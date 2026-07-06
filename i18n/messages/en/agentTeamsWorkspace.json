@@ -32,6 +32,7 @@
       "teammate_shutdown": "Teammate shut down",
       "teammate_started": "Teammate started"
     },
+    "eventsTitle": "Events",
     "liveProgress": "Working — {tools} tools · {chars} chars · {secs}s",
     "liveProgressStarting": "Starting…",
     "progressPhase": {
@@ -65,7 +66,8 @@
         "empty": "No token usage recorded yet.",
         "title": "Token burn"
       }
-    }
+    },
+    "runsTitle": "Runs"
   },
   "allCategories": "All",
   "autoCompose": {
@@ -109,8 +111,8 @@
     "teamNameLabel": "Team name",
     "teamNamePlaceholder": "Name this team",
     "title": "Auto-compose a team",
-    "verifyOption": "Verify (sampling ensemble)",
-    "twinLabel": "Digital employee"
+    "twinLabel": "Digital employee",
+    "verifyOption": "Verify (sampling ensemble)"
   },
   "builtInBadge": "Built-in",
   "cancel": "Cancel",
@@ -331,7 +333,8 @@
       "memory": "Shared memory",
       "overview": "Overview",
       "plugins": "Plugins & capabilities",
-      "ultracode": "Ultracode"
+      "ultracode": "Ultracode",
+      "worktrees": "Worktree isolation"
     },
     "autoShutdown": "Auto-shutdown on completion",
     "awaitingExternalPickup": "Awaiting external pickup",
@@ -423,6 +426,11 @@
         "patternsPlaceholder": "I cannot help with that\nI'm not able to"
       },
       "title": "Governance policy"
+    },
+    "knowledgeTwins": {
+      "empty": "No digital employees yet. Create one in the Twin workbench.",
+      "hint": "Twins selected here can be searched by any teammate via the knowledge tool during a run.",
+      "title": "Digital employee knowledge"
     },
     "maxConcurrent": "Max concurrent",
     "maxRetries": "Max task retries",
@@ -529,10 +537,42 @@
         "placeholder": "/absolute/path/to/repo"
       }
     },
-    "knowledgeTwins": {
-      "title": "Digital employee knowledge",
-      "hint": "Twins selected here can be searched by any teammate via the knowledge tool during a run.",
-      "empty": "No digital employees yet. Create one in the Twin workbench."
+    "worktrees": {
+      "caveat": "Worktrees branch off the working directory's current commit (HEAD), so uncommitted changes there are not visible to agents.",
+      "description": "Give each teammate dispatch its own git worktree + branch so parallel agents never overwrite each other's work or git state. Off by default; desktop app + git repository only.",
+      "enabled": "Enable per-agent worktrees",
+      "reconcile": {
+        "hint": {
+          "manual": "Leave every branch for you to review and merge.",
+          "merge-all": "Merge all successful branches into one integration branch; a conflict stops and reports (never your real branch).",
+          "pipeline": "Sequential dispatches share one branch.",
+          "select": "Keep one branch and discard the rest."
+        },
+        "label": "When the run settles",
+        "option": {
+          "manual": "Manual review",
+          "merge-all": "Merge all",
+          "pipeline": "Pipeline",
+          "select": "Select one"
+        }
+      },
+      "retain": {
+        "label": "After reconcile",
+        "option": {
+          "all": "Keep everything",
+          "keep-winner": "Keep winner, drop losers",
+          "prune-losers": "Prune losers"
+        }
+      },
+      "selectStrategy": {
+        "label": "How to pick the winner",
+        "option": {
+          "first-success": "First success",
+          "judge": "AI judge",
+          "manual": "I choose"
+        }
+      },
+      "title": "Worktree isolation"
     }
   },
   "stats": {
@@ -546,7 +586,8 @@
     "members": "Members",
     "overview": "Overview",
     "settings": "Settings",
-    "tasks": "Tasks"
+    "tasks": "Tasks",
+    "worktrees": "Worktrees"
   },
   "tasks": {
     "addTask": "Add task",
@@ -595,8 +636,8 @@
       "temperature": "Temperature ({value})",
       "title": "Roster fields",
       "twin": "Digital twin",
-      "twinNone": "None",
-      "twinHint": "This teammate acts with the selected digital employee's knowledge and style."
+      "twinHint": "This teammate acts with the selected digital employee's knowledge and style.",
+      "twinNone": "None"
     },
     "save": "Save",
     "title": "Configure {name}"
@@ -617,5 +658,23 @@
   },
   "templatesTab": "Templates",
   "trySampleTeam": "Try sample team",
-  "viewWorkspace": "View workspace"
+  "viewWorkspace": "View workspace",
+  "worktrees": {
+    "actions": {
+      "checkout": "Check out",
+      "compare": "Compare",
+      "delete": "Delete"
+    },
+    "description": "Branches produced by isolated runs (agent/<run>/<teammate>/<task>) — the durable record once worktrees are reclaimed. Review, check out, or delete them.",
+    "desktopOnly": {
+      "description": "Worktree isolation needs the desktop app and a git repository as the team's working directory.",
+      "title": "Desktop only"
+    },
+    "empty": {
+      "description": "Enable worktree isolation and run the team; each agent's branch will appear here.",
+      "title": "No agent branches yet"
+    },
+    "refresh": "Refresh",
+    "title": "Agent branches"
+  }
 }

@@ -2237,6 +2237,22 @@ export class CogniaDB extends Dexie {
     this.version(101).stores({
       opticalArchives: "&id, sessionId, createdAt, [sessionId+createdAt]",
     })
+
+    // v102 — `triggerKind` index on `workflowRuns`. The Agent-Team runs view
+    // (`components/agent/team/runs-list.tsx`) and the CLI status projection
+    // (`lib/cli-bridge/handlers/agent-team.ts`) both resolve team runs via
+    // `.where("triggerKind").equals("trigger.team")`, but no prior version
+    // indexed the column — Dexie threw `SchemaError: KeyPath triggerKind on
+    // object store workflowRuns is not indexed` on first render of the team
+    // workspace. `triggerKind` is a required top-level field stamped at run
+    // creation (`lib/workflow/runtime/orchestrator.ts`), so unlike v91's derived
+    // `triggeredBySource` it needs no backfill — Dexie re-indexes existing rows
+    // from their live values. Restates the full workflowRuns index list (Dexie
+    // replaces, not merges, a table's index list).
+    this.version(102).stores({
+      workflowRuns:
+        "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt], triggeredBySource, [triggeredBySource+startedAt], triggerKind",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>

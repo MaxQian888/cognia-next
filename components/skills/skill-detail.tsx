@@ -11,7 +11,6 @@ import {
   ArrowUpCircleIcon,
   CopyIcon,
   DownloadIcon,
-  FileCode2Icon,
   PencilIcon,
   PowerIcon,
   Trash2Icon,
@@ -45,7 +44,6 @@ export function SkillDetail({ skill }: Props) {
   const source = getSourceMeta(inferSource(skill))
   const Icon = category.icon
   const status = skill.status ?? "enabled"
-  const openEdit = useSkillsStore((s) => s.openEdit)
   const setDeleteTarget = useSkillsStore((s) => s.setDeleteTarget)
   const openSkillInEditor = useSkillsStore((s) => s.openSkillInEditor)
   const setActiveTab = useSkillsStore((s) => s.setActiveTab)
@@ -118,15 +116,9 @@ export function SkillDetail({ skill }: Props) {
           </div>
         </div>
         <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:flex-col sm:items-stretch">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => openEdit(skill.id)}
-            disabled={skill.isBuiltIn}
-          >
-            <PencilIcon className="mr-1.5 size-3.5" />
-            {t("card.edit")}
-          </Button>
+          {/* Single edit entry: jumps straight to the workspace editor (file
+              tree + Monaco + validation). Metadata is edited from the editor's
+              "Skill settings" panel, so there is no separate form dialog. */}
           <Button
             size="sm"
             variant="outline"
@@ -140,8 +132,8 @@ export function SkillDetail({ skill }: Props) {
             disabled={skill.isBuiltIn}
             data-testid="skill-open-in-editor"
           >
-            <FileCode2Icon className="mr-1.5 size-3.5" />
-            {t("card.openInEditor")}
+            <PencilIcon className="mr-1.5 size-3.5" />
+            {t("card.edit")}
           </Button>
           <div className="flex gap-1">
             <Button

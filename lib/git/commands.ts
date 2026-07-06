@@ -25,6 +25,7 @@ import {
   type GitStashEntry,
   type GitStatus,
   type GitTag,
+  type GitWorktree,
   type RebaseTodoEntry,
 } from "@/types/git"
 
@@ -237,6 +238,57 @@ export async function gitRenameBranch(
 ): Promise<void> {
   if (!isTauri()) return
   await transport.call("git_rename_branch", { repoPath, old: old ?? null, newName })
+}
+
+// --------------------------------------------------- worktrees (agent isolation)
+
+/**
+ * `git worktree add -b <branch> <path> [<baseRef>]`. Creates a linked worktree
+ * on a fresh branch; rejects (throws) if the branch already exists / is checked
+ * out elsewhere — the agent allocator relies on that as a collision guard.
+ */
+export async function gitWorktreeAdd(
+  repoPath: string,
+  path: string,
+  branch: string,
+  baseRef?: string
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_worktree_add", { repoPath, path, branch, baseRef: baseRef ?? null })
+}
+
+/** `git worktree remove [--force] <path>`, optionally deleting the branch. */
+export async function gitWorktreeRemove(
+  repoPath: string,
+  path: string,
+  force: boolean,
+  deleteBranch?: string
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_worktree_remove", {
+    repoPath,
+    path,
+    force,
+    deleteBranch: deleteBranch ?? null,
+  })
+}
+
+/** `git worktree list --porcelain`, parsed. Empty on web (no git backend). */
+export async function gitWorktreeList(repoPath: string): Promise<GitWorktree[]> {
+  if (!isTauri()) return []
+  return transport.call<GitWorktree[]>("git_worktree_list", { repoPath })
+}
+
+/**
+ * Stage all + commit inside a worktree so the agent's work lands on its branch.
+ * Returns the new commit SHA, or `null` when the tree was already clean.
+ */
+export async function gitWorktreeCommit(
+  worktreePath: string,
+  message: string
+): Promise<string | null> {
+  if (!isTauri()) return null
+  return transport.call<string | null>("git_worktree_commit", { worktreePath, message })
 }
 
 export async function gitFetch(repoPath: string, remote?: string, prune = false): Promise<void> {

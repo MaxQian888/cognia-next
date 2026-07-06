@@ -147,7 +147,7 @@ export function AgentTeamMembers({
 
   if (teammates.length === 0) {
     return (
-      <Empty>
+      <Empty className="mx-auto w-full max-w-lg">
         <EmptyMedia variant="icon">
           <UsersIcon />
         </EmptyMedia>
@@ -193,7 +193,7 @@ export function AgentTeamMembers({
 
       {/* Workers */}
       {workers.length > 0 && (
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 items-start">
           {workers.map((m, index) => (
             <motion.div
               key={m.id}

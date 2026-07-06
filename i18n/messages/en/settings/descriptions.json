@@ -20,6 +20,7 @@
   "desktop": "Tauri-only window, autostart and tray behavior.",
   "diagnostics": "Crash logs, recent errors, and native logging diagnostics with export bundles.",
   "discover": "Pin, reorder, or hide the Discover categories.",
+  "eval": "Default judge model, scorers, quality gates, and cost guards for agent evaluations.",
   "externalBridge": "MCP server that exposes Cognia's wiki, RAG, and runtime entities to external coding agents (Claude Code, Cursor, Cline). Opt-in per scope.",
   "gateway": "Local OpenAI- and Anthropic-compatible endpoint that lets external tools (Claude Code, any OpenAI client) borrow your providers, routing, and credentials.",
   "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",

@@ -54,7 +54,6 @@
     "enable": "Enable",
     "export": "Export as SKILL.md",
     "open": "Open",
-    "openInEditor": "Open in editor",
     "selectAria": "Select {name}",
     "usageCount": "Used {count}×"
   },
@@ -154,6 +153,7 @@
     "name": "Name",
     "namePlaceholder": "Cite sources",
     "openFileTree": "Open file tree",
+    "openSettings": "Skill settings",
     "openValidation": "Open validation panel",
     "panelValidation": "Validation",
     "resize": {
@@ -164,6 +164,8 @@
     "saved": "saved",
     "savedAll": "All saved.",
     "saving": "Saving…",
+    "settingsSaved": "Settings saved.",
+    "settingsTitle": "Skill settings",
     "tabEdit": "Edit",
     "tabPreview": "Preview",
     "tags": "Tags (comma-sep)",
@@ -477,7 +479,6 @@
     "removedName": "Removed \"{name}\".",
     "uninstalled": "Uninstalled \"{name}\".",
     "updated": "{name} updated.",
-    "updatedName": "Updated \"{name}\".",
     "updatesError": "Update check failed ({error}).",
     "updatesFound": "{count, plural, one {# update available} other {# updates available}}.",
     "updatesNone": "All skills are up to date."

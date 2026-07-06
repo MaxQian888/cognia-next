@@ -34,6 +34,7 @@ describe("desktop client", () => {
       hasInputSim: true,
       hasScreenshot: true,
       hasEvents: true,
+      hasA11yTree: false,
     })
     const caps = await desktop.capabilities()
     expect(mockCall).toHaveBeenCalledWith("desktop_capabilities", {})

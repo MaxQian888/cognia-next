@@ -31,5 +31,6 @@ pub mod status;
 pub mod tag;
 pub mod types;
 pub mod watcher;
+pub mod worktree;
 
 pub use watcher::GitWatcherState;

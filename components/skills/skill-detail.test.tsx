@@ -66,16 +66,20 @@ const skill = {
 } as Skill
 
 describe("SkillDetail", () => {
-  it("'open in editor' loads the skill into the workspace and switches to the editor tab", () => {
+  it("the single Edit button jumps to the workspace editor (no separate form dialog)", () => {
     render(<SkillDetail skill={skill} />)
-    fireEvent.click(screen.getByTestId("skill-open-in-editor"))
+    const editButton = screen.getByTestId("skill-open-in-editor")
+    // Merged into one entry labeled "Edit" — there is no second "open in editor" button.
+    expect(editButton).toHaveTextContent("card.edit")
+    expect(screen.queryByText("card.openInEditor")).not.toBeInTheDocument()
+    fireEvent.click(editButton)
     const state = useSkillsStore.getState()
     expect(state.activeTab).toBe("editor")
     expect(state.editorWorkspace.activeSkillId).toBe("s1")
     expect(state.editorWorkspace.openFiles[0]?.draftContent).toBe("...")
   })
 
-  it("disables 'open in editor' for built-in skills", () => {
+  it("disables the Edit button for built-in skills", () => {
     render(<SkillDetail skill={{ ...skill, isBuiltIn: true } as Skill} />)
     expect(screen.getByTestId("skill-open-in-editor")).toBeDisabled()
   })

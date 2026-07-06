@@ -33,6 +33,7 @@ import {
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { toast } from "sonner"
 
+import { cn } from "@/lib/utils"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { TASK_STATUS_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeamTask, AgentTeammate } from "@/types/agent/agent-team"
@@ -40,6 +41,22 @@ import { createLogger } from "@/lib/logging"
 import { TaskComments } from "./task-comments"
 
 const log = createLogger("agentTeams.tasks")
+
+/** Left-border accent color keyed to task priority. */
+function priorityAccent(priority?: string): string {
+  switch (priority) {
+    case "critical":
+      return "border-l-red-500"
+    case "high":
+      return "border-l-amber-500"
+    case "low":
+      return "border-l-blue-500"
+    case "background":
+      return "border-l-slate-400"
+    default:
+      return "border-l-border"
+  }
+}
 
 const PRIORITIES: ReadonlyArray<{ value: string; labelKey: string }> = [
   { value: "critical", labelKey: "critical" },
@@ -89,7 +106,7 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
 
   if (tasks.length === 0 && !showForm) {
     return (
-      <Empty>
+      <Empty className="mx-auto w-full max-w-lg">
         <EmptyMedia variant="icon">
           <ListTodoIcon />
         </EmptyMedia>
@@ -185,7 +202,7 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
       )}
 
       {/* Task list */}
-      <div className="space-y-2">
+      <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-3 items-start">
         {tasks.map((task, index) => {
           const cfg = TASK_STATUS_CONFIG[task.status]
           const assignee = task.assignedTo ? teammates.find((m) => m.id === task.assignedTo) : null
@@ -200,7 +217,10 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
                 delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
               }}
             >
-              <Card className="space-y-1 p-3" data-testid={`task-${task.id}`}>
+              <Card
+                className={cn("space-y-1 border-l-2 p-3", priorityAccent(task.priority))}
+                data-testid={`task-${task.id}`}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">

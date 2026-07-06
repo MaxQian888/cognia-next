@@ -54,7 +54,6 @@
     "enable": "启用",
     "export": "导出为 SKILL.md",
     "open": "打开",
-    "openInEditor": "在编辑器中打开",
     "selectAria": "选择 {name}",
     "usageCount": "已用 {count} 次"
   },
@@ -154,6 +153,7 @@
     "name": "名称",
     "namePlaceholder": "引用来源",
     "openFileTree": "打开文件树",
+    "openSettings": "技能设置",
     "openValidation": "打开校验面板",
     "panelValidation": "验证",
     "resize": {
@@ -164,6 +164,8 @@
     "saved": "已保存",
     "savedAll": "已全部保存。",
     "saving": "保存中…",
+    "settingsSaved": "设置已保存。",
+    "settingsTitle": "技能设置",
     "tabEdit": "编辑",
     "tabPreview": "预览",
     "tags": "标签（用逗号分隔）",
@@ -477,7 +479,6 @@
     "removedName": "已删除「{name}」。",
     "uninstalled": "已卸载「{name}」。",
     "updated": "{name} 已更新。",
-    "updatedName": "已更新「{name}」。",
     "updatesError": "检查更新失败（{error}）。",
     "updatesFound": "{count} 个技能有更新。",
     "updatesNone": "所有技能均为最新。"

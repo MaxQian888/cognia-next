@@ -38,7 +38,7 @@
     "description": "立即运行该工作流。可选择以 JSON 形式传入触发输入。",
     "invalidJson": "载荷必须是合法的 JSON。",
     "payloadLabel": "触发载荷（可选）",
-    "payloadPlaceholder": "{ \"key\": \"value\" }",
+    "payloadPlaceholder": "'{ \"key\": \"value\" }'",
     "runButton": "运行工作流",
     "title": "运行「{name}」"
   },

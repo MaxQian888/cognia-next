@@ -15,16 +15,23 @@
  * build time.
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { ArrowLeftIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { StatusBadge } from "@/components/status-badge"
-import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 import { useShallow } from "zustand/react/shallow"
@@ -38,11 +45,12 @@ import { AgentTeamOverview } from "@/components/agent/workspace/overview"
 import { AgentTeamTasks } from "@/components/agent/workspace/tasks"
 import { AgentTeamChat } from "@/components/agent/workspace/chat"
 import { AgentTeamActivity } from "@/components/agent/workspace/activity"
+import { WorktreesPanel } from "@/components/agent/workspace/worktrees-panel"
 import { AgentTeamMembers } from "@/components/agent/workspace/members"
 import { AgentTeamSettings } from "@/components/agent/workspace/settings"
 import { WorkspaceTabNav } from "@/components/agent/workspace/workspace-tab-nav"
+import { WorkspaceHeader } from "@/components/agent/workspace/workspace-header"
 import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
-import { TeamRunsList } from "@/components/agent/team/runs-list"
 import type { ComposerHandle } from "@/components/chat/composer"
 
 import { parseLeadingMention } from "@/lib/agent-team/mention-parser"
@@ -59,14 +67,21 @@ import { useRuntimeAvailability } from "@/lib/agent-team/use-runtime-availabilit
 import { buildConversationHistory } from "@/lib/agent-team/conversation-context"
 import { buildTeamClaudeRuntimeModel } from "@/lib/agent-team/provider-model"
 import type {
-  AgentTeam,
   AgentTeamEvent,
   AgentTeamMessage,
   AgentTeamTask,
   TeammateRuntime,
 } from "@/types/agent/agent-team"
 
-const ALL_TABS = ["overview", "tasks", "chat", "activity", "members", "settings"] as const
+const ALL_TABS = [
+  "overview",
+  "tasks",
+  "chat",
+  "activity",
+  "worktrees",
+  "members",
+  "settings",
+] as const
 type Tab = (typeof ALL_TABS)[number]
 
 // Stable empty slices returned by the tab-gated selectors below so
@@ -275,37 +290,35 @@ function AgentTeamWorkspaceInner() {
     ? (activeTab as Tab)
     : "overview"
 
+  // The chat tab fills the pane as a full-height flex column (header on top,
+  // message list flex-grows with an internal scroll, composer pinned at the
+  // bottom) so the lower half of the pane is no longer dead space. Every other
+  // tab keeps the classic "page scrolls as a whole" behaviour.
+  const isChat = tab === "chat"
+
   return (
-    <div
-      className="flex h-full min-h-0 w-full flex-col space-y-4 overflow-y-auto p-4 sm:p-6"
+    <SidebarProvider
+      className="h-full min-h-0"
+      style={{ "--sidebar-width": "14rem", "--sidebar-width-icon": "3rem" } as CSSProperties}
       data-testid="agent-team-workspace"
       data-bg-target="chat"
     >
-      {/* Back + Title */}
-      <div className="flex items-center gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs"
-          onClick={() => router.push("/agent-teams")}
-        >
-          <ArrowLeftIcon className="mr-1 size-3" />
-          {t("listTitle")}
-        </Button>
-        <span className="hidden sm:inline text-xs text-muted-foreground">/</span>
-        <span className="hidden sm:inline text-sm font-medium truncate">{team.name}</span>
-        <HeaderLiveStatus team={team} />
-      </div>
-
-      <Tabs
+      <WorkspaceTabNav
         value={tab}
         onValueChange={(v) => setWorkspaceTab(v as typeof activeTab)}
-        className="lg:flex-row! lg:items-start lg:gap-5"
-      >
-        <WorkspaceTabNav />
+        onBack={() => router.push("/agent-teams")}
+        teamName={team.name}
+        counts={{ members: teammates.length }}
+      />
 
-        <div className="min-w-0 flex-1">
-          <TabsContent value="overview" className="pt-4 lg:pt-0">
+      <SidebarInset
+        className={cn("min-h-0", isChat ? "overflow-hidden" : "overflow-y-auto")}
+        data-bg-target="chat"
+      >
+        <div className={cn("flex flex-col gap-4 p-4 sm:p-6", isChat && "min-h-0 flex-1")}>
+          <WorkspaceHeader team={team} teammates={teammates} />
+
+          {tab === "overview" && (
             <AgentTeamOverview
               team={team}
               teammates={teammates}
@@ -319,13 +332,14 @@ function AgentTeamWorkspaceInner() {
                 toast.success(t("teamUpdated"))
               }}
             />
-          </TabsContent>
-          <TabsContent value="tasks" className="pt-4 lg:pt-0">
+          )}
+          {tab === "tasks" && (
             <AgentTeamTasks teamId={team.id} tasks={tasks} teammates={teammates} />
-          </TabsContent>
-          <TabsContent value="chat" className="pt-4 lg:pt-0">
+          )}
+          {tab === "chat" && (
             <AgentTeamChat
               ref={composerRef}
+              className="min-h-0 flex-1"
               teamId={team.id}
               messages={messages}
               mentionables={mentionables}
@@ -336,49 +350,27 @@ function AgentTeamWorkspaceInner() {
               onRetry={handleRetry}
               onDelete={handleDelete}
             />
-          </TabsContent>
-          <TabsContent value="activity" className="pt-4 lg:pt-0 space-y-4">
+          )}
+          {tab === "activity" && (
             <AgentTeamActivity
               events={events}
               report={team.executionReport}
               team={team}
               teammates={teammates}
             />
-            <TeamRunsList teamId={team.id} />
-          </TabsContent>
-          <TabsContent value="members" className="pt-4 lg:pt-0">
+          )}
+          {tab === "worktrees" && <WorktreesPanel team={team} />}
+          {tab === "members" && (
             <AgentTeamMembers team={team} teammates={teammates} leadId={team.leadId} />
-          </TabsContent>
-          <TabsContent value="settings" className="pt-4 lg:pt-0">
-            <AgentTeamSettings team={team} />
-          </TabsContent>
+          )}
+          {tab === "settings" && <AgentTeamSettings team={team} />}
         </div>
-      </Tabs>
+      </SidebarInset>
 
       {/* HITL approval gates (budget / deadlock / teammate-fix) — the consumer
           for usePendingGatesStore; without it a paused run has no release UI. */}
       <GateModalsHost />
-    </div>
-  )
-}
-
-/**
- * Compact live-status pill for the workspace breadcrumb, so the team's run
- * state stays visible from every tab (Overview previously had the only badge).
- * Split out so `useTeamLiveStatus` runs only when a team resolved.
- */
-function HeaderLiveStatus({ team }: { team: AgentTeam }) {
-  const liveStatus = useTeamLiveStatus(team)
-  const isLive = liveStatus === "executing" || liveStatus === "planning"
-  return (
-    <StatusBadge
-      value={liveStatus}
-      labelNamespace="agentTeam.status"
-      pulse={isLive}
-      pulseClassName={isLive ? "bg-emerald-400 size-2" : undefined}
-      className="ml-auto shrink-0 sm:ml-1"
-      data-testid="workspace-header-status"
-    />
+    </SidebarProvider>
   )
 }
 

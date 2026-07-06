@@ -79,7 +79,7 @@ jest.mock("@/hooks/ui/use-mobile", () => ({
 
 const storeState: {
   activeTab: "my-skills" | "browse" | "editor" | "analytics"
-  editorTarget: null | { mode: "create" | "edit"; skillId?: string }
+  editorTarget: null | { mode: "create" }
   importStaging: null | object
   deleteTarget: null | { skillId: string; name: string }
   detailSkillId: string | null
@@ -378,13 +378,11 @@ describe("SkillPanel", () => {
     await waitFor(() => expect(storeState.setDeleteTarget).toHaveBeenCalledWith(null))
   })
 
-  it("calls updateSkill when the editor host saves in edit mode", async () => {
-    storeState.editorTarget = { mode: "edit", skillId: "s1" }
-    liveQueryRef.current = { id: "s1", name: "Old", description: "d", content: "c" }
+  it("creates a new skill when the editor host saves", async () => {
+    storeState.editorTarget = { mode: "create" }
     render(<SkillPanel />)
     fireEvent.click(screen.getByTestId("editor-save"))
-    await waitFor(() => expect(updateSkill).toHaveBeenCalled())
-    expect(updateSkill.mock.calls[0][0]).toBe("s1")
+    await waitFor(() => expect(createSkill).toHaveBeenCalled())
     expect(storeState.closeEditor).toHaveBeenCalled()
   })
 

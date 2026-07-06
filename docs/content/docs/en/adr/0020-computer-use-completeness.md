@@ -497,3 +497,42 @@ is verified on macOS CI — it does not compile on the Windows dev host.
 actions (re-resolvable element refs), element geometry (`AXPosition`/`AXSize`),
 and the **Linux AT-SPI** equivalent (async/zbus — not attempted blind from the
 Windows host). `tree_shape` is the shared backbone those will reuse.
+
+## Addendum (2026-07-06) — macOS Inspector actually usable
+
+Two follow-on defects made the macOS Inspector effectively dead even though the
+2026-06-27 bounded AX tree had shipped:
+
+1. **Frontend gated on the wrong capability.** `InspectorTab` and the Overview
+   badge keyed off `caps.hasUia` (Windows UI Automation), so macOS — which
+   reports `hasA11yTree: true`, not `hasUia` — always fell through to the
+   "Windows-only … later milestone" alert. The TS `Capabilities` type didn't
+   even mirror the Rust `has_a11y_tree` field. Fix: add `hasA11yTree` to the TS
+   type; gate the Inspector on `hasUia || hasA11yTree`; hide the UIA-only
+   pattern-test affordances (which return `UnsupportedPlatform` off Windows)
+   behind an honest a11y-only note; surface an `a11yTree` badge on the Overview
+   (`platform-capabilities-card.tsx`, extracted + unit-tested).
+
+2. **The tree was "only the window name."** Diagnosed on a macOS host by walking
+   real apps (Chrome, VS Code) with a standalone AX probe — three root causes,
+   all now fixed in `ax/mod.rs` + the new `ax/raw.rs`:
+   - **Lazy web a11y.** Chromium / WebKit / Electron apps (Cognia's own WKWebView
+     included) don't publish their web-content tree until an AT client sets
+     `AXManualAccessibility` / `AXEnhancedUserInterface`. `read_tree` now
+     activates it (with a short settle delay when the app had no windows).
+   - **Wrong root window.** `AXWindows[0]` is often an empty helper window
+     (observed on Chrome). Root selection is now `AXFocusedWindow` →
+     `AXMainWindow` → first non-empty window → app element.
+   - **Thin nodes.** Nodes now carry subrole (→ `class_name`), identifier (→
+     `automation_id`), enabled/focused, a name fallback chain (`AXTitle` →
+     `AXDescription` → string `AXValue` → `AXRoleDescription`), and geometry
+     (`AXPosition`/`AXSize` → `bounding_rect`). An **AX trust gate** now fails
+     `read_tree` loudly (with the system prompt) when the process isn't granted
+     Accessibility, instead of silently returning an empty tree.
+
+   The whole dependency graph shares one `core-foundation-sys` (0.8), so the raw
+   AX FFI bridges cleanly via `accessibility-sys` + `core-foundation-sys` without
+   the core-foundation-0.9-vs-0.10 wrapper conflict the earlier note feared — the
+   deferred `AXUIElementCopyElementAtPosition` pick hit-test is now unblocked by
+   the same bridge. The Inspector's default `maxDepth` was raised 2 → 4 (cap 6 →
+   10) so the tree reaches real content by default.

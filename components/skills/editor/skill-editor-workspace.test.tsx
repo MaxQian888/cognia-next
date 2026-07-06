@@ -64,15 +64,53 @@ jest.mock("@/components/editor/light-code-editor", () => ({
   ),
 }))
 
-import { fireEvent, render, screen } from "@testing-library/react"
+// The metadata form (and its streamdown/AI deps) is exercised by
+// skill-editor.test.tsx; here we only verify the settings panel wiring, so stub
+// SkillEditor with a save button that echoes a metadata-only draft.
+jest.mock("../skill-editor", () => ({
+  SkillEditor: ({
+    hideContent,
+    onSave,
+  }: {
+    hideContent?: boolean
+    onSave: (d: unknown) => Promise<void>
+  }) => (
+    <div data-testid="skill-editor-stub" data-hide-content={String(Boolean(hideContent))}>
+      <button
+        data-testid="settings-save"
+        onClick={() =>
+          void onSave({
+            name: "Renamed",
+            description: "d",
+            content: "SHOULD NOT PERSIST",
+            category: "custom",
+            tags: ["t"],
+            allowedTools: ["Read"],
+            version: "2",
+            author: "a",
+            license: "MIT",
+          })
+        }
+      >
+        save
+      </button>
+    </div>
+  ),
+}))
+
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useSkillsStore } from "@/stores/skills"
+import { updateSkill } from "@/lib/db/skills"
 import { SkillEditorWorkspace } from "./skill-editor-workspace"
+
+const updateSkillMock = updateSkill as jest.Mock
 
 beforeEach(() => {
   skillRef.current = undefined
   resourcesRef.current = []
   liveQueryIdx = 0
   mobileRef.current = false
+  updateSkillMock.mockClear()
   useSkillsStore.setState({
     editorWorkspace: {
       activeSkillId: null,
@@ -198,5 +236,29 @@ describe("SkillEditorWorkspace", () => {
     fireEvent.click(screen.getAllByLabelText("closeTab:" + JSON.stringify({ path: "SKILL.md" }))[0])
     fireEvent.click(screen.getByText("closeDirtyKeep"))
     expect(useSkillsStore.getState().editorWorkspace.openFiles).toHaveLength(1)
+  })
+
+  it("opens the Skill settings panel and saves metadata only, never the body", async () => {
+    skillRef.current = {
+      id: "s1",
+      name: "Test",
+      content: "body",
+      createdAt: 0,
+      updatedAt: 0,
+      source: "custom",
+    } as never
+    useSkillsStore.getState().openSkillInEditor("s1", "body")
+    render(<SkillEditorWorkspace />)
+    // The sidebar header exposes the "Skill settings" entry.
+    fireEvent.click(screen.getAllByLabelText("openSettings")[0])
+    // Reuses SkillEditor in metadata-only mode.
+    expect(screen.getByTestId("skill-editor-stub")).toHaveAttribute("data-hide-content", "true")
+    fireEvent.click(screen.getByTestId("settings-save"))
+    await waitFor(() => expect(updateSkillMock).toHaveBeenCalledTimes(1))
+    const [id, patch] = updateSkillMock.mock.calls[0]
+    expect(id).toBe("s1")
+    expect(patch).toMatchObject({ name: "Renamed", category: "custom", allowedTools: ["Read"] })
+    // The body stays owned by the Monaco tab — settings must never write content.
+    expect(patch).not.toHaveProperty("content")
   })
 })

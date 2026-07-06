@@ -192,14 +192,6 @@ describe("useSkillsStore", () => {
       expect(result.current.detailSkillId).toBeNull()
     })
 
-    it("openEdit sets editor target to edit and clears any open detail", () => {
-      const { result } = renderHook(() => useSkillsStore())
-      act(() => result.current.openDetail("other"))
-      act(() => result.current.openEdit("skill-99"))
-      expect(result.current.editorTarget).toEqual({ mode: "edit", skillId: "skill-99" })
-      expect(result.current.detailSkillId).toBeNull()
-    })
-
     it("closeEditor clears the editor target", () => {
       const { result } = renderHook(() => useSkillsStore())
       act(() => result.current.openCreate())

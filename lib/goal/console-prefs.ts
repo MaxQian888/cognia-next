@@ -5,7 +5,7 @@
  * Two concerns live here so both stay pure + unit-tested without rendering:
  *
  *  1. The segmented-tab identity (`GoalConsoleTab` + guard) — mirrors
- *     `lib/pet/console-tabs.ts`. The console's bottom tab bar and the
+ *     `lib/pet/console-tabs.ts`. The console's top segmented tab bar and the
  *     static-export `?tab=` deep link both resolve against it.
  *  2. The persisted console preferences (`GoalConsolePrefs`) — the default
  *     landing tab and the open-goals default sort. Persisted on
@@ -21,11 +21,22 @@ import type { GoalSortKey, SortDir } from "@/lib/goal/history-filter"
 // Tabs
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The five management tabs under the open-goals section. */
-export type GoalConsoleTab = "history" | "analytics" | "templates" | "defaults" | "tracker"
+/**
+ * The console sections. `overview` is the live-operations dashboard (stat row +
+ * open goals); the other five are the management sections. All six render as a
+ * single top-level segmented tab bar (mirrors `/performance`).
+ */
+export type GoalConsoleTab =
+  | "overview"
+  | "history"
+  | "analytics"
+  | "templates"
+  | "defaults"
+  | "tracker"
 
 /** Canonical tab order — also the render order of the tab bar. */
 export const GOAL_CONSOLE_TABS: readonly GoalConsoleTab[] = [
+  "overview",
   "history",
   "analytics",
   "templates",
@@ -57,7 +68,7 @@ export type StoredGoalConsolePrefs = Partial<GoalConsolePrefs>
 
 /** Hard defaults applied when `AppSettings.goalConsolePrefs` is absent. */
 export const DEFAULT_GOAL_CONSOLE_PREFS: GoalConsolePrefs = {
-  defaultTab: "history",
+  defaultTab: "overview",
   openGoalsSort: "created",
   openGoalsDir: "desc",
 }

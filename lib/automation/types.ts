@@ -18,6 +18,14 @@ export interface Capabilities {
   hasInputSim: boolean
   hasScreenshot: boolean
   hasEvents: boolean
+  /**
+   * The back-end exposes a cross-platform accessibility tree (`readTree` /
+   * `find`) independent of Windows UIA. True on the macOS AXAPI back-end and
+   * the remote cua sandbox; false on the input-only enigo back-ends (Linux
+   * today, and Windows reports its tree through `hasUia` instead). Mirrors
+   * `has_a11y_tree` on the Rust `Capabilities` struct.
+   */
+  hasA11yTree: boolean
   /** Monitors visible to the capture backend (empty for stub/remote). */
   monitors: MonitorInfo[]
 }

@@ -28,25 +28,45 @@ jest.mock("@/hooks/skills", () => ({
 }))
 
 // recharts touches DOM measurements jsdom doesn't model; stub to a no-op
-// container so the cards render predictably.
-jest.mock("recharts", () => ({
-  __esModule: true,
-  Bar: () => null,
-  BarChart: () => null,
-  CartesianGrid: () => null,
-  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Tooltip: () => null,
-  XAxis: () => null,
-  YAxis: () => null,
-  Line: () => null,
-  LineChart: () => null,
-}))
+// container so the cards render predictably. The ResponsiveContainer stub
+// records `initialDimension` so we can assert every chart is seeded with a
+// positive size (guards the width(-1)/height(-1) tab-switch mount flash).
+jest.mock("recharts", () => {
+  const captured: { initialDimension?: { width: number; height: number } }[] = []
+  return {
+    __esModule: true,
+    __captured: captured,
+    Bar: () => null,
+    BarChart: () => null,
+    CartesianGrid: () => null,
+    ResponsiveContainer: ({
+      children,
+      initialDimension,
+    }: {
+      children: React.ReactNode
+      initialDimension?: { width: number; height: number }
+    }) => {
+      captured.push({ initialDimension })
+      return <div>{children}</div>
+    },
+    Tooltip: () => null,
+    XAxis: () => null,
+    YAxis: () => null,
+    Line: () => null,
+    LineChart: () => null,
+  }
+})
+
+const rechartsMock = jest.requireMock("recharts") as {
+  __captured: { initialDimension?: { width: number; height: number } }[]
+}
 
 import { render, screen } from "@testing-library/react"
 import { SkillAnalytics } from "./skill-analytics"
 
 beforeEach(() => {
   analyticsRef.current = emptyAnalytics()
+  rechartsMock.__captured.length = 0
 })
 
 describe("SkillAnalytics", () => {
@@ -75,5 +95,27 @@ describe("SkillAnalytics", () => {
     render(<SkillAnalytics />)
     expect(screen.getByText("categoryUsageTitle")).toBeInTheDocument()
     expect(screen.getByText("mostUsedTitle")).toBeInTheDocument()
+  })
+
+  // Regression: every recharts container (category bar chart + the usage-trend
+  // line chart) must be seeded with a positive `initialDimension`. Otherwise it
+  // starts at {-1,-1} and, on each tab remount, logs "The width(-1) and
+  // height(-1) of chart should be greater than 0" and flashes empty — the
+  // reported tab-switch jitter.
+  it("seeds every chart with a positive initialDimension", () => {
+    analyticsRef.current = {
+      ...emptyAnalytics(),
+      loading: false,
+      byCategory: [{ category: "development", count: 1, usage: 5 }],
+      usageByDay: [{ date: "2026-05-01", count: 3 }],
+    }
+    render(<SkillAnalytics />)
+    // Category bar chart + usage-trend line chart both render.
+    expect(rechartsMock.__captured.length).toBeGreaterThanOrEqual(2)
+    for (const cap of rechartsMock.__captured) {
+      expect(cap.initialDimension).toBeDefined()
+      expect(cap.initialDimension!.width).toBeGreaterThan(0)
+      expect(cap.initialDimension!.height).toBeGreaterThan(0)
+    }
   })
 })

@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AlertCircleIcon, Loader2Icon, MessageCircleIcon } from "lucide-react"
+import { cn } from "@/lib/utils"
 import type { AgentTeamMessage } from "@/types/agent/agent-team"
 import {
   TEAM_MESSAGE_METADATA_KEYS,
@@ -251,6 +252,13 @@ export interface AgentTeamChatProps {
   }) => void | Promise<void>
   /** Remove a message from the chat. */
   onDelete?: (messageId: string) => void | Promise<void>
+  /**
+   * Extra classes for the root container. The workspace passes
+   * `flex-1 min-h-0` so the chat fills the tab height (message list scrolls
+   * internally, composer pinned at the bottom) instead of being a
+   * fixed-height box that leaves the lower half of the pane empty.
+   */
+  className?: string
 }
 
 export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(function AgentTeamChat(
@@ -264,6 +272,7 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
     availability,
     onRetry,
     onDelete,
+    className,
   },
   composerRef
 ) {
@@ -293,9 +302,12 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
   }
 
   return (
-    <div className="flex flex-col gap-3" data-testid="agent-team-chat-root">
+    <div
+      className={cn("flex min-h-0 w-full flex-col gap-3", className)}
+      data-testid="agent-team-chat-root"
+    >
       {messages.length === 0 ? (
-        <div className="rounded-md border bg-muted/30 px-4 py-8">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-md border bg-muted/30 px-4 py-8">
           <Empty>
             <EmptyMedia variant="icon">
               <MessageCircleIcon />
@@ -309,7 +321,7 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
           </Empty>
         </div>
       ) : (
-        <ScrollArea className="h-[clamp(360px,55vh,calc(100vh-280px))]">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-2" data-testid="workspace-chat">
             {messages.map((msg, index) => {
               // Only stagger the last few new messages — established history
@@ -331,7 +343,7 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
         </ScrollArea>
       )}
       {showComposer && (
-        <div className="space-y-2">
+        <div className="shrink-0 space-y-2">
           <TeamMentionChips
             targets={mentionables!}
             onPick={handleChipPick}

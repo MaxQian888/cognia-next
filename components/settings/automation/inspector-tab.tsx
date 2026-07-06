@@ -56,7 +56,7 @@ export function InspectorTab() {
   const [caps, setCaps] = useState<Capabilities | null>(null)
   const [rootMode, setRootMode] = useState<"focused" | "desktop" | "manual">("focused")
   const [manualRef, setManualRef] = useState("")
-  const [maxDepth, setMaxDepth] = useState(2)
+  const [maxDepth, setMaxDepth] = useState(4)
   const [rows, setRows] = useState<TreeRow[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<ElementInfo | null>(null)
@@ -225,10 +225,7 @@ export function InspectorTab() {
   if (!isTauri()) {
     return (
       <Alert>
-        <AlertDescription>
-          The inspector requires the Tauri runtime so it can talk to the active accessibility
-          backend.
-        </AlertDescription>
+        <AlertDescription>{t("requiresTauri")}</AlertDescription>
       </Alert>
     )
   }
@@ -237,220 +234,237 @@ export function InspectorTab() {
     return <Skeleton className="h-72 w-full" />
   }
 
-  if (!caps.hasUia) {
+  // The inspector needs *some* accessibility tree to read. Windows exposes it
+  // through UIA (`hasUia`); macOS (AXAPI) and the remote cua sandbox expose the
+  // cross-platform tree through `hasA11yTree`. Gate on either — not on `hasUia`
+  // alone, which locked out every non-Windows back-end even when it could read.
+  const hasTree = caps.hasUia || caps.hasA11yTree
+  // UIA pattern invocation (`invoke_pattern`) is Windows-only; the a11y-tree
+  // back-ends return `UnsupportedPlatform`. Hide the pattern-test affordances
+  // there rather than offering buttons that can only error.
+  const hasPatterns = caps.hasUia
+
+  if (!hasTree) {
     return (
       <Alert>
-        <AlertDescription>
-          The active platform back-end ({caps.platform}) doesn&apos;t expose a UIA-equivalent tree.
-          The inspector is Windows-only for now; macOS / Linux land in a later milestone.
-        </AlertDescription>
+        <AlertDescription>{t("unavailable", { platform: caps.platform })}</AlertDescription>
       </Alert>
     )
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr,1fr]">
-      <Card className="lg:col-span-1">
-        <CardHeader>
-          <CardTitle>{t("tree")}</CardTitle>
-          <CardDescription>{t("treeDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant={rootMode === "focused" ? "default" : "outline"}
-              onClick={() => setRootMode("focused")}
-            >
-              {t("rootMode.focused")}
-            </Button>
-            <Button
-              size="sm"
-              variant={rootMode === "desktop" ? "default" : "outline"}
-              onClick={() => setRootMode("desktop")}
-            >
-              {t("rootMode.desktop")}
-            </Button>
-            <Button
-              size="sm"
-              variant={rootMode === "manual" ? "default" : "outline"}
-              onClick={() => setRootMode("manual")}
-            >
-              {t("rootMode.manual")}
-            </Button>
-            <Button
-              size="sm"
-              variant={pickCountdown !== null ? "default" : "ghost"}
-              onClick={startPick}
-              title={pickCountdown !== null ? t("pickCancelTooltip") : t("pickStartTooltip")}
-              aria-label={pickCountdown !== null ? t("pickCancelAria") : t("pickStartAria")}
-            >
-              <CrosshairIcon className="size-4 mr-1" />
-              {pickCountdown !== null
-                ? t("pickCountdown", { seconds: pickCountdown })
-                : t("pickStart")}
-            </Button>
-            {pickCountdown !== null && (
+    <div className="space-y-4">
+      {!hasPatterns && (
+        <Alert>
+          <AlertDescription>{t("a11yOnlyNote")}</AlertDescription>
+        </Alert>
+      )}
+      <div className="grid gap-4 lg:grid-cols-[1fr,1fr]">
+        <Card className="lg:col-span-1">
+          <CardHeader>
+            <CardTitle>{t("tree")}</CardTitle>
+            <CardDescription>{t("treeDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                variant="secondary"
-                onClick={captureNow}
-                title={t("pickCaptureNowTooltip")}
-                aria-label={t("pickCaptureNowAria")}
+                variant={rootMode === "focused" ? "default" : "outline"}
+                onClick={() => setRootMode("focused")}
               >
-                {t("pickCaptureNow")}
+                {t("rootMode.focused")}
               </Button>
-            )}
-          </div>
-          {rootMode === "manual" && (
-            <div className="space-y-1">
-              <Label className="text-xs">{t("elementRef")}</Label>
-              <Input
-                placeholder={t("elementRefPlaceholder")}
-                value={manualRef}
-                onChange={(e) => setManualRef(e.target.value)}
-                className="font-mono text-xs"
-              />
+              <Button
+                size="sm"
+                variant={rootMode === "desktop" ? "default" : "outline"}
+                onClick={() => setRootMode("desktop")}
+              >
+                {t("rootMode.desktop")}
+              </Button>
+              <Button
+                size="sm"
+                variant={rootMode === "manual" ? "default" : "outline"}
+                onClick={() => setRootMode("manual")}
+              >
+                {t("rootMode.manual")}
+              </Button>
+              <Button
+                size="sm"
+                variant={pickCountdown !== null ? "default" : "ghost"}
+                onClick={startPick}
+                title={pickCountdown !== null ? t("pickCancelTooltip") : t("pickStartTooltip")}
+                aria-label={pickCountdown !== null ? t("pickCancelAria") : t("pickStartAria")}
+              >
+                <CrosshairIcon className="size-4 mr-1" />
+                {pickCountdown !== null
+                  ? t("pickCountdown", { seconds: pickCountdown })
+                  : t("pickStart")}
+              </Button>
+              {pickCountdown !== null && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={captureNow}
+                  title={t("pickCaptureNowTooltip")}
+                  aria-label={t("pickCaptureNowAria")}
+                >
+                  {t("pickCaptureNow")}
+                </Button>
+              )}
             </div>
-          )}
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">{t("maxDepth")}</Label>
-              <Input
-                type="number"
-                min={0}
-                max={6}
-                value={maxDepth}
-                onChange={(e) => setMaxDepth(Math.max(0, Number(e.target.value) || 0))}
-                className="w-24"
-              />
-            </div>
-            <Button onClick={refresh} disabled={loading} size="sm">
-              <RefreshCwIcon className="size-4 mr-1" />
-              {loading ? t("reading") : t("readTree")}
-            </Button>
-          </div>
-
-          <ScrollArea className="h-[360px] rounded-md border">
-            {rows ? (
-              rows.length === 0 ? (
-                <p className="p-3 text-xs text-muted-foreground">{t("emptyResult")}</p>
-              ) : (
-                <div className="divide-y">
-                  {rows.map((row, idx) => {
-                    const isSel =
-                      selected !== null &&
-                      elementRefValue(selected.elementRef) === elementRefValue(row.info.elementRef)
-                    return (
-                      <button
-                        key={`${elementRefValue(row.info.elementRef)}-${idx}`}
-                        type="button"
-                        onClick={() => setSelected(row.info)}
-                        className={
-                          "block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/40 " +
-                          (isSel ? "bg-muted" : "")
-                        }
-                      >
-                        <span className="font-medium">
-                          {row.info.name ?? row.info.automationId ?? "(unnamed)"}
-                        </span>
-                        {row.info.controlType && (
-                          <span className="ml-2 text-muted-foreground">
-                            [{row.info.controlType}]
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )
-            ) : (
-              <p className="p-3 text-xs text-muted-foreground">{t("clickToPopulate")}</p>
-            )}
-          </ScrollArea>
-        </CardContent>
-      </Card>
-
-      <Card className="lg:col-span-1">
-        <CardHeader>
-          <CardTitle>{t("elementDetails")}</CardTitle>
-          <CardDescription>{t("elementDetailsDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {!selected ? (
-            <p className="text-xs text-muted-foreground">{t("selectRow")}</p>
-          ) : (
-            <>
-              <div className="space-y-1.5 text-xs">
-                <Detail label="name" value={selected.name} />
-                <Detail label="controlType" value={selected.controlType} />
-                <Detail label="automationId" value={selected.automationId} />
-                <Detail label="className" value={selected.className} />
-                <Detail label="processName" value={selected.processName} />
-                <Detail label="windowTitle" value={selected.windowTitle} />
-                <Detail
-                  label="enabled / focused"
-                  value={`${selected.isEnabled} / ${selected.isFocused}`}
+            {rootMode === "manual" && (
+              <div className="space-y-1">
+                <Label className="text-xs">{t("elementRef")}</Label>
+                <Input
+                  placeholder={t("elementRefPlaceholder")}
+                  value={manualRef}
+                  onChange={(e) => setManualRef(e.target.value)}
+                  className="font-mono text-xs"
                 />
-                {selected.boundingRect && (
+              </div>
+            )}
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">{t("maxDepth")}</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={maxDepth}
+                  onChange={(e) => setMaxDepth(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-24"
+                />
+              </div>
+              <Button onClick={refresh} disabled={loading} size="sm">
+                <RefreshCwIcon className="size-4 mr-1" />
+                {loading ? t("reading") : t("readTree")}
+              </Button>
+            </div>
+
+            <ScrollArea className="h-[360px] rounded-md border">
+              {rows ? (
+                rows.length === 0 ? (
+                  <p className="p-3 text-xs text-muted-foreground">{t("emptyResult")}</p>
+                ) : (
+                  <div className="divide-y">
+                    {rows.map((row, idx) => {
+                      const isSel =
+                        selected !== null &&
+                        elementRefValue(selected.elementRef) ===
+                          elementRefValue(row.info.elementRef)
+                      return (
+                        <button
+                          key={`${elementRefValue(row.info.elementRef)}-${idx}`}
+                          type="button"
+                          onClick={() => setSelected(row.info)}
+                          className={
+                            "block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/40 " +
+                            (isSel ? "bg-muted" : "")
+                          }
+                        >
+                          <span className="font-medium">
+                            {row.info.name ?? row.info.automationId ?? "(unnamed)"}
+                          </span>
+                          {row.info.controlType && (
+                            <span className="ml-2 text-muted-foreground">
+                              [{row.info.controlType}]
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )
+              ) : (
+                <p className="p-3 text-xs text-muted-foreground">{t("clickToPopulate")}</p>
+              )}
+            </ScrollArea>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-1">
+          <CardHeader>
+            <CardTitle>{t("elementDetails")}</CardTitle>
+            <CardDescription>{t("elementDetailsDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!selected ? (
+              <p className="text-xs text-muted-foreground">{t("selectRow")}</p>
+            ) : (
+              <>
+                <div className="space-y-1.5 text-xs">
+                  <Detail label="name" value={selected.name} />
+                  <Detail label="controlType" value={selected.controlType} />
+                  <Detail label="automationId" value={selected.automationId} />
+                  <Detail label="className" value={selected.className} />
+                  <Detail label="processName" value={selected.processName} />
+                  <Detail label="windowTitle" value={selected.windowTitle} />
                   <Detail
-                    label="bounding rect"
-                    value={`(${selected.boundingRect.x}, ${selected.boundingRect.y}) ${selected.boundingRect.width}×${selected.boundingRect.height}`}
+                    label="enabled / focused"
+                    value={`${selected.isEnabled} / ${selected.isFocused}`}
                   />
-                )}
-                <Detail label="elementRef" value={elementRefValue(selected.elementRef)} mono />
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-xs">{t("locatorJson")}</Label>
-                <pre className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] font-mono overflow-x-auto">
-                  {locatorJson}
-                </pre>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(locatorJson)
-                      toast.success(t("copyLocator"))
-                    }}
-                  >
-                    {t("copyLocator")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(elementRefValue(selected.elementRef))
-                      toast.success(t("copyRef"))
-                    }}
-                  >
-                    {t("copyRef")}
-                  </Button>
+                  {selected.boundingRect && (
+                    <Detail
+                      label="bounding rect"
+                      value={`(${selected.boundingRect.x}, ${selected.boundingRect.y}) ${selected.boundingRect.width}×${selected.boundingRect.height}`}
+                    />
+                  )}
+                  <Detail label="elementRef" value={elementRefValue(selected.elementRef)} mono />
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label className="text-xs">{t("testPatterns")}</Label>
-                <div className="flex flex-wrap gap-2">
-                  {(["invoke", "toggle", "selectionItem"] as PatternKind[]).map((k) => (
+                <div className="space-y-2">
+                  <Label className="text-xs">{t("locatorJson")}</Label>
+                  <pre className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] font-mono overflow-x-auto">
+                    {locatorJson}
+                  </pre>
+                  <div className="flex flex-wrap gap-2">
                     <Button
-                      key={k}
                       size="sm"
-                      variant="outline"
-                      disabled={patternBusy !== null}
-                      onClick={() => testPattern(k)}
+                      variant="secondary"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(locatorJson)
+                        toast.success(t("copyLocator"))
+                      }}
                     >
-                      {patternBusy === k ? "…" : k}
+                      {t("copyLocator")}
                     </Button>
-                  ))}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(elementRefValue(selected.elementRef))
+                        toast.success(t("copyRef"))
+                      }}
+                    >
+                      {t("copyRef")}
+                    </Button>
+                  </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground">{t("testPatternsHint")}</p>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+
+                {hasPatterns && (
+                  <div className="space-y-2">
+                    <Label className="text-xs">{t("testPatterns")}</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {(["invoke", "toggle", "selectionItem"] as PatternKind[]).map((k) => (
+                        <Button
+                          key={k}
+                          size="sm"
+                          variant="outline"
+                          disabled={patternBusy !== null}
+                          onClick={() => testPattern(k)}
+                        >
+                          {patternBusy === k ? "…" : k}
+                        </Button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">{t("testPatternsHint")}</p>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

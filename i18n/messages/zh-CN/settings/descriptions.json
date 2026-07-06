@@ -20,6 +20,7 @@
   "desktop": "Tauri 专属的窗口、自启与托盘行为。",
   "diagnostics": "崩溃日志、最近错误，以及带可导出诊断包的原生日志状态。",
   "discover": "置顶、排序或隐藏发现页的分类。",
+  "eval": "为 Agent 评估设置默认评委模型、评分器、质量门限与费用保护。",
   "externalBridge": "把 Cognia 的 wiki / RAG / 运行时实体通过 MCP 暴露给外部 Agent（Claude Code、Cursor、Cline）。每个 scope 默认 OFF，需手动启用。",
   "gateway": "本地 OpenAI / Anthropic 兼容端点，让外部工具（Claude Code、任意 OpenAI 客户端）借用你的服务商、路由和凭据。",
   "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",

@@ -94,8 +94,8 @@ describe("AgentTeamOverview", () => {
   it("shows the lead name and teammate count", () => {
     render(<AgentTeamOverview team={baseTeam} teammates={[lead, teammate]} />)
     expect(screen.getByText("Lead Bot")).toBeInTheDocument()
-    // 1 worker (excluding lead)
-    expect(screen.getByText("1")).toBeInTheDocument()
+    // 1 worker (excluding lead) — surfaced in the metrics tile.
+    expect(screen.getByTestId("overview-stat-teammates").textContent).toContain("1")
   })
 
   it("shows 'noLead' fallback when lead isn't in the list", () => {

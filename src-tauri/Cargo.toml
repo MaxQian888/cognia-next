@@ -403,15 +403,24 @@ enigo = "0.6"
 # direct deps keeps the event-tap FFI explicit without adding a new version to
 # the lock.
 core-graphics = "0.25"
+core-graphics-types = "0.2"
 core-foundation = "0.10"
 # macOS Accessibility (AX) element tree — backs the bounded `read_tree` / `find`
-# Computer Use surface (ADR-0020 cross-platform subset, ax/mod.rs). High-level
-# AXUIElement wrapper; we only read role/title/children (no core-foundation type
-# passing across crate boundaries), so its older core-foundation pin coexists
-# with ours in the lock without interop. Coordinate hit-test (`pick_at_point`)
-# stays on the osascript path — AXUIElementCopyElementAtPosition would force a
-# raw-ref wrap across that core-foundation version boundary.
+# Computer Use surface (ADR-0020 cross-platform subset, ax/mod.rs + ax/raw.rs).
+# The high-level `accessibility` crate covers reading role/title/children; the
+# raw `-sys` crates below back the three things it can't do but a useful tree
+# needs (all verified against Chrome / VS Code): activating lazy web-content
+# a11y on Chromium/WebKit/Electron apps, resolving the focused/main window, and
+# reading element geometry (AXPosition/AXSize). The whole graph shares one
+# `core-foundation-sys` (0.8), so the raw `*Ref` C types are interchangeable;
+# only `accessibility`'s core-foundation-0.9 `TCFType` methods
+# (`as_concrete_TypeRef` / `wrap_under_create_rule`) need that version, imported
+# under an alias in `ax/raw.rs` and never leaking into the rest of the app
+# (which is on core-foundation 0.10).
 accessibility = "0.1"
+accessibility-sys = "0.1"
+core-foundation-sys = "0.8"
+core-foundation-0-9 = { package = "core-foundation", version = "0.9" }
 
 [target."cfg(unix)".dependencies]
 # Direct syscalls for the execution sandbox (ADR-0028): `setrlimit` for the

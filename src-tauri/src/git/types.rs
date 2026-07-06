@@ -113,6 +113,23 @@ pub struct GitStashEntry {
     pub branch: Option<String>,
 }
 
+/// One entry from `git worktree list --porcelain`. Used by the agent-team
+/// per-dispatch isolation layer to enumerate the worktrees allocated for a run
+/// (branch names encode `agent/<runId>/<teammate>/<taskId>`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorktree {
+    /// Absolute path of the worktree's working directory.
+    pub path: String,
+    /// Short branch name checked out (e.g. `agent/run_x/alice/t1`), or `None`
+    /// when the worktree is in a detached-HEAD state.
+    pub branch: Option<String>,
+    /// HEAD commit SHA, or `None` for a freshly-`add`ed worktree with no commit.
+    pub head: Option<String>,
+    /// `true` for the repository's main worktree (always listed first by git).
+    pub is_main: bool,
+}
+
 /// A single conflicted path with its three sides extracted from the index
 /// stages. `base` is `None` for add/add conflicts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

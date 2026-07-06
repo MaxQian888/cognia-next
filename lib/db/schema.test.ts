@@ -564,6 +564,60 @@ describe("getDb", () => {
     expect(imRuns).toEqual(["run-im"])
   })
 
+  // v102 — `triggerKind` index on `workflowRuns`. The Agent-Team runs list
+  // (`components/agent/team/runs-list.tsx`) and the CLI status projection
+  // (`lib/cli-bridge/handlers/agent-team.ts`) both resolve team runs via
+  // `.where("triggerKind").equals("trigger.team")`. Before v102 that keyPath was
+  // never indexed, so Dexie threw `SchemaError: KeyPath triggerKind on object
+  // store workflowRuns is not indexed` on first render of the team workspace.
+  // `triggerKind` is a required top-level column stamped at run creation, so
+  // (unlike v91's derived `triggeredBySource`) no backfill runs — the new index
+  // simply resolves existing rows. Opens v101 → production schema end-to-end.
+  it("v102 indexes workflowRuns.triggerKind so team runs resolve without a SchemaError", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v101 with the pre-v102 workflowRuns index (no triggerKind).
+    legacy.version(101).stores({
+      workflowRuns:
+        "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt], triggeredBySource, [triggeredBySource+startedAt]",
+    })
+    await legacy.open()
+    await legacy.table("workflowRuns").bulkPut([
+      {
+        id: "run-team",
+        workflowId: "wf-team",
+        status: "succeeded",
+        startedAt: 1,
+        triggerKind: "trigger.team",
+      },
+      {
+        id: "run-manual",
+        workflowId: "wf-1",
+        status: "succeeded",
+        startedAt: 2,
+        triggerKind: "trigger.manual",
+      },
+      {
+        id: "run-cron",
+        workflowId: "wf-2",
+        status: "running",
+        startedAt: 3,
+        triggerKind: "trigger.cron",
+      },
+    ])
+    legacy.close()
+
+    // Re-open through production schema — v102 adds the triggerKind index.
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(102)
+
+    // The exact query the runs list issues — threw the SchemaError before v102,
+    // now resolves only the team-triggered run.
+    const teamRuns = await db.workflowRuns.where("triggerKind").equals("trigger.team").primaryKeys()
+    expect(teamRuns).toEqual(["run-team"])
+  })
+
   // v50 — Built-in characters → first-party character pack (ADR-0030
   // Amendment). The legacy `char_builtin_*` Dexie rows must pick up
   // `sourcePluginId`, `sourcePackId`, `clonedFromPackCharacterId`, and

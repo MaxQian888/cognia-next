@@ -33,16 +33,22 @@ export function SkillPanelTabs({ className }: { className?: string }) {
       onValueChange={(v) => setActiveTab(v as SkillPanelTab)}
       className={cn("border-b", className)}
     >
-      <div className="mx-2 my-2 overflow-x-auto sm:mx-4">
-        <TabsList className="self-start">
+      {/* No `overflow-x-auto`: it would give the `w-fit` list unbounded width,
+          so it renders at max-content and overflows a narrow pane — the source
+          of the horizontal scrollbar under the tabs and the scroll-into-view
+          "jitter" when a partially-hidden tab is clicked. Instead the triggers
+          shrink to fit (min-w-0 + truncated labels): compact when there's room,
+          gracefully narrowing when there isn't, never scrolling. */}
+      <div className="mx-2 my-2 sm:mx-4">
+        <TabsList className="max-w-full">
           {TAB_DEFS.map((tab) => {
             const Icon = tab.icon
             return (
-              <TabsTrigger key={tab.id} value={tab.id} className="whitespace-nowrap text-xs">
-                <Icon className="mr-1.5 size-3.5" />
-                {t(tab.labelKey)}
+              <TabsTrigger key={tab.id} value={tab.id} className="min-w-0 flex-initial text-xs">
+                <Icon className="size-3.5 shrink-0" />
+                <span className="truncate">{t(tab.labelKey)}</span>
                 {tab.id === "editor" && dirtyCount > 0 && (
-                  <Badge variant="secondary" className="ml-1 h-4 px-1.5 text-[10px]">
+                  <Badge variant="secondary" className="ml-1 h-4 shrink-0 px-1.5 text-[10px]">
                     {dirtyCount}
                   </Badge>
                 )}

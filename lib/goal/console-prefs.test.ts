@@ -9,6 +9,7 @@ describe("goal console-prefs", () => {
   describe("isGoalConsoleTab", () => {
     it("accepts every canonical tab", () => {
       for (const tab of GOAL_CONSOLE_TABS) expect(isGoalConsoleTab(tab)).toBe(true)
+      expect(isGoalConsoleTab("overview")).toBe(true)
     })
 
     it("rejects unknown / nullish values", () => {
@@ -16,6 +17,12 @@ describe("goal console-prefs", () => {
       expect(isGoalConsoleTab(null)).toBe(false)
       expect(isGoalConsoleTab(undefined)).toBe(false)
       expect(isGoalConsoleTab("")).toBe(false)
+    })
+  })
+
+  describe("DEFAULT_GOAL_CONSOLE_PREFS", () => {
+    it("lands on the overview section by default", () => {
+      expect(DEFAULT_GOAL_CONSOLE_PREFS.defaultTab).toBe("overview")
     })
   })
 

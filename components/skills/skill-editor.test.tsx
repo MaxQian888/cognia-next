@@ -42,4 +42,24 @@ describe("SkillEditor", () => {
     // Validation header uses the editor namespace 'validation' key.
     expect(screen.getAllByText("validation").length).toBeGreaterThanOrEqual(1)
   })
+
+  it("hides the content editor in metadata-only mode but keeps the metadata fields", () => {
+    render(
+      <SkillEditor
+        mode="edit"
+        hideContent
+        initial={{ name: "Existing", content: "# body", source: "custom" } as never}
+        onCancel={jest.fn()}
+        onSave={jest.fn(async () => {})}
+      />
+    )
+    // Metadata fields remain…
+    expect(screen.getByText("name")).toBeInTheDocument()
+    expect(screen.getByText("category")).toBeInTheDocument()
+    expect(screen.getByText("tags")).toBeInTheDocument()
+    // …but the markdown-content field is gone.
+    expect(screen.queryByText("content")).not.toBeInTheDocument()
+    // With a non-empty carried-through body, content validation must not fire.
+    expect(screen.queryByText("validation")).not.toBeInTheDocument()
+  })
 })

@@ -493,6 +493,35 @@ export interface AgentTeamConfig {
    */
   workingDir?: string
   /**
+   * Per-dispatch git-worktree isolation. When `enabled`, each teammate dispatch
+   * runs in its own `git worktree` + branch (`agent/<runId>/<teammate>/<taskId>`)
+   * branched off `workingDir`'s HEAD, so parallel agents never share a working
+   * tree / index / branch. Off by default → identical to today's shared-dir
+   * behavior. Desktop-only (git ops run in Rust/Tauri); a no-op on web/mobile.
+   *
+   * `reconcile` decides how the per-dispatch branches are integrated once the
+   * run (or a fan-out group) settles:
+   *   - `"manual"` (default): leave the branches for the user to review/merge.
+   *   - `"merge-all"`: merge each branch into a fresh integration branch off
+   *     `baseRef`; a conflict aborts and is reported (never touches the user's
+   *     real branch).
+   *   - `"select"`: keep one branch per `selectStrategy`, discard the rest per
+   *     `retain`.
+   *   - `"pipeline"`: sequential dispatches share one worktree/branch.
+   * `retain` controls worktree/branch cleanup after reconcile (default
+   * `"keep-winner"`). `baseRef` overrides the branch-point (default =
+   * `workingDir` HEAD at run start). `backend` is a Phase-2 seam (only `"local"`
+   * today; `"container"` / `"e2b"` reserved for the untrusted-code safety wall).
+   */
+  workspaceIsolation?: {
+    enabled?: boolean
+    reconcile?: "manual" | "merge-all" | "select" | "pipeline"
+    selectStrategy?: "manual" | "first-success" | "judge"
+    retain?: "all" | "keep-winner" | "prune-losers"
+    baseRef?: string
+    backend?: "local"
+  }
+  /**
    * Stage-checkpoint adaptive re-planning (model-in-the-loop). When `enabled`,
    * the flat task path runs as Kahn-layer "waves"; between waves a lead model
    * reviews completed results and may inject / cancel / reorder remaining tasks

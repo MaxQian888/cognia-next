@@ -303,6 +303,13 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Send",
     keywords: ["team", "task", "dispatch", "synthesized", "internal"],
   },
+  "action.team.reconcile": {
+    label: "Reconcile agent worktrees",
+    description:
+      "Under workspace isolation, reconcile the per-dispatch agent branches produced so far in this run — merge-all / select / pipeline. Runs inside a team run (reads the per-run worktree ledger).",
+    iconName: "GitMerge",
+    keywords: ["team", "worktree", "git", "reconcile", "merge", "select"],
+  },
   "action.team.create": {
     label: "Create team",
     description: "Creates a new agent team row.",

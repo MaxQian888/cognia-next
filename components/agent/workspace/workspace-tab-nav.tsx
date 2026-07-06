@@ -1,54 +1,119 @@
 "use client"
 
-// Responsive tab navigation for the Agent Teams workspace.
+// Tab navigation for the Agent Teams workspace, built on the shadcn `Sidebar`.
 //
-// - Mobile (<sm): horizontal, icon-only strip that scrolls sideways.
-// - Tablet (sm–lg): horizontal strip with icon + label.
-// - Desktop (lg+): a vertical sidebar rail (icon + label, left-aligned) so the
-//   workspace uses the available width instead of a single centered column.
-//
-// Presentational only — must render inside a `<Tabs>` (Radix context provides
-// the active value + onValueChange). The values match the page's `ALL_TABS`.
+// Renders a real collapsible sidebar rail (icon-collapsible via the header
+// trigger or Ctrl/Cmd+B) instead of a hand-rolled vertical `TabsList`. It is
+// navigation-only: the parent owns the active `value` + `onValueChange` (wired
+// to the store's `workspaceTab`) and conditionally renders the matching panel.
+// Must be mounted inside a `<SidebarProvider>`.
 
 import { useTranslations } from "next-intl"
 import {
   ActivityIcon,
+  ArrowLeftIcon,
   BarChart3Icon,
+  GitBranchIcon,
+  ListTodoIcon,
   MessageCircleIcon,
   Settings2Icon,
-  ListTodoIcon,
   UsersIcon,
   type LucideIcon,
 } from "lucide-react"
 
-import { TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarSeparator,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
 
 export const WORKSPACE_TABS: ReadonlyArray<{ value: string; icon: LucideIcon }> = [
   { value: "overview", icon: BarChart3Icon },
   { value: "tasks", icon: ListTodoIcon },
   { value: "chat", icon: MessageCircleIcon },
   { value: "activity", icon: ActivityIcon },
+  { value: "worktrees", icon: GitBranchIcon },
   { value: "members", icon: UsersIcon },
   { value: "settings", icon: Settings2Icon },
 ]
 
-export function WorkspaceTabNav() {
+export interface WorkspaceTabNavProps {
+  /** Active tab value (matches the store's `workspaceTab`). */
+  value: string
+  /** Select a tab. */
+  onValueChange: (value: string) => void
+  /** Navigate back to the team list. */
+  onBack: () => void
+  /** Team name shown in the rail header (hidden when the rail collapses). */
+  teamName?: string
+  /** Optional per-tab count badges (e.g. `{ members: 3 }`). */
+  counts?: Partial<Record<string, number>>
+}
+
+export function WorkspaceTabNav({
+  value,
+  onValueChange,
+  onBack,
+  teamName,
+  counts,
+}: WorkspaceTabNavProps) {
   const tTabs = useTranslations("agentTeamsWorkspace.tabs")
+  const t = useTranslations("agentTeamsWorkspace")
+
   return (
-    <div className="overflow-x-auto lg:sticky lg:top-0 lg:shrink-0 lg:self-start lg:overflow-visible">
-      <TabsList className="inline-flex h-9 w-max gap-1 lg:h-auto lg:w-48 lg:flex-col lg:items-stretch lg:bg-transparent lg:p-0">
-        {WORKSPACE_TABS.map(({ value, icon: Icon }) => (
-          <TabsTrigger
-            key={value}
-            value={value}
-            data-testid={`tab-${value}`}
-            className="gap-1.5 lg:justify-start lg:px-3 lg:py-2"
+    <Sidebar collapsible="icon" className="border-r">
+      <SidebarHeader>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:hidden"
+            onClick={onBack}
+            aria-label={t("listTitle")}
+            data-testid="workspace-back"
           >
-            <Icon className="size-3.5 shrink-0 lg:size-4" />
-            <span className="hidden sm:inline">{tTabs(value)}</span>
-          </TabsTrigger>
-        ))}
-      </TabsList>
-    </div>
+            <ArrowLeftIcon className="size-4" />
+          </Button>
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold group-data-[collapsible=icon]:hidden">
+            {teamName ?? t("listTitle")}
+          </span>
+          <SidebarTrigger className="shrink-0 group-data-[collapsible=icon]:mx-auto" />
+        </div>
+      </SidebarHeader>
+      <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarMenu>
+            {WORKSPACE_TABS.map(({ value: v, icon: Icon }) => {
+              const count = counts?.[v]
+              return (
+                <SidebarMenuItem key={v}>
+                  <SidebarMenuButton
+                    isActive={value === v}
+                    onClick={() => onValueChange(v)}
+                    tooltip={tTabs(v)}
+                    data-testid={`tab-${v}`}
+                  >
+                    <Icon />
+                    <span>{tTabs(v)}</span>
+                  </SidebarMenuButton>
+                  {typeof count === "number" ? (
+                    <SidebarMenuBadge data-testid={`tab-${v}-count`}>{count}</SidebarMenuBadge>
+                  ) : null}
+                </SidebarMenuItem>
+              )
+            })}
+          </SidebarMenu>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
   )
 }

@@ -24,6 +24,8 @@ import type { ModelPreferenceController } from "@/lib/workflow/runtime/model-pre
 import type { TeammatePool } from "./teammate-pool"
 import type { BudgetGuard } from "./budget-guard"
 import type { TeamNotifier } from "./team-notifier"
+import type { AgentWorkspaceAllocator } from "./workspace/allocator"
+import type { ReconcileCandidate, ReconcileMode, SelectStrategy } from "./workspace/reconciler"
 
 /**
  * Minimal store-write surface the team.task.dispatch executor needs.
@@ -140,6 +142,31 @@ export interface TeamRunContext {
    * exist. Content-free summaries only.
    */
   readonly availableTwins?: TeamTwinSummary[]
+  /**
+   * Per-dispatch git-worktree allocator (ADR-0022 workspace-isolation addendum).
+   * Set only when `team.config.workspaceIsolation.enabled` AND the run is on
+   * desktop AND `workingDir` is a git repo — otherwise undefined and every
+   * teammate runs in the shared `workingDir` (today's behavior). When present,
+   * `dispatchTeammate` allocates a worktree per dispatch and points the
+   * teammate's cwd / sandbox writable roots at it.
+   */
+  readonly workspaceAllocator?: AgentWorkspaceAllocator
+  /**
+   * Ledger of per-dispatch worktrees keyed by allocation key, recorded by
+   * `dispatchTeammate` and consumed by the run's reconcile step at settle. Only
+   * present alongside `workspaceAllocator`.
+   */
+  readonly workspaceLedger?: Map<string, ReconcileCandidate>
+  /**
+   * Resolved isolation reconcile settings (mode / select strategy / retain),
+   * read by the run's settle-time reconcile. Only present alongside
+   * `workspaceAllocator`.
+   */
+  readonly workspaceIsolation?: {
+    mode: ReconcileMode
+    selectStrategy?: SelectStrategy
+    retain?: "all" | "keep-winner" | "prune-losers"
+  }
 }
 
 const registry = new Map<string, TeamRunContext>()

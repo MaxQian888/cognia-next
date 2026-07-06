@@ -7,7 +7,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { SparklesIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
-import { createSkill, deleteSkill, getSkill, updateSkill } from "@/lib/db/skills"
+import { createSkill, deleteSkill, getSkill } from "@/lib/db/skills"
 import { useSkills, useSkillShortcuts, useSkillPrefsHydration } from "@/hooks/skills"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { useSkillsStore } from "@/stores/skills"
@@ -176,8 +176,9 @@ function MySkillsDetailPane() {
 }
 
 /**
- * Hosts the editor sheet. Reads `editorTarget` from the store so it can act
- * as both a "create" and "edit" surface.
+ * Hosts the create-skill Sheet. Existing skills are edited in the workspace
+ * editor (Editor tab) — body in Monaco, metadata via its "Skill settings"
+ * panel — so this surface only ever seeds a brand-new skill.
  */
 function SkillEditorHost() {
   const t = useTranslations("skills")
@@ -186,49 +187,23 @@ function SkillEditorHost() {
   const createSeed = useSkillsStore((s) => s.createSeed)
   const closeEditor = useSkillsStore((s) => s.closeEditor)
   const open = editorTarget !== null
-  const skill = useLiveQuery(
-    () =>
-      editorTarget?.mode === "edit" ? getSkill(editorTarget.skillId) : Promise.resolve(undefined),
-    [editorTarget]
-  )
   const ai = useSkillAi()
   const autoEnableNew = useSkillPanelPrefs().autoEnableNew
 
   const onSave = async (draft: Parameters<typeof createSkill>[0]) => {
-    const mode = editorTarget?.mode
     try {
-      if (mode === "create") {
-        // Honor the "auto-enable new skills" preference: when off, a freshly
-        // created skill lands disabled so the user opts it into the prompt.
-        const created = await createSkill({
-          ...draft,
-          status: autoEnableNew ? (draft.status ?? "enabled") : "disabled",
-        })
-        toast.success(tToasts("createdName", { name: draft.name }))
-        loggers.skills.info("create ok", { skillId: created.id, name: draft.name })
-      } else if (mode === "edit" && skill) {
-        await updateSkill(skill.id, {
-          name: draft.name,
-          description: draft.description,
-          content: draft.content,
-          allowedTools: draft.allowedTools,
-          tags: draft.tags,
-          category: draft.category,
-          version: draft.version,
-          author: draft.author,
-          license: draft.license,
-        })
-        toast.success(tToasts("updatedName", { name: draft.name }))
-        loggers.skills.info("update ok", { skillId: skill.id, name: draft.name })
-      }
+      // Honor the "auto-enable new skills" preference: when off, a freshly
+      // created skill lands disabled so the user opts it into the prompt.
+      const created = await createSkill({
+        ...draft,
+        status: autoEnableNew ? (draft.status ?? "enabled") : "disabled",
+      })
+      toast.success(tToasts("createdName", { name: draft.name }))
+      loggers.skills.info("create ok", { skillId: created.id, name: draft.name })
       closeEditor()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
-      loggers.skills.error("editor save failed", err, {
-        mode,
-        skillId: skill?.id,
-        name: draft.name,
-      })
+      loggers.skills.error("editor save failed", err, { name: draft.name })
     }
   }
 
@@ -236,17 +211,13 @@ function SkillEditorHost() {
     <Sheet open={open} onOpenChange={(o) => !o && closeEditor()}>
       <SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-2xl">
         <SheetHeader className="border-b px-5 py-3">
-          <SheetTitle>
-            {editorTarget?.mode === "create" ? t("editor.create") : t("editor.save")}
-          </SheetTitle>
-          <SheetDescription>
-            {editorTarget?.mode === "create" ? t("description") : (skill?.description ?? "")}
-          </SheetDescription>
+          <SheetTitle>{t("editor.create")}</SheetTitle>
+          <SheetDescription>{t("description")}</SheetDescription>
         </SheetHeader>
         <div className="px-5 py-4">
           <SkillEditor
-            mode={editorTarget?.mode === "create" ? "create" : "edit"}
-            initial={editorTarget?.mode === "create" ? createSeed : (skill ?? null)}
+            mode="create"
+            initial={createSeed}
             onCancel={closeEditor}
             onSave={onSave}
             onAiAssist={

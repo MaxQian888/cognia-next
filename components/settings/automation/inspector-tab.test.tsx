@@ -45,6 +45,7 @@ const baseCaps = {
   hasInputSim: true,
   hasScreenshot: true,
   hasEvents: false,
+  hasA11yTree: false,
   monitors: [],
 }
 

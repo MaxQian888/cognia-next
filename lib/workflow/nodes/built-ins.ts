@@ -2969,6 +2969,64 @@ registerNodeExecutor({
   },
 })
 
+// ── action.team.reconcile ─────────────────────────────────────────────────
+// Workspace-isolation reconcile for a fan-out group. Reads the per-run
+// TeamRunContext; when isolation is active, reconciles the agent branches
+// recorded in the ledger SO FAR using this node's mode (falling back to the
+// team's default), then clears the ledger so a later run-end reconcile only
+// sees dispatches that came after. Lets a workflow mix e.g. `merge-all` after
+// one fan-out and `select` after another. No-op when isolation is off.
+registerNodeExecutor({
+  kind: "action.team.reconcile",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      mode?: "manual" | "merge-all" | "select" | "pipeline"
+      selectStrategy?: "manual" | "first-success" | "judge"
+      retain?: "all" | "keep-winner" | "prune-losers"
+    }
+    const { getTeamRunContext } = await import("@/lib/ai/agent/team/team-run-context")
+    const teamCtx = getTeamRunContext(ctx.runId)
+    if (!teamCtx) {
+      throw nonRetryable(
+        `action.team.reconcile: no TeamRunContext registered for runId=${ctx.runId}`
+      )
+    }
+    if (!teamCtx.workspaceAllocator || !teamCtx.workspaceLedger) {
+      return { output: { reconciled: false } }
+    }
+    const [{ reconcile }, { selectWinnerByJudge }, { executeAgent }] = await Promise.all([
+      import("@/lib/ai/agent/team/workspace/reconciler"),
+      import("@/lib/ai/agent/team/workspace/judge"),
+      import("@/lib/ai/agent/agent-executor"),
+    ])
+    const mode = params.mode ?? teamCtx.workspaceIsolation?.mode ?? "manual"
+    const selectStrategy = params.selectStrategy ?? teamCtx.workspaceIsolation?.selectStrategy
+    const retain = params.retain ?? teamCtx.workspaceIsolation?.retain
+    const result = await reconcile(
+      teamCtx.workspaceAllocator,
+      [...teamCtx.workspaceLedger.values()],
+      {
+        runId: ctx.runId,
+        mode,
+        ...(selectStrategy ? { selectStrategy } : {}),
+        ...(retain ? { retain } : {}),
+        ...(selectStrategy === "judge"
+          ? {
+              judge: (cands) =>
+                selectWinnerByJudge(cands, {
+                  run: async (p) => (await executeAgent(p, {})).text ?? "",
+                }),
+            }
+          : {}),
+      }
+    )
+    // Consumed this group; a run-end reconcile should only see later dispatches.
+    teamCtx.workspaceLedger.clear()
+    return { output: { reconciled: true, ...result } }
+  },
+})
+
 // ── action.plan.step.dispatch ─────────────────────────────────────────────
 // Per ADR-0045 P2. Synthesizer-emitted node: one per PlanStep. Looks up the
 // per-run PlanRunContext (registered by `runPlan` before runWorkflow) and

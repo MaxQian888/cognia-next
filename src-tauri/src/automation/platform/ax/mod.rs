@@ -16,17 +16,32 @@
 //!     `processName` / `windowTitleContains`; deeper AXUIElement tree
 //!     walking is out of scope for the minimum-viable surface.
 //!
-//! ADR-0020 cross-platform bounded subset (macOS): `read_tree` / `find` now
-//! walk the frontmost application's AX element subtree via the high-level
-//! `accessibility` crate, capped through the shared `tree_shape` helper (depth +
-//! node budget). `capabilities()` therefore reports `hasA11yTree: true`.
-//! Coordinate hit-testing (`pick_at_point`) stays on the osascript frontmost-
-//! window path: `AXUIElementCopyElementAtPosition` would force a raw-`-sys` ref
-//! wrap across the `accessibility` crate's older core-foundation pin, which
-//! can't be verified from the Windows dev host — left as Phase-next. Element-
-//! targeted actions (`click`/`scroll`/`invoke_pattern`/`window_op` by ref) also
-//! remain coordinate-only / unsupported: a stable, re-resolvable element ref is
-//! the harder follow-on.
+//! ADR-0020 cross-platform bounded subset (macOS): `read_tree` / `find` walk the
+//! frontmost application's AX element subtree via the high-level `accessibility`
+//! crate, capped through the shared `tree_shape` helper (depth + node budget).
+//! `capabilities()` therefore reports `hasA11yTree: true`.
+//!
+//! The macOS follow-up (see `ax/raw.rs`) closed the "only window name" gap that
+//! made the tree useless in practice:
+//!
+//!   - **AX trust gate** — an untrusted process gets `kAXErrorAPIDisabled` on
+//!     every read, i.e. an empty tree. `read_tree` now fails loudly with an
+//!     actionable message (and pops the system prompt) instead.
+//!   - **Web-a11y activation** — Chromium / WebKit / Electron apps (Cognia's own
+//!     WKWebView included) don't publish their web-content tree until an AT
+//!     client sets `AXManualAccessibility` / `AXEnhancedUserInterface`.
+//!   - **Focused-window root** — `AXWindows[0]` is often an empty helper window;
+//!     the walk now roots at `AXFocusedWindow` / `AXMainWindow`.
+//!   - **Rich nodes** — role, subrole (→ `class_name`), identifier (→
+//!     `automation_id`), enabled/focused, a name fallback chain, and geometry
+//!     (`AXPosition`/`AXSize` → `bounding_rect`).
+//!
+//! Coordinate hit-testing (`pick_at_point`) still resolves to the focused window
+//! via osascript, and element-targeted actions (`invoke_pattern` / `window_op`
+//! by ref) remain unsupported: a stable, re-resolvable element ref is the harder
+//! follow-on.
+
+mod raw;
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -68,12 +83,23 @@ impl AutomationBackend for AxBackend {
     }
 
     fn read_tree(&self, _root: Option<ElementRef>, opts: TreeOpts) -> Result<Vec<ElementInfo>> {
+        // Reading another process's AX tree requires this process to be trusted
+        // for the Accessibility API. Untrusted, every attribute read returns
+        // kAXErrorAPIDisabled and the walk would silently yield an empty tree —
+        // fail loudly with an actionable message (and pop the system prompt once).
+        if !raw::is_trusted() {
+            raw::prompt_trust();
+            return Err(AutomationError::PermissionDenied {
+                reason: "macOS Accessibility permission not granted — enable Cognia in \
+                         System Settings › Privacy & Security › Accessibility, then retry"
+                    .into(),
+            });
+        }
         // Walk the frontmost application's focused-window subtree, depth- and
         // node-capped via the shared budget. We resolve the pid from the same
-        // osascript snapshot the metadata path uses, then drive the high-level
-        // AX accessors. Element refs are observability-only (role/title) — they
-        // aren't re-resolvable to a live AXUIElement, hence no element-targeted
-        // actions yet.
+        // osascript snapshot the metadata path uses, then drive the AX accessors.
+        // Element refs are observability-only (role/title) — they aren't
+        // re-resolvable to a live AXUIElement, hence no element-targeted actions.
         let snap = read_focused_window()?;
         let Some(pid) = snap.pid else {
             return Err(AutomationError::BackendError {
@@ -82,18 +108,20 @@ impl AutomationBackend for AxBackend {
         };
         let budget = TreeBudget::from_opts(opts.max_depth);
         let app = AXUIElement::application(pid as i32);
-        // `AXFocusedWindow`/`AXMainWindow` have no generated accessor in
-        // accessibility 0.1.6, and reading them via the raw attribute API would
-        // pull that crate's older core-foundation types across the version
-        // boundary this module deliberately avoids. Root the walk at the app's
-        // first window instead — `AXWindows` is front-to-back ordered, so this
-        // is the frontmost (active) window — falling back to the application
-        // element (whose children are its windows) when none is exposed.
-        let root = app
-            .windows()
-            .ok()
-            .and_then(|w| w.iter().next().map(|c| (*c).clone()))
-            .unwrap_or_else(|| app.clone());
+        // Chromium / WebKit / Electron apps (Cognia's own WKWebView included)
+        // don't publish their web-content tree until an AT client activates it.
+        // Activate, and if the app had no windows beforehand give the web process
+        // a brief moment to build the tree before we read it.
+        let had_windows = raw::has_visible_windows(&app);
+        raw::activate_web_a11y(&app);
+        if !had_windows {
+            std::thread::sleep(Duration::from_millis(150));
+        }
+        // Root at the focused / main window (falling back to the first non-empty
+        // window, then the app element). `AXWindows[0]` is frequently an empty
+        // helper window, so the naive "first window" pre-fix surfaced just a bare
+        // window node — the "only window name" symptom.
+        let root = raw::resolve_window_root(&app);
         let proc_name = snap.process_name.as_deref();
         let to_info = |el: &AXUIElement| ax_element_to_info(el, Some(pid), proc_name);
         let children = |el: &AXUIElement| -> Vec<AXUIElement> {
@@ -483,42 +511,67 @@ fn snap_to_element_ref(snap: &FocusedSnapshot) -> ElementRef {
     ElementRef(format!("macos|pid={pid_part}|title={title_part}"))
 }
 
-/// Convert a live AX element into our `ElementInfo`. Reads role → `control_type`
-/// and title → `name` / `window_title` (both best-effort; AX accessors return
-/// `Err` when the attribute is absent). `bounding_rect` is left `None` — geometry
-/// (`AXPosition`/`AXSize` are `AXValue`-wrapped) is a follow-on; the bounded
-/// subset only needs role/title for `read_tree` + `find`. The ref is an
-/// observability string, not a re-resolvable handle.
+/// Convert a live AX element into our `ElementInfo`:
+///
+///   - `control_type` ← `AXRole`, `class_name` ← `AXSubrole`, `automation_id` ←
+///     `AXIdentifier`.
+///   - `name` ← first non-empty of `AXTitle` → `AXDescription` → string
+///     `AXValue` → `AXRoleDescription` (most controls have no `AXTitle`).
+///   - `is_enabled` / `is_focused` ← `AXEnabled` / `AXFocused`.
+///   - `bounding_rect` ← `AXPosition` + `AXSize` (global screen coordinates).
+///
+/// All reads are best-effort; absent attributes fall back to sane defaults. The
+/// ref is an observability string, not a re-resolvable handle.
 fn ax_element_to_info(el: &AXUIElement, pid: Option<u32>, proc_name: Option<&str>) -> ElementInfo {
-    let role = el
-        .role()
-        .ok()
-        .map(|r| r.to_string())
-        .filter(|s| !s.is_empty());
-    let title = el
-        .title()
-        .ok()
-        .map(|t| t.to_string())
-        .filter(|s| !s.is_empty());
+    let role = str_attr(el.role());
+    let subrole = str_attr(el.subrole());
+    let title = str_attr(el.title());
+    let description = str_attr(el.description());
+    let role_description = str_attr(el.role_description());
+    let identifier = str_attr(el.identifier());
+    let name = pick_name(
+        title.clone(),
+        description,
+        raw::read_value_string(el),
+        role_description,
+    );
     let element_ref = ElementRef(format!(
         "macos|role={}|title={}",
         role.as_deref().unwrap_or(""),
-        title.as_deref().unwrap_or("")
+        name.as_deref().unwrap_or("")
     ));
     ElementInfo {
         element_ref,
-        name: title.clone(),
-        automation_id: None,
+        name,
+        automation_id: identifier,
         control_type: role,
-        class_name: None,
-        bounding_rect: None,
-        is_enabled: true,
-        is_focused: false,
+        class_name: subrole,
+        bounding_rect: raw::read_rect(el),
+        is_enabled: raw::read_bool(el, "AXEnabled").unwrap_or(true),
+        is_focused: raw::read_bool(el, "AXFocused").unwrap_or(false),
         process_id: pid,
         process_name: proc_name.map(|s| s.to_string()),
         window_title: title,
         children: None,
     }
+}
+
+/// First non-empty AX name candidate, in priority order:
+/// `AXTitle` → `AXDescription` → string `AXValue` → `AXRoleDescription`.
+/// Pure so it's unit-tested on every host (including the Windows dev box where
+/// this module doesn't compile — the logic still needs coverage).
+fn pick_name(
+    title: Option<String>,
+    description: Option<String>,
+    value: Option<String>,
+    role_description: Option<String>,
+) -> Option<String> {
+    title.or(description).or(value).or(role_description)
+}
+
+/// Read a CFString-typed AX accessor result into a trimmed, non-empty `String`.
+fn str_attr<S: ToString>(r: std::result::Result<S, accessibility_sys::AXError>) -> Option<String> {
+    r.ok().map(|s| s.to_string()).filter(|s| !s.is_empty())
 }
 
 fn focused_to_element_info(snap: &FocusedSnapshot) -> ElementInfo {
@@ -584,5 +637,38 @@ mod tests {
     #[test]
     fn named_f_key_routes_through_function_key_map() {
         assert_eq!(named_to_enigo(NamedKey::F(5)), enigo::Key::F5);
+    }
+
+    #[test]
+    fn pick_name_prefers_title_then_falls_back_in_order() {
+        // Title wins when present.
+        assert_eq!(
+            pick_name(
+                Some("Save".into()),
+                Some("desc".into()),
+                Some("val".into()),
+                Some("button".into())
+            )
+            .as_deref(),
+            Some("Save")
+        );
+        // Then description (most controls have no AXTitle).
+        assert_eq!(
+            pick_name(None, Some("Close window".into()), Some("val".into()), None).as_deref(),
+            Some("Close window")
+        );
+        // Then a string AXValue (text fields).
+        assert_eq!(
+            pick_name(None, None, Some("hello@example.com".into()), Some("text field".into()))
+                .as_deref(),
+            Some("hello@example.com")
+        );
+        // Then the human-readable role description.
+        assert_eq!(
+            pick_name(None, None, None, Some("close button".into())).as_deref(),
+            Some("close button")
+        );
+        // Nothing at all → unnamed.
+        assert_eq!(pick_name(None, None, None, None), None);
     }
 }

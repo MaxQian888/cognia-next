@@ -65,8 +65,12 @@ interface SkillsStoreState {
   filterSheetOpen: boolean
   /** When true, the mobile-only category navigator sheet is open. */
   categorySheetOpen: boolean
-  /** When non-null, show the editor pre-filled with this skill (or empty when "create"). */
-  editorTarget: { mode: "create" } | { mode: "edit"; skillId: string } | null
+  /**
+   * When non-null, the create-skill Sheet is open. Existing skills are edited
+   * in the workspace editor (Editor tab) — body in Monaco, metadata in its
+   * "Skill settings" panel — so there is no separate edit-mode Sheet.
+   */
+  editorTarget: { mode: "create" } | null
   /**
    * Skill-shaped seed used to pre-fill the create editor (e.g. picked from a
    * template). Only read while `editorTarget.mode === "create"`; cleared when
@@ -108,7 +112,6 @@ interface SkillsStoreState {
   setFilterSheetOpen: (open: boolean) => void
   setCategorySheetOpen: (open: boolean) => void
   openCreate: (seed?: import("@/lib/claude/types").Skill) => void
-  openEdit: (skillId: string) => void
   closeEditor: () => void
   setImportStaging: (staging: ImportStaging | null) => void
   setDeleteTarget: (target: { skillId: string; name: string } | null) => void
@@ -229,7 +232,6 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   setCategorySheetOpen: (open) => set({ categorySheetOpen: open }),
   openCreate: (seed) =>
     set({ editorTarget: { mode: "create" }, createSeed: seed ?? null, detailSkillId: null }),
-  openEdit: (skillId) => set({ editorTarget: { mode: "edit", skillId }, detailSkillId: null }),
   closeEditor: () => set({ editorTarget: null, createSeed: null }),
   setImportStaging: (staging) => set({ importStaging: staging }),
   setDeleteTarget: (target) => set({ deleteTarget: target }),

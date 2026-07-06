@@ -83,8 +83,13 @@
       "openGoalsSort": "Open-goals sort",
       "title": "Console preferences"
     },
+    "sectionsAria": "Goal sections",
     "statActive": "{count} active",
     "statDone": "{count} done",
+    "statGroups": {
+      "lifetime": "Lifetime",
+      "open": "Open"
+    },
     "statPaused": "{count} paused",
     "stats": {
       "active": "Active",
@@ -102,6 +107,7 @@
       "analytics": "Analytics",
       "defaults": "Defaults",
       "history": "History",
+      "overview": "Overview",
       "templates": "Templates",
       "tracker": "Tracker"
     },

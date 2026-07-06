@@ -37,7 +37,18 @@ const meta = {
   title: "Agent/Workspace/Chat",
   component: AgentTeamChat,
   parameters: { layout: "fullscreen" },
+  // The chat is designed to fill a bounded flex column (message list grows,
+  // composer pinned at the bottom). Give it a full-height parent so the
+  // preview matches how the workspace tab mounts it.
+  decorators: [
+    (Story) => (
+      <div className="flex h-screen flex-col p-4">
+        <Story />
+      </div>
+    ),
+  ],
   args: {
+    className: "min-h-0 flex-1",
     teamId: "team-1",
     messages,
     mentionables,

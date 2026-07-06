@@ -1750,6 +1750,7 @@ name = "cognia-next"
 version = "0.1.0"
 dependencies = [
  "accessibility",
+ "accessibility-sys",
  "aes 0.9.1",
  "aes-gcm",
  "anyhow",
@@ -1765,7 +1766,10 @@ dependencies = [
  "clap",
  "cognia-signaling-core",
  "core-foundation 0.10.1",
+ "core-foundation 0.9.4",
+ "core-foundation-sys",
  "core-graphics 0.25.0",
+ "core-graphics-types 0.2.0",
  "crash-handler",
  "cron",
  "dial9-tokio-telemetry",

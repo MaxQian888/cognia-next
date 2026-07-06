@@ -68,6 +68,7 @@ export type WorkflowNodeKind =
   | "action.team.create"
   | "action.team.update"
   | "action.team.task.dispatch"
+  | "action.team.reconcile"
   // User-placeable plan lifecycle actions (ADR-0045). These expose the
   // AgentPlan runtime and DB readers without going through the synthesized
   // per-step dispatch node below.
@@ -316,6 +317,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.team.create",
   "action.team.update",
   "action.team.task.dispatch",
+  "action.team.reconcile",
   "action.plan.create",
   "action.plan.get",
   "action.plan.list",

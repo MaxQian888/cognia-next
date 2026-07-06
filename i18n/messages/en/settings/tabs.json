@@ -20,6 +20,7 @@
   "desktop": "Desktop",
   "diagnostics": "Diagnostics",
   "discover": "Discover",
+  "eval": "Evaluation",
   "externalBridge": "External Bridge (MCP)",
   "gateway": "Inbound Gateway",
   "general": "General",

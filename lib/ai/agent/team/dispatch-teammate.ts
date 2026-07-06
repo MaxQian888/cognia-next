@@ -28,6 +28,7 @@ import { resolveTeammateCapabilities } from "./capability-resolver"
 import { teammateToCharacter } from "./teammate-character"
 import { applyTeammateTwinContext } from "./twin-context"
 import type { TeamRunContext } from "./team-run-context"
+import type { WorktreeHandle } from "./workspace/allocator"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
 import { agendaFingerprint, parseRateLimitCooldown } from "./nudge-guard"
@@ -74,6 +75,12 @@ export interface DispatchTeammateArgs {
    * round-robin. Set from a task's `assignedTo`.
    */
   preferTeammateId?: string
+  /**
+   * Under workspace isolation, groups dispatches that must share ONE git
+   * worktree (pipeline handoff). Defaults to `taskId` → one worktree per
+   * dispatch. Ignored when isolation is off.
+   */
+  workspaceKey?: string
 }
 
 export interface DispatchTeammateResult {
@@ -138,9 +145,10 @@ async function runToolEnabled(
   modelHint: string | undefined,
   signal: AbortSignal,
   onCaptureEvent?: (event: CaptureStreamEvent) => void,
-  maxSteps?: number
+  maxSteps?: number,
+  cwdOverride?: string
 ): Promise<{ text: string; usage?: TokenUsage }> {
-  const cwd = teamCtx.team.config?.workingDir
+  const cwd = cwdOverride ?? teamCtx.team.config?.workingDir
   const character = teammateToCharacter({
     team: teamCtx.team,
     teammate,
@@ -236,7 +244,8 @@ async function runExternalBacked(
   prompt: string,
   systemPrompt: string,
   signal: AbortSignal,
-  onCaptureEvent?: (event: CaptureStreamEvent) => void
+  onCaptureEvent?: (event: CaptureStreamEvent) => void,
+  cwdOverride?: string
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const [
     { getExternalAgentManager },
@@ -267,8 +276,8 @@ async function runExternalBacked(
   const result = await manager.execute(agentId, prompt, {
     systemPrompt,
     ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
-    ...(teamCtx.team.config?.workingDir
-      ? { workingDirectory: teamCtx.team.config.workingDir }
+    ...((cwdOverride ?? teamCtx.team.config?.workingDir)
+      ? { workingDirectory: cwdOverride ?? teamCtx.team.config?.workingDir }
       : {}),
     ...(mcpServers.length > 0 ? { context: { custom: { mcpServers } } } : {}),
     // Live progress: translate the external protocol stream into the same
@@ -497,7 +506,28 @@ export async function dispatchTeammate(
   })
 
   let turn: { text: string; usage?: TokenUsage }
+  let workspace: WorktreeHandle | undefined
+  const recordWorkspace = (ok: boolean, output?: string): void => {
+    if (workspace && teamCtx.workspaceLedger) {
+      teamCtx.workspaceLedger.set(workspace.key, {
+        handle: workspace,
+        ok,
+        ...(output ? { output } : {}),
+      })
+    }
+  }
   try {
+    // Workspace isolation: give this dispatch its own git worktree + branch.
+    // Fail-closed — an allocation error flows through the catch below (recorded
+    // as a failure + released) instead of silently running in the shared dir.
+    if (teamCtx.workspaceAllocator) {
+      workspace = await teamCtx.workspaceAllocator.allocate({
+        runId: teamCtx.runId,
+        teammateName: teammate.name,
+        taskId: args.taskId,
+        ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
+      })
+    }
     if (channel === "external" && externalAgentId) {
       turn = await runExternalBacked(
         teamCtx,
@@ -507,7 +537,8 @@ export async function dispatchTeammate(
         promptText,
         systemPrompt,
         combinedSignal,
-        streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined
+        streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined,
+        workspace?.path
       )
     } else if (channel === "sidecar") {
       turn = await runToolEnabled(
@@ -521,7 +552,8 @@ export async function dispatchTeammate(
         // Real per-event streaming only on the sidecar path; external + text
         // channels surface start/terminal markers via the reporter instead.
         streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined,
-        maxSteps
+        maxSteps,
+        workspace?.path
       )
     } else {
       // Twin-backed teammate on the text-only channel (web/mobile): executeAgent
@@ -570,6 +602,7 @@ export async function dispatchTeammate(
         retryAfterMs: cooldown.retryAfterMs,
       })
     }
+    recordWorkspace(false)
     release("failure", error)
     throw error
   }
@@ -591,6 +624,7 @@ export async function dispatchTeammate(
       if (args.recordToStore) {
         teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, empty.message)
       }
+      recordWorkspace(false)
       release("failure", empty)
       throw empty
     }
@@ -604,6 +638,7 @@ export async function dispatchTeammate(
       if (args.recordToStore) {
         teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, short.message)
       }
+      recordWorkspace(false)
       release("failure", short)
       throw short
     }
@@ -638,6 +673,25 @@ export async function dispatchTeammate(
     })
     teamCtx.storeWriter.setTaskStatus(args.taskId, "completed", text)
   }
+  // Workspace isolation: capture the agent's work on its branch (worktrees are
+  // GC'd; reconcile merge/select operate on commits). Best-effort — the turn
+  // already succeeded, so a commit failure only warns.
+  if (workspace && teamCtx.workspaceAllocator) {
+    try {
+      await teamCtx.workspaceAllocator.commit(workspace, `${teammate.name}: ${args.taskId}`)
+    } catch {
+      teamCtx.notifier.notify({
+        level: "warn",
+        title: "Worktree commit failed",
+        body: `Could not commit ${teammate.name}'s worktree for task ${args.taskId}; its changes remain uncommitted.`,
+        runId: teamCtx.runId,
+        teamId: teamCtx.teamId,
+        taskId: args.taskId,
+        dedupeKey: `wt-commit:${teamCtx.runId}:${workspace.key}`,
+      })
+    }
+  }
+  recordWorkspace(true, text)
   reporter?.finalize("done")
   release("success")
 

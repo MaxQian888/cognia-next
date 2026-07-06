@@ -32,6 +32,20 @@ describe("SkillPanelTabs", () => {
     expect(screen.getByText("analytics")).toBeInTheDocument()
   })
 
+  // Regression: labels must live in a truncating span so a narrow pane shrinks
+  // the tabs instead of overflowing into a horizontal scrollbar (whose
+  // scroll-into-view on click was the reported tab-switch jitter).
+  it("wraps each tab label in a truncating span so narrow panes shrink instead of scrolling", () => {
+    const { container } = render(<SkillPanelTabs />)
+    const labels = container.querySelectorAll("span.truncate")
+    expect([...labels].map((s) => s.textContent)).toEqual([
+      "mySkills",
+      "browse",
+      "editor",
+      "analytics",
+    ])
+  })
+
   it("writes the new active tab to the store on click", async () => {
     // Radix Tabs listens on the full pointer-down → click sequence. The
     // user-event lib simulates that chain end-to-end whereas fireEvent.click

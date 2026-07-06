@@ -4,16 +4,45 @@
 
 import { render, screen } from "@testing-library/react"
 import { AgentTeamActivity } from "./activity"
-import type { AgentTeamEvent } from "@/types/agent/agent-team"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { buildReport, buildTeam } from "@/lib/storybook/fixtures/agent-team"
+import type { AgentTeam, AgentTeamEvent } from "@/types/agent/agent-team"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+// TeamRunsList drives a Dexie liveQuery; stub it so the activity layout can be
+// asserted without a database. Its own behaviour is covered by runs-list.test.
+jest.mock("../team/runs-list", () => {
+  const React = jest.requireActual("react")
+  return { TeamRunsList: () => React.createElement("div", { "data-testid": "runs-stub" }) }
+})
+
 describe("AgentTeamActivity", () => {
   it("renders the empty state when no events", () => {
     render(<AgentTeamActivity events={[]} />)
     expect(screen.getByTestId("activity-empty")).toBeInTheDocument()
+  })
+
+  it("shows the runs card only when a team is provided", () => {
+    const { rerender } = render(<AgentTeamActivity events={[]} />)
+    expect(screen.queryByTestId("activity-runs")).not.toBeInTheDocument()
+
+    const team = { id: "team-1" } as unknown as AgentTeam
+    rerender(<AgentTeamActivity events={[]} team={team} />)
+    expect(screen.getByTestId("activity-runs")).toBeInTheDocument()
+    expect(screen.getByTestId("runs-stub")).toBeInTheDocument()
+  })
+
+  it("renders the execution report (KPI + checkpoint timeline) when present", () => {
+    render(
+      <TooltipProvider>
+        <AgentTeamActivity events={[]} report={buildReport()} team={buildTeam()} teammates={[]} />
+      </TooltipProvider>
+    )
+    expect(screen.getByTestId("activity-report")).toBeInTheDocument()
+    expect(screen.getByTestId("activity-report-timeline")).toBeInTheDocument()
   })
 
   it("renders newest event first", () => {

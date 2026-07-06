@@ -72,7 +72,15 @@ export function SkillAnalytics() {
           <p className="mb-2 text-xs font-medium">{t("categoryUsageTitle")}</p>
           {categoryRows.length > 0 ? (
             <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
+              {/* Seed a positive initial size (height matches the h-56 = 224px
+                  box) so the chart never renders at recharts' default {-1,-1}
+                  on mount — which logs "width(-1)/height(-1)" and flashes empty
+                  for a frame on every skills-tab remount (tab-switch jitter). */}
+              <ResponsiveContainer
+                width="100%"
+                height="100%"
+                initialDimension={{ width: 320, height: 224 }}
+              >
                 <BarChart data={categoryRows}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                   <XAxis

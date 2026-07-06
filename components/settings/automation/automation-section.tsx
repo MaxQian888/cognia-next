@@ -18,13 +18,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import {
-  ActivityIcon,
-  AlertOctagonIcon,
-  CameraIcon,
-  ShieldAlertIcon,
-  ShieldCheckIcon,
-} from "lucide-react"
+import { ActivityIcon, AlertOctagonIcon, ShieldAlertIcon, ShieldCheckIcon } from "lucide-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -53,6 +47,7 @@ import { InspectorTab } from "./inspector-tab"
 import { SandboxConnectionsTab } from "./sandbox-connections-tab"
 import { ScreenOffCard } from "./screen-off-card"
 import { BehaviorCard } from "./behavior-card"
+import { PlatformCapabilitiesCard } from "./platform-capabilities-card"
 
 interface BackendInitFailure {
   platform: string
@@ -250,10 +245,6 @@ function OverviewTab() {
     )
   }
 
-  const yes = t("yes")
-  const no = t("no")
-  const planned = t("noPlanned")
-
   return (
     <div className="space-y-4">
       {initFailure && (
@@ -311,43 +302,8 @@ function OverviewTab() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CameraIcon className="size-4" />
-            {t("platformCapabilities")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {caps ? (
-            <div className="flex flex-wrap gap-2">
-              <CapBadge label={t("capabilities.platform")} value={caps.platform} />
-              <CapBadge label={t("capabilities.uia")} value={caps.hasUia ? yes : no} />
-              <CapBadge
-                label={t("capabilities.inputSimulation")}
-                value={caps.hasInputSim ? yes : no}
-              />
-              <CapBadge
-                label={t("capabilities.screenshot")}
-                value={caps.hasScreenshot ? yes : no}
-              />
-              <CapBadge label={t("capabilities.events")} value={caps.hasEvents ? yes : planned} />
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t("capabilityProbeFailed")}</p>
-          )}
-        </CardContent>
-      </Card>
+      <PlatformCapabilitiesCard caps={caps} />
     </div>
-  )
-}
-
-function CapBadge({ label, value }: { label: string; value: string }) {
-  return (
-    <Badge variant="secondary" className="gap-1">
-      <span className="text-muted-foreground">{label}</span>
-      <span>{value}</span>
-    </Badge>
   )
 }
 

@@ -78,6 +78,18 @@ export interface GitStashEntry {
   branch: string | null
 }
 
+/**
+ * One entry from `git worktree list --porcelain`. Used by the agent-team
+ * per-dispatch isolation layer; agent worktrees carry a branch named
+ * `agent/<runId>/<teammate>/<taskId>`.
+ */
+export interface GitWorktree {
+  path: string
+  branch: string | null
+  head: string | null
+  isMain: boolean
+}
+
 export interface GitConflict {
   path: string
   ours: string

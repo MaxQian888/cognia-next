@@ -131,7 +131,10 @@
     "testPatterns": "Test Patterns",
     "testPatternsHint": "Invoke UIA patterns against the selected element to verify behavior.",
     "tree": "Accessibility Tree",
-    "treeDescription": "Inspect the UIA/accessibility tree of a target window."
+    "treeDescription": "Inspect the UIA/accessibility tree of a target window.",
+    "requiresTauri": "The inspector requires the Tauri runtime so it can talk to the active accessibility back-end.",
+    "unavailable": "The active platform back-end ({platform}) doesn't expose an accessibility tree yet, so there's nothing for the inspector to read. Tree support lands per platform in a later milestone.",
+    "a11yOnlyNote": "This back-end reads the frontmost window's accessibility tree. Tree reading, element details, and locator export work here; element-targeted pattern tests and coordinate picking aren't available on this platform yet."
   },
   "overview": {
     "capabilities": {
@@ -139,7 +142,8 @@
       "inputSimulation": "Input Simulation",
       "platform": "Platform",
       "screenshot": "Screenshot",
-      "uia": "UI Automation"
+      "uia": "UI Automation",
+      "a11yTree": "Accessibility Tree"
     },
     "capabilityProbeFailed": "Failed to read platform capabilities.",
     "engineStatus": "Engine Status",

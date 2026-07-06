@@ -153,6 +153,15 @@ describe("normalizeAgentTeamConfig", () => {
     // The output is a different object once dirty.
     expect(out).not.toBe(input)
   })
+
+  it("preserves the additive workspaceIsolation field untouched", () => {
+    const iso = { enabled: true, reconcile: "select", selectStrategy: "judge" }
+    const input = { name: "Clean", workspaceIsolation: iso }
+    // Nothing dirty → returned by reference, isolation block intact.
+    expect(normalizeAgentTeamConfig(input)).toBe(input)
+    const trimmed = normalizeAgentTeamConfig({ name: "  T  ", workspaceIsolation: iso })
+    expect(trimmed.workspaceIsolation).toEqual(iso)
+  })
 })
 
 describe("normalizeAgentTeamTask", () => {

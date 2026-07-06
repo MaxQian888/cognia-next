@@ -11,6 +11,7 @@ describe("useGoalConsolePrefs", () => {
   it("returns the hard defaults when unset", () => {
     const { result } = renderHook(() => useGoalConsolePrefs())
     expect(result.current.prefs).toEqual(DEFAULT_GOAL_CONSOLE_PREFS)
+    expect(result.current.prefs.defaultTab).toBe("overview")
   })
 
   it("reflects persisted prefs, folding partials over defaults", () => {

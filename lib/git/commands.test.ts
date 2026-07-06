@@ -46,6 +46,10 @@ import {
   gitUnstage,
   gitWatchStart,
   gitWatchStop,
+  gitWorktreeAdd,
+  gitWorktreeCommit,
+  gitWorktreeList,
+  gitWorktreeRemove,
 } from "./commands"
 import { EMPTY_REPO_STATE, EMPTY_STATUS } from "@/types/git"
 
@@ -76,6 +80,10 @@ describe("when not in Tauri", () => {
     await gitDiscard("/r", ["a"])
     await gitWatchStart("/r")
     await gitWatchStop("/r")
+    expect(await gitWorktreeList("/r")).toEqual([])
+    expect(await gitWorktreeCommit("/wt", "m")).toBeNull()
+    await gitWorktreeAdd("/r", "/wt", "agent/x")
+    await gitWorktreeRemove("/r", "/wt", true, "agent/x")
     expect(callMock).not.toHaveBeenCalled()
   })
 })
@@ -194,6 +202,49 @@ describe("when in Tauri", () => {
       old: "old",
       newName: "new",
     })
+  })
+
+  it("worktree ops pass null defaults", async () => {
+    await gitWorktreeAdd("/r", "/wt", "agent/run/alice/t1")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_add", {
+      repoPath: "/r",
+      path: "/wt",
+      branch: "agent/run/alice/t1",
+      baseRef: null,
+    })
+    await gitWorktreeAdd("/r", "/wt", "agent/b", "HEAD")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_add", {
+      repoPath: "/r",
+      path: "/wt",
+      branch: "agent/b",
+      baseRef: "HEAD",
+    })
+    await gitWorktreeRemove("/r", "/wt", true, "agent/b")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_remove", {
+      repoPath: "/r",
+      path: "/wt",
+      force: true,
+      deleteBranch: "agent/b",
+    })
+    await gitWorktreeRemove("/r", "/wt", false)
+    expect(callMock).toHaveBeenCalledWith("git_worktree_remove", {
+      repoPath: "/r",
+      path: "/wt",
+      force: false,
+      deleteBranch: null,
+    })
+    callMock.mockResolvedValueOnce([{ path: "/r", branch: "main", head: "abc", isMain: true }])
+    const wts = await gitWorktreeList("/r")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_list", { repoPath: "/r" })
+    expect(wts[0]?.isMain).toBe(true)
+
+    callMock.mockResolvedValueOnce("sha123")
+    const sha = await gitWorktreeCommit("/wt", "agent work")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_commit", {
+      worktreePath: "/wt",
+      message: "agent work",
+    })
+    expect(sha).toBe("sha123")
   })
 
   it("network ops", async () => {

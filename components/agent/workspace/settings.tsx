@@ -34,6 +34,7 @@ import { OverviewSection } from "./settings/section-overview"
 import { PluginsSection } from "./settings/section-plugins"
 import { GovernanceSection } from "./settings/section-governance"
 import { UltracodeSection } from "./settings/section-ultracode"
+import { WorktreesSection } from "./settings/section-worktrees"
 import { MemorySection } from "./settings/section-memory"
 import { TeamKnowledgeTwinsCard } from "./settings/team-knowledge-twins-card"
 import { SettingsSaveIndicator } from "./settings/settings-save-indicator"
@@ -61,7 +62,7 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
   }
 
   return (
-    <div className="space-y-4" data-testid="workspace-settings">
+    <div className="mx-auto w-full max-w-4xl space-y-4" data-testid="workspace-settings">
       <SettingsSaveIndicator teamId={team.id} />
       <Accordion type="multiple" defaultValue={["overview"]} className="space-y-2">
         <AccordionItem value="overview" className="border-none">
@@ -97,6 +98,15 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
           </AccordionTrigger>
           <AccordionContent className="pt-3">
             <UltracodeSection team={team} />
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="worktrees" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.worktrees")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <WorktreesSection team={team} />
           </AccordionContent>
         </AccordionItem>
 

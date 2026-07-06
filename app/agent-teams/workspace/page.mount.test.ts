@@ -18,11 +18,20 @@ describe("agent-teams workspace page wiring", () => {
     expect(src).toMatch(/<GateModalsHost\s*\/>/)
   })
 
-  it("imports and renders TeamRunsList (durable run history)", () => {
+  it("mounts AgentTeamActivity, which wires the durable run history", () => {
     expect(src).toMatch(
-      /import\s*{\s*TeamRunsList\s*}\s*from\s*"@\/components\/agent\/team\/runs-list"/
+      /import\s*{\s*AgentTeamActivity\s*}\s*from\s*"@\/components\/agent\/workspace\/activity"/
     )
-    expect(src).toMatch(/<TeamRunsList\s+teamId=/)
+    expect(src).toMatch(/<AgentTeamActivity/)
+  })
+
+  it("keeps TeamRunsList (durable run history) wired inside the activity tab", () => {
+    const activitySrc = readFileSync(
+      join(__dirname, "../../../components/agent/workspace/activity.tsx"),
+      "utf8"
+    )
+    expect(activitySrc).toMatch(/import\s*{\s*TeamRunsList\s*}\s*from\s*"\.\.\/team\/runs-list"/)
+    expect(activitySrc).toMatch(/<TeamRunsList\s+teamId=/)
   })
 
   it("builds the Claude virtual runtime model through the provider-resolution helper", () => {

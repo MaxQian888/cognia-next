@@ -83,8 +83,13 @@
       "openGoalsSort": "进行中目标排序",
       "title": "控制台偏好"
     },
+    "sectionsAria": "目标分区",
     "statActive": "{count} 进行中",
     "statDone": "{count} 已完成",
+    "statGroups": {
+      "lifetime": "累计",
+      "open": "进行中"
+    },
     "statPaused": "{count} 已暂停",
     "stats": {
       "active": "进行中",
@@ -102,6 +107,7 @@
       "analytics": "分析",
       "defaults": "默认值",
       "history": "历史",
+      "overview": "概览",
       "templates": "模板",
       "tracker": "Tracker"
     },

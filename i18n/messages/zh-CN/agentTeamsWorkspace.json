@@ -32,6 +32,7 @@
       "teammate_shutdown": "队友已关闭",
       "teammate_started": "队友已启动"
     },
+    "eventsTitle": "事件",
     "liveProgress": "工作中 — {tools} 个工具 · {chars} 字符 · {secs} 秒",
     "liveProgressStarting": "启动中…",
     "progressPhase": {
@@ -65,7 +66,8 @@
         "empty": "尚未记录 Token 使用。",
         "title": "Token 消耗"
       }
-    }
+    },
+    "runsTitle": "运行记录"
   },
   "allCategories": "全部",
   "autoCompose": {
@@ -109,8 +111,8 @@
     "teamNameLabel": "团队名称",
     "teamNamePlaceholder": "为团队命名",
     "title": "自动组建团队",
-    "verifyOption": "验证（采样集成）",
-    "twinLabel": "数字员工"
+    "twinLabel": "数字员工",
+    "verifyOption": "验证（采样集成）"
   },
   "builtInBadge": "内置",
   "cancel": "取消",
@@ -331,7 +333,8 @@
       "memory": "共享内存",
       "overview": "概览",
       "plugins": "插件与能力",
-      "ultracode": "Ultracode"
+      "ultracode": "Ultracode",
+      "worktrees": "工作树隔离"
     },
     "autoShutdown": "完成后自动关闭",
     "awaitingExternalPickup": "等待外部认领",
@@ -423,6 +426,11 @@
         "patternsPlaceholder": "我无法协助\n我没办法"
       },
       "title": "治理策略"
+    },
+    "knowledgeTwins": {
+      "empty": "还没有数字员工，请在孪生工作台创建。",
+      "hint": "在此选中的孪生可被任意成员在运行中通过知识工具检索。",
+      "title": "数字员工知识"
     },
     "maxConcurrent": "最大并发数",
     "maxRetries": "最大重试次数",
@@ -529,10 +537,42 @@
         "placeholder": "/仓库的绝对路径"
       }
     },
-    "knowledgeTwins": {
-      "title": "数字员工知识",
-      "hint": "在此选中的孪生可被任意成员在运行中通过知识工具检索。",
-      "empty": "还没有数字员工，请在孪生工作台创建。"
+    "worktrees": {
+      "caveat": "工作树从工作目录当前提交（HEAD）切出，因此其中未提交的改动对 agent 不可见。",
+      "description": "为每个成员派发分配独立的 git worktree + 分支，让并行 agent 不再互相覆盖对方的改动或 git 状态。默认关闭；仅桌面应用 + git 仓库可用。",
+      "enabled": "启用每 agent 工作树",
+      "reconcile": {
+        "hint": {
+          "manual": "保留所有分支，交由你审阅合并。",
+          "merge-all": "把所有成功分支合并到一条集成分支；冲突则停止并报告（绝不改动你的真实分支）。",
+          "pipeline": "顺序派发共用一条分支。",
+          "select": "保留一条分支，丢弃其余。"
+        },
+        "label": "运行结束后",
+        "option": {
+          "manual": "手动审阅",
+          "merge-all": "全部合并",
+          "pipeline": "流水线",
+          "select": "择一保留"
+        }
+      },
+      "retain": {
+        "label": "收尾保留",
+        "option": {
+          "all": "全部保留",
+          "keep-winner": "保留优胜，删除其余",
+          "prune-losers": "清理落选"
+        }
+      },
+      "selectStrategy": {
+        "label": "如何择优",
+        "option": {
+          "first-success": "第一个成功",
+          "judge": "AI 评审",
+          "manual": "我来选"
+        }
+      },
+      "title": "工作树隔离"
     }
   },
   "stats": {
@@ -546,7 +586,8 @@
     "members": "成员",
     "overview": "概览",
     "settings": "设置",
-    "tasks": "任务"
+    "tasks": "任务",
+    "worktrees": "工作树"
   },
   "tasks": {
     "addTask": "新建任务",
@@ -595,8 +636,8 @@
       "temperature": "温度（{value}）",
       "title": "队员字段",
       "twin": "数字孪生",
-      "twinNone": "无",
-      "twinHint": "该成员将带着所选数字员工的知识与风格工作。"
+      "twinHint": "该成员将带着所选数字员工的知识与风格工作。",
+      "twinNone": "无"
     },
     "save": "保存",
     "title": "配置 {name}"
@@ -617,5 +658,23 @@
   },
   "templatesTab": "模板",
   "trySampleTeam": "试用示例团队",
-  "viewWorkspace": "查看工作区"
+  "viewWorkspace": "查看工作区",
+  "worktrees": {
+    "actions": {
+      "checkout": "检出",
+      "compare": "对比",
+      "delete": "删除"
+    },
+    "description": "隔离运行产生的分支（agent/<运行>/<成员>/<任务>）——工作树回收后仍持久保留。可审阅、检出或删除。",
+    "desktopOnly": {
+      "description": "工作树隔离需要桌面应用，且团队工作目录为 git 仓库。",
+      "title": "仅桌面端可用"
+    },
+    "empty": {
+      "description": "启用工作树隔离并运行团队后，各 agent 的分支会显示在这里。",
+      "title": "暂无 agent 分支"
+    },
+    "refresh": "刷新",
+    "title": "Agent 分支"
+  }
 }

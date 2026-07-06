@@ -521,6 +521,51 @@ export async function runTeamLifecycle(
       listAvailable: mayRecruit,
     })
 
+    // ── Workspace isolation: build the per-dispatch worktree allocator ──
+    // Only when enabled + on desktop + the workingDir is a git repo. Otherwise
+    // every teammate runs in the shared workingDir (today's behavior). Enabled
+    // but unusable (web / non-git) warns once and runs unisolated.
+    const isoCfg = team.config.workspaceIsolation
+    let workspaceAllocator: import("./team/workspace/allocator").AgentWorkspaceAllocator | undefined
+    let workspaceLedger:
+      | Map<string, import("./team/workspace/reconciler").ReconcileCandidate>
+      | undefined
+    let workspaceReconcile:
+      | {
+          mode: import("./team/workspace/reconciler").ReconcileMode
+          selectStrategy?: import("./team/workspace/reconciler").SelectStrategy
+          retain?: "all" | "keep-winner" | "prune-losers"
+        }
+      | undefined
+    if (isoCfg?.enabled && team.config.workingDir) {
+      const { isTauri } = await import("@/lib/tauri")
+      const { gitIsRepo, gitWorktreeList } = await import("@/lib/git/commands")
+      if (isTauri() && (await gitIsRepo(team.config.workingDir).catch(() => false))) {
+        const wts = await gitWorktreeList(team.config.workingDir).catch(() => [])
+        const baseRef = isoCfg.baseRef ?? wts.find((w) => w.isMain)?.head ?? undefined
+        const { AgentWorkspaceAllocator } = await import("./team/workspace/allocator")
+        workspaceAllocator = new AgentWorkspaceAllocator({
+          mainRepo: team.config.workingDir,
+          ...(baseRef ? { baseRef } : {}),
+        })
+        workspaceLedger = new Map()
+        workspaceReconcile = {
+          mode: isoCfg.reconcile ?? "manual",
+          ...(isoCfg.selectStrategy ? { selectStrategy: isoCfg.selectStrategy } : {}),
+          ...(isoCfg.retain ? { retain: isoCfg.retain } : {}),
+        }
+      } else {
+        notifier.notify({
+          level: "warn",
+          title: "Workspace isolation unavailable",
+          body: "Per-agent git isolation needs the desktop app and a git repository as the team's working directory. Running without isolation.",
+          runId,
+          teamId,
+          dedupeKey: `wsiso-unavailable:${runId}`,
+        })
+      }
+    }
+
     // ── Register the per-run context FIRST ──
     // Ultracode planning + every pattern/dispatch node reads it via
     // getTeamRunContext(runId); registering before synthesis lets the planner
@@ -546,6 +591,10 @@ export async function runTeamLifecycle(
       // Lazily populated by resolveTeammateExternalAgent for external-backed
       // teammates — see `lib/ai/agent/team/resolve-external-backing.ts`.
       externalAgentInstances: new Map(),
+      // Workspace isolation (undefined unless enabled + desktop + git repo).
+      ...(workspaceAllocator ? { workspaceAllocator } : {}),
+      ...(workspaceLedger ? { workspaceLedger } : {}),
+      ...(workspaceReconcile ? { workspaceIsolation: workspaceReconcile } : {}),
     })
 
     // ── Synthesize the VisualWorkflow (ultracode patterns vs. flat task DAG) ──
@@ -671,6 +720,57 @@ export async function runTeamLifecycle(
           }
         }
       }
+      // Workspace isolation: reconcile the per-dispatch agent branches now the
+      // run has settled. Only on a clean completion — a failed/cancelled run
+      // leaves its branches untouched for inspection. Best-effort: reconcile
+      // never fails the run (the `finally` still reclaims the worktree dirs).
+      if (
+        finalStatus === "completed" &&
+        workspaceAllocator &&
+        workspaceLedger &&
+        workspaceReconcile
+      ) {
+        try {
+          const { reconcile } = await import("./team/workspace/reconciler")
+          const strategy = workspaceReconcile.selectStrategy
+          const judge =
+            strategy === "judge"
+              ? async (
+                  cands: import("./team/workspace/reconciler").ReconcileCandidate[]
+                ): Promise<string | null> => {
+                  const [{ selectWinnerByJudge }, { executeAgent }] = await Promise.all([
+                    import("./team/workspace/judge"),
+                    import("./agent-executor"),
+                  ])
+                  return selectWinnerByJudge(cands, {
+                    run: async (prompt) => (await executeAgent(prompt, {})).text ?? "",
+                  })
+                }
+              : undefined
+          const recResult = await reconcile(workspaceAllocator, [...workspaceLedger.values()], {
+            runId,
+            mode: workspaceReconcile.mode,
+            ...(strategy ? { selectStrategy: strategy } : {}),
+            ...(workspaceReconcile.retain ? { retain: workspaceReconcile.retain } : {}),
+            ...(judge ? { judge } : {}),
+          })
+          deps.storeWriter.addEvent?.({
+            type: "progress_update",
+            teamId,
+            data: { kind: "workspace_reconcile", ...recResult },
+            timestamp: new Date(),
+          })
+        } catch (err) {
+          notifier.notify({
+            level: "warn",
+            title: "Workspace reconcile failed",
+            body: err instanceof Error ? err.message : String(err),
+            runId,
+            teamId,
+            dedupeKey: `wsiso-reconcile:${runId}`,
+          })
+        }
+      }
       return {
         runId: result.runId,
         status: finalStatus,
@@ -719,6 +819,13 @@ export async function runTeamLifecycle(
       }
       // Cancel any pending resume timer so it can't fire after the run ends.
       rateLimitResume?.dispose()
+      // Workspace isolation: reclaim every worktree DIRECTORY (agent work is
+      // already committed to its branch, which persists). Branch deletion is
+      // reconcile's job (loser pruning), so keep branches here. Runs on every
+      // exit path (success / failure / cancel) so worktrees never leak.
+      if (workspaceAllocator) {
+        await workspaceAllocator.gc({ deleteBranches: false }).catch(() => undefined)
+      }
       unregisterTeamRunContext(runId)
       // Release any pending approval-bus waiters keyed to this run.
       approveBus({ scope: "agent-team-deadlock", id: runId })

@@ -10,13 +10,13 @@ use tauri::{AppHandle, State};
 use super::error::GitError;
 use super::types::{
     AheadBehind, ConflictSide, GitBlameLine, GitBranch, GitCommit, GitConflict, GitDiff,
-    GitFileChange, GitRef, GitRemote, GitRepoState, GitStashEntry, GitStatus, GitTag,
+    GitFileChange, GitRef, GitRemote, GitRepoState, GitStashEntry, GitStatus, GitTag, GitWorktree,
     RebaseTodoEntry,
 };
 use super::watcher::GitWatcherState;
 use super::{
     blame, branch, commit, diff, history, interactive_rebase, merge, read, remote, repo, reset,
-    restore, sequencer, stage, stash, status, tag,
+    restore, sequencer, stage, stash, status, tag, worktree,
 };
 
 /// Run a synchronous git2 read on the blocking pool.
@@ -267,6 +267,41 @@ pub async fn git_rename_branch(
     new_name: String,
 ) -> Result<(), GitError> {
     branch::rename(&repo_path, old.as_deref(), &new_name).await
+}
+
+// ---- worktrees (agent-team per-dispatch isolation) ----
+
+#[tauri::command]
+pub async fn git_worktree_add(
+    repo_path: String,
+    path: String,
+    branch: String,
+    base_ref: Option<String>,
+) -> Result<(), GitError> {
+    worktree::add(&repo_path, &path, &branch, base_ref.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn git_worktree_remove(
+    repo_path: String,
+    path: String,
+    force: bool,
+    delete_branch: Option<String>,
+) -> Result<(), GitError> {
+    worktree::remove(&repo_path, &path, force, delete_branch.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn git_worktree_list(repo_path: String) -> Result<Vec<GitWorktree>, GitError> {
+    worktree::list(&repo_path).await
+}
+
+#[tauri::command]
+pub async fn git_worktree_commit(
+    worktree_path: String,
+    message: String,
+) -> Result<Option<String>, GitError> {
+    worktree::commit(&worktree_path, &message).await
 }
 
 #[tauri::command]

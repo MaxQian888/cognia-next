@@ -877,3 +877,108 @@ describe("dispatchTeammate — twin-backed teammate (ADR-0003)", () => {
     expect(applyTeammateTwinContextMock).not.toHaveBeenCalled()
   })
 })
+
+describe("dispatchTeammate — workspace isolation", () => {
+  function withAllocator(
+    ctx: TeamRunContext,
+    over: { allocate?: jest.Mock; commit?: jest.Mock } = {}
+  ) {
+    const allocate =
+      over.allocate ??
+      jest.fn(
+        async (a: {
+          runId: string
+          teammateName: string
+          taskId: string
+          workspaceKey?: string
+        }) => ({
+          key: a.workspaceKey ?? a.taskId,
+          runId: a.runId,
+          teammateName: a.teammateName,
+          taskId: a.taskId,
+          branch: `agent/${a.runId}/${a.teammateName}/${a.taskId}`,
+          path: `/wt/${a.taskId}`,
+        })
+      )
+    const commit = over.commit ?? jest.fn(async () => "sha")
+    const ledger = new Map()
+    Object.assign(ctx, {
+      workspaceAllocator: {
+        allocate,
+        commit,
+        remove: jest.fn(),
+        gc: jest.fn(),
+        allocated: () => [],
+      },
+      workspaceLedger: ledger,
+    })
+    return { allocate, commit, ledger }
+  }
+
+  it("allocates a worktree per dispatch and records success + commit", async () => {
+    executeAgentMock.mockResolvedValue({ text: "the answer" })
+    const { ctx } = makeCtx(makeTeammate({ name: "Alice" }))
+    const { allocate, commit, ledger } = withAllocator(ctx)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+
+    expect(allocate).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run1", teammateName: "Alice", taskId: "t1" })
+    )
+    expect(commit).toHaveBeenCalledWith(
+      expect.objectContaining({ branch: "agent/run1/Alice/t1" }),
+      expect.stringContaining("Alice")
+    )
+    expect(ledger.get("t1")).toEqual(
+      expect.objectContaining({ ok: true, handle: expect.objectContaining({ taskId: "t1" }) })
+    )
+  })
+
+  it("forwards workspaceKey (pipeline sharing) to the allocator", async () => {
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx } = makeCtx(makeTeammate())
+    const { allocate } = withAllocator(ctx)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it", workspaceKey: "pipe" })
+
+    expect(allocate).toHaveBeenCalledWith(expect.objectContaining({ workspaceKey: "pipe" }))
+  })
+
+  it("is a no-op when no allocator is present (shared-dir behavior)", async () => {
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx } = makeCtx(makeTeammate())
+    // No withAllocator → ctx.workspaceAllocator undefined.
+    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+    expect(result.text).toBe("ok")
+  })
+
+  it("fail-closed: an allocation error fails the dispatch and records a failure", async () => {
+    executeAgentMock.mockResolvedValue({ text: "ok" })
+    const { ctx, pool } = makeCtx(makeTeammate())
+    const allocate = jest.fn(async () => {
+      throw new Error("git worktree add failed")
+    })
+    const { ledger } = withAllocator(ctx, { allocate })
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })).rejects.toThrow(
+      /worktree add failed/
+    )
+    expect(pool.recordFailure).toHaveBeenCalled()
+    // Nothing was allocated → no ledger entry, and the model never ran.
+    expect(ledger.size).toBe(0)
+    expect(executeAgentMock).not.toHaveBeenCalled()
+  })
+
+  it("records ok=false in the ledger when the teammate returns empty output", async () => {
+    executeAgentMock.mockResolvedValue({ text: "" })
+    const { ctx } = makeCtx(makeTeammate())
+    const { ledger, commit } = withAllocator(ctx)
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })).rejects.toThrow(
+      /EMPTY_OUTPUT/
+    )
+    expect(ledger.get("t1")).toEqual(expect.objectContaining({ ok: false }))
+    // No commit on a failed turn.
+    expect(commit).not.toHaveBeenCalled()
+  })
+})

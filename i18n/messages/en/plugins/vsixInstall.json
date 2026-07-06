@@ -1,0 +1,24 @@
+{
+  "cancel": "Cancel",
+  "choose": "Choose .vsix file",
+  "description": "Pick a VSCode extension (.vsix) to review what it registers before installing.",
+  "hint": "Only .vsix packages are supported.",
+  "install": "Install",
+  "installing": "Installing…",
+  "lspBinaryKind": {
+    "native-exe": "Native executable",
+    "node-binary": "Node binary",
+    "shell-script": "Shell script",
+    "unknown": "Unknown",
+    "wasm-component": "WASM component"
+  },
+  "lspBinaryNote": "These binaries can run on your machine. Review them before granting spawn permission.",
+  "parseError": "Couldn’t parse this .vsix package",
+  "parsing": "Parsing package…",
+  "publisherLabel": "Publisher",
+  "retry": "Try another file",
+  "sectionLspBinaries": "{count, plural, =1 {# language-server binary} other {# language-server binaries}}",
+  "sectionPermissions": "Requested permissions",
+  "sectionThemes": "{count, plural, =1 {# theme} other {# themes}}",
+  "title": "Install VSCode extension"
+}

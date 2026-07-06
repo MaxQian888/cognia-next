@@ -1,10 +1,13 @@
 "use client"
 
 import { useTranslations } from "next-intl"
+import { CoinsIcon, GaugeIcon, TimerIcon, UsersIcon } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { StatCard } from "@/components/scheduler/stat-card"
 import { StatusBadge } from "@/components/status-badge"
+import { formatNumber } from "./token-usage-line"
 import { EditableField } from "./editable-field"
 import { PlanApprovalPanel } from "@/components/agent/team/plan-approval-panel"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -101,8 +104,48 @@ export function AgentTeamOverview({
         </div>
       </Card>
 
+      {/* Key metrics */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="overview-stats">
+        <StatCard
+          label={t("teammates")}
+          value={workers.length}
+          icon={<UsersIcon className="h-5 w-5 text-blue-500" aria-hidden />}
+          valueClassName="text-blue-500"
+          accentGradient="from-blue-500 to-sky-400"
+          iconBgClassName="bg-blue-500/10"
+          testid="overview-stat-teammates"
+        />
+        <StatCard
+          label={t("tokenUsage")}
+          value={formatNumber(tokens)}
+          icon={<CoinsIcon className="h-5 w-5 text-violet-500" aria-hidden />}
+          valueClassName="text-violet-500"
+          accentGradient="from-violet-500 to-purple-400"
+          iconBgClassName="bg-violet-500/10"
+          testid="overview-stat-tokens"
+        />
+        <StatCard
+          label={t("duration")}
+          value={duration ?? "—"}
+          icon={<TimerIcon className="h-5 w-5 text-emerald-500" aria-hidden />}
+          valueClassName="text-foreground"
+          accentGradient="from-emerald-500 to-teal-400"
+          iconBgClassName="bg-emerald-500/10"
+          testid="overview-stat-duration"
+        />
+        <StatCard
+          label={t("concurrency")}
+          value={team.config.maxConcurrentTeammates ?? 5}
+          icon={<GaugeIcon className="h-5 w-5 text-amber-500" aria-hidden />}
+          valueClassName="text-amber-500"
+          accentGradient="from-amber-500 to-yellow-400"
+          iconBgClassName="bg-amber-500/10"
+          testid="overview-stat-concurrency"
+        />
+      </div>
+
       {/* Config summary + Runtime */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card className="space-y-2 p-4">
           <p className="text-xs font-medium text-muted-foreground">{t("configSummary")}</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">

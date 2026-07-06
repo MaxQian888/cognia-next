@@ -4,8 +4,9 @@ import { GoalConsole } from "./goal-console"
 import { seedDb } from "@/lib/storybook/seed-db"
 import { makeGoalSet } from "@/lib/storybook/fixtures/goal"
 
-// The full "Mission Control" dashboard: a live StatCard row, the open-goals
-// section, and the History / Analytics / Templates / Defaults / Tracker tabs.
+// The full "Mission Control" dashboard: a top segmented tab bar (Overview /
+// History / Analytics / Templates / Defaults / Tracker) over a single scroll
+// region. Overview holds the two-cluster StatCard row + the open-goals list.
 // It reads all goals from Dexie via `listAllGoals`, so the populated story
 // seeds a spread across statuses.
 const meta = {

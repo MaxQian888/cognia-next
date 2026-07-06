@@ -635,6 +635,7 @@
         "teammate_shutdown": "队友已关闭",
         "teammate_started": "队友已启动"
       },
+      "eventsTitle": "事件",
       "liveProgress": "工作中 — {tools} 个工具 · {chars} 字符 · {secs} 秒",
       "liveProgressStarting": "启动中…",
       "progressPhase": {
@@ -668,7 +669,8 @@
           "empty": "尚未记录 Token 使用。",
           "title": "Token 消耗"
         }
-      }
+      },
+      "runsTitle": "运行记录"
     },
     "allCategories": "全部",
     "autoCompose": {
@@ -934,7 +936,8 @@
         "memory": "共享内存",
         "overview": "概览",
         "plugins": "插件与能力",
-        "ultracode": "Ultracode"
+        "ultracode": "Ultracode",
+        "worktrees": "工作树隔离"
       },
       "autoShutdown": "完成后自动关闭",
       "awaitingExternalPickup": "等待外部认领",
@@ -1136,6 +1139,43 @@
           "label": "工作目录",
           "placeholder": "/仓库的绝对路径"
         }
+      },
+      "worktrees": {
+        "caveat": "工作树从工作目录当前提交（HEAD）切出，因此其中未提交的改动对 agent 不可见。",
+        "description": "为每个成员派发分配独立的 git worktree + 分支，让并行 agent 不再互相覆盖对方的改动或 git 状态。默认关闭；仅桌面应用 + git 仓库可用。",
+        "enabled": "启用每 agent 工作树",
+        "reconcile": {
+          "hint": {
+            "manual": "保留所有分支，交由你审阅合并。",
+            "merge-all": "把所有成功分支合并到一条集成分支；冲突则停止并报告（绝不改动你的真实分支）。",
+            "pipeline": "顺序派发共用一条分支。",
+            "select": "保留一条分支，丢弃其余。"
+          },
+          "label": "运行结束后",
+          "option": {
+            "manual": "手动审阅",
+            "merge-all": "全部合并",
+            "pipeline": "流水线",
+            "select": "择一保留"
+          }
+        },
+        "retain": {
+          "label": "收尾保留",
+          "option": {
+            "all": "全部保留",
+            "keep-winner": "保留优胜，删除其余",
+            "prune-losers": "清理落选"
+          }
+        },
+        "selectStrategy": {
+          "label": "如何择优",
+          "option": {
+            "first-success": "第一个成功",
+            "judge": "AI 评审",
+            "manual": "我来选"
+          }
+        },
+        "title": "工作树隔离"
       }
     },
     "stats": {
@@ -1149,7 +1189,8 @@
       "members": "成员",
       "overview": "概览",
       "settings": "设置",
-      "tasks": "任务"
+      "tasks": "任务",
+      "worktrees": "工作树"
     },
     "tasks": {
       "addTask": "新建任务",
@@ -1220,7 +1261,25 @@
     },
     "templatesTab": "模板",
     "trySampleTeam": "试用示例团队",
-    "viewWorkspace": "查看工作区"
+    "viewWorkspace": "查看工作区",
+    "worktrees": {
+      "actions": {
+        "checkout": "检出",
+        "compare": "对比",
+        "delete": "删除"
+      },
+      "description": "隔离运行产生的分支（agent/<运行>/<成员>/<任务>）——工作树回收后仍持久保留。可审阅、检出或删除。",
+      "desktopOnly": {
+        "description": "工作树隔离需要桌面应用，且团队工作目录为 git 仓库。",
+        "title": "仅桌面端可用"
+      },
+      "empty": {
+        "description": "启用工作树隔离并运行团队后，各 agent 的分支会显示在这里。",
+        "title": "暂无 agent 分支"
+      },
+      "refresh": "刷新",
+      "title": "Agent 分支"
+    }
   },
   "artifactCreateButton": {
     "asChart": "作为图表",
@@ -1481,6 +1540,7 @@
       "title": "自动化"
     },
     "inspector": {
+      "a11yOnlyNote": "此后端读取前台窗口的无障碍树。此处可读取树、查看元素详情并导出定位器；面向元素的模式测试与坐标拾取暂未在该平台提供。",
       "clickToPopulate": "选择根并点击刷新以填充树。",
       "copyLocator": "复制定位器",
       "copyRef": "复制引用",
@@ -1506,6 +1566,7 @@
       "pickStartTooltip": "启动 3 秒倒计时，结束后拾取光标所在元素",
       "readTree": "刷新",
       "reading": "读取中……",
+      "requiresTauri": "检查器需要 Tauri 运行时才能与当前无障碍后端通信。",
       "rootMode": {
         "desktop": "桌面",
         "focused": "焦点窗口",
@@ -1515,10 +1576,12 @@
       "testPatterns": "测试模式",
       "testPatternsHint": "对所选元素调用 UIA 模式以验证行为。",
       "tree": "无障碍树",
-      "treeDescription": "检查目标窗口的 UIA/无障碍树。"
+      "treeDescription": "检查目标窗口的 UIA/无障碍树。",
+      "unavailable": "当前平台后端（{platform}）尚未暴露无障碍树，检查器暂无内容可读。各平台的树支持将在后续里程碑中陆续提供。"
     },
     "overview": {
       "capabilities": {
+        "a11yTree": "无障碍树",
         "events": "事件",
         "inputSimulation": "输入模拟",
         "platform": "平台",
@@ -4497,6 +4560,33 @@
       "passAt1": "pass@1 {pct}%",
       "passHatK": "pass^{k} {pct}%"
     },
+    "settings": {
+      "costTitle": "费用保护",
+      "costWarnDescription": "当预计费用超过该值时，在开始运行前请求确认。",
+      "costWarnLabel": "超过时警告（美元）",
+      "defaultKDescription": "每个用例默认运行的次数（pass^k 可靠性）。",
+      "defaultKLabel": "默认重复次数 (k)",
+      "defaultScorersDescription": "配置新运行时预先选中的评分器。",
+      "defaultScorersLabel": "默认评分器",
+      "description": "应用于每次 Agent 评估运行的项目级默认设置。",
+      "deterministicDescription": "跳过由 LLM 评判的评分器，仅运行确定性检查。",
+      "deterministicLabel": "仅使用确定性评分器",
+      "gateDescription": "新建数据集时套用的阈值。",
+      "gateMaxCost": "最高总费用（美元）",
+      "gateMinPassAt1": "最低 pass@1",
+      "gateMinPassHatK": "最低 pass^k",
+      "gateMinScorerPassRate": "最低单项评分器通过率",
+      "gateTitle": "质量门限默认值",
+      "judgeModelAuto": "自动",
+      "judgeModelDescription": "运行基于 LLM 的评分器的模型。“自动”将使用你的默认渲染模型。",
+      "judgeModelEmpty": "尚未配置任何模型。",
+      "judgeModelLabel": "评委模型",
+      "judgeModelSearch": "搜索模型…",
+      "judgeTitle": "评委",
+      "openWorkspace": "打开工作区",
+      "runTitle": "运行默认值",
+      "title": "评估设置"
+    },
     "subtitle": "为内置 Agent 提供评测集、评分器与 pass^k 可靠性。",
     "tabs": {
       "annotate": "轨迹分析",
@@ -4988,8 +5078,13 @@
         "openGoalsSort": "进行中目标排序",
         "title": "控制台偏好"
       },
+      "sectionsAria": "目标分区",
       "statActive": "{count} 进行中",
       "statDone": "{count} 已完成",
+      "statGroups": {
+        "lifetime": "累计",
+        "open": "进行中"
+      },
       "statPaused": "{count} 已暂停",
       "stats": {
         "active": "进行中",
@@ -5007,6 +5102,7 @@
         "analytics": "分析",
         "defaults": "默认值",
         "history": "历史",
+        "overview": "概览",
         "templates": "模板",
         "tracker": "Tracker"
       },
@@ -11082,6 +11178,30 @@
     "viewContainers": {
       "empty": "此视图容器还没有任何视图。",
       "unavailable": "此视图容器已不可用——其插件可能已被禁用。"
+    },
+    "vsixInstall": {
+      "cancel": "取消",
+      "choose": "选择 .vsix 文件",
+      "description": "选择一个 VSCode 扩展（.vsix），在安装前查看它将注册的内容。",
+      "hint": "仅支持 .vsix 安装包。",
+      "install": "安装",
+      "installing": "正在安装…",
+      "lspBinaryKind": {
+        "native-exe": "原生可执行文件",
+        "node-binary": "Node 二进制文件",
+        "shell-script": "Shell 脚本",
+        "unknown": "未知",
+        "wasm-component": "WASM 组件"
+      },
+      "lspBinaryNote": "这些二进制文件可在你的设备上运行。授予启动权限前请先仔细检查。",
+      "parseError": "无法解析该 .vsix 安装包",
+      "parsing": "正在解析安装包…",
+      "publisherLabel": "发布者",
+      "retry": "重新选择文件",
+      "sectionLspBinaries": "{count, plural, other {# 个语言服务器二进制文件}}",
+      "sectionPermissions": "请求的权限",
+      "sectionThemes": "{count, plural, other {# 个主题}}",
+      "title": "安装 VSCode 扩展"
     },
     "wasmGitInstall": {
       "branchLabel": "分支 / 标签 / 提交（可选）",
@@ -17372,6 +17492,7 @@
       "desktop": "Tauri 专属的窗口、自启与托盘行为。",
       "diagnostics": "崩溃日志、最近错误，以及带可导出诊断包的原生日志状态。",
       "discover": "置顶、排序或隐藏发现页的分类。",
+      "eval": "为 Agent 评估设置默认评委模型、评分器、质量门限与费用保护。",
       "externalBridge": "把 Cognia 的 wiki / RAG / 运行时实体通过 MCP 暴露给外部 Agent（Claude Code、Cursor、Cline）。每个 scope 默认 OFF，需手动启用。",
       "gateway": "本地 OpenAI / Anthropic 兼容端点，让外部工具（Claude Code、任意 OpenAI 客户端）借用你的服务商、路由和凭据。",
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -19557,6 +19678,7 @@
       "desktop": "桌面",
       "diagnostics": "诊断",
       "discover": "发现",
+      "eval": "评估",
       "externalBridge": "外部桥接 (MCP)",
       "gateway": "入站网关",
       "general": "常规",
@@ -20098,7 +20220,6 @@
       "enable": "启用",
       "export": "导出为 SKILL.md",
       "open": "打开",
-      "openInEditor": "在编辑器中打开",
       "selectAria": "选择 {name}",
       "usageCount": "已用 {count} 次"
     },
@@ -20198,6 +20319,7 @@
       "name": "名称",
       "namePlaceholder": "引用来源",
       "openFileTree": "打开文件树",
+      "openSettings": "技能设置",
       "openValidation": "打开校验面板",
       "panelValidation": "验证",
       "resize": {
@@ -20208,6 +20330,8 @@
       "saved": "已保存",
       "savedAll": "已全部保存。",
       "saving": "保存中…",
+      "settingsSaved": "设置已保存。",
+      "settingsTitle": "技能设置",
       "tabEdit": "编辑",
       "tabPreview": "预览",
       "tags": "标签（用逗号分隔）",
@@ -20521,7 +20645,6 @@
       "removedName": "已删除「{name}」。",
       "uninstalled": "已卸载「{name}」。",
       "updated": "{name} 已更新。",
-      "updatedName": "已更新「{name}」。",
       "updatesError": "检查更新失败（{error}）。",
       "updatesFound": "{count} 个技能有更新。",
       "updatesNone": "所有技能均为最新。"
@@ -22673,7 +22796,7 @@
         "description": "立即运行该工作流。可选择以 JSON 形式传入触发输入。",
         "invalidJson": "载荷必须是合法的 JSON。",
         "payloadLabel": "触发载荷（可选）",
-        "payloadPlaceholder": "{ \"key\": \"value\" }",
+        "payloadPlaceholder": "'{ \"key\": \"value\" }'",
         "runButton": "运行工作流",
         "title": "运行「{name}」"
       },

@@ -302,6 +302,14 @@ const TeamTaskDispatchParams = z.object({
   dependencies: z.array(z.string()).optional(),
 })
 
+// action.team.reconcile — all optional; unset fields fall back to the team's
+// workspaceIsolation config. Only meaningful inside a workspace-isolated run.
+const TeamReconcileParams = z.object({
+  mode: z.enum(["manual", "merge-all", "select", "pipeline"]).optional(),
+  selectStrategy: z.enum(["manual", "first-success", "judge"]).optional(),
+  retain: z.enum(["all", "keep-winner", "prune-losers"]).optional(),
+})
+
 const PlanStepKind = z.enum([
   "agent_turn",
   "teammate_dispatch",
@@ -1508,6 +1516,7 @@ export const PARAMS_SCHEMAS = {
   // Actions: teams
   "action.team.run": TeamRunParams,
   "action.team.task.dispatch": TeamTaskDispatchParams,
+  "action.team.reconcile": TeamReconcileParams,
   "action.plan.create": PlanCreateParams,
   "action.plan.get": PlanIdParams,
   "action.plan.list": PlanListParams,

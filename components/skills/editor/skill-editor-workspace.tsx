@@ -4,10 +4,16 @@ import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
-import { FilesIcon, PanelRightCloseIcon, PanelRightOpenIcon, ShieldAlertIcon } from "lucide-react"
+import {
+  FilesIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
+  Settings2Icon,
+  ShieldAlertIcon,
+} from "lucide-react"
 import { useSkillsStore } from "@/stores/skills"
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
-import { getSkill } from "@/lib/db/skills"
+import { getSkill, updateSkill } from "@/lib/db/skills"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,6 +34,7 @@ import {
 } from "@/components/ui/sheet"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
+import { SkillEditor } from "../skill-editor"
 import { SkillFileTree } from "./skill-file-tree"
 import { SkillTabStrip } from "./skill-tab-strip"
 import { SkillMonacoEditor } from "./skill-monaco-editor"
@@ -53,6 +60,7 @@ export function SkillEditorWorkspace() {
   const [closeTarget, setCloseTarget] = useState<{ fileId: string; path: string } | null>(null)
   const [fileTreeSheetOpen, setFileTreeSheetOpen] = useState(false)
   const [validationSheetOpen, setValidationSheetOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Desktop split persistence (react-resizable-panels v4 — PERCENT strings;
   // bare numbers are pixels). Seeded once at mount, written on change.
@@ -135,6 +143,26 @@ export function SkillEditorWorkspace() {
     />
   )
 
+  // Sidebar header: the skill name plus the "Skill settings" entry that opens
+  // the metadata editor (name / description / category / tags / tools / …).
+  // The body + resources are edited as files; settings covers the frontmatter.
+  const fileTreeHeader = (
+    <div className="flex items-center justify-between gap-1 border-b bg-muted/30 px-2 py-1.5">
+      <span className="truncate text-xs font-medium" title={skill.name}>
+        {skill.name}
+      </span>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-6 shrink-0"
+        aria-label={t("openSettings")}
+        onClick={() => setSettingsOpen(true)}
+      >
+        <Settings2Icon className="size-3.5" />
+      </Button>
+    </div>
+  )
+
   const validationBody = activeFile ? (
     <SkillValidationPanel
       draft={{
@@ -179,6 +207,40 @@ export function SkillEditorWorkspace() {
 
   const sharedOverlays = (
     <>
+      {/* Skill settings (frontmatter metadata) — reuses the SkillEditor form in
+          metadata-only mode. Saves only the metadata columns; the body stays
+          owned by the Monaco tab so an in-flight draft is never clobbered. */}
+      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-lg">
+          <SheetHeader className="border-b px-5 py-3">
+            <SheetTitle>{t("settingsTitle")}</SheetTitle>
+            <SheetDescription>{skill.name}</SheetDescription>
+          </SheetHeader>
+          <div className="px-5 py-4">
+            <SkillEditor
+              mode="edit"
+              hideContent
+              initial={skill}
+              onCancel={() => setSettingsOpen(false)}
+              onSave={async (draft) => {
+                await updateSkill(skill.id, {
+                  name: draft.name,
+                  description: draft.description,
+                  category: draft.category,
+                  tags: draft.tags,
+                  allowedTools: draft.allowedTools,
+                  version: draft.version,
+                  author: draft.author,
+                  license: draft.license,
+                })
+                toast.success(t("settingsSaved"))
+                setSettingsOpen(false)
+              }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
       {/* Mobile: file-tree as Sheet */}
       <Sheet open={fileTreeSheetOpen} onOpenChange={setFileTreeSheetOpen}>
         <SheetContent side="left" className="w-72 p-0 sm:w-80">
@@ -247,6 +309,15 @@ export function SkillEditorWorkspace() {
               <FilesIcon className="size-3.5" />
             </Button>
             <div className="min-w-0 flex-1">{tabStrip}</div>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 shrink-0"
+              aria-label={t("openSettings")}
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings2Icon className="size-3.5" />
+            </Button>
           </div>
           <div className="flex min-h-0 flex-1 flex-col">
             {activeFile ? (
@@ -280,9 +351,10 @@ export function SkillEditorWorkspace() {
           defaultSize="18%"
           minSize="10%"
           maxSize="35%"
-          className="overflow-y-auto border-r"
+          className="flex flex-col overflow-hidden border-r"
         >
-          {fileTreeBody}
+          {fileTreeHeader}
+          <div className="min-h-0 flex-1 overflow-y-auto">{fileTreeBody}</div>
         </ResizablePanel>
         <ResizableHandle withHandle aria-label={t("resize.filesHandle")} />
         <ResizablePanel
