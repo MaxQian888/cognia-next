@@ -66,7 +66,7 @@ import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
-import { useUIStore } from "@/stores/ui/ui-store"
+import { useBarItemVisible, useUIStore } from "@/stores/ui/ui-store"
 import { useActiveSessionLabel } from "@/hooks/chat/use-active-session-label"
 import {
   MaximizeIcon,
@@ -84,6 +84,9 @@ import { useEffect, useState, useSyncExternalStore } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { TitleBarNavArrows } from "@/components/desktop/title-bar-nav-arrows"
 import { TitleBarLayoutControls } from "@/components/desktop/title-bar-layout-controls"
+import { TitleBarWorkspace } from "@/components/desktop/title-bar-workspace"
+import { TitleBarQuickActions } from "@/components/desktop/title-bar-quick-actions"
+import { AccountBarButton } from "@/components/account/account-bar-button"
 import { TitleBarCommandCenterMenu } from "@/components/desktop/title-bar-command-center-menu"
 import { recordNavigation } from "@/hooks/desktop/use-nav-history"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
@@ -202,6 +205,12 @@ export function TitleBar() {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
   const guildRailCollapsed = useUIStore((s) => s.guildRailCollapsed)
   const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
+
+  // Optional title-bar segments (toggled in the Customize Layout dropdown).
+  const showWorkspace = useBarItemVisible("workspace")
+  const showQuickActions = useBarItemVisible("quickActions")
+  const showAccountTop = useBarItemVisible("accountTop")
+  const openFind = useUIStore((s) => s.openFind)
 
   const persistedZoom = useSettingsStore((s) => s.settings?.webviewZoom)
   const persistedLanguage = useSettingsStore((s) => s.settings?.language)
@@ -379,9 +388,9 @@ export function TitleBar() {
   }
   const handleFind = () => {
     log.info("title-bar menu find")
-    // Browser-native find. Webviews honor this; ChatPane / Canvas can intercept
-    // the chord later if they need an in-app finder.
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true }))
+    // Open the in-app find bar (mounted by the desktop shell). It also listens
+    // for Ctrl/Cmd+F globally; this is the Edit → Find menu entry point.
+    openFind()
   }
 
   // ---- View menu ---------------------------------------------------------
@@ -1218,6 +1227,7 @@ export function TitleBar() {
           className="flex flex-1 items-center justify-center gap-1 px-2 min-w-0"
         >
           <TitleBarNavArrows className="shrink-0" />
+          {showWorkspace && <TitleBarWorkspace className="hidden shrink-0 lg:flex" />}
           <div className="flex min-w-0 max-w-[480px] flex-1 items-center justify-center">
             <TitleBarSearchPill
               appName={appName}
@@ -1244,6 +1254,10 @@ export function TitleBar() {
           point="toolbar.right"
           className="flex items-center gap-1 px-1 empty:hidden"
         />
+
+        {showQuickActions && <TitleBarQuickActions className="hidden xl:flex" />}
+
+        {showAccountTop && <AccountBarButton className="mx-0.5" />}
 
         <TitleBarLayoutControls className="px-1" />
 

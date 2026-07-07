@@ -1,6 +1,5 @@
 "use client"
 
-import type { FormEvent } from "react"
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CheckIcon, LockKeyholeIcon, SettingsIcon, UserRoundIcon } from "lucide-react"
@@ -13,27 +12,29 @@ import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
+
 import { AccountManageDialog } from "./account-manage-dialog"
+import { useAccountSwitch } from "./manage/use-account-switch"
 
 export function AccountSwitcher() {
   const t = useTranslations("account.switcher")
   const accounts = useAccountStore((state) => state.accounts)
   const activeAccountId = useAccountStore((state) => state.activeAccountId)
-  const switchAccount = useAccountStore((state) => state.switchAccount)
   const lock = useAccountStore((state) => state.lock)
   const activeAccount = useAccountStore(selectActiveAccount)
   const [open, setOpen] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
-  const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null)
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  // Shared switch/unlock-with-password flow (same one the manage dialog uses).
+  const switcher = useAccountSwitch({
+    onSwitched: () => setOpen(false),
+    operationFailedLabel: t("operationFailed"),
+  })
 
   const sorted = useMemo(
     () => [...accounts].sort((a, b) => a.displayName.localeCompare(b.displayName)),
     [accounts]
   )
-  const pendingAccount = sorted.find((account) => account.id === pendingSwitchId) ?? null
+  const pendingAccount = sorted.find((account) => account.id === switcher.pendingId) ?? null
 
   if (accounts.length === 0) return null
 
@@ -41,33 +42,6 @@ export function AccountSwitcher() {
     ? t("active", { name: activeAccount.displayName })
     : t("noActive")
   const initial = activeAccount?.displayName.trim().charAt(0).toUpperCase()
-
-  const handleStartSwitch = (accountId: string) => {
-    setError(null)
-    setPassword("")
-    if (accountId === activeAccountId) {
-      setPendingSwitchId(null)
-      return
-    }
-    setPendingSwitchId(accountId)
-  }
-
-  const handleConfirmSwitch = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!pendingAccount) return
-    setSubmitting(true)
-    setError(null)
-    try {
-      await switchAccount(pendingAccount.id, password)
-      setPendingSwitchId(null)
-      setPassword("")
-      setOpen(false)
-    } catch (err) {
-      setError(toErrorMessage(err, t("operationFailed")))
-    } finally {
-      setSubmitting(false)
-    }
-  }
 
   const openManage = () => {
     setOpen(false)
@@ -107,7 +81,7 @@ export function AccountSwitcher() {
               <button
                 key={account.id}
                 type="button"
-                onClick={() => handleStartSwitch(account.id)}
+                onClick={() => void switcher.begin(account.id)}
                 data-testid={`account-switch-${account.id}`}
                 className={cn(
                   "flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent",
@@ -131,23 +105,26 @@ export function AccountSwitcher() {
               <Separator className="my-1" />
               <form
                 className="flex flex-col gap-2 p-2"
-                onSubmit={(event) => void handleConfirmSwitch(event)}
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void switcher.confirm()
+                }}
               >
                 <Label htmlFor="account-switch-password">{t("switchPasswordLabel")}</Label>
                 <Input
                   id="account-switch-password"
                   type="password"
-                  value={password}
+                  value={switcher.password}
                   autoComplete="current-password"
                   placeholder={t("switchPasswordPlaceholder")}
-                  onChange={(event) => setPassword(event.target.value)}
+                  onChange={(event) => switcher.setPassword(event.target.value)}
                 />
-                {error && (
+                {switcher.error && (
                   <p role="alert" className="text-sm text-destructive">
-                    {error}
+                    {switcher.error}
                   </p>
                 )}
-                <Button type="submit" size="sm" disabled={submitting}>
+                <Button type="submit" size="sm" disabled={switcher.submitting}>
                   {t("confirmSwitch")}
                 </Button>
               </form>
@@ -182,12 +159,6 @@ export function AccountSwitcher() {
       <AccountManageDialog open={manageOpen} onOpenChange={setManageOpen} />
     </>
   )
-}
-
-function toErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
-  return fallback
 }
 
 export default AccountSwitcher

@@ -103,6 +103,17 @@ jest.mock("@/lib/db/adapter-instances", () => ({
   listAdapterInstancesByType: jest.fn().mockResolvedValue([]),
 }))
 
+const getTemplateWarningsMock = jest.fn(() => [] as unknown[])
+jest.mock("@/lib/plugin/registries/agent-team-template-registry", () => ({
+  getTemplateWarnings: (id: string) => getTemplateWarningsMock(id),
+}))
+
+// Stub the skill marketplace sheet so its heavy SkillMarketplace → streamdown
+// chain doesn't load in jsdom (streamdown is ESM-only).
+jest.mock("@/components/discover/skill-marketplace-sheet", () => ({
+  SkillMarketplaceSheet: () => <div data-testid="stub-skill-marketplace-sheet" />,
+}))
+
 import { DiscoverInspector } from "./discover-inspector"
 
 const character: Character = {
@@ -565,5 +576,178 @@ describe("<DiscoverInspector />", () => {
     // Sonner toast fires after the await resolves
     await new Promise((r) => setTimeout(r, 0))
     expect(toastSuccessMock).toHaveBeenCalled()
+  })
+
+  // ── WF1 registry-backed kinds ───────────────────────────────────────────
+
+  const slashItem: DiscoverItem = {
+    kind: "slashCommand",
+    id: "gitx.status",
+    data: {
+      id: "gitx.status",
+      name: "gitx.status",
+      description: "Show git status",
+      source: "plugin",
+      pluginId: "gitx",
+      handler: jest.fn(),
+    },
+  }
+  const mcpPresetItem: DiscoverItem = {
+    kind: "mcpPreset",
+    id: "filesystem",
+    data: {
+      id: "filesystem",
+      name: "Filesystem",
+      description: "Read/write files",
+      icon: "📁",
+      transport: "stdio",
+      config: {},
+      fields: [{ key: "PATH", label: "Dir", placement: "arg-replace" }],
+      docsUrl: "https://example.com/fs",
+      tags: ["files"],
+    },
+  }
+  const teamTemplateItem: DiscoverItem = {
+    kind: "teamTemplate",
+    id: "parallel-review",
+    data: {
+      id: "parallel-review",
+      name: "Parallel Review",
+      description: "Split review",
+      teammateCount: 3,
+      category: "review",
+      isBuiltIn: true,
+    },
+  }
+  const externalPresetItem: DiscoverItem = {
+    kind: "externalAgentPreset",
+    id: "codex",
+    data: {
+      id: "codex",
+      name: "Codex",
+      description: "OpenAI Codex",
+      tags: ["cli"],
+      setupHint: "Install codex on PATH",
+      docsUrl: "https://example.com/codex",
+    },
+  }
+  const subagentItem: DiscoverItem = {
+    kind: "subagent",
+    id: "workflow-designer",
+    data: {
+      id: "workflow-designer",
+      name: "Workflow Designer",
+      description: "designs workflows",
+      prompt: "",
+    },
+  }
+
+  it("renders a slash command and links to the slash-commands settings", () => {
+    render(
+      <DiscoverInspector
+        category="slashCommands"
+        itemId={slashItem.id}
+        items={[slashItem]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("discover-inspector-title")).toHaveTextContent("/gitx.status")
+    expect(screen.getByText("Show git status")).toBeInTheDocument()
+    expect(screen.getByTestId("discover-inspector-open-slash-command")).toHaveAttribute(
+      "href",
+      "/settings/slash-commands"
+    )
+  })
+
+  it("renders an MCP preset with an add-server deep link carrying the preset id", () => {
+    render(
+      <DiscoverInspector
+        category="mcpPresets"
+        itemId={mcpPresetItem.id}
+        items={[mcpPresetItem]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("discover-inspector-add-mcp-preset")).toHaveAttribute(
+      "href",
+      "/settings/external-bridge?preset=filesystem"
+    )
+    expect(screen.getByText("stdio")).toBeInTheDocument()
+  })
+
+  it("renders a team template with member count and a link to /agent-teams", () => {
+    render(
+      <DiscoverInspector
+        category="teamTemplates"
+        itemId={teamTemplateItem.id}
+        items={[teamTemplateItem]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("discover-inspector-title")).toHaveTextContent("Parallel Review")
+    expect(screen.getByTestId("discover-inspector-use-template")).toHaveAttribute(
+      "href",
+      "/agent-teams"
+    )
+    // Built-in template → getTemplateWarnings not consulted.
+    expect(getTemplateWarningsMock).not.toHaveBeenCalled()
+  })
+
+  it("surfaces missing-dependency warnings for a plugin team template", () => {
+    getTemplateWarningsMock.mockReturnValueOnce([{ code: "missing-skill", missingId: "x" }])
+    const pluginTemplate: DiscoverItem = {
+      kind: "teamTemplate",
+      id: "gitx:review",
+      data: {
+        id: "gitx:review",
+        name: "Plugin Review",
+        description: "review",
+        teammateCount: 1,
+        isBuiltIn: false,
+        pluginId: "gitx",
+      },
+    }
+    render(
+      <DiscoverInspector
+        category="teamTemplates"
+        itemId={pluginTemplate.id}
+        items={[pluginTemplate]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(getTemplateWarningsMock).toHaveBeenCalledWith("gitx:review")
+    expect(screen.getByTestId("discover-inspector-template-warnings")).toBeInTheDocument()
+  })
+
+  it("renders an external-agent preset with setup hint + add link", () => {
+    render(
+      <DiscoverInspector
+        category="agentPresets"
+        itemId={externalPresetItem.id}
+        items={[externalPresetItem]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByText("Install codex on PATH")).toBeInTheDocument()
+    expect(screen.getByTestId("discover-inspector-add-external-agent")).toHaveAttribute(
+      "href",
+      "/me/external-agents"
+    )
+  })
+
+  it("renders a subagent with a link to /me/subagents", () => {
+    render(
+      <DiscoverInspector
+        category="agentPresets"
+        itemId={subagentItem.id}
+        items={[subagentItem]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("discover-inspector-title")).toHaveTextContent("Workflow Designer")
+    expect(screen.getByTestId("discover-inspector-open-subagent")).toHaveAttribute(
+      "href",
+      "/me/subagents"
+    )
   })
 })

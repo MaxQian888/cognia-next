@@ -13,11 +13,13 @@ import {
   BotIcon,
   FileEditIcon,
   InboxIcon,
+  LayoutTemplateIcon,
   PlugIcon,
   PuzzleIcon,
   ScanTextIcon,
   SparklesIcon,
   StarIcon,
+  TerminalIcon,
   UsersIcon,
   UsersRoundIcon,
   WorkflowIcon,
@@ -161,6 +163,58 @@ function useItemMeta(item: DiscoverItem): ItemMeta {
         builtIn: false,
         badge: d.kind,
         avatar: { kind: "icon", Icon: d.kind === "skill" ? SparklesIcon : FileEditIcon },
+      }
+    }
+    case "slashCommand": {
+      const c = item.data
+      return {
+        name: c.name,
+        description: c.description,
+        builtIn: c.source === "builtin",
+        badge: c.source === "plugin" ? "plugin" : (c.shortcut ?? undefined),
+        avatar: { kind: "icon", Icon: TerminalIcon },
+      }
+    }
+    case "mcpPreset": {
+      const p = item.data
+      return {
+        name: p.name,
+        description: p.description,
+        builtIn: true,
+        badge: p.transport,
+        // The preset ships a glyph/emoji; render it in a tinted avatar.
+        avatar: { kind: "color", color: "#475569", glyph: p.icon },
+      }
+    }
+    case "teamTemplate": {
+      const tpl = item.data
+      return {
+        name: tpl.name,
+        description: tpl.description,
+        builtIn: tpl.isBuiltIn,
+        badge: tpl.category,
+        avatar: { kind: "icon", Icon: LayoutTemplateIcon },
+      }
+    }
+    case "externalAgentPreset": {
+      const p = item.data
+      return {
+        name: p.name,
+        description: p.description,
+        builtIn: true,
+        badge: p.tags[0],
+        avatar: { kind: "icon", Icon: BotIcon },
+      }
+    }
+    case "subagent": {
+      const s = item.data
+      // Host-bundled dispatchable ids carry no `<pluginId>:`/`template:` prefix.
+      return {
+        name: s.name,
+        description: s.description,
+        builtIn: !item.id.includes(":"),
+        badge: "subagent",
+        avatar: { kind: "icon", Icon: BotIcon },
       }
     }
     default: {

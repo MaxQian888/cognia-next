@@ -53,6 +53,24 @@ jest.mock("@/components/desktop/job-center-panel", () => ({
   JobCenterPanel: () => <button data-testid="status-job-center">Jobs</button>,
 }))
 
+// New optional segments — covered by their own suites; stub them so the
+// status-bar test focuses on layout + gating.
+jest.mock("@/components/desktop/status-bar-connectivity", () => ({
+  StatusBarConnectivity: () => <div data-testid="status-connectivity" />,
+}))
+jest.mock("@/components/desktop/status-bar-sync", () => ({
+  StatusBarSync: () => <div data-testid="status-sync" />,
+}))
+jest.mock("@/components/desktop/status-bar-perf", () => ({
+  StatusBarPerf: () => <div data-testid="status-perf" />,
+}))
+jest.mock("@/components/desktop/status-bar-usage", () => ({
+  StatusBarUsage: () => <div data-testid="status-usage" />,
+}))
+jest.mock("@/components/account/account-bar-button", () => ({
+  AccountBarButton: () => <div data-testid="account-bar-button" />,
+}))
+
 // `stores/index.ts` calls `isTauri()` at module top-level; declaring the
 // jest.fn inside the factory dodges the TDZ.
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
@@ -105,9 +123,20 @@ jest.mock("@/stores/chat/chat-store", () => ({
 
 const toggleSidebar = jest.fn()
 const uiRef = { sidebarCollapsed: false }
+const barItemsRef: Record<string, boolean> = {
+  connectivity: true,
+  sync: true,
+  perf: false,
+  accountStatus: true,
+  usage: true,
+  workspace: true,
+  quickActions: true,
+  accountTop: true,
+}
 jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: (selector: (s: unknown) => unknown) =>
     selector({ toggleSidebar, sidebarCollapsed: uiRef.sidebarCollapsed }),
+  useBarItemVisible: (id: string) => barItemsRef[id],
 }))
 
 const settingsRef = {
@@ -155,6 +184,11 @@ beforeEach(() => {
   chatRef.errorMessage = null
   chatRef.permissionMode = "default"
   uiRef.sidebarCollapsed = false
+  barItemsRef.connectivity = true
+  barItemsRef.sync = true
+  barItemsRef.perf = false
+  barItemsRef.accountStatus = true
+  barItemsRef.usage = true
   settingsRef.webviewZoom = 1.0
   settingsRef.language = "en"
   themeRef.value = "system"
@@ -175,6 +209,39 @@ test("renders all top-level segments", () => {
   expect(screen.getByTestId("status-locale")).toBeInTheDocument()
   expect(screen.getByTestId("status-notifications")).toBeInTheDocument()
   expect(screen.getByTestId("status-job-center")).toBeInTheDocument()
+  // Default-visible optional segments.
+  expect(screen.getByTestId("status-connectivity")).toBeInTheDocument()
+  expect(screen.getByTestId("account-bar-button")).toBeInTheDocument()
+  // Desktop-only segments (isTauri mocked true) with their flags on.
+  expect(screen.getByTestId("status-sync")).toBeInTheDocument()
+  expect(screen.getByTestId("status-usage")).toBeInTheDocument()
+  // Perf defaults off — not mounted.
+  expect(screen.queryByTestId("status-perf")).toBeNull()
+})
+
+test("gates optional segments on their bar-item flags", () => {
+  barItemsRef.connectivity = false
+  barItemsRef.sync = false
+  barItemsRef.usage = false
+  barItemsRef.accountStatus = false
+  barItemsRef.perf = true
+  render(<StatusBar />)
+  expect(screen.queryByTestId("status-connectivity")).toBeNull()
+  expect(screen.queryByTestId("status-sync")).toBeNull()
+  expect(screen.queryByTestId("status-usage")).toBeNull()
+  expect(screen.queryByTestId("account-bar-button")).toBeNull()
+  // Perf flag on + desktop → mounted.
+  expect(screen.getByTestId("status-perf")).toBeInTheDocument()
+})
+
+test("does not mount desktop-only segments in web mode", () => {
+  isTauriMock.mockReturnValue(false)
+  render(<StatusBar />)
+  // Connectivity is meaningful on web; sync/perf/usage are desktop-only.
+  expect(screen.getByTestId("status-connectivity")).toBeInTheDocument()
+  expect(screen.queryByTestId("status-sync")).toBeNull()
+  expect(screen.queryByTestId("status-usage")).toBeNull()
+  expect(screen.queryByTestId("status-perf")).toBeNull()
 })
 
 test("sidebar segment toggles the sidebar", async () => {

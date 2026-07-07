@@ -10,7 +10,12 @@
 import type { DiscoverViewMode } from "@/lib/discover/categories"
 
 export const DISCOVER_VIEW_CONTAINER: Record<DiscoverViewMode, string> = {
-  grid: "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+  // Column count tracks the grid's OWN width (`@container/discover-grid`,
+  // established by the call site's wrapper), NOT the viewport. The grid renders
+  // inside the `FeaturePageShell` center pane and the mobile scroll area, so
+  // viewport breakpoints would pack 3–4 columns into a narrow pane and overlap
+  // the cards. Mirrors `components/plugins/plugin-panel-grid.tsx`.
+  grid: "grid grid-cols-1 gap-3 @md/discover-grid:grid-cols-2 @4xl/discover-grid:grid-cols-3 @6xl/discover-grid:grid-cols-4",
   list: "flex flex-col gap-2",
   compact: "flex flex-col gap-1",
 }

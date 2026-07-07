@@ -499,6 +499,27 @@ interface ArtifactActions {
   rejectArtifactReview: (id: string) => void
   getPendingReview: (id: string) => CanvasPendingReview | null
 
+  /**
+   * Stage an AI revision of a Canvas document as a pending per-hunk proposal.
+   * Reuses the same `pendingReviews` map + `buildCanvasReview` engine as
+   * artifacts, keyed by the document id (canvas + artifact ids never collide).
+   * Returns `null` when the document is missing or the content is unchanged.
+   */
+  proposeCanvasReview: (
+    documentId: string,
+    proposedContent: string,
+    meta?: { requestId?: string; actionType?: CanvasWorkbenchActionType }
+  ) => CanvasPendingReview | null
+  /**
+   * Apply only the accepted hunks of a Canvas proposal: snapshots a version,
+   * merges via `applyAcceptedCanvasReviewItems`, writes the result through
+   * `updateCanvasDocument`, then clears the proposal. No-op when stale.
+   * Reuses the shared `setReviewItemStatus` / `getPendingReview` for per-hunk
+   * status and lookup.
+   */
+  applyCanvasReview: (documentId: string, changeDescription?: string) => void
+  rejectCanvasReview: (documentId: string) => void
+
   // Artifact version history
   saveArtifactVersion: (id: string, description?: string) => ArtifactVersion | null
   /**
@@ -652,8 +673,12 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           const canvasDocuments = Object.fromEntries(
             Object.entries(state.canvasDocuments).filter(([, d]) => d.projectId !== projectId)
           )
+          // Keep reviews whose target (artifact OR canvas document) survives the
+          // purge — canvas reviews share this map, keyed by document id.
           const pendingReviews = Object.fromEntries(
-            Object.entries(state.pendingReviews).filter(([artifactId]) => artifacts[artifactId])
+            Object.entries(state.pendingReviews).filter(
+              ([reviewId]) => artifacts[reviewId] || canvasDocuments[reviewId]
+            )
           )
           const removedActiveArtifact =
             state.activeArtifactId != null && !artifacts[state.activeArtifactId]
@@ -1029,6 +1054,72 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
 
       getPendingReview: (id) => get().pendingReviews[id] ?? null,
 
+      // Canvas AI-revision review (shares the pendingReviews map + engine)
+      proposeCanvasReview: (documentId, proposedContent, meta) => {
+        const doc = get().canvasDocuments[documentId]
+        if (!doc) return null
+        if (proposedContent === doc.content) return null
+
+        const review = buildCanvasReview({
+          requestId: meta?.requestId ?? nanoid(),
+          actionType: meta?.actionType ?? "custom",
+          originalContent: doc.content,
+          proposedContent,
+        })
+        if (review.items.length === 0) return null
+
+        set((state) => ({
+          pendingReviews: { ...state.pendingReviews, [documentId]: review },
+        }))
+
+        loggers.store.info("canvas.review.propose", {
+          documentId,
+          hunks: review.items.length,
+        })
+
+        return review
+      },
+
+      applyCanvasReview: (documentId, changeDescription) => {
+        const state = get()
+        const review = state.pendingReviews[documentId]
+        const doc = state.canvasDocuments[documentId]
+        if (!review || !doc) return
+
+        // A stale proposal's baseline no longer matches the live buffer; the
+        // review surface forces re-diff / discard before reaching here.
+        if (review.isStale) {
+          loggers.store.warn("canvas.review.apply-skipped-stale", { documentId })
+          return
+        }
+
+        // Snapshot current content, drop the proposal, then merge accepted hunks
+        // against the diff's own baseline and write through updateCanvasDocument.
+        // Clearing the review first keeps the content write from tripping the
+        // staleness guard in updateCanvasDocument.
+        get().saveCanvasVersion(documentId, changeDescription)
+        const merged = applyAcceptedCanvasReviewItems(review.originalContent, review.items)
+        set((s) => {
+          const { [documentId]: _applied, ...pendingReviews } = s.pendingReviews
+          return { pendingReviews }
+        })
+        get().updateCanvasDocument(documentId, { content: merged })
+
+        loggers.store.info("canvas.review.apply", {
+          documentId,
+          accepted: review.items.filter((item) => item.status === "accepted").length,
+          total: review.items.length,
+        })
+      },
+
+      rejectCanvasReview: (documentId) => {
+        set((state) => {
+          if (!state.pendingReviews[documentId]) return state
+          const { [documentId]: _rejected, ...pendingReviews } = state.pendingReviews
+          return { pendingReviews }
+        })
+      },
+
       // Artifact version history
       saveArtifactVersion: (id, description) => {
         const state = get()
@@ -1197,11 +1288,24 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             contentChanged,
           }
 
+          // If a proposal is open against this document and the buffer moved off
+          // the diff baseline, mark it stale so the review surface can prompt a
+          // re-diff / discard (mirrors the artifact `updateArtifact` behavior).
+          const openReview = state.pendingReviews[id]
+          const pendingReviews =
+            contentChanged &&
+            openReview &&
+            !openReview.isStale &&
+            updated.content !== openReview.originalContent
+              ? { ...state.pendingReviews, [id]: { ...openReview, isStale: true } }
+              : state.pendingReviews
+
           return {
             canvasDocuments: {
               ...state.canvasDocuments,
               [id]: updated,
             },
+            pendingReviews,
           }
         })
 
@@ -1251,8 +1355,10 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           didDelete = true
           activeCleared = state.activeCanvasId === id
           const { [id]: _removed, ...rest } = state.canvasDocuments
+          const { [id]: _removedReview, ...pendingReviews } = state.pendingReviews
           return {
             canvasDocuments: rest,
+            pendingReviews,
             activeCanvasId: activeCleared ? null : state.activeCanvasId,
           }
         })
@@ -1426,6 +1532,13 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
 
           didRestore = true
 
+          // A restore moves the buffer off any open proposal's baseline.
+          const openReview = state.pendingReviews[documentId]
+          const pendingReviews =
+            openReview && !openReview.isStale && version.content !== openReview.originalContent
+              ? { ...state.pendingReviews, [documentId]: { ...openReview, isStale: true } }
+              : state.pendingReviews
+
           return {
             canvasDocuments: {
               ...state.canvasDocuments,
@@ -1442,6 +1555,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
                 currentVersionId: versionId,
               },
             },
+            pendingReviews,
           }
         })
 

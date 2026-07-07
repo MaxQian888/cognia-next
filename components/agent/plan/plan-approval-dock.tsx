@@ -23,9 +23,10 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { PlanApprovalCard, type PlanResumeMode } from "./plan-approval-card"
+import { PlanApprovalCard, type PlanEditPatch, type PlanResumeMode } from "./plan-approval-card"
 import { useSessionPlan } from "@/hooks/agent/use-session-plan"
 import { getPlanRuntime } from "@/lib/agent/plan/runtime"
+import { parsePlanText } from "@/lib/agent/plan/exit-plan-capture"
 import { materializeSteps } from "@/lib/agent/plan/steps"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { useSettingsStore } from "@/stores/settings"
@@ -35,6 +36,16 @@ import type { CreatePlanStepInput, PlanRefinementType } from "@/types/agent/plan
 /** The synthetic turn injected after a plan is approved. */
 export const PLAN_APPROVED_PROMPT =
   "The plan above is approved. Implement it now, step by step, following the plan."
+
+/** Build the linear `agent_turn` step chain `exit-plan-capture` / edits share. */
+function linearSteps(titles: string[]) {
+  const inputs: CreatePlanStepInput[] = titles.map((title, i) => ({
+    title: title.slice(0, 200),
+    kind: "agent_turn",
+    ...(i > 0 ? { dependsOn: [i - 1] } : {}),
+  }))
+  return materializeSteps(inputs)
+}
 
 export interface PlanApprovalDockProps {
   sessionId: string
@@ -131,19 +142,23 @@ export function PlanApprovalDock({
     }
   }
 
-  const handleEdit = async (patch: { title: string; stepTitles: string[] }) => {
-    if (busy || patch.stepTitles.length === 0) return
+  const handleEdit = async (patch: PlanEditPatch) => {
+    if (busy) return
+    const title = patch.title.slice(0, 120)
+    // A markdown edit carries the raw body; a step edit carries one title per
+    // line. Either way we re-derive the same linear agent_turn chain so
+    // execution stays in sync with what the user sees.
+    const titles = "planText" in patch ? parsePlanText(patch.planText) : patch.stepTitles
+    if (titles.length === 0) return
     setBusy(true)
     try {
-      // Same linear agent_turn shape `exit-plan-capture` / `refinePlan` produce.
-      const inputs: CreatePlanStepInput[] = patch.stepTitles.map((title, i) => ({
-        title: title.slice(0, 200),
-        kind: "agent_turn",
-        ...(i > 0 ? { dependsOn: [i - 1] } : {}),
-      }))
       await getPlanRuntime().updatePlanDraft(plan.id, {
-        title: patch.title.slice(0, 120),
-        steps: materializeSteps(inputs),
+        title,
+        steps: linearSteps(titles),
+        // Keep the full body in metadata so the card can render it back.
+        ...("planText" in patch
+          ? { metadata: { ...plan.metadata, planText: patch.planText } }
+          : {}),
       })
     } finally {
       setBusy(false)

@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { approve, reject } from "@/lib/ai/agent/plan-approval-bus"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
@@ -39,9 +39,14 @@ export function PlanApprovalPanel({ team, lead }: PlanApprovalPanelProps) {
       <Card className="space-y-3 p-3" data-testid="plan-approval-panel">
         <Label className="text-sm font-semibold">{t("title")}</Label>
         {planText ? (
-          <ScrollArea className="max-h-32 rounded-md bg-muted/40 sm:max-h-48 md:max-h-64">
-            <pre className="p-2 font-mono text-xs whitespace-pre-wrap">{planText}</pre>
-          </ScrollArea>
+          // The lead proposes its plan as markdown — render it (headings, lists,
+          // code, tables) instead of a raw <pre>. Native overflow keeps the
+          // scroll thumb grabbable while text is selected. (Mirrors PlanCard.)
+          <div className="max-h-32 overflow-y-auto overscroll-contain rounded-md bg-muted/40 sm:max-h-48 md:max-h-64">
+            <div className="p-2 text-xs" data-testid="plan-approval-panel-body">
+              <MarkdownRenderer content={planText} />
+            </div>
+          </div>
         ) : (
           <p className="text-xs italic text-muted-foreground">{t("noPlan")}</p>
         )}

@@ -8,11 +8,23 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+const defaultBarItems = {
+  connectivity: true,
+  sync: true,
+  perf: false,
+  accountStatus: true,
+  usage: true,
+  workspace: true,
+  quickActions: true,
+  accountTop: true,
+}
 const mockUiState = {
   sidebarCollapsed: false,
   guildRailCollapsed: false,
   statusBarCollapsed: false,
   toggleSidebar: jest.fn(),
+  barItems: { ...defaultBarItems },
+  toggleBarItem: jest.fn(),
 }
 jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: (selector: (s: typeof mockUiState) => unknown) => selector(mockUiState),
@@ -46,12 +58,18 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
     children,
     checked,
     onCheckedChange,
+    ...rest
   }: {
     children: React.ReactNode
     checked?: boolean
     onCheckedChange?: (v: boolean) => void
   }) => (
-    <div role="menuitemcheckbox" aria-checked={checked} onClick={() => onCheckedChange?.(!checked)}>
+    <div
+      role="menuitemcheckbox"
+      aria-checked={checked}
+      onClick={() => onCheckedChange?.(!checked)}
+      {...rest}
+    >
       {children}
     </div>
   ),
@@ -68,6 +86,8 @@ beforeEach(() => {
   mockTerminalState.togglePanel.mockClear()
   mockToggleGuildRail.mockClear()
   mockToggleStatusBar.mockClear()
+  mockUiState.barItems = { ...defaultBarItems }
+  mockUiState.toggleBarItem.mockClear()
 })
 
 describe("TitleBarLayoutControls", () => {
@@ -105,8 +125,8 @@ describe("TitleBarLayoutControls", () => {
     render(<TitleBarLayoutControls />)
     expect(screen.getByTestId("title-bar-customize-layout")).toBeInTheDocument()
     const items = screen.getAllByRole("menuitemcheckbox")
-    // Guild rail / sidebar / status bar / terminal.
-    expect(items).toHaveLength(4)
+    // 4 panel toggles + 5 status-bar segments + 3 title-bar segments.
+    expect(items).toHaveLength(12)
 
     fireEvent.click(screen.getByText("toggleGuildRail"))
     fireEvent.click(screen.getByText("toggleSidebar"))
@@ -117,5 +137,25 @@ describe("TitleBarLayoutControls", () => {
     expect(mockUiState.toggleSidebar).toHaveBeenCalled()
     expect(mockToggleStatusBar).toHaveBeenCalled()
     expect(mockTerminalState.togglePanel).toHaveBeenCalled()
+  })
+
+  it("wires each bar-item checkbox to toggleBarItem and reflects its state", () => {
+    mockUiState.barItems = { ...defaultBarItems, perf: false, usage: false }
+    render(<TitleBarLayoutControls />)
+
+    // Perf + usage start unchecked; the rest checked.
+    expect(screen.getByTestId("title-bar-item-perf")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("title-bar-item-usage")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("title-bar-item-connectivity")).toHaveAttribute(
+      "aria-checked",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("title-bar-item-perf"))
+    expect(mockUiState.toggleBarItem).toHaveBeenCalledWith("perf")
+    fireEvent.click(screen.getByTestId("title-bar-item-workspace"))
+    expect(mockUiState.toggleBarItem).toHaveBeenCalledWith("workspace")
+    fireEvent.click(screen.getByTestId("title-bar-item-accountTop"))
+    expect(mockUiState.toggleBarItem).toHaveBeenCalledWith("accountTop")
   })
 })

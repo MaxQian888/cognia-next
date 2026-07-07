@@ -167,6 +167,65 @@ describe("ExternalAgentManager", () => {
     expect(screen.getByText(/Protocol\/Transport: ACP via stdio/)).toBeInTheDocument()
   })
 
+  it("resolves every runtime-diagnostics label to its value (guards ICU param/placeholder drift)", () => {
+    // Regression guard: each diagnostics message must declare the exact placeholder
+    // the component passes. A drift (e.g. `{value}` vs `{name}`) makes next-intl throw
+    // and fall back to rendering the raw key path — silently breaking this whole panel.
+    const agent = makeAgent()
+    mockUseExternalAgent.mockReturnValue({
+      ...baseHookValue(),
+      agents: [agent],
+      activeAgentId: "agent-1",
+      activeAgentValidity: {
+        executable: true,
+        checkedAt: new Date("2026-05-01T00:00:00Z"),
+        source: "execution",
+        contractVersion: 3,
+        lifecycleStage: "execution",
+        blockedStage: "recovery",
+        branchOutcome: "fallback",
+        canonicalReasonCode: "extension_unsupported",
+        canonicalReason: "Listing unsupported",
+        healthStatus: "healthy",
+        sessionExtensions: {},
+        negotiation: {
+          protocol: "acp",
+          authRequired: true,
+          authMethods: [{ id: "oauth" }],
+        },
+        ecosystem: {
+          adapterName: "ClaudeAdapter",
+          surfaceName: "Cognia Desktop",
+          supportTier: "guided",
+          prerequisiteStatus: "action-required",
+          recommendedActions: ["Install the CLI"],
+        },
+        correlation: { sessionId: "sess-abc", turnId: "turn-9", observedAt: new Date() },
+        recoveryHints: ["Restart the agent", "Re-run health check"],
+      },
+    })
+    render(wrap(<ExternalAgentManager />))
+    expect(screen.getByText(/Adapter: ClaudeAdapter/)).toBeInTheDocument()
+    expect(screen.getByText(/Surface: Cognia Desktop/)).toBeInTheDocument()
+    expect(screen.getByText(/Support tier: guided/)).toBeInTheDocument()
+    expect(screen.getByText(/Prerequisite status: action-required/)).toBeInTheDocument()
+    expect(screen.getByText(/Contract version: 3/)).toBeInTheDocument()
+    expect(screen.getByText(/Lifecycle stage: execution/)).toBeInTheDocument()
+    expect(screen.getByText(/Blocked stage: recovery/)).toBeInTheDocument()
+    expect(screen.getByText(/Branch outcome: fallback/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Canonical reason: extension_unsupported — Listing unsupported/)
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Auth methods: oauth/)).toBeInTheDocument()
+    expect(screen.getByText(/Correlation — session sess-abc, turn turn-9/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Recovery hints: Restart the agent \| Re-run health check/)
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Recommended actions: Install the CLI/)).toBeInTheDocument()
+    // No label may fall back to its raw i18n key path.
+    expect(screen.queryByText(/externalAgent\.manager\.diagnostics\./)).not.toBeInTheDocument()
+  })
+
   it("renders the benchmark adaptation panel when an agent is active", () => {
     const agent = makeAgent()
     mockUseExternalAgent.mockReturnValue({
@@ -185,8 +244,11 @@ describe("ExternalAgentManager", () => {
       ],
     })
     render(wrap(<ExternalAgentManager />))
+    // Benchmark adaptation is a collapsed-by-default section; expand it first.
     expect(screen.getByTestId("external-agent-benchmark-adaptation")).toBeInTheDocument()
+    fireEvent.click(screen.getByText(en.externalAgent.manager.diagnostics.benchmarkAdaptation))
     expect(screen.getByText("ACP validity projection")).toBeInTheDocument()
+    expect(screen.getByText(/Gap: minor/)).toBeInTheDocument()
     expect(screen.getByText(/Evidence: manager\.test\.ts/)).toBeInTheDocument()
   })
 
@@ -510,6 +572,8 @@ describe("ExternalAgentManager", () => {
       ],
     })
     render(wrap(<ExternalAgentManager />))
+    // Expand the collapsed-by-default benchmark section before asserting content.
+    fireEvent.click(screen.getByText(en.externalAgent.manager.diagnostics.benchmarkAdaptation))
     expect(screen.getByText(/We deviate to prevent retry loops/)).toBeInTheDocument()
     expect(screen.getByText(/Review: @security/)).toBeInTheDocument()
   })
@@ -940,6 +1004,8 @@ describe("ExternalAgentManager", () => {
     fireEvent.change(commandInput, { target: { value: "npx" } })
     const argsInput = screen.getByLabelText(en.externalAgent.settings.arguments) as HTMLInputElement
     fireEvent.change(argsInput, { target: { value: "@anthropics/claude-code --stdio" } })
+    // The retry/error fields live under a collapsed-by-default "Advanced" section.
+    fireEvent.click(screen.getByText(en.externalAgent.manager.advancedOptions))
     const errorPatternsInput = screen.getByLabelText(
       en.externalAgent.settings.retryErrorPatterns
     ) as HTMLTextAreaElement

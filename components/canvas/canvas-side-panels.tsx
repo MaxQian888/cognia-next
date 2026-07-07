@@ -23,7 +23,14 @@ import {
   EmptyMedia,
 } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
-import { Lightbulb, History as HistoryIcon, MessageSquare, Users, Play } from "lucide-react"
+import {
+  Lightbulb,
+  History as HistoryIcon,
+  MessageSquare,
+  Users,
+  Play,
+  ListTree,
+} from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCommentStore } from "@/stores/canvas/comment-store"
 import { useCanvasLayoutStore, type CanvasRightTab } from "@/stores/canvas/canvas-layout-store"
@@ -33,6 +40,7 @@ import { VersionHistoryPanel } from "./version-history-panel"
 import { CommentPanel } from "./comment-panel"
 import { CollaborationPanel } from "./collaboration-panel"
 import { CodeExecutionPanel } from "./code-execution-panel"
+import { CanvasOutlinePanel, countCanvasSymbols, parseCanvasSymbols } from "./canvas-outline-panel"
 import { useCanvasCodeExecution } from "@/hooks/canvas"
 import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -83,6 +91,7 @@ export function CanvasSidePanels() {
       comments: comments.filter((c: { resolvedAt?: unknown }) => c.resolvedAt == null).length,
       collaboration: 0,
       execution: 0,
+      outline: countCanvasSymbols(parseCanvasSymbols(doc)),
     }
   }, [activeId, documents, getCanvasVersions, getCommentsForDocument])
 
@@ -158,6 +167,13 @@ export function CanvasSidePanels() {
             iconOnly={iconOnly}
             badge={tabBadges.execution}
           />
+          <PanelTab
+            value="outline"
+            icon={<ListTree className="size-3.5" />}
+            label={t("outline", { default: "Outline" })}
+            iconOnly={iconOnly}
+            badge={tabBadges.outline}
+          />
         </TabsList>
 
         <AnimatePresence mode="wait" initial={false}>
@@ -220,6 +236,15 @@ export function CanvasSidePanels() {
               {...tabContentMotionProps}
             >
               <ExecutionHost documentId={activeId} />
+            </motion.div>
+          </TabsContent>
+          <TabsContent key="outline" value="outline" className="m-0 flex-1 min-h-0 overflow-hidden">
+            <motion.div
+              key="outline"
+              data-testid="canvas-tab-motion-outline"
+              {...tabContentMotionProps}
+            >
+              <CanvasOutlinePanel documentId={activeId} />
             </motion.div>
           </TabsContent>
         </AnimatePresence>

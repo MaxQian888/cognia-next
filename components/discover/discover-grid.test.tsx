@@ -176,4 +176,44 @@ describe("<DiscoverGrid />", () => {
     await user.click(screen.getByTestId("discover-item-character-c2"))
     expect(onSelectItem).toHaveBeenCalledWith("c2")
   })
+
+  it("renders every card in list mode below the virtualization threshold", () => {
+    const few = Array.from({ length: 12 }, (_, i) => mkCharacter(`d${i}`, `Name ${i}`))
+    render(
+      <DiscoverGrid
+        category="characters"
+        items={few}
+        loading={false}
+        query=""
+        view="list"
+        selectedItemId={null}
+        onSelectItem={jest.fn()}
+      />
+    )
+    const grid = screen.getByTestId("discover-grid-characters")
+    const cards = grid.querySelectorAll('[data-testid^="discover-item-character-"]')
+    expect(cards).toHaveLength(12)
+    // Not windowed → no spacer height applied to the list.
+    expect(grid.style.height).toBe("")
+  })
+
+  it("windows a long list so only a subset of cards mounts", () => {
+    const many = Array.from({ length: 120 }, (_, i) => mkCharacter(`e${i}`, `Name ${i}`))
+    render(
+      <DiscoverGrid
+        category="characters"
+        items={many}
+        loading={false}
+        query=""
+        view="list"
+        selectedItemId={null}
+        onSelectItem={jest.fn()}
+      />
+    )
+    const grid = screen.getByTestId("discover-grid-characters")
+    // Virtualized: the spacer height reflects all rows while only a window mounts.
+    expect(grid.style.height).not.toBe("")
+    const cards = grid.querySelectorAll('[data-testid^="discover-item-character-"]')
+    expect(cards.length).toBeLessThan(120)
+  })
 })

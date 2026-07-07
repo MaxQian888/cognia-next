@@ -7,6 +7,14 @@ describe("discover view-classes", () => {
     expect(DISCOVER_VIEW_CONTAINER.compact).toBe("flex flex-col gap-1")
   })
 
+  it("uses container-query column variants (not viewport) so panes reflow by their own width", () => {
+    expect(DISCOVER_VIEW_CONTAINER.grid).toMatch(/@\w+\/discover-grid:grid-cols/)
+    // Guard against a regression back to viewport breakpoints inside a pane.
+    expect(DISCOVER_VIEW_CONTAINER.grid).not.toMatch(/\bsm:grid-cols/)
+    expect(DISCOVER_VIEW_CONTAINER.grid).not.toMatch(/\blg:grid-cols/)
+    expect(DISCOVER_VIEW_CONTAINER.grid).not.toMatch(/\bxl:grid-cols/)
+  })
+
   it("contains no padding so call sites control their own", () => {
     for (const cls of Object.values(DISCOVER_VIEW_CONTAINER)) {
       expect(cls).not.toMatch(/\bp-\d/)

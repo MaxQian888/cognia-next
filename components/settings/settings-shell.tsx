@@ -275,6 +275,7 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   "ocr",
   "diagnostics",
   "connections",
+  "skills",
 ])
 
 function isSection(value: string | null): value is SettingsSectionId {

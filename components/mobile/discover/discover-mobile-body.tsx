@@ -19,9 +19,11 @@ import { CompassIcon, PlusIcon } from "lucide-react"
 import { ActiveFilterChips } from "@/components/discover/active-filter-chips"
 import { CategoryChipStrip } from "@/components/discover/category-chip-strip"
 import { DiscoverGrid } from "@/components/discover/discover-grid"
+import { DiscoverHome } from "@/components/discover/discover-home"
 import { DiscoverInspector } from "@/components/discover/discover-inspector"
 import { DiscoverViewToggle } from "@/components/discover/discover-view-toggle"
 import { PluginMarketplaceSheet } from "@/components/discover/plugin-marketplace-sheet"
+import { SkillMarketplaceSheet } from "@/components/discover/skill-marketplace-sheet"
 import { SortFilterSheet } from "@/components/discover/sort-filter-sheet"
 import { LongPress } from "@/components/interactions/long-press"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
@@ -41,6 +43,7 @@ import { EmptyState } from "@/components/mobile/empty-state"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { useDiscoverFavorites } from "@/hooks/discover/use-discover-favorites"
+import { useDiscoverHome } from "@/hooks/discover/use-discover-home"
 import { useDiscoverLayout } from "@/hooks/discover/use-discover-layout"
 import { useDiscoverPreferences } from "@/hooks/discover/use-discover-preferences"
 import { useDiscoverQuery, type DiscoverItem } from "@/hooks/discover/use-discover-query"
@@ -53,6 +56,7 @@ import { runSyncDown } from "@/lib/sync/companion-sync"
 import type { Character } from "@/lib/claude/types"
 import {
   FAVORITES_CATEGORY,
+  FORYOU_CATEGORY,
   isValidView,
   resolveLandingCategory,
   type DiscoverCategoryId,
@@ -128,6 +132,7 @@ export function DiscoverMobileBody() {
   const teamsQuery = useDiscoverQuery("teams", query, { sort, filter, favoriteKeys })
   const skillsQuery = useDiscoverQuery("skills", query, { sort, filter, favoriteKeys })
   const gridQuery = useDiscoverQuery(category, query, { sort, filter, favoriteKeys })
+  const home = useDiscoverHome(query)
 
   const characters = charactersQuery.items
   const teams = teamsQuery.items
@@ -138,11 +143,15 @@ export function DiscoverMobileBody() {
     .filter((c): c is Character => Boolean(c?.isBuiltIn))
 
   const trimmed = query.trim()
+  const isHome = category === FORYOU_CATEGORY
   // Favorites + the Phase-3 grid categories render through the shared grid +
   // bottom-Sheet inspector; the legacy categories own their own row UI.
   const isGridDriven =
     category === FAVORITES_CATEGORY || GRID_CATEGORIES.has(category as DiscoverCategoryId)
-  const inspectorOpen = item !== null && isGridDriven
+  // The aggregated landing selects into the same bottom-sheet inspector, backed
+  // by the home hook's flat item list.
+  const inspectorOpen = item !== null && (isGridDriven || isHome)
+  const inspectorItems = isHome ? home.items : gridQuery.items
   // The view toggle also drives density for the three legacy card lists.
   const showToggle = isGridDriven || TOGGLE_LEGACY_CATEGORIES.has(category as DiscoverCategoryId)
   const legacyListClass = discoverViewContainer(view(category))
@@ -206,7 +215,17 @@ export function DiscoverMobileBody() {
       ) : null}
 
       <PullToRefresh onRefresh={onRefresh} className="flex flex-1 min-h-0 flex-col">
-        <div className="flex flex-1 flex-col overflow-y-auto px-4 pb-[calc(6rem+env(safe-area-inset-bottom))]">
+        <div className="@container/discover-grid flex flex-1 flex-col overflow-y-auto px-4 pb-[calc(6rem+env(safe-area-inset-bottom))]">
+          {isHome ? (
+            <DiscoverHome
+              home={home}
+              query={query}
+              selectedItemId={item}
+              onSelectItem={(id) => setItem(id)}
+              onSelectCategory={(id) => setCategory(id)}
+            />
+          ) : null}
+
           {category === "characters" ? (
             <>
               <div className="mb-3 flex justify-end">
@@ -282,40 +301,43 @@ export function DiscoverMobileBody() {
           ) : null}
 
           {category === "skills" ? (
-            skillsQuery.loading ? (
-              <ListSkeleton />
-            ) : skills.length === 0 ? (
-              <EmptyState
-                icon={CompassIcon}
-                title={trimmed.length > 0 ? t("emptyFiltered", { query }) : t("emptySkills")}
-                description={trimmed.length > 0 ? undefined : t("emptySkillsHint")}
-              />
-            ) : (
-              <ul className={legacyListClass}>
-                {skills.map((it) => {
-                  const s = it.kind === "skill" ? it.data : null
-                  if (!s) return null
-                  return (
-                    <li key={s.id}>
-                      <LongPress onLongPress={() => setActionItem(it)} className="block">
-                        <SkillCard
-                          skill={s}
-                          onToggle={(skill) => {
-                            const nextEnabled = skill.status === "disabled"
-                            void setSkillStatus(skill.id, nextEnabled ? "enabled" : "disabled")
-                            void enqueue({
-                              command: "skill_set_enabled",
-                              payload: { id: skill.id, enabled: nextEnabled },
-                              label: `${nextEnabled ? "Enable" : "Disable"} skill ${skill.name}`,
-                            })
-                          }}
-                        />
-                      </LongPress>
-                    </li>
-                  )
-                })}
-              </ul>
-            )
+            <div className="flex flex-col gap-3">
+              {skillsQuery.loading ? (
+                <ListSkeleton />
+              ) : skills.length === 0 ? (
+                <EmptyState
+                  icon={CompassIcon}
+                  title={trimmed.length > 0 ? t("emptyFiltered", { query }) : t("emptySkills")}
+                  description={trimmed.length > 0 ? undefined : t("emptySkillsHint")}
+                />
+              ) : (
+                <ul className={legacyListClass}>
+                  {skills.map((it) => {
+                    const s = it.kind === "skill" ? it.data : null
+                    if (!s) return null
+                    return (
+                      <li key={s.id}>
+                        <LongPress onLongPress={() => setActionItem(it)} className="block">
+                          <SkillCard
+                            skill={s}
+                            onToggle={(skill) => {
+                              const nextEnabled = skill.status === "disabled"
+                              void setSkillStatus(skill.id, nextEnabled ? "enabled" : "disabled")
+                              void enqueue({
+                                command: "skill_set_enabled",
+                                payload: { id: skill.id, enabled: nextEnabled },
+                                label: `${nextEnabled ? "Enable" : "Disable"} skill ${skill.name}`,
+                              })
+                            }}
+                          />
+                        </LongPress>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+              <SkillMarketplaceSheet className="self-start" />
+            </div>
           ) : null}
 
           {category === "plugins" ? (
@@ -374,7 +396,7 @@ export function DiscoverMobileBody() {
           <DiscoverInspector
             category={category}
             itemId={item}
-            items={gridQuery.items}
+            items={inspectorItems}
             onClose={clearItem}
           />
         </SheetContent>

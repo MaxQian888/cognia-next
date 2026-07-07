@@ -14,7 +14,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useChatStore, type PermissionMode } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
-import { useUIStore } from "@/stores/ui/ui-store"
+import { useBarItemVisible, useUIStore } from "@/stores/ui/ui-store"
 import { useActiveSessionLabel } from "@/hooks/chat/use-active-session-label"
 import {
   GlobeIcon,
@@ -33,6 +33,11 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { StatusBarBranch } from "@/components/source-control/status-bar-branch"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { JobCenterPanel } from "@/components/desktop/job-center-panel"
+import { StatusBarConnectivity } from "@/components/desktop/status-bar-connectivity"
+import { StatusBarSync } from "@/components/desktop/status-bar-sync"
+import { StatusBarPerf } from "@/components/desktop/status-bar-perf"
+import { StatusBarUsage } from "@/components/desktop/status-bar-usage"
+import { AccountBarButton } from "@/components/account/account-bar-button"
 
 import {
   ADVANCED_MODES,
@@ -63,6 +68,15 @@ export function StatusBar() {
 
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
+
+  // Optional segments — each self-hides when its data source is absent; here we
+  // additionally gate mounting so a hidden segment sets up no subscriptions
+  // (critical for perf, which starts native sampling on mount).
+  const showConnectivity = useBarItemVisible("connectivity")
+  const showSync = useBarItemVisible("sync")
+  const showPerf = useBarItemVisible("perf")
+  const showUsage = useBarItemVisible("usage")
+  const showAccount = useBarItemVisible("accountStatus")
 
   const persistedZoom = useSettingsStore((s) => s.settings?.webviewZoom)
   const language = useSettingsStore((s) => s.language)
@@ -144,7 +158,11 @@ export function StatusBar() {
         <span>{isDesktop ? t("tauri") : t("web")}</span>
       </StatusItem>
 
+      {showConnectivity && <StatusBarConnectivity />}
+
       <StatusBarBranch />
+
+      {isDesktop && showSync && <StatusBarSync />}
 
       <StatusItem
         onClick={openCommandPalette}
@@ -207,6 +225,12 @@ export function StatusBar() {
       <NotificationBell />
 
       <JobCenterPanel />
+
+      {isDesktop && showPerf && <StatusBarPerf />}
+
+      {isDesktop && showUsage && <StatusBarUsage />}
+
+      {showAccount && <AccountBarButton />}
 
       <StatusItem testId="status-status" aria-label={statusLabel}>
         <span

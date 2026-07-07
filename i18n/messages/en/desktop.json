@@ -472,7 +472,18 @@
     "zoom": "Zoom",
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
-    "zoomReset": "Reset zoom"
+    "zoomReset": "Reset zoom",
+    "connOnline": "Online",
+    "connOffline": "Offline",
+    "connReconnecting": "Reconnecting…",
+    "syncNever": "Not synced",
+    "syncLast": "Synced {time}",
+    "syncNow": "Sync now",
+    "perf": "Performance",
+    "perfCpu": "CPU",
+    "perfMem": "Memory",
+    "usage": "Usage & limits",
+    "usageOpen": "Open usage & limits"
   },
   "titleBar": {
     "alwaysOnTop": "Always on top",
@@ -494,13 +505,38 @@
       "toggleGuildRail": "Toggle Guild Rail",
       "toggleSidebar": "Toggle Sidebar",
       "toggleStatusBar": "Toggle Status Bar",
-      "toggleTerminal": "Toggle Terminal"
+      "toggleTerminal": "Toggle Terminal",
+      "statusBarGroup": "Status bar",
+      "titleBarGroup": "Title bar",
+      "itemConnectivity": "Connectivity",
+      "itemSync": "Sync status",
+      "itemPerf": "Performance monitor",
+      "itemAccount": "Account",
+      "itemUsage": "Usage & limits",
+      "itemWorkspace": "Workspace",
+      "itemQuickActions": "Quick actions"
     },
     "maximize": "Maximize",
     "minimize": "Minimize",
     "openMenus": "Open menus",
     "restore": "Restore",
     "searchPlaceholder": "Search or run command…",
-    "separator": " — "
+    "separator": " — ",
+    "workspace": "Workspace",
+    "workspaceUntitled": "Untitled workspace",
+    "quickActions": {
+      "showPet": "Show desktop pet",
+      "hidePet": "Hide desktop pet",
+      "ocr": "Screen OCR",
+      "capture": "Content capture"
+    }
+  },
+  "find": {
+    "placeholder": "Find in page",
+    "noMatches": "No results",
+    "matchOf": "{index} of {total}",
+    "previous": "Previous match",
+    "next": "Next match",
+    "close": "Close find"
   }
 }

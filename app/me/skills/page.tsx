@@ -7,11 +7,10 @@ import { SkillsSection } from "@/components/settings/sections/skills-section"
 
 export default function MobileSkillsPage() {
   const t = useTranslations("mobile.me")
-  // `SkillsSection` is a fill-height panel tuned for the desktop settings shell
-  // (`h-[calc(100dvh-…)]` + negative margins that cancel the shell's padding).
-  // Under `SubPageShell` we drop the body padding and give the section a fixed
-  // viewport height, then neutralize the component's negative margins + height
-  // via `className` (tailwind-merge lets these override the baked-in classes).
+  // `SkillsSection` is a fill-height panel (`flex-1 min-h-0`) that expects a
+  // bounded flex parent. Under `SubPageShell` we drop the body padding and give
+  // the body a fixed viewport height + flex column, then pass `m-0 h-full` so
+  // the section fills that frame (the panel's own scroll stays internal).
   return (
     <SubPageShell
       title={t("skillsRow")}

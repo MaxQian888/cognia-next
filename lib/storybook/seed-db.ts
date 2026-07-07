@@ -7,6 +7,7 @@
 // (`await getDb().delete(); __resetDbForTesting()`), so story order can't leak
 // rows between renders.
 import { getDb, __resetDbForTesting, whenSeeded } from "@/lib/db/schema"
+import { resolveScopeProjectId } from "@/lib/db/project-scope"
 
 type CogniaDB = ReturnType<typeof getDb>
 
@@ -26,5 +27,14 @@ export async function seedDb(fill: (db: CogniaDB) => Promise<void> | void): Prom
   // Re-open + kick off the built-in seed, then wait for it so list views that
   // also surface seed rows render deterministically.
   await whenSeeded()
+  // Establish the workspace scope the same way production does on first launch.
+  // Scoped reads (`listAllGoals`, …) resolve the active project lazily and will
+  // auto-create the Default workspace if none exists — which is a WRITE. When
+  // such a read runs inside a `useLiveQuery` (Dexie's read-only observation
+  // transaction), that write throws "Readwrite transaction in liveQuery
+  // context" and the story fails to render. Warming the scope here — outside any
+  // liveQuery — pre-creates the Default workspace so the later reactive read is
+  // pure.
+  await resolveScopeProjectId()
   await fill(getDb())
 }

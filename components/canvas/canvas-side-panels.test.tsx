@@ -123,6 +123,7 @@ describe("CanvasSidePanels", () => {
     expect(screen.getByRole("tab", { name: /Comments/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /Collab/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /Run/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /Outline/i })).toBeInTheDocument()
   })
 
   it("clicking a tab calls setActiveRightTab", async () => {
@@ -133,6 +134,8 @@ describe("CanvasSidePanels", () => {
     expect(useCanvasLayoutStore.getState().activeRightTab).toBe("history")
     await user.click(screen.getByRole("tab", { name: /Run/i }))
     expect(useCanvasLayoutStore.getState().activeRightTab).toBe("execution")
+    await user.click(screen.getByRole("tab", { name: /Outline/i }))
+    expect(useCanvasLayoutStore.getState().activeRightTab).toBe("outline")
   })
 
   it("starts on the persisted activeRightTab from the store", () => {

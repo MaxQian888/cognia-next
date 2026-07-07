@@ -58,4 +58,22 @@ describe("<DiscoverCategorySidebar />", () => {
     const nav = screen.getByTestId("discover-category-sidebar")
     expect(nav).toHaveAttribute("aria-label", "groups.aria")
   })
+
+  it("renders a foryou entry, marks it current when active, and selects it on click", async () => {
+    const onSelect = jest.fn()
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <DiscoverCategorySidebar activeCategory="foryou" onSelect={onSelect} />
+    )
+    const foryou = screen.getByTestId("discover-category-foryou")
+    expect(foryou).toHaveAttribute("aria-current", "page")
+    await user.click(foryou)
+    expect(onSelect).toHaveBeenCalledWith("foryou")
+
+    rerender(<DiscoverCategorySidebar activeCategory="characters" onSelect={onSelect} />)
+    expect(screen.getByTestId("discover-category-foryou")).not.toHaveAttribute(
+      "aria-current",
+      "page"
+    )
+  })
 })

@@ -33,7 +33,7 @@ jest.mock("next/navigation", () => ({
 }))
 
 import { useDiscoverRouteState } from "./use-discover-route-state"
-import { DEFAULT_DISCOVER_CATEGORY } from "@/lib/discover/categories"
+import { DEFAULT_DISCOVER_CATEGORY, FORYOU_CATEGORY } from "@/lib/discover/categories"
 
 beforeEach(() => {
   currentSearch = ""
@@ -43,9 +43,9 @@ beforeEach(() => {
 })
 
 describe("useDiscoverRouteState", () => {
-  it("defaults to the first implemented category when ?category= is absent", () => {
+  it("defaults to the foryou aggregated landing when ?category= is absent", () => {
     const { result } = renderHook(() => useDiscoverRouteState())
-    expect(result.current.category).toBe(DEFAULT_DISCOVER_CATEGORY)
+    expect(result.current.category).toBe(FORYOU_CATEGORY)
     expect(result.current.item).toBeNull()
   })
 
@@ -55,19 +55,24 @@ describe("useDiscoverRouteState", () => {
     expect(result.current.category).toBe("plugins")
   })
 
-  it("falls back to the default when ?category= is an unknown value", () => {
-    currentSearch = "?category=bogus"
+  it("reads a newly-added category id such as slashCommands", () => {
+    currentSearch = "?category=slashCommands"
     const { result } = renderHook(() => useDiscoverRouteState())
-    expect(result.current.category).toBe(DEFAULT_DISCOVER_CATEGORY)
+    expect(result.current.category).toBe("slashCommands")
   })
 
-  it("falls back to the default when ?category= names an unknown id", () => {
-    // All registered ids resolve through isValidCategoryId; any string not in
-    // the registry should fall back to the default. Future-phase ids that
-    // haven't shipped land in this bucket as well.
+  it("falls back to foryou when ?category= is an unknown value", () => {
+    currentSearch = "?category=bogus"
+    const { result } = renderHook(() => useDiscoverRouteState())
+    expect(result.current.category).toBe(FORYOU_CATEGORY)
+  })
+
+  it("falls back to foryou when ?category= names an unknown id", () => {
+    // All registered ids resolve through isValidView; any string not in the
+    // registry (nor a pseudo-category) falls back to the foryou landing.
     currentSearch = "?category=alien-id"
     const { result } = renderHook(() => useDiscoverRouteState())
-    expect(result.current.category).toBe(DEFAULT_DISCOVER_CATEGORY)
+    expect(result.current.category).toBe(FORYOU_CATEGORY)
   })
 
   it("reads ?item= when present", () => {

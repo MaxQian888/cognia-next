@@ -1998,3 +1998,99 @@ describe("AI-revision review (pending reviews)", () => {
     expect((persisted.artifacts as Record<string, unknown>)[a.id]).toBeDefined()
   })
 })
+
+describe("canvas AI-revision review", () => {
+  const makeCanvasDoc = (content: string) =>
+    useArtifactStore.getState().createCanvasDocument({
+      sessionId: "s1",
+      title: "Doc",
+      content,
+      language: "markdown",
+      type: "text",
+    })
+
+  it("proposeCanvasReview stages a per-hunk review without applying content", () => {
+    const id = makeCanvasDoc("a\nb\nc\nd")
+    const review = useArtifactStore.getState().proposeCanvasReview(id, "A\nb\nc\nD")
+    expect(review).not.toBeNull()
+    expect(review!.items.length).toBeGreaterThanOrEqual(2)
+    const s = useArtifactStore.getState()
+    expect(s.pendingReviews[id]).toBeDefined()
+    // Proposal is staged only — the buffer is untouched until applied.
+    expect(s.canvasDocuments[id].content).toBe("a\nb\nc\nd")
+  })
+
+  it("proposeCanvasReview returns null for unknown id or identical content", () => {
+    const id = makeCanvasDoc("a\nb")
+    expect(useArtifactStore.getState().proposeCanvasReview("nope", "x")).toBeNull()
+    expect(useArtifactStore.getState().proposeCanvasReview(id, "a\nb")).toBeNull()
+    expect(useArtifactStore.getState().pendingReviews[id]).toBeUndefined()
+  })
+
+  it("applyCanvasReview merges only accepted hunks, snapshots a version, and clears the proposal", () => {
+    const id = makeCanvasDoc("a\nb\nc\nd")
+    const review = useArtifactStore.getState().proposeCanvasReview(id, "A\nb\nc\nD")!
+    // Accept only the first hunk (a -> A); leave the last (d -> D) pending.
+    useArtifactStore.getState().setReviewItemStatus(id, review.items[0].id, "accepted")
+    useArtifactStore.getState().applyCanvasReview(id, "applied")
+
+    const s = useArtifactStore.getState()
+    expect(s.pendingReviews[id]).toBeUndefined()
+    expect(s.canvasDocuments[id].content).toBe("A\nb\nc\nd") // only accepted hunk applied
+    const versions = useArtifactStore.getState().getCanvasVersions(id)
+    expect(versions.some((v) => v.content === "a\nb\nc\nd")).toBe(true) // pre-apply snapshot
+  })
+
+  it("applyCanvasReview is a no-op for unknown ids and stale proposals", () => {
+    expect(() => useArtifactStore.getState().applyCanvasReview("nope")).not.toThrow()
+
+    const id = makeCanvasDoc("a\nb\nc\nd")
+    const review = useArtifactStore.getState().proposeCanvasReview(id, "A\nb\nc\nD")!
+    useArtifactStore.getState().setReviewItemStatus(id, review.items[0].id, "accepted")
+    // A manual edit moves the baseline -> the proposal goes stale.
+    useArtifactStore.getState().updateCanvasDocument(id, { content: "manual\nedit" })
+    expect(useArtifactStore.getState().pendingReviews[id].isStale).toBe(true)
+    useArtifactStore.getState().applyCanvasReview(id)
+    expect(useArtifactStore.getState().canvasDocuments[id].content).toBe("manual\nedit")
+    expect(useArtifactStore.getState().pendingReviews[id]).toBeDefined()
+  })
+
+  it("rejectCanvasReview clears the proposal without changing content", () => {
+    const id = makeCanvasDoc("a\nb\nc\nd")
+    useArtifactStore.getState().proposeCanvasReview(id, "A\nb\nc\nD")
+    useArtifactStore.getState().rejectCanvasReview(id)
+    expect(useArtifactStore.getState().pendingReviews[id]).toBeUndefined()
+    expect(useArtifactStore.getState().canvasDocuments[id].content).toBe("a\nb\nc\nd")
+    // no-op when nothing to reject
+    expect(() => useArtifactStore.getState().rejectCanvasReview(id)).not.toThrow()
+  })
+
+  it("a non-content updateCanvasDocument does not mark an open review stale", () => {
+    const id = makeCanvasDoc("a\nb\nc\nd")
+    useArtifactStore.getState().proposeCanvasReview(id, "A\nb\nc\nD")
+    useArtifactStore.getState().updateCanvasDocument(id, { title: "Renamed" })
+    expect(useArtifactStore.getState().pendingReviews[id].isStale).toBeFalsy()
+  })
+
+  it("restoreCanvasVersion marks an open review stale", () => {
+    const id = makeCanvasDoc("v1\nbody")
+    const v = useArtifactStore.getState().saveCanvasVersion(id, "first")!
+    useArtifactStore.getState().updateCanvasDocument(id, { content: "v2\nbody" })
+    useArtifactStore.getState().proposeCanvasReview(id, "v2\nBODY")
+    useArtifactStore.getState().restoreCanvasVersion(id, v.id)
+    expect(useArtifactStore.getState().pendingReviews[id].isStale).toBe(true)
+  })
+
+  it("deleteCanvasDocument and purgeProject drop the pending review", () => {
+    const id1 = makeCanvasDoc("a\nb\nc")
+    useArtifactStore.getState().proposeCanvasReview(id1, "A\nb\nc")
+    useArtifactStore.getState().deleteCanvasDocument(id1)
+    expect(useArtifactStore.getState().pendingReviews[id1]).toBeUndefined()
+
+    mockActiveProjectId = "proj_c"
+    const id2 = makeCanvasDoc("a\nb\nc")
+    useArtifactStore.getState().proposeCanvasReview(id2, "A\nb\nc")
+    useArtifactStore.getState().purgeProject("proj_c")
+    expect(useArtifactStore.getState().pendingReviews[id2]).toBeUndefined()
+  })
+})

@@ -30,3 +30,14 @@ export { RenameDialog } from "./rename-dialog"
 export { CollaborationPanel } from "./collaboration-panel"
 export { CommentPanel } from "./comment-panel"
 export { KeybindingSettings } from "./keybinding-settings"
+export { CanvasPreviewPane } from "./canvas-preview-pane"
+export { CanvasReviewView } from "./canvas-review-view"
+export { CanvasViewModeToggle } from "./canvas-view-mode-toggle"
+export { CanvasExportMenu } from "./canvas-export-menu"
+export { CanvasLanguageSelect } from "./canvas-language-select"
+export {
+  CanvasOutlinePanel,
+  parseCanvasSymbols,
+  countCanvasSymbols,
+  CANVAS_GOTO_LINE_EVENT,
+} from "./canvas-outline-panel"

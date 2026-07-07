@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { PlanApprovalCard } from "./plan-approval-card"
-import { buildDraftPlan, buildPlan } from "@/lib/storybook/fixtures/agent-plan"
+import { buildDraftPlan, buildMarkdownPlan, buildPlan } from "@/lib/storybook/fixtures/agent-plan"
 
 const meta = {
   title: "Agent/Plan/PlanApprovalCard",
@@ -30,6 +30,18 @@ export const WithRefine: Story = {
 // inline title/steps editor.
 export const WithInlineEdit: Story = {
   args: { onEdit: fn() },
+}
+
+// An `exit_plan_mode` plan renders its full markdown body (headings, lists,
+// code, blockquote) instead of the lossy step-title list.
+export const MarkdownBody: Story = {
+  args: { plan: buildMarkdownPlan() },
+}
+
+// With onEdit, the pencil toggle opens the raw-markdown editor for a plan that
+// carries a markdown body (rather than the one-step-per-line editor).
+export const MarkdownWithEdit: Story = {
+  args: { plan: buildMarkdownPlan(), onEdit: fn() },
 }
 
 // A partially-executed plan shows progress + struck-through completed steps.

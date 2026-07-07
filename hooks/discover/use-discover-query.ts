@@ -16,7 +16,7 @@
  * semantic sense and ignores them elsewhere.
  */
 
-import { useMemo } from "react"
+import { useMemo, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import type { Character, McpServer, Skill, Team } from "@/lib/claude/types"
@@ -37,6 +37,45 @@ import { getDb } from "@/lib/db/schema"
 import { listConnectorMetadata } from "@/lib/connectors/adapter-metadata"
 import { getSharedOcrRegistry } from "@/lib/ocr/registry"
 import { listCopilotTemplates } from "@/lib/workflow/copilot-templates"
+import type { McpPreset } from "@/lib/claude/mcp-presets"
+import { MCP_PRESETS } from "@/lib/claude/mcp-presets"
+import type { SlashCommandDefinition } from "@/lib/slash-commands/registry"
+import {
+  getSlashCommandsVersion,
+  listSlashCommands,
+  subscribeSlashCommands,
+} from "@/lib/slash-commands/registry"
+import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import { BUILT_IN_TEAM_TEMPLATES } from "@/types/agent/agent-team"
+import { listAgentTeamTemplateEntries } from "@/lib/plugin/registries/agent-team-template-registry"
+import { getAvailablePresets, getPresetDisplayInfo } from "@/lib/ai/agent/external/presets"
+import { resolveDispatchableSubagents } from "@/lib/claude/agents/subagents"
+
+/**
+ * Normalized team-template shape shared by the built-in `BUILT_IN_TEAM_TEMPLATES`
+ * and plugin-contributed `PluginAgentTeamTemplateDef` entries so the card /
+ * inspector render one shape regardless of source.
+ */
+export interface DiscoverTeamTemplate {
+  id: string
+  name: string
+  description: string
+  teammateCount: number
+  category?: string
+  isBuiltIn: boolean
+  /** Set for plugin-contributed templates — enables `getTemplateWarnings`. */
+  pluginId?: string
+}
+
+/** Normalized external-agent preset shape (from `getPresetDisplayInfo`). */
+export interface DiscoverExternalAgentPreset {
+  id: string
+  name: string
+  description: string
+  tags: string[]
+  setupHint?: string
+  docsUrl?: string
+}
 
 export type DiscoverItem =
   | { kind: "character"; id: string; data: Character }
@@ -49,6 +88,11 @@ export type DiscoverItem =
   | { kind: "workflowTemplate"; id: string; data: WorkflowCopilotTemplate }
   | { kind: "twinSource"; id: string; data: TwinSource }
   | { kind: "twinDraft"; id: string; data: TwinDraft }
+  | { kind: "slashCommand"; id: string; data: SlashCommandDefinition }
+  | { kind: "mcpPreset"; id: string; data: McpPreset }
+  | { kind: "teamTemplate"; id: string; data: DiscoverTeamTemplate }
+  | { kind: "externalAgentPreset"; id: string; data: DiscoverExternalAgentPreset }
+  | { kind: "subagent"; id: string; data: PluginSubagentDef }
 
 export interface DiscoverQueryOptions {
   sort?: DiscoverSort
@@ -82,6 +126,58 @@ function compareByRecent(aTs: number, bTs: number): number {
   return bTs - aTs
 }
 
+/**
+ * Normalize built-in + plugin-contributed agent-team templates into one list.
+ * Synchronous — reads the static `BUILT_IN_TEAM_TEMPLATES` array and the
+ * in-memory plugin overlay (`listAgentTeamTemplateEntries`).
+ */
+function buildTeamTemplates(): DiscoverTeamTemplate[] {
+  const builtIns = BUILT_IN_TEAM_TEMPLATES.map<DiscoverTeamTemplate>((tpl) => ({
+    id: tpl.id,
+    name: tpl.name,
+    description: tpl.description,
+    teammateCount: tpl.teammates.length,
+    category: tpl.category,
+    isBuiltIn: true,
+  }))
+  const plugins = listAgentTeamTemplateEntries().map<DiscoverTeamTemplate>((e) => ({
+    id: e.id,
+    name: e.entry.name,
+    description: e.entry.description,
+    teammateCount: e.entry.teammates?.length ?? 0,
+    category: e.entry.category,
+    isBuiltIn: false,
+    pluginId: e.pluginId,
+  }))
+  return [...builtIns, ...plugins]
+}
+
+/**
+ * Project every available external-agent preset (static + plugin overlay) into
+ * its display shape. Skips ids with no resolvable display info.
+ */
+function buildExternalAgentPresets(): DiscoverExternalAgentPreset[] {
+  const out: DiscoverExternalAgentPreset[] = []
+  for (const id of getAvailablePresets()) {
+    const info = getPresetDisplayInfo(id)
+    if (!info) continue
+    out.push({
+      id,
+      name: info.name,
+      description: info.description,
+      tags: info.tags ?? [],
+      setupHint: info.setupHint,
+      docsUrl: info.docsUrl,
+    })
+  }
+  return out
+}
+
+/** The dispatchable subagents (host built-ins + plugin overlay + user templates). */
+function buildSubagents(): Array<{ id: string; def: PluginSubagentDef }> {
+  return resolveDispatchableSubagents()
+}
+
 export function useDiscoverQuery(
   category: DiscoverView,
   query: string,
@@ -94,6 +190,15 @@ export function useDiscoverQuery(
   // The favorites pseudo-category aggregates every kind, so its Dexie reads
   // must be live whenever it (not just the matching real category) is active.
   const isFavoritesView = category === FAVORITES_CATEGORY
+
+  // Slash commands live in an in-memory registry (not Dexie). Subscribe to its
+  // version counter so newly (un)registered plugin commands re-derive the list.
+  // The value is unused directly — it is the change signal for the memo below.
+  const slashVersion = useSyncExternalStore(
+    subscribeSlashCommands,
+    getSlashCommandsVersion,
+    getSlashCommandsVersion
+  )
 
   // Every call site is unconditional so React hook order stays the same on
   // every render. Inactive categories resolve to the shared empty array —
@@ -279,6 +384,58 @@ export function useDiscoverQuery(
               )
             })
             .map<DiscoverItem>((data) => ({ kind: "twinDraft", id: data.id, data }))
+        case "slashCommands": {
+          // `slashVersion` (memo dep) drives re-derivation; read fresh here.
+          let arr = listSlashCommands().filter(
+            (c) =>
+              matchesQuery(c.name, trimmed) ||
+              matchesQuery(c.description, trimmed) ||
+              matchesQuery(c.id, trimmed)
+          )
+          if (filter === "builtin") arr = arr.filter((c) => c.source === "builtin")
+          arr.sort((a, b) => a.name.localeCompare(b.name))
+          return arr.map<DiscoverItem>((data) => ({ kind: "slashCommand", id: data.id, data }))
+        }
+        case "mcpPresets": {
+          const arr = MCP_PRESETS.filter(
+            (p) =>
+              matchesQuery(p.name, trimmed) ||
+              matchesQuery(p.description, trimmed) ||
+              (p.tags ?? []).some((tag) => matchesQuery(tag, trimmed))
+          )
+          return arr.map<DiscoverItem>((data) => ({ kind: "mcpPreset", id: data.id, data }))
+        }
+        case "teamTemplates": {
+          let arr = buildTeamTemplates().filter(
+            (tpl) => matchesQuery(tpl.name, trimmed) || matchesQuery(tpl.description, trimmed)
+          )
+          if (filter === "builtin") arr = arr.filter((tpl) => tpl.isBuiltIn)
+          arr.sort((a, b) => a.name.localeCompare(b.name))
+          return arr.map<DiscoverItem>((data) => ({ kind: "teamTemplate", id: data.id, data }))
+        }
+        case "agentPresets": {
+          // Two kinds share this browse gallery: external-agent presets (Codex /
+          // Claude Code / Cursor / …) and dispatchable subagents. `builtin`/etc.
+          // filters don't map cleanly onto a browse-all gallery, so they no-op
+          // here (the `favorites` filter still applies globally below).
+          const presets = buildExternalAgentPresets()
+            .filter(
+              (p) =>
+                matchesQuery(p.name, trimmed) ||
+                matchesQuery(p.description, trimmed) ||
+                p.tags.some((tag) => matchesQuery(tag, trimmed))
+            )
+            .map<DiscoverItem>((data) => ({ kind: "externalAgentPreset", id: data.id, data }))
+          const subs = buildSubagents()
+            .filter(
+              (s) =>
+                matchesQuery(s.def.name, trimmed) ||
+                matchesQuery(s.def.description, trimmed) ||
+                matchesQuery(s.id, trimmed)
+            )
+            .map<DiscoverItem>((s) => ({ kind: "subagent", id: s.id, data: s.def }))
+          return [...presets, ...subs]
+        }
         case FAVORITES_CATEGORY: {
           // Aggregate every kind, then keep only favorited items. The favorites
           // view is a curated short list, so the search box does not narrow it.
@@ -331,6 +488,27 @@ export function useDiscoverQuery(
               id: data.id,
               data,
             })),
+            ...listSlashCommands().map<DiscoverItem>((data) => ({
+              kind: "slashCommand",
+              id: data.id,
+              data,
+            })),
+            ...MCP_PRESETS.map<DiscoverItem>((data) => ({ kind: "mcpPreset", id: data.id, data })),
+            ...buildTeamTemplates().map<DiscoverItem>((data) => ({
+              kind: "teamTemplate",
+              id: data.id,
+              data,
+            })),
+            ...buildExternalAgentPresets().map<DiscoverItem>((data) => ({
+              kind: "externalAgentPreset",
+              id: data.id,
+              data,
+            })),
+            ...buildSubagents().map<DiscoverItem>((s) => ({
+              kind: "subagent",
+              id: s.id,
+              data: s.def,
+            })),
           ]
           return all.filter((i) => favoriteKeys.has(favoriteKey(i.kind, i.id)))
         }
@@ -355,6 +533,7 @@ export function useDiscoverQuery(
     mcpServersRaw,
     twinSourcesRaw,
     twinDraftsRaw,
+    slashVersion,
     trimmed,
     sort,
     filter,

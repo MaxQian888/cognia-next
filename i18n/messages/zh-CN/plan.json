@@ -7,6 +7,8 @@
     "discard": "丢弃计划",
     "edit": "编辑计划",
     "editCancel": "取消",
+    "editPlanHint": "以 Markdown 编辑计划…",
+    "editPlanLabel": "计划（Markdown）",
     "editSave": "保存修改",
     "editStepsHint": "每行一个步骤…",
     "editStepsLabel": "步骤（每行一个）",

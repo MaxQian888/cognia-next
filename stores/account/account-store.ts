@@ -56,6 +56,7 @@ export interface AccountStoreState {
     currentPassword: string,
     newPassword: string
   ) => Promise<LocalAccountRecord>
+  setAccountAvatar: (accountId: string, avatarDataUrl: string | null) => Promise<LocalAccountRecord>
   deleteAccount: (accountId: string, options?: DeleteLocalAccountOptions) => Promise<void>
   lock: () => void
 }
@@ -285,6 +286,24 @@ export function createAccountStore(
             accountId,
             passwordVerifier
           )
+          set((state) => {
+            const accounts = upsertAccount(state.accounts, updated)
+            return {
+              accounts,
+              locked: computeLocked(accounts, state.activeAccountId, state.unlockedAccountId),
+              error: null,
+            }
+          })
+          return updated
+        } catch (error) {
+          throw setFailure(error)
+        }
+      },
+
+      setAccountAvatar: async (accountId, avatarDataUrl) => {
+        set({ error: null })
+        try {
+          const updated = await dependencies.registry.updateAvatar(accountId, avatarDataUrl)
           set((state) => {
             const accounts = upsertAccount(state.accounts, updated)
             return {

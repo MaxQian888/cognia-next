@@ -18,6 +18,19 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+// The panel renders the proposed plan through the shared MarkdownRenderer;
+// stub it (identity) so these tests don't pull in the heavy markdown pipeline.
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
+}))
+
+// Drive the reduced-motion branch of the entrance animation deterministically.
+let mockReducedMotion = false
+jest.mock("motion/react", () => {
+  const actual = jest.requireActual("motion/react")
+  return { ...actual, useReducedMotion: () => mockReducedMotion }
+})
+
 const team: AgentTeam = {
   id: "team-x",
   name: "X",
@@ -58,6 +71,7 @@ const leadWithoutPlan: AgentTeammate = { ...leadWithPlan, proposedPlan: undefine
 
 beforeEach(() => {
   __resetForTesting()
+  mockReducedMotion = false
 })
 
 describe("PlanApprovalPanel", () => {
@@ -72,6 +86,19 @@ describe("PlanApprovalPanel", () => {
   it("renders the proposed plan when present", () => {
     render(<PlanApprovalPanel team={team} lead={leadWithPlan} />)
     expect(screen.getByText(/steps/)).toBeInTheDocument()
+  })
+
+  it("renders the proposed plan as markdown, not a raw <pre>", () => {
+    const { container } = render(<PlanApprovalPanel team={team} lead={leadWithPlan} />)
+    expect(screen.getByTestId("plan-approval-panel-body")).toBeInTheDocument()
+    expect(screen.getByTestId("md")).toBeInTheDocument()
+    expect(container.querySelector("pre")).toBeNull()
+  })
+
+  it("drops the entrance offset when the user prefers reduced motion", () => {
+    mockReducedMotion = true
+    render(<PlanApprovalPanel team={team} lead={leadWithPlan} />)
+    expect(screen.getByTestId("plan-approval-panel")).toBeInTheDocument()
   })
 
   it("approve resolves the bus waiter for this team", async () => {

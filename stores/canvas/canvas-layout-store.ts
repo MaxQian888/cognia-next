@@ -10,10 +10,23 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
-export type CanvasRightTab = "suggestions" | "history" | "comments" | "collaboration" | "execution"
+export type CanvasRightTab =
+  | "suggestions"
+  | "history"
+  | "comments"
+  | "collaboration"
+  | "execution"
+  | "outline"
 
 /** Left-rail presentation: time-grouped buckets vs a flat filename.ext list. */
 export type CanvasRailViewMode = "grouped" | "files"
+
+/**
+ * Center-pane presentation: editor only, editor beside a live preview, or the
+ * live preview alone. The `<CanvasPanel />` toolbar toggles between these; on
+ * narrow panes / mobile "split" is treated as "code" (no side-by-side).
+ */
+export type CanvasPreviewMode = "code" | "split" | "preview"
 
 export interface CanvasLayoutState {
   leftSize: number
@@ -24,6 +37,8 @@ export interface CanvasLayoutState {
   activeRightTab: CanvasRightTab
   /** How the document rail lists documents (see CanvasRailViewMode). */
   railViewMode: CanvasRailViewMode
+  /** How the center pane presents the editor / live preview (see CanvasPreviewMode). */
+  previewMode: CanvasPreviewMode
   mobileLeftOpen: boolean
   mobileRightOpen: boolean
   /** Bumped on migrate / reset so ResizablePanelGroup remounts with new defaults. */
@@ -38,6 +53,7 @@ export interface CanvasLayoutState {
   setRightCollapsed: (collapsed: boolean) => void
   setActiveRightTab: (tab: CanvasRightTab) => void
   setRailViewMode: (mode: CanvasRailViewMode) => void
+  setPreviewMode: (mode: CanvasPreviewMode) => void
   setMobileLeftOpen: (open: boolean) => void
   setMobileRightOpen: (open: boolean) => void
   resetLayout: () => void
@@ -54,6 +70,7 @@ interface PersistedCanvasLayoutState {
   rightCollapsed: boolean
   activeRightTab: CanvasRightTab
   railViewMode: CanvasRailViewMode
+  previewMode: CanvasPreviewMode
   layoutVersion: number
   pinnedDocIds: string[]
 }
@@ -66,6 +83,7 @@ export const CANVAS_LAYOUT_DEFAULTS = {
   rightCollapsed: false,
   activeRightTab: "suggestions" as CanvasRightTab,
   railViewMode: "grouped" as CanvasRailViewMode,
+  previewMode: "split" as CanvasPreviewMode,
   layoutVersion: 0,
   pinnedDocIds: new Set<string>(),
 }
@@ -125,6 +143,7 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
       setRightCollapsed: (collapsed) => set({ rightCollapsed: collapsed }),
       setActiveRightTab: (tab) => set({ activeRightTab: tab }),
       setRailViewMode: (mode) => set({ railViewMode: mode }),
+      setPreviewMode: (mode) => set({ previewMode: mode }),
       setMobileLeftOpen: (open) => set({ mobileLeftOpen: open }),
       setMobileRightOpen: (open) => set({ mobileRightOpen: open }),
       resetLayout: () =>
@@ -148,7 +167,7 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
     }),
     {
       name: "cognia-canvas-layout",
-      version: 5,
+      version: 6,
       migrate: (_oldState: unknown, _oldVersion: number) => ({
         ...CANVAS_LAYOUT_DEFAULTS,
         layoutVersion: 1,
@@ -164,6 +183,7 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
         rightCollapsed: state.rightCollapsed,
         activeRightTab: state.activeRightTab,
         railViewMode: state.railViewMode,
+        previewMode: state.previewMode,
         layoutVersion: state.layoutVersion,
         pinnedDocIds: [...state.pinnedDocIds],
       }),

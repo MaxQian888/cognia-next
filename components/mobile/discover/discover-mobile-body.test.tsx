@@ -220,6 +220,12 @@ jest.mock("@/components/discover/plugin-marketplace-sheet", () => ({
   PluginMarketplaceSheet: () => <div data-testid="stub-plugin-marketplace-sheet" />,
 }))
 
+// Skill marketplace sheet — stubbed so its SkillMarketplace → streamdown (ESM)
+// chain doesn't load in jsdom.
+jest.mock("@/components/discover/skill-marketplace-sheet", () => ({
+  SkillMarketplaceSheet: () => <div data-testid="stub-skill-marketplace-sheet" />,
+}))
+
 // SortFilterSheet — a separate concern; not under test.
 jest.mock("@/components/discover/sort-filter-sheet", () => ({
   SortFilterSheet: () => <div data-testid="stub-sort-filter-sheet" />,
@@ -366,7 +372,15 @@ describe("<DiscoverMobileBody />", () => {
       expect(screen.getByTestId("chip-strip-twinDrafts")).toBeInTheDocument()
     })
 
-    it("default category is 'characters' — character cards visible initially", () => {
+    it("defaults to the aggregated foryou home (no ?category=)", () => {
+      render(<DiscoverMobileBody />)
+      // Default lands on the home strips, not the characters legacy list.
+      expect(screen.getByTestId("chip-strip-foryou")).toBeInTheDocument()
+      expect(screen.queryByTestId("stub-character-card-char-1")).not.toBeInTheDocument()
+    })
+
+    it("characters category renders character cards", () => {
+      currentSearch = "?category=characters"
       render(<DiscoverMobileBody />)
       // The character fixture renders via our CharacterCard stub.
       expect(screen.getByTestId("stub-character-card-char-1")).toBeInTheDocument()
@@ -498,6 +512,7 @@ describe("<DiscoverMobileBody />", () => {
     )
 
     it("characters category shows character cards list (legacy layout)", () => {
+      currentSearch = "?category=characters"
       render(<DiscoverMobileBody />)
       expect(screen.getByTestId("stub-character-card-char-1")).toBeInTheDocument()
     })
@@ -545,6 +560,7 @@ describe("<DiscoverMobileBody />", () => {
 
   describe("create-character FAB", () => {
     it("renders the create-character button on the characters tab", () => {
+      currentSearch = "?category=characters"
       render(<DiscoverMobileBody />)
       expect(screen.getByTestId("character-create-fab")).toBeInTheDocument()
     })
@@ -556,6 +572,7 @@ describe("<DiscoverMobileBody />", () => {
     })
 
     it("clicking the FAB opens the CharacterDetailSheet with no preselected character", async () => {
+      currentSearch = "?category=characters"
       const user = userEvent.setup()
       render(<DiscoverMobileBody />)
       await user.click(screen.getByTestId("character-create-fab"))
@@ -567,6 +584,7 @@ describe("<DiscoverMobileBody />", () => {
 
   describe("FeaturedCarousel", () => {
     it("renders the featured carousel on the characters tab when query is empty", () => {
+      currentSearch = "?category=characters"
       render(<DiscoverMobileBody />)
       expect(screen.getByTestId("stub-featured-carousel")).toBeInTheDocument()
     })

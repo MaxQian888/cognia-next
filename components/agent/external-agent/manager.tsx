@@ -25,6 +25,7 @@ import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertCircle,
+  ChevronDown,
   ExternalLink,
   Plus,
   Power,
@@ -37,6 +38,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Dialog,
@@ -162,18 +164,18 @@ function AgentCard({
   return (
     <Card
       className={cn(
-        "cursor-pointer transition-all hover:shadow-md",
+        "cursor-pointer gap-2 py-3 transition-all hover:shadow-md",
         isActive && "ring-2 ring-primary"
       )}
       onClick={onSelect}
     >
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
+      <CardHeader className="px-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1 space-y-1">
             <div className="flex items-center gap-2">
-              <CardTitle className="text-base">{config.name}</CardTitle>
+              <CardTitle className="truncate text-sm">{config.name}</CardTitle>
               {ecosystem?.supportTier && (
-                <Badge variant="outline" className="text-[10px]">
+                <Badge variant="outline" className="shrink-0 text-[10px]">
                   {ecosystem.supportTier}
                 </Badge>
               )}
@@ -185,18 +187,18 @@ function AgentCard({
               })}
             </CardDescription>
             {ecosystem?.surfaceName && (
-              <p className="text-[11px] text-muted-foreground">{ecosystem.surfaceName}</p>
+              <p className="truncate text-[11px] text-muted-foreground">{ecosystem.surfaceName}</p>
             )}
           </div>
-          <ConnectionStatusBadge status={connectionStatus} withIcon />
+          <ConnectionStatusBadge status={connectionStatus} withIcon className="shrink-0" />
         </div>
       </CardHeader>
-      <CardContent className="pb-3">
-        <div className="flex items-center justify-between">
-          <div className="text-xs text-muted-foreground">
+      <CardContent className="px-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
             {config.process?.command || config.network?.endpoint || tManager("noEndpoint")}
           </div>
-          <div className="flex gap-1">
+          <div className="flex shrink-0 gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -250,6 +252,53 @@ function AgentCard({
         )}
       </CardContent>
     </Card>
+  )
+}
+
+// ============================================================================
+// Collapsible Section
+// ============================================================================
+
+interface CollapsibleSectionProps {
+  title: string
+  /** Optional count badge shown next to the title (hidden when 0/undefined). */
+  count?: number
+  /** Start expanded. Verbose/advanced sections stay collapsed by default. */
+  defaultOpen?: boolean
+  /** Forwarded to the always-mounted root so tests can target the section. */
+  dataTestId?: string
+  children: React.ReactNode
+}
+
+/**
+ * Bordered, collapsible detail block used by the manager's diagnostics and
+ * benchmark panels. Keeps the default view compact while leaving verbose
+ * runtime data one click away. The whole header row is the toggle; sections
+ * that need an inline action in the header (e.g. Sessions) build their own
+ * Collapsible instead.
+ */
+function CollapsibleSection({
+  title,
+  count,
+  defaultOpen = false,
+  dataTestId,
+  children,
+}: CollapsibleSectionProps) {
+  return (
+    <Collapsible defaultOpen={defaultOpen} className="rounded-md border" data-testid={dataTestId}>
+      <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{title}</span>
+          {typeof count === "number" && count > 0 && (
+            <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[10px]">
+              {count}
+            </Badge>
+          )}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-3 pb-3">{children}</CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -673,86 +722,97 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                 />
               </div>
             )}
-            <Separator />
-            <div className="grid gap-2">
-              <Label htmlFor="timeoutMs">{tSettings("executionTimeoutMs")}</Label>
-              <Input
-                id="timeoutMs"
-                type="number"
-                min={1000}
-                step={1000}
-                value={formData.timeoutMs}
-                onChange={(e) => setFormData({ ...formData, timeoutMs: e.target.value })}
-                placeholder={DEFAULT_TIMEOUT_MS}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="retryMaxRetries">{tSettings("maxRetries")}</Label>
-                <Input
-                  id="retryMaxRetries"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={formData.retryMaxRetries}
-                  onChange={(e) => setFormData({ ...formData, retryMaxRetries: e.target.value })}
-                  placeholder={DEFAULT_RETRY_MAX_RETRIES}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="retryDelayMs">{tSettings("retryDelayMs")}</Label>
-                <Input
-                  id="retryDelayMs"
-                  type="number"
-                  min={0}
-                  step={100}
-                  value={formData.retryDelayMs}
-                  onChange={(e) => setFormData({ ...formData, retryDelayMs: e.target.value })}
-                  placeholder={DEFAULT_RETRY_DELAY_MS}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="retryMaxDelayMs">{tSettings("maxRetryDelayMs")}</Label>
-                <Input
-                  id="retryMaxDelayMs"
-                  type="number"
-                  min={0}
-                  step={100}
-                  value={formData.retryMaxDelayMs}
-                  onChange={(e) => setFormData({ ...formData, retryMaxDelayMs: e.target.value })}
-                  placeholder={DEFAULT_RETRY_MAX_DELAY_MS}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="retryExponentialBackoff">{tSettings("backoffStrategy")}</Label>
-                <Select
-                  value={formData.retryExponentialBackoff ? "true" : "false"}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, retryExponentialBackoff: value === "true" })
-                  }
-                >
-                  <SelectTrigger id="retryExponentialBackoff">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="true">{tSettings("backoffExponential")}</SelectItem>
-                    <SelectItem value="false">{tSettings("backoffFixedDelay")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="retryOnErrors">{tSettings("retryErrorPatterns")}</Label>
-              <Textarea
-                id="retryOnErrors"
-                className="min-h-20 text-sm"
-                value={formData.retryOnErrors}
-                onChange={(e) => setFormData({ ...formData, retryOnErrors: e.target.value })}
-                placeholder={tSettings("retryErrorPatternsPlaceholder")}
-              />
-            </div>
+            <Collapsible className="rounded-md border">
+              <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium">
+                <span>{tManager("advancedOptions")}</span>
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="grid gap-4 px-3 pb-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="timeoutMs">{tSettings("executionTimeoutMs")}</Label>
+                  <Input
+                    id="timeoutMs"
+                    type="number"
+                    min={1000}
+                    step={1000}
+                    value={formData.timeoutMs}
+                    onChange={(e) => setFormData({ ...formData, timeoutMs: e.target.value })}
+                    placeholder={DEFAULT_TIMEOUT_MS}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="retryMaxRetries">{tSettings("maxRetries")}</Label>
+                    <Input
+                      id="retryMaxRetries"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={formData.retryMaxRetries}
+                      onChange={(e) =>
+                        setFormData({ ...formData, retryMaxRetries: e.target.value })
+                      }
+                      placeholder={DEFAULT_RETRY_MAX_RETRIES}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="retryDelayMs">{tSettings("retryDelayMs")}</Label>
+                    <Input
+                      id="retryDelayMs"
+                      type="number"
+                      min={0}
+                      step={100}
+                      value={formData.retryDelayMs}
+                      onChange={(e) => setFormData({ ...formData, retryDelayMs: e.target.value })}
+                      placeholder={DEFAULT_RETRY_DELAY_MS}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="retryMaxDelayMs">{tSettings("maxRetryDelayMs")}</Label>
+                    <Input
+                      id="retryMaxDelayMs"
+                      type="number"
+                      min={0}
+                      step={100}
+                      value={formData.retryMaxDelayMs}
+                      onChange={(e) =>
+                        setFormData({ ...formData, retryMaxDelayMs: e.target.value })
+                      }
+                      placeholder={DEFAULT_RETRY_MAX_DELAY_MS}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="retryExponentialBackoff">{tSettings("backoffStrategy")}</Label>
+                    <Select
+                      value={formData.retryExponentialBackoff ? "true" : "false"}
+                      onValueChange={(value) =>
+                        setFormData({ ...formData, retryExponentialBackoff: value === "true" })
+                      }
+                    >
+                      <SelectTrigger id="retryExponentialBackoff">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">{tSettings("backoffExponential")}</SelectItem>
+                        <SelectItem value="false">{tSettings("backoffFixedDelay")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="retryOnErrors">{tSettings("retryErrorPatterns")}</Label>
+                  <Textarea
+                    id="retryOnErrors"
+                    className="min-h-20 text-sm"
+                    value={formData.retryOnErrors}
+                    onChange={(e) => setFormData({ ...formData, retryOnErrors: e.target.value })}
+                    placeholder={tSettings("retryErrorPatternsPlaceholder")}
+                  />
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
           <DialogFooter>
             <Button
@@ -1199,7 +1259,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
       <Separator />
 
       {/* Agent List */}
-      <ScrollArea className="h-100">
+      <ScrollArea className="max-h-[52vh]">
         {agents.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <Settings className="mb-4 h-12 w-12 text-muted-foreground/50" />
@@ -1211,7 +1271,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
             </Button>
           </div>
         ) : (
-          <div className="grid gap-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             {agents.map((agent) => (
               <AgentCard
                 key={agent.config.id}
@@ -1229,104 +1289,118 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
 
       {/* Session Management */}
       {activeAgentId && (
-        <div className="rounded-md border p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="text-sm font-medium">{tManager("sessions")}</div>
+        <Collapsible defaultOpen className="rounded-md border">
+          <div className="flex items-center justify-between gap-2 px-3 py-2">
+            <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium">
+              <span className="truncate">{tManager("sessions")}</span>
+              {sessionList.length > 0 && (
+                <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[10px]">
+                  {sessionList.length}
+                </Badge>
+              )}
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+            </CollapsibleTrigger>
             <Button
               variant="outline"
               size="sm"
+              className="shrink-0"
               onClick={refreshSessions}
               disabled={isLoadingSessions || !canUseSessionActions}
             >
               {isLoadingSessions ? tCommon("loading") : tManager("refreshSessions")}
             </Button>
           </div>
-          {!isActiveAgentExecutable ? (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              {activeAgentBlockedReason || tDiag("notExecutable")}
-            </p>
-          ) : !isActiveAgentConnected ? (
-            <p className="text-xs text-muted-foreground">{tDiag("connectAgentToList")}</p>
-          ) : listSupport?.state === "unsupported" ? (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              {listSupport.reason || tDiag("sessionListingUnsupported")}
-            </p>
-          ) : sessionList.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{tManager("noResumableSessions")}</p>
-          ) : (
-            <div className="space-y-2">
-              {sessionList.map((session) => (
-                <div
-                  key={session.sessionId}
-                  className="flex items-center justify-between rounded border px-2 py-1.5"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-medium">
-                      {session.title || session.sessionId}
-                    </p>
-                    <p className="truncate text-[11px] text-muted-foreground">
-                      {session.sessionId}
-                    </p>
+          <CollapsibleContent className="px-3 pb-3">
+            {!isActiveAgentExecutable ? (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                {activeAgentBlockedReason || tDiag("notExecutable")}
+              </p>
+            ) : !isActiveAgentConnected ? (
+              <p className="text-xs text-muted-foreground">{tDiag("connectAgentToList")}</p>
+            ) : listSupport?.state === "unsupported" ? (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                {listSupport.reason || tDiag("sessionListingUnsupported")}
+              </p>
+            ) : sessionList.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{tManager("noResumableSessions")}</p>
+            ) : (
+              <div className="space-y-2">
+                {sessionList.map((session) => (
+                  <div
+                    key={session.sessionId}
+                    className="flex items-center justify-between rounded border px-2 py-1.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-medium">
+                        {session.title || session.sessionId}
+                      </p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {session.sessionId}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleResumeSession(session.sessionId)}
+                        disabled={
+                          isExecuting ||
+                          activeSession?.id === session.sessionId ||
+                          !isActiveAgentExecutable ||
+                          !isActiveAgentConnected ||
+                          resumeSupport?.state === "unsupported"
+                        }
+                      >
+                        {tManager("resume")}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleForkSession(session.sessionId)}
+                        disabled={
+                          isExecuting ||
+                          !isActiveAgentExecutable ||
+                          !isActiveAgentConnected ||
+                          forkSupport?.state === "unsupported"
+                        }
+                      >
+                        {tManager("fork")}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleResumeSession(session.sessionId)}
-                      disabled={
-                        isExecuting ||
-                        activeSession?.id === session.sessionId ||
-                        !isActiveAgentExecutable ||
-                        !isActiveAgentConnected ||
-                        resumeSupport?.state === "unsupported"
-                      }
-                    >
-                      {tManager("resume")}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleForkSession(session.sessionId)}
-                      disabled={
-                        isExecuting ||
-                        !isActiveAgentExecutable ||
-                        !isActiveAgentConnected ||
-                        forkSupport?.state === "unsupported"
-                      }
-                    >
-                      {tManager("fork")}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {(resumeSupport?.state === "unsupported" || forkSupport?.state === "unsupported") && (
-            <div className="mt-2 space-y-1 text-[11px] text-amber-700 dark:text-amber-400">
-              {resumeSupport?.state === "unsupported" && (
-                <p>
-                  {tDiag("resumeUnsupported", {
-                    reason: resumeSupport.reason || tDiag("resumeUnsupportedDefault"),
-                  })}
-                </p>
-              )}
-              {forkSupport?.state === "unsupported" && (
-                <p>
-                  {tDiag("forkUnsupported", {
-                    reason: forkSupport.reason || tDiag("forkUnsupportedDefault"),
-                  })}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
+                ))}
+              </div>
+            )}
+            {(resumeSupport?.state === "unsupported" || forkSupport?.state === "unsupported") && (
+              <div className="mt-2 space-y-1 text-[11px] text-amber-700 dark:text-amber-400">
+                {resumeSupport?.state === "unsupported" && (
+                  <p>
+                    {tDiag("resumeUnsupported", {
+                      reason: resumeSupport.reason || tDiag("resumeUnsupportedDefault"),
+                    })}
+                  </p>
+                )}
+                {forkSupport?.state === "unsupported" && (
+                  <p>
+                    {tDiag("forkUnsupported", {
+                      reason: forkSupport.reason || tDiag("forkUnsupportedDefault"),
+                    })}
+                  </p>
+                )}
+              </div>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {/* Runtime Diagnostics */}
       {activeAgent && (
-        <div className="rounded-md border p-3 text-xs" data-testid="external-agent-diagnostics">
-          <div className="mb-2 text-sm font-medium">{tDiag("runtimeDiagnostics")}</div>
-          <div className="grid gap-1 text-muted-foreground">
+        <CollapsibleSection
+          title={tDiag("runtimeDiagnostics")}
+          defaultOpen
+          dataTestId="external-agent-diagnostics"
+        >
+          <div className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs text-muted-foreground [&>p]:min-w-0 [&>p]:break-words sm:grid-cols-2">
             <p>
               {tDiag("protocolTransport", {
                 protocol: activeAgent.config.protocol.toUpperCase(),
@@ -1353,7 +1427,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                 value: activeAgentValidity?.negotiation?.authRequired ? tDiag("yes") : tDiag("no"),
               })}
             </p>
-            <p>
+            <p className="sm:col-span-2">
               {tDiag("authMethods", {
                 methods: activeAgentValidity?.negotiation?.authMethods?.length
                   ? activeAgentValidity.negotiation.authMethods
@@ -1385,7 +1459,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
             <p>{tDiag("lifecycleStage", { stage: lifecycleStage })}</p>
             {blockedStage && <p>{tDiag("blockedStage", { stage: blockedStage })}</p>}
             <p>{tDiag("branchOutcome", { outcome: branchOutcome })}</p>
-            <p>
+            <p className="sm:col-span-2">
               {canonicalReason
                 ? tDiag("canonicalReasonWithText", {
                     code: canonicalReasonCode,
@@ -1394,7 +1468,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                 : tDiag("canonicalReason", { code: canonicalReasonCode })}
             </p>
             {(correlationSessionId || correlationTurnId) && (
-              <p>
+              <p className="sm:col-span-2">
                 {tDiag("correlation", {
                   session: correlationSessionId || tDiag("naLabel"),
                   turn: correlationTurnId || tDiag("naLabel"),
@@ -1402,7 +1476,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
               </p>
             )}
             {activeLastRunSnapshot && (
-              <div className="rounded border p-2 text-foreground">
+              <div className="rounded border p-2 text-foreground sm:col-span-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <span>
                     {tDiag("latestRun", { outcome: activeLastRunSnapshot.terminalOutcome })}
@@ -1431,79 +1505,85 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
               </div>
             )}
             {activeAgentBlockedReason && (
-              <p className="text-amber-700 dark:text-amber-400">
+              <p className="text-amber-700 sm:col-span-2 dark:text-amber-400">
                 {tDiag("blockingReason", { reason: activeAgentBlockedReason })}
               </p>
             )}
             {recoveryHints.length > 0 && (
-              <p>{tDiag("recoveryHints", { hints: recoveryHints.join(" | ") })}</p>
+              <p className="sm:col-span-2">
+                {tDiag("recoveryHints", { hints: recoveryHints.join(" | ") })}
+              </p>
             )}
             {activeEcosystem?.recommendedActions?.length ? (
-              <p>
+              <p className="sm:col-span-2">
                 {tDiag("recommendedActions", {
                   actions: activeEcosystem.recommendedActions.join(" | "),
                 })}
               </p>
             ) : null}
           </div>
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* Benchmark Adaptation */}
       {activeAgent && (
-        <div
-          className="rounded-md border p-3 text-xs"
-          data-testid="external-agent-benchmark-adaptation"
+        <CollapsibleSection
+          title={tDiag("benchmarkAdaptation")}
+          count={benchmarkEntries.length}
+          dataTestId="external-agent-benchmark-adaptation"
         >
-          <div className="mb-2 text-sm font-medium">{tDiag("benchmarkAdaptation")}</div>
-          {benchmarkEntries.length === 0 ? (
-            <p className="text-muted-foreground">{tDiag("noBenchmarkAdaptation")}</p>
-          ) : (
-            <div className="space-y-2">
-              {benchmarkEntries.map((entry) => (
-                <div key={entry.id} className="rounded border p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium">{entry.title}</p>
-                    <Badge variant="outline" className="text-[11px]">
-                      {entry.status}
-                    </Badge>
-                  </div>
-                  <p className="text-muted-foreground">{tDiag("gap", { grade: entry.gapGrade })}</p>
-                  <p className="text-muted-foreground">
-                    {tDiag("target", { target: entry.adaptationTarget })}
-                  </p>
-                  {entry.status === "validated" && (
-                    <p className="text-muted-foreground">
-                      {tDiag("evidence", {
-                        evidence:
-                          entry.evidence.length > 0
-                            ? entry.evidence.map((item) => item.reference).join(", ")
-                            : tDiag("evidenceMissing"),
-                      })}
-                    </p>
-                  )}
-                  {entry.status === "intentional-deviation" && entry.deviation && (
-                    <div className="space-y-1 text-amber-700 dark:text-amber-400">
-                      <p>{tDiag("rationale", { rationale: entry.deviation.rationale })}</p>
-                      <p>{tDiag("tradeOff", { tradeOff: entry.deviation.tradeOff })}</p>
-                      <p>{tDiag("userImpact", { impact: entry.deviation.userImpact })}</p>
-                      <p>
-                        {entry.deviation.review.reviewLink
-                          ? tDiag("reviewWithLink", {
-                              reviewedBy: entry.deviation.review.reviewedBy,
-                              link: entry.deviation.review.reviewLink,
-                            })
-                          : tDiag("review", {
-                              reviewedBy: entry.deviation.review.reviewedBy,
-                            })}
-                      </p>
+          <div className="text-xs">
+            {benchmarkEntries.length === 0 ? (
+              <p className="text-muted-foreground">{tDiag("noBenchmarkAdaptation")}</p>
+            ) : (
+              <div className="space-y-2">
+                {benchmarkEntries.map((entry) => (
+                  <div key={entry.id} className="rounded border p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-medium">{entry.title}</p>
+                      <Badge variant="outline" className="text-[11px]">
+                        {entry.status}
+                      </Badge>
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                    <p className="text-muted-foreground">
+                      {tDiag("gap", { grade: entry.gapGrade })}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {tDiag("target", { target: entry.adaptationTarget })}
+                    </p>
+                    {entry.status === "validated" && (
+                      <p className="text-muted-foreground">
+                        {tDiag("evidence", {
+                          evidence:
+                            entry.evidence.length > 0
+                              ? entry.evidence.map((item) => item.reference).join(", ")
+                              : tDiag("evidenceMissing"),
+                        })}
+                      </p>
+                    )}
+                    {entry.status === "intentional-deviation" && entry.deviation && (
+                      <div className="space-y-1 text-amber-700 dark:text-amber-400">
+                        <p>{tDiag("rationale", { rationale: entry.deviation.rationale })}</p>
+                        <p>{tDiag("tradeOff", { tradeOff: entry.deviation.tradeOff })}</p>
+                        <p>{tDiag("userImpact", { impact: entry.deviation.userImpact })}</p>
+                        <p>
+                          {entry.deviation.review.reviewLink
+                            ? tDiag("reviewWithLink", {
+                                reviewedBy: entry.deviation.review.reviewedBy,
+                                link: entry.deviation.review.reviewLink,
+                              })
+                            : tDiag("review", {
+                                reviewedBy: entry.deviation.review.reviewedBy,
+                              })}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </CollapsibleSection>
       )}
 
       {/* Config Options */}

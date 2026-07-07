@@ -1,5 +1,11 @@
 import { act, renderHook } from "@testing-library/react"
-import { useMemberStatus, useUIStore, type SelectedGuild } from "./ui-store"
+import {
+  DEFAULT_BAR_ITEMS,
+  useBarItemVisible,
+  useMemberStatus,
+  useUIStore,
+  type SelectedGuild,
+} from "./ui-store"
 import { getPluginEventHooks } from "@/lib/plugin"
 
 const RESET = {
@@ -16,6 +22,8 @@ const RESET = {
   sidebarWidth: 256,
   channelListView: "active" as const,
   collapsedFolderIds: [] as string[],
+  barItems: { ...DEFAULT_BAR_ITEMS },
+  findOpen: false,
 }
 
 describe("useUIStore", () => {
@@ -221,6 +229,7 @@ describe("useUIStore", () => {
         collapsedFolderIds: [],
         guildRailCollapsed: true,
         statusBarCollapsed: true,
+        barItems: { ...DEFAULT_BAR_ITEMS },
       })
       // Transient fields explicitly excluded
       expect(parsed.state.memberStatus).toBeUndefined()
@@ -264,6 +273,73 @@ describe("useUIStore", () => {
       expect(result.current.statusBarCollapsed).toBe(true)
       act(() => result.current.setStatusBarCollapsed(false))
       expect(result.current.statusBarCollapsed).toBe(false)
+    })
+  })
+
+  describe("barItems", () => {
+    it("defaults to DEFAULT_BAR_ITEMS with perf off", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.barItems).toEqual(DEFAULT_BAR_ITEMS)
+      expect(result.current.barItems.perf).toBe(false)
+      expect(result.current.barItems.connectivity).toBe(true)
+    })
+
+    it("toggleBarItem flips a single segment", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.toggleBarItem("perf"))
+      expect(result.current.barItems.perf).toBe(true)
+      act(() => result.current.toggleBarItem("perf"))
+      expect(result.current.barItems.perf).toBe(false)
+      // Other segments untouched.
+      expect(result.current.barItems.connectivity).toBe(true)
+    })
+
+    it("toggleBarItem falls back to the default when the key is missing", () => {
+      const { result } = renderHook(() => useUIStore())
+      // Simulate a persisted snapshot that predates the `usage` segment.
+      act(() => {
+        const { usage: _omit, ...rest } = result.current.barItems
+        useUIStore.setState({ barItems: rest as typeof result.current.barItems })
+      })
+      act(() => result.current.toggleBarItem("usage"))
+      // Default is true → toggling yields false.
+      expect(result.current.barItems.usage).toBe(false)
+    })
+  })
+
+  describe("useBarItemVisible", () => {
+    it("reads a segment's visibility", () => {
+      const { result } = renderHook(() => useBarItemVisible("connectivity"))
+      expect(result.current).toBe(true)
+    })
+
+    it("falls back to the default for a missing key", () => {
+      act(() => {
+        const cur = useUIStore.getState().barItems
+        const { perf: _omit, ...rest } = cur
+        useUIStore.setState({ barItems: rest as typeof cur })
+      })
+      const { result } = renderHook(() => useBarItemVisible("perf"))
+      expect(result.current).toBe(false)
+    })
+  })
+
+  describe("findOpen", () => {
+    it("defaults closed and toggles via openFind/closeFind", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.findOpen).toBe(false)
+      act(() => result.current.openFind())
+      expect(result.current.findOpen).toBe(true)
+      act(() => result.current.closeFind())
+      expect(result.current.findOpen).toBe(false)
+    })
+
+    it("is not persisted to localStorage", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.openFind())
+      const raw = window.localStorage.getItem("cognia-ui")
+      const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> }
+      expect(parsed.state.findOpen).toBeUndefined()
     })
   })
 

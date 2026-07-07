@@ -10,6 +10,8 @@ Next.js 16 (React 19) + Tauri 2.9 + Capacitor 7 + TypeScript + Tailwind v4 + sha
 
 These are project-level hard rules. They override any default behavior to the contrary.
 
+> **Development pipeline:** the end-to-end flow that wires these rules to concrete skills/agents/gates (idea → brainstorm → grill → plan → build → preflight → gates) lives in [`WORKFLOW.md`](./WORKFLOW.md). Follow it for any non-trivial change.
+
 1. **Research before implementing.** Before writing any new code, search `lib/`, `components/`, `hooks/`, `src-tauri/`, and the relevant ADR for an existing implementation. Reuse — don't reimplement. If you think you need a new utility/component/hook, first prove (with grep results or file paths) that no equivalent exists. The Subsystem Map and **Cross-cutting hooks** section below list the most reused entry points; check them first.
 2. **No simplifications.** Implement the full behavior the task requires. Do not stub, mock-out, abbreviate, or "// TODO later" production paths. Do not strip error handling, validation, or edge cases to ship faster. If something genuinely cannot be implemented now, stop and surface the blocker — do not silently degrade scope.
 3. **Every component ships with a unit test.** Any new file under `components/**`, `hooks/**`, `lib/**`, or `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) must have a co-located `*.test.ts(x)` / in-file `#[cfg(test)]` test. Coverage must stay ≥90% lines/branches/functions; verify with `pnpm test:coverage` before claiming done. Editing an existing component? Update or add tests in the same change.

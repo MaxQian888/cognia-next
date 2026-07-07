@@ -32,6 +32,13 @@ export interface LocalAccountRecord {
   passwordVerifier: PasswordVerifierRecord
   createdAt: number
   updatedAt: number
+  /**
+   * Optional per-account avatar as a downscaled, size-capped data URL (the
+   * same shape `ProfileAvatarPicker` / `lib/profile/avatar-image.ts` produce).
+   * Non-indexed, so adding it needs no registry-DB version bump; absent on
+   * records created before avatars existed.
+   */
+  avatarDataUrl?: string
 }
 
 export interface LegacyMigrationState {

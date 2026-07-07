@@ -74,4 +74,18 @@ describe("<CategoryChipStrip />", () => {
     render(<CategoryChipStrip activeCategory="characters" onSelect={jest.fn()} />)
     expect(screen.getByTestId("discover-chip-strip")).toHaveAttribute("aria-label", "chipStripAria")
   })
+
+  it("renders a foryou chip, marks it active, and selects it on click", async () => {
+    const onSelect = jest.fn()
+    const user = userEvent.setup()
+    const { rerender } = render(<CategoryChipStrip activeCategory="foryou" onSelect={onSelect} />)
+    const chip = screen.getByTestId("chip-strip-foryou")
+    expect(chip).toHaveAttribute("aria-selected", "true")
+    await user.click(chip)
+    expect(onSelect).toHaveBeenCalledWith("foryou")
+
+    // Inactive when another category is active.
+    rerender(<CategoryChipStrip activeCategory="characters" onSelect={onSelect} />)
+    expect(screen.getByTestId("chip-strip-foryou")).toHaveAttribute("aria-selected", "false")
+  })
 })

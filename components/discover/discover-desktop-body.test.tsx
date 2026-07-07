@@ -79,6 +79,11 @@ jest.mock("@/hooks/discover/use-discover-query", () => ({
 jest.mock("@/components/mobile/discover/character-detail-sheet", () => ({
   CharacterDetailSheet: () => null,
 }))
+// The inspector's skills empty-state pulls in SkillMarketplace → streamdown
+// (ESM-only); stub the sheet so the suite loads in jsdom.
+jest.mock("@/components/discover/skill-marketplace-sheet", () => ({
+  SkillMarketplaceSheet: () => <div data-testid="stub-skill-marketplace-sheet" />,
+}))
 jest.mock("@/lib/db/skills", () => ({ setSkillStatus: jest.fn() }))
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({ enqueue: jest.fn() }))
 jest.mock("@/lib/db/schema", () => ({
@@ -100,9 +105,19 @@ beforeEach(() => {
 
 describe("<DiscoverDesktopBody />", () => {
   it("renders the feature shell with the desktop toolbar + grid", () => {
+    // The default landing is now the aggregated "foryou" home; pin to a real
+    // category to assert the grid renders.
+    currentSearch = "?category=characters"
     render(<DiscoverDesktopBody />)
     expect(screen.getByTestId("discover-desktop-toolbar")).toBeInTheDocument()
     expect(screen.getByTestId("discover-grid-characters")).toBeInTheDocument()
+  })
+
+  it("renders the aggregated home by default (no ?category=)", () => {
+    render(<DiscoverDesktopBody />)
+    // Default lands on the foryou home strips, not a category grid.
+    expect(screen.queryByTestId("discover-grid-characters")).not.toBeInTheDocument()
+    expect(screen.getByTestId("discover-category-foryou")).toBeInTheDocument()
   })
 
   it("renders the populated category sidebar groups", () => {

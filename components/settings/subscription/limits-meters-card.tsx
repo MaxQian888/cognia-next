@@ -59,7 +59,10 @@ function trimAmount(n: number): string {
   return s.endsWith(".00") ? s.slice(0, -3) : s
 }
 
-function MeterRow({
+/** One normalized meter row (progress bar + figure + reset countdown). Exported
+ *  so compact surfaces (e.g. the status-bar usage popover) render the exact same
+ *  meter presentation instead of duplicating it. */
+export function MeterRow({
   meter,
   accountId,
   now,

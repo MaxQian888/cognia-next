@@ -47,6 +47,8 @@ const editorStub = {
   focus: jest.fn(),
   getModel: () => null,
   layout: mockEditorLayout,
+  revealLineInCenter: jest.fn(),
+  setPosition: jest.fn(),
 }
 jest.mock("next/dynamic", () => () => {
   const Mock = (props: { value: string; onMount?: (editor: unknown) => void }) => {
@@ -85,10 +87,10 @@ jest.mock("@/hooks/canvas/use-canvas-monaco-setup", () => ({
 }))
 // Mutable so individual tests can surface an action error (mock-prefixed to
 // satisfy jest's out-of-scope factory rule).
-const mockActionsState = { running: false, error: null as string | null }
+const mockActionsState = { running: false, error: null as string | null, runResult: "" }
 jest.mock("@/hooks/canvas/use-canvas-actions", () => ({
   useCanvasActions: () => ({
-    run: jest.fn(),
+    run: jest.fn(() => Promise.resolve(mockActionsState.runResult)),
     running: mockActionsState.running,
     error: mockActionsState.error,
   }),
@@ -104,6 +106,12 @@ jest.mock("@/components/document/document-format-toolbar", () => ({
 }))
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: () => null,
+}))
+// Keep the sandboxed preview stack out of the panel smoke tests.
+jest.mock("@/components/artifacts/artifact-preview", () => ({
+  ArtifactPreview: ({ artifact }: { artifact: { type: string } }) => (
+    <div data-testid="mock-artifact-preview" data-type={artifact.type} />
+  ),
 }))
 
 // Viewport switch + the CM6 light editor (needs DOM-measure shims in jsdom —
@@ -140,6 +148,7 @@ describe("CanvasPanel", () => {
     mobileRef.current = false
     mockActionsState.running = false
     mockActionsState.error = null
+    mockActionsState.runResult = ""
     act(() => {
       useCanvasSettingsStore.getState().resetSettings()
     })
@@ -236,6 +245,139 @@ describe("CanvasPanel", () => {
       renderWithProviders(<CanvasPanel />)
       expect(screen.queryByRole("alert")).not.toBeInTheDocument()
       expect(screen.getByText("boom")).toBeInTheDocument()
+    })
+  })
+
+  describe("preview / review / export wiring", () => {
+    function seedDoc(language: "markdown" | "javascript", content = "x") {
+      let id = ""
+      act(() => {
+        id = useArtifactStore.getState().createCanvasDocument({
+          title: "Doc",
+          content,
+          language,
+          type: language === "markdown" ? "text" : "code",
+        })
+        useArtifactStore.getState().setActiveCanvas(id)
+      })
+      return id
+    }
+
+    it("shows the view-mode toggle and preview pane for a previewable document in split mode", () => {
+      seedDoc("markdown")
+      renderWithProviders(<CanvasPanel />)
+      expect(screen.getByTestId("canvas-view-mode-toggle")).toBeInTheDocument()
+      expect(screen.getByTestId("monaco-editor-mock")).toBeInTheDocument()
+      expect(screen.getByTestId("mock-artifact-preview")).toBeInTheDocument()
+    })
+
+    it("hides the toggle for a non-previewable document (code-only)", () => {
+      seedDoc("javascript")
+      renderWithProviders(<CanvasPanel />)
+      expect(screen.queryByTestId("canvas-view-mode-toggle")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("mock-artifact-preview")).not.toBeInTheDocument()
+    })
+
+    it("renders the review view and a reviewing indicator when a proposal is open", () => {
+      const id = seedDoc("javascript")
+      act(() => {
+        useArtifactStore.getState().proposeCanvasReview(id, "IMPROVED\nCODE")
+      })
+      renderWithProviders(<CanvasPanel />)
+      expect(screen.getByTestId("canvas-review-view")).toBeInTheDocument()
+      expect(screen.getByText("Reviewing changes")).toBeInTheDocument()
+      // The toggle is replaced by the reviewing indicator.
+      expect(screen.queryByTestId("canvas-view-mode-toggle")).not.toBeInTheDocument()
+    })
+
+    it("renders the export trigger", () => {
+      seedDoc("markdown")
+      renderWithProviders(<CanvasPanel />)
+      expect(screen.getByTestId("canvas-export-trigger")).toBeInTheDocument()
+    })
+
+    it("closing a tab removes the document from the store", () => {
+      let idA = ""
+      let idB = ""
+      act(() => {
+        idA = useArtifactStore.getState().createCanvasDocument({
+          title: "Alpha",
+          content: "a",
+          language: "markdown",
+          type: "text",
+        })
+        idB = useArtifactStore.getState().createCanvasDocument({
+          title: "Beta",
+          content: "b",
+          language: "markdown",
+          type: "text",
+        })
+        useArtifactStore.getState().setActiveCanvas(idB)
+      })
+      renderWithProviders(<CanvasPanel />)
+      // Tabs (with close buttons) render when >1 document exists.
+      act(() => {
+        fireEvent.click(screen.getByRole("button", { name: /Close Alpha/i }))
+      })
+      expect(useArtifactStore.getState().canvasDocuments[idA]).toBeUndefined()
+      expect(useArtifactStore.getState().canvasDocuments[idB]).toBeDefined()
+    })
+
+    it("shows the language/type selector for the active document", () => {
+      seedDoc("javascript")
+      renderWithProviders(<CanvasPanel />)
+      expect(screen.getByTestId("canvas-language-select")).toBeInTheDocument()
+    })
+
+    it("reveals the line in Monaco when a canvas-goto-line event arrives", async () => {
+      editorStub.revealLineInCenter.mockClear()
+      editorStub.setPosition.mockClear()
+      editorStub.focus.mockClear()
+      seedDoc("javascript")
+      renderWithProviders(<CanvasPanel />)
+      // Let the Monaco mock attach editorStub via onMount.
+      await act(async () => {
+        await Promise.resolve()
+      })
+      act(() => {
+        window.dispatchEvent(new CustomEvent("canvas-goto-line", { detail: { line: 3 } }))
+      })
+      expect(editorStub.revealLineInCenter).toHaveBeenCalledWith(3)
+      expect(editorStub.setPosition).toHaveBeenCalledWith({ lineNumber: 3, column: 1 })
+      expect(editorStub.focus).toHaveBeenCalled()
+    })
+
+    it("ignores a malformed canvas-goto-line event without throwing", async () => {
+      editorStub.revealLineInCenter.mockClear()
+      seedDoc("javascript")
+      renderWithProviders(<CanvasPanel />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      act(() => {
+        window.dispatchEvent(new CustomEvent("canvas-goto-line", { detail: {} }))
+      })
+      expect(editorStub.revealLineInCenter).not.toHaveBeenCalled()
+    })
+
+    it("routes a whole-document AI action into a per-hunk review instead of overwriting", async () => {
+      mockActionsState.runResult = "IMPROVED"
+      const id = seedDoc("javascript")
+      renderWithProviders(<CanvasPanel />)
+      // Let the Monaco mock attach editorStub (getSelection → null → whole-doc).
+      await act(async () => {
+        await Promise.resolve()
+      })
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent("canvas-action", { detail: { type: "improve" } }))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      const review = useArtifactStore.getState().pendingReviews[id]
+      expect(review).toBeDefined()
+      expect(review.proposedContent).toBe("IMPROVED")
+      // The buffer itself is untouched until the review is applied.
+      expect(useArtifactStore.getState().canvasDocuments[id].content).toBe("x")
     })
   })
 

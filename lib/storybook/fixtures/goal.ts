@@ -3,6 +3,7 @@
 // out so the console / detail-sheet / tab / analytics stories share one source
 // of truth. Dependency-free (types only) so importing it never drags a store.
 import type { Goal, GoalEvent, GoalStatus } from "@/types/goal"
+import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 
 /** Fixed clock so timeline buckets + "elapsed" counters render deterministically. */
 export const GOAL_NOW = 1_700_000_000_000
@@ -11,6 +12,11 @@ export const GOAL_NOW = 1_700_000_000_000
 export function makeGoal(over: Partial<Goal> = {}): Goal {
   return {
     id: "goal_1",
+    // Stamp the Default workspace so `listAllGoals` — which scopes by the
+    // compound `[projectId+createdAt]` index — actually returns the seed. Dexie
+    // omits rows whose compound-index component is undefined, so a goal without
+    // `projectId` is invisible to scoped reads. `seedDb` warms the same scope.
+    projectId: DEFAULT_PROJECT_ID,
     sessionId: "ses_a",
     rawObjective: "Triage the open bug backlog and draft fixes for the top 3",
     safeObjective: "Triage the open bug backlog and draft fixes for the top 3",

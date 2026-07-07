@@ -1,9 +1,20 @@
 "use client"
 
-import type { FormEvent } from "react"
+/**
+ * Local-account management dialog (desktop-only). A responsive master-detail:
+ * a searchable account list on the left and a tabbed detail pane (Profile /
+ * Security / Danger zone) on the right, with inline switch/unlock. The dialog
+ * content is a `@container`, so it lays out two columns at `@lg` and collapses
+ * to a single column (list → detail with a back button) on narrow windows.
+ *
+ * This shell owns only selection + the narrow-layout view; all account state
+ * comes from the account store and all mutations live in the child components.
+ * The public `AccountManageDialog` / `AccountManageDialogProps` surface is
+ * unchanged so both mount sites (settings overview, rail switcher) are untouched.
+ */
+
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { PlusIcon, Trash2Icon, UserRoundIcon } from "lucide-react"
 
 import {
   Dialog,
@@ -12,15 +23,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
-import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password-policy"
+import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 import { useAccountStore } from "@/stores/account/account-store"
-import { PasswordStrengthMeter } from "./password-strength-meter"
+
+import { AccountList } from "./manage/account-list"
+import { AccountDetail } from "./manage/account-detail"
 
 export interface AccountManageDialogProps {
   open: boolean
@@ -31,290 +39,72 @@ export function AccountManageDialog({ open, onOpenChange }: AccountManageDialogP
   const t = useTranslations("account.manage")
   const accounts = useAccountStore((state) => state.accounts)
   const activeAccountId = useAccountStore((state) => state.activeAccountId)
-  const createAccount = useAccountStore((state) => state.createAccount)
-  const renameAccount = useAccountStore((state) => state.renameAccount)
-  const changePassword = useAccountStore((state) => state.changePassword)
-  const deleteAccount = useAccountStore((state) => state.deleteAccount)
+  const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
+  const error = useAccountStore((state) => state.error)
+
   const sorted = useMemo(
     () => [...accounts].sort((a, b) => a.displayName.localeCompare(b.displayName)),
     [accounts]
   )
-  const [selectedId, setSelectedId] = useState<string | null>(sorted[0]?.id ?? null)
-  const selected = sorted.find((account) => account.id === selectedId) ?? sorted[0] ?? null
-  const [newDisplayName, setNewDisplayName] = useState("")
-  const [newPassword, setNewPassword] = useState("")
-  const [editDisplayName, setEditDisplayName] = useState(selected?.displayName ?? "")
-  const [currentPassword, setCurrentPassword] = useState("")
-  const [changeNewPassword, setChangeNewPassword] = useState("")
-  const [confirmNewPassword, setConfirmNewPassword] = useState("")
-  const [passwordChanged, setPasswordChanged] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Narrow (single-column) layout only: which pane is visible. Ignored at `@lg`
+  // where both columns render side by side.
+  const [narrowView, setNarrowView] = useState<"list" | "detail">("list")
 
-  const replacementAccountId =
-    selected?.id === activeAccountId
-      ? sorted.find((account) => account.id !== selected.id)?.id
-      : undefined
-  const canDelete = Boolean(selected && (selected.id !== activeAccountId || replacementAccountId))
+  const selected: LocalAccountRecord | null =
+    sorted.find((account) => account.id === selectedId) ?? sorted[0] ?? null
 
-  const handleSelect = (accountId: string) => {
-    const account = sorted.find((candidate) => candidate.id === accountId)
+  const select = (accountId: string) => {
     setSelectedId(accountId)
-    setEditDisplayName(account?.displayName ?? "")
-    setCurrentPassword("")
-    setChangeNewPassword("")
-    setConfirmNewPassword("")
-    setPasswordChanged(false)
-    setConfirmingDelete(false)
-    setError(null)
+    setNarrowView("detail")
   }
-
-  const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (newPassword.length < PASSWORD_MIN_LENGTH) {
-      setError(t("passwordTooShort", { min: PASSWORD_MIN_LENGTH }))
-      return
-    }
-    setSubmitting(true)
-    setError(null)
-    try {
-      await createAccount({
-        displayName: newDisplayName,
-        password: newPassword,
-      })
-      setNewDisplayName("")
-      setNewPassword("")
-    } catch (err) {
-      setError(toErrorMessage(err, t("operationFailed")))
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const handleRename = async () => {
-    if (!selected) return
-    setSubmitting(true)
-    setError(null)
-    try {
-      await renameAccount(selected.id, editDisplayName)
-    } catch (err) {
-      setError(toErrorMessage(err, t("operationFailed")))
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const handleChangePassword = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!selected) return
-    setPasswordChanged(false)
-    if (changeNewPassword.length < PASSWORD_MIN_LENGTH) {
-      setError(t("passwordTooShort", { min: PASSWORD_MIN_LENGTH }))
-      return
-    }
-    if (changeNewPassword !== confirmNewPassword) {
-      setError(t("passwordMismatch"))
-      return
-    }
-    setSubmitting(true)
-    setError(null)
-    try {
-      await changePassword(selected.id, currentPassword, changeNewPassword)
-      setCurrentPassword("")
-      setChangeNewPassword("")
-      setConfirmNewPassword("")
-      setPasswordChanged(true)
-    } catch (err) {
-      setError(toErrorMessage(err, t("operationFailed")))
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const handleDelete = async () => {
-    if (!selected || !canDelete) return
-    if (!confirmingDelete) {
-      setConfirmingDelete(true)
-      return
-    }
-    setSubmitting(true)
-    setError(null)
-    try {
-      await deleteAccount(selected.id, { replacementAccountId })
-      setConfirmingDelete(false)
-    } catch (err) {
-      setError(toErrorMessage(err, t("operationFailed")))
-    } finally {
-      setSubmitting(false)
-    }
+  const handleCreated = (account: LocalAccountRecord) => {
+    setSelectedId(account.id)
+    setNarrowView("detail")
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader className="px-6 pt-6 pr-10 pb-4">
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-[minmax(0,12rem)_1fr] gap-4">
-          <div className="flex flex-col gap-3">
-            <form className="flex flex-col gap-2" onSubmit={(event) => void handleCreate(event)}>
-              <Label htmlFor="account-new-display-name">{t("newDisplayNameLabel")}</Label>
-              <Input
-                id="account-new-display-name"
-                value={newDisplayName}
-                placeholder={t("newDisplayNamePlaceholder")}
-                onChange={(event) => setNewDisplayName(event.target.value)}
+        <div className="@container min-h-0 flex-1 overflow-hidden px-6 pb-6">
+          <div className="grid h-full min-h-0 gap-4 @lg:grid-cols-[minmax(0,15rem)_1fr]">
+            <div
+              className={cn("flex min-h-0 flex-col", narrowView === "detail" && "hidden @lg:flex")}
+              data-testid="account-manage-list-col"
+            >
+              <AccountList
+                accounts={accounts}
+                activeAccountId={activeAccountId}
+                unlockedAccountId={unlockedAccountId}
+                selectedId={selected?.id ?? null}
+                onSelect={select}
+                onCreated={handleCreated}
+                error={error}
               />
-              <Label htmlFor="account-new-password">{t("newPasswordLabel")}</Label>
-              <Input
-                id="account-new-password"
-                value={newPassword}
-                type="password"
-                autoComplete="new-password"
-                placeholder={t("newPasswordPlaceholder")}
-                onChange={(event) => setNewPassword(event.target.value)}
+            </div>
+            <div
+              className={cn("min-h-0 overflow-y-auto", narrowView === "list" && "hidden @lg:block")}
+              data-testid="account-manage-detail-col"
+            >
+              <AccountDetail
+                account={selected}
+                accounts={accounts}
+                activeAccountId={activeAccountId}
+                unlockedAccountId={unlockedAccountId}
+                showBack
+                onBack={() => setNarrowView("list")}
               />
-              <PasswordStrengthMeter password={newPassword} />
-              <Button type="submit" size="sm" disabled={submitting} className="gap-2">
-                <PlusIcon className="size-4" />
-                {t("createAccount")}
-              </Button>
-            </form>
-            <Separator />
-            <ScrollArea className="h-72">
-              <ul className="flex flex-col gap-1 pr-2" aria-label={t("listLabel")}>
-                {sorted.map((account) => (
-                  <li key={account.id}>
-                    <button
-                      type="button"
-                      onClick={() => handleSelect(account.id)}
-                      data-testid={`account-manage-row-${account.id}`}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent",
-                        selected?.id === account.id && "bg-primary/10 text-foreground"
-                      )}
-                    >
-                      <UserRoundIcon className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate">{account.displayName}</span>
-                      {activeAccountId === account.id && (
-                        <span className="text-[10px] text-muted-foreground">
-                          {t("activeBadge")}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </ScrollArea>
-          </div>
-
-          <div className="min-w-0">
-            {!selected ? (
-              <div className="flex h-full items-center justify-center rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                {t("empty")}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="account-edit-display-name">{t("editDisplayNameLabel")}</Label>
-                  <Input
-                    id="account-edit-display-name"
-                    value={editDisplayName}
-                    onChange={(event) => setEditDisplayName(event.target.value)}
-                  />
-                </div>
-                {error && (
-                  <p
-                    role="alert"
-                    className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive"
-                  >
-                    {error}
-                  </p>
-                )}
-                <Separator />
-                <form
-                  className="flex flex-col gap-2"
-                  aria-label={t("changePasswordHeading")}
-                  onSubmit={(event) => void handleChangePassword(event)}
-                >
-                  <p className="text-sm font-medium">{t("changePasswordHeading")}</p>
-                  <Label htmlFor="account-current-password">{t("currentPasswordLabel")}</Label>
-                  <Input
-                    id="account-current-password"
-                    type="password"
-                    value={currentPassword}
-                    autoComplete="current-password"
-                    placeholder={t("currentPasswordPlaceholder")}
-                    onChange={(event) => setCurrentPassword(event.target.value)}
-                  />
-                  <Label htmlFor="account-change-new-password">{t("changeNewPasswordLabel")}</Label>
-                  <Input
-                    id="account-change-new-password"
-                    type="password"
-                    value={changeNewPassword}
-                    autoComplete="new-password"
-                    placeholder={t("changeNewPasswordPlaceholder")}
-                    onChange={(event) => setChangeNewPassword(event.target.value)}
-                  />
-                  <PasswordStrengthMeter password={changeNewPassword} />
-                  <Label htmlFor="account-confirm-new-password">
-                    {t("confirmNewPasswordLabel")}
-                  </Label>
-                  <Input
-                    id="account-confirm-new-password"
-                    type="password"
-                    value={confirmNewPassword}
-                    autoComplete="new-password"
-                    placeholder={t("confirmNewPasswordPlaceholder")}
-                    onChange={(event) => setConfirmNewPassword(event.target.value)}
-                  />
-                  {passwordChanged && (
-                    <p role="status" className="text-sm text-muted-foreground">
-                      {t("passwordChanged")}
-                    </p>
-                  )}
-                  <Button type="submit" size="sm" variant="outline" disabled={submitting}>
-                    {t("changePassword")}
-                  </Button>
-                </form>
-                <Separator />
-                <div className="flex items-center justify-between gap-2">
-                  <Button
-                    type="button"
-                    variant={confirmingDelete ? "destructive" : "ghost"}
-                    size="sm"
-                    disabled={!canDelete || submitting}
-                    onClick={() => void handleDelete()}
-                    className="gap-2"
-                  >
-                    <Trash2Icon className="size-4" />
-                    {confirmingDelete ? t("confirmDelete") : t("delete")}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={submitting}
-                    onClick={() => void handleRename()}
-                  >
-                    {t("save")}
-                  </Button>
-                </div>
-              </div>
-            )}
+            </div>
           </div>
         </div>
       </DialogContent>
     </Dialog>
   )
-}
-
-function toErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
-  return fallback
 }
 
 export default AccountManageDialog

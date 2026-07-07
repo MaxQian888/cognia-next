@@ -134,6 +134,43 @@ describe("LocalAccountRegistry", () => {
     db.close()
   })
 
+  it("sets and clears the account avatar with monotonic updatedAt", async () => {
+    const { db, registry } = await freshRegistry("update-avatar")
+    await registry.createAccount({
+      id: "acct_one",
+      displayName: "One",
+      passwordVerifier: verifier,
+      now: 10,
+    })
+
+    const dataUrl = "data:image/png;base64,AAAA"
+    await expect(registry.updateAvatar("acct_one", dataUrl, 20)).resolves.toMatchObject({
+      id: "acct_one",
+      avatarDataUrl: dataUrl,
+      updatedAt: 20,
+    })
+    await expect(registry.listAccounts()).resolves.toEqual([
+      expect.objectContaining({ avatarDataUrl: dataUrl }),
+    ])
+
+    // Whitespace-only clears the avatar back to the glyph fallback.
+    const cleared = await registry.updateAvatar("acct_one", "   ", 30)
+    expect(cleared.avatarDataUrl).toBeUndefined()
+    expect(cleared.updatedAt).toBe(30)
+
+    // Null also clears; monotonic updatedAt bumps past a stale timestamp.
+    await registry.updateAvatar("acct_one", dataUrl, 40)
+    const nulled = await registry.updateAvatar("acct_one", null, 35)
+    expect(nulled.avatarDataUrl).toBeUndefined()
+    expect(nulled.updatedAt).toBe(41)
+
+    await expect(registry.updateAvatar("acct_missing", dataUrl, 50)).rejects.toThrow(
+      /does not exist/i
+    )
+
+    db.close()
+  })
+
   it("does not delete the last account and requires a replacement when deleting the active account", async () => {
     const { db, registry } = await freshRegistry("delete-account")
     await registry.createAccount({

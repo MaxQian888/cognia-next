@@ -26,7 +26,23 @@ import {
 import { toggleGuildRailAction, toggleStatusBarAction } from "@/lib/desktop/menu-actions"
 import { cn } from "@/lib/utils"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
-import { useUIStore } from "@/stores/ui/ui-store"
+import { useUIStore, type BarItemId } from "@/stores/ui/ui-store"
+
+/** Optional bar segments grouped by which bar they live in. Label keys resolve
+ *  under `desktop.titleBar.layout.*`. Rendered as checkboxes in the Customize
+ *  Layout dropdown so the user can hide any segment they don't want. */
+const STATUS_BAR_ITEMS: { id: BarItemId; labelKey: string }[] = [
+  { id: "connectivity", labelKey: "itemConnectivity" },
+  { id: "sync", labelKey: "itemSync" },
+  { id: "perf", labelKey: "itemPerf" },
+  { id: "accountStatus", labelKey: "itemAccount" },
+  { id: "usage", labelKey: "itemUsage" },
+]
+const TITLE_BAR_ITEMS: { id: BarItemId; labelKey: string }[] = [
+  { id: "accountTop", labelKey: "itemAccount" },
+  { id: "workspace", labelKey: "itemWorkspace" },
+  { id: "quickActions", labelKey: "itemQuickActions" },
+]
 
 // Mirror of the title bar's popover perf override (kept local to avoid an
 // import cycle with title-bar.tsx): kill the enter/exit keyframes that repaint
@@ -76,6 +92,8 @@ export function TitleBarLayoutControls({ className }: { className?: string }) {
   const guildRailCollapsed = useUIStore((s) => s.guildRailCollapsed)
   const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
+  const barItems = useUIStore((s) => s.barItems)
+  const toggleBarItem = useUIStore((s) => s.toggleBarItem)
   const terminalOpen = useTerminalStore((s) => s.panelOpen)
   const toggleTerminal = useTerminalStore((s) => s.togglePanel)
 
@@ -154,6 +172,32 @@ export function TitleBarLayoutControls({ className }: { className?: string }) {
           <DropdownMenuCheckboxItem checked={terminalOpen} onCheckedChange={() => toggleTerminal()}>
             {t("toggleTerminal")}
           </DropdownMenuCheckboxItem>
+
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>{t("statusBarGroup")}</DropdownMenuLabel>
+          {STATUS_BAR_ITEMS.map(({ id, labelKey }) => (
+            <DropdownMenuCheckboxItem
+              key={id}
+              checked={barItems[id]}
+              onCheckedChange={() => toggleBarItem(id)}
+              data-testid={`title-bar-item-${id}`}
+            >
+              {t(labelKey)}
+            </DropdownMenuCheckboxItem>
+          ))}
+
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>{t("titleBarGroup")}</DropdownMenuLabel>
+          {TITLE_BAR_ITEMS.map(({ id, labelKey }) => (
+            <DropdownMenuCheckboxItem
+              key={id}
+              checked={barItems[id]}
+              onCheckedChange={() => toggleBarItem(id)}
+              data-testid={`title-bar-item-${id}`}
+            >
+              {t(labelKey)}
+            </DropdownMenuCheckboxItem>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

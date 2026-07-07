@@ -11,7 +11,7 @@
  * `components/canvas/canvas-side-panels.tsx`.
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTranslations } from "next-intl"
@@ -72,6 +72,16 @@ import { LspServerHint } from "@/components/editor/lsp-server-hint"
 import { MonacoDiagnosticsBar } from "@/components/editor/monaco-diagnostics-bar"
 import { editorLanguageFromMonacoId } from "@/components/editor/editor-language"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { isCanvasDocumentPreviewable } from "@/lib/canvas/artifact-projection"
+import type { CanvasWorkbenchActionType } from "@/types/artifact/artifact"
+import { CanvasPreviewPane } from "./canvas-preview-pane"
+import { CanvasReviewView } from "./canvas-review-view"
+import { CanvasViewModeToggle } from "./canvas-view-mode-toggle"
+import { CanvasExportMenu } from "./canvas-export-menu"
+import { CanvasLanguageSelect } from "./canvas-language-select"
+import { CANVAS_GOTO_LINE_EVENT, type CanvasGotoLineDetail } from "./canvas-outline-panel"
 
 const MonacoEditorView = dynamic(() => import("@monaco-editor/react").then((mod) => mod.default), {
   ssr: false,
@@ -105,6 +115,11 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const create = useArtifactStore((s) => s.createCanvasDocument)
   const remove = useArtifactStore((s) => s.deleteCanvasDocument)
   const saveVersion = useArtifactStore((s) => s.saveCanvasVersion)
+  const proposeCanvasReview = useArtifactStore((s) => s.proposeCanvasReview)
+  const previewMode = useCanvasLayoutStore((s) => s.previewMode)
+  const pendingReview = useArtifactStore((s) =>
+    activeId ? (s.pendingReviews[activeId] ?? null) : null
+  )
 
   const activeDoc = useMemo(
     () => documents.find((d) => d.id === activeId) ?? null,
@@ -136,11 +151,36 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   // the app palette / light-dark / high-contrast state instead of fighting it.
   const resolvedMonacoTheme = monacoSetup.resolvedThemeId
 
-  // Drop the stale Monaco handle when the viewport flips to mobile (the
-  // light editor renders instead) so consumers take their fallback paths.
+  // Center-pane presentation. Non-previewable code documents can only show the
+  // editor, so "split"/"preview" collapse to "code" for them.
+  const previewable = activeDoc ? isCanvasDocumentPreviewable(activeDoc) : false
+  const reviewing = Boolean(activeDoc && pendingReview)
+  const effectiveMode = previewable ? previewMode : "code"
+  // The desktop Monaco editor is only mounted in code/split (not preview) and
+  // never during a review; when it isn't mounted, drop the stale handle so
+  // every editorRef consumer takes its whole-document fallback path (and we
+  // never call getValue() on a disposed editor from the auto-save loop).
+  const editorMounted = Boolean(activeDoc) && !reviewing && !isMobile && effectiveMode !== "preview"
   useEffect(() => {
-    if (isMobile) editorRef.current = null
-  }, [isMobile])
+    if (!editorMounted) editorRef.current = null
+  }, [editorMounted])
+
+  // Outline → editor navigation: the outline panel (a sibling in the right rail)
+  // dispatches `canvas-goto-line`; reveal + focus the line in Monaco. Mirrors the
+  // existing `canvas-action` / `canvas-save` window-event bus.
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const detail = (ev as CustomEvent<CanvasGotoLineDetail>).detail
+      if (!detail || typeof detail.line !== "number") return
+      const editor = editorRef.current
+      if (!editor) return
+      editor.revealLineInCenter(detail.line)
+      editor.setPosition({ lineNumber: detail.line, column: 1 })
+      editor.focus()
+    }
+    window.addEventListener(CANVAS_GOTO_LINE_EVENT, handler as EventListener)
+    return () => window.removeEventListener(CANVAS_GOTO_LINE_EVENT, handler as EventListener)
+  }, [])
 
   // Wire keyboard shortcuts: Cmd+R/F/I/E/S/X dispatch CustomEvents
   // that the toolbar listens for. The keybinding store remaps these
@@ -307,12 +347,17 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       })
       if (actionType === "review" || actionType === "explain") return // narrative actions, don't replace
       if (selectionText && editor && sel) {
+        // Selection-scoped edits stay inline (fast path).
         editor.executeEdits("canvas-action", [{ range: sel, text: result, forceMoveMarkers: true }])
       } else {
-        updateDoc(activeDoc.id, { content: result, updatedAt: new Date() })
+        // Whole-document rewrites open a per-hunk diff review instead of
+        // silently overwriting the buffer — accept/reject before it lands.
+        proposeCanvasReview(activeDoc.id, result, {
+          actionType: actionType as CanvasWorkbenchActionType,
+        })
       }
     },
-    [actions, activeDoc, updateDoc]
+    [actions, activeDoc, proposeCanvasReview]
   )
 
   // Keep the keyboard-action ref pointing at the freshest runAction so
@@ -359,6 +404,98 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     setActive(id)
   }, [create, setActive, t])
 
+  const desktopEditorNode = activeDoc ? (
+    <div className="flex h-full flex-col">
+      <LspServerHint language={activeDoc.language} />
+      <div className="min-h-0 flex-1">
+        <Suspense fallback={<EditorLoading />}>
+          <MonacoEditorView
+            key={activeDoc.id}
+            language={activeDoc.language}
+            value={activeDoc.content}
+            onChange={handleEditorChange}
+            onMount={(editor, monaco) => {
+              editorRef.current = editor
+              monacoSetup.onMount(editor, monaco)
+            }}
+            options={monacoSetup.editorOptions as MonacoEditor.IStandaloneEditorConstructionOptions}
+            theme={resolvedMonacoTheme}
+          />
+        </Suspense>
+      </div>
+      {monacoSetup.diagnostics ? (
+        <MonacoDiagnosticsBar
+          monaco={monacoSetup.diagnostics.monaco}
+          editor={monacoSetup.diagnostics.editor}
+        />
+      ) : null}
+    </div>
+  ) : null
+
+  const mobileEditorNode = activeDoc ? (
+    // Mobile: CodeMirror light editor — Monaco's worker bundle and
+    // virtual-keyboard handling are unsuited to the Capacitor shell.
+    <LightCodeEditor
+      key={activeDoc.id}
+      value={activeDoc.content}
+      language={editorLanguageFromMonacoId(activeDoc.language)}
+      onChange={(v) => handleEditorChange(v)}
+      aria-label={activeDoc.title}
+      className="px-2"
+      fontSize={editorSettings.fontSize}
+      fontFamily={editorSettings.fontFamily}
+      lineHeight={editorSettings.lineHeight}
+      tabSize={editorSettings.tabSize}
+      wordWrap={editorSettings.wordWrap}
+      lineNumbers={editorSettings.lineNumbers !== "off"}
+    />
+  ) : null
+
+  // Center-pane body: review > preview-only > split > editor-only. When a
+  // proposal is open it takes the whole pane (the Monaco diff needs the room).
+  let bodyContent: ReactNode
+  if (!activeDoc) {
+    bodyContent = (
+      <Empty className="h-full border-0">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <FileText />
+          </EmptyMedia>
+          <EmptyDescription>
+            {t("empty.subtitle", { default: "Select or create a document to start." })}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    )
+  } else if (reviewing) {
+    bodyContent = (
+      <CanvasReviewView documentId={activeDoc.id} panelMode={isMobile ? "mobile" : "desktop"} />
+    )
+  } else if (isMobile) {
+    bodyContent =
+      effectiveMode === "preview" ? (
+        <CanvasPreviewPane documentId={activeDoc.id} />
+      ) : (
+        mobileEditorNode
+      )
+  } else if (effectiveMode === "preview") {
+    bodyContent = <CanvasPreviewPane documentId={activeDoc.id} />
+  } else if (effectiveMode === "split") {
+    bodyContent = (
+      <ResizablePanelGroup orientation="horizontal" className="h-full">
+        <ResizablePanel id="canvas-editor-pane" defaultSize="55%" minSize="30%">
+          {desktopEditorNode}
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel id="canvas-preview-pane" defaultSize="45%" minSize="25%">
+          <CanvasPreviewPane documentId={activeDoc.id} />
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    )
+  } else {
+    bodyContent = desktopEditorNode
+  }
+
   return (
     <div className={cn("flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden", className)}>
       <CanvasToolbar
@@ -369,10 +506,13 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         running={actions.running}
         onSelectDocument={setActive}
         onCloseDocument={(id) => {
+          // Closing a tab removes the document from the workspace (canvas has no
+          // separate "open vs all" state) and moves focus to a sibling.
           if (activeId === id) {
             const next = documents.find((d) => d.id !== id)
             setActive(next?.id ?? null)
           }
+          remove(id)
         }}
         onCreateDocument={onCreate}
         onRenameDocument={(id, title) => updateDoc(id, { title, updatedAt: new Date() })}
@@ -396,6 +536,9 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
         onFormat={handleFormat}
         aiEnabled={aiWorkbenchEnabled}
+        previewable={previewable}
+        reviewing={reviewing}
+        isMobile={isMobile}
       />
 
       <PluginExtensionSlot
@@ -414,65 +557,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
             "focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring/60"
         )}
       >
-        {activeDoc ? (
-          isMobile ? (
-            // Mobile: CodeMirror light editor — Monaco's worker bundle and
-            // virtual-keyboard handling are unsuited to the Capacitor shell.
-            <LightCodeEditor
-              key={activeDoc.id}
-              value={activeDoc.content}
-              language={editorLanguageFromMonacoId(activeDoc.language)}
-              onChange={(v) => handleEditorChange(v)}
-              aria-label={activeDoc.title}
-              className="px-2"
-              fontSize={editorSettings.fontSize}
-              fontFamily={editorSettings.fontFamily}
-              lineHeight={editorSettings.lineHeight}
-              tabSize={editorSettings.tabSize}
-              wordWrap={editorSettings.wordWrap}
-              lineNumbers={editorSettings.lineNumbers !== "off"}
-            />
-          ) : (
-            <div className="flex h-full flex-col">
-              <LspServerHint language={activeDoc.language} />
-              <div className="min-h-0 flex-1">
-                <Suspense fallback={<EditorLoading />}>
-                  <MonacoEditorView
-                    key={activeDoc.id}
-                    language={activeDoc.language}
-                    value={activeDoc.content}
-                    onChange={handleEditorChange}
-                    onMount={(editor, monaco) => {
-                      editorRef.current = editor
-                      monacoSetup.onMount(editor, monaco)
-                    }}
-                    options={
-                      monacoSetup.editorOptions as MonacoEditor.IStandaloneEditorConstructionOptions
-                    }
-                    theme={resolvedMonacoTheme}
-                  />
-                </Suspense>
-              </div>
-              {monacoSetup.diagnostics ? (
-                <MonacoDiagnosticsBar
-                  monaco={monacoSetup.diagnostics.monaco}
-                  editor={monacoSetup.diagnostics.editor}
-                />
-              ) : null}
-            </div>
-          )
-        ) : (
-          <Empty className="h-full border-0">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <FileText />
-              </EmptyMedia>
-              <EmptyDescription>
-                {t("empty.subtitle", { default: "Select or create a document to start." })}
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        )}
+        {bodyContent}
         {(actions.running || suggestions.running) && (
           <div className="pointer-events-none absolute right-3 top-2 flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs shadow">
             <Spinner className="size-3" />
@@ -527,6 +612,9 @@ interface CanvasToolbarProps {
   onSaveVersion: () => void
   onFormat: (action: FormatAction) => void
   aiEnabled: boolean
+  previewable: boolean
+  reviewing: boolean
+  isMobile: boolean
 }
 
 function CanvasToolbar({
@@ -545,6 +633,9 @@ function CanvasToolbar({
   onSaveVersion,
   onFormat,
   aiEnabled,
+  previewable,
+  reviewing,
+  isMobile,
 }: CanvasToolbarProps) {
   const t = useTranslations("canvas")
   const tActions = useTranslations("canvas.actions")
@@ -628,6 +719,7 @@ function CanvasToolbar({
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                        aria-label={`${t("close")} ${doc.title}`}
                         onClick={(e) => {
                           e.stopPropagation()
                           onCloseDocument(doc.id)
@@ -647,6 +739,18 @@ function CanvasToolbar({
         )}
 
         <div className="flex items-center gap-0.5 shrink-0 px-1">
+          {reviewing ? (
+            <span className="mr-1 hidden text-[11px] font-medium text-muted-foreground sm:inline">
+              {t("reviewingChanges")}
+            </span>
+          ) : (
+            <>
+              <CanvasLanguageSelect documentId={activeDocumentId} className="mr-1" />
+              {previewable && <CanvasViewModeToggle compact={isMobile} className="mr-1" />}
+            </>
+          )}
+          <CanvasExportMenu documentId={activeDocumentId} />
+
           <Tooltip delayDuration={300}>
             <TooltipTrigger asChild>
               <Button

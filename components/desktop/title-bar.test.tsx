@@ -167,10 +167,22 @@ const toggleSidebar = jest.fn()
 const toggleGuildRail = jest.fn()
 const toggleStatusBar = jest.fn()
 const requestCreate = jest.fn()
+const openFind = jest.fn()
 const uiStateRef = {
   sidebarCollapsed: false,
   guildRailCollapsed: false,
   statusBarCollapsed: false,
+}
+const toggleBarItem = jest.fn()
+const barItemsRef: Record<string, boolean> = {
+  connectivity: true,
+  sync: true,
+  perf: false,
+  accountStatus: true,
+  usage: true,
+  workspace: true,
+  quickActions: true,
+  accountTop: true,
 }
 jest.mock("@/stores/ui/ui-store", () => {
   const buildState = () => ({
@@ -179,6 +191,9 @@ jest.mock("@/stores/ui/ui-store", () => {
     toggleGuildRail,
     toggleStatusBar,
     requestCreate,
+    openFind,
+    toggleBarItem,
+    barItems: barItemsRef,
     sidebarCollapsed: uiStateRef.sidebarCollapsed,
     guildRailCollapsed: uiStateRef.guildRailCollapsed,
     statusBarCollapsed: uiStateRef.statusBarCollapsed,
@@ -188,8 +203,21 @@ jest.mock("@/stores/ui/ui-store", () => {
       (selector: (s: ReturnType<typeof buildState>) => unknown) => selector(buildState()),
       { getState: buildState }
     ),
+    useBarItemVisible: (id: string) => barItemsRef[id],
   }
 })
+
+// New title-bar segments — covered by their own suites; stub to keep this test
+// focused on the title-bar shell + gating.
+jest.mock("@/components/desktop/title-bar-workspace", () => ({
+  TitleBarWorkspace: () => <div data-testid="title-bar-workspace-seg" />,
+}))
+jest.mock("@/components/desktop/title-bar-quick-actions", () => ({
+  TitleBarQuickActions: () => <div data-testid="title-bar-quick-actions" />,
+}))
+jest.mock("@/components/account/account-bar-button", () => ({
+  AccountBarButton: () => <div data-testid="account-bar-button" />,
+}))
 
 const sessionRef = {
   value: undefined as undefined | { id: string; title: string; characterId?: string },
@@ -315,6 +343,10 @@ beforeEach(() => {
   uiStateRef.sidebarCollapsed = false
   uiStateRef.guildRailCollapsed = false
   uiStateRef.statusBarCollapsed = false
+  barItemsRef.workspace = true
+  barItemsRef.quickActions = true
+  barItemsRef.accountTop = true
+  openFind.mockClear()
   narrowState.matches = false
 })
 
@@ -492,6 +524,28 @@ test("renders the nav arrows and layout controls", async () => {
   expect(screen.getByTestId("title-bar-nav-back")).toBeDisabled()
 })
 
+test("mounts the optional workspace / quick-actions / account segments by default", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByTestId("title-bar-workspace-seg")).toBeInTheDocument())
+  expect(screen.getByTestId("title-bar-quick-actions")).toBeInTheDocument()
+  expect(screen.getByTestId("account-bar-button")).toBeInTheDocument()
+})
+
+test("hides the optional segments when their bar-item flags are off", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  barItemsRef.workspace = false
+  barItemsRef.quickActions = false
+  barItemsRef.accountTop = false
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByTestId("title-bar-nav-arrows")).toBeInTheDocument())
+  expect(screen.queryByTestId("title-bar-workspace-seg")).toBeNull()
+  expect(screen.queryByTestId("title-bar-quick-actions")).toBeNull()
+  expect(screen.queryByTestId("account-bar-button")).toBeNull()
+})
+
 test("command-center caret menu surfaces quick targets", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
@@ -564,22 +618,15 @@ test("File > Quit closes the window", async () => {
   await waitFor(() => expect(close).toHaveBeenCalled())
 })
 
-test("Edit > Find dispatches Ctrl+F", async () => {
+test("Edit > Find opens the in-app find bar", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
   const user = userEvent.setup()
-  const seen: KeyboardEvent[] = []
-  const listener = (e: Event) => seen.push(e as KeyboardEvent)
-  window.addEventListener("keydown", listener)
-  try {
-    render(<TitleBar />)
-    await waitFor(() => expect(screen.getByText("desktop.menu.edit.label")).toBeInTheDocument())
-    await user.click(screen.getByText("desktop.menu.edit.label"))
-    await user.click(await screen.findByText("desktop.menu.edit.find"))
-    expect(seen.some((e) => e.key === "f" && e.ctrlKey)).toBe(true)
-  } finally {
-    window.removeEventListener("keydown", listener)
-  }
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByText("desktop.menu.edit.label")).toBeInTheDocument())
+  await user.click(screen.getByText("desktop.menu.edit.label"))
+  await user.click(await screen.findByText("desktop.menu.edit.find"))
+  expect(openFind).toHaveBeenCalled()
 })
 
 test("Edit > Copy delegates to document.execCommand", async () => {

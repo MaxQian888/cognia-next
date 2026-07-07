@@ -15,13 +15,18 @@
     "title": "操作"
   },
   "categories": {
+    "agentPresets": "智能体与子智能体",
     "characters": "角色",
     "connectors": "连接器",
     "favorites": "收藏",
+    "foryou": "推荐",
+    "mcpPresets": "MCP 预设",
     "mcpTools": "MCP 工具",
     "ocrProviders": "OCR 服务",
     "plugins": "插件",
     "skills": "技能",
+    "slashCommands": "斜杠命令",
+    "teamTemplates": "团队模板",
     "teams": "团队",
     "twinDrafts": "孪生草稿",
     "twinIngest": "Twin 摄入",
@@ -91,16 +96,20 @@
   "empty": {
     "noQuery": "暂无内容。"
   },
+  "emptyAgentPresets": "暂无可用的智能体预设。",
   "emptyCharacters": "还没有角色 — 在桌面端创建一个吧。",
   "emptyCharactersHint": "在桌面端创建角色后会同步到这里。",
   "emptyConnectors": "暂无可用连接器。",
   "emptyFavorites": "还没有收藏 — 点任意项目上的星标即可固定到这里。",
   "emptyFiltered": "没有匹配 \"{query}\" 的结果。",
+  "emptyMcpPresets": "暂无可用的 MCP 预设。",
   "emptyMcpTools": "暂未配置 MCP 服务器。",
   "emptyOcrProviders": "暂未注册 OCR 提供方。",
   "emptyPlugins": "暂无已安装插件。",
   "emptySkills": "还没有技能。",
   "emptySkillsHint": "在桌面端启用的技能会显示在这里。",
+  "emptySlashCommands": "暂未注册斜杠命令。",
+  "emptyTeamTemplates": "暂无可用的团队模板。",
   "emptyTeams": "还没有团队。",
   "emptyTeamsHint": "在桌面端创建智能体团队后会同步到这里。",
   "emptyTwinDrafts": "暂无待审孪生草稿。",
@@ -122,17 +131,31 @@
     "templates": "模板",
     "twin": "孪生"
   },
+  "home": {
+    "empty": "暂无可发现的内容。",
+    "emptyHint": "添加角色、技能、插件等内容后，会显示在这里。",
+    "featured": "精选",
+    "recent": "最近更新",
+    "viewAll": "查看全部（{count}）"
+  },
   "inspector": {
+    "addExternalAgent": "添加智能体",
+    "addMcpServer": "添加服务器",
     "aria": "详情面板",
     "close": "关闭",
     "disable": "已禁用",
     "empty": "选择一项查看详情。",
     "enable": "已启用",
     "itemCount": "{count, plural, =0 {暂无项目} =1 {1 项} other {# 项}}",
+    "manageCommands": "管理命令",
+    "mcpPresetFields": "{count, plural, =1 {需填写 1 个字段} other {需填写 # 个字段}}",
     "openFull": "打开完整页面",
+    "templateMissingDeps": "{count, plural, =1 {缺少 1 项依赖} other {缺少 # 项依赖}}",
     "title": "详情",
     "twinDraftFallbackName": "{kind} 草稿",
-    "twinSourceMeta": "{bytes} 字节 · {chunks, plural, =0 {无分片} =1 {1 个分片} other {# 个分片}}"
+    "twinSourceMeta": "{bytes} 字节 · {chunks, plural, =0 {无分片} =1 {1 个分片} other {# 个分片}}",
+    "useTemplate": "使用模板",
+    "viewDocs": "查看文档"
   },
   "marketplace": {
     "browse": "浏览市场",
@@ -162,8 +185,8 @@
   "pluginBadge": "插件",
   "preferences": {
     "description": "设置「发现」页默认打开哪个分类以及默认外观。",
-    "landingAuto": "自动（第一个可见分类）",
-    "landingHint": "当链接未指定分类时，「发现」页默认打开的分类。「自动」会使用第一个可见分类。",
+    "landingAuto": "自动（推荐）",
+    "landingHint": "当链接未指定分类时，「发现」页默认打开的分类。「自动」会打开「推荐」落地页。",
     "landingLabel": "默认分类",
     "reset": "重置",
     "title": "偏好设置",
@@ -181,6 +204,10 @@
     "piiTitle": "检测到可能的个人信息",
     "shareOriginal": "仍按原文分享",
     "shareRedacted": "移除后继续"
+  },
+  "skillMarketplace": {
+    "browse": "浏览技能",
+    "title": "技能市场"
   },
   "sortFilter": {
     "filter": {

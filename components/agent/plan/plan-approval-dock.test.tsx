@@ -12,6 +12,12 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+// The card (rendered for real here) delegates markdown rendering to the shared
+// MarkdownRenderer; stub it so a planText plan doesn't pull in the heavy pipeline.
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
+}))
+
 const approvePlan = jest.fn().mockResolvedValue(null)
 const rejectPlan = jest.fn().mockResolvedValue(null)
 const refinePlan = jest.fn().mockResolvedValue(null)
@@ -169,6 +175,38 @@ describe("PlanApprovalDock", () => {
     expect(patch.title).toBe("Ship it")
     expect(patch.steps.map((s) => s.title)).toEqual(["alpha", "beta"])
     // Linear dependency chain, same shape as exit-plan-capture.
+    expect(patch.steps[1].dependencies).toEqual([patch.steps[0].id])
+  })
+
+  it("skips the edit (no updatePlanDraft) when every step title is cleared", async () => {
+    mockPlan.mockReturnValue(plan({ steps: [step("a", "one", 0)] }))
+    render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    await userEvent.click(screen.getByTestId("plan-approval-edit"))
+    await userEvent.clear(screen.getByTestId("plan-edit-steps"))
+    await userEvent.click(screen.getByTestId("plan-edit-save"))
+    // Empty titles → guard returns early; the plan is not wiped.
+    expect(updatePlanDraft).not.toHaveBeenCalled()
+  })
+
+  it("saves a markdown edit → persists planText metadata + re-derived linear steps", async () => {
+    mockPlan.mockReturnValue(
+      plan({ steps: [step("a", "one", 0)], metadata: { planText: "- one" } })
+    )
+    render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    await userEvent.click(screen.getByTestId("plan-approval-edit"))
+    await userEvent.clear(screen.getByTestId("plan-edit-plan"))
+    await userEvent.type(screen.getByTestId("plan-edit-plan"), "- alpha{enter}- beta")
+    await userEvent.click(screen.getByTestId("plan-edit-save"))
+    await waitFor(() => expect(updatePlanDraft).toHaveBeenCalled())
+    const [planId, patch] = updatePlanDraft.mock.calls[0] as [
+      string,
+      { title: string; steps: PlanStep[]; metadata: { planText: string } },
+    ]
+    expect(planId).toBe("p1")
+    expect(patch.title).toBe("Ship it")
+    // Full body kept for display; steps re-derived from it (linear chain).
+    expect(patch.metadata.planText).toBe("- alpha\n- beta")
+    expect(patch.steps.map((s) => s.title)).toEqual(["alpha", "beta"])
     expect(patch.steps[1].dependencies).toEqual([patch.steps[0].id])
   })
 

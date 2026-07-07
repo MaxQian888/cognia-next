@@ -2,248 +2,134 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import type { LocalAccountRecord, PasswordVerifierRecord } from "@/lib/accounts/account-types"
-import type { AccountStoreState } from "@/stores/account/account-store"
+import { fireEvent, render, screen } from "@testing-library/react"
+import type { LocalAccountRecord } from "@/lib/accounts/account-types"
+import type { AccountListProps } from "./manage/account-list"
+import type { AccountDetailProps } from "./manage/account-detail"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, values?: Record<string, string>) =>
-    values ? `${key}:${Object.values(values).join(",")}` : key,
+  useTranslations: () => (key: string) => key,
 }))
 
-const mockCreateAccount = jest.fn<Promise<LocalAccountRecord>, [unknown]>()
-const mockRenameAccount = jest.fn<Promise<LocalAccountRecord>, [string, string]>()
-const mockChangePassword = jest.fn<Promise<LocalAccountRecord>, [string, string, string]>()
-const mockDeleteAccount = jest.fn<Promise<void>, [string, unknown?]>()
-
-let mockState: Pick<
-  AccountStoreState,
-  | "accounts"
-  | "activeAccountId"
-  | "createAccount"
-  | "renameAccount"
-  | "changePassword"
-  | "deleteAccount"
->
-
+let mockState: {
+  accounts: LocalAccountRecord[]
+  activeAccountId: string | null
+  unlockedAccountId: string | null
+  error: string | null
+}
 jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
 }))
 
+const created: LocalAccountRecord = {
+  id: "acct_new",
+  displayName: "New",
+  passwordVerifier: { algorithm: "a", salt: "s", hash: "h", params: {} },
+  createdAt: 1,
+  updatedAt: 1,
+}
+
+jest.mock("./manage/account-list", () => ({
+  AccountList: (props: AccountListProps) => (
+    <div data-testid="stub-list">
+      <button data-testid="stub-select-beta" onClick={() => props.onSelect("acct_beta")}>
+        select
+      </button>
+      <button data-testid="stub-create" onClick={() => props.onCreated?.(created)}>
+        create
+      </button>
+      <span data-testid="stub-list-selected">{props.selectedId ?? "none"}</span>
+      <span data-testid="stub-list-error">{props.error ?? "no-error"}</span>
+    </div>
+  ),
+}))
+jest.mock("./manage/account-detail", () => ({
+  AccountDetail: (props: AccountDetailProps) => (
+    <div data-testid="stub-detail">
+      <span data-testid="stub-detail-account">{props.account?.id ?? "none"}</span>
+      <button data-testid="stub-back" onClick={props.onBack}>
+        back
+      </button>
+    </div>
+  ),
+}))
+
 import { AccountManageDialog } from "./account-manage-dialog"
 
-const verifier: PasswordVerifierRecord = {
-  algorithm: "argon2id-v1",
-  salt: "salt",
-  hash: "hash",
-  params: {},
-}
-
 function account(id: string, displayName: string): LocalAccountRecord {
-  return { id, displayName, passwordVerifier: verifier, createdAt: 1, updatedAt: 1 }
+  return {
+    id,
+    displayName,
+    passwordVerifier: { algorithm: "a", salt: "s", hash: "h", params: {} },
+    createdAt: 1,
+    updatedAt: 1,
+  }
 }
 
-function setManageState(overrides: Partial<typeof mockState> = {}) {
+function setState(overrides: Partial<typeof mockState> = {}) {
   mockState = {
-    accounts: [account("acct_alpha", "Alpha"), account("acct_beta", "Beta")],
+    accounts: [
+      account("acct_alpha", "Alpha"),
+      account("acct_beta", "Beta"),
+      account("acct_new", "New"),
+    ],
     activeAccountId: "acct_alpha",
-    createAccount: mockCreateAccount,
-    renameAccount: mockRenameAccount,
-    changePassword: mockChangePassword,
-    deleteAccount: mockDeleteAccount,
+    unlockedAccountId: "acct_alpha",
+    error: null,
     ...overrides,
   }
 }
+
+beforeEach(() => setState())
+
+const listCol = () => screen.getByTestId("account-manage-list-col")
+const detailCol = () => screen.getByTestId("account-manage-detail-col")
 
 function renderDialog() {
   return render(<AccountManageDialog open onOpenChange={jest.fn()} />)
 }
 
-beforeEach(() => {
-  jest.clearAllMocks()
-  mockCreateAccount.mockResolvedValue(account("acct_created", "Created"))
-  mockRenameAccount.mockImplementation(async (id, displayName) => account(id, displayName))
-  mockChangePassword.mockImplementation(async (id) => account(id, "Alpha"))
-  mockDeleteAccount.mockResolvedValue()
-  setManageState()
-})
-
 describe("AccountManageDialog", () => {
-  it("creates an account from the create form", async () => {
+  it("renders both columns and defaults to the first sorted account", () => {
     renderDialog()
-    fireEvent.change(screen.getByLabelText("newDisplayNameLabel"), {
-      target: { value: "Gamma" },
-    })
-    fireEvent.change(screen.getByLabelText("newPasswordLabel"), {
-      target: { value: "secret-pw" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
-
-    await waitFor(() =>
-      expect(mockCreateAccount).toHaveBeenCalledWith({
-        displayName: "Gamma",
-        password: "secret-pw",
-      })
-    )
+    expect(screen.getByTestId("stub-list")).toBeInTheDocument()
+    expect(screen.getByTestId("stub-detail-account")).toHaveTextContent("acct_alpha")
   })
 
-  it("blocks creating an account below the minimum password length", () => {
+  it("passes the store error into the list", () => {
+    setState({ error: "boom" })
     renderDialog()
-    fireEvent.change(screen.getByLabelText("newDisplayNameLabel"), {
-      target: { value: "Gamma" },
-    })
-    fireEvent.change(screen.getByLabelText("newPasswordLabel"), {
-      target: { value: "short" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
-
-    expect(screen.getByText("passwordTooShort:8")).toBeInTheDocument()
-    expect(mockCreateAccount).not.toHaveBeenCalled()
+    expect(screen.getByTestId("stub-list-error")).toHaveTextContent("boom")
   })
 
-  it("renames the selected account", async () => {
+  it("selecting an account swaps to the detail pane on narrow layouts", () => {
     renderDialog()
-    fireEvent.click(screen.getByTestId("account-manage-row-acct_beta"))
-    fireEvent.change(screen.getByLabelText("editDisplayNameLabel"), {
-      target: { value: "Renamed" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "save" }))
+    expect(detailCol().className).toMatch(/hidden/)
+    expect(listCol().className).not.toMatch(/hidden/)
 
-    await waitFor(() => expect(mockRenameAccount).toHaveBeenCalledWith("acct_beta", "Renamed"))
+    fireEvent.click(screen.getByTestId("stub-select-beta"))
+    expect(screen.getByTestId("stub-detail-account")).toHaveTextContent("acct_beta")
+    expect(listCol().className).toMatch(/hidden/)
+    expect(detailCol().className).not.toMatch(/hidden/)
   })
 
-  it("changes the password for the selected account", async () => {
+  it("selects the newly created account", () => {
     renderDialog()
-    fireEvent.change(screen.getByLabelText("currentPasswordLabel"), {
-      target: { value: "old-password" },
-    })
-    fireEvent.change(screen.getByLabelText("changeNewPasswordLabel"), {
-      target: { value: "new-secret" },
-    })
-    fireEvent.change(screen.getByLabelText("confirmNewPasswordLabel"), {
-      target: { value: "new-secret" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "changePassword" }))
-
-    await waitFor(() =>
-      expect(mockChangePassword).toHaveBeenCalledWith("acct_alpha", "old-password", "new-secret")
-    )
-    expect(await screen.findByText("passwordChanged")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("stub-create"))
+    expect(screen.getByTestId("stub-detail-account")).toHaveTextContent("acct_new")
   })
 
-  it("blocks the password change when the confirmation does not match", async () => {
+  it("back returns to the list on narrow layouts", () => {
     renderDialog()
-    fireEvent.change(screen.getByLabelText("currentPasswordLabel"), {
-      target: { value: "old-password" },
-    })
-    fireEvent.change(screen.getByLabelText("changeNewPasswordLabel"), {
-      target: { value: "new-secret" },
-    })
-    fireEvent.change(screen.getByLabelText("confirmNewPasswordLabel"), {
-      target: { value: "different" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "changePassword" }))
-
-    expect(await screen.findByText("passwordMismatch")).toBeInTheDocument()
-    expect(mockChangePassword).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("stub-select-beta"))
+    fireEvent.click(screen.getByTestId("stub-back"))
+    expect(listCol().className).not.toMatch(/hidden/)
+    expect(detailCol().className).toMatch(/hidden/)
   })
 
-  it("blocks the password change below the minimum length", () => {
+  it("falls back to an empty detail when there are no accounts", () => {
+    setState({ accounts: [], activeAccountId: null, unlockedAccountId: null })
     renderDialog()
-    fireEvent.change(screen.getByLabelText("currentPasswordLabel"), {
-      target: { value: "old-password" },
-    })
-    fireEvent.change(screen.getByLabelText("changeNewPasswordLabel"), {
-      target: { value: "short" },
-    })
-    fireEvent.change(screen.getByLabelText("confirmNewPasswordLabel"), {
-      target: { value: "short" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "changePassword" }))
-
-    expect(screen.getByText("passwordTooShort:8")).toBeInTheDocument()
-    expect(mockChangePassword).not.toHaveBeenCalled()
-  })
-
-  it("surfaces password change errors", async () => {
-    mockChangePassword.mockRejectedValueOnce(new Error("Invalid local account password."))
-    renderDialog()
-    fireEvent.change(screen.getByLabelText("currentPasswordLabel"), {
-      target: { value: "wrong" },
-    })
-    fireEvent.change(screen.getByLabelText("changeNewPasswordLabel"), {
-      target: { value: "new-secret" },
-    })
-    fireEvent.change(screen.getByLabelText("confirmNewPasswordLabel"), {
-      target: { value: "new-secret" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "changePassword" }))
-
-    expect(await screen.findByText("Invalid local account password.")).toBeInTheDocument()
-  })
-
-  it("deletes an inactive account after confirmation", async () => {
-    renderDialog()
-    fireEvent.click(screen.getByTestId("account-manage-row-acct_beta"))
-    fireEvent.click(screen.getByRole("button", { name: "delete" }))
-    fireEvent.click(screen.getByRole("button", { name: "confirmDelete" }))
-
-    await waitFor(() =>
-      expect(mockDeleteAccount).toHaveBeenCalledWith("acct_beta", {
-        replacementAccountId: undefined,
-      })
-    )
-  })
-
-  it("deletes the active account with a replacement account id", async () => {
-    renderDialog()
-    fireEvent.click(screen.getByTestId("account-manage-row-acct_alpha"))
-    fireEvent.click(screen.getByRole("button", { name: "delete" }))
-    fireEvent.click(screen.getByRole("button", { name: "confirmDelete" }))
-
-    await waitFor(() =>
-      expect(mockDeleteAccount).toHaveBeenCalledWith("acct_alpha", {
-        replacementAccountId: "acct_beta",
-      })
-    )
-  })
-
-  it("disables deleting the last account", () => {
-    setManageState({ accounts: [account("acct_solo", "Solo")], activeAccountId: "acct_solo" })
-    renderDialog()
-    expect(screen.getByRole("button", { name: "delete" })).toBeDisabled()
-  })
-
-  it("shows action errors", async () => {
-    mockCreateAccount.mockRejectedValueOnce(new Error("create failed"))
-    renderDialog()
-    fireEvent.change(screen.getByLabelText("newDisplayNameLabel"), {
-      target: { value: "Gamma" },
-    })
-    fireEvent.change(screen.getByLabelText("newPasswordLabel"), {
-      target: { value: "secret-pw" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "createAccount" }))
-
-    await screen.findByText("create failed")
-  })
-
-  it("shows rename and delete errors using string/fallback messages", async () => {
-    mockRenameAccount.mockRejectedValueOnce("rename failed")
-    renderDialog()
-    fireEvent.click(screen.getByTestId("account-manage-row-acct_beta"))
-    fireEvent.click(screen.getByRole("button", { name: "save" }))
-    expect(await screen.findByText("rename failed")).toBeInTheDocument()
-
-    mockDeleteAccount.mockRejectedValueOnce({ code: "delete-failed" })
-    fireEvent.click(screen.getByRole("button", { name: "delete" }))
-    fireEvent.click(screen.getByRole("button", { name: "confirmDelete" }))
-    expect(await screen.findByText("operationFailed")).toBeInTheDocument()
-  })
-
-  it("renders the empty selection state when the account list is empty", () => {
-    setManageState({ accounts: [], activeAccountId: null })
-    renderDialog()
-    expect(screen.getByText("empty")).toBeInTheDocument()
+    expect(screen.getByTestId("stub-detail-account")).toHaveTextContent("none")
   })
 })

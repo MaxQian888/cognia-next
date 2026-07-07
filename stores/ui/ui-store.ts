@@ -38,6 +38,38 @@ export type SelectedGuild =
  */
 export type MemberStatus = "idle" | "thinking" | "errored"
 
+/**
+ * Individually-toggleable desktop chrome segments added to the title/status
+ * bars. Each maps to a self-contained sub-component that returns `null` when
+ * its flag is off. Surfaced as checkboxes in the title bar's "Customize
+ * Layout" dropdown.
+ */
+export type BarItemId =
+  | "connectivity"
+  | "sync"
+  | "perf"
+  | "accountStatus"
+  | "usage"
+  | "workspace"
+  | "quickActions"
+  | "accountTop"
+
+/**
+ * Default visibility per segment. `perf` starts **off** because mounting its
+ * component begins native CPU/mem sampling — it is strictly opt-in. Everything
+ * else defaults on (but each still self-hides when its data source is absent).
+ */
+export const DEFAULT_BAR_ITEMS: Record<BarItemId, boolean> = {
+  connectivity: true,
+  sync: true,
+  perf: false,
+  accountStatus: true,
+  usage: true,
+  workspace: true,
+  quickActions: true,
+  accountTop: true,
+}
+
 interface UIState {
   selectedGuild: SelectedGuild
   setSelectedGuild: (g: SelectedGuild) => void
@@ -115,6 +147,23 @@ interface UIState {
   statusBarCollapsed: boolean
   toggleStatusBar: () => void
   setStatusBarCollapsed: (collapsed: boolean) => void
+
+  /**
+   * Per-segment visibility for the optional title/status-bar chrome items.
+   * Persisted so the user's chosen segments stick across reloads. Read via
+   * {@link useBarItemVisible} so a missing key falls back to its default.
+   */
+  barItems: Record<BarItemId, boolean>
+  toggleBarItem: (id: BarItemId) => void
+
+  /**
+   * Transient (never persisted) open state for the in-app Find bar. Set by the
+   * title bar's Edit → Find / Ctrl+F handler; read by the shell-mounted
+   * `FindBar`. Reset on reload — a stale find query has no meaning after that.
+   */
+  findOpen: boolean
+  openFind: () => void
+  closeFind: () => void
 
   /**
    * Per-team-session collapsed state for the Shared notes (scratchpad) panel
@@ -229,6 +278,19 @@ export const useUIStore = create<UIState>()(
       toggleStatusBar: () => set((s) => ({ statusBarCollapsed: !s.statusBarCollapsed })),
       setStatusBarCollapsed: (collapsed) => set({ statusBarCollapsed: collapsed }),
 
+      barItems: { ...DEFAULT_BAR_ITEMS },
+      toggleBarItem: (id) =>
+        set((s) => ({
+          barItems: {
+            ...s.barItems,
+            [id]: !(s.barItems[id] ?? DEFAULT_BAR_ITEMS[id]),
+          },
+        })),
+
+      findOpen: false,
+      openFind: () => set({ findOpen: true }),
+      closeFind: () => set({ findOpen: false }),
+
       scratchpadCollapsed: {},
       setScratchpadCollapsed: (sessionId, collapsed) =>
         set((s) => ({
@@ -295,15 +357,25 @@ export const useUIStore = create<UIState>()(
     {
       name: "cognia-ui",
       storage: createJSONStorage(() => localStorage),
-      // Bumped from unversioned (0 → 1) when the conversation-sidebar layout
-      // fields (width / view / collapsed folders) were added. Missing keys in a
-      // pre-v1 snapshot fall back to the store's initial defaults on merge, so
-      // the migration is a passthrough — the version simply gives future
-      // migrations a stable baseline.
-      version: 1,
+      // Bumped 0 → 1 when the conversation-sidebar layout fields were added,
+      // then 1 → 2 when per-segment `barItems` visibility was added. Missing
+      // keys fall back to defaults via `merge` below, so migration stays a
+      // passthrough — the version just gives future migrations a baseline.
+      version: 2,
       migrate: (persisted) => persisted as UIState,
+      // Deep-merge `barItems` so a snapshot written before a new segment
+      // existed still gains that segment's default (shallow merge would drop
+      // any key the persisted map lacks). Everything else merges shallowly.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<UIState>
+        return {
+          ...current,
+          ...p,
+          barItems: { ...DEFAULT_BAR_ITEMS, ...(p.barItems ?? {}) },
+        }
+      },
       // Don't persist member statuses (tied to in-flight requests that died)
-      // or stop requests (one-shot, transient).
+      // or stop requests (one-shot, transient). `findOpen` is transient too.
       partialize: (s) => ({
         selectedGuild: s.selectedGuild,
         showMemberList: s.showMemberList,
@@ -314,10 +386,20 @@ export const useUIStore = create<UIState>()(
         collapsedFolderIds: s.collapsedFolderIds,
         guildRailCollapsed: s.guildRailCollapsed,
         statusBarCollapsed: s.statusBarCollapsed,
+        barItems: s.barItems,
       }),
     }
   )
 )
+
+/**
+ * Read a single title/status-bar segment's visibility, falling back to its
+ * built-in default when the persisted map predates the segment. Prefer this
+ * over reading `barItems[id]` directly so a segment never renders `undefined`.
+ */
+export function useBarItemVisible(id: BarItemId): boolean {
+  return useUIStore((s) => s.barItems[id] ?? DEFAULT_BAR_ITEMS[id])
+}
 
 /** Selector helper: read the live status of a team member. */
 export function useMemberStatus(teamSessionId: string | null, characterId: string): MemberStatus {

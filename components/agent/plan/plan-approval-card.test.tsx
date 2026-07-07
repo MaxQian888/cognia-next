@@ -12,6 +12,12 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+// The card delegates markdown-body rendering to the shared MarkdownRenderer;
+// stub it (identity) so these tests stay focused on the card's own branching.
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
+}))
+
 function step(id: string, over: Partial<PlanStep> = {}): PlanStep {
   return {
     id,
@@ -40,6 +46,7 @@ function plan(over: Partial<AgentPlan> = {}): AgentPlan {
     generationId: "g",
     createdAt: 0,
     updatedAt: 0,
+    metadata: over.metadata,
   }
 }
 
@@ -56,6 +63,54 @@ describe("PlanApprovalCard", () => {
     expect(screen.getByText("Ship the widget")).toBeInTheDocument()
     expect(screen.getByText("First step")).toBeInTheDocument()
     expect(screen.getByText("status.awaiting_approval")).toBeInTheDocument()
+  })
+
+  it("renders the full markdown body (not the step list) when metadata.planText is present", () => {
+    render(
+      <PlanApprovalCard
+        plan={plan({ metadata: { planText: "## Plan\n\n- step one\n- step two" } })}
+        {...noop}
+      />
+    )
+    expect(screen.getByTestId("plan-approval-body")).toBeInTheDocument()
+    expect(screen.getByTestId("md")).toHaveTextContent("step one")
+    // The lossy step-title projection is replaced by the faithful markdown.
+    expect(screen.queryByTestId("plan-approval-steps")).not.toBeInTheDocument()
+  })
+
+  it("edits the raw markdown (not step titles) and saves planText via onEdit", async () => {
+    const onEdit = jest.fn()
+    render(
+      <PlanApprovalCard
+        plan={plan({ metadata: { planText: "- one" } })}
+        {...noop}
+        onEdit={onEdit}
+      />
+    )
+    await userEvent.click(screen.getByTestId("plan-approval-edit"))
+    // The markdown editor, not the one-step-per-line textarea.
+    expect(screen.queryByTestId("plan-edit-steps")).not.toBeInTheDocument()
+    expect(screen.getByTestId("plan-edit-plan")).toHaveValue("- one")
+    await userEvent.clear(screen.getByTestId("plan-edit-plan"))
+    await userEvent.type(screen.getByTestId("plan-edit-plan"), "## New{enter}- alpha")
+    await userEvent.click(screen.getByTestId("plan-edit-save"))
+    expect(onEdit).toHaveBeenCalledWith({ title: "Ship the widget", planText: "## New\n- alpha" })
+  })
+
+  it("does not save an emptied markdown body (guards against wiping the plan)", async () => {
+    const onEdit = jest.fn()
+    render(
+      <PlanApprovalCard
+        plan={plan({ metadata: { planText: "- one" } })}
+        {...noop}
+        onEdit={onEdit}
+      />
+    )
+    await userEvent.click(screen.getByTestId("plan-approval-edit"))
+    await userEvent.clear(screen.getByTestId("plan-edit-plan"))
+    await userEvent.click(screen.getByTestId("plan-edit-save"))
+    expect(onEdit).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("plan-approval-editor")).not.toBeInTheDocument()
   })
 
   it("caps the card height and scrolls the step list natively (selection-safe)", () => {

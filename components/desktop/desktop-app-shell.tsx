@@ -25,6 +25,7 @@ import { CommandPalette } from "@/components/desktop/command-palette"
 import { GuildRail } from "@/components/shell/guild-rail"
 import { StatusBar } from "@/components/desktop/status-bar"
 import { TitleBar } from "@/components/desktop/title-bar"
+import { FindBar } from "@/components/desktop/find-bar"
 import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
 import { WindowResizeEdges } from "@/components/desktop/window-resize-edges"
 import { ZoomShortcuts } from "@/components/desktop/zoom-shortcuts"
@@ -133,7 +134,9 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
           <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => handleOpenSettings()} />
         )}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex min-h-0 flex-1 overflow-hidden">{children}</div>
+          <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
+            {children}
+          </div>
           {terminalPanelOpen ? (
             <div
               data-testid="terminal-dock-region"
@@ -153,6 +156,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
         <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
       </div>
       {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
+      <FindBar />
       {!statusBarCollapsed && <StatusBar />}
     </div>
   )

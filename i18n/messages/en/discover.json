@@ -15,13 +15,18 @@
     "title": "Actions"
   },
   "categories": {
+    "agentPresets": "Agents & subagents",
     "characters": "Characters",
     "connectors": "Connectors",
     "favorites": "Favorites",
+    "foryou": "For You",
+    "mcpPresets": "MCP presets",
     "mcpTools": "MCP tools",
     "ocrProviders": "OCR providers",
     "plugins": "Plugins",
     "skills": "Skills",
+    "slashCommands": "Slash commands",
+    "teamTemplates": "Team templates",
     "teams": "Teams",
     "twinDrafts": "Twin drafts",
     "twinIngest": "Twin ingest",
@@ -91,16 +96,20 @@
   "empty": {
     "noQuery": "Nothing here yet."
   },
+  "emptyAgentPresets": "No agent presets available.",
   "emptyCharacters": "No characters yet — create one on the desktop.",
   "emptyCharactersHint": "Create characters in the desktop app and they'll sync here.",
   "emptyConnectors": "No connectors available.",
   "emptyFavorites": "No favorites yet — tap the star on any item to pin it here.",
   "emptyFiltered": "No matches for \"{query}\".",
+  "emptyMcpPresets": "No MCP presets available.",
   "emptyMcpTools": "No MCP servers configured.",
   "emptyOcrProviders": "No OCR providers registered.",
   "emptyPlugins": "No plugins installed.",
   "emptySkills": "No skills yet.",
   "emptySkillsHint": "Skills you enable in the desktop app appear here.",
+  "emptySlashCommands": "No slash commands registered.",
+  "emptyTeamTemplates": "No team templates available.",
   "emptyTeams": "No teams yet.",
   "emptyTeamsHint": "Create agent teams in the desktop app and they'll sync here.",
   "emptyTwinDrafts": "No pending twin drafts.",
@@ -122,17 +131,31 @@
     "templates": "Templates",
     "twin": "Twin"
   },
+  "home": {
+    "empty": "Nothing to discover yet.",
+    "emptyHint": "Add characters, skills, plugins, and more — they'll show up here.",
+    "featured": "Featured",
+    "recent": "Recently updated",
+    "viewAll": "View all ({count})"
+  },
   "inspector": {
+    "addExternalAgent": "Add agent",
+    "addMcpServer": "Add server",
     "aria": "Details panel",
     "close": "Close",
     "disable": "Disabled",
     "empty": "Select an item to see its details.",
     "enable": "Enabled",
     "itemCount": "{count, plural, =0 {No items} =1 {1 item} other {# items}}",
+    "manageCommands": "Manage commands",
+    "mcpPresetFields": "{count, plural, =1 {1 field to fill in} other {# fields to fill in}}",
     "openFull": "Open full page",
+    "templateMissingDeps": "{count, plural, =1 {1 missing dependency} other {# missing dependencies}}",
     "title": "Details",
     "twinDraftFallbackName": "{kind} draft",
-    "twinSourceMeta": "{bytes} bytes · {chunks, plural, =0 {no chunks} =1 {1 chunk} other {# chunks}}"
+    "twinSourceMeta": "{bytes} bytes · {chunks, plural, =0 {no chunks} =1 {1 chunk} other {# chunks}}",
+    "useTemplate": "Use template",
+    "viewDocs": "View docs"
   },
   "marketplace": {
     "browse": "Browse marketplace",
@@ -162,8 +185,8 @@
   "pluginBadge": "Plugin",
   "preferences": {
     "description": "Set where Discover opens and how it looks by default.",
-    "landingAuto": "Auto (first visible)",
-    "landingHint": "The category Discover opens on when no link specifies one. Auto uses your first visible category.",
+    "landingAuto": "Auto (For You)",
+    "landingHint": "The category Discover opens on when no link specifies one. Auto opens the For You landing.",
     "landingLabel": "Default category",
     "reset": "Reset",
     "title": "Preferences",
@@ -181,6 +204,10 @@
     "piiTitle": "Possible personal info detected",
     "shareOriginal": "Share anyway",
     "shareRedacted": "Remove and continue"
+  },
+  "skillMarketplace": {
+    "browse": "Browse skills",
+    "title": "Skill marketplace"
   },
   "sortFilter": {
     "filter": {

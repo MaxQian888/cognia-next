@@ -117,7 +117,22 @@ export function planInputFromExitPlanMode(
   }
 }
 
-/** Find the first `ExitPlanMode` tool_use block's input in an assistant event. */
+// The plan-mode signal tool across SDK flavors: the native Anthropic
+// `ExitPlanMode`, and the cognia builtin `exit_plan_mode` the ai-sdk path uses
+// (flat, or namespaced `mcp__cognia-tools__exit_plan_mode` under the Anthropic
+// escape hatch). Fold the namespace prefix off before matching, mirroring the
+// renderer's `normalizeToolName`, so capture — and thus the approval dock —
+// works on every provider, not just Anthropic.
+const CORE_TOOL_PREFIX = "mcp__cognia-tools__"
+const EXIT_PLAN_TOOL_NAMES = new Set(["ExitPlanMode", "exit_plan_mode"])
+
+function isExitPlanToolName(name: string | undefined): boolean {
+  if (!name) return false
+  const bare = name.startsWith(CORE_TOOL_PREFIX) ? name.slice(CORE_TOOL_PREFIX.length) : name
+  return EXIT_PLAN_TOOL_NAMES.has(bare)
+}
+
+/** Find the first exit-plan tool_use block's input in an assistant event. */
 export function findExitPlanModeInput(evt: SDKMessage): unknown | null {
   if (!evt || evt.type !== "assistant") return null
   const message = (evt as SDKAssistantMessage).message
@@ -125,7 +140,7 @@ export function findExitPlanModeInput(evt: SDKMessage): unknown | null {
   for (const block of message.content) {
     if ((block as { type?: string }).type !== "tool_use") continue
     const tu = block as BetaToolUseBlock
-    if (tu.name === "ExitPlanMode") return tu.input
+    if (isExitPlanToolName(tu.name)) return tu.input
   }
   return null
 }

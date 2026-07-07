@@ -40,6 +40,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { permissionRiskMarker } from "@/lib/settings/permission-mode-meta"
 import {
   computePlanCounts,
@@ -63,6 +64,16 @@ const REFINE_LABEL_KEY: Record<PlanRefinementType, string> = {
  * `PermissionMode` members — the host applies it directly, no translation.
  */
 export type PlanResumeMode = "acceptEdits" | "default" | "auto"
+
+/**
+ * An inline plan edit. A plan captured with a full markdown body edits that
+ * body (`planText`); a plan without one edits its step titles one per line
+ * (`stepTitles`). The discriminant lets the host derive steps either way
+ * without a fallback branch.
+ */
+export type PlanEditPatch =
+  | { title: string; planText: string }
+  | { title: string; stepTitles: string[] }
 
 export function stepStatusIcon(status: PlanStepStatus) {
   switch (status) {
@@ -96,10 +107,13 @@ export interface PlanApprovalCardProps {
   onRefine?: (type: PlanRefinementType, feedback?: string) => void
   /**
    * When provided (and the plan is awaiting approval), a pencil toggle opens
-   * an inline editor; saving hands the edited title + one-per-line step titles
-   * to the host, which persists them via the runtime's `updatePlanDraft`.
+   * an inline editor; saving hands the edit to the host, which persists it via
+   * the runtime's `updatePlanDraft`. For an `exit_plan_mode` plan (one carrying
+   * a full markdown body in `metadata.planText`) the editor edits the raw
+   * markdown and the patch carries `planText`; otherwise it edits one step title
+   * per line and the patch carries `stepTitles`.
    */
-  onEdit?: (patch: { title: string; stepTitles: string[] }) => void
+  onEdit?: (patch: PlanEditPatch) => void
   /** Disables all actions (e.g. while an approve/refine is in flight). */
   disabled?: boolean
 }
@@ -118,7 +132,14 @@ export function PlanApprovalCard({
   const [editing, setEditing] = useState(false)
   const [editTitle, setEditTitle] = useState("")
   const [editSteps, setEditSteps] = useState("")
+  const [editMarkdown, setEditMarkdown] = useState("")
   const steps = [...plan.steps].sort((a, b) => a.order - b.order)
+  // The full markdown body an `exit_plan_mode` plan was captured from — the
+  // step list is only a lossy projection of it, so when it's present we render
+  // (and edit) the faithful markdown instead. (exit-plan-capture stamps it.)
+  const planMeta = plan.metadata as { planText?: unknown } | undefined
+  const planText = typeof planMeta?.planText === "string" ? planMeta.planText.trim() : ""
+  const isMarkdownPlan = planText.length > 0
   const trimmed = () => feedback.trim() || undefined
   const { totalSteps, completedSteps } = computePlanCounts(plan.steps)
   const progressPct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0
@@ -127,15 +148,24 @@ export function PlanApprovalCard({
   const openEditor = () => {
     setEditTitle(plan.title)
     setEditSteps(steps.map((s) => s.title).join("\n"))
+    setEditMarkdown(planText)
     setEditing(true)
   }
 
   const saveEdit = () => {
-    const stepTitles = editSteps
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-    onEdit?.({ title: editTitle.trim() || plan.title, stepTitles })
+    const title = editTitle.trim() || plan.title
+    if (isMarkdownPlan) {
+      // Editing the markdown body: only persist when it's non-empty so a stray
+      // clear can't wipe the plan; the host re-derives steps from it.
+      const md = editMarkdown.trim()
+      if (md) onEdit?.({ title, planText: md })
+    } else {
+      const stepTitles = editSteps
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+      onEdit?.({ title, stepTitles })
+    }
     setEditing(false)
   }
 
@@ -176,18 +206,37 @@ export function PlanApprovalCard({
             className="h-8 text-sm"
             data-testid="plan-edit-title"
           />
-          <label className="text-xs text-muted-foreground" htmlFor="plan-edit-steps">
-            {t("approval.editStepsLabel")}
-          </label>
-          <Textarea
-            id="plan-edit-steps"
-            rows={8}
-            value={editSteps}
-            onChange={(e) => setEditSteps(e.target.value)}
-            placeholder={t("approval.editStepsHint")}
-            className="min-h-0 flex-1 text-xs"
-            data-testid="plan-edit-steps"
-          />
+          {isMarkdownPlan ? (
+            <>
+              <label className="text-xs text-muted-foreground" htmlFor="plan-edit-plan">
+                {t("approval.editPlanLabel")}
+              </label>
+              <Textarea
+                id="plan-edit-plan"
+                rows={12}
+                value={editMarkdown}
+                onChange={(e) => setEditMarkdown(e.target.value)}
+                placeholder={t("approval.editPlanHint")}
+                className="min-h-0 flex-1 font-mono text-xs"
+                data-testid="plan-edit-plan"
+              />
+            </>
+          ) : (
+            <>
+              <label className="text-xs text-muted-foreground" htmlFor="plan-edit-steps">
+                {t("approval.editStepsLabel")}
+              </label>
+              <Textarea
+                id="plan-edit-steps"
+                rows={8}
+                value={editSteps}
+                onChange={(e) => setEditSteps(e.target.value)}
+                placeholder={t("approval.editStepsHint")}
+                className="min-h-0 flex-1 text-xs"
+                data-testid="plan-edit-steps"
+              />
+            </>
+          )}
           <div className="flex items-center justify-end gap-2">
             <Button
               size="sm"
@@ -236,7 +285,18 @@ export function PlanApprovalCard({
             </div>
           )}
 
-          {steps.length > 0 ? (
+          {isMarkdownPlan ? (
+            // Faithful plan body: render the captured markdown (headings, lists,
+            // code, tables) instead of the lossy step-title projection, capped +
+            // scrolling in its own container so the actions/composer stay put.
+            // Native overflow (not Radix ScrollArea): the thumb stays grabbable
+            // while text is selected, matching the transcript PlanCard.
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md bg-muted/40">
+              <div data-testid="plan-approval-body" className="p-2 text-sm">
+                <MarkdownRenderer content={planText} />
+              </div>
+            </div>
+          ) : steps.length > 0 ? (
             // Native overflow, not Radix ScrollArea: a persistent grabbable thumb
             // that keeps working while text is selected inside the transcript.
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md bg-muted/40">

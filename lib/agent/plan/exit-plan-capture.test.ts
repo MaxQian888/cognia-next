@@ -69,6 +69,19 @@ describe("planInputFromExitPlanMode", () => {
     expect(input!.steps.map((s) => s.title)).toEqual(["x", "y"])
   })
 
+  it("reads a pre-structured item's description when content/title are absent", () => {
+    const input = planInputFromExitPlanMode({ steps: [{ description: "do the thing" }] }, ctx)
+    expect(input!.steps.map((s) => s.title)).toEqual(["do the thing"])
+  })
+
+  it("passes ctx.config through to the created plan input", () => {
+    const input = planInputFromExitPlanMode(
+      { plan: "- a" },
+      { ...ctx, config: { requireApproval: false } }
+    )
+    expect(input!.config).toEqual({ requireApproval: false })
+  })
+
   it("derives a title from the first step, override wins", () => {
     expect(planInputFromExitPlanMode({ plan: "- only" }, ctx)!.title).toBe("only")
     expect(planInputFromExitPlanMode({ plan: "- only" }, { ...ctx, title: "Custom" })!.title).toBe(
@@ -98,9 +111,39 @@ describe("findExitPlanModeInput", () => {
     })
   })
 
-  it("returns null for other tools / non-assistant events", () => {
+  it("matches the ai-sdk exit_plan_mode and the namespaced cognia form", () => {
+    // Non-Anthropic providers emit the cognia builtin name (flat or namespaced),
+    // never the native PascalCase one — capture must recognise all three.
+    expect(findExitPlanModeInput(assistantEvt("exit_plan_mode", { plan: "- y" }))).toEqual({
+      plan: "- y",
+    })
+    expect(
+      findExitPlanModeInput(assistantEvt("mcp__cognia-tools__exit_plan_mode", { plan: "- z" }))
+    ).toEqual({ plan: "- z" })
+  })
+
+  it("returns null for other tools / non-assistant events / nameless blocks", () => {
     expect(findExitPlanModeInput(assistantEvt("TodoWrite", {}))).toBeNull()
     expect(findExitPlanModeInput({ type: "result" } as unknown as SDKMessage)).toBeNull()
+    // A malformed tool_use block with no name must not throw.
+    expect(
+      findExitPlanModeInput(assistantEvt(undefined as unknown as string, { plan: "- x" }))
+    ).toBeNull()
+  })
+
+  it("skips non-tool_use blocks and tolerates a missing content array", () => {
+    const mixed = {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "thinking…" },
+          { type: "tool_use", name: "ExitPlanMode", input: { plan: "- x" } },
+        ],
+      },
+    } as unknown as SDKMessage
+    expect(findExitPlanModeInput(mixed)).toEqual({ plan: "- x" })
+    const noContent = { type: "assistant", message: {} } as unknown as SDKMessage
+    expect(findExitPlanModeInput(noContent)).toBeNull()
   })
 })
 
@@ -116,6 +159,21 @@ describe("captureExitPlanMode", () => {
     expect(plan!.source).toBe("exit_plan_mode")
     expect(plan!.totalSteps).toBe(3)
     // Persisted + retrievable as the session's open plan.
+    const open = await getPlanRuntime().getOpenPlanForSession("ses_a")
+    expect(open?.id).toBe(plan!.id)
+  })
+
+  it("captures a non-Anthropic exit_plan_mode event and keeps the markdown body", async () => {
+    const plan = await captureExitPlanMode(
+      assistantEvt("exit_plan_mode", { plan: "- a\n- b" }),
+      "ses_a"
+    )
+    expect(plan).not.toBeNull()
+    expect(plan!.source).toBe("exit_plan_mode")
+    expect(plan!.totalSteps).toBe(2)
+    // Full markdown body retained for the approval card / audit.
+    expect(plan!.metadata?.planText).toBe("- a\n- b")
+    // And the dock becomes reachable — it's the session's open plan.
     const open = await getPlanRuntime().getOpenPlanForSession("ses_a")
     expect(open?.id).toBe(plan!.id)
   })

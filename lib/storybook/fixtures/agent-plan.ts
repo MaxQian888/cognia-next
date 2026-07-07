@@ -74,3 +74,29 @@ export function buildDraftPlan(over: Partial<AgentPlan> = {}): AgentPlan {
     ...over,
   })
 }
+
+/** A realistic markdown plan body — what `exit_plan_mode` captures. */
+export const SAMPLE_PLAN_MARKDOWN = `## Overview
+
+Refactor the plan reducer to fix the off-by-one and add regression coverage.
+
+### Steps
+
+1. **Reproduce** the failure with a focused unit test.
+2. Patch \`applyStepStatus\` to clamp the cursor.
+3. Re-run the suite and confirm it's green.
+
+\`\`\`ts
+const next = Math.min(index, steps.length - 1)
+\`\`\`
+
+> Ship behind the existing plan-mode flag.`
+
+/**
+ * A draft `exit_plan_mode` plan carrying its full markdown body in
+ * `metadata.planText` — the approval card renders this instead of the lossy
+ * step-title projection.
+ */
+export function buildMarkdownPlan(over: Partial<AgentPlan> = {}): AgentPlan {
+  return buildDraftPlan({ metadata: { planText: SAMPLE_PLAN_MARKDOWN }, ...over })
+}

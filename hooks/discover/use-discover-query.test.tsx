@@ -58,6 +58,75 @@ jest.mock("@/lib/ocr/registry", () => ({
 jest.mock("@/lib/workflow/copilot-templates", () => ({
   listCopilotTemplates: jest.fn(() => []),
 }))
+// New synchronous registries (WF1) — stub so tests control their content and
+// don't pull in the real runtime stores / agent-definition modules.
+jest.mock("@/lib/claude/mcp-presets", () => ({
+  MCP_PRESETS: [
+    {
+      id: "filesystem",
+      name: "Filesystem",
+      description: "Read/write files",
+      transport: "stdio",
+      tags: ["files"],
+    },
+    {
+      id: "github",
+      name: "GitHub",
+      description: "Repos and PRs",
+      transport: "stdio",
+      tags: ["dev"],
+    },
+  ],
+}))
+jest.mock("@/lib/slash-commands/registry", () => ({
+  listSlashCommands: jest.fn(() => [
+    { id: "help", name: "help", description: "Show help", source: "builtin" },
+    {
+      id: "gitx.status",
+      name: "gitx.status",
+      description: "Git status",
+      source: "plugin",
+      pluginId: "gitx",
+    },
+  ]),
+  subscribeSlashCommands: jest.fn(() => () => {}),
+  getSlashCommandsVersion: jest.fn(() => 0),
+}))
+jest.mock("@/types/agent/agent-team", () => ({
+  BUILT_IN_TEAM_TEMPLATES: [
+    {
+      id: "parallel-review",
+      name: "Parallel Review",
+      description: "Split review",
+      category: "review",
+      teammates: [{ name: "a" }, { name: "b" }],
+    },
+  ],
+}))
+jest.mock("@/lib/plugin/registries/agent-team-template-registry", () => ({
+  listAgentTeamTemplateEntries: jest.fn(() => []),
+}))
+jest.mock("@/lib/ai/agent/external/presets", () => ({
+  getAvailablePresets: jest.fn(() => ["codex", "claude-code"]),
+  getPresetDisplayInfo: jest.fn((id: string) => ({
+    name: id === "codex" ? "Codex" : "Claude Code",
+    description: `${id} agent`,
+    tags: ["cli"],
+  })),
+}))
+jest.mock("@/lib/claude/agents/subagents", () => ({
+  resolveDispatchableSubagents: jest.fn(() => [
+    {
+      id: "workflow-designer",
+      def: {
+        id: "workflow-designer",
+        name: "Workflow Designer",
+        description: "designs",
+        prompt: "",
+      },
+    },
+  ]),
+}))
 
 // Inline useLiveQuery mock: invoke the querier exactly once per mount via a
 // ref-gated guard. The real dexie-react-hooks implementation subscribes to
@@ -524,5 +593,75 @@ describe("useDiscoverQuery", () => {
     await flush()
     rerender()
     expect(result.current.items.map((i) => i.id)).toEqual(["c2"])
+  })
+
+  describe("WF1 registry-backed categories (synchronous)", () => {
+    it("lists slash commands, sorted by name, wrapped as slashCommand", () => {
+      const { result } = renderHook(() => useDiscoverQuery("slashCommands", ""))
+      expect(result.current.loading).toBe(false)
+      expect(result.current.items.map((i) => i.id)).toEqual(["gitx.status", "help"])
+      expect(result.current.items[1]).toEqual({
+        kind: "slashCommand",
+        id: "help",
+        data: expect.objectContaining({ name: "help" }),
+      })
+    })
+
+    it("filter=builtin narrows slash commands to builtin source", () => {
+      const { result } = renderHook(() =>
+        useDiscoverQuery("slashCommands", "", { filter: "builtin" })
+      )
+      expect(result.current.items.map((i) => i.id)).toEqual(["help"])
+    })
+
+    it("searches slash commands by description", () => {
+      const { result } = renderHook(() => useDiscoverQuery("slashCommands", "git status"))
+      expect(result.current.items.map((i) => i.id)).toEqual(["gitx.status"])
+    })
+
+    it("lists mcp presets and filters by tag", () => {
+      const all = renderHook(() => useDiscoverQuery("mcpPresets", ""))
+      expect(all.result.current.items.map((i) => i.id)).toEqual(["filesystem", "github"])
+      const dev = renderHook(() => useDiscoverQuery("mcpPresets", "dev"))
+      expect(dev.result.current.items.map((i) => i.id)).toEqual(["github"])
+    })
+
+    it("lists team templates (built-in) with a normalized shape", () => {
+      const { result } = renderHook(() => useDiscoverQuery("teamTemplates", ""))
+      expect(result.current.items[0]).toEqual({
+        kind: "teamTemplate",
+        id: "parallel-review",
+        data: expect.objectContaining({ isBuiltIn: true, teammateCount: 2 }),
+      })
+    })
+
+    it("combines external-agent presets and subagents under agentPresets", () => {
+      const { result } = renderHook(() => useDiscoverQuery("agentPresets", ""))
+      const kinds = new Set(result.current.items.map((i) => i.kind))
+      expect(kinds.has("externalAgentPreset")).toBe(true)
+      expect(kinds.has("subagent")).toBe(true)
+      expect(result.current.items.some((i) => i.id === "codex")).toBe(true)
+      expect(result.current.items.some((i) => i.id === "workflow-designer")).toBe(true)
+    })
+
+    it("favorites aggregates the new registry kinds", async () => {
+      listCharactersMock.mockResolvedValueOnce([])
+      listTeamsMock.mockResolvedValueOnce([])
+      listSkillsMock.mockResolvedValueOnce([])
+      listPluginsMock.mockResolvedValueOnce([])
+      sortByMock.mockResolvedValue([])
+      twinSourcesSortByMock.mockResolvedValue([])
+      const { result, rerender } = renderHook(() =>
+        useDiscoverQuery("favorites", "", {
+          favoriteKeys: new Set(["mcpPreset:github", "subagent:workflow-designer"]),
+        })
+      )
+      await flush()
+      rerender()
+      const ids = result.current.items.map((i) => `${i.kind}:${i.id}`)
+      expect(ids).toEqual(
+        expect.arrayContaining(["mcpPreset:github", "subagent:workflow-designer"])
+      )
+    })
   })
 })

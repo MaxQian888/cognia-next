@@ -19,6 +19,7 @@ const mockUpdatePasswordVerifier = jest.fn<
 >()
 const mockSetActiveAccountId = jest.fn<Promise<void>, [string]>()
 const mockDeleteRegistryAccount = jest.fn<Promise<void>, [string, unknown?]>()
+const mockUpdateAvatarRegistry = jest.fn<Promise<LocalAccountRecord>, [string, string | null]>()
 
 jest.mock("@/lib/accounts/account-db", () => ({
   LocalAccountRegistry: jest.fn().mockImplementation(() => ({
@@ -27,6 +28,7 @@ jest.mock("@/lib/accounts/account-db", () => ({
     createAccount: mockCreateRegistryAccount,
     renameAccount: mockRenameRegistryAccount,
     updatePasswordVerifier: mockUpdatePasswordVerifier,
+    updateAvatar: mockUpdateAvatarRegistry,
     setActiveAccountId: mockSetActiveAccountId,
     deleteAccount: mockDeleteRegistryAccount,
   })),
@@ -125,6 +127,10 @@ beforeEach(() => {
   mockUpdatePasswordVerifier.mockImplementation(async (id, passwordVerifier) =>
     account(id, id, passwordVerifier)
   )
+  mockUpdateAvatarRegistry.mockImplementation(async (id, avatarDataUrl) => ({
+    ...account(id, id),
+    avatarDataUrl: avatarDataUrl ?? undefined,
+  }))
   mockDropAccountDatabase.mockResolvedValue()
   mockPurgeAccountLocalState.mockResolvedValue()
   mockActivateAccountLocalState.mockResolvedValue()
@@ -299,6 +305,53 @@ describe("account store create and unlock", () => {
     ).rejects.toThrow(/weak password/)
 
     expect(store.getState().error).toBe("weak password")
+  })
+})
+
+describe("account store avatar", () => {
+  it("persists an avatar via the registry and mirrors it into state", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+
+    const dataUrl = "data:image/png;base64,AAAA"
+    const updated = await store.getState().setAccountAvatar("acct_alpha", dataUrl)
+
+    expect(mockUpdateAvatarRegistry).toHaveBeenCalledWith("acct_alpha", dataUrl)
+    expect(updated.avatarDataUrl).toBe(dataUrl)
+    expect(store.getState().accounts.find((a) => a.id === "acct_alpha")?.avatarDataUrl).toBe(
+      dataUrl
+    )
+    expect(store.getState().error).toBeNull()
+  })
+
+  it("clears the avatar when passed null", async () => {
+    const alpha: LocalAccountRecord = {
+      ...account("acct_alpha", "Alpha"),
+      avatarDataUrl: "data:image/png;base64,AAAA",
+    }
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    mockUpdateAvatarRegistry.mockImplementationOnce(async (id) => account(id, id))
+    const store = makeStore()
+    await store.getState().load()
+
+    const updated = await store.getState().setAccountAvatar("acct_alpha", null)
+
+    expect(mockUpdateAvatarRegistry).toHaveBeenCalledWith("acct_alpha", null)
+    expect(updated.avatarDataUrl).toBeUndefined()
+  })
+
+  it("surfaces registry failures and records the error", async () => {
+    mockUpdateAvatarRegistry.mockRejectedValueOnce(new Error("avatar write failed"))
+    const store = makeStore()
+
+    await expect(store.getState().setAccountAvatar("acct_alpha", "data:x")).rejects.toThrow(
+      /avatar write failed/
+    )
+    expect(store.getState().error).toBe("avatar write failed")
   })
 })
 
