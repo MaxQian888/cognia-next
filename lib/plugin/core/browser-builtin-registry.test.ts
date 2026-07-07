@@ -41,7 +41,9 @@ describe("browser-builtin-registry", () => {
       "cognia-workflow-ai",
       "cognia-workspace-tools",
       "github-delivery",
+      "pet-daily-quests",
       "ripgrep-tools",
+      "strix-security",
       "zhihu-content-pipeline",
     ])
   })

@@ -1,0 +1,47 @@
+{
+  "id": "strix-security",
+  "name": "Strix Security Scan",
+  "version": "0.1.0",
+  "description": "Run Strix autonomous AI penetration tests from a dedicated panel and browse the findings. Desktop only — requires a local Docker daemon and the strix CLI on PATH.",
+  "type": "frontend",
+  "capabilities": ["view-container"],
+  "permissions": ["terminal:spawn", "terminal:write", "terminal:kill"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "Apache-2.0",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["startup"],
+  "viewsContainers": [
+    {
+      "id": "security",
+      "title": "Security",
+      "icon": "ShieldAlert",
+      "location": "rail",
+      "when": "platform.tauri"
+    }
+  ],
+  "dexie": {
+    "tables": [
+      { "name": "runs", "schema": "&runId, target, startedAt, status" },
+      { "name": "findings", "schema": "++id, runId, severity, [runId+severity]" },
+      { "name": "prefs", "schema": "&key" }
+    ]
+  },
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "reason": "Shells out to the strix CLI and drives a local Docker daemon — desktop only."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Requires a local Docker daemon and the strix CLI — unavailable on mobile."
+    }
+  }
+}

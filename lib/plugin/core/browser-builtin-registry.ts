@@ -34,6 +34,7 @@ import ripgrepToolsManifest from "@/plugins/ripgrep-tools/plugin.json"
 import skillRecorderManifest from "@/plugins/skill-recorder/plugin.json"
 import browserToolsManifest from "@/plugins/browser-tools/plugin.json"
 import petDailyQuestsManifest from "@/plugins/pet-daily-quests/plugin.json"
+import strixSecurityManifest from "@/plugins/strix-security/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -70,6 +71,7 @@ import ripgrepToolsModule from "@/plugins/ripgrep-tools/src/index"
 import skillRecorderModule from "@/plugins/skill-recorder/src/index"
 import browserToolsModule from "@/plugins/browser-tools/src/index"
 import petDailyQuestsModule from "@/plugins/pet-daily-quests/src/index"
+import strixSecurityModule from "@/plugins/strix-security/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -342,6 +344,16 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://pet-daily-quests",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(petDailyQuestsModule),
+  },
+  {
+    // Strix autonomous pentest CLI wrapper. `browser`/`mobile` blocked (shells
+    // out to strix + a local Docker daemon); discovered here so the "Security"
+    // rail container + `/security` command materialize on the desktop shell.
+    // The compatibility policy gates it at enable time, not discovery.
+    manifest: builtinManifest(strixSecurityManifest, strixSecurityModule),
+    path: "builtin://strix-security",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(strixSecurityModule),
   },
 ]
 
