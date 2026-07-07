@@ -84,6 +84,23 @@ describe("runPkceAuthFlow", () => {
     expect(new URL(opened).searchParams.get("access_type")).toBe("offline")
   })
 
+  it("merges extra token-exchange params (Logto resource + organization_id)", async () => {
+    const config = baseConfig({
+      extraTokenParams: {
+        resource: "https://brain.example/api",
+        organization_id: "org_1",
+      },
+    })
+    await runPkceAuthFlow(config)
+    const fetchMock = config.fetchImpl as jest.Mock
+    const body = fetchMock.mock.calls[0][1].body as string
+    const parsed = new URLSearchParams(body)
+    expect(parsed.get("resource")).toBe("https://brain.example/api")
+    expect(parsed.get("organization_id")).toBe("org_1")
+    // The base grant params must still be present.
+    expect(parsed.get("grant_type")).toBe("authorization_code")
+  })
+
   it("generates a random state when none is supplied (and the callback echoes it)", async () => {
     let issuedState = ""
     const config = baseConfig({

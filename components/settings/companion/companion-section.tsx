@@ -50,6 +50,7 @@ import { useAccountStore } from "@/stores/account/account-store"
 import { PairedDevicesCard } from "./paired-devices-card"
 import { WebRtcCard } from "./webrtc-card"
 import { SyncStatusCard } from "./sync-status-card"
+import { LogtoLoginCard } from "./logto-login-card"
 
 // ---------------------------------------------------------------------------
 // Tauri command shapes — mirror src-tauri/src/companion_api/commands.rs
@@ -196,6 +197,9 @@ export function CompanionSection() {
       <CompanionGroup id="pairing" title={t("pairing")} defaultOpen>
         <PairDeviceCard />
         <PairedDevicesCard />
+      </CompanionGroup>
+      <CompanionGroup id="cloud" title={t("cloud")} defaultOpen={false}>
+        <LogtoLoginCard />
       </CompanionGroup>
       <CompanionGroup id="push" title={t("push")} defaultOpen>
         <PushCredentialsCard />

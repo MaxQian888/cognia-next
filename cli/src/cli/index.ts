@@ -10,6 +10,7 @@ import { authCommand as defaultAuth } from "./auth-command"
 import { configCommand as defaultConfig } from "./config-command"
 import { handoffCommand as defaultHandoff, resumeCommand as defaultResume } from "./handoff-cmd"
 import { chatCommand as defaultChat } from "./chat"
+import { logtoCommand as defaultLogto } from "./logto-command"
 import { serveCommand as defaultServe } from "../serve/serve-command"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
@@ -29,6 +30,8 @@ Usage:
   cognia-agent handoff <sessionId>          push a session to the desktop app
   cognia-agent resume <id> "<prompt>"       continue a desktop hand-back
   cognia-agent auth <login|status|logout> [--provider p] [--api-key k]
+  cognia-agent logto <login|status|logout>          cloud OIDC (Logto) session
+                     [--issuer u] [--client-id id] [--resource api] [--scope a,b] [--org id]
   cognia-agent config <get|set|path>
   cognia-agent serve [--server-url u] [--account id] [--home dir]
                      [--flush-debounce ms]           headless brain for cognia-server
@@ -51,7 +54,16 @@ Flags:
 `
 
 /** Real subcommands — anything else under `--print` is treated as a prompt. */
-const KNOWN_COMMANDS = new Set(["run", "auth", "config", "handoff", "resume", "chat", "serve"])
+const KNOWN_COMMANDS = new Set([
+  "run",
+  "auth",
+  "config",
+  "handoff",
+  "resume",
+  "chat",
+  "serve",
+  "logto",
+])
 
 export interface MainDeps {
   run?: typeof defaultRun
@@ -60,6 +72,7 @@ export interface MainDeps {
   handoff?: typeof defaultHandoff
   resume?: typeof defaultResume
   chat?: typeof defaultChat
+  logto?: typeof defaultLogto
   serve?: typeof defaultServe
   out?: OutputSink
 }
@@ -106,6 +119,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.resume ?? defaultResume)(args, { out })
     case "chat":
       return (deps.chat ?? defaultChat)(args, { out })
+    case "logto":
+      return (deps.logto ?? defaultLogto)(args, { out })
     case "serve":
       return (deps.serve ?? defaultServe)(args, { out })
     default:

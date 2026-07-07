@@ -7175,9 +7175,42 @@
       },
       "groups": {
         "advanced": "Advanced & diagnostics",
+        "cloud": "Cloud sign-in",
         "network": "Server & network",
         "pairing": "Device pairing",
         "push": "Push notifications"
+      },
+      "logto": {
+        "awaitingCode": "A browser window opened. After you authorize, paste the full redirect URL (or just the code) below.",
+        "cancel": "Cancel",
+        "description": "Sign in to your Logto tenant so this desktop can act as an authenticated client of the cloud / headless companion gateway.",
+        "desktopOnly": "Cloud sign-in is only available in the desktop app (the session is stored in the OS keyring).",
+        "errors": {
+          "codeMalformed": "Could not read a code from that input. Paste the full redirect URL or the code value.",
+          "missingFields": "Issuer, client ID, API resource and redirect URI are all required.",
+          "stateMismatch": "The pasted callback does not match this sign-in attempt. Start again."
+        },
+        "field": {
+          "clientId": "Client ID",
+          "code": "Authorization code",
+          "codePlaceholder": "https://…/callback?code=… or the code",
+          "expires": "Expires",
+          "expiresUnknown": "unknown",
+          "issuer": "Issuer",
+          "org": "Organization ID (optional)",
+          "redirectUri": "Redirect URI",
+          "resource": "API resource",
+          "scope": "Scopes (optional)"
+        },
+        "loading": "Checking cloud session…",
+        "signIn": "Sign in with Logto",
+        "signOut": "Sign out",
+        "submitCode": "Finish sign-in",
+        "title": "Logto cloud sign-in",
+        "toast": {
+          "signedIn": "Signed in to Logto.",
+          "signedOut": "Signed out of Logto."
+        }
       },
       "mdns": {
         "description": "Broadcast _cognia._tcp on the LAN so phones find this desktop without QR scan.",

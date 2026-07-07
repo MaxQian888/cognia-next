@@ -47,6 +47,7 @@ pub mod jwt;
 pub mod mdns;
 pub mod metrics;
 pub mod middleware;
+pub mod oidc;
 pub mod pair_code_guard;
 pub mod pair_code_lru;
 pub mod pair_flow_test;
@@ -235,6 +236,23 @@ static PRE_AUTH_RATE_LIMITER: once_cell::sync::Lazy<Arc<rate_limit::RateLimiter>
 
 pub fn pre_auth_rate_limiter() -> Arc<rate_limit::RateLimiter> {
     Arc::clone(&PRE_AUTH_RATE_LIMITER)
+}
+
+/// Process-global OIDC authenticator (ADR-0059 cloud/headless Logto mode).
+///
+/// Built once from the environment: `None` unless BOTH `COGNIA_LOGTO_ISSUER`
+/// and `COGNIA_LOGTO_AUDIENCE` are set, so the offline desktop app never
+/// activates OIDC — the companion gateway keeps using the self-issued HS256
+/// device/service tokens. When present, [`middleware::require_device_jwt`]
+/// tries a Logto access token first and falls back to the HS256 path.
+///
+/// Kept process-global (like [`PRE_AUTH_RATE_LIMITER`] / [`TLS_FINGERPRINT`])
+/// so the many `CompanionState` constructors don't have to thread it through.
+static OIDC_AUTHENTICATOR: once_cell::sync::Lazy<Option<Arc<oidc::OidcAuthenticator>>> =
+    once_cell::sync::Lazy::new(oidc::OidcAuthenticator::from_env);
+
+pub fn oidc_authenticator() -> Option<Arc<oidc::OidcAuthenticator>> {
+    OIDC_AUTHENTICATOR.clone()
 }
 
 // ---------------------------------------------------------------------------

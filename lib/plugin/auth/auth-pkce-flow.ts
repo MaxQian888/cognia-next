@@ -33,6 +33,13 @@ export interface PkceFlowConfig {
   fetchImpl?: typeof fetch
   /** Extra authorize-URL params (e.g. `access_type=offline`). */
   extraAuthParams?: Record<string, string>
+  /**
+   * Extra token-exchange body params (e.g. Logto's RFC-8707 `resource`
+   * indicator and `organization_id`). Merged into the `POST` body so the
+   * authorization server can bind the issued access token to an API resource
+   * / organization.
+   */
+  extraTokenParams?: Record<string, string>
   /** Random state. Injectable for tests; defaults to a PKCE verifier. */
   state?: string
 }
@@ -78,6 +85,9 @@ export async function runPkceAuthFlow(config: PkceFlowConfig): Promise<PkceToken
     client_id: config.clientId,
     code_verifier: verifier,
   })
+  for (const [k, v] of Object.entries(config.extraTokenParams ?? {})) {
+    body.set(k, v)
+  }
   const res = await fetchImpl(config.tokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },

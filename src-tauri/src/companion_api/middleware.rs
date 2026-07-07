@@ -39,9 +39,11 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use super::{
     jwt::{verify, JwtError},
+    oidc::{self, OidcAuthenticator},
     rate_limit::RateLimitDecision,
     SharedState,
 };
@@ -86,6 +88,22 @@ struct TokenQuery {
 /// Wired in via `axum::middleware::from_fn_with_state(state.clone(), require_device_jwt)`.
 pub async fn require_device_jwt(
     State(state): State<SharedState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    authenticate_request(state, super::oidc_authenticator(), request, next).await
+}
+
+/// Core companion-gateway auth, split out from [`require_device_jwt`] so the
+/// OIDC authenticator can be injected in tests.
+///
+/// `oidc` is `Some` only in cloud/headless mode ([`super::oidc_authenticator`]).
+/// When present, a Logto access token is tried first; any failure falls through
+/// to the HS256 device / service path, so enabling OIDC never breaks existing
+/// paired devices.
+async fn authenticate_request(
+    state: SharedState,
+    oidc: Option<Arc<OidcAuthenticator>>,
     mut request: Request,
     next: Next,
 ) -> Response {
@@ -124,6 +142,34 @@ pub async fn require_device_jwt(
             );
         }
     };
+
+    // ── 1b. OIDC mode (ADR-0059 cloud/headless): try a Logto token first ─────
+    // Present only when the gateway is configured for Logto. On ANY failure we
+    // fall through to the HS256 device/service path below, so enabling OIDC is
+    // additive and never breaks existing paired devices.
+    if let Some(authn) = oidc.as_ref() {
+        match authn.authenticate(&token).await {
+            Ok(claims) => {
+                let ctx = oidc_device_context(&claims);
+                if state.deny_list.is_revoked(&ctx.device_id) {
+                    return error_response("device_revoked", "this device has been revoked");
+                }
+                request.extensions_mut().insert(ctx);
+                return next.run(request).await;
+            }
+            // Not a Logto token (no `kid`) — the common case for a paired HS256
+            // device. Expected: fall through to the HS256 path silently.
+            Err(super::oidc::OidcError::MissingKid) => {}
+            // A token that DID look like a Logto JWT failed to verify (bad
+            // signature / wrong issuer or audience / expired / missing scope) or
+            // the JWKS fetch failed. Log it (error only, never the token) so
+            // cloud-mode misconfig or a hung issuer is diagnosable, then still
+            // fall through — enabling OIDC never breaks existing paired devices.
+            Err(e) => {
+                log::warn!("companion-api oidc: token rejected, falling back to HS256: {e}");
+            }
+        }
+    }
 
     // ── 2. Verify JWT ───────────────────────────────────────────────────────
     let secret = state.secret.read().clone();
@@ -239,6 +285,21 @@ fn error_response(code: &str, message: &str) -> Response {
         })),
     )
         .into_response()
+}
+
+/// Map validated Logto claims (ADR-0059 cloud mode) onto a [`DeviceContext`].
+/// The Logto `sub` becomes the caller/device id; the Organization id becomes
+/// the account (cognia tenant), falling back to `sub` for non-organization
+/// tokens. `scope` is stamped `"oidc"` to distinguish the identity source.
+fn oidc_device_context(claims: &oidc::OidcClaims) -> DeviceContext {
+    DeviceContext {
+        device_id: claims.sub.clone(),
+        account_id: claims
+            .organization_id
+            .clone()
+            .unwrap_or_else(|| claims.sub.clone()),
+        scope: "oidc".to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -661,5 +722,110 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 200);
         let body = body_json(resp).await;
         assert_eq!(body["device_id"], "header-device");
+    }
+
+    // ── OIDC mode (ADR-0059 cloud/headless — Logto) ──────────────────────────
+
+    use crate::companion_api::oidc::{self, test_support, OidcAuthenticator, OidcVerifierConfig};
+    use std::time::Duration;
+
+    const OIDC_AUD: &str = "https://brain.cognia.test/api";
+
+    fn oidc_authn(issuer: String) -> Arc<OidcAuthenticator> {
+        Arc::new(OidcAuthenticator::new(
+            OidcVerifierConfig::new(issuer, OIDC_AUD, vec![]),
+            Duration::from_secs(300),
+        ))
+    }
+
+    fn build_oidc_router(state: SharedState, authn: Arc<OidcAuthenticator>) -> Router {
+        Router::new()
+            .route("/protected", get(echo_device))
+            .layer(from_fn(move |req, next| {
+                let state = state.clone();
+                let authn = authn.clone();
+                async move { authenticate_request(state, Some(authn), req, next).await }
+            }))
+    }
+
+    #[test]
+    fn oidc_device_context_maps_sub_and_org() {
+        let claims = oidc::OidcClaims {
+            sub: "user_x".into(),
+            organization_id: Some("org_y".into()),
+            scopes: vec!["brain:rpc".into()],
+            exp: 0,
+        };
+        let ctx = oidc_device_context(&claims);
+        assert_eq!(ctx.device_id, "user_x");
+        assert_eq!(ctx.account_id, "org_y");
+        assert_eq!(ctx.scope, "oidc");
+    }
+
+    #[test]
+    fn oidc_device_context_falls_back_to_sub_without_org() {
+        let claims = oidc::OidcClaims {
+            sub: "user_x".into(),
+            organization_id: None,
+            scopes: vec![],
+            exp: 0,
+        };
+        let ctx = oidc_device_context(&claims);
+        assert_eq!(ctx.account_id, "user_x");
+    }
+
+    #[tokio::test]
+    async fn oidc_valid_token_authenticates() {
+        let server = wiremock::MockServer::start().await;
+        test_support::mount_lenient(&server).await;
+        let router = build_oidc_router(test_state(), oidc_authn(server.uri()));
+        let token = test_support::mint(
+            test_support::claims(&server.uri(), OIDC_AUD),
+            Some(test_support::TEST_KID),
+            jsonwebtoken::Algorithm::ES384,
+        );
+        let req = Request::builder()
+            .uri("/protected")
+            .header("Authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let body = body_json(resp).await;
+        assert_eq!(body["device_id"], "user_abc");
+        assert_eq!(body["account_id"], "org_tenant_1");
+    }
+
+    #[tokio::test]
+    async fn oidc_configured_still_accepts_device_hs256() {
+        // With OIDC enabled, a plain HS256 device token (no `kid`) fails OIDC
+        // verification and must fall through to the existing HS256 path.
+        let server = wiremock::MockServer::start().await;
+        test_support::mount_lenient(&server).await;
+        let router = build_oidc_router(test_state(), oidc_authn(server.uri()));
+        let jwt = device_jwt("hs256-device");
+        let req = Request::builder()
+            .uri("/protected")
+            .header("Authorization", format!("Bearer {jwt}"))
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let body = body_json(resp).await;
+        assert_eq!(body["device_id"], "hs256-device");
+    }
+
+    #[tokio::test]
+    async fn oidc_configured_rejects_unknown_token() {
+        let server = wiremock::MockServer::start().await;
+        test_support::mount_lenient(&server).await;
+        let router = build_oidc_router(test_state(), oidc_authn(server.uri()));
+        let req = Request::builder()
+            .uri("/protected")
+            .header("Authorization", "Bearer not.a.token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 401);
     }
 }

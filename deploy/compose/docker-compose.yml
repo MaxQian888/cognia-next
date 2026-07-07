@@ -5,13 +5,17 @@
 #   server         + cognia-server (headless)   → W6 tier-2 smoke
 #   tls            + Caddy ACME front door       → F2 tier-3 smoke
 #   observability  + Prometheus                  → D9
+#   logto          + Logto IdP (core+pg+redis)   → ADR-0059 multi-user OIDC auth
 #
 #   docker compose up -d --wait                          # signaling + share
 #   docker compose --profile server up -d --wait          # + cognia-server
 #   docker compose --profile server --profile tls up -d   # + Caddy
+#   docker compose --profile logto up -d --wait           # + Logto IdP
 #
 # Copy .env.example → .env and fill SHARE_UPLOAD_SECRET (+ COGNIA_MASTER_KEY
-# and provider keys for the server profile) before starting.
+# and provider keys for the server profile; LOGTO_DB_PASSWORD for the logto
+# profile) before starting. See LOGTO.md for the one-time Logto seed steps
+# (API resource + apps) and the COGNIA_LOGTO_* wiring.
 name: cognia
 
 services:
@@ -73,6 +77,17 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Admit the smoke's stub ACP agent through SpawnPolicy (R11). Leave unset in production.
       COGNIA_SMOKE_AGENT: ${COGNIA_SMOKE_AGENT:-}
+      # ── OIDC / Logto (ADR-0059 cloud multi-user) — OFF unless BOTH issuer
+      # and audience are set. When present, the companion gateway
+      # (src-tauri/src/companion_api/oidc.rs) accepts Logto-issued JWT access
+      # tokens (validated via JWKS) in addition to the local HS256 device
+      # tokens. CRITICAL: COGNIA_LOGTO_ISSUER must equal the token `iss` claim,
+      # i.e. `${LOGTO_ENDPOINT}/oidc`, and be reachable FROM this container —
+      # see LOGTO.md for the issuer-consistency footgun.
+      COGNIA_LOGTO_ISSUER: ${COGNIA_LOGTO_ISSUER:-}
+      COGNIA_LOGTO_AUDIENCE: ${COGNIA_LOGTO_AUDIENCE:-}
+      COGNIA_LOGTO_REQUIRED_SCOPES: ${COGNIA_LOGTO_REQUIRED_SCOPES:-}
+      COGNIA_LOGTO_JWKS_TTL_SECS: ${COGNIA_LOGTO_JWKS_TTL_SECS:-}
     volumes:
       - cognia_data:/data
     ports:
@@ -120,9 +135,76 @@ services:
       - "9090:9090"
     restart: unless-stopped
 
+  # ── Logto IdP (ADR-0059 multi-user OIDC) ─────────────────────────────────
+  # Self-hosted identity provider. `logto` core serves both the OIDC issuer
+  # (port 3001) and the Admin Console (port 3002). Postgres + Redis are its
+  # hard requirements. All three are on the `logto` profile so the default and
+  # server smokes never pull them.
+  logto-postgres:
+    profiles: [logto]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LOGTO_DB_PASSWORD:?set LOGTO_DB_PASSWORD in .env for the logto profile}
+      POSTGRES_DB: logto
+    volumes:
+      - logto_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d logto"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  logto-redis:
+    profiles: [logto]
+    image: redis:7-alpine
+    volumes:
+      - logto_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  logto:
+    profiles: [logto]
+    image: svhd/logto:${LOGTO_VERSION:-latest}
+    depends_on:
+      logto-postgres:
+        condition: service_healthy
+      logto-redis:
+        condition: service_healthy
+    # First boot seeds the schema idempotently, then starts the server.
+    entrypoint: ["sh", "-c", "npm run cli db seed -- --swe && npm start"]
+    environment:
+      TRUST_PROXY_HEADER: "1"
+      DB_URL: postgres://postgres:${LOGTO_DB_PASSWORD:?set LOGTO_DB_PASSWORD in .env for the logto profile}@logto-postgres:5432/logto
+      REDIS_URL: redis://logto-redis:6379
+      # Public base URLs. The OIDC issuer is `${ENDPOINT}/oidc` — this MUST be
+      # the value used for COGNIA_LOGTO_ISSUER and be reachable from every
+      # token consumer (browser AND cognia-server). For a real deployment put
+      # Logto behind the tls front door and set a domain here. See LOGTO.md.
+      ENDPOINT: ${LOGTO_ENDPOINT:-http://localhost:3001}
+      ADMIN_ENDPOINT: ${LOGTO_ADMIN_ENDPOINT:-http://localhost:3002}
+    ports:
+      - "3001:3001"
+      - "3002:3002"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3001/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
 volumes:
   share_data:
   cognia_data:
   caddy_data:
   caddy_config:
   prom_data:
+  logto_pg:
+  logto_redis:

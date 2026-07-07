@@ -13,9 +13,42 @@
   },
   "groups": {
     "advanced": "高级与诊断",
+    "cloud": "云登录",
     "network": "服务与网络",
     "pairing": "设备配对",
     "push": "推送通知"
+  },
+  "logto": {
+    "awaitingCode": "已打开浏览器窗口。授权后，请将完整的回调 URL（或仅 code）粘贴到下方。",
+    "cancel": "取消",
+    "description": "登录你的 Logto 租户，使此桌面端可作为云端 / 无头 companion 网关的已认证客户端。",
+    "desktopOnly": "云登录仅在桌面应用中可用（会话保存在操作系统钥匙串中）。",
+    "errors": {
+      "codeMalformed": "无法从输入中解析出 code。请粘贴完整的回调 URL 或 code 值。",
+      "missingFields": "Issuer、Client ID、API 资源与回调 URI 均为必填。",
+      "stateMismatch": "粘贴的回调与本次登录不匹配。请重新开始。"
+    },
+    "field": {
+      "clientId": "Client ID",
+      "code": "授权码",
+      "codePlaceholder": "https://…/callback?code=… 或直接填 code",
+      "expires": "过期时间",
+      "expiresUnknown": "未知",
+      "issuer": "Issuer",
+      "org": "组织 ID（可选）",
+      "redirectUri": "回调 URI",
+      "resource": "API 资源",
+      "scope": "作用域（可选）"
+    },
+    "loading": "正在检查云会话…",
+    "signIn": "使用 Logto 登录",
+    "signOut": "退出登录",
+    "submitCode": "完成登录",
+    "title": "Logto 云登录",
+    "toast": {
+      "signedIn": "已登录 Logto。",
+      "signedOut": "已退出 Logto。"
+    }
   },
   "mdns": {
     "description": "在局域网广播 _cognia._tcp，手机不用扫码也能找到桌面。",
