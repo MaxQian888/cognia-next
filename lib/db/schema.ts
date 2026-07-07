@@ -119,6 +119,7 @@ import type { EvalRunCaseRow } from "./eval-run-cases"
 import type { CalibrationItemRow } from "./calibration-items"
 import type { CalibrationRunRow } from "./calibration-runs"
 import type { BackgroundTaskJournalRow } from "./background-tasks"
+import type { TeamPrObservationRow } from "./team-pr-observations"
 import type { WasmGrantLedgerRow } from "./wasm-grant-ledger"
 import type { RunRecordRow } from "./run-records"
 import type { Memory } from "@/types/memory/memory"
@@ -378,6 +379,8 @@ export class CogniaDB extends Dexie {
   // renderer/CLI heap, but records lifecycle transitions here so Job Center and
   // post-reload collect can distinguish done/error/interrupted history.
   backgroundTasks!: Table<BackgroundTaskJournalRow, string>
+  // v103 — Agent Team PR feedback observations. See `lib/db/team-pr-observations.ts`.
+  teamPrObservations!: Table<TeamPrObservationRow, string>
   // v88 — Durable WASM preopen grant ledger. See `lib/db/wasm-grant-ledger.ts`.
   wasmGrantLedger!: Table<WasmGrantLedgerRow, string>
   // v89 — Per-turn Run Records (Run Panel). See `lib/db/run-records.ts`.
@@ -2253,6 +2256,16 @@ export class CogniaDB extends Dexie {
       workflowRuns:
         "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt], triggeredBySource, [triggeredBySource+startedAt], triggerKind",
     })
+
+    // v103 — Agent Team PR feedback loop (ADR — team PR feedback). One row per
+    // (team run, PR): the durable PR/CI/review observation facts, the cached
+    // read-time-derived display status, and the restart-safe reaction dedup
+    // ledger. `teamId` powers the workspace PR-status liveQuery; `runId` powers
+    // per-run cleanup; `derivedStatus` supports status filtering. Pure additive
+    // — no upgrade hook. See `lib/db/team-pr-observations.ts`.
+    this.version(103).stores({
+      teamPrObservations: "&id, teamId, [teamId+updatedAt], runId, derivedStatus",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2334,6 +2347,7 @@ export type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport
 export type { PluginDexieMeta } from "./plugin-types"
 export type { EvalRunRow } from "./eval-runs"
 export type { OpticalArchiveRow, OpticalArchiveFrame } from "./optical-archives"
+export type { TeamPrObservationRow } from "./team-pr-observations"
 export type { TraceAnnotationRow } from "./trace-annotations"
 export type { CalibrationItemRow } from "./calibration-items"
 export type { CalibrationRunRow, CalibrationVerdict } from "./calibration-runs"

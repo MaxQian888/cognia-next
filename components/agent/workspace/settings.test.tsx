@@ -73,6 +73,11 @@ describe("AgentTeamSettings", () => {
     expect(screen.getByDisplayValue("10000")).toBeInTheDocument()
   })
 
+  it("renders the PR feedback settings accordion", () => {
+    render(<AgentTeamSettings team={baseTeam} />)
+    expect(screen.getByText("PR feedback")).toBeInTheDocument()
+  })
+
   it("editing the name eagerly persists via updateTeam on blur", () => {
     render(<AgentTeamSettings team={baseTeam} />)
     const nameInput = screen.getByDisplayValue("Squad Alpha")

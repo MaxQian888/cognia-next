@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/status-badge"
+import { PrStatusBadge } from "./pr-status-badge"
+import { useTeamPrStatusByTeammate } from "@/hooks/agent-runs/use-team-pr-status"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -283,6 +285,7 @@ function MemberRow({
   const tRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
   const statusCfg = TEAMMATE_STATUS_CONFIG[member.status]
   const runtime = member.config.runtime ?? DEFAULT_TEAMMATE_RUNTIME
+  const prRow = useTeamPrStatusByTeammate(teamId).get(member.id)
 
   return (
     <div className="flex items-start gap-3">
@@ -304,6 +307,7 @@ function MemberRow({
               data-testid={`member-${member.id}-status`}
             />
           )}
+          {prRow && <PrStatusBadge status={prRow.derivedStatus} prUrl={prRow.prUrl} />}
           <RuntimeBadge runtime={runtime} />
         </div>
         {member.description && (

@@ -618,6 +618,70 @@ describe("getDb", () => {
     expect(teamRuns).toEqual(["run-team"])
   })
 
+  it("v103 adds the teamPrObservations table with team/run/status indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(103)
+
+    const at = 100
+    await db.teamPrObservations.bulkPut([
+      {
+        id: "r1:pr1",
+        runId: "r1",
+        teamId: "team-a",
+        teammateId: "m1",
+        taskId: "t1",
+        prUrl: "pr1",
+        branch: "b1",
+        repo: "o/n",
+        facts: {} as never,
+        derivedStatus: "ci_failed",
+        lastNudgeSignature: {},
+        observedAt: at,
+        updatedAt: at,
+      },
+      {
+        id: "r1:pr2",
+        runId: "r1",
+        teamId: "team-a",
+        teammateId: "m2",
+        taskId: "t2",
+        prUrl: "pr2",
+        branch: "b2",
+        repo: "o/n",
+        facts: {} as never,
+        derivedStatus: "mergeable",
+        lastNudgeSignature: {},
+        observedAt: at,
+        updatedAt: at + 5,
+      },
+      {
+        id: "r2:pr3",
+        runId: "r2",
+        teamId: "team-b",
+        teammateId: "m3",
+        taskId: "t3",
+        prUrl: "pr3",
+        branch: "b3",
+        repo: "o/n",
+        facts: {} as never,
+        derivedStatus: "pr_open",
+        lastNudgeSignature: {},
+        observedAt: at,
+        updatedAt: at,
+      },
+    ])
+
+    expect(await db.teamPrObservations.where("teamId").equals("team-a").count()).toBe(2)
+    expect(await db.teamPrObservations.where("runId").equals("r1").primaryKeys()).toEqual([
+      "r1:pr1",
+      "r1:pr2",
+    ])
+    expect(
+      await db.teamPrObservations.where("derivedStatus").equals("ci_failed").primaryKeys()
+    ).toEqual(["r1:pr1"])
+  })
+
   // v50 — Built-in characters → first-party character pack (ADR-0030
   // Amendment). The legacy `char_builtin_*` Dexie rows must pick up
   // `sourcePluginId`, `sourcePackId`, `clonedFromPackCharacterId`, and

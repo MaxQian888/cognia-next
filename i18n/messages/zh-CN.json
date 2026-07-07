@@ -565,6 +565,21 @@
       }
     },
     "defaultTeamLeadName": "组长",
+    "prStatus": {
+      "approved": "已批准",
+      "changesRequested": "请求修改",
+      "ciFailed": "CI 失败",
+      "ciPending": "CI 运行中",
+      "closed": "已关闭",
+      "draft": "草稿",
+      "mergeConflict": "合并冲突",
+      "mergeable": "可合并",
+      "merged": "已合并",
+      "none": "无 PR",
+      "openPr": "打开拉取请求",
+      "prOpen": "PR 已开启",
+      "reviewPending": "待评审"
+    },
     "runs": {
       "completedAt": "完成时间",
       "empty": "暂无运行记录",
@@ -936,6 +951,7 @@
         "memory": "共享内存",
         "overview": "概览",
         "plugins": "插件与能力",
+        "prFeedback": "PR 反馈",
         "ultracode": "Ultracode",
         "worktrees": "工作树隔离"
       },
@@ -1094,6 +1110,30 @@
       "name": "团队名称",
       "plugins": {
         "intro": "这些插件能力将被团队所有队友继承。在队员配置中可以单独覆盖。"
+      },
+      "prFeedback": {
+        "caveat": "在团队运行期间及结束后的短暂窗口内生效；需要 GitHub 远程与可解析的凭据（例如 gh auth）。",
+        "description": "观测每个成员的拉取请求（CI、评审意见、合并冲突），并将反馈作为受控 nudge 回灌给团队。默认关闭；仅桌面应用 + 已配置凭据的 GitHub 仓库可用。",
+        "enabled": "启用 PR 反馈",
+        "observeWindow": {
+          "hint": "任务列表完成后，对每个 PR 继续轮询多久。单次仅捕获当前状态；设置窗口则持续监控 CI/评审（会延长运行）。",
+          "label": "运行结束后继续观测",
+          "option": {
+            "fiveMin": "5 分钟",
+            "onePass": "单次（不等待）",
+            "tenMin": "10 分钟",
+            "twoMin": "2 分钟"
+          }
+        },
+        "publishPr": {
+          "hint": "自动 push 每个成员的分支并开拉取请求。关闭时仅观测成员自己开的 PR。",
+          "label": "为每个成员自动开 PR"
+        },
+        "reviewer": {
+          "hint": "对每个 PR 的 diff 自动跑一次评审，并在请求修改时把结论回灌给成员。",
+          "label": "内置 reviewer 智能体"
+        },
+        "title": "PR 反馈闭环"
       },
       "requirePlanApproval": "需要计划审批",
       "save": "保存",

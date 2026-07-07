@@ -37,6 +37,21 @@
     }
   },
   "defaultTeamLeadName": "组长",
+  "prStatus": {
+    "approved": "已批准",
+    "changesRequested": "请求修改",
+    "ciFailed": "CI 失败",
+    "ciPending": "CI 运行中",
+    "closed": "已关闭",
+    "draft": "草稿",
+    "mergeConflict": "合并冲突",
+    "mergeable": "可合并",
+    "merged": "已合并",
+    "none": "无 PR",
+    "openPr": "打开拉取请求",
+    "prOpen": "PR 已开启",
+    "reviewPending": "待评审"
+  },
   "runs": {
     "completedAt": "完成时间",
     "empty": "暂无运行记录",

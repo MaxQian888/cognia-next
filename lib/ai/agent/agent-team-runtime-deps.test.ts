@@ -134,6 +134,19 @@ describe("buildLeadPlanningPrompt", () => {
   })
 })
 
+describe("buildAgentTeamRuntimeDeps", () => {
+  it("exposes lead-planning, notifier, and the PR-feedback resolver seams", () => {
+    const deps = buildAgentTeamRuntimeDeps()
+    expect(typeof deps.runLeadPlanning).toBe("function")
+    expect(deps.notifierDeps).toBeDefined()
+    // PR feedback loop resolvers (ADR — team PR feedback) must be wired so the
+    // loop is reachable when a team enables it.
+    expect(typeof deps.resolveTeamRepo).toBe("function")
+    expect(typeof deps.resolvePrObserveOctokit).toBe("function")
+    expect(typeof deps.runPrReview).toBe("function")
+  })
+})
+
 // runTeammateTask was deleted in the PR 4 cutover (ADR-0022 §3.9).
 // Per-task dispatch now lives in the action.team.task.dispatch workflow node
 // executor; its tests are in lib/workflow/nodes/built-ins.test.ts.

@@ -575,6 +575,29 @@ export interface AgentTeamConfig {
     /** Skip a nudge when the member had tool activity within this window (ms). Default 60000. */
     busySignalWindowMs?: number
   }
+  /**
+   * GitHub PR feedback loop (ADR — team PR feedback; ported from
+   * agent-orchestrator). When `enabled` and the run has worktree isolation on a
+   * git repo with resolvable GitHub credentials, each teammate's PR is observed
+   * (CI / review / merge-conflict) and actionable feedback is routed back to the
+   * team as a guarded `review_pickup` nudge; a derived PR status shows in the
+   * workspace. Default OFF; inert (silent) when the gate isn't met.
+   *
+   * The loop is run-scoped: it observes during the run and for `observeWindowMs`
+   * after the task DAG completes, then is disposed. A teammate only gets a PR if
+   * it opens one itself (via its git/gh tools) or `publishPr` is on.
+   */
+  prFeedback?: {
+    enabled?: boolean
+    /** Auto-push each teammate's branch and open a PR (else observe self-opened PRs). */
+    publishPr?: boolean
+    /** PR observation poll interval (ms). Default 30000. */
+    pollIntervalMs?: number
+    /** How long to keep observing after the task DAG completes (ms). Default 0 (one pass). */
+    observeWindowMs?: number
+    /** Run the internal reviewer agent against each PR and route its verdict. */
+    reviewer?: { enabled?: boolean }
+  }
 }
 
 /**
@@ -1838,4 +1861,38 @@ export const TASK_STATUS_CONFIG: Record<
   completed: { labelKey: "completed", color: "text-green-500", icon: "CheckCircle" },
   failed: { labelKey: "failed", color: "text-destructive", icon: "XCircle" },
   cancelled: { labelKey: "cancelled", color: "text-orange-500", icon: "Ban" },
+}
+
+/**
+ * Derived PR status (ADR — team PR feedback). Re-exported from the observation
+ * layer so team UI + this display map share one union. Computed at read time
+ * from durable facts — never stored.
+ */
+export type { PrDerivedStatus } from "@/lib/github/pr-observe/types"
+
+/**
+ * PR status display configuration. `labelKey` is under `agentTeam.prStatus.*`.
+ * Colors follow the agent-orchestrator status palette (ci_failed red,
+ * changes/review amber, mergeable/approved green, merged/pr_open muted).
+ */
+export const PR_STATUS_CONFIG: Record<
+  import("@/lib/github/pr-observe/types").PrDerivedStatus,
+  { labelKey: string; color: string; icon: string }
+> = {
+  none: { labelKey: "none", color: "text-muted-foreground", icon: "Circle" },
+  pr_open: { labelKey: "prOpen", color: "text-muted-foreground", icon: "GitPullRequest" },
+  draft: { labelKey: "draft", color: "text-muted-foreground", icon: "GitPullRequestDraft" },
+  ci_pending: { labelKey: "ciPending", color: "text-yellow-500", icon: "Loader2" },
+  ci_failed: { labelKey: "ciFailed", color: "text-destructive", icon: "XCircle" },
+  changes_requested: {
+    labelKey: "changesRequested",
+    color: "text-yellow-500",
+    icon: "MessageSquareWarning",
+  },
+  merge_conflict: { labelKey: "mergeConflict", color: "text-orange-500", icon: "GitMerge" },
+  review_pending: { labelKey: "reviewPending", color: "text-blue-400", icon: "Eye" },
+  approved: { labelKey: "approved", color: "text-green-500", icon: "Check" },
+  mergeable: { labelKey: "mergeable", color: "text-green-500", icon: "GitPullRequestArrow" },
+  merged: { labelKey: "merged", color: "text-purple-500", icon: "GitMerge" },
+  closed: { labelKey: "closed", color: "text-muted-foreground", icon: "GitPullRequestClosed" },
 }

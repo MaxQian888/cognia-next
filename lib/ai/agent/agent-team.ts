@@ -52,7 +52,10 @@ export interface AgentTeamManager {
  * builds the side-effect-free defaults instead of dying — an explicit
  * `configureAgentTeamRuntime` still wins.
  */
-type ConfiguredDeps = Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps">
+type ConfiguredDeps = Pick<
+  RunTeamLifecycleDeps,
+  "runLeadPlanning" | "notifierDeps" | "resolveTeamRepo" | "resolvePrObserveOctokit" | "runPrReview"
+>
 let configuredDeps: ConfiguredDeps | null = null
 
 export function configureAgentTeamRuntime(deps: ConfiguredDeps): void {
@@ -128,6 +131,11 @@ export const agentTeamManager: AgentTeamManager = {
       storeWriter: bindStoreWriter(),
       runLeadPlanning: deps.runLeadPlanning,
       notifierDeps: deps.notifierDeps,
+      ...(deps.resolveTeamRepo ? { resolveTeamRepo: deps.resolveTeamRepo } : {}),
+      ...(deps.resolvePrObserveOctokit
+        ? { resolvePrObserveOctokit: deps.resolvePrObserveOctokit }
+        : {}),
+      ...(deps.runPrReview ? { runPrReview: deps.runPrReview } : {}),
       ...(opts?.origin ? { origin: opts.origin } : {}),
       // Manual "Run with ultracode" forces orchestration; an explicit normal
       // run turns it off. Omitted → the team's autoMode decides.

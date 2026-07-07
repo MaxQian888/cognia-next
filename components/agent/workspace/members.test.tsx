@@ -53,6 +53,15 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
     }),
 }))
 
+// Mutable PR-status map so a test can seed a teammate's PR observation. Prefixed
+// `mock*` to satisfy jest's out-of-scope factory rule.
+const mockPrStatus: { current: Map<string, { derivedStatus: string; prUrl?: string }> } = {
+  current: new Map(),
+}
+jest.mock("@/hooks/agent-runs/use-team-pr-status", () => ({
+  useTeamPrStatusByTeammate: () => mockPrStatus.current,
+}))
+
 import { AgentTeamMembers } from "./members"
 import type { AgentTeammate } from "@/types/agent/agent-team"
 
@@ -75,6 +84,7 @@ beforeEach(() => {
   addTeammateMock.mockClear()
   removeTeammateMock.mockClear()
   updateTeammateMock.mockClear()
+  mockPrStatus.current = new Map()
 })
 
 describe("AgentTeamMembers", () => {
@@ -99,6 +109,25 @@ describe("AgentTeamMembers", () => {
     expect(screen.getByText("Worker One")).toBeInTheDocument()
     const status = screen.getByTestId("member-tm_1-status")
     expect(status.textContent ?? "").toMatch(/Executing/i)
+  })
+
+  it("renders a PR status badge with a PR link when the teammate has an observed PR", () => {
+    mockPrStatus.current = new Map([
+      ["tm_1", { derivedStatus: "ci_failed", prUrl: "https://gh/acme/app/pull/1" }],
+    ])
+    const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
+    render(<AgentTeamMembers teamId="team_x" teammates={[worker]} leadId="" />)
+    expect(screen.getByTestId("pr-status-badge")).toBeInTheDocument()
+    expect(screen.getByTestId("pr-status-link")).toHaveAttribute(
+      "href",
+      "https://gh/acme/app/pull/1"
+    )
+  })
+
+  it("renders no PR status badge when the teammate has no observed PR", () => {
+    const worker = teammate({ id: "tm_1", name: "Worker One", role: "teammate" })
+    render(<AgentTeamMembers teamId="team_x" teammates={[worker]} leadId="" />)
+    expect(screen.queryByTestId("pr-status-badge")).toBeNull()
   })
 
   it("does not render a determinate progress bar even when progress > 0", () => {

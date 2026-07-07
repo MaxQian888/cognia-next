@@ -108,6 +108,21 @@ export interface RunTeamLifecycleDeps {
    * fan-out stops past MAX_TEAM_TRIGGER_CHAIN_DEPTH (loop guard).
    */
   triggerChainDepth?: number
+  /**
+   * PR feedback loop seams (ADR — team PR feedback). Wired by
+   * `configureAgentTeamRuntime` on desktop; absence disables the loop (so it is
+   * inert on web / when unconfigured). `resolveTeamRepo` maps the team's
+   * workingDir to its GitHub repo + default branch (from the origin remote);
+   * `resolvePrObserveOctokit` mints a request-ready client for that repo;
+   * `runPrReview` runs the internal reviewer (dispatchStructured-backed).
+   */
+  resolveTeamRepo?: (
+    workingDir: string
+  ) => Promise<{ fullName: string; defaultBranch: string } | null>
+  resolvePrObserveOctokit?: (
+    repoFullName: string
+  ) => Promise<import("@/lib/github/pr-observe/types").OctokitLike | null>
+  runPrReview?: import("./team/pr-feedback/reviewer").RunReview
 }
 
 export interface RunTeamLifecycleResult {
@@ -141,6 +156,66 @@ export function parseProposedPlan(
     return { ok: true, plan: parsed }
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * Resolve + build the PR feedback controller for a run (ADR — team PR feedback).
+ *
+ * Returns `undefined` (inert) unless a GitHub repo + credentials resolve and the
+ * controller builds. Best-effort: any failure is reported via `onWarn` and
+ * yields `undefined` — it never throws to the run. Extracted from
+ * {@link runTeamLifecycle} so the resolve→build wiring is unit-testable; the
+ * module loaders are injectable and default to dynamic `import()` so the
+ * pr-feedback code stays out of the main bundle until the loop is used.
+ */
+export async function buildRunPrFeedback(opts: {
+  runId: string
+  teamId: string
+  config: NonNullable<AgentTeam["config"]["prFeedback"]>
+  workingDir: string
+  leadId?: string
+  nudges?: AgentTeam["config"]["nudges"]
+  teammates: Array<{ id: string; name: string }>
+  tasks: Array<{ id: string; title?: string }>
+  resolveTeamRepo: NonNullable<RunTeamLifecycleDeps["resolveTeamRepo"]>
+  resolvePrObserveOctokit: NonNullable<RunTeamLifecycleDeps["resolvePrObserveOctokit"]>
+  runPrReview?: RunTeamLifecycleDeps["runPrReview"]
+  notify: (n: import("./team/pr-feedback/runtime").PrFeedbackNotifyInput) => void
+  addMessage: (m: import("./team/pr-feedback/runtime").PrFeedbackMailboxInput) => void
+  onWarn: (message: string) => void
+  loadRuntime?: () => Promise<
+    Pick<typeof import("./team/pr-feedback/runtime"), "buildTeamPrFeedback">
+  >
+  loadGit?: () => Promise<Pick<typeof import("@/lib/git/commands"), "gitPush">>
+}): Promise<import("./team/pr-feedback/runtime").TeamPrFeedback | undefined> {
+  const loadRuntime = opts.loadRuntime ?? (() => import("./team/pr-feedback/runtime"))
+  const loadGit = opts.loadGit ?? (() => import("@/lib/git/commands"))
+  try {
+    const resolved = await opts.resolveTeamRepo(opts.workingDir)
+    if (!resolved) return undefined
+    const octokit = await opts.resolvePrObserveOctokit(resolved.fullName)
+    if (!octokit) return undefined
+    const [{ buildTeamPrFeedback }, { gitPush }] = await Promise.all([loadRuntime(), loadGit()])
+    return buildTeamPrFeedback({
+      runId: opts.runId,
+      teamId: opts.teamId,
+      ...(opts.leadId ? { leadId: opts.leadId } : {}),
+      repo: resolved.fullName,
+      baseBranch: resolved.defaultBranch,
+      octokit,
+      config: opts.config,
+      ...(opts.nudges ? { nudges: opts.nudges } : {}),
+      teammates: opts.teammates,
+      tasks: opts.tasks,
+      notify: opts.notify,
+      addMessage: opts.addMessage,
+      git: { push: (cwd, branch) => gitPush(cwd, { remote: "origin", branch, setUpstream: true }) },
+      ...(opts.config.reviewer?.enabled && opts.runPrReview ? { runReview: opts.runPrReview } : {}),
+    })
+  } catch (err) {
+    opts.onWarn(err instanceof Error ? err.message : String(err))
+    return undefined
   }
 }
 
@@ -566,6 +641,52 @@ export async function runTeamLifecycle(
       }
     }
 
+    // ── PR feedback loop (ADR — team PR feedback) ──
+    // Built when enabled + isolation active + a GitHub repo/creds resolve. It
+    // observes each teammate's PR post-DAG (see the track+settle after
+    // reconcile) and is disposed in the run's `finally`. Inert otherwise.
+    let teamPrFeedback: import("./team/pr-feedback/runtime").TeamPrFeedback | undefined
+    if (
+      team.config.prFeedback?.enabled &&
+      workspaceAllocator &&
+      team.config.workingDir &&
+      deps.resolveTeamRepo &&
+      deps.resolvePrObserveOctokit
+    ) {
+      teamPrFeedback = await buildRunPrFeedback({
+        runId,
+        teamId,
+        config: team.config.prFeedback,
+        workingDir: team.config.workingDir,
+        ...(team.leadId ? { leadId: team.leadId } : {}),
+        ...(team.config.nudges ? { nudges: team.config.nudges } : {}),
+        teammates: workers.map((w) => ({ id: w.id, name: w.name })),
+        tasks: tasks.map((t) => ({ id: t.id, title: t.title })),
+        resolveTeamRepo: deps.resolveTeamRepo,
+        resolvePrObserveOctokit: deps.resolvePrObserveOctokit,
+        ...(deps.runPrReview ? { runPrReview: deps.runPrReview } : {}),
+        notify: (n) =>
+          notifier.notify({
+            level: n.level,
+            title: n.title,
+            body: n.body,
+            runId: n.runId,
+            teamId: n.teamId,
+            dedupeKey: n.dedupeKey,
+          }),
+        addMessage: (m) => deps.storeWriter.addMessage(m),
+        onWarn: (message) =>
+          notifier.notify({
+            level: "warn",
+            title: "PR feedback unavailable",
+            body: message,
+            runId,
+            teamId,
+            dedupeKey: `prfeedback-init:${runId}`,
+          }),
+      })
+    }
+
     // ── Register the per-run context FIRST ──
     // Ultracode planning + every pattern/dispatch node reads it via
     // getTeamRunContext(runId); registering before synthesis lets the planner
@@ -771,6 +892,25 @@ export async function runTeamLifecycle(
           })
         }
       }
+      // PR feedback: bind each teammate's committed branch to its PR and observe
+      // for the bounded window (0 = one pass). Nudges route back via the team
+      // mailbox; the loop is disposed in `finally`. Best-effort — never fails the
+      // run.
+      if (teamPrFeedback && workspaceAllocator) {
+        try {
+          await teamPrFeedback.trackAll(workspaceAllocator.allocated())
+          await teamPrFeedback.settle(team.config.prFeedback?.observeWindowMs ?? 0)
+        } catch (err) {
+          notifier.notify({
+            level: "warn",
+            title: "PR feedback loop error",
+            body: err instanceof Error ? err.message : String(err),
+            runId,
+            teamId,
+            dedupeKey: `prfeedback-run:${runId}`,
+          })
+        }
+      }
       return {
         runId: result.runId,
         status: finalStatus,
@@ -819,6 +959,8 @@ export async function runTeamLifecycle(
       }
       // Cancel any pending resume timer so it can't fire after the run ends.
       rateLimitResume?.dispose()
+      // Stop the PR feedback loop so no scheduled poll fires after the run ends.
+      teamPrFeedback?.dispose()
       // Workspace isolation: reclaim every worktree DIRECTORY (agent work is
       // already committed to its branch, which persists). Branch deletion is
       // reconcile's job (loser pruning), so keep branches here. Runs on every

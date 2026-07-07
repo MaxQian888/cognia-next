@@ -35,6 +35,7 @@ import { PluginsSection } from "./settings/section-plugins"
 import { GovernanceSection } from "./settings/section-governance"
 import { UltracodeSection } from "./settings/section-ultracode"
 import { WorktreesSection } from "./settings/section-worktrees"
+import { PrFeedbackSection } from "./settings/section-pr-feedback"
 import { MemorySection } from "./settings/section-memory"
 import { TeamKnowledgeTwinsCard } from "./settings/team-knowledge-twins-card"
 import { SettingsSaveIndicator } from "./settings/settings-save-indicator"
@@ -107,6 +108,15 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
           </AccordionTrigger>
           <AccordionContent className="pt-3">
             <WorktreesSection team={team} />
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="prFeedback" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.prFeedback")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <PrFeedbackSection team={team} />
           </AccordionContent>
         </AccordionItem>
 

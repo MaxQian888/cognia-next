@@ -37,6 +37,21 @@
     }
   },
   "defaultTeamLeadName": "Team Lead",
+  "prStatus": {
+    "approved": "Approved",
+    "changesRequested": "Changes Requested",
+    "ciFailed": "CI Failed",
+    "ciPending": "CI Running",
+    "closed": "Closed",
+    "draft": "Draft",
+    "mergeConflict": "Merge Conflict",
+    "mergeable": "Ready to Merge",
+    "merged": "Merged",
+    "none": "No PR",
+    "openPr": "Open pull request",
+    "prOpen": "PR Open",
+    "reviewPending": "Review Pending"
+  },
   "runs": {
     "completedAt": "Completed",
     "empty": "No runs yet",

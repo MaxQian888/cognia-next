@@ -23,6 +23,11 @@ import {
 } from "@/lib/claude/hooks/lifecycle-firer"
 import type { LeadPlanResult, RunTeamLifecycleDeps } from "./agent-team-runtime"
 import type { TeamNotifierDeps } from "./team/team-notifier"
+import {
+  createResolveOctokit,
+  createResolveTeamRepo,
+  createRunPrReview,
+} from "./team/pr-feedback/resolvers"
 
 /** Build the prompt sent to a teammate for a specific task. */
 export function buildTeammatePrompt(
@@ -116,7 +121,10 @@ export interface BuildAgentTeamRuntimeDepsOptions {
  */
 export function buildAgentTeamRuntimeDeps(
   opts: BuildAgentTeamRuntimeDepsOptions = {}
-): Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps"> {
+): Pick<
+  RunTeamLifecycleDeps,
+  "runLeadPlanning" | "notifierDeps" | "resolveTeamRepo" | "resolvePrObserveOctokit" | "runPrReview"
+> {
   const executeAgent = opts.executeAgent ?? defaultExecuteAgent
   const firer = opts.firer ?? defaultLifecycleFirer
 
@@ -207,5 +215,11 @@ export function buildAgentTeamRuntimeDeps(
   return {
     runLeadPlanning,
     notifierDeps: opts.notifierDeps ?? defaultNotifierDeps,
+    // PR feedback loop resolvers (ADR — team PR feedback). Fail-closed: each
+    // returns null off-desktop / without creds, so the loop stays inert unless a
+    // team enables `prFeedback` on a GitHub repo with resolvable credentials.
+    resolveTeamRepo: createResolveTeamRepo(),
+    resolvePrObserveOctokit: createResolveOctokit(),
+    runPrReview: createRunPrReview(),
   }
 }

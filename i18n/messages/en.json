@@ -565,6 +565,21 @@
       }
     },
     "defaultTeamLeadName": "Team Lead",
+    "prStatus": {
+      "approved": "Approved",
+      "changesRequested": "Changes Requested",
+      "ciFailed": "CI Failed",
+      "ciPending": "CI Running",
+      "closed": "Closed",
+      "draft": "Draft",
+      "mergeConflict": "Merge Conflict",
+      "mergeable": "Ready to Merge",
+      "merged": "Merged",
+      "none": "No PR",
+      "openPr": "Open pull request",
+      "prOpen": "PR Open",
+      "reviewPending": "Review Pending"
+    },
     "runs": {
       "completedAt": "Completed",
       "empty": "No runs yet",
@@ -936,6 +951,7 @@
         "memory": "Shared memory",
         "overview": "Overview",
         "plugins": "Plugins & capabilities",
+        "prFeedback": "PR feedback",
         "ultracode": "Ultracode",
         "worktrees": "Worktree isolation"
       },
@@ -1094,6 +1110,30 @@
       "name": "Team name",
       "plugins": {
         "intro": "These plugin capabilities are inherited by every teammate. Use per-teammate overlays to override them on a specific member."
+      },
+      "prFeedback": {
+        "caveat": "Runs while the team run is active and for a short window after; needs a GitHub remote and resolvable credentials (e.g. gh auth).",
+        "description": "Observe each teammate's pull request (CI, review comments, merge conflicts) and route the feedback back to the team as a guarded nudge. Off by default; desktop app + a GitHub repository with credentials only.",
+        "enabled": "Enable PR feedback",
+        "observeWindow": {
+          "hint": "How long to keep polling each PR after the task list finishes. One pass captures the current state; a window keeps monitoring CI/reviews (and extends the run).",
+          "label": "Keep observing after the run",
+          "option": {
+            "fiveMin": "5 minutes",
+            "onePass": "One pass (no wait)",
+            "tenMin": "10 minutes",
+            "twoMin": "2 minutes"
+          }
+        },
+        "publishPr": {
+          "hint": "Push each teammate's branch and open a pull request automatically. Off = only observe PRs teammates open themselves.",
+          "label": "Auto-open a PR per teammate"
+        },
+        "reviewer": {
+          "hint": "Run an automated reviewer over each PR's diff and route a changes-requested verdict back to the teammate.",
+          "label": "Internal reviewer agent"
+        },
+        "title": "PR feedback loop"
       },
       "requirePlanApproval": "Require plan approval",
       "save": "Save",
