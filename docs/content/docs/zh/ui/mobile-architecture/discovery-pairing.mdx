@@ -13,7 +13,7 @@ description: 手机如何找到并信任桌面端 —— mDNS 订阅、LAN IP �
 
 <StatGrid>
   <Stat label="mDNS 服务名" value="_cognia._tcp" hint="mdns-discovery.ts:42" />
-  <Stat label="Probe 端口" value="7890·7891·7900·8443" hint="lan-scanner.ts:119" />
+  <Stat label="Probe 端口" value="27890·7890·7891·7900·8443" hint="lan-scanner.ts:119" />
   <Stat label="Probe 目标" value="GET /api/v1/whoami → 401" hint="lan-scanner.ts:357" />
   <Stat label="Candidate 顺序" value="mDNS → tunnel → cache" hint="connection-strategy.ts:43" />
 </StatGrid>
@@ -53,7 +53,7 @@ flowchart TB
   class PROBE,DROP q
 ```
 
-候选主机**仅在**返回 HTTP `401` 且携带 `{code,message}` 响应体时才被接受（`evaluateProbeResponse`，`:409-432`）——对 `/api/v1/whoami` 的未认证请求*应当*被拒绝，这恰好证明该主机是 Cognia 服务器。随后通过 `healthz` 补充 TLS fingerprint 信息。默认端口为 `7890`（`:110`）；额外端口 `[7890, 7891, 7900, 8443]`（`:119`）仅对已配对设备或模拟器 IP 尝试。
+候选主机**仅在**返回 HTTP `401` 且携带 `{code,message}` 响应体时才被接受（`evaluateProbeResponse`，`:409-432`）——对 `/api/v1/whoami` 的未认证请求*应当*被拒绝，这恰好证明该主机是 Cognia 服务器。随后通过 `healthz` 补充 TLS fingerprint 信息。默认端口为 `27890`（`:110`）；额外端口 `[27890, 7890, 7891, 7900, 8443]`（`:119`）仅对已配对设备或模拟器 IP 尝试。
 
 ### 本地 IP 获取技巧 — `local-ip.ts:50`
 

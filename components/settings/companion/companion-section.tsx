@@ -56,7 +56,9 @@ import { LogtoLoginCard } from "./logto-login-card"
 // Tauri command shapes — mirror src-tauri/src/companion_api/commands.rs
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PORT = 7890
+// Mirrors Rust `companion_api::server::DEFAULT_PORT` — 27890, outside the
+// 789x Clash mixed/SOCKS range so it can't collide with a local proxy.
+const DEFAULT_PORT = 27890
 
 type BindMode = "loopback" | "lan"
 

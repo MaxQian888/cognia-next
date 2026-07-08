@@ -101,22 +101,25 @@ export interface ScanLanOptions {
   getLocalIps?: typeof getPrivateLocalIps
   /** Test seam — healthz fetcher. Defaults to the real `fetchHealthz`. */
   healthzFetcher?: typeof fetchHealthz
-  /** Primary companion port — 7890. The full probe set
+  /** Primary companion port — 27890. The full probe set
    *  (`PROBE_PORTS`) is only applied to paired/emulator IPs to keep
    *  generic /24 fan-out bounded. */
   port?: number
 }
 
-const DEFAULT_PORT = 7890
+// Mirrors Rust `companion_api::server::DEFAULT_PORT` — 27890, moved out of
+// the 789x range because 7890 is the Clash mixed-port default.
+const DEFAULT_PORT = 27890
 
 /**
  * Ports the scanner sweeps for paired / emulator IPs. The desktop binds
- * 7890 by default, but dev iteration sometimes uses 7891/7900/8443 (the
- * alt-port set the user might pick when 7890 is held by another process).
+ * 27890 by default; 7890 stays in the set so phones can rediscover desktops
+ * still running a pre-27890 build, and 7891/7900/8443 are the alt-port set
+ * the user might pick when the default is held by another process.
  * Generic /24 IPs only get the primary port — see
  * [`resolveProbePorts`].
  */
-export const PROBE_PORTS: readonly number[] = [7890, 7891, 7900, 8443]
+export const PROBE_PORTS: readonly number[] = [27890, 7890, 7891, 7900, 8443]
 
 /**
  * Android emulator host gateway alias. The emulator's NAT'd subnet

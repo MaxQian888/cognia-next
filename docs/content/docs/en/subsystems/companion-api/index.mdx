@@ -25,7 +25,7 @@ description: The desktop-as-server surface — three independent axum listeners 
   <Stat label="RPC commands" value="110" hint="KNOWN_COMMANDS allowlist — rpc.rs:163" />
   <Stat label="HTTP/WS routes" value="8" hint="companion_api router — server.rs:199" />
   <Stat label="Transport tiers" value="4" hint="ws-lan · ws-tunnel · rtc-direct · rtc-relay" />
-  <Stat label="Default companion port" value="7890" hint="server.rs:51 — adjustable" />
+  <Stat label="Default companion port" value="27890" hint="server.rs — DEFAULT_PORT, adjustable" />
   <Stat label="Device JWT TTL" value="90 d" hint="jwt.rs:29 — pair JWT is 5 min" />
 </StatGrid>
 
@@ -38,7 +38,7 @@ not a Next.js route. Three listeners cover three audiences:
 
 | Server | Lives in | Bind | Port | Auth | Audience |
 | --- | --- | --- | --- | --- | --- |
-| **Companion API** | `src-tauri/src/companion_api/` | `127.0.0.1` **or** `0.0.0.0` (toggle) + TLS | `7890` default | **device JWT** (HS256) | the mobile companion app |
+| **Companion API** | `src-tauri/src/companion_api/` | `127.0.0.1` **or** `0.0.0.0` (toggle) + TLS | `27890` default | **device JWT** (HS256) | the mobile companion app |
 | **Remote Control** | `src-tauri/src/remote_control/` | `127.0.0.1` only | `47821` default | bearer token + IPv4 CIDR allowlist | local scripts / CI |
 | **MCP / External Bridge** | `src-tauri/src/mcp_server/` | `127.0.0.1` only | OS-assigned | bearer token | external coding agents |
 

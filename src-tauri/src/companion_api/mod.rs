@@ -2,7 +2,7 @@
 //!
 //! This module implements the server-side of the cognia mobile companion
 //! pairing flow (M2.3).  It exposes an axum HTTP server on a configurable
-//! port (default 7890) with two endpoints:
+//! port (default 27890) with two endpoints:
 //!
 //! - `POST /api/v1/auth/pair/issue` — desktop-only (127.0.0.1 listener when
 //!   `bind_loopback_only = true`); issues a short-lived pair JWT that the QR

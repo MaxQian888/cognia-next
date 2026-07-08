@@ -607,7 +607,7 @@ describe("CompanionSection", () => {
     await user.click(toggle)
     await waitFor(() =>
       expect(callSpy).toHaveBeenCalledWith("companion_tunnel_start", {
-        localUrl: "https://127.0.0.1:7890",
+        localUrl: "https://127.0.0.1:27890",
       })
     )
 
@@ -774,7 +774,7 @@ describe("CompanionSection", () => {
     await user.click(toggle)
     await waitFor(() =>
       expect(callSpy).toHaveBeenCalledWith("companion_mdns_start", {
-        port: 7890,
+        port: 27890,
         appVersion: "0.1.0",
         tlsFingerprint: "sha256:fp",
       })

@@ -2,7 +2,7 @@
 //!
 //! # Port separation rationale
 //!
-//! The companion API runs on its own TCP port (default 7890) rather than
+//! The companion API runs on its own TCP port (default 27890) rather than
 //! sharing the MCP server port (default from `mcp_server/http_server.rs`).
 //! This keeps the MCP server untouched and gives M2.4 (JWT verifier middleware),
 //! M2.5 (RPC routes), and M2.6 (WS upgrade) clean, independent mount points on
@@ -52,7 +52,11 @@ const BODY_LIMIT_BYTES: usize = 64 * 1024;
 
 /// Default companion API port.  Configurable via `companion_server_start`.
 /// Used by M2.8 settings UI.
-pub const DEFAULT_PORT: u16 = 7890;
+///
+/// 27890 — deliberately outside the 789x range: 7890/7891 are the Clash
+/// mixed/SOCKS defaults (see `proxy_config::detect::KNOWN_PORTS`), so binding
+/// there collides with FlClash/Clash Verge on developer machines.
+pub const DEFAULT_PORT: u16 = 27890;
 
 // ---------------------------------------------------------------------------
 // Public handle
@@ -583,7 +587,12 @@ mod tests {
     }
 
     #[test]
-    fn default_port_is_7890() {
-        assert_eq!(DEFAULT_PORT, 7890);
+    fn default_port_avoids_known_proxy_ports() {
+        assert_eq!(DEFAULT_PORT, 27890);
+        // Guard against regressing back into the Clash/V2Ray default range —
+        // every entry in proxy_config's known-port probe list is off-limits.
+        for (port, _, _) in crate::proxy_config::detect::KNOWN_PORTS {
+            assert_ne!(DEFAULT_PORT, *port, "DEFAULT_PORT collides with a known proxy port");
+        }
     }
 }

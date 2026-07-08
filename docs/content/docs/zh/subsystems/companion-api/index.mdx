@@ -25,7 +25,7 @@ description: 桌面端作为服务器的对外接口——三个独立的 axum �
   <Stat label="RPC 命令数" value="110" hint="KNOWN_COMMANDS allowlist — rpc.rs:163" />
   <Stat label="HTTP/WS 路由数" value="8" hint="companion_api router — server.rs:199" />
   <Stat label="Transport 层级" value="4" hint="ws-lan · ws-tunnel · rtc-direct · rtc-relay" />
-  <Stat label="默认 companion 端口" value="7890" hint="server.rs:51 — 可调整" />
+  <Stat label="默认 companion 端口" value="27890" hint="server.rs — DEFAULT_PORT，可调整" />
   <Stat label="设备 JWT 有效期" value="90 d" hint="jwt.rs:29 — pair JWT 为 5 分钟" />
 </StatGrid>
 
@@ -38,7 +38,7 @@ Cognia 中的**外部 API** 是指由 Tauri Rust 后端向*进程外*调用方�
 
 | 服务 | 代码位置 | 绑定地址 | 端口 | 认证方式 | 受众 |
 | --- | --- | --- | --- | --- | --- |
-| **Companion API** | `src-tauri/src/companion_api/` | `127.0.0.1` **或** `0.0.0.0`（可切换）+ TLS | 默认 `7890` | **设备 JWT**（HS256） | 移动端 companion 应用 |
+| **Companion API** | `src-tauri/src/companion_api/` | `127.0.0.1` **或** `0.0.0.0`（可切换）+ TLS | 默认 `27890` | **设备 JWT**（HS256） | 移动端 companion 应用 |
 | **Remote Control** | `src-tauri/src/remote_control/` | 仅 `127.0.0.1` | 默认 `47821` | bearer token + IPv4 CIDR allowlist | 本地脚本 / CI |
 | **MCP / External Bridge** | `src-tauri/src/mcp_server/` | 仅 `127.0.0.1` | 由 OS 分配 | bearer token | 外部编程 agent |
 

@@ -86,12 +86,12 @@ enum CliCommand {
         advertise_url: Option<String>,
         /// Port used for the default advertise URL when neither
         /// `--advertise-url` nor `COGNIA_PUBLIC_URL` is set.
-        #[arg(long, default_value_t = 7890)]
+        #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
         port: u16,
     },
     /// Boot the HTTPS companion server. Binds 0.0.0.0:<port>.
     Serve {
-        #[arg(long, default_value_t = 7890)]
+        #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
         port: u16,
         /// Public base URL advertised in pair payloads/logs. Defaults to
         /// `COGNIA_PUBLIC_URL`, else `https://127.0.0.1:<bound port>`.
@@ -116,7 +116,7 @@ enum CliCommand {
 
 /// Resolve the advertised base URL: explicit flag → `COGNIA_PUBLIC_URL` →
 /// loopback default for `port`. The old skeleton hardcoded
-/// `https://127.0.0.1:7890` regardless of the actual port.
+/// `https://127.0.0.1:<DEFAULT_PORT>` regardless of the actual port.
 fn resolve_advertise_url(flag: Option<String>, port: u16) -> String {
     flag.or_else(|| std::env::var("COGNIA_PUBLIC_URL").ok())
         .filter(|s| !s.trim().is_empty())

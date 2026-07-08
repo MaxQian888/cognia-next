@@ -20,7 +20,7 @@ description: How a phone finds and trusts a desktop — mDNS subscribe, the LAN 
 
 <StatGrid>
   <Stat label="mDNS service" value="_cognia._tcp" hint="mdns-discovery.ts:42" />
-  <Stat label="Probe ports" value="7890·7891·7900·8443" hint="lan-scanner.ts:119" />
+  <Stat label="Probe ports" value="27890·7890·7891·7900·8443" hint="lan-scanner.ts:119" />
   <Stat label="Probe target" value="GET /api/v1/whoami → 401" hint="lan-scanner.ts:357" />
   <Stat label="Candidate order" value="mDNS → tunnel → cache" hint="connection-strategy.ts:43" />
 </StatGrid>
@@ -66,7 +66,7 @@ flowchart TB
 A candidate is accepted **only** if it returns HTTP `401` with a `{code,message}` body
 (`evaluateProbeResponse`, `:409-432`) — an unauthenticated request to `/api/v1/whoami` *should* be
 rejected, which is exactly what proves the host is a Cognia server. The result is then enriched with
-the TLS fingerprint via `healthz`. Default port `7890` (`:110`); the extra ports `[7890, 7891, 7900,
+the TLS fingerprint via `healthz`. Default port `27890` (`:110`); the extra ports `[27890, 7890, 7891, 7900,
 8443]` (`:119`) are tried only for paired/emulator IPs.
 
 ### The local-IP trick — `local-ip.ts:50`

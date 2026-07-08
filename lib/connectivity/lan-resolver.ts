@@ -24,7 +24,7 @@ import { scanLan, type DiscoveredServer } from "./lan-scanner"
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 
 /** Default companion port — mirrors `lan-scanner`'s `DEFAULT_PORT`. */
-const DEFAULT_PORT = 7890
+const DEFAULT_PORT = 27890
 
 export interface ResolveLanOptions {
   /** The currently paired device's config — only `baseUrl` + the pinned

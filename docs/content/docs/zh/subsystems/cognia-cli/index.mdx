@@ -189,7 +189,7 @@ sequenceDiagram
 | CLI 二进制真实性 | 始终 SHA-256；一旦替换占位密钥即进行 Ed25519 release-key 校验 | `download.rs:200-309`、`release_key.rs:25` |
 
 <Callout type="info" title="bridge 不是 companion API">
-  CLI bridge（临时 loopback 端口、每次启动的 dev token）是一个独立于移动配对 companion API（端口 7890，
+  CLI bridge（临时 loopback 端口、每次启动的 dev token）是一个独立于移动配对 companion API（默认端口 27890，
   JWT 鉴权）的监听器。按设计，两者都不为插件 endpoint 提供 LAN/WAN 触达 —— 见
   [Companion API](../companion-api)。
 </Callout>

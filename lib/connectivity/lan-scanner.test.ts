@@ -137,7 +137,7 @@ describe("scanLan", () => {
     const fetchMock = makeFetch((url) => {
       calls.push(url)
       // Only one IP in the /24 returns a cognia 401; the rest return random shape.
-      if (url.startsWith("https://192.168.5.42:7890")) return cogniaResp({ code: "x" })
+      if (url.startsWith("https://192.168.5.42:27890")) return cogniaResp({ code: "x" })
       return okResp()
     })
     const result = await scanLan({
@@ -152,7 +152,7 @@ describe("scanLan", () => {
     expect(calls.length).toBeGreaterThan(50) // many probes
     expect(result).toHaveLength(1)
     expect(result[0]).toMatchObject({
-      id: "192.168.5.42:7890",
+      id: "192.168.5.42:27890",
       source: "probe",
       ip: "192.168.5.42",
     })
@@ -209,7 +209,7 @@ describe("scanLan", () => {
       probeConcurrency: 16,
     })
     expect(result).toHaveLength(1)
-    expect(result[0].id).toBe("192.168.0.99:7890")
+    expect(result[0].id).toBe("192.168.0.99:27890")
     expect(calls).toBeGreaterThan(1)
   })
 

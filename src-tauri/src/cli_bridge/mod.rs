@@ -3,7 +3,7 @@
 //!
 //! # Why a separate listener?
 //!
-//! The companion_api (port 7890) is designed for paired mobile devices:
+//! The companion_api (default port 27890) is designed for paired mobile devices:
 //! HTTPS, JWT-protected, LAN-accessible. The CLI bridge is for the
 //! developer's own machine: loopback-only, plain HTTP, dev-token gated.
 //! Keeping them on separate ports lets each carry the auth model
