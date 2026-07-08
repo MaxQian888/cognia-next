@@ -26,6 +26,7 @@
     "idle": "Idle",
     "muted": "Muted"
   },
+  "islandToggle": "Toggle agent island",
   "newChat": "New Chat",
   "openLogs": "Open Log Panel",
   "pet": {

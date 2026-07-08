@@ -297,6 +297,19 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
                 let _ = window.set_ignore_cursor_events(false);
             }
         }
+        "island-toggle" => {
+            // Toggle the fleet agent-monitor island (hide if visible, else
+            // open at defaults) — mirrors "pet-toggle".
+            let handle = app.app_handle();
+            if crate::fleet::island_window::is_island_window_open_inner(handle) {
+                let _ = crate::fleet::island_window::close_island_window_inner(handle);
+            } else {
+                let _ = crate::fleet::island_window::open_island_window_inner(
+                    handle,
+                    crate::fleet::island_window::IslandWindowOpts::default(),
+                );
+            }
+        }
         "quit" => {
             // Handled by PredefinedMenuItem::quit — should never reach here
             // because the builder routes quit-natives away from the index.

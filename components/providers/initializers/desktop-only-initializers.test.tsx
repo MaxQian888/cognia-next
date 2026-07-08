@@ -19,6 +19,8 @@ jest.mock("@/lib/native/utils", () => ({
 let mockPetRole: "main" | "web" | "overlay" | "popup" = "main"
 jest.mock("@/lib/pet/window-role", () => ({
   getPetWindowRole: () => mockPetRole,
+  isSecondaryOverlayRole: (role: string) =>
+    role === "overlay" || role === "popup" || role === "island",
 }))
 
 describe("DesktopOnlyInitializers", () => {
@@ -44,7 +46,7 @@ describe("DesktopOnlyInitializers", () => {
     })
     // Mirrors the count of gated children in the component — a guard against
     // silently dropping one when the list changes.
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(14)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(15)
   })
 
   it.each(["overlay", "popup"] as const)(

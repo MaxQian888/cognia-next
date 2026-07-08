@@ -231,6 +231,7 @@ describe("isShellBypassRoute", () => {
     // The transparent desktop-pet overlay + click popup routes must render
     // full-bleed with no desktop chrome so the frameless windows stay transparent.
     expect(isShellBypassRoute("/pet-overlay")).toBe(true)
+    expect(isShellBypassRoute("/island")).toBe(true)
     expect(isShellBypassRoute("/pet-popup")).toBe(true)
   })
 

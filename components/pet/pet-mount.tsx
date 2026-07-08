@@ -16,7 +16,7 @@ import { usePetCareAlert } from "@/hooks/pet/use-pet-care-alert"
 import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
 import { registerPetInteractionCommands, registerPetWindowCommand } from "@/lib/pet/commands"
-import { getPetWindowRole } from "@/lib/pet/window-role"
+import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { isTauri } from "@/lib/platform/detect"
 import { usePlatform } from "@/hooks/use-platform"
 import { startMainPetBridge } from "@/lib/pet/events/cross-window-bridge"
@@ -36,7 +36,7 @@ export function PetMount() {
   // (`/pet-popup`, label "pet-popup") — render presentation only, so here they
   // must contribute nothing; otherwise XP double-awards.
   const role = useMemo(() => getPetWindowRole(), [])
-  const secondary = role === "overlay" || role === "popup"
+  const secondary = isSecondaryOverlayRole(role)
 
   // The floating in-app widget is a desktop / web affordance only. On the
   // Capacitor mobile shell it would dock to a viewport corner with a 96px hit

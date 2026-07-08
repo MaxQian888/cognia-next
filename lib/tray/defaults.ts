@@ -46,6 +46,16 @@ export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
     payload: { kind: "native", action: "pet-disable-click-through" },
   },
   {
+    // Toggle the fleet agent-monitor island overlay from the tray, mirroring
+    // the pet toggle. The Rust `island-toggle` native action opens at
+    // defaults / hides if visible.
+    kind: "action",
+    id: "tray.island-toggle",
+    label: "tray.islandToggle",
+    iconHint: "window",
+    payload: { kind: "native", action: "island-toggle" },
+  },
+  {
     // Quick interactions without opening the widget panel — dispatch through
     // the same `pet.feed`/`pet.play`/`pet.pet` commands the global hotkey
     // and the widget itself use (`lib/pet/commands.ts`), so there's exactly

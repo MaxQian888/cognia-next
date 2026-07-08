@@ -25,6 +25,8 @@ jest.mock("@/lib/tauri", () => ({
 let mockPetRole: "main" | "web" | "overlay" | "popup" = "main"
 jest.mock("@/lib/pet/window-role", () => ({
   getPetWindowRole: () => mockPetRole,
+  isSecondaryOverlayRole: (role: string) =>
+    role === "overlay" || role === "popup" || role === "island",
 }))
 
 const mockCreateAccount = jest.fn<Promise<LocalAccountRecord>, [unknown]>()

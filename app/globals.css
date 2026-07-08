@@ -300,7 +300,9 @@ html.reduce-motion *::after {
      `body { @apply bg-background }` base rule and the BOOT_SCRIPT CSS-var
      background snapshot applied before React hydrates. */
   html[data-pet-overlay],
-  html[data-pet-overlay] body {
+  html[data-pet-overlay] body,
+  html[data-island-overlay],
+  html[data-island-overlay] body {
     background: transparent !important;
   }
 
@@ -311,7 +313,8 @@ html.reduce-motion *::after {
      solid black even though the OS window and the webview are both transparent
      — zeroing `background` alone can't reach that backdrop. `normal` removes the
      forced scheme backdrop; `!important` beats next-themes' inline style. */
-  html[data-pet-overlay] {
+  html[data-pet-overlay],
+  html[data-island-overlay] {
     color-scheme: normal !important;
   }
 
@@ -327,7 +330,11 @@ html.reduce-motion *::after {
   html[data-pet-overlay] [data-bg-enabled="true"]::before,
   html[data-pet-overlay] [data-bg-target]::before,
   html[data-pet-overlay] [data-bg-scrim="true"]::after,
-  html[data-pet-overlay] [data-bg-target][data-bg-scrim="true"]::after {
+  html[data-pet-overlay] [data-bg-target][data-bg-scrim="true"]::after,
+  html[data-island-overlay] [data-bg-enabled="true"]::before,
+  html[data-island-overlay] [data-bg-target]::before,
+  html[data-island-overlay] [data-bg-scrim="true"]::after,
+  html[data-island-overlay] [data-bg-target][data-bg-scrim="true"]::after {
     display: none !important;
     background: none !important;
   }

@@ -15,7 +15,7 @@
 
 import { isTauri } from "@/lib/platform/detect"
 
-export type PetWindowRole = "main" | "overlay" | "popup" | "web"
+export type PetWindowRole = "main" | "overlay" | "popup" | "island" | "web"
 
 /** Label given to the desktop-pet overlay window by the Rust `open_pet_window`. */
 export const PET_WINDOW_LABEL = "pet"
@@ -25,6 +25,13 @@ export const PET_WINDOW_LABEL = "pet"
  * `open_pet_popup`. Kept in lockstep with `pet_window/popup.rs:PET_POPUP_LABEL`.
  */
 export const PET_POPUP_WINDOW_LABEL = "pet-popup"
+
+/**
+ * Label given to the fleet agent-monitor island overlay by the Rust
+ * `open_island_window`. Kept in lockstep with
+ * `fleet/island_window.rs:ISLAND_LABEL`.
+ */
+export const ISLAND_WINDOW_LABEL = "island"
 
 interface TauriInternalsShape {
   metadata?: {
@@ -67,7 +74,20 @@ export function getPetWindowRole(
   const label = getLabel()
   if (label === PET_WINDOW_LABEL) return "overlay"
   if (label === PET_POPUP_WINDOW_LABEL) return "popup"
+  if (label === ISLAND_WINDOW_LABEL) return "island"
   return "main"
+}
+
+/**
+ * True for the transparent secondary overlay windows (pet sprite, pet popup,
+ * fleet island). These load the shared root layout but must render
+ * presentation only: no controllers, no wallpaper, no account gate, no
+ * boot-time initializers — they are least-privilege windows whose denied
+ * capabilities would otherwise log spurious warnings (and the pet controller
+ * would double-award XP).
+ */
+export function isSecondaryOverlayRole(role: PetWindowRole): boolean {
+  return role === "overlay" || role === "popup" || role === "island"
 }
 
 /**

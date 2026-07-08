@@ -106,6 +106,7 @@ pub const NATIVE_ACTIONS: &[&str] = &[
     "automation-kill",
     "pet-toggle",
     "pet-disable-click-through",
+    "island-toggle",
     "noop",
     "quit",
 ];

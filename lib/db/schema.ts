@@ -2284,6 +2284,17 @@ export class CogniaDB extends Dexie {
     this.version(104).stores({
       agentTeamBoard: "&id, teamId, [teamId+updatedAt], updatedAt, kind, status",
     })
+
+    // v105 — Fleet agent-monitor history. Summary rows for coding-agent
+    // sessions observed by the fleet island (Claude Code / Codex / OpenCode),
+    // written by `hooks/fleet/use-fleet-history-sink.ts` from the live
+    // `fleet://update` stream so the history survives island close / app
+    // restart (the in-memory Rust registry does not). Keyed by
+    // `[agent+sessionId]`; `startedAt` orders the history list. Pure additive
+    // — no upgrade hook. See `lib/db/fleet-sessions.ts`.
+    this.version(105).stores({
+      fleetSessions: "&id, [agent+sessionId], startedAt, endedAt, agent, outcome",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2340,6 +2351,8 @@ export class CogniaDB extends Dexie {
   radarReports!: Table<import("@/types/radar").RadarReport, string>
   // v97 — Content capture store. See `lib/db/captured-items.ts`.
   capturedItems!: Table<import("@/types/capture").CapturedItem, string>
+  // v105 — Fleet agent-monitor session history. See `lib/db/fleet-sessions.ts`.
+  fleetSessions!: Table<import("./fleet-sessions").FleetSessionHistoryRow, string>
   // v98 — External Bridge inbound-write review queue. See `lib/db/inbound-drafts.ts`.
   inboundDrafts!: Table<import("./inbound-drafts").InboundDraftRow, string>
   // v99 — Inbound gateway durable request log. See `lib/db/gateway-request-log.ts`.
@@ -2386,6 +2399,58 @@ export type {
 let _db: CogniaDB | null = null
 let _seedPromise: Promise<void> | null = null
 let _activeDatabaseName: string | null = null
+let _yieldChannel: BroadcastChannel | null = null
+
+/**
+ * Cross-context yield coordination for schema upgrades.
+ *
+ * Native IndexedDB fires `versionchange` on connections that block an
+ * upgrade, and our handler below closes the cached db in response — but
+ * delivery across WKWebView windows (main window + pet window share this
+ * origin) and background-throttled tabs is unreliable. A holder that never
+ * receives `versionchange` blocks the upgrade indefinitely ("Upgrade '…'
+ * blocked by other connection holding version N").
+ *
+ * So the blocked side also nudges every other context over a
+ * BroadcastChannel; each context listening closes its cached connection for
+ * that db name and lazily re-opens (at the new version) on its next getDb().
+ * Posting and listening share one channel instance, and BroadcastChannel
+ * never delivers a message back to the instance that posted it — the
+ * upgrading context cannot yank its own connection.
+ */
+const DB_YIELD_CHANNEL_NAME = "cognia-db-yield"
+
+interface DbYieldMessage {
+  type: "dexie-yield"
+  dbName: string
+}
+
+function ensureYieldChannel(): BroadcastChannel | null {
+  if (_yieldChannel) return _yieldChannel
+  if (typeof BroadcastChannel === "undefined") return null
+  try {
+    _yieldChannel = new BroadcastChannel(DB_YIELD_CHANNEL_NAME)
+    _yieldChannel.onmessage = (event: MessageEvent) => {
+      const msg = event.data as DbYieldMessage | undefined
+      if (msg?.type !== "dexie-yield") return
+      if (_db && _db.name === msg.dbName) {
+        closeCachedDb()
+      }
+    }
+  } catch {
+    _yieldChannel = null
+  }
+  return _yieldChannel
+}
+
+function requestOtherConnectionsToYield(dbName: string): void {
+  try {
+    ensureYieldChannel()?.postMessage({ type: "dexie-yield", dbName } satisfies DbYieldMessage)
+  } catch {
+    // Channel closed or structured-clone failure — the native versionchange
+    // path remains the fallback; never let the nudge itself throw.
+  }
+}
 
 export function activateAccountDatabase(accountId: string): void {
   const nextName = accountDatabaseName(accountId)
@@ -2408,6 +2473,7 @@ export function getDb(): CogniaDB {
   }
   if (!_db) {
     _db = new CogniaDB(_activeDatabaseName ?? LEGACY_COGNIA_DB_NAME)
+    ensureYieldChannel()
     // Yield to another connection that needs to upgrade the schema. Plugin
     // Dexie tables and second tabs open the same DB name at a higher version;
     // without this handler our connection keeps holding the old version and
@@ -2418,13 +2484,18 @@ export function getDb(): CogniaDB {
       closeCachedDb()
     })
     // The mirror case: WE are the connection trying to upgrade and something
-    // else is holding the old version open. Downgrade Dexie's default noisy
-    // console warning to an informative log; the open retries once the other
-    // connection closes (its own versionchange handler above will yield).
+    // else is holding the old version open. Note Dexie's own constructor-
+    // registered "blocked" subscriber still fires alongside this one (its
+    // console.warn cannot be suppressed by subscribing), so the noisy default
+    // line will appear once; we add context and — because versionchange
+    // delivery across WKWebView windows / throttled tabs is unreliable —
+    // actively ask other contexts to yield over the BroadcastChannel.
+    const opened = _db
     _db.on("blocked", () => {
       console.info(
         "[db] schema upgrade is waiting for another connection (tab or plugin) to close; it will proceed automatically."
       )
+      requestOtherConnectionsToYield(opened.name)
     })
     const seedTarget = _db
     // Kick off seeding once per process. We import lazily to avoid a circular
@@ -2466,6 +2537,12 @@ export function whenSeeded(): Promise<void> {
 export function __resetDbForTesting(): void {
   _activeDatabaseName = null
   closeCachedDb()
+  try {
+    _yieldChannel?.close()
+  } catch {
+    // already closed
+  }
+  _yieldChannel = null
 }
 
 function closeCachedDb(): void {

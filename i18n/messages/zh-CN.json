@@ -5331,6 +5331,46 @@
     "deniedTitle": "文件访问被拒绝",
     "failed": "文件操作失败：{message}"
   },
+  "fleet": {
+    "agents": {
+      "claude-code": "Claude Code",
+      "codex": "Codex",
+      "opencode": "OpenCode"
+    },
+    "island": {
+      "empty": "暂无活动 Agent",
+      "summary": "{count} 个 Agent",
+      "summaryWaiting": "{count} 个 Agent · {waiting} 个待处理",
+      "toggle": "展开/收起 Agent 列表"
+    },
+    "permission": {
+      "allow": "允许",
+      "allowed": "已允许",
+      "countdown": "{seconds} 秒",
+      "denied": "已拒绝",
+      "deny": "拒绝",
+      "expired": "已在终端中处理",
+      "request": "权限请求：{tool}",
+      "requestGeneric": "收到权限请求"
+    },
+    "reply": {
+      "open": "回复",
+      "placeholder": "发送消息…",
+      "send": "发送"
+    },
+    "row": {
+      "focusTerminal": "聚焦终端",
+      "status": {
+        "ended": "会话已结束",
+        "idle": "空闲",
+        "planPending": "计划等待在终端中确认",
+        "waitingInput": "正在终端中等待你的输入",
+        "waitingPermission": "等待权限审批",
+        "working": "工作中…"
+      },
+      "you": "你："
+    }
+  },
   "goal": {
     "activity": {
       "config_updated": "配置已更新",
@@ -18632,6 +18672,50 @@
         "title": "内置 Hook"
       },
       "description": "在生命周期事件触发时运行 shell 命令或调用 webhook。配置写入 ~/.claude/settings.json (用户作用域) 或项目下的 .claude/settings.json。整份配置原样回写,未识别的字段会被保留。",
+      "fleet": {
+        "claude": {
+          "desc": "将转发 hooks 安装到 ~/.claude/settings.json，让每个 Claude Code 会话上报到这里。失败即放行：Cognia 关闭时立即退出。",
+          "label": "Claude Code hooks"
+        },
+        "codex": {
+          "desc": "将 ~/.codex/config.toml 的 notify 指向转发脚本。仅观察——每轮完成上报一次，无需信任步骤。",
+          "label": "Codex notify"
+        },
+        "description": "监控并控制本机任意位置启动的编码 Agent（终端、编辑器）——不限于 Cognia 启动的实例。",
+        "error": "舰队操作失败：{detail}",
+        "history": {
+          "activeFor": "已活动 {duration}",
+          "clear": "清空",
+          "empty": "尚无会话记录。",
+          "endedAgo": "{ago}前结束",
+          "import": "导入…",
+          "title": "最近会话"
+        },
+        "island": {
+          "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",
+          "label": "灵动岛悬浮层"
+        },
+        "monitor": {
+          "desc": "外部 Agent hook 的本地事件入口。运行在 companion 服务器上，仅监听回环地址。",
+          "label": "舰队监控",
+          "running": "正在监听 127.0.0.1:{port}。"
+        },
+        "opencode": {
+          "desc": "在 ~/.config/opencode/plugin 安装插件。可在灵动岛上观察会话并批准/拒绝权限。",
+          "label": "OpenCode 插件"
+        },
+        "saved": "舰队设置已更新。",
+        "status": {
+          "codexConflict": "notify 已占用",
+          "codexUnavailable": "未找到 Codex",
+          "installed": "已安装",
+          "opencodeUnavailable": "未找到 OpenCode",
+          "partial": "不完整",
+          "stale": "已被修改",
+          "unavailable": "未找到 Claude Code"
+        },
+        "title": "Agent 舰队监控"
+      },
       "group": {
         "addHandler": "新建处理器",
         "emptyHandlers": "尚无处理器 — 点击下方按钮添加。",
@@ -22408,6 +22492,7 @@
       "idle": "空闲",
       "muted": "静音"
     },
+    "islandToggle": "切换 Agent 灵动岛",
     "newChat": "新建对话",
     "openLogs": "打开日志面板",
     "pet": {

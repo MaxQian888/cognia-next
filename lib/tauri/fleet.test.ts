@@ -1,0 +1,200 @@
+/** @jest-environment jsdom */
+/**
+ * Tests for the fleet Tauri wrappers: web no-ops (isTauri false), happy-path
+ * invoke pass-through, and error swallowing (a failed command never throws
+ * into the renderer). Mirrors pet-window.test.ts.
+ */
+
+const invokeMock = jest.fn()
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+}))
+
+const isTauriMock = jest.fn()
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => isTauriMock(),
+}))
+
+import {
+  closeIslandWindow,
+  fleetCodexInstall,
+  fleetCodexStatus,
+  fleetCodexUninstall,
+  fleetOpencodeInstall,
+  fleetOpencodeStatus,
+  fleetOpencodeUninstall,
+  fleetOpencodeSendMessage,
+  fleetFocusTerminal,
+  fleetGetSnapshot,
+  fleetMonitorRestore,
+  fleetMonitorStart,
+  fleetMonitorStatus,
+  fleetMonitorStop,
+  fleetPermissionRespond,
+  islandResize,
+  isIslandWindowOpen,
+  openIslandWindow,
+} from "./fleet"
+
+const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+beforeEach(() => {
+  invokeMock.mockReset()
+  isTauriMock.mockReturnValue(true)
+  warnSpy.mockClear()
+})
+
+afterAll(() => warnSpy.mockRestore())
+
+describe("off Tauri (web)", () => {
+  beforeEach(() => isTauriMock.mockReturnValue(false))
+
+  it("returns benign values without invoking", async () => {
+    expect(await fleetMonitorStart()).toBeNull()
+    expect(await fleetMonitorStop()).toEqual({ enabled: false, port: null, configPath: null })
+    expect(await fleetMonitorStatus()).toEqual({ enabled: false, port: null, configPath: null })
+    expect(await fleetMonitorRestore()).toEqual({ enabled: false, port: null, configPath: null })
+    expect(await fleetGetSnapshot()).toEqual({ sessions: [], generatedAt: 0 })
+    expect(await fleetPermissionRespond("r", "allow")).toBe(false)
+    expect(await fleetFocusTerminal("claude-code", "s")).toBe(false)
+    expect(await fleetCodexStatus()).toEqual({
+      status: "unavailable",
+      configPath: null,
+      scriptPath: null,
+    })
+    expect(await fleetCodexInstall()).toEqual({
+      status: "unavailable",
+      configPath: null,
+      scriptPath: null,
+    })
+    expect(await fleetCodexUninstall()).toEqual({
+      status: "unavailable",
+      configPath: null,
+      scriptPath: null,
+    })
+    expect(await fleetOpencodeStatus()).toEqual({ status: "unavailable", pluginPath: null })
+    expect(await fleetOpencodeInstall()).toEqual({ status: "unavailable", pluginPath: null })
+    expect(await fleetOpencodeUninstall()).toEqual({ status: "unavailable", pluginPath: null })
+    expect(await fleetOpencodeSendMessage("s", "hi")).toBeNull()
+    expect(await openIslandWindow()).toBe(false)
+    expect(await closeIslandWindow()).toBe(false)
+    expect(await isIslandWindowOpen()).toBe(false)
+    expect(await islandResize(400, 44)).toBe(false)
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("on Tauri", () => {
+  it("passes monitor lifecycle calls through", async () => {
+    const status = { enabled: true, port: 7890, configPath: "/x/agent-monitor.json" }
+    invokeMock.mockResolvedValue(status)
+    expect(await fleetMonitorStart()).toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_monitor_start")
+    expect(await fleetMonitorStatus()).toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_monitor_status")
+    expect(await fleetMonitorRestore()).toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_monitor_restore")
+  })
+
+  it("passes permission responses with camelCase args", async () => {
+    invokeMock.mockResolvedValue(true)
+    expect(await fleetPermissionRespond("req-1", "deny")).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_permission_respond", {
+      requestId: "req-1",
+      behavior: "deny",
+    })
+  })
+
+  it("passes Codex integration calls through", async () => {
+    const status = { status: "installed", configPath: "/c", scriptPath: "/s" }
+    invokeMock.mockResolvedValue(status)
+    expect(await fleetCodexInstall()).toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_codex_install")
+    expect(await fleetCodexUninstall()).toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_codex_uninstall")
+    expect(await fleetCodexStatus()).toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_codex_status")
+  })
+
+  it("swallows a Codex status failure but lets install/uninstall throw", async () => {
+    invokeMock.mockRejectedValue(new Error("boom"))
+    // status is defensive (used in the render path) → swallow to unavailable.
+    expect(await fleetCodexStatus()).toEqual({
+      status: "unavailable",
+      configPath: null,
+      scriptPath: null,
+    })
+    // install/uninstall surface conflicts to the user → must reject.
+    await expect(fleetCodexInstall()).rejects.toThrow("boom")
+    await expect(fleetCodexUninstall()).rejects.toThrow("boom")
+  })
+
+  it("passes OpenCode integration calls through", async () => {
+    const status = { status: "installed", pluginPath: "/p" }
+    invokeMock.mockResolvedValue(status)
+    expect(await fleetOpencodeInstall()).toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_opencode_install")
+    expect(await fleetOpencodeUninstall()).toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_opencode_uninstall")
+    expect(await fleetOpencodeStatus()).toEqual(status)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_opencode_status")
+  })
+
+  it("swallows an OpenCode status failure but lets install/uninstall throw", async () => {
+    invokeMock.mockRejectedValue(new Error("boom"))
+    expect(await fleetOpencodeStatus()).toEqual({ status: "unavailable", pluginPath: null })
+    await expect(fleetOpencodeInstall()).rejects.toThrow("boom")
+    await expect(fleetOpencodeUninstall()).rejects.toThrow("boom")
+  })
+
+  it("queues an OpenCode send-message and returns the command id", async () => {
+    invokeMock.mockResolvedValue("cmd-9")
+    expect(await fleetOpencodeSendMessage("oc-1", "continue")).toBe("cmd-9")
+    expect(invokeMock).toHaveBeenCalledWith("fleet_opencode_send_message", {
+      sessionId: "oc-1",
+      text: "continue",
+    })
+    // Failure → null, not a throw (renderer-safe).
+    invokeMock.mockRejectedValue(new Error("boom"))
+    expect(await fleetOpencodeSendMessage("oc-1", "x")).toBeNull()
+  })
+
+  it("focuses a terminal by agent + session id", async () => {
+    invokeMock.mockResolvedValue(undefined)
+    expect(await fleetFocusTerminal("codex", "abc")).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_focus_terminal", {
+      agent: "codex",
+      sessionId: "abc",
+    })
+  })
+
+  it("island window ops pass opts and sizes through", async () => {
+    invokeMock.mockResolvedValue(undefined)
+    expect(await openIslandWindow({ width: 500, height: 60 })).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("open_island_window", {
+      opts: { width: 500, height: 60 },
+    })
+    expect(await openIslandWindow()).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("open_island_window", { opts: null })
+    expect(await islandResize(640, 200)).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("island_resize", { width: 640, height: 200 })
+    expect(await closeIslandWindow()).toBe(true)
+    invokeMock.mockResolvedValue(true)
+    expect(await isIslandWindowOpen()).toBe(true)
+  })
+
+  it("swallows command failures with a warn", async () => {
+    invokeMock.mockRejectedValue(new Error("boom"))
+    expect(await fleetMonitorStart()).toBeNull()
+    expect(await fleetMonitorStop()).toEqual({ enabled: false, port: null, configPath: null })
+    expect(await fleetMonitorStatus()).toEqual({ enabled: false, port: null, configPath: null })
+    expect(await fleetGetSnapshot()).toEqual({ sessions: [], generatedAt: 0 })
+    expect(await fleetPermissionRespond("r", "allow")).toBe(false)
+    expect(await fleetFocusTerminal("codex", "s")).toBe(false)
+    expect(await openIslandWindow()).toBe(false)
+    expect(await closeIslandWindow()).toBe(false)
+    expect(await isIslandWindowOpen()).toBe(false)
+    expect(await islandResize(1, 1)).toBe(false)
+    expect(warnSpy).toHaveBeenCalled()
+  })
+})

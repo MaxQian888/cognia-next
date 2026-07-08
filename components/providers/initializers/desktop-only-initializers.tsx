@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import { useSyncExternalStore } from "react"
 
 import { isTauri } from "@/lib/native/utils"
-import { getPetWindowRole } from "@/lib/pet/window-role"
+import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 
 /**
  * Client-mount probe via `useSyncExternalStore` (not `useState` + effect, which
@@ -87,6 +87,10 @@ const UpdateCheckInitializer = dynamic(
   () => import("./update-check-initializer").then((m) => m.UpdateCheckInitializer),
   { ssr: false }
 )
+const FleetHistorySinkInitializer = dynamic(
+  () => import("./fleet-history-sink-initializer").then((m) => m.FleetHistorySinkInitializer),
+  { ssr: false }
+)
 const PluginDeepLinkRouter = dynamic(
   () => import("@/components/plugins/plugin-deep-link-router").then((m) => m.PluginDeepLinkRouter),
   { ssr: false }
@@ -122,7 +126,7 @@ export function DesktopOnlyInitializers() {
   // a spurious warning. Skip the whole bundle there; the pet windows start their
   // own cross-window bridge from the pet view, and need nothing here.
   const role = getPetWindowRole()
-  if (role === "overlay" || role === "popup") return null
+  if (isSecondaryOverlayRole(role)) return null
 
   return (
     <>
@@ -134,6 +138,7 @@ export function DesktopOnlyInitializers() {
       <TerminalBridgeInitializer />
       <LocalCharacterPackInitializer />
       <PetWindowInitializer />
+      <FleetHistorySinkInitializer />
       <UpdateCheckInitializer />
       <PluginDeepLinkRouter />
       <ConsentOverlay />

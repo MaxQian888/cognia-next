@@ -27,7 +27,11 @@ jest.mock("@/hooks/pet/use-active-character-id", () => ({
 }))
 jest.mock("@/lib/pet/bones/account-id", () => ({ ensurePetAccountId: () => ensurePetAccountId() }))
 jest.mock("@/lib/pet/runtime/init-pet", () => ({ ensurePetProfile: () => ensurePetProfile() }))
-jest.mock("@/lib/pet/window-role", () => ({ getPetWindowRole: () => getPetWindowRole() }))
+jest.mock("@/lib/pet/window-role", () => ({
+  getPetWindowRole: () => getPetWindowRole(),
+  isSecondaryOverlayRole: (role: string) =>
+    role === "overlay" || role === "popup" || role === "island",
+}))
 jest.mock("@/lib/platform/detect", () => ({ isTauri: () => isTauri() }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => usePlatform() }))
 jest.mock("@/lib/pet/events/cross-window-bridge", () => ({

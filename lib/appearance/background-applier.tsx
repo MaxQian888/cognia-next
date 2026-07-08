@@ -5,7 +5,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { applyUserCss } from "@/lib/appearance/custom-css/apply"
 import { disposeUrl, resolveSourceToCss } from "@/lib/appearance/wallpaper-storage"
 import { withBuiltinPresets } from "@/lib/appearance/presets"
-import { getPetWindowRole } from "@/lib/pet/window-role"
+import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 
 /** Body data attributes the appearance module owns. globals.css selectors key off these. */
@@ -98,7 +98,7 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
   // layer for global/all scopes. Force wallpaper OFF in those windows: they own
   // no surface that should carry the app background.
   const role = getPetWindowRole()
-  if (role === "overlay" || role === "popup") {
+  if (isSecondaryOverlayRole(role)) {
     body.setAttribute(ATTR_ENABLED, "false")
     body.removeAttribute(ATTR_SCOPE)
     clearScrim(body)

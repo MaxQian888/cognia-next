@@ -16,6 +16,8 @@ jest.mock("@/lib/appearance/wallpaper-storage", () => ({
 let mockPetRole: "main" | "web" | "overlay" | "popup" = "main"
 jest.mock("@/lib/pet/window-role", () => ({
   getPetWindowRole: () => mockPetRole,
+  isSecondaryOverlayRole: (role: string) =>
+    role === "overlay" || role === "popup" || role === "island",
 }))
 
 // Mock the settings store with a manual selector implementation.

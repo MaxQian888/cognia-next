@@ -1,0 +1,40 @@
+{
+  "agents": {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "opencode": "OpenCode"
+  },
+  "island": {
+    "empty": "暂无活动 Agent",
+    "summary": "{count} 个 Agent",
+    "summaryWaiting": "{count} 个 Agent · {waiting} 个待处理",
+    "toggle": "展开/收起 Agent 列表"
+  },
+  "permission": {
+    "allow": "允许",
+    "allowed": "已允许",
+    "countdown": "{seconds} 秒",
+    "denied": "已拒绝",
+    "deny": "拒绝",
+    "expired": "已在终端中处理",
+    "request": "权限请求：{tool}",
+    "requestGeneric": "收到权限请求"
+  },
+  "reply": {
+    "open": "回复",
+    "placeholder": "发送消息…",
+    "send": "发送"
+  },
+  "row": {
+    "focusTerminal": "聚焦终端",
+    "status": {
+      "ended": "会话已结束",
+      "idle": "空闲",
+      "planPending": "计划等待在终端中确认",
+      "waitingInput": "正在终端中等待你的输入",
+      "waitingPermission": "等待权限审批",
+      "working": "工作中…"
+    },
+    "you": "你："
+  }
+}

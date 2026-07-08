@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { isTauri } from "@/lib/tauri"
-import { getPetWindowRole } from "@/lib/pet/window-role"
+import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password-policy"
 import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
 import { PasswordStrengthMeter } from "./password-strength-meter"
@@ -67,7 +67,7 @@ export function AccountGate({ children }: AccountGateProps) {
   // `loaded` gate for the same server/first-client hydration agreement as the
   // `isTauri()` passthrough above (role reads Tauri internals post-hydration).
   const petRole = getPetWindowRole()
-  if (petRole === "overlay" || petRole === "popup") {
+  if (isSecondaryOverlayRole(petRole)) {
     return <>{children}</>
   }
 

@@ -26,6 +26,13 @@ mod surfaces;
 pub use popup::*;
 pub use surfaces::*;
 
+// Shared overlay seam: the fleet island window reuses the exact NSPanel
+// reclassing the pet windows pioneered (non-activating, all-Spaces,
+// floating level). Alias rather than move — pet call sites stay untouched.
+pub(crate) use macos_panel::{
+    apply_pet_panel_behavior as apply_overlay_panel_behavior, PetPanelRole as OverlayPanelRole,
+};
+
 /// Default overlay size used when the tray opens the pet with no renderer
 /// supplied options (the renderer always sends its persisted size).
 const DEFAULT_PET_WIDTH: f64 = 280.0;

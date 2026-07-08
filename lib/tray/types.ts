@@ -23,6 +23,7 @@ export type TrayNativeAction =
   | "automation-kill"
   | "pet-toggle"
   | "pet-disable-click-through"
+  | "island-toggle"
   | "noop"
   | "quit"
 

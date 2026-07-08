@@ -55,6 +55,7 @@ import {
 import { cn } from "@/lib/utils"
 import { HookGroupEditor, validateMatcher } from "./hook-group-editor"
 import { BuiltinHooksCard } from "./builtin-hooks-card"
+import { FleetMonitorCard } from "./fleet-monitor-card"
 import { createLogger } from "@/lib/logging"
 import {
   CLAUDE_CODE_RELATED,
@@ -241,6 +242,8 @@ export function HooksSection({ cwd }: Props) {
       <RelatedSectionsStrip current="hooks" targets={CLAUDE_CODE_RELATED} />
 
       <BuiltinHooksCard />
+
+      <FleetMonitorCard />
 
       <Tabs value={scope} onValueChange={(v) => setScope(v as Scope)}>
         <TabsList>

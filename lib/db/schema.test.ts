@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the schema module — Dexie instance lifecycle, lazy seeding,
 // and the test reset helper. Also exercises the v5 (members[]) and v7
 // (appsEnabled={}) upgrade hooks indirectly: the seeder runs against a
@@ -1578,6 +1579,98 @@ describe("getDb", () => {
   // the "happy path" return value: the false branch of that conditional is
   // hit in every spec. Documenting here so a future maintainer knows why
   // we don't claim to exercise the throw.
+})
+
+describe("cross-context upgrade yield channel", () => {
+  /**
+   * jsdom has no BroadcastChannel — stub one that records instances, posted
+   * messages, and lets tests deliver inbound messages via `onmessage`.
+   */
+  class FakeBroadcastChannel {
+    static instances: FakeBroadcastChannel[] = []
+    onmessage: ((ev: { data: unknown }) => void) | null = null
+    posted: unknown[] = []
+    closed = false
+    constructor(public name: string) {
+      FakeBroadcastChannel.instances.push(this)
+    }
+    postMessage(data: unknown): void {
+      this.posted.push(data)
+    }
+    close(): void {
+      this.closed = true
+    }
+  }
+
+  let infoSpy: jest.SpyInstance
+  let warnSpy: jest.SpyInstance
+
+  beforeEach(() => {
+    FakeBroadcastChannel.instances = []
+    ;(globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = FakeBroadcastChannel
+    __resetDbForTesting()
+    // Dexie's constructor-registered blocked subscriber console.warns; ours
+    // console.infos. Silence both to keep test output clean.
+    infoSpy = jest.spyOn(console, "info").mockImplementation(() => {})
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    __resetDbForTesting()
+    delete (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel
+    infoSpy.mockRestore()
+    warnSpy.mockRestore()
+  })
+
+  function activeChannel(): FakeBroadcastChannel {
+    const open = FakeBroadcastChannel.instances.filter((c) => !c.closed)
+    expect(open).toHaveLength(1)
+    return open[0]
+  }
+
+  it("creates the coordination channel lazily on getDb()", () => {
+    expect(FakeBroadcastChannel.instances).toHaveLength(0)
+    getDb()
+    expect(activeChannel().name).toBe("cognia-db-yield")
+  })
+
+  it("broadcasts a yield request when our upgrade is blocked", () => {
+    const db = getDb()
+    db.on("blocked").fire({ oldVersion: 1220, newVersion: 1230 })
+    expect(activeChannel().posted).toEqual([{ type: "dexie-yield", dbName: db.name }])
+    expect(infoSpy).toHaveBeenCalled()
+  })
+
+  it("closes the cached connection when another context asks us to yield", () => {
+    const before = getDb()
+    activeChannel().onmessage?.({ data: { type: "dexie-yield", dbName: before.name } })
+    const after = getDb()
+    expect(after).not.toBe(before)
+  })
+
+  it("ignores yield requests for a different database name", () => {
+    const before = getDb()
+    const channel = activeChannel()
+    channel.onmessage?.({ data: { type: "dexie-yield", dbName: "cognia-account-other" } })
+    channel.onmessage?.({ data: { type: "something-else", dbName: before.name } })
+    channel.onmessage?.({ data: undefined })
+    expect(getDb()).toBe(before)
+  })
+
+  it("__resetDbForTesting closes the channel", () => {
+    getDb()
+    const channel = activeChannel()
+    __resetDbForTesting()
+    expect(channel.closed).toBe(true)
+  })
+
+  it("degrades gracefully when BroadcastChannel is unavailable", () => {
+    delete (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel
+    const db = getDb()
+    // Firing blocked must not throw even though no channel could be created.
+    expect(() => db.on("blocked").fire({ oldVersion: 1220, newVersion: 1230 })).not.toThrow()
+    expect(FakeBroadcastChannel.instances).toHaveLength(0)
+  })
 })
 
 describe("whenSeeded", () => {

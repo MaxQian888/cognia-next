@@ -26,6 +26,7 @@
     "idle": "空闲",
     "muted": "静音"
   },
+  "islandToggle": "切换 Agent 灵动岛",
   "newChat": "新建对话",
   "openLogs": "打开日志面板",
   "pet": {

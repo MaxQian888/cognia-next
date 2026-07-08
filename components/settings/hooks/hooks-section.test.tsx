@@ -62,6 +62,12 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+// FleetMonitorCard is tested in isolation (fleet-monitor-card.test.tsx); it
+// pulls in the fleet Tauri wrappers + SessionImportDialog (which needs
+// useLocale), so stub it here — this suite exercises the hooks editor, not the
+// fleet card.
+jest.mock("./fleet-monitor-card", () => ({ FleetMonitorCard: () => null }))
+
 const replaceMock = jest.fn()
 let searchString = ""
 jest.mock("next/navigation", () => ({

@@ -5331,6 +5331,46 @@
     "deniedTitle": "File access denied",
     "failed": "File operation failed: {message}"
   },
+  "fleet": {
+    "agents": {
+      "claude-code": "Claude Code",
+      "codex": "Codex",
+      "opencode": "OpenCode"
+    },
+    "island": {
+      "empty": "No active agents",
+      "summary": "{count, plural, one {# agent} other {# agents}}",
+      "summaryWaiting": "{count, plural, one {# agent} other {# agents}} · {waiting} waiting",
+      "toggle": "Toggle agent list"
+    },
+    "permission": {
+      "allow": "Allow",
+      "allowed": "Allowed",
+      "countdown": "{seconds}s",
+      "denied": "Denied",
+      "deny": "Deny",
+      "expired": "Answered in terminal",
+      "request": "Permission: {tool}",
+      "requestGeneric": "Permission requested"
+    },
+    "reply": {
+      "open": "Reply",
+      "placeholder": "Send a message…",
+      "send": "Send"
+    },
+    "row": {
+      "focusTerminal": "Focus terminal",
+      "status": {
+        "ended": "Session ended",
+        "idle": "Idle",
+        "planPending": "Plan awaiting approval in the terminal",
+        "waitingInput": "Waiting for your input in the terminal",
+        "waitingPermission": "Waiting for permission approval",
+        "working": "Working…"
+      },
+      "you": "You:"
+    }
+  },
   "goal": {
     "activity": {
       "config_updated": "Config updated",
@@ -18632,6 +18672,50 @@
         "title": "Built-in hooks"
       },
       "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
+      "fleet": {
+        "claude": {
+          "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
+          "label": "Claude Code hooks"
+        },
+        "codex": {
+          "desc": "Point ~/.codex/config.toml's notify at a forwarder. Observe-only — one event per completed turn, no trust step.",
+          "label": "Codex notify"
+        },
+        "description": "Watch and control coding agents launched anywhere on this machine (terminals, editors) — not just ones started by Cognia.",
+        "error": "Fleet action failed: {detail}",
+        "history": {
+          "activeFor": "active {duration}",
+          "clear": "Clear",
+          "empty": "No sessions recorded yet.",
+          "endedAgo": "ended {ago} ago",
+          "import": "Import…",
+          "title": "Recent sessions"
+        },
+        "island": {
+          "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
+          "label": "Island overlay"
+        },
+        "monitor": {
+          "desc": "Local event ingress for external agent hooks. Runs on the companion server, loopback only.",
+          "label": "Fleet monitoring",
+          "running": "Listening on 127.0.0.1:{port}."
+        },
+        "opencode": {
+          "desc": "Install a plugin into ~/.config/opencode/plugin. Observe sessions and approve/deny permissions from the island.",
+          "label": "OpenCode plugin"
+        },
+        "saved": "Fleet settings updated.",
+        "status": {
+          "codexConflict": "Notify in use",
+          "codexUnavailable": "Codex not found",
+          "installed": "Installed",
+          "opencodeUnavailable": "OpenCode not found",
+          "partial": "Partial",
+          "stale": "Modified",
+          "unavailable": "Claude Code not found"
+        },
+        "title": "Agent fleet monitor"
+      },
       "group": {
         "addHandler": "Add handler",
         "emptyHandlers": "No handlers — add one below.",
@@ -22408,6 +22492,7 @@
       "idle": "Idle",
       "muted": "Muted"
     },
+    "islandToggle": "Toggle agent island",
     "newChat": "New Chat",
     "openLogs": "Open Log Panel",
     "pet": {

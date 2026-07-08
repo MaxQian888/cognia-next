@@ -3,7 +3,9 @@
  */
 import {
   getPetWindowRole,
+  ISLAND_WINDOW_LABEL,
   isMainAppWindow,
+  isSecondaryOverlayRole,
   PET_POPUP_WINDOW_LABEL,
   PET_WINDOW_LABEL,
 } from "./window-role"
@@ -69,9 +71,25 @@ describe("getPetWindowRole", () => {
     expect(getPetWindowRole()).toBe("main")
   })
 
+  it("returns 'island' when the Tauri label is 'island'", () => {
+    setTauri(true)
+    expect(getPetWindowRole(() => ISLAND_WINDOW_LABEL)).toBe("island")
+  })
+
   it("exposes the canonical pet window labels", () => {
     expect(PET_WINDOW_LABEL).toBe("pet")
     expect(PET_POPUP_WINDOW_LABEL).toBe("pet-popup")
+    expect(ISLAND_WINDOW_LABEL).toBe("island")
+  })
+})
+
+describe("isSecondaryOverlayRole", () => {
+  it("covers the three overlay windows and nothing else", () => {
+    expect(isSecondaryOverlayRole("overlay")).toBe(true)
+    expect(isSecondaryOverlayRole("popup")).toBe(true)
+    expect(isSecondaryOverlayRole("island")).toBe(true)
+    expect(isSecondaryOverlayRole("main")).toBe(false)
+    expect(isSecondaryOverlayRole("web")).toBe(false)
   })
 })
 
@@ -97,5 +115,10 @@ describe("isMainAppWindow", () => {
   it("is false for the pet click popup window", () => {
     setTauri(true)
     expect(isMainAppWindow(() => PET_POPUP_WINDOW_LABEL)).toBe(false)
+  })
+
+  it("is false for the fleet island window", () => {
+    setTauri(true)
+    expect(isMainAppWindow(() => ISLAND_WINDOW_LABEL)).toBe(false)
   })
 })

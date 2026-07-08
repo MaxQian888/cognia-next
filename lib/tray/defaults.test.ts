@@ -9,6 +9,7 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       "tray.show",
       "tray.pet-toggle",
       "tray.pet-disable-click-through",
+      "tray.island-toggle",
       "tray.pet",
       "tray.new-chat",
       "tray.quick-goal",
@@ -43,6 +44,7 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       "automation-kill",
       "pet-toggle",
       "pet-disable-click-through",
+      "island-toggle",
       "noop",
       "quit",
     ])

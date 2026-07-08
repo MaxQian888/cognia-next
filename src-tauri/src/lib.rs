@@ -16,6 +16,7 @@ pub mod crash;
 mod cua_sandbox;
 mod external_agent;
 mod files;
+pub mod fleet;
 mod fonts;
 mod fs_atomic;
 mod gateway;
@@ -194,7 +195,10 @@ pub fn run() {
                 //     the plugin restore a stale hidden/visible bit would fight
                 //     that handshake.
                 tauri_plugin_window_state::Builder::default()
-                    .with_denylist(&["pet", "pet-popup"])
+                    // "island": the fleet overlay recomputes its top-center
+                    // placement on every open/resize; persisted coordinates
+                    // would fight it (same rationale as the pet).
+                    .with_denylist(&["pet", "pet-popup", "island"])
                     .with_state_flags(
                         tauri_plugin_window_state::StateFlags::all()
                             & !tauri_plugin_window_state::StateFlags::FULLSCREEN
@@ -473,6 +477,27 @@ pub fn run() {
             pet_window::open_pet_popup,
             pet_window::close_pet_popup,
             pet_window::pet_popup_resize,
+            fleet::fleet_monitor_start,
+            fleet::fleet_monitor_restore,
+            fleet::fleet_monitor_stop,
+            fleet::fleet_monitor_status,
+            fleet::fleet_get_snapshot,
+            fleet::fleet_permission_respond,
+            fleet::fleet_opencode_send_message,
+            fleet::control::fleet_focus_terminal,
+            fleet::codex::fleet_codex_install,
+            fleet::codex::fleet_codex_uninstall,
+            fleet::codex::fleet_codex_status,
+            fleet::opencode::fleet_opencode_install,
+            fleet::opencode::fleet_opencode_uninstall,
+            fleet::opencode::fleet_opencode_status,
+            fleet::install::fleet_scripts_install,
+            fleet::install::fleet_scripts_uninstall,
+            fleet::install::fleet_scripts_status,
+            fleet::island_window::open_island_window,
+            fleet::island_window::close_island_window,
+            fleet::island_window::is_island_window_open,
+            fleet::island_window::island_resize,
             tray::commands::tray_set_menu,
             tray::commands::tray_set_icon_state,
             tray::commands::tray_set_tooltip,

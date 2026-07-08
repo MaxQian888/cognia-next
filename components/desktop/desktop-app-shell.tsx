@@ -50,6 +50,7 @@ const BYPASS_PREFIXES = [
   "/canvas/join",
   "/pet-overlay",
   "/pet-popup",
+  "/island",
 ]
 
 export function isShellBypassRoute(pathname: string | null | undefined): boolean {

@@ -279,6 +279,13 @@ pub fn build_router(state: SharedState) -> Router {
         .merge(protected_routes)
         .with_state(state);
 
+    // Fleet ingress (`/api/v1/fleet/*`) — its own auth tier: loopback-source
+    // + shared fleet token (see `fleet::routes`). Neither device-JWT (hook
+    // scripts have no pairing) nor pre-auth rate limit (events fire on every
+    // tool call and are already token-gated). Merged after `with_state`
+    // because the fleet router is stateless (process-global runtime).
+    router = router.merge(crate::fleet::routes::router());
+
     // Public connector webhook ingress (ADR-0059 F4 / R12) — headless only.
     // Deliberately OUTSIDE the JWT middleware: webhook auth is the platform
     // HMAC/signature + replay guard inside `connectors::axum_app`. It still
