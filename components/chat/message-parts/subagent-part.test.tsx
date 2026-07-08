@@ -37,6 +37,11 @@ jest.mock("@/lib/claude/agents/cancel-subagent", () => ({
   cancelSubagentRun: (...a: unknown[]) => cancelSubagentRun(...a),
 }))
 
+const setActiveSession = jest.fn()
+jest.mock("@/stores/chat/chat-store", () => ({
+  useChatStore: { getState: () => ({ setActiveSession }) },
+}))
+
 const basePart: SubagentPartType = {
   type: "subagent",
   subagentId: "sa-1",
@@ -138,6 +143,18 @@ describe("SubagentPart", () => {
     render(<SubagentPart part={basePart} />)
     const link = screen.getByTestId("subagent-open") as HTMLAnchorElement
     expect(link.getAttribute("href")).toContain("subagent:sa-1")
+  })
+
+  it("imported subagent: drills into the nested transcript session instead of the workspace link", () => {
+    setActiveSession.mockClear()
+    render(
+      <SubagentPart part={{ ...basePart, nestedSessionId: "import:claude-code:s:sub:sa-1" }} />
+    )
+    // The workspace link is replaced by the transcript drill-in.
+    expect(screen.queryByTestId("subagent-open")).toBeNull()
+    const btn = screen.getByTestId("subagent-open-transcript")
+    fireEvent.click(btn)
+    expect(setActiveSession).toHaveBeenCalledWith("import:claude-code:s:sub:sa-1")
   })
 
   it("computes duration from startedAt → completedAt when both present", () => {

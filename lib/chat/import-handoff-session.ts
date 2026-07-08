@@ -19,6 +19,7 @@ import type { UIMessage } from "ai"
 import type { ChatSession } from "@/lib/claude/types"
 import { getDb } from "@/lib/db/schema"
 import { persistMessages, invalidatePersistSnapshot } from "@/lib/db/messages"
+import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { renderTranscript } from "@/lib/chat/branch-session"
 
 export interface HandoffMessage {
@@ -37,12 +38,27 @@ export interface ImportHandoffParams {
     model?: string
     cwd?: string
   }
+  /**
+   * Workspace the imported session belongs to. Defaults to the active
+   * workspace via {@link resolveScopeProjectId} so the row is visible in the
+   * scoped chat sidebar (a raw `put` with no `projectId` is invisible to
+   * `listScopedSessions`).
+   */
+  projectId?: string
   /** Injected clock for deterministic tests. */
   now?: number
 }
 
 function newMessageId(seed: string): string {
   return `m_${seed}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * Mint a fresh session id when the CLI-supplied one collides with a native
+ * (non-handoff) desktop session. Same shape as `lib/db/sessions.ts:newId`.
+ */
+function newSessionId(): string {
+  return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
 function toUiMessages(messages: HandoffMessage[]): UIMessage[] {
@@ -62,30 +78,52 @@ function toUiMessages(messages: HandoffMessage[]): UIMessage[] {
  * Returns the created {@link ChatSession}.
  */
 export async function importHandoffSession(params: ImportHandoffParams): Promise<ChatSession> {
-  const { sessionId, messages, meta } = params
-  if (!sessionId) throw new Error("importHandoffSession: sessionId is required")
+  const { messages, meta } = params
+  if (!params.sessionId) throw new Error("importHandoffSession: sessionId is required")
 
   const now = params.now ?? Date.now()
   const uiMessages = toUiMessages(messages)
   const transcript = renderTranscript(uiMessages)
+  const db = getDb()
+
+  // Collision guard: a prior handoff of the SAME session (tagged
+  // `handoffSource: "cli"`) is overwritten in place — the intended idempotent
+  // re-handoff. But an incoming id that instead belongs to a *native* desktop
+  // session must never be clobbered (title reset, messages replaced), so divert
+  // to a fresh id and leave the original row untouched.
+  const existing = await db.sessions.get(params.sessionId)
+  const isPriorHandoff = existing?.handoffSource === "cli"
+  const collidesWithNative = existing != null && !isPriorHandoff
+  const sessionId = collidesWithNative ? newSessionId() : params.sessionId
+
+  // Workspace scope: preserve a prior handoff's workspace; otherwise stamp the
+  // active one so the row shows up in the scoped chat sidebar. Without this the
+  // `[projectId+updatedAt]` index skips the row and it never lists.
+  const projectId =
+    (isPriorHandoff ? existing?.projectId : undefined) ??
+    (await resolveScopeProjectId(params.projectId))
 
   const session: ChatSession = {
     id: sessionId,
+    projectId,
     title: params.title?.trim() || "Handoff from CLI",
     titleAuto: false,
     kind: "direct",
+    // Lineage marker: distinguishes a re-handoff from a native-session collision
+    // (see the collision guard above) and lets the UI show "handed off from the CLI".
+    handoffSource: "cli",
     model: meta?.model,
     providerOverride: meta?.provider,
     workingDir: meta?.cwd,
-    createdAt: now,
+    // Preserve the original creation time on an idempotent re-handoff.
+    createdAt: isPriorHandoff ? (existing?.createdAt ?? now) : now,
     updatedAt: now,
-    // Tag the lineage so the UI can show "handed off from the CLI", and seed
-    // the truncated context for the first in-app send (no sdkSessionId to fork).
+    // Seed the truncated context for the first in-app send (no sdkSessionId to fork).
     branchKind: "direct",
     ...(transcript ? { branchSeed: { kind: "transcript" as const, content: transcript } } : {}),
   }
 
-  await getDb().sessions.put(session)
+  await db.sessions.put(session)
   invalidatePersistSnapshot(sessionId)
   await persistMessages(sessionId, uiMessages)
 

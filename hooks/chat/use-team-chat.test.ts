@@ -105,15 +105,53 @@ jest.mock("@/lib/db/teams", () => ({
   getTeam: (id: string) => getTeamMock(id),
 }))
 
+const isAtCapacityMock = jest.fn().mockReturnValue(false)
+jest.mock("@/lib/execution/broker", () => ({
+  getExecutionBroker: () => ({ isAtCapacity: (...a: unknown[]) => isAtCapacityMock(...a) }),
+}))
+
+const acquireChatLeaseMock = jest.fn().mockResolvedValue(undefined)
+const releaseChatLeaseMock = jest.fn()
+jest.mock("@/lib/execution/chat-lease", () => ({
+  acquireChatLease: (...a: unknown[]) => acquireChatLeaseMock(...a),
+  releaseChatLease: (...a: unknown[]) => releaseChatLeaseMock(...a),
+}))
+
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isCapacitor: jest.fn(() => false),
+}))
+jest.mock("@/lib/platform/web-companion", () => ({
+  ...jest.requireActual("@/lib/platform/web-companion"),
+  hasWebCompanionTarget: jest.fn(() => false),
+}))
+
 interface ChatStateLike {
   activeSessionId: string | null
   messages: unknown[]
   pendingApprovals: unknown[]
+  /** Sessions with a visible pane — mirrors the real store's open-pane list. */
+  openSessionIds: string[]
+  steerQueue: Array<{ id: string; text: string; blocks?: unknown[] }>
+  /** Per-session status override surfaced through the `sessions` getter. */
+  statusBySession: Record<string, string | undefined>
+  /** Derived slice map: the active session's slice built from the flat fields. */
+  readonly sessions: Record<
+    string,
+    { messages: unknown[]; status?: string; steerQueue: ChatStateLike["steerQueue"] }
+  >
   setActiveSession: jest.Mock
   setMessages: jest.Mock
   replaceMessages: jest.Mock
   setStatus: jest.Mock
   setError: jest.Mock
+  // Session-scoped setters delegate to the flat mocks above so assertions on
+  // setStatus/setError/replaceMessages keep working unchanged.
+  replaceSessionMessages: jest.Mock
+  setSessionStatus: jest.Mock
+  setSessionError: jest.Mock
+  enqueueSteer: jest.Mock
+  clearSteerQueue: jest.Mock
   pushApproval: jest.Mock
   clearApproval: jest.Mock
   referencedPaths: unknown[]
@@ -123,11 +161,47 @@ const chatState: ChatStateLike = {
   activeSessionId: "team-1",
   messages: [],
   pendingApprovals: [],
+  openSessionIds: ["team-1"],
+  steerQueue: [],
+  statusBySession: {},
+  get sessions() {
+    const out: Record<
+      string,
+      { messages: unknown[]; status?: string; steerQueue: ChatStateLike["steerQueue"] }
+    > = {}
+    for (const id of chatState.openSessionIds) {
+      out[id] = {
+        messages: id === chatState.activeSessionId ? chatState.messages : [],
+        status: chatState.statusBySession[id],
+        steerQueue: chatState.steerQueue,
+      }
+    }
+    return out
+  },
   setActiveSession: jest.fn(),
   setMessages: jest.fn(),
   replaceMessages: jest.fn(),
   setStatus: jest.fn(),
   setError: jest.fn(),
+  replaceSessionMessages: jest.fn((id: string, msgs: unknown[]) => {
+    void id
+    chatState.replaceMessages(msgs)
+  }),
+  setSessionStatus: jest.fn((id: string, st: string) => {
+    void id
+    chatState.setStatus(st)
+  }),
+  setSessionError: jest.fn((id: string, msg: string | null) => {
+    void id
+    chatState.setError(msg)
+  }),
+  enqueueSteer: jest.fn((id: string, entry: ChatStateLike["steerQueue"][number]) => {
+    void id
+    chatState.steerQueue.push(entry)
+  }),
+  clearSteerQueue: jest.fn(() => {
+    chatState.steerQueue = []
+  }),
   pushApproval: jest.fn(),
   clearApproval: jest.fn(),
   referencedPaths: [],
@@ -211,6 +285,17 @@ beforeEach(() => {
   chatState.activeSessionId = "team-1"
   chatState.messages = []
   chatState.pendingApprovals = []
+  chatState.openSessionIds = ["team-1"]
+  chatState.steerQueue = []
+  chatState.statusBySession = {}
+  isAtCapacityMock.mockReset().mockReturnValue(false)
+  acquireChatLeaseMock.mockReset().mockResolvedValue(undefined)
+  releaseChatLeaseMock.mockClear()
+  chatState.replaceSessionMessages.mockClear()
+  chatState.setSessionStatus.mockClear()
+  chatState.setSessionError.mockClear()
+  chatState.enqueueSteer.mockClear()
+  chatState.clearSteerQueue.mockClear()
   chatState.setActiveSession.mockClear()
   chatState.setMessages.mockClear()
   chatState.replaceMessages.mockClear()
@@ -740,7 +825,7 @@ describe("useTeamChat — send coverage", () => {
     const { result } = renderHook(() => useTeamChat())
     await flush()
     await act(async () => {
-      await result.current.send("hi", true)
+      await result.current.send("hi", { skipPersistUserTurn: true })
     })
 
     expect(chatState.setStatus).toHaveBeenCalledWith("streaming")
@@ -802,15 +887,40 @@ describe("useTeamChat — send coverage", () => {
       await result.current.send("original message")
     })
 
-    // Now regenerate
+    // Now regenerate — non-destructive: the anchor stays, old replies become
+    // per-member branches, and the cached content is re-sent without
+    // re-persisting the user turn.
+    persistMessagesMock.mockClear()
     chatState.messages = [
       { id: "u1", role: "user", parts: [{ type: "text", text: "hello" }] } as never,
+      {
+        id: "a-alice",
+        role: "assistant",
+        parts: [{ type: "text", text: "old reply" }],
+        metadata: { senderId: "alice" },
+      } as never,
     ]
     await act(async () => {
       await result.current.regenerate()
     })
 
-    expect(truncateAfterMock).toHaveBeenCalledWith("team-1", "u1", { inclusive: true })
+    expect(truncateAfterMock).not.toHaveBeenCalled()
+    // Old reply persisted back with its per-member branch tag.
+    const persisted = persistMessagesMock.mock.calls[0][1] as Array<{
+      id: string
+      metadata?: Record<string, unknown>
+    }>
+    expect(persisted.map((m) => m.id)).toEqual(["u1", "a-alice"])
+    expect(persisted[1].metadata).toMatchObject({
+      branchGroupId: "u1::alice::0",
+      branchIndex: 0,
+    })
+    // The replay never re-persists the user message (no duplicate turn).
+    const userAppends = persistMessagesMock.mock.calls.filter((c) => {
+      const msgs = c[1] as Array<{ role: string }>
+      return msgs.filter((m) => m.role === "user").length > 1
+    })
+    expect(userAppends).toHaveLength(0)
   })
 
   it("regenerate without cached content falls back to parts extraction", async () => {
@@ -841,7 +951,10 @@ describe("useTeamChat — send coverage", () => {
       await result.current.regenerate()
     })
 
-    expect(truncateAfterMock).toHaveBeenCalledWith("team-1", "u99", { inclusive: true })
+    // Non-destructive regen: no truncate; the anchor's text parts were
+    // re-sent (send re-loads the session).
+    expect(truncateAfterMock).not.toHaveBeenCalled()
+    expect(getSessionMock).toHaveBeenCalledWith("team-1")
   })
 
   it("supervisor send: surfaces error when configured supervisor not in members", async () => {
@@ -1035,7 +1148,7 @@ describe("useTeamChat — event handler coverage", () => {
     expect(approveToolMock).toHaveBeenCalledWith("team-1::char::c1::t1", "req-1", "allow")
   })
 
-  it("permission_request auto-denies when session is not active", async () => {
+  it("permission_request auto-denies when the team session has no open pane", async () => {
     let emitTeamEvent: ((evt: unknown) => void) | null = null
     onClaudeMessageMock.mockImplementationOnce(async (cb: (evt: unknown) => void) => {
       emitTeamEvent = cb
@@ -1149,8 +1262,9 @@ describe("useTeamChat — event handler coverage", () => {
       return onClaudeUnsub
     })
 
-    // Active session is different from the event's team session
+    // The event's team session has no open pane (not active, not open).
     chatState.activeSessionId = "other-team"
+    chatState.openSessionIds = ["other-team"]
 
     renderHook(() => useTeamChat())
     await flush()
@@ -1679,7 +1793,7 @@ describe("useTeamChat — error path branches", () => {
       await new Promise<void>((r) => setTimeout(r, 10))
     })
 
-    expect(spy).toHaveBeenCalledWith("non-active deny failed", expect.any(Error))
+    expect(spy).toHaveBeenCalledWith("non-open deny failed", expect.any(Error))
     spy.mockRestore()
   })
 
@@ -2369,5 +2483,268 @@ describe("useTeamChat — content helpers", () => {
     })
 
     expect(stripDispatchesMock).toHaveBeenCalled()
+  })
+})
+
+describe("useTeamChat — direct-chat parity (steer / lease / per-session)", () => {
+  it("send() while the team session is streaming enqueues a steer instead of a second turn", async () => {
+    chatState.statusBySession = { "team-1": "streaming" }
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("follow-up while busy")
+    })
+    expect(chatState.enqueueSteer).toHaveBeenCalledWith(
+      "team-1",
+      expect.objectContaining({ text: "follow-up while busy" })
+    )
+    // No second orchestration loop: nothing persisted, session never loaded.
+    expect(getSessionMock).not.toHaveBeenCalled()
+    expect(persistMessagesMock).not.toHaveBeenCalled()
+  })
+
+  it("send() is blocked at the concurrency cap", async () => {
+    isAtCapacityMock.mockReturnValue(true)
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("over cap")
+    })
+    expect(getSessionMock).not.toHaveBeenCalled()
+    expect(chatState.enqueueSteer).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it("send() acquires one 'team' broker lease per turn", async () => {
+    makeAutoResolveSetup()
+    makeLinearTeam([{ id: "alice", name: "Alice" }])
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(acquireChatLeaseMock).toHaveBeenCalledTimes(1)
+    expect(acquireChatLeaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "team-1",
+        kind: "team",
+        onCancel: expect.any(Function),
+      })
+    )
+  })
+
+  it("a lease-acquire failure degrades to sending without admission", async () => {
+    acquireChatLeaseMock.mockRejectedValueOnce(new Error("broker down"))
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    makeAutoResolveSetup()
+    makeLinearTeam([{ id: "alice", name: "Alice" }])
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    // The turn still ran (member sub-session dispatched).
+    expect(sendPromptMock).toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(
+      "team chat lease acquire failed; sending without admission",
+      expect.any(Error)
+    )
+    warn.mockRestore()
+  })
+
+  it("the lease's onCancel interrupts the live team turn", async () => {
+    let onCancel: (() => void) | undefined
+    acquireChatLeaseMock.mockImplementation(async (params: { onCancel?: () => void }) => {
+      onCancel = params.onCancel
+    })
+    let emitTeamEvent: ((evt: unknown) => void) | null = null
+    onClaudeMessageMock.mockImplementationOnce(async (cb: (evt: unknown) => void) => {
+      emitTeamEvent = cb
+      return onClaudeUnsub
+    })
+    sendPromptMock.mockImplementation(async () => {})
+    makeLinearTeam([{ id: "alice", name: "Alice" }])
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    let sendDone: Promise<void> | undefined
+    await act(async () => {
+      sendDone = result.current.send("long turn")
+      await new Promise<void>((r) => setTimeout(r, 10))
+    })
+    expect(onCancel).toBeInstanceOf(Function)
+    await act(async () => {
+      onCancel?.()
+      await new Promise<void>((r) => setTimeout(r, 10))
+      emitTeamEvent?.({
+        type: "session_ended",
+        sessionId: interruptSessionMock.mock.calls[0]?.[0],
+        error: null,
+      })
+      await sendDone
+    })
+    expect(interruptSessionMock).toHaveBeenCalledWith(
+      expect.stringContaining("team-1::char::alice")
+    )
+  })
+
+  it("a clean settle drains the steer queue as a fresh team turn", async () => {
+    makeAutoResolveSetup()
+    // Not mockResolvedValueOnce: the drained replay runs a second full send.
+    getSessionMock.mockResolvedValue({ id: "team-1", kind: "team", teamId: "t-1", title: "T" })
+    getTeamMock.mockResolvedValue({
+      id: "t-1",
+      orchestration: "round_robin",
+      members: [],
+      supervisorCharacterId: null,
+    })
+    listCharactersByIdsMock.mockResolvedValue([])
+    routeTurnMock.mockReturnValue([])
+    chatState.steerQueue = [{ id: "s1", text: "queued steer" }]
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("first turn")
+      await new Promise<void>((r) => setTimeout(r, 10))
+    })
+
+    expect(chatState.clearSteerQueue).toHaveBeenCalledWith("team-1")
+    // The replay issued a second full send (session re-loaded).
+    expect(getSessionMock.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it("stop(sessionId) only interrupts that team session's turn", async () => {
+    let emitTeamEvent: ((evt: unknown) => void) | null = null
+    onClaudeMessageMock.mockImplementationOnce(async (cb: (evt: unknown) => void) => {
+      emitTeamEvent = cb
+      return onClaudeUnsub
+    })
+    // Keep the sub-session pending so a resolver stays registered.
+    sendPromptMock.mockImplementation(async () => {})
+    makeLinearTeam([{ id: "alice", name: "Alice" }])
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    let sendDone: Promise<void> | undefined
+    await act(async () => {
+      sendDone = result.current.send("hang")
+      await new Promise<void>((r) => setTimeout(r, 10))
+    })
+
+    // A stop targeted at a DIFFERENT team session must not interrupt team-1.
+    await act(async () => {
+      await result.current.stop("team-2")
+    })
+    expect(interruptSessionMock).not.toHaveBeenCalled()
+
+    // A stop targeted at team-1 (even while another session is focused) does.
+    chatState.activeSessionId = "other"
+    await act(async () => {
+      await result.current.stop("team-1")
+      emitTeamEvent?.({
+        type: "session_ended",
+        sessionId: interruptSessionMock.mock.calls[0]?.[0],
+        error: null,
+      })
+      await sendDone
+    })
+    expect(interruptSessionMock).toHaveBeenCalledWith(
+      expect.stringContaining("team-1::char::alice")
+    )
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("team-1", "idle")
+  })
+
+  it("interruptAndSteer arms the drain and interrupts the live sub-session", async () => {
+    let emitTeamEvent: ((evt: unknown) => void) | null = null
+    onClaudeMessageMock.mockImplementationOnce(async (cb: (evt: unknown) => void) => {
+      emitTeamEvent = cb
+      return onClaudeUnsub
+    })
+    sendPromptMock.mockImplementation(async () => {})
+    makeLinearTeam([{ id: "alice", name: "Alice" }])
+    // The drained replay runs a second full send.
+    getSessionMock.mockResolvedValue({ id: "team-1", kind: "team", teamId: "t-1", title: "T" })
+    getTeamMock.mockResolvedValue({
+      id: "t-1",
+      orchestration: "round_robin",
+      members: [],
+      supervisorCharacterId: null,
+    })
+    listCharactersByIdsMock.mockResolvedValue([])
+    routeTurnMock.mockReturnValue([])
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    let sendDone: Promise<void> | undefined
+    await act(async () => {
+      sendDone = result.current.send("long turn")
+      await new Promise<void>((r) => setTimeout(r, 10))
+    })
+
+    chatState.steerQueue = [{ id: "s1", text: "steer now" }]
+    await act(async () => {
+      await result.current.interruptAndSteer("team-1")
+      emitTeamEvent?.({
+        type: "session_ended",
+        sessionId: interruptSessionMock.mock.calls[0]?.[0],
+        error: null,
+      })
+      await sendDone
+      await new Promise<void>((r) => setTimeout(r, 10))
+    })
+
+    expect(interruptSessionMock).toHaveBeenCalled()
+    // Armed interrupt still drains: the queue was cleared and replayed.
+    expect(chatState.clearSteerQueue).toHaveBeenCalledWith("team-1")
+  })
+
+  it("flushSteer replays the queue immediately without a turn boundary", async () => {
+    makeAutoResolveSetup()
+    getSessionMock.mockResolvedValue({ id: "team-1", kind: "team", teamId: "t-1", title: "T" })
+    getTeamMock.mockResolvedValue({
+      id: "t-1",
+      orchestration: "round_robin",
+      members: [],
+      supervisorCharacterId: null,
+    })
+    listCharactersByIdsMock.mockResolvedValue([])
+    routeTurnMock.mockReturnValue([])
+    chatState.steerQueue = [{ id: "s1", text: "flush me" }]
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      result.current.flushSteer("team-1")
+      await new Promise<void>((r) => setTimeout(r, 10))
+    })
+    expect(chatState.clearSteerQueue).toHaveBeenCalledWith("team-1")
+    expect(getSessionMock).toHaveBeenCalled()
+  })
+
+  it("send() with an explicit sessionId targets that session, not the focused one", async () => {
+    makeAutoResolveSetup()
+    chatState.activeSessionId = "other"
+    chatState.openSessionIds = ["other", "team-1"]
+    getSessionMock.mockResolvedValueOnce({ id: "team-1", kind: "team", teamId: "t-1", title: "T" })
+    getTeamMock.mockResolvedValueOnce({
+      id: "t-1",
+      orchestration: "round_robin",
+      members: [],
+      supervisorCharacterId: null,
+    })
+    listCharactersByIdsMock.mockResolvedValueOnce([])
+    routeTurnMock.mockReturnValueOnce([])
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("background send", { sessionId: "team-1" })
+    })
+
+    expect(getSessionMock).toHaveBeenCalledWith("team-1")
+    expect(chatState.replaceSessionMessages).toHaveBeenCalledWith("team-1", expect.any(Array))
+    expect(persistMessagesMock).toHaveBeenCalledWith("team-1", expect.any(Array))
   })
 })

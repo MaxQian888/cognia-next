@@ -21,7 +21,6 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
-import { ChatPane } from "@/components/chat/chat-view"
 import { ChatPaneGroup } from "@/components/chat/chat-pane-group"
 import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { CharacterPicker } from "@/components/chat/character-picker"
@@ -31,10 +30,10 @@ import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace
 import { CanvasShell } from "@/components/canvas"
 import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
 import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
-import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import { WorkspaceTrustGate } from "@/components/chat/workspace-trust-gate"
 import type { ComposerHandle } from "@/components/chat/composer"
-import type { ApprovalDecision, Character, SendContent } from "@/lib/claude/types"
+import type { ApprovalDecision, Character, PendingApproval, SendContent } from "@/lib/claude/types"
+import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { usePlatform } from "@/hooks/use-platform"
 import { useChatStore } from "@/stores/chat"
@@ -75,7 +74,6 @@ export function DesktopChatWorkspace() {
   const teamChat = useTeamChat()
 
   const errorMessage = useChatStore((s) => s.errorMessage)
-  const pendingApproval = useChatStore((s) => s.pendingApprovals[0] ?? null)
   const activeSessionEpoch = useChatStore((s) => s.activeSessionEpoch)
 
   const loadSettings = useSettingsStore((s) => s.load)
@@ -130,12 +128,11 @@ export function DesktopChatWorkspace() {
   // Keep the active chat session in lockstep with the selected guild. The two
   // live in separate stores (guild in useUIStore, session in useChatStore), so
   // when they disagree we reconcile by navigation epoch: whichever the user
-  // touched most recently wins. This is what makes a deliberate team click in
-  // the rail open that team's conversation — resuming the most recent one, or
-  // starting a fresh one when the team has none — instead of bouncing back to a
-  // "pick a team" screen, while a session resumed from elsewhere still pulls
-  // the guild over to match it.
-  const creatingTeamRef = useRef<string | null>(null)
+  // touched most recently wins. A deliberate team click in the rail resumes
+  // that team's most recent conversation; a team with no conversations lands
+  // on the welcome empty state (the CTA / "+" create one explicitly — the
+  // reconcile never silently inserts a session row). A session resumed from
+  // elsewhere still pulls the guild over to match it.
   useEffect(() => {
     if (!mounted) return
     const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
@@ -159,27 +156,6 @@ export function DesktopChatWorkspace() {
         log.info("auto guild-switch from active session", { target: action.guild })
         setSelectedGuild(action.guild)
         break
-      case "create-team": {
-        const { teamId } = action
-        // Guard the async gap: the live session list and active id only update
-        // after create() resolves, so without this the effect could fire a
-        // second create before the first one lands.
-        if (creatingTeamRef.current === teamId) break
-        creatingTeamRef.current = teamId
-        log.info("new-team-conversation", { teamId, reason: "guild-switch" })
-        void create({ title: "New conversation", kind: "team", teamId })
-          .then((s) => select(s.id))
-          .catch((err) =>
-            log.warn("new-team-conversation failed", {
-              teamId,
-              error: err instanceof Error ? err.message : String(err),
-            })
-          )
-          .finally(() => {
-            if (creatingTeamRef.current === teamId) creatingTeamRef.current = null
-          })
-        break
-      }
     }
   }, [
     mounted,
@@ -189,7 +165,6 @@ export function DesktopChatWorkspace() {
     sessions,
     activeSessionId,
     select,
-    create,
     setSelectedGuild,
   ])
 
@@ -265,41 +240,69 @@ export function DesktopChatWorkspace() {
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const isCanvasGuild = selectedGuild.kind === "canvas"
 
-  const send = isTeamSession ? teamChat.send : directChat.send
-  const stop = isTeamSession ? teamChat.stop : directChat.stop
-
-  // Workspace Trust: bump a nonce on each send so the trust gate can lazily
-  // prompt (once per session) when the active workspace is restricted. Trust
-  // applies to direct chat — team sessions resolve cwd per-member elsewhere.
-  const [trustPromptNonce, setTrustPromptNonce] = useState(0)
-  const sendWithTrustPrompt = useCallback(
-    (content: SendContent) => {
-      if (!isTeamSession) setTrustPromptNonce((n) => n + 1)
-      return send(content)
+  // Kind lookup for the per-pane dispatchers below: a team session routes to
+  // useTeamChat, everything else to useClaudeChat. Both hooks are session-
+  // parameterized, so team and direct panes share one ChatPaneGroup.
+  const isTeamSessionId = useCallback(
+    (sid: string) => {
+      const s = sessions.find((x) => x.id === sid)
+      return s?.kind === "team" && Boolean(s.teamId)
     },
-    [send, isTeamSession]
+    [sessions]
   )
 
-  // Per-session handlers for the concurrent direct-chat panes. Each binds to an
+  // Workspace Trust: bump a nonce on each send so the trust gate can lazily
+  // prompt (once per session) when the active workspace is restricted. The
+  // gate applies to team sessions too — a member's cwd resolves through the
+  // same session.workingDir → workspace root chain as direct chat.
+  const [trustPromptNonce, setTrustPromptNonce] = useState(0)
+
+  // Per-session handlers for the concurrent chat panes. Each binds to an
   // explicit session id so a background pane sends / stops / regenerates
   // against itself. Trust-prompting wraps the send for the targeted pane.
   const paneSend = useCallback(
     (content: SendContent, sid: string) => {
       setTrustPromptNonce((n) => n + 1)
-      return directChat.send(content, undefined, { sessionId: sid })
+      return isTeamSessionId(sid)
+        ? teamChat.send(content, { sessionId: sid })
+        : directChat.send(content, undefined, { sessionId: sid })
     },
-    [directChat]
+    [directChat, teamChat, isTeamSessionId]
   )
-  const paneStop = useCallback((sid: string) => directChat.stop(sid), [directChat])
-  const paneSteer = useCallback((sid: string) => directChat.interruptAndSteer(sid), [directChat])
-  const paneFlush = useCallback((sid: string) => directChat.flushSteer(sid), [directChat])
-  const paneRegenerate = useCallback((sid: string) => directChat.regenerate(sid), [directChat])
+  const paneStop = useCallback(
+    (sid: string) => (isTeamSessionId(sid) ? teamChat.stop(sid) : directChat.stop(sid)),
+    [directChat, teamChat, isTeamSessionId]
+  )
+  const paneSteer = useCallback(
+    (sid: string) =>
+      isTeamSessionId(sid) ? teamChat.interruptAndSteer(sid) : directChat.interruptAndSteer(sid),
+    [directChat, teamChat, isTeamSessionId]
+  )
+  const paneFlush = useCallback(
+    (sid: string) => (isTeamSessionId(sid) ? teamChat.flushSteer(sid) : directChat.flushSteer(sid)),
+    [directChat, teamChat, isTeamSessionId]
+  )
+  const paneRegenerate = useCallback(
+    (sid: string) => (isTeamSessionId(sid) ? teamChat.regenerate(sid) : directChat.regenerate(sid)),
+    [directChat, teamChat, isTeamSessionId]
+  )
   const paneEditResend = useCallback(
     (messageId: string, content: SendContent, sid: string) =>
-      directChat.editAndResend(messageId, content, sid),
-    [directChat]
+      isTeamSessionId(sid)
+        ? teamChat.editAndResend(messageId, content, sid)
+        : directChat.editAndResend(messageId, content, sid),
+    [directChat, teamChat, isTeamSessionId]
   )
-  const paneClose = useCallback((sid: string) => void directChat.close(sid), [directChat])
+  const paneClose = useCallback(
+    (sid: string) => {
+      // Team sub-sessions are torn down per turn by useTeamChat; closing the
+      // pane only drops the store slice. Direct panes also close the sidecar
+      // session.
+      if (isTeamSessionId(sid)) useChatStore.getState().closeSession(sid)
+      else void directChat.close(sid)
+    },
+    [directChat, isTeamSessionId]
+  )
 
   // After a plan is approved in the plan-approval dock, switch the session's
   // permission mode and resume the turn. The store mode is set FIRST (so the
@@ -309,13 +312,15 @@ export function DesktopChatWorkspace() {
   // turn in `plan` mode. `skipUserAppend` injects the turn with no user bubble.
   const resumeAfterPlanApproval = useCallback(
     async (prompt: string, mode: PlanResumeMode, sid: string) => {
+      // Plan mode is a direct-chat surface (principled exclusion for teams).
+      if (isTeamSessionId(sid)) return
       if (useChatStore.getState().activeSessionId === sid) {
         useChatStore.getState().setPermissionMode(mode)
       }
       await updateSession(sid, { permissionMode: mode })
       await directChat.send(prompt, undefined, { sessionId: sid, skipUserAppend: true })
     },
-    [directChat]
+    [directChat, isTeamSessionId]
   )
 
   const handleChannelNewDirect = useCallback(() => {
@@ -407,10 +412,20 @@ export function DesktopChatWorkspace() {
 
   const handleUseSample = useCallback(
     (text: string) => {
-      void send(text)
+      const active = useChatStore.getState().activeSessionId
+      if (active && isTeamSessionId(active)) void teamChat.send(text)
+      else void directChat.send(text)
     },
-    [send]
+    [directChat, teamChat, isTeamSessionId]
   )
+
+  // The welcome CTA / tab-strip "+" respect the selected guild: a team guild
+  // starts a new conversation with that team, everything else opens the
+  // character picker for a direct chat.
+  const handleCreate = useCallback(() => {
+    if (selectedGuild.kind === "team") void handleNewTeamConversation(selectedGuild.teamId)
+    else handleNewDirect()
+  }, [selectedGuild, handleNewTeamConversation, handleNewDirect])
 
   const handleMemberMention = useCallback((c: Character) => {
     composerRef.current?.insertMention(c.name)
@@ -451,14 +466,14 @@ export function DesktopChatWorkspace() {
     [create, select, setSelectedGuild]
   )
 
-  const handleToolApprovalRespond = useCallback(
-    (decision: ApprovalDecision) => {
-      if (!pendingApproval) return Promise.resolve()
-      return pendingApproval.sessionId.includes("::char::")
-        ? teamChat.respondToApproval(pendingApproval, decision)
-        : directChat.respondToApproval(pendingApproval, decision)
-    },
-    [pendingApproval, teamChat, directChat]
+  // Inline pane gates carry approvals for both kinds; team approvals arrive
+  // tagged with the member sub-session id, so route them to useTeamChat.
+  const handleApprovalRespond = useCallback(
+    (approval: PendingApproval, decision: ApprovalDecision) =>
+      decodeSubSession(approval.sessionId) !== null
+        ? teamChat.respondToApproval(approval, decision)
+        : directChat.respondToApproval(approval, decision),
+    [teamChat, directChat]
   )
 
   return (
@@ -502,30 +517,15 @@ export function DesktopChatWorkspace() {
             >
               {!mounted ? null : platform !== "tauri" ? (
                 <DesktopOnlyBanner />
-              ) : isTeamSession ? (
-                // Team sessions stay single-pane (per-member sub-sessions are
-                // orchestrated by useTeamChat); no multi-pane tabs.
-                <ChatPane
-                  activeSession={activeSession}
-                  onSend={sendWithTrustPrompt}
-                  onStop={stop}
-                  onRegenerate={teamChat.regenerate}
-                  onEditResend={teamChat.editAndResend}
-                  onCreate={handleNewDirect}
-                  onUseSample={handleUseSample}
-                  onOpenSettings={openSettings}
-                  recentSessions={recentSessions}
-                  onResumeSession={handleSwitchToSession}
-                  composerRef={composerRef}
-                />
               ) : (
                 <>
                   <WorkspaceTrustGate
                     sessionId={activeSession?.id ?? null}
                     promptNonce={trustPromptNonce}
                   />
-                  {/* Concurrent direct-chat workspace: tabs + optional split, each
-                    pane bound to its own session slice + inline approval gate. */}
+                  {/* Concurrent chat workspace (direct AND team sessions):
+                    tabs + optional split, each pane bound to its own session
+                    slice + inline approval gate, dispatched by session kind. */}
                   <ChatPaneGroup
                     sessions={sessions}
                     send={paneSend}
@@ -534,9 +534,9 @@ export function DesktopChatWorkspace() {
                     steerFlush={paneFlush}
                     regenerate={paneRegenerate}
                     editResend={paneEditResend}
-                    respondToApproval={directChat.respondToApproval}
+                    respondToApproval={handleApprovalRespond}
                     closePane={paneClose}
-                    onCreate={handleNewDirect}
+                    onCreate={handleCreate}
                     onUseSample={handleUseSample}
                     onOpenSettings={openSettings}
                     recentSessions={recentSessions}
@@ -570,12 +570,6 @@ export function DesktopChatWorkspace() {
         onOpenChange={handleOnboardingOpenChange}
         onPickCharacter={handleOnboardingPickCharacter}
       />
-
-      {/* Team sessions surface approvals through this single dialog; direct
-          sessions render per-pane inline gates inside ChatPaneGroup. */}
-      {isTeamSession && (
-        <ToolApprovalDialog approval={pendingApproval} onRespond={handleToolApprovalRespond} />
-      )}
     </>
   )
 }

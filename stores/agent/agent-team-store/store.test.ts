@@ -157,6 +157,7 @@ describe("partializeAgentTeamState", () => {
       teams: { team_a: persistedTeam("team_a", "Alpha") },
       teammates: { mate_a: { id: "mate_a" } },
       tasks: { task_a: { id: "task_a" } },
+      editorSession: initialState.editorSession,
     })
   })
 

@@ -38,11 +38,13 @@ import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
 import { notifyDroppedCapabilityOnce } from "@/lib/claude/dropped-capability-toast"
 import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
-import { buildSteerPayload, steerBlocksOf, steerTextOf } from "@/lib/claude/steer"
+import { steerBlocksOf, steerTextOf } from "@/lib/claude/steer"
+import { isSessionOpen, maybeDrainSteer, sessionStatusOf, steerArmed } from "./steer-runtime"
+import { tagBranchSiblings } from "@/lib/chat/branch-regen"
+import { mirrorTruncateToDesktop } from "@/lib/chat/mirror-truncate"
 import {
   approveTool,
   closeSession,
-  deleteMessage,
   interruptSession,
   onClaudeMessage,
   sendPrompt,
@@ -80,7 +82,6 @@ import {
   truncateAfter,
   updateMessageMetadata,
 } from "@/lib/db/messages"
-import { getDb } from "@/lib/db/schema"
 import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
 import {
   getSession,
@@ -88,6 +89,7 @@ import {
   touchSession,
   updateSession,
   clearBranchSeed,
+  freezeImportedSession,
 } from "@/lib/db/sessions"
 import { recordResultUsage } from "@/lib/db/session-usage"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
@@ -136,7 +138,8 @@ import type {
   SendContent,
   SendOptions,
 } from "@/lib/claude/types"
-import { useChatStore, type ChatStatus } from "@/stores/chat"
+import { isSubSessionId } from "@/lib/claude/team-session-id"
+import { useChatStore } from "@/stores/chat"
 import { getExecutionBroker } from "@/lib/execution/broker"
 import { acquireChatLease } from "@/lib/execution/chat-lease"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
@@ -767,6 +770,31 @@ export function useClaudeChat() {
         if (st === "streaming" || st === "awaiting_approval") {
           const text = steerTextOf(content)
           const blocks = steerBlocksOf(content)
+          // Live steer: an external runtime whose adapter implements
+          // turn/steer (Codex app-server) takes the guidance mid-turn — no
+          // restart, no waiting for settle. Anything else (unsupported
+          // protocol, no active turn, transport hiccup) falls back to the
+          // queue-and-replay path below.
+          if (text && st === "streaming") {
+            const rt = useAgentRuntimeStore.getState()
+            if (rt.runtime === "external" && rt.externalAgentId) {
+              try {
+                const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+                const mgr = getExternalAgentManager()
+                if (mgr.supportsSteering(rt.externalAgentId)) {
+                  await mgr.steerSession(rt.externalAgentId, undefined, text)
+                  // Steered input never replays through send — append it to the
+                  // transcript now so the guidance is visible in the history.
+                  const store = useChatStore.getState()
+                  const prior = store.sessions[sessionId]?.messages ?? []
+                  store.replaceSessionMessages(sessionId, [...prior, makeUserMessage(content)])
+                  return
+                }
+              } catch (err) {
+                console.warn("live steer failed; queueing instead", err)
+              }
+            }
+          }
           if (text || blocks.length > 0) {
             useChatStore.getState().enqueueSteer(sessionId, {
               id: crypto.randomUUID(),
@@ -1202,6 +1230,16 @@ export function useClaudeChat() {
           void clearBranchSeed(sessionId).catch((err) =>
             console.error("clearBranchSeed failed", err)
           )
+          // Freeze-on-continue (ADR-0062): the user is now continuing an
+          // imported session, so Cognia takes ownership — the fs-watch
+          // re-import guard must stop mirroring source-side edits. This is the
+          // exact first-continuation signal (imported sessions always carry a
+          // `branchSeed`, consumed once here).
+          if (sessionId.startsWith("import:")) {
+            void freezeImportedSession(sessionId).catch((err) =>
+              console.error("freezeImportedSession failed", err)
+            )
+          }
         }
         // Cache the post-routing send so a transient `session_ended.error`
         // can re-issue the turn against the next entry in the alias's
@@ -1323,7 +1361,7 @@ export function useClaudeChat() {
   const flushSteer = useCallback((targetSessionId?: string) => {
     const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
     if (!sessionId) return
-    maybeDrainSteer(sessionId, sendRef)
+    drainSteerVia(sessionId, sendRef)
   }, [])
 
   const respondToApproval = useCallback(
@@ -1454,31 +1492,19 @@ export function useClaudeChat() {
 
       const anchor = messages[lastUserIdx]
       // Existing assistant siblings — every assistant message after the anchor
-      // belongs to the same branch group. We retain them with branchGroupId
-      // metadata so the user can switch back via the BranchNavigator.
+      // belongs to the same branch group (direct chat = one reply per turn).
+      // We retain them with branchGroupId metadata so the user can switch back
+      // via the BranchNavigator.
       const groupId = anchor.id
-      const existingSiblings = messages.slice(lastUserIdx + 1).filter((m) => m.role === "assistant")
-      const taggedSiblings = existingSiblings.map((m, i) => {
-        const meta = (m as { metadata?: Record<string, unknown> }).metadata ?? {}
-        // Preserve any prior branchGroupId — only stamp if missing.
-        const stampedGroup =
-          typeof meta.branchGroupId === "string" ? (meta.branchGroupId as string) : groupId
-        const stampedIndex = typeof meta.branchIndex === "number" ? (meta.branchIndex as number) : i
-        return {
-          ...m,
-          metadata: { ...meta, branchGroupId: stampedGroup, branchIndex: stampedIndex },
-        } as typeof m
-      })
+      const { merged, nextIndexByGroup } = tagBranchSiblings(messages, lastUserIdx, () => groupId)
 
       // Persist the tagged siblings (and untouched prefix) before the new send.
-      const prefix = messages.slice(0, lastUserIdx + 1)
-      const merged = [...prefix, ...taggedSiblings]
       store.getState().replaceSessionMessages(sessionId, merged)
       await persistMessages(sessionId, merged)
 
       // Stash the next-branch tag in a ref so handleEvent can stamp the
       // freshly-arrived assistant message with branchGroupId + the next index.
-      const nextIndex = existingSiblings.length
+      const nextIndex = nextIndexByGroup.get(groupId) ?? 0
       pendingBranchTagRef.current.set(sessionId, { groupId, index: nextIndex })
 
       // Prefer the original SendContent if we have it (preserves attachments);
@@ -1521,28 +1547,6 @@ export function useClaudeChat() {
  * truncate (and subsequent send) is the load-bearing path; a desktop write
  * failure surfaces later through sync rather than blocking the user.
  */
-async function mirrorTruncateToDesktop(sessionId: string, anchorMessageId: string): Promise<void> {
-  try {
-    const db = getDb()
-    const anchor = await db.messages.get(anchorMessageId)
-    if (!anchor || anchor.sessionId !== sessionId) return
-    const ids = await db.messages
-      .where("[sessionId+createdAt]")
-      .between([sessionId, anchor.createdAt], [sessionId, Number.MAX_SAFE_INTEGER])
-      .primaryKeys()
-    for (const rawId of ids) {
-      const id = rawId as string
-      try {
-        await deleteMessage(sessionId, id)
-      } catch (err) {
-        console.warn("mirrorTruncateToDesktop: deleteMessage failed", { id, err })
-      }
-    }
-  } catch (err) {
-    console.warn("mirrorTruncateToDesktop failed", err)
-  }
-}
-
 async function buildSendOptions(
   session: ChatSession | null | undefined,
   userMessage?: string
@@ -1698,7 +1702,7 @@ async function buildSendOptions(
  * session id and the character id (see hooks/use-team-chat.ts). The direct
  * chat handler should ignore those — useTeamChat handles them. */
 function isTeamSubSession(sessionId: string): boolean {
-  return sessionId.includes("::char::")
+  return isSubSessionId(sessionId)
 }
 
 /**
@@ -1710,12 +1714,6 @@ function isTeamSubSession(sessionId: string): boolean {
 interface StreamCoalescing {
   messagesMirrorRef: React.MutableRefObject<Map<string, UIMessage[]>>
   registry: SessionCoalescingRegistry
-}
-
-/** A session is "open" when it has a visible pane (tab / split). Its events
- * stream into the store slice; closed (background) sessions only touch Dexie. */
-function isSessionOpen(sessionId: string): boolean {
-  return useChatStore.getState().openSessionIds.includes(sessionId)
 }
 
 /**
@@ -1730,31 +1728,9 @@ function sliceMessages(sessionId: string): UIMessage[] {
   return useChatStore.getState().sessions[sessionId]?.messages ?? []
 }
 
-/** Sessions whose imminent settle must drain the steer queue even if the turn
- * ended via interrupt/error (set by `interruptAndSteer`). A natural clean end
- * always drains regardless of this set. */
-const steerArmed = new Set<string>()
-
-/** Live status for a session (its slice, falling back to the active mirror). */
-function sessionStatusOf(sessionId: string): ChatStatus {
-  const s = useChatStore.getState()
-  return s.sessions[sessionId]?.status ?? (sessionId === s.activeSessionId ? s.status : "idle")
-}
-
-/**
- * Replay a session's queued steer messages as one fresh, framed turn. No-op
- * when the queue is empty. Called only once the turn has settled (idle/error),
- * so `send`'s busy-gate sees a non-streaming session and won't re-enqueue it.
- *
- * The payload is built by `buildSteerPayload` — texts joined into one framed
- * steer, attachments of all entries aggregated ahead of it so they survive.
- */
-function maybeDrainSteer(sessionId: string, sendRef: React.MutableRefObject<SendFn | null>) {
-  steerArmed.delete(sessionId)
-  const queue = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []
-  if (queue.length === 0) return
-  useChatStore.getState().clearSteerQueue(sessionId)
-  void sendRef.current?.(buildSteerPayload(queue), undefined, { sessionId })
+/** Drain a session's queued steer through this hook's send (direct replay). */
+function drainSteerVia(sessionId: string, sendRef: React.MutableRefObject<SendFn | null>) {
+  maybeDrainSteer(sessionId, (payload) => void sendRef.current?.(payload, undefined, { sessionId }))
 }
 
 async function handleEvent(
@@ -1875,7 +1851,7 @@ async function handleEvent(
         // always drains; an errored end drains only when an explicit
         // "interrupt & steer" armed it (a natural error keeps the queue).
         if (!evt.error || steerArmed.has(evt.sessionId)) {
-          maybeDrainSteer(evt.sessionId, sendRef)
+          drainSteerVia(evt.sessionId, sendRef)
         }
       }
       return

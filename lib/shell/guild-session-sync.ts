@@ -21,8 +21,9 @@ export function guildKeyOf(g: SelectedGuild): string {
 export function sessionMatchesGuild(s: ChatSession, g: SelectedGuild): boolean {
   if (g.kind === "team") return s.kind === "team" && s.teamId === g.teamId
   // The DM bucket holds everything that isn't a team session. Workflow-editor
-  // sessions are scoped to the editor's chat tab and never surface here.
-  return s.kind !== "team" && s.kind !== "workflow-editor"
+  // sessions are scoped to the editor's chat tab, and `subagent` sessions
+  // (ADR-0062) are hidden imported-subagent transcripts — neither surfaces here.
+  return s.kind !== "team" && s.kind !== "workflow-editor" && s.kind !== "subagent"
 }
 
 /** The most recently updated session that belongs to the guild, or null. */
@@ -42,7 +43,6 @@ export type GuildReconcileAction =
   | { type: "none" }
   | { type: "select"; sessionId: string }
   | { type: "clear" }
-  | { type: "create-team"; teamId: string }
   | { type: "sync-guild"; guild: SelectedGuild }
 
 /**
@@ -55,8 +55,8 @@ export type GuildReconcileAction =
  * while a resumed session still pulls the guild over to match it.
  *
  * - guild wins, has a conversation  → resume the most recent matching one
- * - guild wins, team has none yet    → start a fresh team conversation
- * - guild wins, DM has none          → clear the active session (show welcome)
+ * - guild wins, has none             → clear the active session (show welcome;
+ *   the CTA / "+" create a conversation explicitly — never silently here)
  * - session wins, has active session → move the guild to that session's bucket
  * - session wins, active was cleared → resume a sibling in the current guild
  */
@@ -77,9 +77,8 @@ export function planGuildReconcile(args: {
   if (guildWins) {
     const resume = latestMatchingSession(sessions, guild)
     if (resume) return { type: "select", sessionId: resume.id }
-    if (guild.kind === "team") return { type: "create-team", teamId: guild.teamId }
-    // DM with nothing to show: clear so the welcome renders (no-op if already
-    // cleared, which avoids a redundant store write).
+    // Nothing to show (DM or team): clear so the welcome renders (no-op if
+    // already cleared, which avoids a redundant store write).
     return activeSession ? { type: "clear" } : { type: "none" }
   }
 

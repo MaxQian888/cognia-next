@@ -1238,8 +1238,13 @@ export type SDKMessage =
  *     (Phase C, ADR-0026 follow-up). Loads the cognia-workflow-ai plugin
  *     tools + the four workflow subagents + a system prompt block
  *     summarising the currently-open workflow.
+ *   • `"subagent"` — a hidden, read-only session holding the full inner
+ *     transcript of an imported Claude Code Task subagent (ADR-0062 fidelity
+ *     upgrade). Filtered out of the ChannelList / search / companion-sync;
+ *     reachable only by drilling in from the parent turn's `SubagentPart`.
+ *     Carries no `branchSeed`, so it has no continuation path.
  */
-export type SessionKind = "direct" | "team" | "workflow-editor"
+export type SessionKind = "direct" | "team" | "workflow-editor" | "subagent"
 
 export interface ChatSession {
   id: string
@@ -1392,6 +1397,26 @@ export interface ChatSession {
    * Undefined once consumed, and on tail branches that use SDK fork instead.
    */
   branchSeed?: { kind: "transcript" | "summary"; content: string }
+  /**
+   * Imported-session ownership flag (ADR-0062 fidelity upgrade). An
+   * `import:*` session is a live mirror of an external agent's on-disk history
+   * until the user continues it in Cognia; the first continuation sets this
+   * `true` (see the freeze-on-continue path in `hooks/chat/use-claude-chat.ts`).
+   * Once frozen, the fs-watch re-import guard (`lib/data/import-merge.ts`)
+   * skips the row entirely, so later source-side edits can't clobber the
+   * continued conversation (they surface as a "diverged" badge instead).
+   * Non-indexed optional column — no Dexie schema bump.
+   */
+  importFrozen?: boolean
+  /**
+   * Set to `"cli"` on a session materialised from a standalone-CLI handoff
+   * (`lib/chat/import-handoff-session.ts`). Lets a repeat handoff of the *same*
+   * CLI session overwrite its row in place (idempotent re-handoff), while an
+   * incoming id that collides with a *native* desktop session is diverted to a
+   * fresh id instead of clobbering it. Non-indexed optional column — no Dexie
+   * schema bump.
+   */
+  handoffSource?: "cli"
   /** Per-session override for `--bare` (skip on-disk auto-discovery). */
   bareMode?: boolean
   /** Per-session override for `--debug` (verbose logging). */

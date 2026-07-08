@@ -132,6 +132,45 @@ describe("useAgentTeamStore deleteTeam", () => {
   })
 })
 
+describe("useAgentTeamStore editorSession", () => {
+  beforeEach(() => reset())
+
+  it("creates a session on first patch with sensible defaults", () => {
+    useAgentTeamStore.getState().setEditorSession("team-1", { rootKey: "/proj" })
+    expect(useAgentTeamStore.getState().editorSession["team-1"]).toEqual({
+      rootKey: "/proj",
+      openPaths: [],
+      activePath: null,
+    })
+  })
+
+  it("merges patches without dropping prior fields", () => {
+    const s = useAgentTeamStore.getState()
+    s.setEditorSession("team-1", { rootKey: "/proj", openPaths: ["a.ts"] })
+    s.setEditorSession("team-1", { activePath: "a.ts" })
+    expect(useAgentTeamStore.getState().editorSession["team-1"]).toEqual({
+      rootKey: "/proj",
+      openPaths: ["a.ts"],
+      activePath: "a.ts",
+    })
+  })
+
+  it("cleanupTeam drops the deleted team's editor session", () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "E", task: "t" })
+    useAgentTeamStore.getState().setEditorSession(team.id, { rootKey: "/proj" })
+    useAgentTeamStore.getState().deleteTeam(team.id)
+    expect(useAgentTeamStore.getState().editorSession[team.id]).toBeUndefined()
+  })
+
+  it("purgeProject drops editor sessions for the project's teams", () => {
+    mockActiveProjectId = "proj-1"
+    const team = useAgentTeamStore.getState().createTeam({ name: "P", task: "t" })
+    useAgentTeamStore.getState().setEditorSession(team.id, { rootKey: "/proj" })
+    useAgentTeamStore.getState().purgeProject("proj-1")
+    expect(useAgentTeamStore.getState().editorSession[team.id]).toBeUndefined()
+  })
+})
+
 describe("useAgentTeamStore updateTeam", () => {
   beforeEach(() => {
     reset()

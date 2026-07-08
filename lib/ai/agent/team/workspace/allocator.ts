@@ -17,6 +17,7 @@ import {
   gitWorktreeAdd,
   gitWorktreeCommit,
   gitWorktreeList,
+  gitWorktreePrune,
   gitWorktreeRemove,
 } from "@/lib/git/commands"
 import type { GitWorktree } from "@/types/git"
@@ -50,6 +51,7 @@ export interface WorktreeGitOps {
   remove(repoPath: string, path: string, force: boolean, deleteBranch?: string): Promise<void>
   list(repoPath: string): Promise<GitWorktree[]>
   commit(worktreePath: string, message: string): Promise<string | null>
+  prune(repoPath: string): Promise<void>
 }
 
 const REAL_GIT: WorktreeGitOps = {
@@ -57,6 +59,7 @@ const REAL_GIT: WorktreeGitOps = {
   remove: gitWorktreeRemove,
   list: gitWorktreeList,
   commit: gitWorktreeCommit,
+  prune: gitWorktreePrune,
 }
 
 export interface AllocatorOptions {
@@ -205,6 +208,11 @@ export class AgentWorkspaceAllocator {
   /**
    * Remove every worktree allocated this run (crash/run-end cleanup). Best
    * effort — a single bad worktree never aborts the pass.
+   *
+   * A final `worktree prune` reclaims administrative entries left behind when a
+   * worktree directory vanished out-of-band (a crashed dispatch, or a `remove`
+   * that failed above), so a later branch delete isn't blocked by a stale
+   * "checked out in a worktree" ref.
    */
   async gc(opts?: { deleteBranches?: boolean }): Promise<void> {
     const deleteBranch = opts?.deleteBranches ?? true
@@ -214,6 +222,11 @@ export class AgentWorkspaceAllocator {
       } catch {
         // best-effort GC
       }
+    }
+    try {
+      await this.git.prune(this.mainRepo)
+    } catch {
+      // best-effort GC
     }
   }
 }

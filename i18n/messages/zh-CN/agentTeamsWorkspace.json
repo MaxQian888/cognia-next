@@ -656,7 +656,8 @@
     "overview": "概览",
     "settings": "设置",
     "tasks": "任务",
-    "worktrees": "工作树"
+    "worktrees": "工作树",
+    "editor": "编辑器"
   },
   "tasks": {
     "addTask": "新建任务",
@@ -773,5 +774,38 @@
     },
     "refresh": "刷新",
     "title": "Agent 分支"
+  },
+  "editor": {
+    "unavailableTitle": "编辑器不可用",
+    "unavailableDesc": "项目编辑器需要桌面应用或已配对的设备才能访问项目文件。",
+    "noWorkingDir": "该团队未设置工作目录。",
+    "filesTab": "文件",
+    "searchTab": "搜索",
+    "emptyEditor": "从文件树打开一个文件开始编辑。",
+    "treeAria": "项目文件",
+    "treeEmpty": "暂无文件",
+    "newFile": "新建文件",
+    "newFolder": "新建文件夹",
+    "refresh": "刷新",
+    "rename": "重命名",
+    "delete": "删除",
+    "deleteConfirm": "删除“{name}”？此操作无法撤销。",
+    "cancel": "取消",
+    "closeTab": "关闭 {name}",
+    "saveAll": "全部保存（{count}）",
+    "externallyChanged": "磁盘已变更",
+    "rootLabel": "项目根目录",
+    "rootMain": "main（主仓库）",
+    "search": "搜索",
+    "searchPlaceholder": "在项目中搜索…",
+    "searchEmpty": "无匹配",
+    "saveFailed": "保存失败：{error}",
+    "action": {
+      "save": "保存",
+      "format": "格式化文档",
+      "copyPath": "复制路径",
+      "copyRelativePath": "复制相对路径",
+      "searchProject": "在项目中搜索"
+    }
   }
 }

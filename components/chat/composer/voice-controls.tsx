@@ -11,6 +11,7 @@
 import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AudioLinesIcon, LanguagesIcon, Settings2Icon } from "lucide-react"
+import { toast } from "sonner"
 import {
   MicSelector,
   MicSelectorContent,
@@ -19,6 +20,7 @@ import {
   MicSelectorItem,
   MicSelectorLabel,
   MicSelectorList,
+  MicSelectorRequestAccess,
   MicSelectorTrigger,
   MicSelectorValue,
 } from "@/components/ai-elements/mic-selector"
@@ -89,22 +91,64 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
     [save]
   )
 
+  // Recording state surfaced by SpeechInput — drives the red button style,
+  // the pulsing "listening" pill, and the aria labels.
+  const [listening, setListening] = useState(false)
+
+  const onSpeechError = useCallback(
+    (error: string) => {
+      if (error === "not-allowed" || error === "service-not-allowed") {
+        toast.error(t("errors.permissionDenied"))
+      } else if (error === "no-speech") {
+        toast.info(t("errors.noSpeech"))
+      } else if (error === "audio-capture") {
+        toast.error(t("errors.noMicrophone"))
+      } else {
+        toast.error(t("errors.generic"))
+      }
+    },
+    [t]
+  )
+
+  const speechLabel = listening ? t("stopListening") : t("startListening")
+
   return (
     <div className="flex items-center gap-1">
+      {listening && (
+        <span
+          aria-live="polite"
+          role="status"
+          className="flex items-center gap-1.5 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
+        >
+          <span className="relative flex size-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-60" />
+            <span className="relative inline-flex size-2 rounded-full bg-destructive" />
+          </span>
+          {t("listening")}
+        </span>
+      )}
+
       <Tooltip>
         <TooltipTrigger asChild>
           <SpeechInput
-            aria-label={t("holdToTalk")}
-            className="size-8! rounded-md! bg-transparent! text-muted-foreground! shadow-none! hover:bg-accent! hover:text-foreground! data-[disabled=true]:opacity-50"
+            aria-label={speechLabel}
+            className={cn(
+              "size-8! rounded-md! shadow-none! data-[disabled=true]:opacity-50",
+              listening
+                ? "bg-destructive! text-white! hover:bg-destructive/80! hover:text-white!"
+                : "bg-transparent! text-muted-foreground! hover:bg-accent! hover:text-foreground!"
+            )}
             disabled={disabled}
             lang={lang}
+            onError={onSpeechError}
+            onListeningChange={setListening}
             onTranscriptionChange={onTranscription}
             size="icon-sm"
             type="button"
             variant="ghost"
           />
         </TooltipTrigger>
-        <TooltipContent>{t("holdToTalk")}</TooltipContent>
+        <TooltipContent>{speechLabel}</TooltipContent>
       </Tooltip>
 
       <Popover>
@@ -147,17 +191,32 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
               <MicSelectorContent>
                 <MicSelectorInput />
                 <MicSelectorList>
-                  {(devices) =>
-                    devices.length > 0 ? (
-                      devices.map((device) => (
-                        <MicSelectorItem key={device.deviceId} value={device.deviceId}>
-                          <MicSelectorLabel device={device} />
-                        </MicSelectorItem>
-                      ))
-                    ) : (
-                      <MicSelectorEmpty />
-                    )
-                  }
+                  {(devices, permission) => (
+                    <>
+                      {devices.length > 0 ? (
+                        devices.map((device) => (
+                          <MicSelectorItem key={device.deviceId} value={device.deviceId}>
+                            <MicSelectorLabel device={device} />
+                          </MicSelectorItem>
+                        ))
+                      ) : (
+                        <MicSelectorEmpty>{t("noMicFound")}</MicSelectorEmpty>
+                      )}
+                      {permission.state === "denied" ? (
+                        <p className="px-3 py-2 text-xs text-muted-foreground">
+                          {t("micPermissionDenied")}
+                        </p>
+                      ) : (
+                        permission.state !== "granted" &&
+                        devices.every((device) => !device.label) && (
+                          <MicSelectorRequestAccess>
+                            <AudioLinesIcon className="size-3.5" />
+                            {t("grantMicAccess")}
+                          </MicSelectorRequestAccess>
+                        )
+                      )}
+                    </>
+                  )}
                 </MicSelectorList>
               </MicSelectorContent>
             </MicSelector>

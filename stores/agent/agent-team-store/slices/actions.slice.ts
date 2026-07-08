@@ -335,7 +335,10 @@ export const createAgentTeamActionsSlice = (
       )
       const activeTeamId =
         state.activeTeamId && removedTeamIds.has(state.activeTeamId) ? null : state.activeTeamId
-      return { teams, teammates, tasks, activeTeamId }
+      const editorSession = Object.fromEntries(
+        Object.entries(state.editorSession).filter(([teamId]) => !removedTeamIds.has(teamId))
+      )
+      return { teams, teammates, tasks, activeTeamId, editorSession }
     })
   },
 
@@ -1163,6 +1166,20 @@ export const createAgentTeamActionsSlice = (
   setWorkspaceTab: (tab) => set({ workspaceTab: tab }),
 
   setTasksView: (view) => set({ tasksView: view }),
+  setEditorSession: (teamId, patch) =>
+    set((state) => {
+      const prev = state.editorSession[teamId] ?? {
+        rootKey: "",
+        openPaths: [],
+        activePath: null,
+      }
+      return {
+        editorSession: {
+          ...state.editorSession,
+          [teamId]: { ...prev, ...patch },
+        },
+      }
+    }),
   setWorkspaceFocus: (focus) =>
     set((state) => ({
       workspaceFocus: {
@@ -1336,6 +1353,9 @@ export const createAgentTeamActionsSlice = (
         if (d.sourceTeamId === teamId) delete restDelegations[id]
       }
 
+      // Drop the team's persisted project-Editor session.
+      const { [teamId]: _es, ...restEditorSession } = state.editorSession
+
       return {
         teams: restTeams,
         teammates: restTeammates,
@@ -1344,6 +1364,7 @@ export const createAgentTeamActionsSlice = (
         consensus: restConsensus,
         sharedMemory: restSharedMemory,
         delegations: restDelegations,
+        editorSession: restEditorSession,
         activeTeamId: state.activeTeamId === teamId ? null : state.activeTeamId,
       }
     })

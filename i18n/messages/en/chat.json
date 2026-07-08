@@ -398,10 +398,21 @@
       }
     },
     "voice": {
-      "holdToTalk": "Hold to talk",
+      "errors": {
+        "generic": "Voice input failed. Please try again.",
+        "noMicrophone": "No microphone available. Check your audio devices.",
+        "noSpeech": "No speech detected. Try speaking closer to the microphone.",
+        "permissionDenied": "Microphone access denied. Allow microphone access for this app, then try again."
+      },
+      "grantMicAccess": "Allow microphone access",
       "languageLabel": "Language",
+      "listening": "Listening…",
+      "micPermissionDenied": "Microphone access is blocked — enable it in your system or browser settings.",
       "microphoneLabel": "Microphone",
+      "noMicFound": "No microphone found.",
       "selectMicAria": "Select microphone",
+      "startListening": "Start voice input",
+      "stopListening": "Stop recording",
       "voiceSettings": "Voice settings"
     },
     "webLabel": "Web",
@@ -552,7 +563,10 @@
     "tokensLabel": "{input} in / {output} out",
     "untitledSession": "(untitled)",
     "workingDirLabel": "Working directory",
-    "workingDirPlaceholder": "/path/to/project"
+    "workingDirPlaceholder": "/path/to/project",
+    "compactStarted": "Context compaction started",
+    "compactAria": "Compact",
+    "compactTooltip": "Compact the conversation context on the agent side"
   },
   "history": {
     "loadError": "Couldn't load this conversation.",
@@ -964,6 +978,7 @@
     "logsTailNote": "Showing the last {n} log entries",
     "noLogsYet": "No log entries yet — sub-agent is initializing.",
     "openInWorkspace": "Open in workspace",
+    "openTranscript": "Open full transcript",
     "rejected": {
       "cycle": "Dispatch rejected — would create a cycle.",
       "maxDepth": "Dispatch rejected — max nesting depth reached."

@@ -271,21 +271,25 @@ export function ChatPane({
   // starts. It remounts across that branch swap; `setComposerRef` re-attaches
   // our ref (and the external one) to the new instance, and `onExitComplete`
   // restores focus to it so the first send doesn't drop the keyboard.
-  const composerEl = (
-    <Composer
-      ref={setComposerRef}
-      session={activeSession}
-      onStartNewSession={() => onCreate()}
-      onOpenSettings={(tab) => onOpenSettings(tab)}
-      onSend={handleSend}
-      onStop={() => void onStop()}
-      // Block a new send while this pane awaits approval OR while the
-      // concurrent-stream cap is reached (this pane isn't one of the streamers).
-      disabled={status === "awaiting_approval" || atCapacity}
-      mobileMentionMembers={mobileMentionMembers}
-      workflowMention={workflowMention}
-    />
-  )
+  //
+  // `subagent` sessions (ADR-0062) are read-only imported inner transcripts —
+  // no composer at all (they have no continuation path).
+  const composerEl =
+    activeSession?.kind === "subagent" ? null : (
+      <Composer
+        ref={setComposerRef}
+        session={activeSession}
+        onStartNewSession={() => onCreate()}
+        onOpenSettings={(tab) => onOpenSettings(tab)}
+        onSend={handleSend}
+        onStop={() => void onStop()}
+        // Block a new send while this pane awaits approval OR while the
+        // concurrent-stream cap is reached (this pane isn't one of the streamers).
+        disabled={status === "awaiting_approval" || atCapacity}
+        mobileMentionMembers={mobileMentionMembers}
+        workflowMention={workflowMention}
+      />
+    )
 
   // Transient run-status layer (timer / interrupt / live tools / steer queue),
   // pinned directly above the composer. Self-hides when idle with no queue.

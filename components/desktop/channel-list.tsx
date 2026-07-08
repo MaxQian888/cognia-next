@@ -330,9 +330,11 @@ function ChannelListBody({
   // Filter the session list by selected guild. (Phase D) Sessions with
   // `kind === "workflow-editor"` are scoped to the workflow editor's chat
   // tab and never surface in the main channel list — they appear ONLY
-  // inside the editor itself.
+  // inside the editor itself. `kind === "subagent"` sessions (ADR-0062) are
+  // hidden imported-subagent inner transcripts, reachable only by drilling in
+  // from a parent turn's SubagentPart — never in the list, search, or a bucket.
   const filtered = useMemo(() => {
-    const visible = sessions.filter((s) => s.kind !== "workflow-editor")
+    const visible = sessions.filter((s) => s.kind !== "workflow-editor" && s.kind !== "subagent")
     if (chatGuild.kind === "team") {
       return visible.filter((s) => s.kind === "team" && s.teamId === chatGuild.teamId)
     }

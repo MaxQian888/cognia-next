@@ -9,6 +9,14 @@
  * logs come from assistant/user frames whose `parent_tool_use_id` maps back to
  * a known task (only present when `forwardSubagentText` is enabled).
  *
+ * Nesting: `task_started` carries no parent pointer on the wire, so task→task
+ * ancestry is reconstructed locally — every `tool_use` block streamed inside a
+ * task's forwarded child frames is recorded as owned by that task, and a later
+ * `task_started` whose `tool_use_id` matches an owned block hangs off that
+ * owner as a depth-N child (`parentSubagentId` edge, rendered by the same
+ * `SubagentTree` the dispatch_agent engine feeds). Tasks spawned by the
+ * top-level chat correlate to no owner and stay depth 1.
+ *
  * Disambiguation (verified): the renderer `dispatch_agent` path runs out-of-band
  * and never emits a `task_*` frame nor a `parent_tool_use_id` child, so this
  * bridge can never double-handle it. Pure + best-effort (never throws).
@@ -30,19 +38,41 @@ import type {
 /** tool_use_id (the spawning Task tool_use) → task_id (our node key). */
 const toolUseToTask = new Map<string, string>()
 
-/** Test seam — clears the cross-frame correlation map. */
+/**
+ * tool_use block id → the task whose forwarded child frame CONTAINED it.
+ * This is the nesting correlator: `task_started` carries no parent pointer
+ * (the SDK wire has no task→task ancestry field), but when a subagent itself
+ * spawns a Task, the spawning `tool_use` block streams inside one of ITS
+ * forwarded child frames — so the block's owner IS the nested task's parent.
+ * Blocks owned by the top-level chat never enter this map (top-level frames
+ * have no `parent_tool_use_id`), so a depth-1 task correlates to no parent.
+ */
+const toolUseOwner = new Map<string, string>()
+
+/** Test seam — clears the cross-frame correlation maps. */
 export function __resetSdkSubagentBridge(): void {
   toolUseToTask.clear()
+  toolUseOwner.clear()
 }
 
-function baseNode(taskId: string, sessionId: string, name: string, task: string): SubAgent {
-  // SDK-native subagents always run at depth 1 under the spawning chat session.
+function baseNode(
+  taskId: string,
+  sessionId: string,
+  name: string,
+  task: string,
+  parent?: SubAgent
+): SubAgent {
+  // Depth 1 under the spawning chat session, unless the spawning tool_use was
+  // seen inside another task's forwarded child frames — then this is a nested
+  // task and the node hangs off that parent (depth-N, same tree model the
+  // dispatch_agent engine uses; `SubagentTree` renders both identically).
   return createSubAgentNode({
     id: taskId,
     name,
     task,
-    parentAgentId: sessionId,
-    depth: 1,
+    parentAgentId: parent ? parent.id : sessionId,
+    depth: parent ? (parent.depth ?? 1) + 1 : 1,
+    ...(parent ? { parentSubagentId: parent.id } : {}),
     sessionId,
   })
 }
@@ -66,7 +96,13 @@ function onTaskStarted(m: SDKTaskStartedMessage, sessionId: string): void {
   const store = useSubagentRuntimeStore.getState()
   if (store.subAgents[m.task_id]) return
   if (m.tool_use_id) toolUseToTask.set(m.tool_use_id, m.task_id)
-  store.upsert(baseNode(m.task_id, sessionId, m.subagent_type, m.prompt ?? m.description ?? ""))
+  // Nesting correlation: a spawning tool_use seen inside another task's child
+  // frames means THAT task is this one's parent (see `toolUseOwner`).
+  const parentTaskId = m.tool_use_id ? toolUseOwner.get(m.tool_use_id) : undefined
+  const parent = parentTaskId ? store.subAgents[parentTaskId] : undefined
+  store.upsert(
+    baseNode(m.task_id, sessionId, m.subagent_type, m.prompt ?? m.description ?? "", parent)
+  )
 }
 
 function onTaskProgress(m: SDKTaskProgressMessage): void {
@@ -126,6 +162,9 @@ function onChildFrame(evt: SDKAssistantMessage | SDKUserMessage): void {
     if (b.type === "text" && typeof b.text === "string" && b.text) {
       store.pushStreamText(taskId, b.text)
     } else if (b.type === "tool_use" && b.name) {
+      // Record the block's owner so a nested `task_started` naming this
+      // tool_use id can resolve its parent task (see `toolUseOwner`).
+      if (typeof b.id === "string" && b.id) toolUseOwner.set(b.id, taskId)
       // Log + populate the inline tool list (toolCalls) in one write so the
       // SDK-native Task engine matches the dispatch_agent engine.
       store.applyRunEvent(taskId, {

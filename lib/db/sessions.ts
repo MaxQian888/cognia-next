@@ -182,6 +182,22 @@ export async function clearBranchSeed(id: string): Promise<void> {
 }
 
 /**
+ * Mark an imported (`import:*`) session as owned by Cognia (ADR-0062 fidelity
+ * upgrade). Called once, on the user's first continuation of an imported
+ * session, so the fs-watch re-import guard (`applyImportedMerged`) stops
+ * mirroring source-side edits and can never clobber the continued thread.
+ * Idempotent — re-freezing a frozen row is a no-op write.
+ */
+export async function freezeImportedSession(id: string): Promise<void> {
+  await getDb()
+    .sessions.where("id")
+    .equals(id)
+    .modify((s) => {
+      s.importFrozen = true
+    })
+}
+
+/**
  * Archive a session (conversation-list overhaul). Sets `archivedAt` so the
  * conversation-list model drops it from the active list; it remains visible in
  * the Archived view. `updatedAt` is intentionally left untouched so the row

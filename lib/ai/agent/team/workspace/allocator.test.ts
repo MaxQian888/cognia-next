@@ -8,13 +8,16 @@ import {
 function makeGit(over: Partial<WorktreeGitOps> = {}): WorktreeGitOps & {
   addCalls: Array<{ repo: string; path: string; branch: string; baseRef?: string }>
   removeCalls: Array<{ repo: string; path: string; force: boolean; deleteBranch?: string }>
+  pruneCalls: string[]
 } {
   const addCalls: Array<{ repo: string; path: string; branch: string; baseRef?: string }> = []
   const removeCalls: Array<{ repo: string; path: string; force: boolean; deleteBranch?: string }> =
     []
+  const pruneCalls: string[] = []
   return {
     addCalls,
     removeCalls,
+    pruneCalls,
     add: async (repo, path, branch, baseRef) => {
       addCalls.push({ repo, path, branch, baseRef })
     },
@@ -23,6 +26,9 @@ function makeGit(over: Partial<WorktreeGitOps> = {}): WorktreeGitOps & {
     },
     list: async () => [],
     commit: async () => "sha",
+    prune: async (repo) => {
+      pruneCalls.push(repo)
+    },
     ...over,
   }
 }
@@ -185,7 +191,7 @@ describe("AgentWorkspaceAllocator", () => {
     expect(git.removeCalls[0]?.deleteBranch).toBeUndefined()
   })
 
-  it("gc removes every worktree and tolerates individual failures", async () => {
+  it("gc removes every worktree, then prunes, tolerating individual failures", async () => {
     let n = 0
     let calls = 0
     const git = makeGit({
@@ -200,5 +206,18 @@ describe("AgentWorkspaceAllocator", () => {
 
     await expect(alloc.gc()).resolves.toBeUndefined()
     expect(calls).toBe(2) // both attempted despite the first throwing
+    // A dangling admin entry (from the failed remove) is reclaimed by prune.
+    expect(git.pruneCalls).toEqual(["/repo"])
+  })
+
+  it("gc swallows a failing prune", async () => {
+    const git = makeGit({
+      prune: async () => {
+        throw new Error("prune boom")
+      },
+    })
+    const alloc = new AgentWorkspaceAllocator({ ...base, git })
+    await alloc.allocate({ runId: "r", teammateName: "A", taskId: "t1" })
+    await expect(alloc.gc()).resolves.toBeUndefined()
   })
 })

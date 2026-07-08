@@ -13,9 +13,11 @@ jest.mock("next-intl", () => ({
     params?.title ? `${key}:${params.title}` : key,
 }))
 
-const mockImport = jest.fn(async (_arg?: unknown) => ({}))
+// Default: echo the incoming sessionId as the created row's id (the common
+// no-collision case). Tests that exercise the id-divert path override this.
+const mockImport = jest.fn(async (arg?: { sessionId?: string }) => ({ id: arg?.sessionId }))
 jest.mock("@/lib/chat/import-handoff-session", () => ({
-  importHandoffSession: (arg: unknown) => mockImport(arg),
+  importHandoffSession: (arg: unknown) => mockImport(arg as { sessionId?: string }),
 }))
 
 const mockSetActive = jest.fn()
@@ -84,6 +86,22 @@ it("imports the handed-off session and activates it", async () => {
   })
   expect(mockSetActive).toHaveBeenCalledWith("s_cli_1")
   expect(mockToastSuccess).toHaveBeenCalledWith("received:Fix bug")
+})
+
+it("activates the id the import returned, not the CLI id (collision divert)", async () => {
+  // The import diverted to a fresh id because the CLI id collided with a
+  // native session; the hook must open the row that was actually written.
+  mockImport.mockResolvedValueOnce({ id: "s_fresh_9" })
+  await act(async () => {
+    render(<Harness />)
+    await flush()
+  })
+  await act(async () => {
+    captured!({ payload: { sessionId: "s_cli_x", messages: [{ role: "user", content: "hi" }] } })
+    await flush()
+  })
+  expect(mockSetActive).toHaveBeenCalledWith("s_fresh_9")
+  expect(mockSetActive).not.toHaveBeenCalledWith("s_cli_x")
 })
 
 it("ignores a payload with no sessionId", async () => {

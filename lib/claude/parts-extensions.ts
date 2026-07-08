@@ -74,6 +74,13 @@ export interface SubagentPart {
   completedAt?: number
   summary?: string
   toolUseId?: string
+  /**
+   * Imported subagents only (ADR-0062): id of the hidden `kind: "subagent"`
+   * ChatSession holding this run's full inner transcript. When set, the
+   * subagent card renders a "drill-in" affordance that opens that session.
+   * Absent for live/native subagents (their detail lives in the runtime store).
+   */
+  nestedSessionId?: string
 
   // ── Nested-dispatch tree (depth-N) ─────────────────────────────────────────
   // These let the chat transcript render a parent→child→grandchild tree that

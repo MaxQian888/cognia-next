@@ -1,14 +1,17 @@
 /**
  * Desktop → CLI handoff (the reverse direction).
  *
- * Writes a session's transcript to `~/.cognia/handoff/<sessionId>.jsonl` — the
+ * Writes a session's transcript to `<cli-home>/handoff/<sessionId>.jsonl` — the
  * drop file `cognia-agent resume <id>` reads — and returns the resume command
  * for the UI to surface (copy / toast). Uses `@tauri-apps/api/path` + the
  * existing `ensureDir`/`writeTextFile` Tauri commands, so it needs no new Rust
  * surface. Filesystem + path collaborators are injected for unit tests.
  *
- * Note: targets the default CLI home (`~/.cognia`). A CLI started with a
- * `$COGNIA_HOME` override won't see this drop — acceptable for v1.
+ * The CLI home is resolved via {@link resolveCliHome} (the Rust
+ * `resolve_cli_home` command), which honours `$COGNIA_HOME` and falls back to
+ * `~/.cognia` itself — so a CLI started with an overridden home still sees the
+ * drop. When it can't be resolved we throw rather than guessing `~/.cognia`,
+ * which would silently drop the transcript in the wrong home.
  */
 
 import type { UIMessage } from "ai"
@@ -23,8 +26,6 @@ export interface ExportHandoffDeps {
    * to `homeDir()` + `.cognia` when it returns null (e.g. mid-test).
    */
   resolveHome?: () => Promise<string | null>
-  /** Resolve the OS home dir (defaults to @tauri-apps/api/path homeDir). */
-  homeDir?: () => Promise<string>
   /** Join path segments (defaults to @tauri-apps/api/path join). */
   join?: (...parts: string[]) => Promise<string>
   /** Ensure a directory exists (defaults to the ensureDir Tauri command). */
@@ -54,11 +55,6 @@ function toLine(message: UIMessage, ts: number): string | null {
   return JSON.stringify({ ts, role, content })
 }
 
-async function defaultHomeDir(): Promise<string> {
-  const { homeDir } = await import("@tauri-apps/api/path")
-  return homeDir()
-}
-
 async function defaultJoin(...parts: string[]): Promise<string> {
   const { join } = await import("@tauri-apps/api/path")
   return join(...parts)
@@ -72,7 +68,6 @@ export async function exportHandoffToCli(
   params: ExportHandoffParams,
   deps: ExportHandoffDeps = {}
 ): Promise<ExportHandoffResult> {
-  const homeDir = deps.homeDir ?? defaultHomeDir
   const join = deps.join ?? defaultJoin
   const now = deps.now ?? Date.now
 
@@ -84,10 +79,15 @@ export async function exportHandoffToCli(
     throw new Error("export handoff: session has no text to hand off")
   }
 
-  // Prefer the COGNIA_HOME-aware resolver so a CLI started with an overridden
-  // home still sees the drop. Fall back to `~/.cognia` when it's unavailable.
+  // Resolve the CLI home via the COGNIA_HOME-aware resolver. It already falls
+  // back to `~/.cognia` on its own, so a null here means it genuinely couldn't
+  // be resolved (outside Tauri, or a Rust-command failure). Guessing `~/.cognia`
+  // ourselves would silently mis-write when $COGNIA_HOME is set, so throw.
   const resolveHome = deps.resolveHome ?? resolveCliHome
-  const cogniaHome = (await resolveHome()) ?? (await join(await homeDir(), ".cognia"))
+  const cogniaHome = await resolveHome()
+  if (!cogniaHome) {
+    throw new Error("export handoff: could not resolve the cognia CLI home directory")
+  }
   const dir = await join(cogniaHome, "handoff")
   const path = await join(dir, `${params.sessionId}.jsonl`)
 

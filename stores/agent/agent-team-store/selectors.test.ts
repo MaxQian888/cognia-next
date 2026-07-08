@@ -632,7 +632,7 @@ describe("agent-team-store store-level config", () => {
     const stored = window.localStorage.getItem("cognia-agent-teams")
     expect(stored).not.toBeNull()
     const parsed = JSON.parse(stored as string)
-    expect(parsed.version).toBe(5)
+    expect(parsed.version).toBe(6)
     expect(parsed.state.displayMode).toBe("compact")
     // partialize keeps templates / defaultConfig / displayMode / workspaceTab /
     // lastAdapterSyncVersion AND (v4+) the durable team definitions.
@@ -642,6 +642,8 @@ describe("agent-team-store store-level config", () => {
     // v4+ persists durable team maps (empty after reset, but present).
     expect(parsed.state.teams).toBeDefined()
     expect(parsed.state.tasks).toBeDefined()
+    // v6 persists the project Editor session map.
+    expect(parsed.state.editorSession).toBeDefined()
     // live runtime ephemera stays out of the persisted slice
     expect(parsed.state.messages).toBeUndefined()
   })

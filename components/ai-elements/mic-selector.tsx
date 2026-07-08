@@ -17,8 +17,17 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 const deviceIdRegex = /\(([\da-fA-F]{4}:[\da-fA-F]{4})\)$/
 
+export type MicPermissionState = "granted" | "denied" | "prompt" | "unknown"
+
+export interface MicSelectorPermission {
+  state: MicPermissionState
+  loading: boolean
+  request: () => Promise<void>
+}
+
 interface MicSelectorContextType {
   data: MediaDeviceInfo[]
+  permission: MicSelectorPermission
   value: string | undefined
   onValueChange?: (value: string) => void
   open: boolean
@@ -27,23 +36,37 @@ interface MicSelectorContextType {
   setWidth?: (width: number) => void
 }
 
+const noopRequest = async () => {}
+
 const MicSelectorContext = createContext<MicSelectorContextType>({
   data: [],
   onOpenChange: undefined,
   onValueChange: undefined,
   open: false,
+  permission: { loading: false, request: noopRequest, state: "unknown" },
   setWidth: undefined,
   value: undefined,
   width: 200,
 })
 
+const hasMediaDevices = () =>
+  typeof navigator !== "undefined" && typeof navigator.mediaDevices !== "undefined"
+
 export const useAudioDevices = () => {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [hasPermission, setHasPermission] = useState(false)
+  const [permissionState, setPermissionState] = useState<MicPermissionState>("unknown")
 
-  const loadDevicesWithoutPermission = useCallback(async () => {
+  // Enumerate-only refresh — never triggers a permission prompt. Device
+  // labels are only exposed once permission is granted, so a labelled
+  // audioinput doubles as a "granted" signal on browsers without the
+  // Permissions API.
+  const refreshDevices = useCallback(async () => {
+    if (!hasMediaDevices()) {
+      setLoading(false)
+      return
+    }
     try {
       setLoading(true)
       setError(null)
@@ -52,6 +75,9 @@ export const useAudioDevices = () => {
       const audioInputs = deviceList.filter((device) => device.kind === "audioinput")
 
       setDevices(audioInputs)
+      if (audioInputs.some((device) => device.label)) {
+        setPermissionState("granted")
+      }
     } catch (caughtError) {
       const message =
         caughtError instanceof Error ? caughtError.message : "Failed to get audio devices"
@@ -63,11 +89,13 @@ export const useAudioDevices = () => {
     }
   }, [])
 
-  const loadDevicesWithPermission = useCallback(async () => {
-    if (loading) {
+  // The ONLY code path that may show a permission prompt — call it from an
+  // explicit user gesture (e.g. a "grant access" button), never from an
+  // open/mount effect.
+  const requestPermission = useCallback(async () => {
+    if (!hasMediaDevices()) {
       return
     }
-
     try {
       setLoading(true)
       setError(null)
@@ -80,12 +108,17 @@ export const useAudioDevices = () => {
         track.stop()
       }
 
+      setPermissionState("granted")
+
       const deviceList = await navigator.mediaDevices.enumerateDevices()
       const audioInputs = deviceList.filter((device) => device.kind === "audioinput")
 
       setDevices(audioInputs)
-      setHasPermission(true)
     } catch (caughtError) {
+      const name = caughtError instanceof Error ? caughtError.name : ""
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        setPermissionState("denied")
+      }
       const message =
         caughtError instanceof Error ? caughtError.message : "Failed to get audio devices"
 
@@ -94,19 +127,53 @@ export const useAudioDevices = () => {
     } finally {
       setLoading(false)
     }
-  }, [loading])
+  }, [])
 
   useEffect(() => {
-    loadDevicesWithoutPermission()
-  }, [loadDevicesWithoutPermission])
+    if (!hasMediaDevices()) {
+      setLoading(false)
+      return
+    }
 
-  useEffect(() => {
-    const handleDeviceChange = () => {
-      if (hasPermission) {
-        loadDevicesWithPermission()
-      } else {
-        loadDevicesWithoutPermission()
+    let cancelled = false
+    let status: PermissionStatus | null = null
+    const handlePermissionChange = () => {
+      if (cancelled || !status) return
+      setPermissionState(status.state as MicPermissionState)
+      if (status.state === "granted") {
+        void refreshDevices()
       }
+    }
+
+    const syncPermission = async () => {
+      try {
+        status = await navigator.permissions.query({
+          name: "microphone" as PermissionName,
+        })
+        if (cancelled) return
+        setPermissionState(status.state as MicPermissionState)
+        status.addEventListener("change", handlePermissionChange)
+      } catch {
+        // Permissions API unavailable (Firefox/WebKit variants) — the
+        // labelled-device inference in refreshDevices covers "granted".
+      }
+    }
+
+    void syncPermission()
+    void refreshDevices()
+
+    return () => {
+      cancelled = true
+      status?.removeEventListener("change", handlePermissionChange)
+    }
+  }, [refreshDevices])
+
+  useEffect(() => {
+    if (!hasMediaDevices() || typeof navigator.mediaDevices.addEventListener !== "function") {
+      return
+    }
+    const handleDeviceChange = () => {
+      void refreshDevices()
     }
 
     navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange)
@@ -114,14 +181,16 @@ export const useAudioDevices = () => {
     return () => {
       navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange)
     }
-  }, [hasPermission, loadDevicesWithPermission, loadDevicesWithoutPermission])
+  }, [refreshDevices])
 
   return {
     devices,
     error,
-    hasPermission,
-    loadDevices: loadDevicesWithPermission,
+    hasPermission: permissionState === "granted",
+    loadDevices: requestPermission,
     loading,
+    permissionState,
+    requestPermission,
   }
 }
 
@@ -153,13 +222,12 @@ export const MicSelector = ({
     prop: controlledOpen,
   })
   const [width, setWidth] = useState(200)
-  const { devices, loading, hasPermission, loadDevices } = useAudioDevices()
+  const { devices, loading, permissionState, requestPermission } = useAudioDevices()
 
-  useEffect(() => {
-    if (open && !hasPermission && !loading) {
-      loadDevices()
-    }
-  }, [open, hasPermission, loading, loadDevices])
+  const permission = useMemo<MicSelectorPermission>(
+    () => ({ loading, request: requestPermission, state: permissionState }),
+    [loading, permissionState, requestPermission]
+  )
 
   const contextValue = useMemo(
     () => ({
@@ -167,11 +235,12 @@ export const MicSelector = ({
       onOpenChange,
       onValueChange,
       open,
+      permission,
       setWidth,
       value,
       width,
     }),
-    [devices, onOpenChange, onValueChange, open, setWidth, value, width]
+    [devices, onOpenChange, onValueChange, open, permission, setWidth, value, width]
   )
 
   return (
@@ -247,13 +316,48 @@ export const MicSelectorInput = ({ ...props }: MicSelectorInputProps) => (
 )
 
 export type MicSelectorListProps = Omit<ComponentProps<typeof CommandList>, "children"> & {
-  children: (devices: MediaDeviceInfo[]) => ReactNode
+  children: (devices: MediaDeviceInfo[], permission: MicSelectorPermission) => ReactNode
 }
 
 export const MicSelectorList = ({ children, ...props }: MicSelectorListProps) => {
-  const { data } = useContext(MicSelectorContext)
+  const { data, permission } = useContext(MicSelectorContext)
 
-  return <CommandList {...props}>{children(data)}</CommandList>
+  return <CommandList {...props}>{children(data, permission)}</CommandList>
+}
+
+export type MicSelectorRequestAccessProps = ComponentProps<typeof Button>
+
+/**
+ * Explicit "grant microphone access" affordance — the only UI that triggers
+ * a permission prompt. Render it (with a localized label as children) when
+ * `permission.state` is "prompt"/"unknown" and devices are unlabelled.
+ */
+export const MicSelectorRequestAccess = ({
+  className,
+  children,
+  onClick,
+  ...props
+}: MicSelectorRequestAccessProps) => {
+  const { permission } = useContext(MicSelectorContext)
+
+  return (
+    <Button
+      className={cn("w-full justify-start gap-2 rounded-none text-xs", className)}
+      disabled={permission.loading}
+      onClick={(event) => {
+        onClick?.(event)
+        if (!event.defaultPrevented) {
+          void permission.request()
+        }
+      }}
+      size="sm"
+      type="button"
+      variant="ghost"
+      {...props}
+    >
+      {children}
+    </Button>
+  )
 }
 
 export type MicSelectorEmptyProps = ComponentProps<typeof CommandEmpty>

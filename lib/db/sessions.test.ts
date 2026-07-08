@@ -14,6 +14,7 @@ import {
   deleteSession,
   bulkDeleteSessions,
   clearBranchSeed,
+  freezeImportedSession,
   archiveSession,
   unarchiveSession,
   bulkArchiveSessions,
@@ -144,6 +145,21 @@ describe("createSession — default preset auto-apply", () => {
     expect(fresh?.branchSeed).toBeUndefined()
     // Sibling lineage fields untouched.
     expect(fresh?.parentSessionId).toBe("p1")
+  })
+
+  it("freezeImportedSession sets importFrozen (idempotent)", async () => {
+    const now = Date.now()
+    await getDb().sessions.put({
+      id: "import:codex:x1",
+      title: "Imported",
+      createdAt: now,
+      updatedAt: now,
+    })
+    await freezeImportedSession("import:codex:x1")
+    expect((await getSession("import:codex:x1"))?.importFrozen).toBe(true)
+    // Re-freezing stays true (no throw, no flip).
+    await freezeImportedSession("import:codex:x1")
+    expect((await getSession("import:codex:x1"))?.importFrozen).toBe(true)
   })
 
   it("does NOT auto-apply when a character is supplied", async () => {

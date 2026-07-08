@@ -17,6 +17,7 @@ import {
   type TeamDisplayMode,
   type AgentTeamWorkspaceTab,
   type AgentTeamWorkspaceFocus,
+  type AgentTeamEditorSession,
   type TeamDelegationRecord,
   type TeamDelegationStatus,
   type TeamExecutionReport,
@@ -60,6 +61,11 @@ export interface AgentTeamState {
   workspaceDetailOpen: boolean
   /** Tasks tab presentation: flat list or kanban board. Persisted. */
   tasksView: "list" | "board"
+  /**
+   * Per-team project Editor tab session (open files, active file, selected
+   * root, layout). Persisted so reopening the tab restores the working set.
+   */
+  editorSession: Record<string, AgentTeamEditorSession>
 
   // Settings
   defaultConfig: AgentTeamConfig
@@ -162,6 +168,11 @@ export interface AgentTeamState {
   setWorkspaceFocus: (focus: Partial<AgentTeamWorkspaceFocus>) => void
   setWorkspaceTeamFromRoute: (teamId: string | null | undefined) => void
   closeAgentTeamWorkspaceDetail: () => void
+  /**
+   * Merge a patch into a team's persisted project-Editor session. Session
+   * cleanup on team deletion is handled inline by `cleanupTeam` / `purgeProject`.
+   */
+  setEditorSession: (teamId: string, patch: Partial<AgentTeamEditorSession>) => void
 
   // Selectors
   getTeam: (teamId: string) => AgentTeam | undefined

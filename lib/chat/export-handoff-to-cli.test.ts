@@ -15,7 +15,7 @@ function deps(extra: Partial<ExportHandoffDeps> = {}): ExportHandoffDeps & {
   const writes: Array<{ path: string; content: string }> = []
   const dirs: string[] = []
   return {
-    homeDir: async () => "/home/u",
+    resolveHome: async () => "/home/u/.cognia",
     join: async (...parts: string[]) => parts.join("/"),
     ensureDir: async (d) => void dirs.push(d),
     writeTextFile: async (p, c) => void writes.push({ path: p, content: c }),
@@ -64,6 +64,21 @@ describe("exportHandoffToCli", () => {
     await expect(exportHandoffToCli({ sessionId: "s_3", messages: [] }, d)).rejects.toThrow(
       /no text to hand off/
     )
+  })
+
+  it("honours a $COGNIA_HOME-overridden CLI home", async () => {
+    const d = deps({ resolveHome: async () => "/custom/cognia-home" })
+    const res = await exportHandoffToCli({ sessionId: "s_h", messages: [msg("user", "hi")] }, d)
+    expect(res.path).toBe("/custom/cognia-home/handoff/s_h.jsonl")
+    expect(d.dirs[0]).toBe("/custom/cognia-home/handoff")
+  })
+
+  it("throws (never guesses ~/.cognia) when the CLI home can't be resolved", async () => {
+    const d = deps({ resolveHome: async () => null })
+    await expect(
+      exportHandoffToCli({ sessionId: "s_5", messages: [msg("user", "hi")] }, d)
+    ).rejects.toThrow(/could not resolve the cognia CLI home/)
+    expect(d.writes).toHaveLength(0)
   })
 
   it("normalizes unexpected roles to user", async () => {

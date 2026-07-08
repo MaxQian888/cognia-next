@@ -88,6 +88,19 @@ describe("buildConversationSections", () => {
     expect(sections.some((s) => s.kind === "date" && s.bucket === "prev30")).toBe(false)
   })
 
+  it("excludes hidden subagent sessions from every surface (list + search)", () => {
+    const sessions = [
+      session("visible", { updatedAt: NOW }),
+      session("sub", { updatedAt: NOW, kind: "subagent", title: "hidden inner" }),
+    ]
+    const grouped = buildConversationSections(sessions, [], opts())
+    expect(grouped.total).toBe(1)
+    expect(grouped.orderedIds).toEqual(["visible"])
+    // …and not matchable by search either.
+    const searched = buildConversationSections(sessions, [], opts({ query: "hidden" }))
+    expect(searched.filteredCount).toBe(0)
+  })
+
   it("sorts within a bucket newest-first", () => {
     const sessions = [
       session("a", { updatedAt: NOW - 3 * 3_600_000 }),

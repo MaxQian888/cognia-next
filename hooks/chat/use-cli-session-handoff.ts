@@ -19,6 +19,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { loggers } from "@/lib/logging"
 import { importHandoffSession, type HandoffMessage } from "@/lib/chat/import-handoff-session"
 import { useChatStore } from "@/stores/chat/chat-store"
@@ -51,14 +52,16 @@ export function useCliSessionHandoff(): void {
           if (!p?.sessionId) return
           void (async () => {
             try {
-              await importHandoffSession({
+              // Open the id the import actually wrote — it may differ from the
+              // CLI-minted id when that collided with a native session.
+              const created = await importHandoffSession({
                 sessionId: p.sessionId,
                 title: p.title,
                 messages: p.messages ?? [],
                 meta: p.meta,
               })
-              useChatStore.getState().setActiveSession(p.sessionId)
-              loggers.shell.info(`[cli-bridge] session handoff received: ${p.sessionId}`)
+              useChatStore.getState().setActiveSession(created.id)
+              loggers.shell.info(`[cli-bridge] session handoff received: ${created.id}`)
               toast.success(tRef.current("received", { title: p.title ?? p.sessionId }))
             } catch (err) {
               loggers.shell.warn(`[cli-bridge] session handoff import failed`, {
@@ -69,7 +72,7 @@ export function useCliSessionHandoff(): void {
           })()
         })
         if (active) unlisten = off
-        else off()
+        else safeUnlisten(off)
       } catch (err) {
         loggers.shell.warn(`[cli-bridge] failed to subscribe to session handoff`, {
           error: String(err),
@@ -79,11 +82,7 @@ export function useCliSessionHandoff(): void {
 
     return () => {
       active = false
-      try {
-        unlisten?.()
-      } catch {
-        // already detached
-      }
+      safeUnlisten(unlisten)
     }
   }, [])
 }

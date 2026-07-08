@@ -115,36 +115,55 @@ jest.mock("@/hooks/chat", () => ({
     deleteFolder,
     assignToFolder,
   }),
-  useClaudeChat: () => ({
-    send: jest.fn(),
-    stop: jest.fn(),
-    regenerate: jest.fn(),
-    editAndResend: jest.fn(),
-    respondToApproval: jest.fn(),
-  }),
-  useTeamChat: () => ({
-    send: jest.fn(),
-    stop: jest.fn(),
-    regenerate: jest.fn(),
-    editAndResend: jest.fn(),
-    respondToApproval: jest.fn(),
-  }),
+  useClaudeChat: () => directChatMock,
+  useTeamChat: () => teamChatMock,
 }))
 
+// Stable hook mocks so the kind-dispatching pane callbacks can be asserted.
+const directChatMock = {
+  send: jest.fn(),
+  stop: jest.fn(),
+  interruptAndSteer: jest.fn(),
+  flushSteer: jest.fn(),
+  regenerate: jest.fn(),
+  editAndResend: jest.fn(),
+  respondToApproval: jest.fn(),
+  close: jest.fn(),
+}
+const teamChatMock = {
+  send: jest.fn(),
+  stop: jest.fn(),
+  interruptAndSteer: jest.fn(),
+  flushSteer: jest.fn(),
+  regenerate: jest.fn(),
+  editAndResend: jest.fn(),
+  respondToApproval: jest.fn(),
+}
+
 const errorMessageRef: { current: string | null } = { current: null }
+const closeSessionStoreMock = jest.fn()
 jest.mock("@/stores/chat", () => ({
-  useChatStore: <T,>(
-    selector: (s: {
-      errorMessage: string | null
-      pendingApprovals: unknown[]
-      activeSessionEpoch: number
-    }) => T
-  ): T =>
-    selector({
-      errorMessage: errorMessageRef.current,
-      pendingApprovals: [],
-      activeSessionEpoch,
-    }),
+  useChatStore: Object.assign(
+    <T,>(
+      selector: (s: {
+        errorMessage: string | null
+        pendingApprovals: unknown[]
+        activeSessionEpoch: number
+      }) => T
+    ): T =>
+      selector({
+        errorMessage: errorMessageRef.current,
+        pendingApprovals: [],
+        activeSessionEpoch,
+      }),
+    {
+      getState: () => ({
+        activeSessionId,
+        closeSession: closeSessionStoreMock,
+        setPermissionMode: jest.fn(),
+      }),
+    }
+  ),
 }))
 
 const loadSettings = jest.fn().mockResolvedValue(undefined)
@@ -189,6 +208,13 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,
 }))
 
+// Render the real Tauri branch (ChatPaneGroup + trust gate) — the workspace
+// no longer has a separate team ChatPane fork to exercise.
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => "tauri",
+  detectPlatform: () => "desktop",
+}))
+
 jest.mock("@/lib/db/session-state", () => ({
   markSessionRead: jest.fn().mockResolvedValue(undefined),
 }))
@@ -197,8 +223,15 @@ jest.mock("@/lib/db/session-state", () => ({
 jest.mock("@/components/chat/chat-view", () => ({
   ChatPane: () => <div data-testid="chat-pane" />,
 }))
+const paneGroupPropsLog: Array<Record<string, unknown>> = []
 jest.mock("@/components/chat/chat-pane-group", () => ({
-  ChatPaneGroup: () => <div data-testid="chat-pane-group" />,
+  ChatPaneGroup: (props: Record<string, unknown>) => {
+    paneGroupPropsLog.push(props)
+    return <div data-testid="chat-pane-group" />
+  },
+}))
+jest.mock("@/components/chat/workspace-trust-gate", () => ({
+  WorkspaceTrustGate: () => null,
 }))
 jest.mock("@/components/chat/character-picker", () => ({
   CharacterPicker: ({ open }: { open: boolean }) =>
@@ -263,6 +296,10 @@ beforeEach(() => {
   errorMessageRef.current = null
   pendingSettingsRequestRef.current = null
   channelListPropsLog.length = 0
+  paneGroupPropsLog.length = 0
+  closeSessionStoreMock.mockClear()
+  for (const m of Object.values(directChatMock)) m.mockClear()
+  for (const m of Object.values(teamChatMock)) m.mockClear()
 })
 
 test("auto-selects a matching session on first render and logs", async () => {
@@ -339,8 +376,7 @@ test("clicking a team (guild chosen most recently) resumes its latest conversati
   await waitFor(() => expect(select).toHaveBeenCalledWith("t-new"))
 })
 
-test("clicking a team with no conversations starts a new one", async () => {
-  create.mockResolvedValue({ id: "fresh" })
+test("clicking a team with no conversations lands on the welcome state without creating", async () => {
   sessionsRef.current = [
     { id: "d-1", title: "d", kind: "direct", createdAt: 0, updatedAt: 0 } as unknown as ChatSession,
   ]
@@ -351,14 +387,10 @@ test("clicking a team with no conversations starts a new one", async () => {
   await act(async () => {
     render(<DesktopChatWorkspace />)
   })
-  await waitFor(() =>
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ kind: "team", teamId: "t-9" }))
-  )
-  await waitFor(() => expect(select).toHaveBeenCalledWith("fresh"))
-  expect(logInfo).toHaveBeenCalledWith(
-    "new-team-conversation",
-    expect.objectContaining({ teamId: "t-9", reason: "guild-switch" })
-  )
+  // The reconcile clears the stale direct session so the welcome renders; it
+  // must NOT silently insert a new team session row.
+  await waitFor(() => expect(select).toHaveBeenCalledWith(null))
+  expect(create).not.toHaveBeenCalled()
 })
 
 test("clears the active session when switching to an empty DM bucket", async () => {
@@ -407,48 +439,20 @@ test("syncs the guild to the active session when the session is the most recent 
   )
 })
 
-test("logs a warning when starting a team conversation fails", async () => {
-  create.mockRejectedValue(new Error("boom"))
-  sessionsRef.current = []
-  activeSessionId = null
-  activeSessionEpoch = 1
-  selectedGuild = { kind: "team", teamId: "t-x" }
-  selectedGuildEpoch = 5
-  await act(async () => {
-    render(<DesktopChatWorkspace />)
-  })
-  await waitFor(() =>
-    expect(logWarn).toHaveBeenCalledWith(
-      "new-team-conversation failed",
-      expect.objectContaining({ teamId: "t-x", error: "boom" })
-    )
-  )
-})
-
-test("guards against a duplicate create while one is already in flight", async () => {
-  let resolveCreate: (v: { id: string }) => void = () => {}
-  create.mockReturnValue(
-    new Promise<{ id: string }>((res) => {
-      resolveCreate = res
-    })
-  )
+test("an empty team guild with no active session is a stable no-op", async () => {
   sessionsRef.current = []
   activeSessionId = null
   activeSessionEpoch = 1
   selectedGuild = { kind: "team", teamId: "t-x" }
   selectedGuildEpoch = 5
   const { rerender } = render(<DesktopChatWorkspace />)
-  await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
-  // Re-run the reconcile effect (bump the guild epoch) while the create is
-  // still pending — the in-flight guard must prevent a second create.
+  // Nothing to resume and nothing to clear: no session mutation of any kind.
   selectedGuildEpoch = 6
   await act(async () => {
     rerender(<DesktopChatWorkspace />)
   })
-  expect(create).toHaveBeenCalledTimes(1)
-  await act(async () => {
-    resolveCreate({ id: "fresh" })
-  })
+  expect(create).not.toHaveBeenCalled()
+  expect(select).not.toHaveBeenCalled()
 })
 
 test("does not recreate a conversation after the team's last one is deleted", async () => {
@@ -464,6 +468,173 @@ test("does not recreate a conversation after the team's last one is deleted", as
   })
   expect(create).not.toHaveBeenCalled()
   expect(select).not.toHaveBeenCalled()
+})
+
+test("an active team session renders the shared ChatPaneGroup plus the MemberList", async () => {
+  sessionsRef.current = [
+    {
+      id: "t-1",
+      title: "team chat",
+      kind: "team",
+      teamId: "team-x",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+  ]
+  activeSessionId = "t-1"
+  activeSessionEpoch = 5
+  selectedGuild = { kind: "team", teamId: "team-x" }
+  selectedGuildEpoch = 6
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  // One shared multi-pane surface for team and direct sessions alike…
+  expect(screen.getByTestId("chat-pane-group")).toBeInTheDocument()
+  expect(screen.queryByTestId("chat-pane")).not.toBeInTheDocument()
+  // …with the team chrome still attached.
+  expect(screen.getByTestId("member-list")).toBeInTheDocument()
+})
+
+test("the pane group's onCreate starts a team conversation while a team guild is selected", async () => {
+  create.mockResolvedValue({ id: "fresh" })
+  sessionsRef.current = [
+    {
+      id: "t-1",
+      title: "team chat",
+      kind: "team",
+      teamId: "team-x",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+  ]
+  activeSessionId = "t-1"
+  activeSessionEpoch = 5
+  selectedGuild = { kind: "team", teamId: "team-x" }
+  selectedGuildEpoch = 6
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  const props = paneGroupPropsLog[paneGroupPropsLog.length - 1]
+  await act(async () => {
+    ;(props.onCreate as () => void)()
+  })
+  await waitFor(() =>
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ kind: "team", teamId: "team-x" }))
+  )
+  expect(select).toHaveBeenCalledWith("fresh")
+  // No approval modal is mounted anymore — approvals ride the inline gates.
+  expect(screen.queryByTestId("tool-approval-dialog")).not.toBeInTheDocument()
+})
+
+test("pane callbacks dispatch by session kind (team → useTeamChat, direct → useClaudeChat)", async () => {
+  sessionsRef.current = [
+    {
+      id: "t-1",
+      title: "team chat",
+      kind: "team",
+      teamId: "team-x",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+    {
+      id: "d-1",
+      title: "dm",
+      kind: "direct",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+  ]
+  activeSessionId = "t-1"
+  activeSessionEpoch = 5
+  selectedGuild = { kind: "team", teamId: "team-x" }
+  selectedGuildEpoch = 6
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  const props = paneGroupPropsLog[paneGroupPropsLog.length - 1] as {
+    send: (content: unknown, sid: string) => unknown
+    stop: (sid: string) => unknown
+    steerNow: (sid: string) => unknown
+    steerFlush: (sid: string) => unknown
+    regenerate: (sid: string) => unknown
+    editResend: (id: string, content: unknown, sid: string) => unknown
+    closePane: (sid: string) => void
+    respondToApproval: (approval: unknown, decision: string) => unknown
+  }
+
+  await act(async () => {
+    props.send("hi", "t-1")
+    props.stop("t-1")
+    props.steerNow("t-1")
+    props.steerFlush("t-1")
+    props.regenerate("t-1")
+    props.editResend("m1", "edited", "t-1")
+    props.closePane("t-1")
+  })
+  expect(teamChatMock.send).toHaveBeenCalledWith("hi", { sessionId: "t-1" })
+  expect(teamChatMock.stop).toHaveBeenCalledWith("t-1")
+  expect(teamChatMock.interruptAndSteer).toHaveBeenCalledWith("t-1")
+  expect(teamChatMock.flushSteer).toHaveBeenCalledWith("t-1")
+  expect(teamChatMock.regenerate).toHaveBeenCalledWith("t-1")
+  expect(teamChatMock.editAndResend).toHaveBeenCalledWith("m1", "edited", "t-1")
+  // Team pane close only drops the store slice — sub-sessions are torn down
+  // per turn by useTeamChat.
+  expect(closeSessionStoreMock).toHaveBeenCalledWith("t-1")
+  expect(directChatMock.close).not.toHaveBeenCalled()
+
+  await act(async () => {
+    props.send("hi", "d-1")
+    props.stop("d-1")
+    props.steerNow("d-1")
+    props.steerFlush("d-1")
+    props.regenerate("d-1")
+    props.editResend("m2", "edited", "d-1")
+    props.closePane("d-1")
+  })
+  expect(directChatMock.send).toHaveBeenCalledWith("hi", undefined, { sessionId: "d-1" })
+  expect(directChatMock.stop).toHaveBeenCalledWith("d-1")
+  expect(directChatMock.interruptAndSteer).toHaveBeenCalledWith("d-1")
+  expect(directChatMock.flushSteer).toHaveBeenCalledWith("d-1")
+  expect(directChatMock.regenerate).toHaveBeenCalledWith("d-1")
+  expect(directChatMock.editAndResend).toHaveBeenCalledWith("m2", "edited", "d-1")
+  expect(directChatMock.close).toHaveBeenCalledWith("d-1")
+
+  // Approval routing: sub-session ids go to the team hook, plain ids direct.
+  const teamApproval = { sessionId: "t-1::char::alice::turn", requestId: "r1" }
+  const directApproval = { sessionId: "d-1", requestId: "r2" }
+  await act(async () => {
+    props.respondToApproval(teamApproval, "allow")
+    props.respondToApproval(directApproval, "deny")
+  })
+  expect(teamChatMock.respondToApproval).toHaveBeenCalledWith(teamApproval, "allow")
+  expect(directChatMock.respondToApproval).toHaveBeenCalledWith(directApproval, "deny")
+})
+
+test("resumeAfterPlanApproval is a guarded no-op for team sessions", async () => {
+  sessionsRef.current = [
+    {
+      id: "t-1",
+      title: "team chat",
+      kind: "team",
+      teamId: "team-x",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+  ]
+  activeSessionId = "t-1"
+  activeSessionEpoch = 5
+  selectedGuild = { kind: "team", teamId: "team-x" }
+  selectedGuildEpoch = 6
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  const props = paneGroupPropsLog[paneGroupPropsLog.length - 1] as {
+    onResumeAfterPlanApproval: (prompt: string, mode: string, sid: string) => Promise<void>
+  }
+  await act(async () => {
+    await props.onResumeAfterPlanApproval("resume", "acceptEdits", "t-1")
+  })
+  expect(directChatMock.send).not.toHaveBeenCalled()
 })
 
 test("opens settings via deep-link when pendingSettingsRequest is set", async () => {

@@ -45,13 +45,18 @@ import type { AgentTeamState } from "./types"
  *   - `AgentTeamTask.comments` (new) is backfilled to `[]` on every persisted
  *     task so the UI / selectors can treat it as always-present.
  *
+ * v5 → v6 (Project Editor tab session):
+ *   - `editorSession` (new, root) is a `Record<teamId, AgentTeamEditorSession>`
+ *     persisting the project Editor tab's open files / active file / selected
+ *     root / layout. Older snapshots have none — default to `{}`.
+ *
  * Additive optional fields (NO version bump): `AgentTeam.dispatchDecision`
  * and `AgentTeam.externalPickup` (dispatch-completion work) stay `undefined`
  * on older rows; every consumer guards for absence, so no migration branch
  * is needed. `externalPickup` Dates round-trip as ISO strings through the
  * JSON storage — same as `routingAssessment.createdAt`.
  */
-const PERSIST_VERSION = 5
+const PERSIST_VERSION = 6
 const AGENT_TEAM_STORAGE_KEY = "cognia-agent-teams"
 
 function agentTeamAccountStorageKey(accountId: string): string {
@@ -78,6 +83,8 @@ interface V1PersistedShape {
   teams?: Record<string, { status?: string } & Record<string, unknown>>
   teammates?: Record<string, unknown>
   tasks?: Record<string, unknown>
+  // v6: project Editor tab session.
+  editorSession?: Record<string, unknown>
 }
 
 /**
@@ -160,6 +167,11 @@ export function migrateAgentTeamPersisted(
     }
   }
 
+  // v6: project Editor tab session. Older snapshots have none — default to {}.
+  if (!raw.editorSession || typeof raw.editorSession !== "object") {
+    raw.editorSession = {}
+  }
+
   return raw as unknown as AgentTeamState
 }
 
@@ -184,6 +196,7 @@ export function partializeAgentTeamState(state: AgentTeamState) {
     teams: state.teams,
     teammates: state.teammates,
     tasks: state.tasks,
+    editorSession: state.editorSession,
   }
 }
 

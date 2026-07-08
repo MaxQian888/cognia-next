@@ -95,8 +95,26 @@ export type AgentTeamWorkspaceTab =
   | "chat"
   | "activity"
   | "worktrees"
+  | "editor"
   | "members"
   | "settings"
+
+/**
+ * Persisted per-team state of the project Editor tab. Restores the open file
+ * set, active file, selected project root (main repo vs a worktree), and the
+ * three-pane layout when the tab is reopened. Unsaved draft content is NOT
+ * persisted — the on-disk file is the source of truth.
+ */
+export interface AgentTeamEditorSession {
+  /** Absolute path of the selected root (team workingDir or a worktree path). */
+  rootKey: string
+  /** Open files, as paths relative to `rootKey`, in tab order. */
+  openPaths: string[]
+  /** Relative path of the active file, or null when no file is open. */
+  activePath: string | null
+  /** Persisted `ResizablePanelGroup` sizes: [tree, editor, side]. */
+  layout?: number[]
+}
 
 /**
  * Current operator focus inside the Agent Team workspace

@@ -9,6 +9,7 @@ import {
   type AgentTeamEvent,
   type TeamDisplayMode,
   type AgentTeamWorkspaceFocus,
+  type AgentTeamEditorSession,
   type ConsensusRequest,
   type SharedMemoryEntry,
   type TeamDelegationRecord,
@@ -44,6 +45,7 @@ export const initialState = {
     messageId: null,
   } as AgentTeamWorkspaceFocus,
   workspaceDetailOpen: true,
+  editorSession: {} as Record<string, AgentTeamEditorSession>,
   defaultConfig: { ...DEFAULT_TEAM_CONFIG },
   // Per-(teamId, adapterId) cursor of the last shared-memory version pulled
   // from a shared-memory adapter. Persisted so reverse sync resumes

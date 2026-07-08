@@ -10,6 +10,7 @@ import type {
 } from "@/lib/claude/types"
 import type { ArtifactSelectionRef } from "@/types/artifact/artifact"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
+import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { IDLE_TIMING, nextRunTiming, type RunTiming } from "@/lib/claude/run-status"
 import { nextToolTimestamps } from "@/lib/claude/run-record"
 import { useSyncExternalStore } from "react"
@@ -633,10 +634,15 @@ export const useChatStore = create<ChatState>((set) => ({
     set((s) => patchSliceState(s, id, { activeBranchByGroup: { ...map } })),
   pushApproval: (approval) =>
     set((s) => {
-      const slice = sliceForId(s, approval.sessionId)
-      return patchSliceState(s, approval.sessionId, {
+      // Team tool approvals arrive tagged with the *sub-session* id
+      // (`…::char::…`). Bucket them under the parent team session so the
+      // active-session projection and per-pane inline gates can see them;
+      // `approval.sessionId` keeps the sub-session id for approveTool routing.
+      const bucketId = decodeSubSession(approval.sessionId)?.teamSessionId ?? approval.sessionId
+      const slice = sliceForId(s, bucketId)
+      return patchSliceState(s, bucketId, {
         pendingApprovals: [...slice.pendingApprovals, approval],
-        ...statusPatch(s, approval.sessionId, "awaiting_approval"),
+        ...statusPatch(s, bucketId, "awaiting_approval"),
       })
     }),
   clearApproval: (requestId, sessionId) =>

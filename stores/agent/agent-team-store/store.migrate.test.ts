@@ -24,9 +24,20 @@ describe("migrateAgentTeamPersisted", () => {
     const current = {
       defaultConfig: { capabilities: { skillIds: ["s"] }, sharedMemoryAdapterId: undefined },
       lastAdapterSyncVersion: {},
+      editorSession: {},
     }
-    const out = migrateAgentTeamPersisted(current, 5)
+    const out = migrateAgentTeamPersisted(current, 6)
     expect(out).toBe(current)
+  })
+
+  it("upgrades v5 → v6: backfills an empty editorSession map", () => {
+    const v5 = {
+      defaultConfig: { governancePolicy: DEFAULT_TEAM_CONFIG.governancePolicy },
+      tasks: { t1: { id: "t1", title: "a", comments: [] } },
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out = migrateAgentTeamPersisted(v5, 5) as any
+    expect(out.editorSession).toEqual({})
   })
 
   it("upgrades v4 → v5: backfills an empty comments array on every task", () => {

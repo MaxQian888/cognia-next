@@ -41,6 +41,8 @@ describe("sessionMatchesGuild", () => {
     expect(sessionMatchesGuild(session({ kind: "direct" }), dm)).toBe(true)
     expect(sessionMatchesGuild(session({ kind: "team", teamId: "A" }), dm)).toBe(false)
     expect(sessionMatchesGuild(session({ kind: "workflow-editor" }), dm)).toBe(false)
+    // Hidden imported-subagent sessions never belong to any guild bucket.
+    expect(sessionMatchesGuild(session({ kind: "subagent" }), dm)).toBe(false)
   })
 })
 
@@ -108,7 +110,7 @@ describe("planGuildReconcile", () => {
       ).toEqual({ type: "select", sessionId: "t2" })
     })
 
-    it("starts a new conversation for a team with none yet", () => {
+    it("clears to the welcome state for a team with no conversations (never creates)", () => {
       expect(
         planGuildReconcile({
           guild: teamA,
@@ -116,7 +118,18 @@ describe("planGuildReconcile", () => {
           activeSession: session({ id: "d", kind: "direct" }),
           sessions: [session({ id: "d", kind: "direct" })],
         })
-      ).toEqual({ type: "create-team", teamId: "A" })
+      ).toEqual({ type: "clear" })
+    })
+
+    it("is a no-op for an empty team bucket with nothing already active", () => {
+      expect(
+        planGuildReconcile({
+          guild: teamA,
+          guildWins: true,
+          activeSession: null,
+          sessions: [],
+        })
+      ).toEqual({ type: "none" })
     })
 
     it("clears the active session when switching to an empty DM bucket", () => {

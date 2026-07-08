@@ -279,6 +279,95 @@ describe("applySdkSubagentBridge — rich logs via parent_tool_use_id", () => {
   })
 })
 
+describe("applySdkSubagentBridge — nested task correlation", () => {
+  /** Stream T1's child frame containing a spawning `tool_use` block. */
+  function spawnBlockInsideT1(blockId: string) {
+    applySdkSubagentBridge(
+      {
+        type: "assistant",
+        parent_tool_use_id: "tu1",
+        uuid: "u",
+        session_id: "sdk",
+        message: {
+          id: "m",
+          role: "assistant",
+          content: [{ type: "tool_use", id: blockId, name: "Task", input: { prompt: "deeper" } }],
+        },
+      } as never,
+      SID
+    )
+  }
+
+  it("hangs a nested task off the task whose child frame contained its spawning tool_use", () => {
+    applySdkSubagentBridge(started(), SID) // T1, depth 1
+    spawnBlockInsideT1("tu-nested")
+    applySdkSubagentBridge(
+      started({ task_id: "T2", tool_use_id: "tu-nested", subagent_type: "helper" }),
+      SID
+    )
+    const child = node("T2")!
+    expect(child.depth).toBe(2)
+    expect(child.parentSubagentId).toBe("T1")
+    expect(child.parentAgentId).toBe("T1")
+    expect(child.context?.sessionId).toBe(SID)
+    // The parent stays a depth-1 chat-session child.
+    expect(node("T1")!.depth).toBe(1)
+  })
+
+  it("chains depth for a grandchild (nested task spawning its own task)", () => {
+    applySdkSubagentBridge(started(), SID) // T1
+    spawnBlockInsideT1("tu-nested")
+    applySdkSubagentBridge(
+      started({ task_id: "T2", tool_use_id: "tu-nested", subagent_type: "helper" }),
+      SID
+    )
+    // T2's forwarded child frame carries ITS spawning block for T3.
+    applySdkSubagentBridge(
+      {
+        type: "assistant",
+        parent_tool_use_id: "tu-nested",
+        uuid: "u",
+        session_id: "sdk",
+        message: {
+          id: "m2",
+          role: "assistant",
+          content: [{ type: "tool_use", id: "tu-grand", name: "Task", input: {} }],
+        },
+      } as never,
+      SID
+    )
+    applySdkSubagentBridge(
+      started({ task_id: "T3", tool_use_id: "tu-grand", subagent_type: "digger" }),
+      SID
+    )
+    const grand = node("T3")!
+    expect(grand.depth).toBe(3)
+    expect(grand.parentSubagentId).toBe("T2")
+  })
+
+  it("keeps a task at depth 1 when its spawning tool_use was never seen inside a task", () => {
+    applySdkSubagentBridge(started(), SID)
+    applySdkSubagentBridge(
+      started({ task_id: "T2", tool_use_id: "tu-top-level", subagent_type: "helper" }),
+      SID
+    )
+    const sibling = node("T2")!
+    expect(sibling.depth).toBe(1)
+    expect(sibling.parentSubagentId).toBeUndefined()
+    expect(sibling.parentAgentId).toBe(SID)
+  })
+
+  it("keeps a task at depth 1 when task_started carries no tool_use_id at all", () => {
+    applySdkSubagentBridge(started(), SID)
+    spawnBlockInsideT1("tu-nested")
+    applySdkSubagentBridge(
+      started({ task_id: "T2", tool_use_id: undefined, subagent_type: "helper" }),
+      SID
+    )
+    expect(node("T2")!.depth).toBe(1)
+  })
+})
+
 describe("applySdkSubagentBridge — robustness", () => {
   it("never throws on malformed input", () => {
     expect(() => applySdkSubagentBridge({ type: "result" } as never, SID)).not.toThrow()

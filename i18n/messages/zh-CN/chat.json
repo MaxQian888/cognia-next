@@ -398,10 +398,21 @@
       }
     },
     "voice": {
-      "holdToTalk": "按住说话",
+      "errors": {
+        "generic": "语音输入失败，请重试。",
+        "noMicrophone": "没有可用的麦克风，请检查音频设备。",
+        "noSpeech": "未检测到语音，请靠近麦克风再试。",
+        "permissionDenied": "麦克风权限被拒绝，请为应用开启麦克风权限后重试。"
+      },
+      "grantMicAccess": "允许访问麦克风",
       "languageLabel": "语言",
+      "listening": "正在聆听…",
+      "micPermissionDenied": "麦克风访问已被禁止——请在系统或浏览器设置中开启。",
       "microphoneLabel": "麦克风",
+      "noMicFound": "未找到麦克风。",
       "selectMicAria": "选择麦克风",
+      "startListening": "开始语音输入",
+      "stopListening": "停止录音",
       "voiceSettings": "语音设置"
     },
     "webLabel": "Web",
@@ -552,7 +563,10 @@
     "tokensLabel": "{input} in / {output} out",
     "untitledSession": "（未命名）",
     "workingDirLabel": "工作目录",
-    "workingDirPlaceholder": "/path/to/project"
+    "workingDirPlaceholder": "/path/to/project",
+    "compactStarted": "已开始压缩上下文",
+    "compactAria": "压缩",
+    "compactTooltip": "在智能体侧压缩会话上下文"
   },
   "history": {
     "loadError": "无法加载此对话。",
@@ -964,6 +978,7 @@
     "logsTailNote": "仅显示最近 {n} 条日志",
     "noLogsYet": "暂无日志 — 子代理正在初始化。",
     "openInWorkspace": "在工作区打开",
+    "openTranscript": "打开完整记录",
     "rejected": {
       "cycle": "派发被拒 — 会形成循环。",
       "maxDepth": "派发被拒 — 已达最大嵌套深度。"

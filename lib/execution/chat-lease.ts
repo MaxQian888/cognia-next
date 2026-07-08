@@ -18,7 +18,7 @@
 
 import { getExecutionBroker } from "./broker"
 import type { ExecutionBroker } from "./broker"
-import type { ExecutionLease } from "./types"
+import type { ExecutionLease, ExecutionLegKind } from "./types"
 import { useChatStore } from "@/stores/chat"
 import { interruptSession } from "@/lib/claude/ipc"
 
@@ -62,6 +62,15 @@ export interface AcquireChatLeaseParams {
   projectId?: string
   /** Display label for the execution panel — pass the session title. */
   label: string
+  /** Leg kind for the execution panel; foreground chat turns default to
+   *  "chat", team turns pass "team". */
+  kind?: Extract<ExecutionLegKind, "chat" | "team">
+  /**
+   * Broker-side cancel bridge. Defaults to `interruptSession(sessionId)`,
+   * which is right for direct chat; team turns pass their own — the live
+   *  work runs under per-member sub-session ids, not `sessionId` itself.
+   */
+  onCancel?: () => void
 }
 
 /**
@@ -78,20 +87,16 @@ export async function acquireChatLease(
   ensureWatcher()
   if (held.has(params.sessionId)) return
   const lease = await broker.acquire({
-    kind: "chat",
+    kind: params.kind ?? "chat",
     label: params.label,
     sessionId: params.sessionId,
     ...(params.projectId ? { projectId: params.projectId } : {}),
   })
   // A broker-side cancel aborts the lease signal — bridge it to an interrupt so
   // the live turn actually stops. (A normal release never fires `abort`.)
-  lease.signal.addEventListener(
-    "abort",
-    () => {
-      void interruptSession(params.sessionId).catch(() => undefined)
-    },
-    { once: true }
-  )
+  const onCancel =
+    params.onCancel ?? (() => void interruptSession(params.sessionId).catch(() => undefined))
+  lease.signal.addEventListener("abort", () => onCancel(), { once: true })
   held.set(params.sessionId, { lease, sawActive: false })
 }
 

@@ -39,6 +39,7 @@ import type { LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import { useChatStore } from "@/stores/chat/chat-store"
 import type { SubagentPart as SubagentPartType } from "@/lib/claude/parts-extensions"
 import { SUB_AGENT_STATUS_CONFIG } from "@/types/agent/sub-agent"
 import type { SubAgentToolCall, SubAgentTokenUsage } from "@/types/agent/sub-agent"
@@ -101,6 +102,7 @@ const SubagentLogBody = memo(function SubagentLogBody({
   logs,
   lastLog,
   subagentId,
+  nestedSessionId,
   mode,
   toolCalls,
   finalResponse,
@@ -110,6 +112,8 @@ const SubagentLogBody = memo(function SubagentLogBody({
   logs: SubagentLogEntry[]
   lastLog?: SubagentLogEntry
   subagentId: string
+  /** Imported subagents: id of the hidden nested inner-transcript session. */
+  nestedSessionId?: string
   mode: AgentFlowMode
   toolCalls: SubAgentToolCall[]
   finalResponse?: string
@@ -192,14 +196,29 @@ const SubagentLogBody = memo(function SubagentLogBody({
         </p>
       ) : null}
 
-      <Link
-        href={`/agent-teams?focus=subagent:${subagentId}`}
-        className="inline-flex items-center gap-1 text-xs underline"
-        data-testid="subagent-open"
-      >
-        {t("openInWorkspace")}
-        <ExternalLinkIcon className="size-3" />
-      </Link>
+      {nestedSessionId ? (
+        // Imported subagent (ADR-0062): drill into the hidden nested session
+        // holding this run's full inner transcript. In-app store navigation,
+        // not a route link.
+        <button
+          type="button"
+          onClick={() => useChatStore.getState().setActiveSession(nestedSessionId)}
+          className="inline-flex items-center gap-1 text-xs underline"
+          data-testid="subagent-open-transcript"
+        >
+          {t("openTranscript")}
+          <ExternalLinkIcon className="size-3" />
+        </button>
+      ) : (
+        <Link
+          href={`/agent-teams?focus=subagent:${subagentId}`}
+          className="inline-flex items-center gap-1 text-xs underline"
+          data-testid="subagent-open"
+        >
+          {t("openInWorkspace")}
+          <ExternalLinkIcon className="size-3" />
+        </Link>
+      )}
     </>
   )
 })
@@ -353,6 +372,7 @@ export const SubagentPart = memo(function SubagentPart({
               logs={logs}
               lastLog={lastLog}
               subagentId={part.subagentId}
+              nestedSessionId={part.nestedSessionId}
               mode={mode}
               toolCalls={toolCalls}
               finalResponse={finalResponse}
@@ -442,6 +462,7 @@ export const SubagentPart = memo(function SubagentPart({
             logs={logs}
             lastLog={lastLog}
             subagentId={part.subagentId}
+            nestedSessionId={part.nestedSessionId}
             mode={mode}
             toolCalls={toolCalls}
             finalResponse={finalResponse}

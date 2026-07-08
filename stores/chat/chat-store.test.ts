@@ -245,6 +245,38 @@ describe("useChatStore", () => {
       expect(result.current.sessions.s2.pendingApprovals).toEqual([])
     })
 
+    it("buckets a team sub-session approval under the parent team session", () => {
+      const { result } = renderHook(() => useChatStore())
+      // Approval arrives tagged with the sub-session id but must land in the
+      // team session's slice so panes/projection can see it.
+      const teamApproval = { ...approval("t1"), sessionId: "team-9::char::alice::turn1" }
+      act(() => result.current.pushApproval(teamApproval))
+      expect(result.current.sessions["team-9"].pendingApprovals.map((a) => a.requestId)).toEqual([
+        "t1",
+      ])
+      expect(result.current.sessions["team-9"].status).toBe("awaiting_approval")
+      // The original sub-session id is preserved on the approval for routing.
+      expect(result.current.sessions["team-9"].pendingApprovals[0].sessionId).toBe(
+        "team-9::char::alice::turn1"
+      )
+      // No slice is materialised under the raw sub-session id.
+      expect(result.current.sessions["team-9::char::alice::turn1"]).toBeUndefined()
+      // clearApproval finds it by scan and resolves the team slice status.
+      act(() => result.current.clearApproval("t1"))
+      expect(result.current.sessions["team-9"].pendingApprovals).toEqual([])
+      expect(result.current.sessions["team-9"].status).toBe("streaming")
+    })
+
+    it("projects a team sub-session approval when the team session is active", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveSession("team-9"))
+      act(() =>
+        result.current.pushApproval({ ...approval("t2"), sessionId: "team-9::char::bob::t" })
+      )
+      expect(result.current.pendingApprovals.map((a) => a.requestId)).toEqual(["t2"])
+      expect(result.current.status).toBe("awaiting_approval")
+    })
+
     it("two sessions hold independent approval queues simultaneously", () => {
       const { result } = renderHook(() => useChatStore())
       act(() => {

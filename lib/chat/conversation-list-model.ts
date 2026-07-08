@@ -152,8 +152,12 @@ export function buildConversationSections(
   const { query, view, now, collapsedFolderIds, groupByDate = true, contentMatchIds } = opts
   const needle = query.trim().toLowerCase()
 
-  const viewed = sessions.filter((s) =>
-    view === "archived" ? s.archivedAt != null : s.archivedAt == null
+  const viewed = sessions.filter(
+    (s) =>
+      // `subagent` sessions (ADR-0062) are hidden imported-subagent inner
+      // transcripts — never listed, bucketed, or matched by search on any
+      // surface (desktop + mobile both flow through here).
+      s.kind !== "subagent" && (view === "archived" ? s.archivedAt != null : s.archivedAt == null)
   )
   const total = viewed.length
 

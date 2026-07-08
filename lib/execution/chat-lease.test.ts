@@ -81,6 +81,18 @@ describe("chat-lease", () => {
     expect(interruptMock).toHaveBeenCalledWith("s")
   })
 
+  it("acquires with kind 'team' and routes broker cancels through onCancel", async () => {
+    const broker = getExecutionBroker()
+    const onCancel = jest.fn()
+    await acquireChatLease({ sessionId: "team-1", label: "Team", kind: "team", onCancel })
+    expect(broker.list()[0]).toMatchObject({ kind: "team", sessionId: "team-1" })
+
+    expect(broker.cancelBySession("team-1")).toBe(1)
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    // The default interrupt bridge is replaced, not stacked.
+    expect(interruptMock).not.toHaveBeenCalled()
+  })
+
   it("releaseChatLease releases immediately and is idempotent", async () => {
     const broker = getExecutionBroker()
     await acquireChatLease({ sessionId: "s", label: "x" })
