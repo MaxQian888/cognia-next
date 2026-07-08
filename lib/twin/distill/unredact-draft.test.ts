@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the Drafts → Accept unredact-preview helper. We seed a
  * twin source with an encrypted redaction map, then build a draft that

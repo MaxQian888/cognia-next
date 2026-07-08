@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for `lib/db/wiki-manifest.ts` — per-scope manifest CRUD plus the
  * pure `diffManifest` function (Merkle-driven incremental refresh).

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the teams CRUD layer + member management + supervisor
 // validation.
 

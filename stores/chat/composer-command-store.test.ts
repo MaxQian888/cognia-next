@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import { useComposerCommandStore, isCommandPinned, RECENT_LIMIT } from "./composer-command-store"
 

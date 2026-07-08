@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 describe("canvas feature flags", () => {
   const originalCollab = process.env.NEXT_PUBLIC_CANVAS_COLLABORATION_V1
   const originalAi = process.env.NEXT_PUBLIC_CANVAS_AI_WORKBENCH_V1

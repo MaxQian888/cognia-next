@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the singleton settings module — get/save defaults, partial
 // patches, and the alwaysAllow tool list helpers.
 

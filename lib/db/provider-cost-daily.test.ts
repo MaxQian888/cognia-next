@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the providerCostDaily rollup module — id/day helpers, atomic
 // upsert-increment, today aggregation, range query, and pruning. Uses
 // fake-indexeddb so the real Dexie query path runs against in-memory IDB.

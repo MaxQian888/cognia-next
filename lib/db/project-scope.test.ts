@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 
 // The cascade dynamically imports the project-knowledge deps resolver for its

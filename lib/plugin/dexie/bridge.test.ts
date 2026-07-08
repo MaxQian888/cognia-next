@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * dexie-bridge tests
  *

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { renderHook, act } from "@testing-library/react"
 
 jest.mock("@tauri-apps/api/core", () => ({

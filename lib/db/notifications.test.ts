@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the notifications CRUD module (ADR-0042, table v68): put/get,
 // dedupe lookup, patch, listing/filter, badge counts, group lookup, retention
 // pruning (TTL + age + cap), and delete/clear. fake-indexeddb exercises the

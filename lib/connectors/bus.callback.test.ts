@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for ConnectorBus.dispatchConnectorCallback — Group 4.
  *

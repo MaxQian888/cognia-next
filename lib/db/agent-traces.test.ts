@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the agent-trace span CRUD + aggregator layer.
 
 import "fake-indexeddb/auto"

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for sandbox.ts
  * Plugin Sandbox - isolated execution environment

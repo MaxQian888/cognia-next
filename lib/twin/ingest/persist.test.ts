@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for `persistChunks` — the double-write step that lands chunks
  * in Dexie + the remote vector store. The re-parse path (`M1`) added an

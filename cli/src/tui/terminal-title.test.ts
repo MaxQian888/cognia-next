@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import {
   MAX_TITLE_LEN,
   buildTitleSequence,

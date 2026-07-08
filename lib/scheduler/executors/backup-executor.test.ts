@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { listBackupHistory } from "@/lib/db/backup-history"

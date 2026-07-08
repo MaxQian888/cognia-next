@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for log-filter-presets — small persistence helpers that serialise
  * the log panel's filter chips into `localStorage`.

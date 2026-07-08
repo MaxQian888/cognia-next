@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Pure tests for the v1 → v2 migration helper.
  *

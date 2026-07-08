@@ -1,0 +1,110 @@
+{
+  "./stores/**/*.{ts,tsx}": {
+    "branches": 90,
+    "functions": 90,
+    "lines": 90,
+    "statements": 90
+  },
+  "./lib/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/provider-core/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/provider-embedding/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/provider-routing/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/rag/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/error-parsers/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/vector/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/document/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/agent-trace/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/primitives/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/time/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/latex/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/mermaid/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./packages/plugin-sdk/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
+  "./hooks/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 30,
+    "lines": 40,
+    "statements": 40
+  },
+  "./components/logging/**/*.{ts,tsx}": {
+    "branches": 45,
+    "functions": 20,
+    "lines": 70,
+    "statements": 70
+  },
+  "global": {
+    "branches": 60,
+    "functions": 30,
+    "lines": 25,
+    "statements": 25
+  }
+}

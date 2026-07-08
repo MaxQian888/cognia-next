@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for buildLarkA2UICard + parseLarkInteractiveCallback (G3.4).
  */

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the M5 cron-bridge. Uses real Dexie (fake-indexeddb) so
  * the scheduler-db round-trip is exercised end-to-end.

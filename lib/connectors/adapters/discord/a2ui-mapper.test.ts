@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the Discord A2UI mapper — embeds + components projection
  * with callback-binding persistence against the v38 schema.

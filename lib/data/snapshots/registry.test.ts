@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import {
   DOMAIN_SNAPSHOT_MODULES,
   SNAPSHOT_MODULES,

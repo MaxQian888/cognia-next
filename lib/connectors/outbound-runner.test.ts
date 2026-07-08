@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/connectors/outbound-runner.ts — Tasks 38 & 39.
  *

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the shared A2UI mapper toolkit.
  *

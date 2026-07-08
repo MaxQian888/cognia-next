@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { invoke } from "@tauri-apps/api/core"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"

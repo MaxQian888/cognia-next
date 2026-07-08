@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Tests for the live session-control round-trip (`sessionControl` + the typed
 // wrappers). Drives the singleton `control_response` listener by capturing the
 // handler passed to `transport.subscribe` and feeding it synthetic events.

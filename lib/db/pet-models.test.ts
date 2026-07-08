@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the pet Live2D model storage CRUD layer (v73).
 
 import "fake-indexeddb/auto"

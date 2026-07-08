@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the MCP server CRUD module. Uses fake-indexeddb to hit the
 // Dexie store directly. We mock the lazy-imported sync module so we never
 // pull Tauri IPC into jsdom.

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/connector-drafts.ts — outbound draft approval queue.
  */

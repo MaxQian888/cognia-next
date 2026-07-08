@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Capability-audit tests. Pure validation is exercised with a hand-built
  * known-id snapshot; the store-sweep + sidecar path mocks the registry/Dexie

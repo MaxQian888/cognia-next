@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { requestPersistentStorage, isStoragePersisted } from "./persistence-request"
 
 const original = (globalThis.navigator as Navigator | undefined)?.storage

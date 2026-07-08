@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the owner-side share service. Network is mocked; the Dexie
 // mirror uses fake-indexeddb. An explicit endpoint is injected so the tests
 // don't depend on settings/keyring resolution.

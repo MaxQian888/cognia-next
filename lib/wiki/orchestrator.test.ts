@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * End-to-end coverage for `lib/wiki/orchestrator.ts` — the wiki rebuild
  * driver.

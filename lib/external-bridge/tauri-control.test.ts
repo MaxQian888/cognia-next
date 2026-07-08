@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the MCP server Tauri command wrappers.
  *

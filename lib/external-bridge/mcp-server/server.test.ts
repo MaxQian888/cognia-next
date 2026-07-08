@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the MCP server skeleton — exercises tool registration +
  * the gate→handler→envelope dispatch using the SDK's in-memory transport.

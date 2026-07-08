@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import {
   AUTOSTART_CHANGED_EVENT,
   broadcastAutostartChanged,

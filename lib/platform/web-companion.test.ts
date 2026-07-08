@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /** Web-standalone → cloud-companion detection (ADR-0059 C1). */
 import {
   buildTimeServerUrl,

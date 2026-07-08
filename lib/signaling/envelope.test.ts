@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the HMAC envelope: deterministic canonical JSON, round-trip
  * sign/verify, replay window, clock-skew enforcement, and tamper detection.

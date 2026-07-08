@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Plugin Context Tests
  */

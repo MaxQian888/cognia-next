@@ -18,7 +18,6 @@
 import { expect, test } from "@playwright/test"
 import { createTelegramMockServer } from "../connectors/telegram-mock-server"
 
-const MOCK_PORT = 19877
 const APP_BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000"
 
 let mock: ReturnType<typeof createTelegramMockServer> | null = null
@@ -26,7 +25,8 @@ let mock: ReturnType<typeof createTelegramMockServer> | null = null
 test.describe("connector.inbound → workflow trigger", () => {
   test.beforeAll(async () => {
     mock = createTelegramMockServer()
-    await mock.start(MOCK_PORT)
+    // Ephemeral port — parallel workers must never collide on a fixed one.
+    await mock.start(0)
   })
 
   test.afterAll(async () => {

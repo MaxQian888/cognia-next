@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the teamPrObservations CRUD module — record/get round-trip,
 // team-scoped newest-first listing, nudge-signature update, and per-run clear.
 // Uses fake-indexeddb so the real Dexie query path runs in memory.

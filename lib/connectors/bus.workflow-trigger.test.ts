@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Verifies that `dispatchInboundFull` fans out to matching workflows after
  * routing + audit. The trigger dispatch is the M2 addition; the existing

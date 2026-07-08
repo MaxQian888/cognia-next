@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/inbound-ledger.ts — dedup ledger for inbound messages.
  */

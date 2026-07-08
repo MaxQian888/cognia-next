@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/conversation-overrides.ts — per-conversation settings CRUD.
  */

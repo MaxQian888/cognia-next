@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 const renderMock = jest.fn(async (id: string, source: string) => ({
   svg: `<svg data-id="${id}">${source}</svg>`,
 }))

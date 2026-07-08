@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import { useSkillsStore, type ImportStaging, type SkillFilters } from "./skills-store"
 import { DEFAULT_SKILL_PANEL_PREFS } from "@/lib/skills/preferences"

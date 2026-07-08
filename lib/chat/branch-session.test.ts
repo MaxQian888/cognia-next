@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { branchSessionAtMessage, renderTranscript } from "./branch-session"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"

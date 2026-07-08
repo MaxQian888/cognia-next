@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * A2UI Thumbnail Generation Tests
  */

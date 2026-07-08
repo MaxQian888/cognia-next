@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { canAfford, consumeItem, purchaseItem } from "./shop"
 import { getPetItem } from "./item-catalog"

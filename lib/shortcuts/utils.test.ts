@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { normalizeKeyCombo, parseKeyEvent, formatKeybinding } from "./utils"
 
 describe("normalizeKeyCombo", () => {

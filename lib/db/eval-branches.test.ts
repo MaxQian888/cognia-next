@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Branch coverage for the eval Dexie CRUD guards + optional-field paths that
  * the happy-path suites don't exercise (empty-id early returns, missing-row

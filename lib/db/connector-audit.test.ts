@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/connector-audit.ts — capped audit log for connectors.
  */

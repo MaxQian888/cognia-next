@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the System (Web Speech API) TTS helpers. Stubs
  * `window.speechSynthesis` and `window.SpeechSynthesisUtterance` so the

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the v49 inbox-connectors MCP handlers.
  *

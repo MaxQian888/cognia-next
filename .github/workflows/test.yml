@@ -3,7 +3,25 @@ name: Test Suite
 # ============================================================================
 # Test Suite & Build Verification
 # ============================================================================
-# Runs tests with coverage and builds the Next.js application.
+# Job graph:
+#   test (jest, 4 coverage shards) ─┐
+#                                   ├─ coverage-merge (merge maps + enforce
+#   sidecar (node --test suites)    │   thresholds + publish junit)
+#   build (plain static export, bundle size)
+#   build-e2e (NEXT_PUBLIC_E2E=1 export) ─ e2e (Playwright shards, static
+#                                            server) ─ e2e-report (merge blobs)
+#
+# Jest shards run with --coverageThreshold='{}' because a shard only sees
+# partial coverage for files whose tests landed on another shard; the real
+# gate is scripts/test/merge-coverage.mjs in coverage-merge, which applies
+# scripts/test/coverage-thresholds.json (the same file jest.config.ts uses)
+# with Jest's exact glob/path/global semantics.
+#
+# E2E runs against the prebuilt static export (PLAYWRIGHT_STATIC=1 →
+# scripts/e2e/serve-out.mjs) instead of `pnpm dev`, so specs never pay
+# Turbopack's per-route compilation. NEXT_PUBLIC_E2E must be present at BUILD
+# time for the export (build-e2e job) — it is dead-code-eliminated otherwise.
+#
 # This workflow works OUT-OF-THE-BOX without requiring any secrets.
 #
 # OPTIONAL: Codecov Integration (commented out by default)
@@ -24,17 +42,16 @@ concurrency:
 
 jobs:
   test:
-    name: Test Suite
+    name: Jest (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
 
     permissions:
       contents: read
-      pull-requests: write
-      checks: write
 
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [20.x]
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout code
@@ -47,32 +64,86 @@ jobs:
         with:
           version: 10
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20.x
           cache: "pnpm"
-
-      - name: Cache Next.js build
-        uses: actions/cache@v5
-        with:
-          path: |
-            .next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run tests with coverage
-        run: pnpm test:coverage
+      # Thresholds are intentionally disabled per shard (see header comment);
+      # the json reporter emits the raw istanbul map for the merge job.
+      - name: Run Jest shard with coverage
+        run: >-
+          pnpm exec jest --coverage --shard=${{ matrix.shard }}/4
+          --coverageReporters=json --coverageThreshold='{}'
+        env:
+          JEST_COVERAGE: "1"
+          JEST_JUNIT_OUTPUT_NAME: junit-shard-${{ matrix.shard }}.xml
 
-      - name: Install sidecar dependencies
-        run: pnpm sidecars:install
+      - name: Upload shard coverage + junit
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: jest-shard-${{ matrix.shard }}
+          path: |
+            coverage/coverage-final.json
+            coverage/junit-shard-${{ matrix.shard }}.xml
+          retention-days: 7
 
-      - name: Run sidecar tests (Claude + VS Code ext host)
-        run: pnpm sidecars:test
+  coverage-merge:
+    name: Coverage Merge & Gate
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The merge/threshold tooling itself gates this job — run its own
+      # node --test suites first so a broken script fails loudly, not by
+      # silently passing a bad merge.
+      - name: Test the coverage tooling
+        run: pnpm test:coverage:merge:test && pnpm test:coverage:changed:test && pnpm e2e:serve:test
+
+      - name: Download shard artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: jest-shard-*
+          path: shards/
+
+      # Skip the gate when a shard failed — its coverage map is incomplete
+      # and thresholds would report phantom regressions on top of the real
+      # test failure the shard job already surfaced.
+      - name: Merge shard coverage and enforce thresholds
+        if: needs.test.result == 'success'
+        run: node scripts/test/merge-coverage.mjs --check --out coverage shards/jest-shard-*/
+
+      - name: Merge shard coverage (report only — shards failed)
+        if: needs.test.result != 'success'
+        run: node scripts/test/merge-coverage.mjs --out coverage shards/jest-shard-*/
 
       - name: Generate coverage summary
         if: always()
@@ -98,39 +169,8 @@ jobs:
       #     name: codecov-umbrella
       #     fail_ci_if_error: false
       #   continue-on-error: true
-      #
-      # - name: Code Coverage Report
-      #   uses: irongut/CodeCoverageSummary@v1.3.0
-      #   if: github.event_name == 'pull_request'
-      #   with:
-      #     filename: coverage/cobertura-coverage.xml
-      #     badge: true
-      #     fail_below_min: false
-      #     format: markdown
-      #     hide_branch_rate: false
-      #     hide_complexity: true
-      #     indicators: true
-      #     output: both
-      #     thresholds: '60 80'
-      #   continue-on-error: true
-      #
-      # - name: Add Coverage PR Comment
-      #   uses: marocchino/sticky-pull-request-comment@v2
-      #   if: github.event_name == 'pull_request'
-      #   with:
-      #     recreate: true
-      #     path: code-coverage-results.md
-      #   continue-on-error: true
 
-      - name: Upload test results
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: test-results
-          path: coverage/junit.xml
-          retention-days: 30
-
-      - name: Upload coverage report
+      - name: Upload merged coverage report
         uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -143,10 +183,77 @@ jobs:
         if: always() && github.event_name == 'pull_request'
         with:
           files: |
-            coverage/junit.xml
+            shards/jest-shard-*/junit-shard-*.xml
           check_name: Test Results
           comment_title: Test Results
         continue-on-error: true
+
+  sidecar:
+    name: Sidecar Tests
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install sidecar dependencies
+        run: pnpm sidecars:install
+
+      - name: Run sidecar tests (Claude + VS Code ext host)
+        run: pnpm sidecars:test
+
+  build:
+    name: Build Verification
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: "pnpm"
+
+      - name: Cache Next.js build
+        uses: actions/cache@v5
+        with:
+          path: |
+            .next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build Next.js application
         run: pnpm build
@@ -173,9 +280,60 @@ jobs:
           du -sb out/ | cut -f1 > .github/size-snapshot/build-size.txt
         continue-on-error: true
 
-  e2e:
-    name: E2E Suite (Playwright)
+  build-e2e:
+    name: Build E2E Static Export
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: "pnpm"
+
+      # Separate cache key from the plain verification build — the E2E flag
+      # changes the compiled output, so the two builds must not share
+      # incremental state.
+      - name: Cache Next.js build (E2E)
+        uses: actions/cache@v5
+        with:
+          path: |
+            .next/cache
+          key: ${{ runner.os }}-nextjs-e2e-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-e2e-${{ hashFiles('**/pnpm-lock.yaml') }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # NEXT_PUBLIC_E2E must be present at BUILD time so ExposeTestGlobals
+      # (window.__cognia* seed/reset bridges every spec depends on) is
+      # compiled into the export — it is dead-code-eliminated otherwise.
+      - name: Build Next.js static export (E2E)
+        run: pnpm test:e2e:build
+
+      - name: Upload E2E build
+        uses: actions/upload-artifact@v7
+        with:
+          name: nextjs-build-e2e
+          path: out/
+          retention-days: 3
+
+  e2e:
+    name: E2E ${{ matrix.project }} (shard ${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    needs: build-e2e
 
     permissions:
       contents: read
@@ -186,6 +344,7 @@ jobs:
         project:
           - chromium
           - mobile-pixel-7
+        shard: [1, 2]
 
     steps:
       - name: Checkout code
@@ -224,26 +383,82 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: pnpm exec playwright install-deps chromium
 
-      - name: Run Playwright tests (${{ matrix.project }})
-        run: pnpm exec playwright test --project=${{ matrix.project }}
+      - name: Download E2E static export
+        uses: actions/download-artifact@v7
+        with:
+          name: nextjs-build-e2e
+          path: out/
+
+      # PLAYWRIGHT_STATIC=1 serves the downloaded export via
+      # scripts/e2e/serve-out.mjs — no Turbopack, no per-route compiles.
+      # Blob reporter feeds the e2e-report merge job.
+      - name: Run Playwright tests (${{ matrix.project }} ${{ matrix.shard }}/2)
+        run: >-
+          pnpm exec playwright test --project=${{ matrix.project }}
+          --shard=${{ matrix.shard }}/2 --reporter=blob,list
         env:
           CI: "true"
-          NEXT_PUBLIC_E2E: "1"
+          PLAYWRIGHT_STATIC: "1"
 
-      - name: Upload Playwright HTML report
+      - name: Upload blob report
         uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: playwright-report-${{ matrix.project }}
-          path: playwright-report/
-          retention-days: 14
+          name: e2e-blob-${{ matrix.project }}-${{ matrix.shard }}
+          path: blob-report/
+          retention-days: 7
 
       - name: Upload Playwright trace + screenshots
         uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: playwright-traces-${{ matrix.project }}
+          name: playwright-traces-${{ matrix.project }}-${{ matrix.shard }}
           path: test-results/
+          retention-days: 14
+
+  e2e-report:
+    name: E2E Merged Report
+    runs-on: ubuntu-latest
+    needs: e2e
+    if: always()
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v7
+        with:
+          pattern: e2e-blob-*
+          path: all-blob-reports/
+          merge-multiple: true
+
+      - name: Merge into HTML report + annotations
+        run: pnpm exec playwright merge-reports --reporter html,github ./all-blob-reports
+
+      - name: Upload merged Playwright HTML report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
           retention-days: 14
 
   e2e-ios-weekly:

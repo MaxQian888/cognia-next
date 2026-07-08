@@ -22,6 +22,14 @@
  * `webServer` block. Set PLAYWRIGHT_NO_SERVER=1 to opt out (when you already
  * have `pnpm dev` running in another shell).
  *
+ * Set PLAYWRIGHT_STATIC=1 to serve the prebuilt static export (`out/`) via
+ * `scripts/e2e/serve-out.mjs` instead of `pnpm dev`. This removes Turbopack's
+ * per-route on-demand compilation (~30s worst case on first hit) so the test
+ * timeout drops back to 30s. The export must be built with
+ * `NEXT_PUBLIC_E2E=1 pnpm build` first — `pnpm test:e2e:build` does exactly
+ * that, and `pnpm test:e2e:static` runs the suite against it. The serve
+ * script refuses to start when the export lacks the E2E bridge.
+ *
  * Set PLAYWRIGHT_NO_GLOBAL_SETUP=1 to skip the V2 + per-service mock fleet
  * (only useful for the existing connector tests which spin up their own
  * mocks).
@@ -32,19 +40,29 @@ import { defineConfig, devices } from "@playwright/test"
 const tauriEnabled =
   process.env.PLAYWRIGHT_TAURI === "1" || process.env.PLAYWRIGHT_TAURI_DRIVER === "1"
 const iosEnabled = process.env.PLAYWRIGHT_MOBILE_IOS === "1"
+const staticMode = process.env.PLAYWRIGHT_STATIC === "1"
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  fullyParallel: false, // connector + workflow tests share Dexie singleton in dev
+  // Files run in parallel across workers; tests WITHIN a file stay serial
+  // (fullyParallel: false). Every chromium/mobile spec is parallel-safe: each
+  // test gets a fresh browser context (fresh IndexedDB/Dexie), workflow specs
+  // reset the DB per test, and the shared global-setup mock fleet is only
+  // consumed read-only at its default scenario from these projects. The tauri
+  // project is the exception — its fixture reuses the ONE WebView2 page/context
+  // (tests/e2e/tauri/fixtures.ts) and its chat specs mutate the shared
+  // anthropic mock scenario via /__control — so tauri runs stay single-worker.
+  fullyParallel: false,
   // Each test's beforeEach reloads through AccountGate (the dev-unlock marker is
   // sessionStorage, reset per browser context) and waits for the test-globals
   // bridge to mount. Under Turbopack dev that mount races route compilation and
   // can approach 30s on the first hit of a route, so the default 30s test budget
-  // is too tight. A static-export CI build mounts fast and never approaches this.
-  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 60_000),
+  // is too tight. The static export (PLAYWRIGHT_STATIC=1) has no route
+  // compilation, mounts fast, and keeps the default 30s budget.
+  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? (staticMode ? 30_000 : 60_000)),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: 1,
+  workers: tauriEnabled ? 1 : process.env.CI ? 4 : "50%",
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never", outputFolder: "playwright-report" }], ["github"]]
     : [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
@@ -60,17 +78,28 @@ export default defineConfig({
 
   webServer: process.env.PLAYWRIGHT_NO_SERVER
     ? undefined
-    : {
-        command: "pnpm dev",
-        url: "http://localhost:3000",
-        reuseExistingServer: !process.env.CI,
-        timeout: Number(process.env.PLAYWRIGHT_WEBSERVER_TIMEOUT ?? 300_000),
-        stdout: "ignore",
-        stderr: "pipe",
-        env: {
-          NEXT_PUBLIC_E2E: "1",
+    : staticMode
+      ? {
+          // Serves the prebuilt `out/` export — binds in well under a second,
+          // so a short startup budget fails fast on a missing/stale build.
+          command: "node scripts/e2e/serve-out.mjs --port 3000 --host 127.0.0.1",
+          url: "http://localhost:3000",
+          reuseExistingServer: !process.env.CI,
+          timeout: Number(process.env.PLAYWRIGHT_WEBSERVER_TIMEOUT ?? 30_000),
+          stdout: "ignore",
+          stderr: "pipe",
+        }
+      : {
+          command: "pnpm dev",
+          url: "http://localhost:3000",
+          reuseExistingServer: !process.env.CI,
+          timeout: Number(process.env.PLAYWRIGHT_WEBSERVER_TIMEOUT ?? 300_000),
+          stdout: "ignore",
+          stderr: "pipe",
+          env: {
+            NEXT_PUBLIC_E2E: "1",
+          },
         },
-      },
 
   projects: [
     {

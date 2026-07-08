@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the first-run seeder — verifies that all four seed surfaces
 // (characters, skills, presets, teams) are populated after one call, and
 // that re-invoking is idempotent.

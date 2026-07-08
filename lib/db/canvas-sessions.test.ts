@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/canvas-sessions.ts (schema v11+ canvasSessions table).
  */

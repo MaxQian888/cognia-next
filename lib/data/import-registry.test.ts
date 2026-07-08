@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Dispatcher / persistence tests for the chat-import surface.
 
 import "fake-indexeddb/auto"

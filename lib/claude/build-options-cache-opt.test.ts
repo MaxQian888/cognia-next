@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Targeted coverage for the cache-friendly prompt assembly branch of
  * `resolveSendOptions` (`AppSettings.cacheOptimizationEnabled`). The flag is

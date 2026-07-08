@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { revealArtifactInWorkspace } from "./reveal"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/outbound-jobs.ts — outbound delivery queue CRUD.
  */

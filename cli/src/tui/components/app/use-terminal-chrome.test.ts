@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 
 import { useTerminalChrome, type TerminalChromeOptions } from "./use-terminal-chrome"

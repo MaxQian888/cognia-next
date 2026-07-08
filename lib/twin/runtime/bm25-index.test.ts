@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the per-twin BM25 index cache. Uses fake-indexeddb so the
  * cache's version-signal rebuild path runs against the real Dexie indexes.

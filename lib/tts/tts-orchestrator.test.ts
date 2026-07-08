@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the singleton TTS orchestrator. Mocks every provider plus the
  * cache layer so we can exercise:

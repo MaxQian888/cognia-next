@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { deriveContextKeys, detectOs, type ContextKeyInputs } from "./derive-context-keys"
 
 const base: ContextKeyInputs = {

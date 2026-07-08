@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for Canvas Plugin API
  */

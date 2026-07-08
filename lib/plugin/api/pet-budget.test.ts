@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import {
   __resetPetBudgetForTesting,
   consumePetBudget,

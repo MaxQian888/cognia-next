@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the project-instruction-file + markdown-subagent wiring in
  * `resolveSendOptions`. The on-disk loader is mocked — the pure loader itself

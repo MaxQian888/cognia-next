@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 
 import { useBashShellout } from "./use-bash-shellout"

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the shared twin-injection helper (M6). The downstream
  * `applyTwinContext` is exercised by its own tests — here we focus on

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 
 // Plugin hook fan-out — asserted per dispatch kind; the real hooks system is

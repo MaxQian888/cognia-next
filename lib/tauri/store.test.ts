@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Provide a per-test mock for LazyStore so we can control success vs. failure.
 const lazyStoreInstances: MockLazyStore[] = []
 

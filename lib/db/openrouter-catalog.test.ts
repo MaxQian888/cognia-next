@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the OpenRouter catalog cache CRUD (Dexie v93). Uses fake-indexeddb
 // to exercise the real Dexie query path in-memory.
 

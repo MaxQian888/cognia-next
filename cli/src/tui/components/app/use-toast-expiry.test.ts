@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { renderHook } from "@testing-library/react"
 
 import { useToastExpiry, defaultToastTtl, type ToastTimers } from "./use-toast-expiry"

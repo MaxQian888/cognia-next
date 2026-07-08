@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { Goal, GoalConfig } from "@/types/goal"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"

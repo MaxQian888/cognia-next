@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/plugin/connectors-bridge.ts — Task 110.
  *

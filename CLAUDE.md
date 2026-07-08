@@ -24,8 +24,19 @@ These are project-level hard rules. They override any default behavior to the co
 # Frontend (port 3000)
 pnpm dev / build / start / lint / lint:fix / format / format:check / typecheck
 
-# Jest tests (co-located *.test.ts(x))
+# Jest tests (co-located *.test.ts(x)); two projects: pure-.ts suites under
+# lib/stores/cli/packages/types/plugins/i18n run in the fast `node` env,
+# everything else (and any `/** @jest-environment jsdom */`-docblocked .ts
+# file — required for Dexie/getDb, localStorage, window stubs) runs in jsdom
 pnpm test / test:watch / test:coverage
+pnpm test:changed            # only suites affected by your diff vs master
+pnpm test:coverage:changed   # scoped coverage for changed files only (fast; -- --strict gates at 90%)
+
+# Playwright E2E (tests/e2e/; chromium+mobile run file-parallel, tauri stays serial)
+pnpm test:e2e                # against the Turbopack dev server (60s test budget)
+pnpm test:e2e:build          # NEXT_PUBLIC_E2E=1 static export → out/
+pnpm test:e2e:static         # against the prebuilt out/ (fast, no per-route compiles; run test:e2e:build first)
+pnpm test:e2e:changed        # only specs affected by your diff vs master
 
 # Tauri desktop
 pnpm tauri dev / build / info

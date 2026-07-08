@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { cn, formatVideoTime, formatDurationShort, isTauri, responsiveSelectClass } from "./index"
 
 describe("cn", () => {

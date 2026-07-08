@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { renderHook } from "@testing-library/react"
 import { useAutoMode } from "./use-auto-mode"
 import { useSettingsStore } from "@/stores/settings"

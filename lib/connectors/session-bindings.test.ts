@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/connectors/session-bindings.ts — IM conversation ↔ ChatSession
  * binding lookups (control-plane multi-session).

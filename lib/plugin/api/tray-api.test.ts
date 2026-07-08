@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { createTrayAPI } from "./tray-api"
 import { __resetTrayRegistryForTesting, listTrayItems } from "@/lib/tray/registry"
 

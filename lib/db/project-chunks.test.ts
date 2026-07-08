@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { ProjectChunk } from "@/types/project-knowledge"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"

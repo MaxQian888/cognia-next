@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // React hook tests for the CCSwitch data-fetching wrappers. Mocks the
 // underlying client so the hook behaviour can be observed without IPC.
 

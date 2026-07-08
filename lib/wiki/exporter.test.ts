@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the wiki Markdown exporter — round-trip articles to a
  * fake-fs and verify the rendered MDX shape + idempotency.

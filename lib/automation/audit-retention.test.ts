@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for ADR-0020 W1 audit retention sweeper. Uses `fake-indexeddb`
  * so the Dexie store has a real in-memory IDB to talk to.

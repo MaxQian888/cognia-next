@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Clobber-guard tests for external-agent session re-import (ADR-0062).
 
 import "fake-indexeddb/auto"

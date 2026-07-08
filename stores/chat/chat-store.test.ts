@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import type { UIMessage } from "ai"
 import type { PendingApproval, SendOptions } from "@/lib/claude/types"

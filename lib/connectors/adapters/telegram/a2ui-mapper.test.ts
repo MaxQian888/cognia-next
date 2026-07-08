@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the Telegram A2UI mapper.
  *

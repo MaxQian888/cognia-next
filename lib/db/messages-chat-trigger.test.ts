@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Verifies that `persistMessages` fires `trigger.chat.message` exactly once
  * per newly-arrived user message. The earlier 15 tests in `messages.test.ts`

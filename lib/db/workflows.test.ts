@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // CRUD coverage for the workflows table — list/get/create/update/replace/
 // delete plus duplicate, seed, and the regenerateNodeIds helper.
 

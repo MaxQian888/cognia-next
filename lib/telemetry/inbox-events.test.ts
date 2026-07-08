@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the trackInboxEvent convenience wrapper.
  *

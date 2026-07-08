@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for Plugin A2UI Bridge
  */

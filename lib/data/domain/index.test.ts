@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the per-domain export/import surface. We seed each domain's
 // table, build an export, then apply it back into a fresh DB and confirm the
 // rows are restored.

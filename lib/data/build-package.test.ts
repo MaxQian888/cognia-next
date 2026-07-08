@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // End-to-end test for `buildBackupPackage` against a fake IndexedDB. We seed
 // each table, build a v3 package, and verify the manifest, payload, checksum,
 // and behavior of the include* options.

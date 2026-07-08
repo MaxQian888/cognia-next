@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * End-to-end bus runtime test — Task 28.
  *

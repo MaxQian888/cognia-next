@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { isAutostartEnabled, enableAutostart, disableAutostart, setAutostart } from "./autostart"
 
 jest.mock("@tauri-apps/plugin-autostart", () => ({

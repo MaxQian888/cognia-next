@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the models.dev catalog cache CRUD (Dexie v60). Uses
 // fake-indexeddb to exercise the real Dexie query path in-memory.
 

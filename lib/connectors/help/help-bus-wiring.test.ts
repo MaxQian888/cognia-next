@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Integration test for the bus-level help / welcome wiring + the
  * `help_quick_command` callback short-circuit. Drives the real

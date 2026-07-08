@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for ConnectorBus.applyMessageEdit / applyMessageDelete after the
  * v49 messages.platformMessageId index landed. These previously used

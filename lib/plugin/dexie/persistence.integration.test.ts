@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Integration test: plugin Dexie table data persists across db close/reopen.
  *

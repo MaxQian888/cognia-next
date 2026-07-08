@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for `lib/external-bridge/audit-log.ts` — the policy wrapper that
  * funnels every MCP call through `appendMcpAuditLog`.

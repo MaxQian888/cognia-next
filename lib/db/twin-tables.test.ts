@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Integration coverage for the five Employee Digital Twin Dexie tables and
  * their CRUD modules. Lives next to `lib/db/twin-{sources,chunks,profile,

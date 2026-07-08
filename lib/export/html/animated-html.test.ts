@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { exportToAnimatedHtml } from "./animated-html"
 import type { ChatSession, StoredMessage } from "@/lib/claude/types"
 

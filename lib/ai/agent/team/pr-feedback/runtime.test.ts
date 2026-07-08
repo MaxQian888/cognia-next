@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Wiring-proof integration test for the PR feedback runtime glue: a failing-CI
 // PR observed through the real controller + reaction engine lands a
 // `review_pickup` mailbox message and a persisted `ci_failed` observation row.

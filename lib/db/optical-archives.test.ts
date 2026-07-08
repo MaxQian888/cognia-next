@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the opticalArchives CRUD module — save/replace, per-session and
 // global newest-first listing, get/delete/clear, and cap pruning. Uses
 // fake-indexeddb so we exercise the real Dexie query path in memory.

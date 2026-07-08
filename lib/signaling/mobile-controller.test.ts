@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Mobile-controller — covers the `applySettings` reducer that the
  * production `installMobileSignalingController` plumbs through

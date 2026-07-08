@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/platform-identities.ts — CRUD for platformIdentities table.
  */

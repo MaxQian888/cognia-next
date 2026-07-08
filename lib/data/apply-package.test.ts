@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Verifies that applyBackupPackage applies the v3 payload to the local Dexie
 // database under each merge strategy, respects built-ins, and handles the
 // non-`id`-keyed tables (trustedWorkspaces / sessionState / ttsProviderKeys).

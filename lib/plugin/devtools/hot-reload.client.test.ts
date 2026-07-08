@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Plugin Hot Reload Client Hook Tests
  */

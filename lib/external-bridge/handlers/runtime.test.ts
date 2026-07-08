@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the `runtime_query` MCP handler. Drives Dexie via
  * fake-indexeddb against the seeded built-ins so the tests exercise real

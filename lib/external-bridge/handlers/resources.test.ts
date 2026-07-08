@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the MCP `resources/*` handlers — listing + reading +
  * scope/uri parsing.

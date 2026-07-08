@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the skills CRUD layer + bulk-import + render helpers.
 
 import "fake-indexeddb/auto"

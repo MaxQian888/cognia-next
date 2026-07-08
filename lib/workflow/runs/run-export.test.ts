@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { downloadRunExport, downloadRunsCsv, downloadRunsJson, runsToCsv } from "./run-export"
 import {
   DEFAULT_WORKFLOW_SETTINGS,

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { getOsInfo, isLinuxPlatform, isMacPlatform } from "./os"
 
 jest.mock("@tauri-apps/plugin-os", () => ({

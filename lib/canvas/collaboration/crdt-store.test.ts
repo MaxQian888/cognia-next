@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Comprehensive Tests for CRDT Store
  */

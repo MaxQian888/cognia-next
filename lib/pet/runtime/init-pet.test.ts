@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { ensurePetProfile, hatchPet } from "./init-pet"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"

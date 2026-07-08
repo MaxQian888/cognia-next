@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Plugin Dev Server Client Hook Tests
  */

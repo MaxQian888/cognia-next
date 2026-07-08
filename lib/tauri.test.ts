@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { greet, isCapacitor, isTauri, transport } from "./tauri"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"

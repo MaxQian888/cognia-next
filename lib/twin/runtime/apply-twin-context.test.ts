@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Integration coverage for `applyTwinContext`. Uses fake-indexeddb +
  * in-memory IVectorStore + jest.spyOn for `generateEmbedding` so the

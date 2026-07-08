@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/connectors/runtime.ts — Task 37 + IM completion §A.
  *

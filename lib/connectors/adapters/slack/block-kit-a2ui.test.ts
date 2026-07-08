@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for buildSlackA2UIBlocks — Slack Block Kit projection of
  * an A2UI surface (G3.3).

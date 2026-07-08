@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for session creation, focused on the default-preset auto-apply
 // path added in v12 of the preset feature uplift. The non-preset behaviour
 // of `createSession` was tested implicitly through the broader app; we

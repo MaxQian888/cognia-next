@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the `rag_search` MCP handler. Drives the shared BM25 + flagship
  * pipeline (sanitize → expand → BM25 → fuse → rerank → grade → confidence →

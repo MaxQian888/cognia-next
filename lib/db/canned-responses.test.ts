@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "./schema"
 import {

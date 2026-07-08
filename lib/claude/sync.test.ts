@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Mock Dexie + IPC + tauri detection so the orchestrator can be exercised
 // purely in JS-land without a real backend.
 

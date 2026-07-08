@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { getLaunchCli } from "./cli"
 
 jest.mock("@tauri-apps/plugin-cli", () => ({

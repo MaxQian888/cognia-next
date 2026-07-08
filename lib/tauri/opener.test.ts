@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { openExternal, openPath, revealInExplorer } from "./opener"
 
 jest.mock("@tauri-apps/plugin-opener", () => ({

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Shared-memory orchestrator tests.
  *

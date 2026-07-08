@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { EvalReport } from "@/types/eval/eval"
 import {

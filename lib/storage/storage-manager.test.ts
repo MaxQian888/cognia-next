@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { StorageManager, __TESTING__ } from "./storage-manager"
 import { appendBackupHistory } from "@/lib/db/backup-history"

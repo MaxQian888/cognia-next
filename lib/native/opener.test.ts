@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
 jest.mock(
   "@tauri-apps/plugin-opener",

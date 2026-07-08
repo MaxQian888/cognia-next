@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the messages CRUD layer — list/persist/clear/truncateAfter.
 // Persistence is diff-based so we exercise the upsert-vs-delete branches
 // directly, plus the metadata hoisting (senderId/senderKind) round-trip.

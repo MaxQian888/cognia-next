@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the heartbeat loop:
  *   - recordHeartbeatNow writes one connectorHeartbeats row (v51 dedicated table)

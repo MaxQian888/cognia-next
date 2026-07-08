@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/adapter-instances.ts — CRUD for the v18 adapterInstances table.
  */

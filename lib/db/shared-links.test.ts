@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the share-link local-mirror CRUD layer.
 
 import "fake-indexeddb/auto"

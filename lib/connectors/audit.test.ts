@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the audit append helper (Task 28).
  */

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { createLive2dLoader, type EngineModule } from "./loader"
 import type { Live2DManifest, ModelFileEntry } from "./types"
 

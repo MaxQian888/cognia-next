@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { DEFAULT_WORKFLOW_FILTERS, useWorkflowLibraryStore } from "./workflow-library-store"

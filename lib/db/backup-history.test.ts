@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the backupHistory CRUD module — append, listing/filter, latest,
 // pruning, and clear/delete. Uses fake-indexeddb so we exercise the real Dexie
 // query path against an in-memory IDB.

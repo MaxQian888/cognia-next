@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Team-collaboration built-in tools — manifest + host-side router.
  *

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the wiki MCP handlers — `wiki_search` ranking + `wiki_read`
  * lookup. Drives Dexie via fake-indexeddb so the handlers exercise the

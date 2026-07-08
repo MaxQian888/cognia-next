@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Pipeline Integration Tests
  * End-to-end: template -> messages -> store -> ready

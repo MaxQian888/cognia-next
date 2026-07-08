@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 const invokeMock = jest.fn()
 
 jest.mock("@tauri-apps/api/core", () => ({

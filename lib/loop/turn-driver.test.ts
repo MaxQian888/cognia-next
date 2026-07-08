@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { LoopCreateInput } from "@/lib/db/loops"
 import { createLoop, getLoop, listLoopEvents, updateLoop } from "@/lib/db/loops"

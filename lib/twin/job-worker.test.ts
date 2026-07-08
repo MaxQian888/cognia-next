@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the distill-completion path of `processJob` — specifically
  * that per-agent `partialFailures` returned by `runDistillJob` are forwarded

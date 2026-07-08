@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the automation audit Dexie mirror. Uses `fake-indexeddb` for
  * an in-memory IDB shim — required because Jest's jsdom environment doesn't

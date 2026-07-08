@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"

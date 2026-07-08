@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the pet Dexie CRUD layer (v67).
 
 import "fake-indexeddb/auto"

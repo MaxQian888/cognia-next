@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { renderHook } from "@testing-library/react"
 import fs from "node:fs"
 import os from "node:os"

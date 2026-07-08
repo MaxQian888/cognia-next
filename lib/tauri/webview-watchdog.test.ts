@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import {
   __resetWebviewHeartbeatForTests,
   HEARTBEAT_INTERVAL_MS,

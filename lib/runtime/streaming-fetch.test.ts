@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { isCapacitor } from "@/lib/platform/detect"
 
 import { browserDirectHeaders, getStreamingFetch } from "./streaming-fetch"

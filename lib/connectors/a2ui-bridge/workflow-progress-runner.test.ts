@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { EnqueueInput } from "@/lib/db/outbound-jobs"

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the IndexedDB-backed TTS audio cache. Drives the real cache
  * manager against fake-indexeddb so we exercise the same code paths as

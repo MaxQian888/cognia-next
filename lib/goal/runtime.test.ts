@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { AppSettings } from "@/lib/claude/types"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"

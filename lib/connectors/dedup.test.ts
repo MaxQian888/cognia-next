@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the inbound dedup layer (Task 28).
  */

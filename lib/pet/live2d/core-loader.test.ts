@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { CUBISM_CORE_PUBLIC_PATH } from "./constants"
 import { ensureCubismCore, resetCubismCoreLoaderForTests } from "./core-loader"
 

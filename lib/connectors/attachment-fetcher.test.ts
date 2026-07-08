@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the TS-side attachment fetcher.
  *

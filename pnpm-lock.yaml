@@ -561,9 +561,21 @@ importers:
       fake-indexeddb:
         specifier: ^6.2.5
         version: 6.2.5
+      glob:
+        specifier: ^13.0.6
+        version: 13.0.6
       husky:
         specifier: ^9.1.7
         version: 9.1.7
+      istanbul-lib-coverage:
+        specifier: ^3.2.2
+        version: 3.2.2
+      istanbul-lib-report:
+        specifier: ^3.0.1
+        version: 3.0.1
+      istanbul-reports:
+        specifier: ^3.2.0
+        version: 3.2.0
       jest:
         specifier: ^30.4.2
         version: 30.4.2(@types/node@25.9.4)(ts-node@10.9.2(@swc/core@1.15.43)(@types/node@25.9.4)(typescript@6.0.3))

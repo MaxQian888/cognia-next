@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Targeted coverage for the twin-injection branch of `resolveSendOptions`.
  * The full resolver has its own tests covering precedence rules; here we

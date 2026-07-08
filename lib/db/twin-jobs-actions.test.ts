@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Focused coverage for the M1-era job-action helpers in
  * `lib/db/twin-jobs.ts`: `cancelJob` and `retryDeadLetterJob`. The other

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { transport } from "@/lib/tauri"
 
 jest.mock("@tauri-apps/api/event", () => ({

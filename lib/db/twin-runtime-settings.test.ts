@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 
 jest.mock("@/lib/tauri", () => ({

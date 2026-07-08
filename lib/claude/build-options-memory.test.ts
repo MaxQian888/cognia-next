@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Targeted coverage for the long-term-memory injection branch of
  * `resolveSendOptions`. Mirrors `build-options-twin.test.ts`.

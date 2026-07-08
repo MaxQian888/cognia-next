@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // CRUD coverage for the v15 plugin tables. Each table's module mirrors the
 // pattern set by `lib/db/skills.ts`, so the assertions focus on:
 //   * defaults applied by `create*` / `upsert*` helpers,

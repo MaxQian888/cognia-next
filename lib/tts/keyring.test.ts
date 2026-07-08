@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the TTS keyring frontend wrapper. Drives both code paths:
  *   - Tauri (mocks `@tauri-apps/api/core` and `lib/tauri.isTauri`)

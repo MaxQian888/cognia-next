@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Scheduler Database Tests
  */

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // CRUD coverage for the characters table — list/get/create/update/delete
 // plus the duplicate path and idempotent built-in seeder. ADR-0030 added
 // overlay-aware paths exercised below.

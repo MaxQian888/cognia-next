@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/canvas-comments.ts (schema v11+ canvasComments table).
  */

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { mouthOpenAt, LIP_SYNC_PARAM, LIP_SYNC_REST } from "./lip-sync"
 
 describe("lip-sync", () => {

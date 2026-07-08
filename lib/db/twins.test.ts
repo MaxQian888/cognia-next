@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the `twins` Dexie table (schema v29) and its CRUD module.
  * Covers basic CRUD, archive toggling, clone semantics, cascade delete

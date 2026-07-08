@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the redaction-map encryption helpers. We exercise the
  * Web-mode path (Tauri keyring is opaque to jsdom) — both branches

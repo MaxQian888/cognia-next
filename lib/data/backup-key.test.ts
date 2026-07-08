@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Behavior of the auto-key fallback. We test both the web (localStorage) path
 // and the desktop branch's resilience when the plugin isn't loaded — the
 // __mocks__/tauri-plugin-store.js shim returns null from `get`, so the code

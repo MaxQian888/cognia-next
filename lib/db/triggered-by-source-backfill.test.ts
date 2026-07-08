@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import Dexie from "dexie"
 import { backfillTriggeredBySourceV91 } from "./triggered-by-source-backfill"

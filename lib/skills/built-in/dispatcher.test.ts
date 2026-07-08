@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/skills/built-in/dispatcher.ts — trust-model gates and
  * execution pipeline. Mocks PII redact + audit append + binding write

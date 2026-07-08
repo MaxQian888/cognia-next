@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { saveCaseResult, listCaseResults, deleteCaseResultsForRun } from "./eval-run-cases"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"

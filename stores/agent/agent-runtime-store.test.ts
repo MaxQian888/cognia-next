@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import { useAgentRuntimeStore } from "./agent-runtime-store"
 // Touch the outer agent barrel so its `export *` lines are covered.

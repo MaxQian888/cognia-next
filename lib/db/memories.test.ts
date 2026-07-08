@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { Memory } from "@/types/memory/memory"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"

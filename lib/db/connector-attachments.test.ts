@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/connector-attachments.ts — cached platform attachment CRUD.
  */

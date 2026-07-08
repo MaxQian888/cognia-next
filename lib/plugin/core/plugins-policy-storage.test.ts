@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import {
   DEFAULT_POLICY,
   POLICY_STORAGE_KEY,

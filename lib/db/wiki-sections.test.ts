@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for `lib/db/wiki-sections.ts` — section CRUD + ordering.
  */

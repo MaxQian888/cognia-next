@@ -33,8 +33,11 @@
 import { test, expect } from "@playwright/test"
 import { createTelegramMockServer, makeTelegramUpdate } from "./telegram-mock-server"
 
-const MOCK_SERVER_PORT = 19876
 const APP_BASE_URL = "http://localhost:3000"
+
+// Assigned in beforeAll after the mock binds an ephemeral port (`start(0)`),
+// so parallel workers running other spec files can never collide on a port.
+let mockServerPort = 0
 
 // ── Test suite ────────────────────────────────────────────────────────────────
 
@@ -42,7 +45,8 @@ test.describe("Telegram bidirectional connector (mock server)", () => {
   // Start the mock Telegram server once before all tests in this suite.
   test.beforeAll(async () => {
     const server = createTelegramMockServer()
-    await server.start(MOCK_SERVER_PORT)
+    await server.start(0)
+    mockServerPort = server.port
     // Attach to test info so teardown can access it
     ;(global as Record<string, unknown>).__telegramMockServer = server
   })
@@ -91,7 +95,7 @@ test.describe("Telegram bidirectional connector (mock server)", () => {
   // ── Mock server self-test ─────────────────────────────────────────────────
 
   test("mock server responds to getMe", async ({ request }) => {
-    const resp = await request.get(`http://localhost:${MOCK_SERVER_PORT}/botFAKE_TOKEN/getMe`)
+    const resp = await request.get(`http://localhost:${mockServerPort}/botFAKE_TOKEN/getMe`)
     expect(resp.ok()).toBe(true)
     const body = await resp.json()
     expect(body.ok).toBe(true)
@@ -100,7 +104,7 @@ test.describe("Telegram bidirectional connector (mock server)", () => {
   })
 
   test("mock server responds to getUpdates (empty queue)", async ({ request }) => {
-    const resp = await request.get(`http://localhost:${MOCK_SERVER_PORT}/botFAKE_TOKEN/getUpdates`)
+    const resp = await request.get(`http://localhost:${mockServerPort}/botFAKE_TOKEN/getUpdates`)
     expect(resp.ok()).toBe(true)
     const body = await resp.json()
     expect(body.ok).toBe(true)
@@ -117,7 +121,7 @@ test.describe("Telegram bidirectional connector (mock server)", () => {
 
     // Drain the update
     const updatesResp = await request.get(
-      `http://localhost:${MOCK_SERVER_PORT}/botFAKE_TOKEN/getUpdates`
+      `http://localhost:${mockServerPort}/botFAKE_TOKEN/getUpdates`
     )
     const updates = await updatesResp.json()
     expect(updates.result).toHaveLength(1)
@@ -125,7 +129,7 @@ test.describe("Telegram bidirectional connector (mock server)", () => {
 
     // Simulate bot → user (outbound sendMessage)
     const sendResp = await request.post(
-      `http://localhost:${MOCK_SERVER_PORT}/botFAKE_TOKEN/sendMessage`,
+      `http://localhost:${mockServerPort}/botFAKE_TOKEN/sendMessage`,
       {
         data: { chat_id: 555, text: "Reply from bot" },
       }

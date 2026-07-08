@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import {
   PluginConsentBroker,
   PLUGIN_CONSENT_REQUEST_EVENT,

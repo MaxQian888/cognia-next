@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the dual-backend (Tauri disk / IndexedDB) wallpaper storage
 // abstraction. We mock `@tauri-apps/api/core` and the Tauri detector so a
 // single jsdom test can exercise both branches without spinning up the real

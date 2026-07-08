@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 jest.mock("@/lib/claude/ipc", () => ({
   getSidecarStatus: jest.fn(),
   hasApiKey: jest.fn(),

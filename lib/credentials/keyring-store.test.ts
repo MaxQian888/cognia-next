@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Generic keyring-store backend selection + round-trip. Mirrors the
  * battle-tested behaviour of `turn-credentials.ts` but parameterized by

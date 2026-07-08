@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { paneCenterScreenPoint } from "./pane-center"
 
 describe("paneCenterScreenPoint", () => {
