@@ -57,6 +57,11 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
     }),
 }))
 
+// ── twin catalog stub — the assignee-hint effect must not touch Dexie ────────
+jest.mock("@/lib/ai/agent/team/twin-context", () => ({
+  gatherTeamTwins: jest.fn(async () => []),
+}))
+
 // ── board stub — the kanban has its own suite; keep this one's graph light ───
 jest.mock("./board/task-board", () => ({
   TaskBoard: () => <div data-testid="mock-task-board" />,

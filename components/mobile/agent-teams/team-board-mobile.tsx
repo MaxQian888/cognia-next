@@ -16,7 +16,15 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { LockIcon, MessageSquareIcon, PauseIcon, PlayIcon, SendIcon, SquareIcon } from "lucide-react"
+import {
+  BotIcon,
+  LockIcon,
+  MessageSquareIcon,
+  PauseIcon,
+  PlayIcon,
+  SendIcon,
+  SquareIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -82,6 +90,8 @@ export function TeamBoardMobile({ teamId }: TeamBoardMobileProps) {
 
   const nameOf = (id: string | undefined) =>
     id ? (meta?.teammates.find((m) => m.id === id)?.name ?? id) : undefined
+  const twinBound = (id: string | undefined) =>
+    id ? Boolean(meta?.teammates.find((m) => m.id === id)?.twinId) : false
 
   const call = async (command: string, payload: Record<string, unknown>): Promise<boolean> => {
     setBusy(true)
@@ -197,6 +207,13 @@ export function TeamBoardMobile({ teamId }: TeamBoardMobileProps) {
                   </Badge>
                   {nameOf(task.claimedBy ?? task.assignedTo) && (
                     <span className="truncate">{nameOf(task.claimedBy ?? task.assignedTo)}</span>
+                  )}
+                  {twinBound(task.claimedBy ?? task.assignedTo) && (
+                    <BotIcon
+                      className="size-3"
+                      aria-label={t("twinBound")}
+                      data-testid={`mobile-board-card-${task.id}-twin`}
+                    />
                   )}
                   {task.dependencies.length > 0 && <LockIcon className="size-3 text-red-400" />}
                   {task.commentCount > 0 && (

@@ -1,11 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
 
 import { TaskBoard } from "./task-board"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { toast } from "sonner"
@@ -77,6 +78,14 @@ jest.mock("@dnd-kit/sortable", () => ({
   })),
 }))
 
+// Twin catalog: deterministic + keeps Dexie out of the suite.
+jest.mock("@/lib/ai/agent/team/twin-context", () => ({
+  gatherTeamTwins: jest.fn(async () => [
+    { id: "twin-9", name: "Ada", expertise: "frontend" },
+    { id: "twin-kb", name: "Kb", expertise: "docs" },
+  ]),
+}))
+
 // The toolbar's run controls reach the manager facade (whose import graph
 // drags in the whole runtime) — stub it.
 jest.mock("@/lib/ai/agent/agent-team", () => ({
@@ -124,7 +133,11 @@ const seed = () => {
 }
 
 const renderBoard = (ctx: ReturnType<typeof seed>) =>
-  render(<TaskBoard team={ctx.team} tasks={ctx.tasks()} teammates={ctx.teammates} />)
+  render(
+    <TooltipProvider>
+      <TaskBoard team={ctx.team} tasks={ctx.tasks()} teammates={ctx.teammates} />
+    </TooltipProvider>
+  )
 
 beforeEach(() => {
   useAgentTeamStore.getState().reset()
@@ -188,11 +201,13 @@ describe("TaskBoard", () => {
     const ctx = seed()
     useAgentTeamStore.getState().assignTask(ctx.pending1.id, ctx.mate.id)
     render(
-      <TaskBoard
-        team={ctx.team}
-        tasks={ctx.tasks()}
-        teammates={[useAgentTeamStore.getState().teammates[ctx.mate.id]]}
-      />
+      <TooltipProvider>
+        <TaskBoard
+          team={ctx.team}
+          tasks={ctx.tasks()}
+          teammates={[useAgentTeamStore.getState().teammates[ctx.mate.id]]}
+        />
+      </TooltipProvider>
     )
     await user.click(screen.getByTestId("board-swimlanes-toggle"))
     expect(screen.getByTestId("board-swimlanes")).toBeInTheDocument()
@@ -200,5 +215,31 @@ describe("TaskBoard", () => {
     expect(screen.getByTestId("board-lane-unassigned")).toBeInTheDocument()
     // Drag surface is gone in swimlane mode.
     expect(screen.queryByTestId("board-columns")).not.toBeInTheDocument()
+  })
+
+  it("shows twin badges on swimlane headers and knowledge-twin chips", async () => {
+    const user = userEvent.setup()
+    const ctx = seed()
+    const state = useAgentTeamStore.getState()
+    state.updateTeammate(ctx.mate.id, { config: { twinId: "twin-9" } })
+    state.updateTeam(ctx.team.id, {
+      config: { ...ctx.team.config, knowledgeTwinIds: ["twin-kb"] },
+    })
+    state.assignTask(ctx.pending1.id, ctx.mate.id)
+    const fresh = useAgentTeamStore.getState()
+    render(
+      <TooltipProvider>
+        <TaskBoard
+          team={fresh.teams[ctx.team.id]}
+          tasks={ctx.tasks()}
+          teammates={[fresh.teammates[ctx.mate.id]]}
+        />
+      </TooltipProvider>
+    )
+    // Knowledge twins resolve display names from the twin catalog (async
+    // gatherTeamTwins — the chip shows the raw id until the fetch lands).
+    await waitFor(() => expect(screen.getByTestId("board-knowledge-twins")).toHaveTextContent("Kb"))
+    await user.click(screen.getByTestId("board-swimlanes-toggle"))
+    expect(await screen.findByTestId(`board-lane-${ctx.mate.id}-twin`)).toHaveTextContent("Ada")
   })
 })

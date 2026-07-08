@@ -8,7 +8,7 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { LockIcon, MessageSquareIcon, MoreHorizontalIcon, Trash2Icon } from "lucide-react"
+import { BotIcon, LockIcon, MessageSquareIcon, MoreHorizontalIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Card } from "@/components/ui/card"
@@ -59,12 +59,20 @@ export interface TaskBoardCardProps {
   task: AgentTeamTask
   /** Resolved display name of claimedBy ?? assignedTo. */
   assigneeName?: string
+  /** The owner teammate's bound digital employee, when any (twin badge). */
+  twinName?: string
   lock: DependencyLockInfo
   /** Disables the drag handle (e.g. blocked column / runtime-owned while live). */
   dragDisabled?: boolean
 }
 
-export function TaskBoardCard({ task, assigneeName, lock, dragDisabled }: TaskBoardCardProps) {
+export function TaskBoardCard({
+  task,
+  assigneeName,
+  twinName,
+  lock,
+  dragDisabled,
+}: TaskBoardCardProps) {
   const t = useTranslations("agentTeamsWorkspace.tasks.board")
   const tTasks = useTranslations("agentTeamsWorkspace.tasks")
   const tPriority = useTranslations("agentPriority")
@@ -163,6 +171,21 @@ export function TaskBoardCard({ task, assigneeName, lock, dragDisabled }: TaskBo
             {tPriority(task.priority)}
           </Badge>
           {assigneeName && <span className="truncate">{assigneeName}</span>}
+          {twinName && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="outline"
+                  className="gap-0.5 px-1 py-0 text-[10px]"
+                  data-testid={`board-card-${task.id}-twin`}
+                >
+                  <BotIcon className="size-2.5" />
+                  {twinName}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t("twinBound", { name: twinName })}</TooltipContent>
+            </Tooltip>
+          )}
           {task.tags.slice(0, 3).map((tag) => (
             <span key={tag} className="rounded bg-muted px-1 py-0.5">
               {tag}

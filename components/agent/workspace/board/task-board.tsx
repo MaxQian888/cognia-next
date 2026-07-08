@@ -6,8 +6,9 @@
 // Swimlane mode is a read view (drag off): dragging across lanes would imply
 // reassignment, which the board deliberately does not do.
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { BotIcon } from "lucide-react"
 import {
   DndContext,
   PointerSensor,
@@ -37,6 +38,10 @@ import {
   type BoardFilter,
 } from "@/lib/ai/agent/team/board-model"
 import { allowedMoveTargets } from "@/lib/ai/agent/team/task-move-guard"
+import { gatherTeamTwins } from "@/lib/ai/agent/team/twin-context"
+import type { TeamTwinSummary } from "@/lib/ai/agent/team/team-run-context"
+import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TASK_STATUS_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeam, AgentTeammate, AgentTeamTask, TeamStatus } from "@/types/agent/agent-team"
 import { BoardToolbar } from "./board-toolbar"
@@ -53,6 +58,7 @@ function BoardColumnView({
   teamStatus,
   activeTask,
   nameOf,
+  twinNameOf,
   tasksById,
   dragDisabled,
 }: {
@@ -60,6 +66,7 @@ function BoardColumnView({
   teamStatus: TeamStatus
   activeTask: AgentTeamTask | null
   nameOf: (id: string | undefined) => string | undefined
+  twinNameOf?: (id: string | undefined) => string | undefined
   tasksById: ReadonlyMap<string, AgentTeamTask>
   dragDisabled: boolean
 }) {
@@ -110,6 +117,7 @@ function BoardColumnView({
               key={task.id}
               task={task}
               assigneeName={nameOf(task.claimedBy ?? task.assignedTo)}
+              twinName={twinNameOf?.(task.claimedBy ?? task.assignedTo)}
               lock={dependencyLockInfo(task, tasksById)}
               dragDisabled={dragDisabled}
             />
@@ -134,6 +142,29 @@ export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
   const [filter, setFilter] = useState<BoardFilter>(EMPTY_BOARD_FILTER)
   const [swimlanes, setSwimlanes] = useState(false)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
+
+  // Twin visibility: resolve names/expertise for the bindings the runtime
+  // already uses (teammate twinId + config.knowledgeTwinIds). Best-effort —
+  // an empty list simply hides the badges.
+  const [twins, setTwins] = useState<TeamTwinSummary[]>([])
+  useEffect(() => {
+    let cancelled = false
+    void gatherTeamTwins().then((list) => {
+      if (!cancelled) setTwins(list)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  const twinsById = useMemo(() => new Map(twins.map((t) => [t.id, t])), [twins])
+  const twinOf = (teammateId: string | undefined) => {
+    if (!teammateId) return undefined
+    const twinId = teammates.find((m) => m.id === teammateId)?.config?.twinId
+    return twinId
+      ? (twinsById.get(twinId) ?? { id: twinId, name: twinId, expertise: "" })
+      : undefined
+  }
+  const knowledgeTwinIds = team.config.knowledgeTwinIds ?? []
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
@@ -188,16 +219,52 @@ export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
         onSwimlanesChange={setSwimlanes}
       />
 
+      {/* Knowledge twins the team can consult via twin_knowledge_search —
+          team-level (config.knowledgeTwinIds), so shown once, not per card. */}
+      {knowledgeTwinIds.length > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground"
+          data-testid="board-knowledge-twins"
+        >
+          <span>{t("knowledgeTwins")}</span>
+          {knowledgeTwinIds.map((id) => (
+            <Badge key={id} variant="outline" className="gap-1 px-1.5 py-0 text-[10px]">
+              <BotIcon className="size-3" />
+              {twinsById.get(id)?.name ?? id}
+            </Badge>
+          ))}
+        </div>
+      )}
+
       {swimlanes ? (
         <div className="space-y-4" data-testid="board-swimlanes">
           {lanes.map((lane) => (
             <div key={lane.teammateId ?? "__unassigned__"} className="space-y-1.5">
               <p
-                className="text-xs font-medium"
+                className="flex items-center gap-2 text-xs font-medium"
                 data-testid={`board-lane-${lane.teammateId ?? "unassigned"}`}
               >
                 {lane.name ?? t("unassignedLane")}
-                <span className="ml-2 text-[10px] font-normal text-muted-foreground">
+                {lane.twinId && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge
+                        variant="outline"
+                        className="gap-1 px-1.5 py-0 text-[10px]"
+                        data-testid={`board-lane-${lane.teammateId}-twin`}
+                      >
+                        <BotIcon className="size-3" />
+                        {twinsById.get(lane.twinId)?.name ?? lane.twinId}
+                      </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("twinBound", {
+                        name: twinsById.get(lane.twinId)?.name ?? lane.twinId,
+                      })}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+                <span className="text-[10px] font-normal text-muted-foreground">
                   {lane.taskCount}
                 </span>
               </p>
@@ -236,6 +303,7 @@ export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
                 teamStatus={teamStatus}
                 activeTask={activeTask}
                 nameOf={nameOf}
+                twinNameOf={(id) => twinOf(id)?.name}
                 tasksById={tasksById}
                 dragDisabled={false}
               />

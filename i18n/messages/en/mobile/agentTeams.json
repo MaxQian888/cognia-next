@@ -12,7 +12,8 @@
       "pause": "Pause",
       "resume": "Resume",
       "stop": "Stop"
-    }
+    },
+    "twinBound": "Twin-bound teammate"
   },
   "tabs": {
     "activity": "Activity",

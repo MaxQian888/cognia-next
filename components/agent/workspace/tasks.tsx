@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
 import {
@@ -48,6 +48,9 @@ import { createLogger } from "@/lib/logging"
 import { TaskComments } from "./task-comments"
 import { TaskBoard } from "./board/task-board"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { gatherTeamTwins } from "@/lib/ai/agent/team/twin-context"
+import { rankAssigneesForTask } from "@/lib/ai/agent/team/twin-expertise-hints"
+import type { TeamTwinSummary } from "@/lib/ai/agent/team/team-run-context"
 
 const log = createLogger("agentTeams.tasks")
 
@@ -93,6 +96,20 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
 
   const [showForm, setShowForm] = useState(false)
   const [title, setTitle] = useState("")
+
+  // Twin-expertise assignee hints: resolve the roster's twin bindings once the
+  // form opens (best-effort; empty list = plain alphabetical roster).
+  const [twins, setTwins] = useState<TeamTwinSummary[]>([])
+  useEffect(() => {
+    if (!showForm) return
+    let cancelled = false
+    void gatherTeamTwins().then((list) => {
+      if (!cancelled) setTwins(list)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [showForm])
   const [description, setDescription] = useState("")
   const [priority, setPriority] = useState("normal")
   const [assigneeId, setAssigneeId] = useState("")
@@ -220,9 +237,14 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">{t("unassigned")}</SelectItem>
-                  {teammates.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.name}
+                  {/* Ranked by twin-expertise overlap with the typed title —
+                      pure token matching over data the runtime already has
+                      (see twin-expertise-hints.ts). */}
+                  {rankAssigneesForTask({ title, tags: [] }, teammates, twins).map((hint) => (
+                    <SelectItem key={hint.teammateId} value={hint.teammateId}>
+                      {hint.teammateName}
+                      {hint.twinName ? ` · ${hint.twinName}` : ""}
+                      {hint.score > 0 && hint.expertise ? ` — ${hint.expertise.slice(0, 60)}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>

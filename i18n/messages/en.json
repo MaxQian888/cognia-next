@@ -1324,11 +1324,13 @@
         "filterPriority": "Priority",
         "filterTags": "Tags",
         "filters": "Filters",
+        "knowledgeTwins": "Knowledge twins",
         "lockedBy": "Blocked by: {titles}",
         "pause": "Pause",
         "resume": "Resume",
         "run": "Run",
         "swimlanes": "Swimlanes",
+        "twinBound": "Digital employee: {name}",
         "unassignedLane": "Unassigned",
         "viewBoard": "Board view",
         "viewList": "List view",
@@ -7297,7 +7299,8 @@
           "pause": "Pause",
           "resume": "Resume",
           "stop": "Stop"
-        }
+        },
+        "twinBound": "Twin-bound teammate"
       },
       "tabs": {
         "activity": "Activity",

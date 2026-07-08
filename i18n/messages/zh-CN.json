@@ -1324,11 +1324,13 @@
         "filterPriority": "优先级",
         "filterTags": "标签",
         "filters": "筛选",
+        "knowledgeTwins": "知识库数字员工",
         "lockedBy": "被阻塞于：{titles}",
         "pause": "暂停",
         "resume": "恢复",
         "run": "运行",
         "swimlanes": "泳道",
+        "twinBound": "数字员工：{name}",
         "unassignedLane": "未指派",
         "viewBoard": "看板视图",
         "viewList": "列表视图",
@@ -7297,7 +7299,8 @@
           "pause": "暂停",
           "resume": "恢复",
           "stop": "停止"
-        }
+        },
+        "twinBound": "绑定数字员工的成员"
       },
       "tabs": {
         "activity": "动态",

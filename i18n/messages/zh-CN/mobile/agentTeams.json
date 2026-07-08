@@ -12,7 +12,8 @@
       "pause": "暂停",
       "resume": "恢复",
       "stop": "停止"
-    }
+    },
+    "twinBound": "绑定数字员工的成员"
   },
   "tabs": {
     "activity": "动态",
