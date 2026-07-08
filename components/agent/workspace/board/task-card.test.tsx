@@ -111,6 +111,14 @@ describe("TaskBoardCard", () => {
     expect(screen.getByText("kanban")).toBeInTheDocument()
   })
 
+  it.each(["critical", "high", "low", "background", "normal"] as const)(
+    "renders the %s priority accent without crashing",
+    (priority) => {
+      renderCard({ task: task({ priority }) })
+      expect(screen.getByTestId("board-card-task-1")).toBeInTheDocument()
+    }
+  )
+
   it("shows the dependency-lock badge only when locked", () => {
     renderCard({ lock: { locked: true, blocking: [{ id: "dep-1", title: "Upstream" }] } })
     expect(screen.getByTestId("board-card-task-1-lock")).toBeInTheDocument()

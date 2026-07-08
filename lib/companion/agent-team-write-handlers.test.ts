@@ -116,6 +116,14 @@ describe("handleTeamTaskCreate", () => {
     })
   })
 
+  it("defaults tags to [] when the payload omits or malforms them", async () => {
+    const { team } = seed()
+    const result = await handleTeamTaskCreate({ teamId: team.id, title: "no tags" })
+    expect(useAgentTeamStore.getState().tasks[result.taskId!].tags).toEqual([])
+    const result2 = await handleTeamTaskCreate({ teamId: team.id, title: "bad tags", tags: "x" })
+    expect(useAgentTeamStore.getState().tasks[result2.taskId!].tags).toEqual([])
+  })
+
   it("rejects unknown teams, bad priorities, and off-team assignees", async () => {
     const { team } = seed()
     expect(await handleTeamTaskCreate({ teamId: "ghost", title: "x" })).toEqual({
