@@ -1,11 +1,47 @@
 /**
  * Typed wrappers around the connectors_* Tauri commands.
  *
- * All functions call `invoke` from `@tauri-apps/api/core` — in web mode
- * (no Tauri host) these will throw. Callers should guard with `isTauri()`
- * from `@/lib/tauri` before invoking.
+ * By default all functions call `invoke` from `@tauri-apps/api/core` — in
+ * web mode (no Tauri host) these will throw. Callers should guard with
+ * `isTauri()` from `@/lib/tauri` before invoking.
+ *
+ * The transport is swappable via `setConnectorCommandInvoker` so the
+ * headless brain (ADR-0059 T-A5) can route the SAME wrappers over the
+ * companion `_rpc` arms instead of Tauri IPC — one implementation of every
+ * command wrapper, two hosts.
  */
 import { invoke } from "@tauri-apps/api/core"
+
+/**
+ * Transport for the connectors_* command surface. `name` is always the
+ * Tauri command name; a non-Tauri invoker owns any name remapping and
+ * host-specific no-op semantics.
+ */
+export type ConnectorCommandInvoker = <T>(
+  name: string,
+  args?: Record<string, unknown>
+) => Promise<T>
+
+// Preserve call arity — `invoke(name)` and `invoke(name, undefined)` must
+// stay distinguishable so the default path is byte-identical to the
+// pre-seam direct calls.
+const tauriInvoker: ConnectorCommandInvoker = (name, args) =>
+  args === undefined ? invoke(name) : invoke(name, args)
+
+let invoker: ConnectorCommandInvoker = tauriInvoker
+
+/**
+ * Swap the transport behind every connectors_* wrapper. Pass `null` to
+ * restore the default Tauri `invoke`. Returns the previously-active invoker
+ * so callers can restore it on teardown.
+ */
+export function setConnectorCommandInvoker(
+  fn: ConnectorCommandInvoker | null
+): ConnectorCommandInvoker {
+  const previous = invoker
+  invoker = fn ?? tauriInvoker
+  return previous
+}
 
 // ---------------------------------------------------------------------------
 // Shared types (mirror src-tauri/src/connectors/types.rs)
@@ -143,15 +179,15 @@ export interface MatrixCryptoAttachmentDecryptResponse {
 // ---------------------------------------------------------------------------
 
 export async function connectorsRegisterAdapter(reg: AdapterRegistration): Promise<void> {
-  await invoke("connectors_register_adapter", { reg })
+  await invoker("connectors_register_adapter", { reg })
 }
 
 export async function connectorsUnregisterAdapter(adapterId: string): Promise<void> {
-  await invoke("connectors_unregister_adapter", { adapterId })
+  await invoker("connectors_unregister_adapter", { adapterId })
 }
 
 export async function connectorsHealth(): Promise<ConnectorsHealth> {
-  return invoke<ConnectorsHealth>("connectors_health")
+  return invoker<ConnectorsHealth>("connectors_health")
 }
 
 // ---------------------------------------------------------------------------
@@ -166,11 +202,11 @@ export async function connectorsStartServer(
   port: number,
   bindLoopbackOnly = true
 ): Promise<string> {
-  return invoke<string>("connectors_start_server", { port, bindLoopbackOnly })
+  return invoker<string>("connectors_start_server", { port, bindLoopbackOnly })
 }
 
 export async function connectorsStopServer(): Promise<void> {
-  await invoke("connectors_stop_server")
+  await invoker("connectors_stop_server")
 }
 
 // ---------------------------------------------------------------------------
@@ -182,21 +218,21 @@ export async function connectorsKeyringSet(
   credential: string,
   value: string
 ): Promise<void> {
-  await invoke("connectors_keyring_set", { adapterId, credential, value })
+  await invoker("connectors_keyring_set", { adapterId, credential, value })
 }
 
 export async function connectorsKeyringGet(
   adapterId: string,
   credential: string
 ): Promise<string | null> {
-  return invoke<string | null>("connectors_keyring_get", { adapterId, credential })
+  return invoker<string | null>("connectors_keyring_get", { adapterId, credential })
 }
 
 export async function connectorsKeyringDelete(
   adapterId: string,
   credential: string
 ): Promise<void> {
-  await invoke("connectors_keyring_delete", { adapterId, credential })
+  await invoker("connectors_keyring_delete", { adapterId, credential })
 }
 
 /**
@@ -207,7 +243,7 @@ export async function connectorsKeyringList(
   adapterId: string,
   accounts: string[]
 ): Promise<string[]> {
-  return invoke<string[]>("connectors_keyring_list", { adapterId, accounts })
+  return invoker<string[]>("connectors_keyring_list", { adapterId, accounts })
 }
 
 // ---------------------------------------------------------------------------
@@ -215,7 +251,7 @@ export async function connectorsKeyringList(
 // ---------------------------------------------------------------------------
 
 export async function connectorsHttpRequest(req: TauriHttpRequest): Promise<TauriHttpResponse> {
-  return invoke<TauriHttpResponse>("connectors_http_request", { req })
+  return invoker<TauriHttpResponse>("connectors_http_request", { req })
 }
 
 // ---------------------------------------------------------------------------
@@ -230,18 +266,18 @@ export async function connectorsWsOpen(
   url: string,
   headers?: Record<string, string>
 ): Promise<string> {
-  return invoke<string>("connectors_ws_open", { url, headers })
+  return invoker<string>("connectors_ws_open", { url, headers })
 }
 
 /**
  * Send a text message on an open WebSocket identified by `handleId`.
  */
 export async function connectorsWsSend(handleId: string, data: string): Promise<void> {
-  await invoke("connectors_ws_send", { handleId, data })
+  await invoker("connectors_ws_send", { handleId, data })
 }
 
 export async function connectorsWsClose(handleId: string): Promise<void> {
-  await invoke("connectors_ws_close", { handleId })
+  await invoker("connectors_ws_close", { handleId })
 }
 
 /**
@@ -255,7 +291,7 @@ export async function connectorsWsClose(handleId: string): Promise<void> {
  * before opening any adapter, to reap the previous load's leaked sockets.
  */
 export async function connectorsResetAllWs(): Promise<number> {
-  return invoke<number>("connectors_reset_all_ws")
+  return invoker<number>("connectors_reset_all_ws")
 }
 
 // ---------------------------------------------------------------------------
@@ -274,11 +310,11 @@ export async function connectorsResetAllWs(): Promise<number> {
  * The connection self-reconnects until `connectorsLarkWsClose` is called.
  */
 export async function connectorsLarkWsOpen(adapterId: string): Promise<string> {
-  return invoke<string>("connectors_lark_ws_open", { adapterId })
+  return invoker<string>("connectors_lark_ws_open", { adapterId })
 }
 
 export async function connectorsLarkWsClose(handleId: string): Promise<void> {
-  await invoke("connectors_lark_ws_close", { handleId })
+  await invoker("connectors_lark_ws_close", { handleId })
 }
 
 // ---------------------------------------------------------------------------
@@ -297,7 +333,7 @@ export interface OnebotLiveClient {
  * client is up, so this is how the settings UI shows per-adapter liveness.
  */
 export async function connectorsOnebotProbe(): Promise<OnebotLiveClient[]> {
-  return invoke<OnebotLiveClient[]>("connectors_onebot_probe")
+  return invoker<OnebotLiveClient[]>("connectors_onebot_probe")
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +346,7 @@ export async function connectorsAttachmentFetch(
   sourceUrl: string,
   headers?: Record<string, string>
 ): Promise<AttachmentRef> {
-  return invoke<AttachmentRef>("connectors_attachment_fetch", {
+  return invoker<AttachmentRef>("connectors_attachment_fetch", {
     adapterId,
     remoteRef,
     sourceUrl,
@@ -329,7 +365,7 @@ export async function connectorsAttachmentRead(
   remoteRef: string,
   maxBytes: number
 ): Promise<string | null> {
-  return invoke<string | null>("connectors_attachment_read", {
+  return invoker<string | null>("connectors_attachment_read", {
     adapterId,
     remoteRef,
     maxBytes,
@@ -337,17 +373,17 @@ export async function connectorsAttachmentRead(
 }
 
 export async function connectorsMediaUpload(req: ConnectorMediaUploadRequest): Promise<string> {
-  return invoke<string>("connectors_media_upload", { req })
+  return invoker<string>("connectors_media_upload", { req })
 }
 
 export async function connectorsMatrixCryptoInit(req: MatrixCryptoInitRequest): Promise<void> {
-  await invoke("connectors_matrix_crypto_init", { req })
+  await invoker("connectors_matrix_crypto_init", { req })
 }
 
 export async function connectorsMatrixCryptoOutgoingRequests(
   adapterId: string
 ): Promise<MatrixCryptoOutgoingRequest[]> {
-  return invoke<MatrixCryptoOutgoingRequest[]>("connectors_matrix_crypto_outgoing_requests", {
+  return invoker<MatrixCryptoOutgoingRequest[]>("connectors_matrix_crypto_outgoing_requests", {
     adapterId,
   })
 }
@@ -355,43 +391,43 @@ export async function connectorsMatrixCryptoOutgoingRequests(
 export async function connectorsMatrixCryptoMarkRequestSent(
   req: MatrixCryptoMarkSentRequest
 ): Promise<void> {
-  await invoke("connectors_matrix_crypto_mark_request_sent", { req })
+  await invoker("connectors_matrix_crypto_mark_request_sent", { req })
 }
 
 export async function connectorsMatrixCryptoReceiveSyncChanges(
   req: MatrixCryptoReceiveSyncRequest
 ): Promise<void> {
-  await invoke("connectors_matrix_crypto_receive_sync_changes", { req })
+  await invoker("connectors_matrix_crypto_receive_sync_changes", { req })
 }
 
 export async function connectorsMatrixCryptoDecryptEvent(
   req: MatrixCryptoDecryptRequest
 ): Promise<MatrixCryptoDecryptResponse> {
-  return invoke<MatrixCryptoDecryptResponse>("connectors_matrix_crypto_decrypt_event", { req })
+  return invoker<MatrixCryptoDecryptResponse>("connectors_matrix_crypto_decrypt_event", { req })
 }
 
 export async function connectorsMatrixCryptoEncryptEvent(
   req: MatrixCryptoEncryptRequest
 ): Promise<MatrixCryptoEncryptResponse> {
-  return invoke<MatrixCryptoEncryptResponse>("connectors_matrix_crypto_encrypt_event", { req })
+  return invoker<MatrixCryptoEncryptResponse>("connectors_matrix_crypto_encrypt_event", { req })
 }
 
 export async function connectorsMatrixCryptoShareRoomKey(
   req: MatrixCryptoShareRoomKeyRequest
 ): Promise<MatrixCryptoOutgoingRequest[]> {
-  return invoke<MatrixCryptoOutgoingRequest[]>("connectors_matrix_crypto_share_room_key", { req })
+  return invoker<MatrixCryptoOutgoingRequest[]>("connectors_matrix_crypto_share_room_key", { req })
 }
 
 export async function connectorsMatrixCryptoUpdateTrackedUsers(
   req: MatrixCryptoTrackUsersRequest
 ): Promise<void> {
-  await invoke("connectors_matrix_crypto_update_tracked_users", { req })
+  await invoker("connectors_matrix_crypto_update_tracked_users", { req })
 }
 
 export async function connectorsMatrixCryptoGetMissingSessions(
   req: MatrixCryptoMissingSessionsRequest
 ): Promise<MatrixCryptoOutgoingRequest[]> {
-  return invoke<MatrixCryptoOutgoingRequest[]>("connectors_matrix_crypto_get_missing_sessions", {
+  return invoker<MatrixCryptoOutgoingRequest[]>("connectors_matrix_crypto_get_missing_sessions", {
     req,
   })
 }
@@ -399,7 +435,7 @@ export async function connectorsMatrixCryptoGetMissingSessions(
 export async function connectorsMatrixCryptoEncryptAttachment(
   req: MatrixCryptoAttachmentEncryptRequest
 ): Promise<MatrixCryptoAttachmentEncryptResponse> {
-  return invoke<MatrixCryptoAttachmentEncryptResponse>(
+  return invoker<MatrixCryptoAttachmentEncryptResponse>(
     "connectors_matrix_crypto_encrypt_attachment",
     { req }
   )
@@ -408,7 +444,7 @@ export async function connectorsMatrixCryptoEncryptAttachment(
 export async function connectorsMatrixCryptoDecryptAttachment(
   req: MatrixCryptoAttachmentDecryptRequest
 ): Promise<MatrixCryptoAttachmentDecryptResponse> {
-  return invoke<MatrixCryptoAttachmentDecryptResponse>(
+  return invoker<MatrixCryptoAttachmentDecryptResponse>(
     "connectors_matrix_crypto_decrypt_attachment",
     { req }
   )
@@ -430,7 +466,7 @@ export interface LarkFileUploadRequest {
 
 /** Returns the opaque Lark `file_key`. */
 export async function connectorsLarkUploadFile(req: LarkFileUploadRequest): Promise<string> {
-  return invoke<string>("connectors_lark_upload_file", {
+  return invoker<string>("connectors_lark_upload_file", {
     accessToken: req.accessToken,
     sourceUrl: req.sourceUrl,
     fileType: req.fileType,
@@ -448,7 +484,7 @@ export interface LarkImageUploadRequest {
 
 /** Returns the opaque Lark `image_key`. */
 export async function connectorsLarkUploadImage(req: LarkImageUploadRequest): Promise<string> {
-  return invoke<string>("connectors_lark_upload_image", {
+  return invoker<string>("connectors_lark_upload_image", {
     accessToken: req.accessToken,
     sourceUrl: req.sourceUrl,
     imageType: req.imageType,

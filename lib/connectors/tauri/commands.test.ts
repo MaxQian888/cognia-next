@@ -6,6 +6,7 @@
  */
 import { invoke } from "@tauri-apps/api/core"
 import {
+  setConnectorCommandInvoker,
   connectorsRegisterAdapter,
   connectorsUnregisterAdapter,
   connectorsHealth,
@@ -448,5 +449,64 @@ describe("Matrix crypto command wrappers", () => {
     expect(mockInvoke).toHaveBeenLastCalledWith("connectors_matrix_crypto_decrypt_attachment", {
       req: { bytesBase64: "cipher", info: encrypted.info },
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ADR-0059 T-A5 — swappable command transport (headless brain seam)
+// ---------------------------------------------------------------------------
+
+describe("setConnectorCommandInvoker", () => {
+  afterEach(() => {
+    // Restore the default Tauri transport so this suite can't leak a custom
+    // invoker into the wrapper tests above (Jest may interleave describes).
+    setConnectorCommandInvoker(null)
+  })
+
+  it("routes every wrapper through the custom invoker instead of Tauri invoke", async () => {
+    const custom = jest.fn().mockResolvedValue({ status: 200, headers: {}, body: "{}" })
+    setConnectorCommandInvoker(custom as never)
+
+    await connectorsHttpRequest({ url: "https://api.example.com", method: "GET" })
+    await connectorsKeyringSet("tg-1", "botToken", "secret")
+
+    expect(custom).toHaveBeenCalledWith("connectors_http_request", {
+      req: { url: "https://api.example.com", method: "GET" },
+    })
+    expect(custom).toHaveBeenCalledWith("connectors_keyring_set", {
+      adapterId: "tg-1",
+      credential: "botToken",
+      value: "secret",
+    })
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("passing null restores the default Tauri invoke", async () => {
+    const custom = jest.fn().mockResolvedValue(undefined)
+    setConnectorCommandInvoker(custom as never)
+    setConnectorCommandInvoker(null)
+
+    mockInvoke.mockResolvedValueOnce(undefined)
+    await connectorsStopServer()
+
+    expect(custom).not.toHaveBeenCalled()
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_stop_server")
+  })
+
+  it("returns the previously-active invoker so callers can restore it", async () => {
+    const first = jest.fn().mockResolvedValue(undefined)
+    const second = jest.fn().mockResolvedValue(undefined)
+
+    const initial = setConnectorCommandInvoker(first as never)
+    const prev = setConnectorCommandInvoker(second as never)
+    expect(prev).toBe(first)
+
+    // Restoring the returned handle re-activates it.
+    setConnectorCommandInvoker(prev)
+    await connectorsStopServer()
+    expect(first).toHaveBeenCalledWith("connectors_stop_server")
+    expect(second).not.toHaveBeenCalled()
+
+    setConnectorCommandInvoker(initial)
   })
 })
