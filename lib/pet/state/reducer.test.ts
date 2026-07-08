@@ -79,9 +79,12 @@ describe("reducePetVisualState", () => {
     expect(reducePetVisualState(event("teamRun"), needs())).toBe("thinking")
     expect(reducePetVisualState(event("workflowRun"), needs())).toBe("thinking")
     expect(reducePetVisualState(event("goalProgress"), needs())).toBe("thinking")
+    expect(reducePetVisualState(event("scheduledRunStarting"), needs())).toBe("thinking")
     expect(reducePetVisualState(event("idle"), needs({ energy: 5 }))).toBe("sleeping")
     expect(reducePetVisualState(event("inboundMessage"), needs())).toBe("idle")
     expect(reducePetVisualState(event("scheduledRun"), needs())).toBe("idle")
+    expect(reducePetVisualState(event("scheduledRunDue"), needs())).toBe("idle")
+    expect(reducePetVisualState(event("scheduledRunDue"), needs({ energy: 5 }))).toBe("sleeping")
   })
 
   it("reflects ambient twin activity: busy reads as thinking, a milestone as happy", () => {

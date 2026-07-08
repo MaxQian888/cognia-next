@@ -14,6 +14,7 @@ import { wireConnectorSource } from "./sources/connector-source"
 import { wireGoalSource } from "./sources/goal-source"
 import { wireWorkflowSource } from "./sources/workflow-source"
 import { wireSchedulerSource } from "./sources/scheduler-source"
+import { wireSchedulerDueSource } from "./sources/scheduler-due-source"
 import { wireHeartbeatSource } from "./sources/heartbeat-source"
 
 export type PetSourceWire = (emit: PetEmit) => () => void
@@ -26,6 +27,8 @@ export const DEFAULT_PET_SOURCES: PetSourceWire[] = [
   wireGoalSource,
   wireWorkflowSource,
   wireSchedulerSource,
+  // Forward-looking "task is due" reminder cue from the native alarm daemon.
+  wireSchedulerDueSource,
   // Wall-clock self-tick: closes the neglect → unwell → notify loop on elapsed
   // time when no subsystem activity is nudging the pet.
   wireHeartbeatSource,

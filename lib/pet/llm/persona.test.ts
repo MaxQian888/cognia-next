@@ -55,4 +55,16 @@ describe("buildPetSystemPrompt", () => {
     expect(out).toContain("emotion tag in square brackets")
     expect(out).toContain("Reply in the user's language (zh-CN).")
   })
+
+  it("swaps the reply guidance in conversational mode (and drops the one-line cap)", () => {
+    const out = buildPetSystemPrompt({ soul, bones, conversational: true })
+    expect(out).toContain("Reply conversationally and in character")
+    expect(out).toContain("You may answer questions and be genuinely helpful")
+    expect(out).not.toContain("ONE short, playful sentence")
+    expect(out).not.toContain("Do not give long answers")
+    // Identity + personality prefix is unchanged.
+    expect(
+      out.startsWith(`You are ${soul.name}, a ${bones.rarity} ${bones.species} desktop pet.`)
+    ).toBe(true)
+  })
 })

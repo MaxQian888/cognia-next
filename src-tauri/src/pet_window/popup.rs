@@ -106,6 +106,12 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
         }
     });
 
+    // macOS: reclass to a non-activating NSPanel (all Spaces, over full-screen,
+    // no focus theft). `can_become_key_window: true` keeps the talk composer
+    // typeable; the `WindowEvent::Focused(false)` blur-to-close above is kept as
+    // the cross-platform dismiss path. No-op off macOS.
+    super::macos_panel::apply_pet_panel_behavior(&window, super::macos_panel::PetPanelRole::Popup)?;
+
     // Intentionally do NOT `show()` / `set_focus()` here. Like the sprite
     // window (`mod.rs`), a `transparent(true)` window shown before its WebView
     // commits a first paint renders an opaque rectangle — here the popup's

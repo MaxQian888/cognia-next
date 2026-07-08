@@ -55,7 +55,7 @@ export function NurtureTab({
   return (
     <div
       data-testid="pet-nurture-tab"
-      className="mx-auto grid w-full max-w-4xl gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]"
+      className="mx-auto grid w-full max-w-4xl gap-4 @2xl/pet-pane:grid-cols-[minmax(0,1fr)_18rem]"
     >
       {/* Main column: stats, level + needs, actions. */}
       <div className="flex flex-col gap-4">
@@ -94,7 +94,7 @@ export function NurtureTab({
       </div>
 
       {/* Hero column: a large live preview of the pet. */}
-      <aside className="order-first flex items-center justify-center rounded-xl border bg-card p-6 lg:order-none lg:items-start">
+      <aside className="order-first flex items-center justify-center rounded-xl border bg-card p-6 @2xl/pet-pane:order-none @2xl/pet-pane:items-start">
         <PetRenderer
           bones={view.effectiveBones}
           stage={profile.stage}

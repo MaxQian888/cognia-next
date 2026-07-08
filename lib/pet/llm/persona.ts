@@ -33,19 +33,35 @@ export interface BuildPetSystemPromptInput {
   emotionInstruction?: boolean
   /** BCP-47 tag of the user's UI language (proactive seeds are English). */
   locale?: string
+  /**
+   * Conversational mode for the multi-turn chat panel: the pet may give a few
+   * short sentences and actually answer questions, instead of the one-line
+   * bubble default. Absent/false keeps the legacy one-line persona (the
+   * compatibility lock — byte-identical when every optional layer is absent).
+   */
+  conversational?: boolean
 }
 
 /** Matches `apply-memory-context.ts` so the pet and chat speak one format. */
 const RECALL_HEADING = "## What you remember about the user"
 
-/** Legacy layer-1 text — keep byte-identical to the original speak prompt. */
+/**
+ * Legacy layer-1 text. The default (non-conversational) branch is kept
+ * BYTE-IDENTICAL to the original speak prompt — `speak.test.ts` locks it.
+ * Conversational mode swaps only the reply-length guidance.
+ */
 function personaLayer(input: BuildPetSystemPromptInput): string {
   const personaLine = input.persona ? ` Your human's current persona is: ${input.persona}.` : ""
+  const replyGuidance = input.conversational
+    ? `Reply conversationally and in character — a few short sentences at most. ` +
+      `You may answer questions and be genuinely helpful, but stay playful and true to your personality. ` +
+      `Never reveal or ask for personal data.`
+    : `Reply in ONE short, playful sentence, in character. ` +
+      `Never reveal or ask for personal data. Do not give long answers.`
   return (
     `You are ${input.soul.name}, a ${input.bones.rarity} ${input.bones.species} desktop pet. ` +
     `Personality: ${input.soul.personality}.${personaLine} ` +
-    `Reply in ONE short, playful sentence, in character. ` +
-    `Never reveal or ask for personal data. Do not give long answers.`
+    replyGuidance
   )
 }
 

@@ -25,7 +25,12 @@ export interface SpeakArgs {
   recallText?: string
   emotionInstruction?: boolean
   locale?: string
+  /** Multi-turn chat mode: a few sentences, may answer questions (see persona). */
+  conversational?: boolean
 }
+
+/** Longest a conversational chat reply may run (paragraphs preserved). */
+const MAX_CHAT_REPLY = 1200
 
 /** Trim a raw reply to a single short, quote-free line. */
 export function sanitizeReply(raw: string): string {
@@ -41,6 +46,23 @@ export function sanitizeReply(raw: string): string {
   return s
 }
 
+/**
+ * Trim a raw CHAT reply: strip a single pair of wrapping quotes and collapse
+ * runaway blank lines, but PRESERVE paragraph breaks (unlike `sanitizeReply`,
+ * which flattens to one line for the bubble).
+ */
+export function sanitizeChatReply(raw: string): string {
+  let s = (raw ?? "").trim()
+  if (!s) return ""
+  s = s
+    .replace(/^["'`“”]+/, "")
+    .replace(/["'`“”]+$/, "")
+    .trim()
+  s = s.replace(/\n{3,}/g, "\n\n")
+  if (s.length > MAX_CHAT_REPLY) s = s.slice(0, MAX_CHAT_REPLY).trim()
+  return s
+}
+
 function buildSystemPrompt(args: SpeakArgs): string {
   return buildPetSystemPrompt({
     soul: args.soul,
@@ -51,6 +73,7 @@ function buildSystemPrompt(args: SpeakArgs): string {
     recallText: args.recallText,
     emotionInstruction: args.emotionInstruction,
     locale: args.locale,
+    conversational: args.conversational,
   })
 }
 
@@ -74,6 +97,30 @@ export async function speakAsPet(
       maxTokens: 80,
     })
     const reply = sanitizeReply(raw)
+    return reply || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Chat as the pet — the multi-turn conversation-panel counterpart of
+ * `speakAsPet`. Same hard PII gate and null-on-failure contract, but a
+ * conversational persona, a larger token budget, and `sanitizeChatReply`
+ * (paragraphs preserved). Returns the reply, or null on any degradation.
+ */
+export async function chatAsPet(client: LlmClient | null, args: SpeakArgs): Promise<string | null> {
+  if (!client) return null
+  const text = (args.userText ?? "").trim()
+  if (!text) return null
+  if (!hasNoLeakingPii(text)) return null
+  try {
+    const raw = await client.complete(text.slice(0, 1000), {
+      system: buildSystemPrompt({ ...args, conversational: true }),
+      temperature: 0.8,
+      maxTokens: 400,
+    })
+    const reply = sanitizeChatReply(raw)
     return reply || null
   } catch {
     return null

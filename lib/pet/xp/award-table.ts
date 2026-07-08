@@ -20,6 +20,8 @@ export const XP_AWARD: Partial<Record<PetEventKind, number>> = {
   workflowRun: 4,
   inboundMessage: 1,
   scheduledRun: 2,
+  scheduledRunStarting: 1,
+  scheduledRunDue: 0, // a reminder cue, not a work milestone — no XP economy impact
   twinBusy: 0, // purely ambient — no XP economy impact this wave
   twinMilestone: 0,
   // interactions

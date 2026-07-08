@@ -12,7 +12,10 @@ import { PetRenderer } from "../pet-renderer"
 export function DexTab({ bones }: { bones: PetBones }) {
   const t = useTranslations("pet")
   return (
-    <div data-testid="pet-dex" className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
+    <div
+      data-testid="pet-dex"
+      className="grid grid-cols-3 gap-3 @sm/pet-pane:grid-cols-4 @lg/pet-pane:grid-cols-6"
+    >
       {ALL_PET_SPECIES.map((species) => {
         const owned = species === bones.species
         return (

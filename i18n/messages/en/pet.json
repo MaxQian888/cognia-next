@@ -112,6 +112,11 @@
     "petted": ["Purr…", "That's nice.", "♥"],
     "played": ["So fun!", "Again!", "Wheee!"],
     "review": ["Take a look?", "Ready for review."],
+    "scheduledRunDue": [
+      "Reminder! Your scheduled task is due.",
+      "Hey, it's time for your scheduled task!"
+    ],
+    "scheduledRunStarting": ["On it — running your task…", "Task time! Working on it…"],
     "slept": {
       "0": "Zzz…",
       "1": "So cozy…"
@@ -141,6 +146,34 @@
       "title": "Your pet isn't feeling great"
     }
   },
+  "notifications": {
+    "scheduledDue": {
+      "title": "Scheduled task due",
+      "body": "\"{taskName}\" is due right now.",
+      "bodyGeneric": "One of your scheduled tasks is due right now."
+    }
+  },
+  "chat": {
+    "you": "You",
+    "petFallbackName": "Pet",
+    "empty": "Say hi to your pet — it can chat back now.",
+    "sending": "{name} is thinking…",
+    "openFullChat": "Open full chat",
+    "openPanel": "Chat",
+    "enableCta": {
+      "title": "Turn on pet chat",
+      "body": "Let your pet actually talk back using your configured model. It stays playful and never sends personal data.",
+      "action": "Enable chat"
+    },
+    "degrade": {
+      "disabled": "Pet chat is off right now.",
+      "pii": "That looked like personal info, so I kept it private and didn't send it.",
+      "rateLimited": "Give me a moment to catch my breath…",
+      "noClient": "No chat model is configured yet — check the pet settings.",
+      "empty": "Hmm, I didn't have anything to say to that.",
+      "error": "Something went wrong reaching the model. Try again?"
+    }
+  },
   "console": {
     "hatch": "Hatch",
     "hatchPrompt": "Your egg is ready to hatch.",
@@ -149,6 +182,7 @@
     "tabs": {
       "achievements": "Achievements",
       "binding": "Characters",
+      "chat": "Chat",
       "customize": "Customize",
       "dex": "Dex",
       "nurture": "Nurture",

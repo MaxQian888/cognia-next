@@ -5,6 +5,7 @@
 
 export const PET_CONSOLE_TABS = [
   "nurture",
+  "chat",
   "shop",
   "customize",
   "insights",

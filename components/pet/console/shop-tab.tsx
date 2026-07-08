@@ -53,7 +53,7 @@ export function ShopTab() {
             <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {t(`shop.categories.${category}`)}
             </h3>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 @md/pet-pane:grid-cols-2">
               {items.map((item) => {
                 const Icon = petItemIcon(item.icon)
                 const owned = ownedQty.get(item.id) ?? 0

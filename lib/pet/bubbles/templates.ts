@@ -25,6 +25,8 @@ const VARIANTS: Partial<Record<PetEventKind, number>> = {
   hatched: 2,
   greeting: 3,
   inboundMessage: 2,
+  scheduledRunStarting: 2,
+  scheduledRunDue: 2,
   achievementUnlocked: 2,
   twinBusy: 2,
   twinMilestone: 2,

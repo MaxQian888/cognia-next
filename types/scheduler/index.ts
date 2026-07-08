@@ -46,6 +46,9 @@ export type ScheduledTaskType =
   // in the same `tasks` Dexie store are typed properly across the codebase.
   | "connection:scheduled:digest"
   | "connection:outbound:send"
+  // Usage-presence refresh (token-usage status on IM platforms) — registered
+  // in `lib/connectors/presence/usage-status-runner.ts`.
+  | "connection:presence:refresh"
   // External Bridge subsystem registers `"wiki-rebuild"` via
   // `registerTaskExecutor` in `lib/scheduler/executors/wiki-rebuild-executor.ts`.
   // Listed here so cron-driven Wiki rebuild rows are typed properly.

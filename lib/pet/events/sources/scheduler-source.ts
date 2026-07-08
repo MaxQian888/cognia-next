@@ -1,9 +1,11 @@
 // Scheduler executions → pet events. The task scheduler broadcasts
 // `execution-update` messages on `BroadcastChannel("cognia-scheduler-executions")`
-// (see `lib/scheduler/task-scheduler.ts`). A completed run nudges the pet with
+// (see `lib/scheduler/task-scheduler.ts`). A started run makes the pet look busy
+// (`scheduledRunStarting` → thinking); a completed run nudges it with
 // `scheduledRun`; a failed run maps to the generic `error` radar kind (same one
 // the workflow source uses). All other statuses and malformed messages are
-// ignored.
+// ignored. The "due / about to fire" signal is a separate native path — see
+// `scheduler-due-source.ts`.
 //
 // The subscribe transport is injectable so the pure mapping is unit-tested with
 // a plain fake; the default opens the BroadcastChannel.
@@ -18,8 +20,9 @@ export type PetEventInput = Omit<PetEvent, "at"> & { at?: number }
 
 /**
  * Pure mapping from a raw scheduler broadcast message to a pet emit (or null
- * when the message is irrelevant or malformed). Completed → `scheduledRun`,
- * failed → `error`; everything else is ignored.
+ * when the message is irrelevant or malformed). Running → `scheduledRunStarting`,
+ * completed → `scheduledRun`, failed → `error`; everything else is ignored. The
+ * optional `taskName` is threaded into `meta` for bubble/notification copy.
  */
 export function schedulerMessageToPetEvent(msg: unknown): PetEventInput | null {
   if (!msg || typeof msg !== "object") return null
@@ -27,9 +30,11 @@ export function schedulerMessageToPetEvent(msg: unknown): PetEventInput | null {
   if (m.type !== "execution-update") return null
   if (typeof m.taskId !== "string") return null
   const taskId = m.taskId
-  if (m.status === "completed")
-    return { source: "scheduler", kind: "scheduledRun", meta: { taskId } }
-  if (m.status === "failed") return { source: "scheduler", kind: "error", meta: { taskId } }
+  const meta: Record<string, unknown> =
+    typeof m.taskName === "string" && m.taskName ? { taskId, taskName: m.taskName } : { taskId }
+  if (m.status === "running") return { source: "scheduler", kind: "scheduledRunStarting", meta }
+  if (m.status === "completed") return { source: "scheduler", kind: "scheduledRun", meta }
+  if (m.status === "failed") return { source: "scheduler", kind: "error", meta }
   return null
 }
 

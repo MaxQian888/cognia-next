@@ -25,4 +25,9 @@ describe("xpForEvent", () => {
     expect(xpForEvent("twinBusy")).toBe(0)
     expect(xpForEvent("twinMilestone")).toBe(0)
   })
+
+  it("treats scheduled-task cues as low-signal (a due reminder pays nothing)", () => {
+    expect(xpForEvent("scheduledRunStarting")).toBe(1)
+    expect(xpForEvent("scheduledRunDue")).toBe(0)
+  })
 })

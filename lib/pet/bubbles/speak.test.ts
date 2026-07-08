@@ -1,4 +1,4 @@
-import { speakAsPet, sanitizeReply } from "./speak"
+import { speakAsPet, chatAsPet, sanitizeReply, sanitizeChatReply } from "./speak"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { PetBones, PetSoul } from "@/types/pet"
 
@@ -79,5 +79,50 @@ describe("speakAsPet", () => {
     expect(system).toContain("## What you remember about the user")
     expect(system).toContain("emotion tag in square brackets")
     expect(system).toContain("(zh-CN)")
+  })
+})
+
+describe("sanitizeChatReply", () => {
+  it("preserves paragraph breaks and strips wrapping quotes", () => {
+    expect(sanitizeChatReply('  "First line.\n\nSecond line."  ')).toBe(
+      "First line.\n\nSecond line."
+    )
+  })
+
+  it("collapses runaway blank lines and returns '' for empty input", () => {
+    expect(sanitizeChatReply("a\n\n\n\nb")).toBe("a\n\nb")
+    expect(sanitizeChatReply("   ")).toBe("")
+  })
+
+  it("caps very long replies", () => {
+    const long = "x".repeat(2000)
+    expect(sanitizeChatReply(long).length).toBe(1200)
+  })
+})
+
+describe("chatAsPet", () => {
+  it("returns null without a client", async () => {
+    expect(await chatAsPet(null, { soul, bones, userText: "hi" })).toBeNull()
+  })
+
+  it("returns a multi-line reply and uses the conversational persona + larger budget", async () => {
+    const c = client("Sure!\n\nHere is a longer, chattier answer.")
+    const res = await chatAsPet(c, { soul, bones, userText: "tell me about cats" })
+    expect(res).toBe("Sure!\n\nHere is a longer, chattier answer.")
+    const [, opts] = (c.complete as jest.Mock).mock.calls[0]
+    expect(opts.maxTokens).toBe(400)
+    expect(opts.system).toContain("Reply conversationally")
+    expect(opts.system).not.toContain("ONE short, playful sentence")
+  })
+
+  it("blocks PII and returns null on empty/thrown output", async () => {
+    const pii = client("nope")
+    expect(
+      await chatAsPet(pii, { soul, bones, userText: "my email is jane.doe@example.com" })
+    ).toBeNull()
+    expect(pii.complete).not.toHaveBeenCalled()
+    expect(await chatAsPet(client("   "), { soul, bones, userText: "hi" })).toBeNull()
+    const boom = { complete: jest.fn().mockRejectedValue(new Error("x")) } as unknown as LlmClient
+    expect(await chatAsPet(boom, { soul, bones, userText: "hi" })).toBeNull()
   })
 })

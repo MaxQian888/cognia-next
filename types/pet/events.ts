@@ -33,6 +33,10 @@ export type PetEventKind =
   | "teamRun"
   | "inboundMessage"
   | "scheduledRun"
+  // a scheduled task began running (expressive "thinking")
+  | "scheduledRunStarting"
+  // a scheduled task/reminder is due right now (drives the pet reminder)
+  | "scheduledRunDue"
   | "workflowRun"
   // ambient twin-awareness signals (opt-in; job metadata only, never content)
   | "twinBusy"

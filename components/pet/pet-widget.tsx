@@ -18,6 +18,7 @@ import { usePetBubbles } from "@/hooks/pet/use-pet-bubbles"
 import { usePetSpeak } from "@/hooks/pet/use-pet-speak"
 import { usePetProactive } from "@/hooks/pet/use-pet-proactive"
 import { usePetInsight } from "@/hooks/pet/use-pet-insight"
+import { usePetScheduledReminder } from "@/hooks/pet/use-pet-scheduled-reminder"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
 import { usePetDragGesture } from "@/hooks/pet/use-pet-drag-gesture"
@@ -78,6 +79,9 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   usePetProactive({ profile, view, enabled: settings.enabled && !settings.mutedBubbles })
   // Attention Radar teaser: nudge when a fresh info-diet report lands.
   usePetInsight(settings.enabled && !settings.mutedBubbles)
+  // Scheduled-task reminders: flourish + Notification-Center alert when a task
+  // is due. Gated only on `enabled` — a reminder is real, not idle chatter.
+  usePetScheduledReminder(settings.enabled)
 
   // Resolve which skin actually renders — live2d only when picked, the Cubism
   // runtime is ready, and an active model exists; otherwise the SVG mascot.

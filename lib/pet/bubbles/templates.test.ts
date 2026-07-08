@@ -38,6 +38,8 @@ describe("pickBubbleKey", () => {
       "hatched",
       "greeting",
       "inboundMessage",
+      "scheduledRunStarting",
+      "scheduledRunDue",
       "achievementUnlocked",
       "twinBusy",
       "twinMilestone",

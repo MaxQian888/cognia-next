@@ -112,6 +112,8 @@
     "petted": ["呼噜…", "真舒服。", "♥"],
     "played": ["真好玩！", "再来！", "哇哦！"],
     "review": ["来看看？", "可以检查啦。"],
+    "scheduledRunDue": ["提醒！你的定时任务到点啦。", "嘿，该执行你的定时任务了！"],
+    "scheduledRunStarting": ["收到——正在跑你的任务…", "任务时间到！开工啦…"],
     "slept": {
       "0": "呼呼…",
       "1": "好舒服…"
@@ -141,6 +143,34 @@
       "title": "你的宠物不太舒服"
     }
   },
+  "notifications": {
+    "scheduledDue": {
+      "title": "定时任务到点",
+      "body": "「{taskName}」现在到点啦。",
+      "bodyGeneric": "你有一个定时任务现在到点啦。"
+    }
+  },
+  "chat": {
+    "you": "你",
+    "petFallbackName": "宠物",
+    "empty": "跟你的宠物打个招呼吧——它现在能回话啦。",
+    "sending": "{name} 正在思考…",
+    "openFullChat": "打开完整对话",
+    "openPanel": "聊天",
+    "enableCta": {
+      "title": "开启宠物聊天",
+      "body": "让宠物用你配置的模型真正回话。它依然俏皮，也绝不会发送个人信息。",
+      "action": "开启聊天"
+    },
+    "degrade": {
+      "disabled": "宠物聊天当前已关闭。",
+      "pii": "这看起来像是个人信息，我帮你保密没有发送。",
+      "rateLimited": "让我喘口气，稍等一下…",
+      "noClient": "还没有配置聊天模型——去宠物设置里看看吧。",
+      "empty": "唔，这个我暂时没什么好说的。",
+      "error": "连接模型时出错了，要不再试一次？"
+    }
+  },
   "console": {
     "hatch": "孵化",
     "hatchPrompt": "你的蛋可以孵化了。",
@@ -149,6 +179,7 @@
     "tabs": {
       "achievements": "成就",
       "binding": "角色",
+      "chat": "聊天",
       "customize": "自定义",
       "dex": "图鉴",
       "nurture": "养育",

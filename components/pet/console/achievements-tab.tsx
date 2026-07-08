@@ -57,7 +57,7 @@ export function AchievementsTab() {
   const unlockedIds = new Set((unlocked ?? []).map((a) => a.id))
 
   return (
-    <div data-testid="pet-achievements" className="grid gap-2 sm:grid-cols-2">
+    <div data-testid="pet-achievements" className="grid gap-2 @md/pet-pane:grid-cols-2">
       {PET_ACHIEVEMENTS.map((a) => {
         const Icon = ICONS[a.icon] ?? SparklesIcon
         const got = unlockedIds.has(a.id)

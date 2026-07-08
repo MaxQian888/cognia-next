@@ -8,11 +8,19 @@ import type { PetEvent } from "@/types/pet"
 describe("schedulerMessageToPetEvent", () => {
   const base = { type: "execution-update", executionId: "e1", taskName: "T" }
 
-  it("maps a completed execution to scheduledRun", () => {
+  it("maps a running execution to scheduledRunStarting", () => {
+    expect(schedulerMessageToPetEvent({ ...base, taskId: "t1", status: "running" })).toEqual({
+      source: "scheduler",
+      kind: "scheduledRunStarting",
+      meta: { taskId: "t1", taskName: "T" },
+    })
+  })
+
+  it("maps a completed execution to scheduledRun and threads the task name", () => {
     expect(schedulerMessageToPetEvent({ ...base, taskId: "t1", status: "completed" })).toEqual({
       source: "scheduler",
       kind: "scheduledRun",
-      meta: { taskId: "t1" },
+      meta: { taskId: "t1", taskName: "T" },
     })
   })
 
@@ -20,12 +28,26 @@ describe("schedulerMessageToPetEvent", () => {
     expect(schedulerMessageToPetEvent({ ...base, taskId: "t1", status: "failed" })).toEqual({
       source: "scheduler",
       kind: "error",
-      meta: { taskId: "t1" },
+      meta: { taskId: "t1", taskName: "T" },
     })
   })
 
-  it("ignores in-progress and other terminal statuses", () => {
-    for (const status of ["pending", "running", "cancelled", "skipped"]) {
+  it("omits taskName from meta when it is missing or blank", () => {
+    expect(
+      schedulerMessageToPetEvent({ type: "execution-update", taskId: "t1", status: "completed" })
+    ).toEqual({ source: "scheduler", kind: "scheduledRun", meta: { taskId: "t1" } })
+    expect(
+      schedulerMessageToPetEvent({
+        type: "execution-update",
+        taskId: "t1",
+        taskName: "",
+        status: "completed",
+      })
+    ).toEqual({ source: "scheduler", kind: "scheduledRun", meta: { taskId: "t1" } })
+  })
+
+  it("ignores non-actionable statuses", () => {
+    for (const status of ["pending", "cancelled", "skipped"]) {
       expect(schedulerMessageToPetEvent({ ...base, taskId: "t1", status })).toBeNull()
     }
   })
@@ -60,12 +82,13 @@ describe("createSchedulerSource", () => {
     const wire = createSchedulerSource({ subscribe })
     const dispose = wire((e) => events.push({ ...e, at: 0 }))
 
-    push({ type: "execution-update", taskId: "t1", status: "running" }) // ignored
+    push({ type: "execution-update", taskId: "t1", status: "running" }) // → scheduledRunStarting
     push({ type: "execution-update", taskId: "t1", status: "completed" }) // → scheduledRun
     push({ type: "execution-update", taskId: "t2", status: "failed" }) // → error
+    push({ type: "execution-update", taskId: "t3", status: "pending" }) // ignored
     push("garbage") // ignored
 
-    expect(events.map((e) => e.kind)).toEqual(["scheduledRun", "error"])
+    expect(events.map((e) => e.kind)).toEqual(["scheduledRunStarting", "scheduledRun", "error"])
     expect(events[0]).toMatchObject({ source: "scheduler", meta: { taskId: "t1" } })
 
     dispose()

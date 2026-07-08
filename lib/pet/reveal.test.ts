@@ -9,6 +9,12 @@ jest.mock("@/lib/platform/detect", () => ({
   isTauri: () => mockIsTauri,
 }))
 
+// `@/lib/tauri/os` transitively loads the heavy Tauri transport chain (which
+// calls `isTauri()` at module init → a TDZ crash under this file's mock), so
+// stub the one leaf reveal uses. It also lets us drive the macOS branch.
+let mockIsMac = false
+jest.mock("@/lib/tauri/os", () => ({ isMacPlatform: () => mockIsMac }))
+
 // Tauri window API reached via dynamic import inside the reveal.
 const showMock = jest.fn().mockResolvedValue(undefined)
 const setFocusMock = jest.fn().mockResolvedValue(undefined)
@@ -52,6 +58,7 @@ async function flushAsync() {
 
 beforeEach(() => {
   mockIsTauri = false
+  mockIsMac = false
   showMock.mockClear()
   setFocusMock.mockClear()
   innerSizeMock.mockClear()
@@ -99,6 +106,21 @@ describe("schedulePetWindowReveal", () => {
     expect(setSizeMock.mock.calls[0][0]).toMatchObject({ width: 200, height: 241 })
     expect(setSizeMock.mock.calls[1][0]).toMatchObject({ width: 200, height: 240 })
     expect(setResizableMock).toHaveBeenNthCalledWith(2, false)
+  })
+
+  it("skips the resize nudge on macOS (protects the NSPanel style mask)", async () => {
+    mockIsTauri = true
+    mockIsMac = true
+    schedulePetWindowReveal()
+    flushRaf()
+    flushRaf()
+    await flushAsync()
+
+    // The window still reveals, but the Windows-only recomposite nudge is
+    // skipped so `setResizable` can't drop the non-activating panel bit.
+    expect(showMock).toHaveBeenCalledTimes(1)
+    expect(setResizableMock).not.toHaveBeenCalled()
+    expect(setSizeMock).not.toHaveBeenCalled()
   })
 
   it("focuses after showing when focus is requested (popup blur-to-close)", async () => {

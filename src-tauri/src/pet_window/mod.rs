@@ -20,6 +20,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, PhysicalPosition, Runtime};
 
+mod macos_panel;
 mod popup;
 mod surfaces;
 pub use popup::*;
@@ -195,6 +196,12 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     window
         .set_ignore_cursor_events(opts.click_through)
         .map_err(|e| e.to_string())?;
+
+    // macOS: reclass to a non-activating NSPanel so the pet floats over every
+    // Space + full-screen apps and never steals the foreground app's focus.
+    // No-op on Windows/Linux (the builder flags already suffice there). Runs
+    // while the window is still hidden — converting a hidden window is fine.
+    macos_panel::apply_pet_panel_behavior(&window, macos_panel::PetPanelRole::Sprite)?;
 
     // Intentionally do NOT `show()` here. On Windows a `transparent(true)` window
     // shown before its WebView has committed a first paint renders an opaque

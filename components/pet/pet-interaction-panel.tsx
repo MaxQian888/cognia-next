@@ -7,6 +7,9 @@
 "use client"
 
 import { useState } from "react"
+import { MessagesSquareIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { PetProfile } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
@@ -64,6 +67,7 @@ export function PetInteractionPanel({
   showInventory = true,
   className,
 }: PetInteractionPanelProps) {
+  const t = useTranslations("pet")
   const grewStats = usePetStore((s) => s.lastGrewStats)
   const [talkOpen, setTalkOpen] = useState(false)
 
@@ -117,6 +121,19 @@ export function PetInteractionPanel({
       />
 
       {talkOpen && <PetTalkComposer onTalk={onTalk} />}
+
+      {onOpenConsole && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 justify-start gap-2"
+          data-testid="pet-open-chat"
+          onClick={() => onOpenConsole("chat")}
+        >
+          <MessagesSquareIcon className="size-3.5" />
+          {t("chat.openPanel")}
+        </Button>
+      )}
 
       {onOpenConsole && <PetQuickNav onNavigate={onOpenConsole} />}
     </div>

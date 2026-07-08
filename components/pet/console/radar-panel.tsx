@@ -168,7 +168,7 @@ export function RadarPanel() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 @md/pet-pane:grid-cols-2">
           <div className="space-y-1">
             <Label className="text-[10px] text-muted-foreground">
               {t("settings.scheduleModeLabel")}

@@ -28,6 +28,7 @@ import { resolveEffectiveSkin } from "../skins/resolve-effective-skin"
 import { PetRenderer } from "../pet-renderer"
 import { PetNameEditor } from "../pet-name-editor"
 import { NurtureTab } from "./nurture-tab"
+import { ChatTab } from "./chat-tab"
 import { ShopTab } from "./shop-tab"
 import { CustomizeTab } from "./customize-tab"
 import { DexTab } from "./dex-tab"
@@ -133,7 +134,7 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
         ))}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-auto p-4">
+      <div className="@container/pet-pane min-h-0 flex-1 overflow-auto p-4">
         {tab === "nurture" &&
           (profile.soul ? (
             <NurtureTab
@@ -162,6 +163,7 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
               <Button onClick={() => void hatch()}>{t("console.hatch")}</Button>
             </div>
           ))}
+        {tab === "chat" && <ChatTab profile={profile} view={view} />}
         {tab === "shop" && <ShopTab />}
         {tab === "customize" && <CustomizeTab />}
         {tab === "insights" && (

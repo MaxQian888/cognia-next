@@ -22,7 +22,9 @@ export const COIN_AWARD: Partial<Record<PetEventKind, number>> = {
   teamRun: 4,
   workflowRun: 2,
   scheduledRun: 1,
-  // inboundMessage / radar / twin / lifecycle kinds mint nothing.
+  // inboundMessage / radar / twin / lifecycle kinds mint nothing. Scheduled-task
+  // starting/due cues (scheduledRunStarting / scheduledRunDue) are reminders, not
+  // completed work, so they mint nothing either (fall through to 0).
 }
 
 /**

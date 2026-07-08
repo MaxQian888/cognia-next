@@ -36,7 +36,15 @@ import { usePetStore } from "@/stores/pet/pet-store"
  * (e.g. `twinBusy` → thinking, `twinMilestone` → happy) must NOT be listed, or
  * `restingWithCare` would suppress those states and make the reducer cases dead.
  */
-const PASSIVE_KINDS = new Set<PetEventKind>(["idle", "inboundMessage", "scheduledRun"])
+const PASSIVE_KINDS = new Set<PetEventKind>([
+  "idle",
+  "inboundMessage",
+  "scheduledRun",
+  // A due reminder maps to restingFromNeeds (the punch comes from the reminder
+  // hook's one-shot), so honor the care condition like the other passive kinds.
+  // scheduledRunStarting is NOT here — it maps to the expressive "thinking".
+  "scheduledRunDue",
+])
 
 /** Lifecycle kinds the controller re-emits — never re-emit while handling one. */
 const LIFECYCLE_EMIT_KINDS = new Set<PetEventKind>(["levelUp", "evolved", "unwell"])

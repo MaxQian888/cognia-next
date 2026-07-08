@@ -41,6 +41,8 @@ export const STAT_GROWTH_TABLE: Partial<Record<PetEventKind, Partial<PetStatProg
   workflowRun: { patience: 0.3, wisdom: 0.4 },
   scheduledRun: { patience: 0.6, wisdom: 0.2 },
   inboundMessage: { snark: 0.5 },
+  // scheduledRunStarting / scheduledRunDue are reminder cues, not completed work
+  // — they grow no stats on their own (absent → statDeltaForEvent returns zeros).
 }
 
 /** Compute the stat growth a single event produces. Pure. */

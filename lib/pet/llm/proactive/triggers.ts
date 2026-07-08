@@ -28,6 +28,10 @@ export const PROACTIVE_CLAIMED_KINDS: readonly PetEventKind[] = [
   "goalComplete",
   "achievementUnlocked",
   "workflowRun",
+  // A due scheduled task/reminder: the pet says the reminder out loud when
+  // proactive is on, else `usePetBubbles` shows the template. `scheduledRunStarting`
+  // is intentionally NOT claimed — a spoken line on every run start is too chatty.
+  "scheduledRunDue",
 ] as const
 
 const EVENT_SEEDS: Partial<Record<PetEventKind, string>> = {
@@ -36,6 +40,8 @@ const EVENT_SEEDS: Partial<Record<PetEventKind, string>> = {
   goalComplete: "Your human just completed a goal. Congratulate them in one short line.",
   achievementUnlocked: "You two just unlocked an achievement badge. Cheer in one short line.",
   workflowRun: "A workflow your human set up just ran. Comment on it in one short line.",
+  scheduledRunDue:
+    "A scheduled task your human set up is due right now. Remind them about it in one short line.",
 }
 
 /**
