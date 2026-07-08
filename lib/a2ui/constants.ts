@@ -27,10 +27,12 @@ export const CATEGORY_I18N_MAP: Record<string, string> = {
  * Surface container styles by type
  */
 export const surfaceStyles = {
-  inline: "w-full",
+  // @container lets renderer components respond to the surface width (chat
+  // column, side panel) instead of the viewport
+  inline: "@container w-full",
   dialog: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
-  panel: "w-full max-w-md border-l bg-background",
-  fullscreen: "fixed inset-0 z-50 bg-background",
+  panel: "@container w-full max-w-md border-l bg-background",
+  fullscreen: "@container fixed inset-0 z-50 bg-background",
 }
 
 /**
@@ -38,7 +40,8 @@ export const surfaceStyles = {
  */
 export const contentStyles = {
   inline: "",
-  dialog: "bg-background rounded-lg shadow-lg max-w-lg w-full max-h-[90vh] overflow-auto p-4",
+  dialog:
+    "@container bg-background rounded-lg shadow-lg max-w-lg w-full max-h-[90vh] overflow-auto p-4",
   panel: "h-full overflow-auto p-4",
   fullscreen: "h-full overflow-auto p-4",
 }

@@ -14,7 +14,8 @@ description: A2UI surfaces must degrade into platform-native rich content — La
   from plugin-facing factories (`surface-builder.ts`), turns assistant replies into outbound
   `MessageSegment[]` with a `plainTextMirror` fallback (`a2ui-to-segments.ts`), and scores each
   surface against the target adapter's capability matrix (`capability-evaluator.ts`). **Inbound**, it
-  folds platform segments back into a single A2UI `Column` surface (`segments-to-a2ui.ts`) and routes
+  projects platform-rich content into an `InboundA2UIBlock` for the Inbox renderer
+  (`projectInboundToA2UI` → per-platform `inbound-to-a2ui.ts`) and routes
   button taps into an AI digest turn or a workflow-control handler. **Workflow projection** turns a
   live run into an approval card, per-step progress lines, an in-place cumulative status card, and a
   terminal summary — fanned out to every subscribed channel by an event-driven background runner
@@ -44,7 +45,7 @@ so the model can be told — in its own system prompt — what will and won't su
   - lib/connectors/a2ui-bridge/surface-builder.ts — plugin-facing pure surface builder (backs `ctx.connectors.a2ui`)
   - lib/connectors/a2ui-bridge/capability-evaluator.ts — surface vs adapter capability matrix
   - lib/connectors/a2ui-bridge/a2ui-to-segments.ts — assistant reply → outbound `MessageSegment[]`
-  - lib/connectors/a2ui-bridge/segments-to-a2ui.ts — inbound platform segments → one A2UI `Column`
+  - lib/connectors/adapters/_shared/inbound-a2ui-dispatch.ts — `projectInboundToA2UI`: inbound platform payload → `InboundA2UIBlock`
   - lib/connectors/a2ui-bridge/workflow-to-a2ui.ts — PURE workflow → A2UI builders
   - lib/connectors/a2ui-bridge/workflow-progress-runner.ts — background fan-out loop
   - lib/a2ui/connector-callback-handler.ts — generic callback → AI digest turn
@@ -145,29 +146,46 @@ prompt the model sees before composing.
 (`capability.ts:133`); `isKnownKind` (`capability-evaluator.ts:147`) and `A2UI_COMPONENT_KINDS`
 guard against unrecognized component strings.
 
-## Inbound: Segments → Surface + Callbacks
+## Inbound: Platform Payload → InboundA2UIBlock + Callbacks
 
-### Folding platform segments into one Column (`segments-to-a2ui.ts`)
+### Projecting a platform payload into an `InboundA2UIBlock` (`inbound-a2ui-dispatch.ts`)
 
-`segmentsToA2UI` (`segments-to-a2ui.ts:48`) turns an inbound platform message back into a single A2UI
-`Column` surface. Each segment kind maps to one component via the switch at `:67-144`:
+> A previous version of this doc described a `segmentsToA2UI` (`segments-to-a2ui.ts`) module that
+> folded inbound segments into a single A2UI `Column` surface. That module was **removed as dead
+> code** — it had zero callers. The real inbound projection does **not** reuse the outbound A2UI
+> surface shape; it produces a focused `InboundA2UIBlock` tree for the Inbox renderer.
 
-| Segment kind | → Component (id prefix) | Notes (`segments-to-a2ui.ts`) |
-| --- | --- | --- |
-| `text` (68) | `Text` (`text-`) | also pushed to `textParts` |
-| `markdown` (75) | `Text` (`text-`) | |
-| `image` (82) | `Image` `src/alt/width/height` (`img-`) | |
-| `card` (96) | `Card` `title=card.kind` (`card-`) | |
-| `video` / `voice` / `file` (112) | `Link` labelled `[file]` / `[voice]` / `[video]` (`link-`) | |
-| `location` (127) | `Text` 📍 label (`text-`) | glyph at `:130` |
-| `a2ui` (135) | returned **unchanged** | already a surface |
-| default (142) | folded into text | `mention` / `emoji` / `code` / `reply` / `poll` |
+`projectInboundToA2UI` (`inbound-a2ui-dispatch.ts:26`) is the bus-side dispatcher. The bus calls it
+once per inbound `create` event with the platform kind and the raw platform payload; it switches to
+the matching per-platform mapper (`../<platform>/inbound-to-a2ui.ts`, one for each of `slack`,
+`lark`, `discord`, `telegram`, `onebot`, `wecom`, `wechat-personal`, `wechat-oa`, `matrix`,
+`qq-official`, `dingtalk`) and returns an `InboundA2UIBlock` (`inbound-a2ui-types.ts:50`) or `null`.
+Mappers are **best-effort**: a nullish payload, an unmapped platform, or a mapper that throws all
+resolve to `null` (`:40`, `:66`, `:68-76`), and the bus falls through to plaintext rendering.
 
-`nextSurfaceId` (`segments-to-a2ui.ts:27`) mints `inbound:<platform>:<adapterId>:<messageId>:<n>`
-(`:29`, off module-level `surfaceCounter` at `:25`). Empty input → `null` (`:54`); no mapped children
-→ `null` (`:147`). The root `Column` carries `children: childIds`, id `"root"` (`:149-150`); the
-content is `{components, dataModel:{}, rootId, surfaceType:"inline"}` (`:152-157`), and
-`plainTextMirror = textParts.join("\n")` (`:163`).
+The resulting `InboundA2UIBlock` is persisted onto `StoredMessage.metadata.inboundA2UI` and walked by
+`components/chat/message-parts/inbound-a2ui-renderer.tsx` so the Inbox shows the platform's native
+rich structure. The block is a deliberately narrow subset of the full `A2UISurface` — a `source`
+chip, an optional `title`, and a `body` array of `InboundA2UINode`:
+
+| Node kind (`inbound-a2ui-types.ts`) | Renders as |
+| --- | --- |
+| `text` (emphasis `muted`/`bold`/`italic`/`code`) | inline text |
+| `heading` (level 1–3) | heading |
+| `image` (`url/alt/width/height`) | image |
+| `link` (`href/label`) | hyperlink |
+| `button` (`url` or `actionId`, `style`) | action button |
+| `divider` | rule |
+| `row` / `column` / `list` (`ordered?`) | layout containers |
+| `card` (`title/subtitle/children`) | card |
+| `alert` (tone `info`/`warning`/`success`/`error`) | callout |
+| `mention` / `reply_context` / `raw_json` | mention · reply preview · raw escape hatch |
+
+Anything the mapper can't express in `body` is stashed on `raw` and surfaced behind a `<details>` for
+debugging. Note this inbound path is **not** the inverse of the outbound `assistantReplyToSegments`
+(`a2ui-to-segments.ts`) — outbound flattens an assistant surface into transferable
+`MessageSegment[]`, while inbound lifts a raw platform payload into a compact `InboundA2UIBlock`; the
+two are independent projections, not a matched pair.
 
 ### Button tap → AI digest turn (`connector-callback-handler.ts`)
 

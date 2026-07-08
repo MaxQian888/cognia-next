@@ -36,7 +36,7 @@ export function A2UIComparisonCards({
           {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
         </div>
       ) : null}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @md:grid-cols-2">
         {items.map((item) => {
           const card = (
             <Card className="h-full border-border/60 bg-background/80 text-left">

@@ -62,7 +62,7 @@ flowchart TB
     EXT["external CLI agent<br/>sidecar/a2ui-mcp.mjs"]
     ACP["ACP-native CLI<br/>acp-bridge.ts:26"]
     GEN["app-generator (no LLM)<br/>app-generator/index.ts:67"]
-    IMIN["inbound IM segments<br/>segments-to-a2ui.ts:48"]
+    IMIN["inbound IM payload<br/>projectInboundToA2UI"]
   end
 
   subgraph PROTO["Protocol core (lib/a2ui)"]

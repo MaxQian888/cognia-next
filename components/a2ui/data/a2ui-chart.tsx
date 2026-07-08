@@ -274,7 +274,8 @@ export const A2UIChart = memo(function A2UIChart({
       style={{ height, ...(component.style as React.CSSProperties) }}
     >
       {component.title && <h3 className="mb-2 text-sm font-medium">{component.title}</h3>}
-      <ResponsiveContainer width="100%" height="100%">
+      {/* initialDimension keeps the chart visible when mounted at 0×0 (tabs, dialogs, collapsibles) */}
+      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 320, height }}>
         {renderChart()}
       </ResponsiveContainer>
     </div>

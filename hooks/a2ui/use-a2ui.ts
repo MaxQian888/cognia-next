@@ -3,7 +3,7 @@
  * Provides A2UI surface management and message processing
  */
 
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import { useA2UIStore } from "@/stores/a2ui"
 import { parseA2UIInput, createA2UISurface } from "@/lib/a2ui/parser"
 import { globalEventEmitter } from "@/lib/a2ui/events"
@@ -56,8 +56,9 @@ interface UseA2UIReturn {
   setDataValue: (surfaceId: string, path: string, value: unknown) => void
   getDataValue: <T = unknown>(surfaceId: string, path: string) => T | undefined
 
-  // Event history
-  eventHistory: (A2UIUserAction | A2UIDataModelChange)[]
+  // Event history — read lazily; subscribing reactively would re-render every
+  // useA2UI consumer on each action/keystroke
+  getEventHistory: () => (A2UIUserAction | A2UIDataModelChange)[]
   clearEventHistory: () => void
 
   // Active surface
@@ -76,24 +77,37 @@ export function useA2UI(options: UseA2UIOptions = {}): UseA2UIReturn {
   const processMessagesStore = useA2UIStore((state) => state.processMessages)
   const setDataValueStore = useA2UIStore((state) => state.setDataValue)
   const getDataValueStore = useA2UIStore((state) => state.getDataValue)
-  const eventHistory = useA2UIStore((state) => state.eventHistory)
   const clearEventHistoryStore = useA2UIStore((state) => state.clearEventHistory)
   const activeSurfaceId = useA2UIStore((state) => state.activeSurfaceId)
   const setActiveSurfaceStore = useA2UIStore((state) => state.setActiveSurface)
 
+  // Keep latest handlers in refs so the emitter subscription survives
+  // inline-closure handler props without tearing down on every render
+  const onActionRef = useRef(onAction)
+  const onDataChangeRef = useRef(onDataChange)
+  useEffect(() => {
+    onActionRef.current = onAction
+    onDataChangeRef.current = onDataChange
+  }, [onAction, onDataChange])
+
+  const hasAction = !!onAction
+  const hasDataChange = !!onDataChange
+
   // Subscribe to events
   useEffect(() => {
-    const unsubscribeAction = onAction ? globalEventEmitter.onAction(onAction) : undefined
+    const unsubscribeAction = hasAction
+      ? globalEventEmitter.onAction((action) => onActionRef.current?.(action))
+      : undefined
 
-    const unsubscribeDataChange = onDataChange
-      ? globalEventEmitter.onDataChange(onDataChange)
+    const unsubscribeDataChange = hasDataChange
+      ? globalEventEmitter.onDataChange((change) => onDataChangeRef.current?.(change))
       : undefined
 
     return () => {
       unsubscribeAction?.()
       unsubscribeDataChange?.()
     }
-  }, [onAction, onDataChange])
+  }, [hasAction, hasDataChange])
 
   // Create surface
   const createSurface = useCallback(
@@ -210,6 +224,11 @@ export function useA2UI(options: UseA2UIOptions = {}): UseA2UIReturn {
     [getDataValueStore]
   )
 
+  // Read event history lazily (non-reactive) to avoid re-render storms
+  const getEventHistory = useCallback(() => {
+    return useA2UIStore.getState().eventHistory
+  }, [])
+
   // Clear event history
   const clearEventHistory = useCallback(() => {
     clearEventHistoryStore()
@@ -235,7 +254,7 @@ export function useA2UI(options: UseA2UIOptions = {}): UseA2UIReturn {
     createQuickSurface,
     setDataValue,
     getDataValue,
-    eventHistory,
+    getEventHistory,
     clearEventHistory,
     activeSurfaceId,
     setActiveSurface,

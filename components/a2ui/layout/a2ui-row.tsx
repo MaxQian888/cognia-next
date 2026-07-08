@@ -36,7 +36,9 @@ export const A2UIRow = memo(function A2UIRow({ component }: A2UIComponentProps<A
   return (
     <div
       className={cn(
-        "flex flex-row",
+        // min-w-0 on the row and its direct children lets flex items shrink
+        // instead of overflowing narrow inline surfaces
+        "flex min-w-0 flex-row [&>*]:min-w-0",
         gapClass,
         alignStyles[align],
         justifyStyles[justify],

@@ -61,6 +61,12 @@ export type A2UIComponentType =
   | "Animation"
   | "InteractiveGuide"
   | "RichOutput"
+  | "Tabs"
+  | "Accordion"
+  | "Toggle"
+  | "FormGroup"
+  | "AcademicAnalysis"
+  | "AcademicSearchResults"
   | string // Allow custom component types
 
 /**

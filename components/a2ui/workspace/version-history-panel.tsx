@@ -14,10 +14,14 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useA2UIStore } from "@/stores/a2ui"
 import { useWorkspaceContext } from "./a2ui-workspace-context"
 
+// Stable fallback so the selector keeps referential equality when the stack
+// is absent (a fresh [] would re-render on every store change)
+const EMPTY_UNDO_STACK: never[] = []
+
 export function VersionHistoryPanel() {
   const t = useTranslations("a2ui")
   const { surfaceId } = useWorkspaceContext()
-  const undoStack = useA2UIStore((state) => state.undoStacks[surfaceId] || [])
+  const undoStack = useA2UIStore((state) => state.undoStacks[surfaceId] ?? EMPTY_UNDO_STACK)
   const undo = useA2UIStore((state) => state.undo)
 
   const handleRestore = useCallback(

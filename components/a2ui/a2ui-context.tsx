@@ -39,7 +39,7 @@ export function A2UIProvider({
 
   const dataModel = useMemo(() => surface?.dataModel ?? {}, [surface])
   const components = useMemo(() => surface?.components ?? {}, [surface])
-  const catalog = getCatalog(catalogId)
+  const catalog = useMemo(() => getCatalog(catalogId), [catalogId])
 
   const emitAction = useCallback(
     (action: string, componentId: string, data?: Record<string, unknown>) => {

@@ -5,7 +5,7 @@
  * Renders an A2UI surface with its component tree
  */
 
-import React, { useCallback, useEffect } from "react"
+import React, { useCallback, useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import type {
@@ -42,22 +42,34 @@ export function A2UISurface({
   const error = useA2UIStore((state) => state.errors[surfaceId])
   const resolvedLoadingText = loadingText ?? t("surface.loading")
 
+  // Keep latest handlers in refs so inline-closure props don't tear the
+  // emitter subscription down and re-register it on every render
+  const onActionRef = useRef(onAction)
+  const onDataChangeRef = useRef(onDataChange)
+  useEffect(() => {
+    onActionRef.current = onAction
+    onDataChangeRef.current = onDataChange
+  }, [onAction, onDataChange])
+
+  const hasAction = !!onAction
+  const hasDataChange = !!onDataChange
+
   // Subscribe to events
   useEffect(() => {
-    if (!onAction && !onDataChange) return
+    if (!hasAction && !hasDataChange) return
 
-    const unsubscribeAction = onAction
+    const unsubscribeAction = hasAction
       ? globalEventEmitter.onAction((action: A2UIUserAction) => {
           if (action.surfaceId === surfaceId) {
-            onAction(action)
+            onActionRef.current?.(action)
           }
         })
       : undefined
 
-    const unsubscribeDataChange = onDataChange
+    const unsubscribeDataChange = hasDataChange
       ? globalEventEmitter.onDataChange((change: A2UIDataModelChange) => {
           if (change.surfaceId === surfaceId) {
-            onDataChange(change)
+            onDataChangeRef.current?.(change)
           }
         })
       : undefined
@@ -66,7 +78,7 @@ export function A2UISurface({
       unsubscribeAction?.()
       unsubscribeDataChange?.()
     }
-  }, [surfaceId, onAction, onDataChange])
+  }, [surfaceId, hasAction, hasDataChange])
 
   // Render component callback for provider
   const renderComponent = useCallback((component: A2UIComponent) => {

@@ -40,6 +40,65 @@ const MAX_HISTORY_ENTRIES = 50
 const HISTORY_DEBOUNCE_MS = 300
 
 /**
+ * Compute the undo/redo stack update for a snapshot of `surfaceId`.
+ *
+ * Extracted so mutating actions (updateComponents / updateDataModel) can fold
+ * the snapshot into the same set() transaction as the mutation itself — a
+ * separate pushSnapshot set() would notify every subscriber twice per patch,
+ * which compounds badly during streaming.
+ *
+ * Returns null when the surface does not exist.
+ */
+function buildSnapshotUpdate(
+  state: Pick<A2UIState, "surfaces" | "undoStacks" | "redoStacks">,
+  surfaceId: string,
+  description: string
+): Partial<Pick<A2UIState, "undoStacks" | "redoStacks">> | null {
+  const surface = state.surfaces[surfaceId]
+  if (!surface) return null
+
+  const stack = state.undoStacks[surfaceId] || []
+  const lastEntry = stack[stack.length - 1]
+
+  // Debounce: merge consecutive same-description snapshots within 300ms
+  if (
+    lastEntry &&
+    lastEntry.description === description &&
+    Date.now() - lastEntry.timestamp < HISTORY_DEBOUNCE_MS
+  ) {
+    // Update the latest entry's timestamp (keep original snapshot)
+    const updatedStack = [...stack]
+    updatedStack[updatedStack.length - 1] = { ...lastEntry, timestamp: Date.now() }
+    return {
+      undoStacks: { ...state.undoStacks, [surfaceId]: updatedStack },
+    }
+  }
+
+  // The store mutates `components` / `dataModel` immutably (every
+  // update replaces them via structural sharing — see
+  // `lib/a2ui/data-model.ts`), so a snapshot can capture the current
+  // references directly instead of deep-cloning the whole tree on
+  // every component/data update. Structural sharing means the
+  // retained snapshots also share unchanged subtrees, so undo history
+  // costs O(changed-spine) memory rather than O(model size) per step.
+  const entry: A2UIHistoryEntry = {
+    id: `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: Date.now(),
+    description,
+    components: surface.components,
+    dataModel: surface.dataModel,
+  }
+
+  const newStack = [...stack, entry].slice(-MAX_HISTORY_ENTRIES)
+
+  return {
+    undoStacks: { ...state.undoStacks, [surfaceId]: newStack },
+    // Clear redo stack on new change
+    redoStacks: { ...state.redoStacks, [surfaceId]: [] },
+  }
+}
+
+/**
  * A2UI Store State
  */
 interface A2UIState {
@@ -265,12 +324,12 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
         // Component management
         updateComponents: (surfaceId, components) => {
-          // Snapshot before mutation for undo
-          get().pushSnapshot(surfaceId, "updateComponents")
-
+          // Snapshot + mutation in one set() transaction (single notification)
           set((state) => {
             const surface = state.surfaces[surfaceId]
             if (!surface) return state
+
+            const snapshot = buildSnapshotUpdate(state, surfaceId, "updateComponents")
 
             const updatedComponents = { ...surface.components }
             for (const component of components) {
@@ -278,6 +337,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
             }
 
             return {
+              ...snapshot,
               surfaces: {
                 ...state.surfaces,
                 [surfaceId]: {
@@ -297,16 +357,16 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
         // Data model management
         updateDataModel: (surfaceId, data, merge = true) => {
-          // Snapshot before mutation for undo
-          get().pushSnapshot(surfaceId, "updateDataModel")
-
+          // Snapshot + mutation in one set() transaction (single notification)
           set((state) => {
             const surface = state.surfaces[surfaceId]
             if (!surface) return state
 
+            const snapshot = buildSnapshotUpdate(state, surfaceId, "updateDataModel")
             const newDataModel = merge ? deepMerge(surface.dataModel, data) : deepClone(data)
 
             return {
+              ...snapshot,
               surfaces: {
                 ...state.surfaces,
                 [surfaceId]: {
@@ -320,13 +380,22 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
         },
 
         setDataValue: (surfaceId, path, value) => {
+          const changeEvent = createDataModelChange(surfaceId, path, value)
+
+          // Mutation + event-history append in one set() transaction so each
+          // keystroke fires a single store notification
           set((state) => {
+            const eventHistory = [changeEvent, ...state.eventHistory].slice(
+              0,
+              state.maxEventHistory
+            )
             const surface = state.surfaces[surfaceId]
-            if (!surface) return state
+            if (!surface) return { eventHistory }
 
             const newDataModel = setValueByPath(surface.dataModel, path, value)
 
             return {
+              eventHistory,
               surfaces: {
                 ...state.surfaces,
                 [surfaceId]: {
@@ -338,8 +407,8 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
             }
           })
 
-          // Emit data change event
-          get().emitDataChange(surfaceId, path, value)
+          // Emit to global event emitter
+          globalEventEmitter.emitDataChange(changeEvent)
         },
 
         getDataValue: <T = unknown>(surfaceId: string, path: string): T | undefined => {
@@ -521,50 +590,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
         // Undo/redo
         pushSnapshot: (surfaceId, description) => {
-          const surface = get().surfaces[surfaceId]
-          if (!surface) return
-
-          set((state) => {
-            const stack = state.undoStacks[surfaceId] || []
-            const lastEntry = stack[stack.length - 1]
-
-            // Debounce: merge consecutive same-description snapshots within 300ms
-            if (
-              lastEntry &&
-              lastEntry.description === description &&
-              Date.now() - lastEntry.timestamp < HISTORY_DEBOUNCE_MS
-            ) {
-              // Update the latest entry's timestamp (keep original snapshot)
-              const updatedStack = [...stack]
-              updatedStack[updatedStack.length - 1] = { ...lastEntry, timestamp: Date.now() }
-              return {
-                undoStacks: { ...state.undoStacks, [surfaceId]: updatedStack },
-              }
-            }
-
-            // The store mutates `components` / `dataModel` immutably (every
-            // update replaces them via structural sharing — see
-            // `lib/a2ui/data-model.ts`), so a snapshot can capture the current
-            // references directly instead of deep-cloning the whole tree on
-            // every component/data update. Structural sharing means the
-            // retained snapshots also share unchanged subtrees, so undo history
-            // costs O(changed-spine) memory rather than O(model size) per step.
-            const entry: A2UIHistoryEntry = {
-              id: `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              timestamp: Date.now(),
-              description,
-              components: surface.components,
-              dataModel: surface.dataModel,
-            }
-
-            const newStack = [...stack, entry].slice(-MAX_HISTORY_ENTRIES)
-
-            return {
-              undoStacks: { ...state.undoStacks, [surfaceId]: newStack },
-              // Clear redo stack on new change
-              redoStacks: { ...state.redoStacks, [surfaceId]: [] },
-            }
-          })
+          set((state) => buildSnapshotUpdate(state, surfaceId, description) ?? state)
         },
 
         undo: (surfaceId) => {

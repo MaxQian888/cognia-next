@@ -115,17 +115,65 @@ function mapElement(el: LarkCardElement): InboundA2UINode | null {
 }
 
 /**
- * Convert a Lark interactive-card payload into an InboundA2UIBlock.
- * Accepts both the new schema-2.0 envelope and the older flat shape;
- * mappers gracefully skip elements they don't recognise.
+ * Minimal shape of the Lark event-subscription envelope this mapper is handed
+ * in production. `projectInboundToA2UI` passes `event.raw` — the FULL envelope
+ * (`{schema, header, event}`) — not a bare card. When the inbound message is an
+ * interactive card, the card JSON lives *stringified* at `event.message.content`.
  */
-export function larkInboundToA2UI(payload: LarkCardPayload): InboundA2UIBlock | null {
-  const elements =
-    payload.elements ?? payload.i18n_elements?.en_us ?? payload.i18n_elements?.zh_cn ?? []
-  if (elements.length === 0 && !payload.header?.title?.content) return null
+interface LarkEnvelopeLike {
+  header?: { event_type?: string }
+  event?: {
+    message?: { message_type?: string; content?: string }
+  }
+}
+
+function isEnvelope(payload: unknown): payload is LarkEnvelopeLike {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    "event" in payload &&
+    typeof (payload as { event?: unknown }).event === "object" &&
+    (payload as { event?: unknown }).event !== null
+  )
+}
+
+/**
+ * Resolve the actual interactive-card payload from whatever
+ * `projectInboundToA2UI` handed us. Production passes the full event envelope,
+ * whose interactive card is stringified at `event.message.content`; tests and
+ * legacy callers pass a bare card payload directly. Returns null when there is
+ * no interactive card to project (plain text / image / post messages, or a
+ * malformed content string) so the bus falls through to plaintext rendering.
+ */
+function resolveCardPayload(payload: LarkCardPayload | LarkEnvelopeLike): LarkCardPayload | null {
+  if (isEnvelope(payload)) {
+    const message = payload.event?.message
+    if (!message || message.message_type !== "interactive" || !message.content) return null
+    try {
+      return JSON.parse(message.content) as LarkCardPayload
+    } catch {
+      return null
+    }
+  }
+  return payload as LarkCardPayload
+}
+
+/**
+ * Convert a Lark interactive-card payload into an InboundA2UIBlock.
+ * Accepts the full schema-2.0 event envelope (the production shape), the
+ * new schema-2.0 card payload, and the older flat shape; mappers gracefully
+ * skip elements they don't recognise.
+ */
+export function larkInboundToA2UI(
+  payload: LarkCardPayload | LarkEnvelopeLike
+): InboundA2UIBlock | null {
+  const card = resolveCardPayload(payload)
+  if (!card) return null
+  const elements = card.elements ?? card.i18n_elements?.en_us ?? card.i18n_elements?.zh_cn ?? []
+  if (elements.length === 0 && !card.header?.title?.content) return null
   const body: InboundA2UINode[] = []
-  const headerTitle = payload.header?.title?.content
-  const headerSubtitle = payload.header?.subtitle?.content
+  const headerTitle = card.header?.title?.content
+  const headerSubtitle = card.header?.subtitle?.content
   if (headerTitle) {
     body.push({ kind: "heading", level: 2, text: headerTitle })
   }
@@ -133,8 +181,8 @@ export function larkInboundToA2UI(payload: LarkCardPayload): InboundA2UIBlock | 
     body.push({ kind: "text", text: headerSubtitle, emphasis: "muted" })
   }
   body.push(...flatten(elements.map(mapElement)))
-  if (payload.card_link?.url) {
-    body.push({ kind: "link", href: payload.card_link.url, label: payload.card_link.url })
+  if (card.card_link?.url) {
+    body.push({ kind: "link", href: card.card_link.url, label: card.card_link.url })
   }
   if (body.length === 0) return null
   return {
@@ -142,6 +190,6 @@ export function larkInboundToA2UI(payload: LarkCardPayload): InboundA2UIBlock | 
     source: "lark",
     title: headerTitle,
     body,
-    raw: payload,
+    raw: card,
   }
 }

@@ -55,20 +55,20 @@ export const A2UICard = memo(function A2UICard({
         </div>
       )}
       {(title || description) && (
-        <CardHeader className="p-4 sm:p-6">
-          {title && <CardTitle className="text-base sm:text-lg">{title}</CardTitle>}
+        <CardHeader className="p-4 @md:p-6">
+          {title && <CardTitle className="text-base @md:text-lg">{title}</CardTitle>}
           {description && (
-            <CardDescription className="text-xs sm:text-sm">{description}</CardDescription>
+            <CardDescription className="text-xs @md:text-sm">{description}</CardDescription>
           )}
         </CardHeader>
       )}
       {component.children && component.children.length > 0 && (
-        <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+        <CardContent className="px-4 @md:px-6 pb-4 @md:pb-6">
           <A2UIChildRenderer childIds={component.children} />
         </CardContent>
       )}
       {component.footer && component.footer.length > 0 && (
-        <CardFooter className="px-4 sm:px-6 pb-4 sm:pb-6">
+        <CardFooter className="px-4 @md:px-6 pb-4 @md:pb-6">
           <A2UIChildRenderer childIds={component.footer} />
         </CardFooter>
       )}

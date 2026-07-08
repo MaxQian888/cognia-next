@@ -89,6 +89,12 @@ const standardCatalogDefinition: Omit<A2UIComponentCatalog, "components"> & {
     "ButtonGroup",
     "InputGroup",
     "Collapsible",
+    "Tabs",
+    "Accordion",
+    "Toggle",
+    "FormGroup",
+    "AcademicAnalysis",
+    "AcademicSearchResults",
   ],
 }
 

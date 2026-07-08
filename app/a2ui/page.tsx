@@ -422,10 +422,11 @@ function A2UIPageContent() {
                     onClick={() => handleOpenWorkspace(recentApp.id)}
                   >
                     <div className="grid gap-0 md:grid-cols-[minmax(0,1.2fr)_minmax(260px,0.8fr)]">
-                      <div className="min-h-[220px] border-b bg-muted/30 p-4 md:border-b-0 md:border-r">
+                      <div className="min-h-[220px] overflow-hidden border-b bg-muted/30 p-4 md:border-b-0 md:border-r">
+                        {/* w-[125%] compensates scale-[0.8] so the scaled preview fills its layout box */}
                         <A2UIInlineSurface
                           surfaceId={recentApp.id}
-                          className="pointer-events-none min-h-[180px] scale-[0.8] origin-top-left"
+                          className="pointer-events-none min-h-[180px] w-[125%] scale-[0.8] origin-top-left"
                         />
                       </div>
                       <div className="flex flex-col justify-between gap-4 p-5">
@@ -678,10 +679,11 @@ function A2UIPageContent() {
                         </div>
 
                         {viewMode === "grid" && (
-                          <div className="border-b bg-muted/30 p-3">
+                          <div className="overflow-hidden border-b bg-muted/30 p-3">
+                            {/* w-[161%] compensates scale-[0.62] so the scaled preview fills its layout box */}
                             <A2UIInlineSurface
                               surfaceId={app.id}
-                              className="pointer-events-none min-h-[120px] scale-[0.62] origin-top-left"
+                              className="pointer-events-none min-h-[120px] w-[161%] scale-[0.62] origin-top-left"
                             />
                           </div>
                         )}

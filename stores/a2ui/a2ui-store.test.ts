@@ -175,6 +175,52 @@ describe("useA2UIStore", () => {
     })
   })
 
+  describe("single-notification transactions", () => {
+    it("fires exactly one store notification per mutating action", () => {
+      act(() => {
+        useA2UIStore.getState().createSurface("surface-1", "dialog")
+      })
+
+      const listener = jest.fn()
+      const unsubscribe = useA2UIStore.subscribe(listener)
+
+      act(() => {
+        useA2UIStore
+          .getState()
+          .updateComponents("surface-1", [
+            { id: "comp-1", type: "Button", props: { label: "Click" } } as never,
+          ])
+      })
+      expect(listener).toHaveBeenCalledTimes(1)
+
+      act(() => {
+        useA2UIStore.getState().updateDataModel("surface-1", { name: "John" })
+      })
+      expect(listener).toHaveBeenCalledTimes(2)
+
+      act(() => {
+        useA2UIStore.getState().setDataValue("surface-1", "/name", "Jane")
+      })
+      expect(listener).toHaveBeenCalledTimes(3)
+
+      unsubscribe()
+    })
+
+    it("records undo snapshot and event history inside the same transaction", () => {
+      act(() => {
+        useA2UIStore.getState().createSurface("surface-1", "dialog")
+        useA2UIStore.getState().updateDataModel("surface-1", { name: "John" })
+      })
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toHaveLength(1)
+
+      act(() => {
+        useA2UIStore.getState().setDataValue("surface-1", "/name", "Jane")
+      })
+      expect(useA2UIStore.getState().eventHistory).toHaveLength(1)
+      expect(useA2UIStore.getState().surfaces["surface-1"].dataModel.name).toBe("Jane")
+    })
+  })
+
   describe("processMessage: connectorAction", () => {
     it("injects an IM callback as a userAction (value carries the action id)", () => {
       act(() => {
