@@ -13,6 +13,13 @@ export type ChatImportFormat =
 export interface ImportedConversation {
   session: ChatSession
   messages: StoredMessage[]
+  /**
+   * Additional conversations produced alongside this one, persisted as
+   * top-level rows too (ADR-0062). Claude Code uses this for the hidden
+   * `kind: "subagent"` inner-transcript sessions a parent turn drills into.
+   * Flattened by `parseSessions` before `applyImported`.
+   */
+  nested?: ImportedConversation[]
 }
 
 export interface ChatImportOptions {
