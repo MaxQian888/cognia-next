@@ -52,7 +52,12 @@
     },
     "island": {
       "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
-      "label": "Island overlay"
+      "label": "Island overlay",
+      "monitor": {
+        "label": "Show on display",
+        "option": "{name} ({width}×{height})",
+        "primary": "Primary display"
+      }
     },
     "monitor": {
       "desc": "Local event ingress for external agent hooks. Runs on the companion server, loopback only.",

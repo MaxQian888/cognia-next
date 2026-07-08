@@ -236,3 +236,42 @@ export async function islandResize(width: number, height: number): Promise<boole
     return false
   }
 }
+
+/** One connected monitor, for the island display picker (mirrors Rust `IslandMonitorInfo`). */
+export interface IslandMonitorInfo {
+  /** OS monitor name — the persisted identifier. `null` when unnamed. */
+  name: string | null
+  index: number
+  isPrimary: boolean
+  /** Whether the persisted preference points at this monitor. */
+  selected: boolean
+  /** Logical size, for the "2560×1440" hint. */
+  width: number
+  height: number
+}
+
+/** List connected monitors for the island display picker. */
+export async function islandListMonitors(): Promise<IslandMonitorInfo[]> {
+  if (!isTauri()) return []
+  try {
+    return await invoke<IslandMonitorInfo[]>("island_list_monitors")
+  } catch (err) {
+    console.warn("islandListMonitors failed", err)
+    return []
+  }
+}
+
+/**
+ * Persist the island's preferred monitor (`null` → follow the primary) and
+ * move a live island there immediately.
+ */
+export async function islandSetMonitor(name: string | null): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    await invoke("island_set_monitor", { monitor: name })
+    return true
+  } catch (err) {
+    console.warn("islandSetMonitor failed", err)
+    return false
+  }
+}

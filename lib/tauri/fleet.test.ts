@@ -31,7 +31,9 @@ import {
   fleetMonitorStatus,
   fleetMonitorStop,
   fleetPermissionRespond,
+  islandListMonitors,
   islandResize,
+  islandSetMonitor,
   isIslandWindowOpen,
   openIslandWindow,
 } from "./fleet"
@@ -181,6 +183,22 @@ describe("on Tauri", () => {
     expect(await closeIslandWindow()).toBe(true)
     invokeMock.mockResolvedValue(true)
     expect(await isIslandWindowOpen()).toBe(true)
+  })
+
+  it("lists monitors and persists the island display choice", async () => {
+    const monitors = [
+      { name: "Built-in", index: 0, isPrimary: true, selected: false, width: 1512, height: 982 },
+    ]
+    invokeMock.mockResolvedValueOnce(monitors)
+    expect(await islandListMonitors()).toEqual(monitors)
+    expect(invokeMock).toHaveBeenCalledWith("island_list_monitors")
+
+    invokeMock.mockResolvedValueOnce(undefined)
+    expect(await islandSetMonitor("DELL U2723QE")).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("island_set_monitor", { monitor: "DELL U2723QE" })
+    invokeMock.mockResolvedValueOnce(undefined)
+    expect(await islandSetMonitor(null)).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("island_set_monitor", { monitor: null })
   })
 
   it("swallows command failures with a warn", async () => {

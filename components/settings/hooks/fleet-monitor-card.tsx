@@ -31,6 +31,13 @@ import {
   type FleetHooksInstallState,
 } from "@/lib/claude/hooks/fleet-hooks"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   closeIslandWindow,
   fleetCodexInstall,
   fleetCodexStatus,
@@ -42,8 +49,11 @@ import {
   fleetOpencodeStatus,
   fleetOpencodeUninstall,
   isIslandWindowOpen,
+  islandListMonitors,
+  islandSetMonitor,
   openIslandWindow,
   type CodexStatus,
+  type IslandMonitorInfo,
   type OpencodeStatus,
 } from "@/lib/tauri/fleet"
 import { subscribeClaudeSettings } from "@/lib/claude/settings"
@@ -62,6 +72,7 @@ export function FleetMonitorCard() {
   const [codexStatus, setCodexStatus] = useState<CodexStatus>("not-installed")
   const [opencodeStatus, setOpencodeStatus] = useState<OpencodeStatus>("not-installed")
   const [islandOpen, setIslandOpen] = useState(false)
+  const [islandMonitors, setIslandMonitors] = useState<IslandMonitorInfo[]>([])
   const [busy, setBusy] = useState(false)
 
   // Read the three status sources without touching React state — the caller
@@ -69,12 +80,13 @@ export function FleetMonitorCard() {
   // state write stay on the right side of the effect's await boundary.
   const fetchStatus = useCallback(async () => {
     try {
-      const [monitor, hooks, codex, opencode, island] = await Promise.all([
+      const [monitor, hooks, codex, opencode, island, monitors] = await Promise.all([
         fleetMonitorStatus(),
         readFleetHooksStatus(),
         fleetCodexStatus(),
         fleetOpencodeStatus(),
         isIslandWindowOpen(),
+        islandListMonitors(),
       ])
       return {
         monitorEnabled: monitor.enabled,
@@ -84,6 +96,7 @@ export function FleetMonitorCard() {
         codexStatus: codex.status,
         opencodeStatus: opencode.status,
         islandOpen: island,
+        islandMonitors: monitors,
       }
     } catch (e) {
       log.error("refresh_failed", { error: String(e) })
@@ -100,6 +113,7 @@ export function FleetMonitorCard() {
       setCodexStatus(s.codexStatus)
       setOpencodeStatus(s.opencodeStatus)
       setIslandOpen(s.islandOpen)
+      setIslandMonitors(s.islandMonitors)
     }
     setLoaded(true)
   }, [])
@@ -233,6 +247,24 @@ export function FleetMonitorCard() {
       }
     },
     [busy]
+  )
+
+  // "primary" is the Select sentinel for "no persisted preference" — Radix
+  // Select can't represent a null value, and Rust maps it back to `None`.
+  const selectedIslandMonitor = islandMonitors.find((m) => m.selected)?.name ?? "primary"
+
+  const changeIslandMonitor = useCallback(
+    async (value: string) => {
+      if (busy) return
+      setBusy(true)
+      try {
+        const ok = await islandSetMonitor(value === "primary" ? null : value)
+        if (ok) await refresh()
+      } finally {
+        setBusy(false)
+      }
+    },
+    [busy, refresh]
   )
 
   const codexBadge = (() => {
@@ -410,6 +442,45 @@ export function FleetMonitorCard() {
             data-testid="fleet-island-switch"
           />
         </div>
+
+        {islandMonitors.length > 1 ? (
+          <div
+            className="flex items-center justify-between gap-3"
+            data-testid="fleet-island-monitor-row"
+          >
+            <Label className="text-xs font-medium text-muted-foreground">
+              {t("island.monitor.label")}
+            </Label>
+            <Select
+              value={selectedIslandMonitor}
+              disabled={busy || !loaded}
+              onValueChange={(v) => void changeIslandMonitor(v)}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-56 text-xs"
+                aria-label={t("island.monitor.label")}
+                data-testid="fleet-island-monitor-trigger"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="primary">{t("island.monitor.primary")}</SelectItem>
+                {islandMonitors
+                  .filter((m) => m.name !== null)
+                  .map((m) => (
+                    <SelectItem key={m.name} value={m.name as string}>
+                      {t("island.monitor.option", {
+                        name: m.name as string,
+                        width: m.width,
+                        height: m.height,
+                      })}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
       </div>
 
       <div className="border-t pt-3">

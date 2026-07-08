@@ -43,6 +43,8 @@ const mockFleet = {
   openIslandWindow: jest.fn(),
   closeIslandWindow: jest.fn(),
   isIslandWindowOpen: jest.fn(),
+  islandListMonitors: jest.fn(),
+  islandSetMonitor: jest.fn(),
 }
 jest.mock("@/lib/tauri/fleet", () => ({
   fleetMonitorStart: () => mockFleet.fleetMonitorStart(),
@@ -57,6 +59,39 @@ jest.mock("@/lib/tauri/fleet", () => ({
   openIslandWindow: () => mockFleet.openIslandWindow(),
   closeIslandWindow: () => mockFleet.closeIslandWindow(),
   isIslandWindowOpen: () => mockFleet.isIslandWindowOpen(),
+  islandListMonitors: () => mockFleet.islandListMonitors(),
+  islandSetMonitor: (name: string | null) => mockFleet.islandSetMonitor(name),
+}))
+
+// Radix Select can't be driven in jsdom (pointer-capture APIs missing); a
+// native <select> stand-in keeps the value/onValueChange contract testable.
+jest.mock("@/components/ui/select", () => ({
+  Select: ({
+    value,
+    onValueChange,
+    disabled,
+    children,
+  }: {
+    value: string
+    onValueChange: (v: string) => void
+    disabled?: boolean
+    children: React.ReactNode
+  }) => (
+    <select
+      data-testid="fleet-island-monitor-select"
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onValueChange(e.target.value)}
+    >
+      {children}
+    </select>
+  ),
+  SelectTrigger: () => null,
+  SelectValue: () => null,
+  SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => (
+    <option value={value}>{children}</option>
+  ),
 }))
 
 const mockSubscribe = jest.fn()
@@ -89,6 +124,17 @@ beforeEach(() => {
   })
   mockFleet.fleetOpencodeStatus.mockResolvedValue({ status: "not-installed", pluginPath: null })
   mockFleet.isIslandWindowOpen.mockResolvedValue(false)
+  mockFleet.islandListMonitors.mockResolvedValue([
+    {
+      name: "Built-in Display",
+      index: 0,
+      isPrimary: true,
+      selected: false,
+      width: 1512,
+      height: 982,
+    },
+  ])
+  mockFleet.islandSetMonitor.mockResolvedValue(true)
   mockHooks.readFleetHooksStatus.mockResolvedValue(hooksStatus("not-installed", "missing"))
 })
 
@@ -286,6 +332,46 @@ describe("FleetMonitorCard", () => {
     )
     fireEvent.click(screen.getByTestId("fleet-island-switch"))
     await waitFor(() => expect(mockFleet.closeIslandWindow).toHaveBeenCalled())
+  })
+
+  it("hides the display picker with a single monitor", async () => {
+    await renderLoaded()
+    expect(screen.queryByTestId("fleet-island-monitor-row")).toBeNull()
+  })
+
+  it("persists a display choice and maps the primary sentinel back to null", async () => {
+    mockFleet.islandListMonitors.mockResolvedValue([
+      {
+        name: "Built-in Display",
+        index: 0,
+        isPrimary: true,
+        selected: false,
+        width: 1512,
+        height: 982,
+      },
+      {
+        name: "DELL U2723QE",
+        index: 1,
+        isPrimary: false,
+        selected: true,
+        width: 2560,
+        height: 1440,
+      },
+    ])
+    await renderLoaded()
+
+    // The persisted preference (selected: true) is reflected in the control.
+    const select = screen.getByTestId("fleet-island-monitor-select") as HTMLSelectElement
+    expect(select.value).toBe("DELL U2723QE")
+
+    fireEvent.change(select, { target: { value: "Built-in Display" } })
+    await waitFor(() => expect(mockFleet.islandSetMonitor).toHaveBeenCalledWith("Built-in Display"))
+    // The card is busy until set + refresh settle; a change fired while busy
+    // is intentionally swallowed, so wait for the control to re-enable.
+    await waitFor(() => expect(select).not.toBeDisabled())
+
+    fireEvent.change(select, { target: { value: "primary" } })
+    await waitFor(() => expect(mockFleet.islandSetMonitor).toHaveBeenCalledWith(null))
   })
 
   it("re-derives install state when settings.json changes externally", async () => {

@@ -498,6 +498,8 @@ pub fn run() {
             fleet::island_window::close_island_window,
             fleet::island_window::is_island_window_open,
             fleet::island_window::island_resize,
+            fleet::island_window::island_list_monitors,
+            fleet::island_window::island_set_monitor,
             tray::commands::tray_set_menu,
             tray::commands::tray_set_icon_state,
             tray::commands::tray_set_tooltip,

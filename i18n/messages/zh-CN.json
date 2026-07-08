@@ -18693,7 +18693,12 @@
         },
         "island": {
           "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",
-          "label": "灵动岛悬浮层"
+          "label": "灵动岛悬浮层",
+          "monitor": {
+            "label": "显示在哪个屏幕",
+            "option": "{name}（{width}×{height}）",
+            "primary": "主显示器"
+          }
         },
         "monitor": {
           "desc": "外部 Agent hook 的本地事件入口。运行在 companion 服务器上，仅监听回环地址。",

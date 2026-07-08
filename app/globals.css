@@ -318,6 +318,17 @@ html.reduce-motion *::after {
     color-scheme: normal !important;
   }
 
+  /* The island window hugs its measured content (`island_resize`), but the
+     resize round-trips through Rust — for a frame or two the content can be
+     taller/wider than the window, and any overflow paints a scrollbar inside
+     what must look like a floating glass pill. The shell manages its own
+     scrolling (the expanded list is `overflow-y-auto`); the page itself must
+     never scroll. */
+  html[data-island-overlay],
+  html[data-island-overlay] body {
+    overflow: hidden !important;
+  }
+
   /* Kill every wallpaper layer inside the pet windows. `<BackgroundApplier />`
      mounts in this same root layout, so a user wallpaper is painted through TWO
      pseudo-element layers — `body[data-bg-enabled]::before` (fixed, full-window)
