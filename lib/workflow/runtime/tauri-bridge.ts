@@ -17,6 +17,7 @@ import type {
   RegisterTriggerInput,
 } from "@/types/workflow/visual"
 import { notifyCompanionsOfRunState } from "./companion-run-events"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 let _isTauri: boolean | null = null
 
@@ -92,13 +93,18 @@ export async function getWebhookUrl(triggerId: string): Promise<string | null> {
 /**
  * Subscribe to Rust-side trigger events. Returns an unsubscribe function.
  * In web mode, returns a no-op unsubscribe immediately.
+ *
+ * The unsubscribe is wrapped in `safeUnlisten` — Tauri's injected
+ * `unregisterListener` throws (as an unhandled rejection) when the
+ * registration eval hasn't landed yet, which React StrictMode's
+ * mount→unmount→mount cycle reliably triggers.
  */
 export async function listenTriggerEvents(handler: (event: unknown) => void): Promise<() => void> {
   if (!isTauri()) return () => undefined
   try {
     const mod = await import("@tauri-apps/api/event")
     const stop = await mod.listen("workflow:trigger", (e) => handler(e.payload))
-    return stop
+    return () => safeUnlisten(stop)
   } catch {
     return () => undefined
   }
@@ -128,7 +134,7 @@ export async function listenResumeEvents(handler: (event: unknown) => void): Pro
   try {
     const mod = await import("@tauri-apps/api/event")
     const stop = await mod.listen("workflow:resume", (e) => handler(e.payload))
-    return stop
+    return () => safeUnlisten(stop)
   } catch {
     return () => undefined
   }

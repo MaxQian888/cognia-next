@@ -199,7 +199,7 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
         <ProjectRootSwitcher roots={roots} rootKey={rootKey} onSelect={selectRoot} />
         <div className="flex-1" />
       </div>
-      <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
+      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel defaultSize={24} minSize={14} className="min-h-0">
           <div className="flex h-full flex-col">
             <div className="flex border-b">

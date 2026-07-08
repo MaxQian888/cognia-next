@@ -107,7 +107,13 @@ export function PerfGraphCard({
           className={cn(fill && "min-h-0 flex-1")}
           style={fill ? { minHeight: height } : undefined}
         >
-          <ResponsiveContainer width="100%" height={fill ? "100%" : height}>
+          {/* initialDimension pre-empts recharts' -1×-1 first render before
+              ResizeObserver reports (same pattern as perf-sparkline). */}
+          <ResponsiveContainer
+            width="100%"
+            height={fill ? "100%" : height}
+            initialDimension={{ width: 320, height }}
+          >
             <AreaChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">

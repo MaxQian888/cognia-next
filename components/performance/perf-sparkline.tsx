@@ -37,7 +37,12 @@ export function PerfSparkline({
 
   return (
     <div className={cn("h-8 w-16", className)} data-testid={testId}>
-      <ResponsiveContainer width="100%" height="100%">
+      {/* initialDimension pre-empts recharts' first render at its internal
+          -1×-1 default ("The width(-1) and height(-1) of chart should be
+          greater than 0") before ResizeObserver reports — same pattern as
+          a2ui-chart / skill-analytics. 64×32 matches the default h-8 w-16
+          box; the first real measurement corrects it immediately. */}
+      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 64, height: 32 }}>
         <AreaChart data={data} margin={{ top: 1, right: 0, left: 0, bottom: 0 }}>
           <Area
             type="monotone"

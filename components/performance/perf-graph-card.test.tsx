@@ -9,11 +9,17 @@ jest.mock("recharts", () => ({
   ResponsiveContainer: ({
     children,
     height,
+    initialDimension,
   }: {
     children?: React.ReactNode
     height?: number | string
+    initialDimension?: { width: number; height: number }
   }) => (
-    <div data-testid="rc" data-height={String(height)}>
+    <div
+      data-testid="rc"
+      data-height={String(height)}
+      data-initial-dimension={JSON.stringify(initialDimension)}
+    >
       {children}
     </div>
   ),
@@ -76,6 +82,13 @@ describe("PerfGraphCard", () => {
       JSON.stringify(["42.3", "App CPU"])
     )
     expect(screen.getByTestId("tooltip")).toHaveAttribute("data-label", "[]")
+    // Positive initialDimension pre-empts recharts' -1×-1 first-render warning.
+    const dim = JSON.parse(screen.getByTestId("rc").getAttribute("data-initial-dimension")!) as {
+      width: number
+      height: number
+    }
+    expect(dim.width).toBeGreaterThan(0)
+    expect(dim.height).toBe(220)
   })
 
   it("renders an optional subtitle", () => {
