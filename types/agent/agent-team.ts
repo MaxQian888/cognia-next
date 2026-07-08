@@ -1439,6 +1439,12 @@ export interface CreateTaskInput {
 export interface AddTaskCommentInput {
   taskId: string
   authorId: string
+  /**
+   * Display-name override for authors outside the roster (e.g. plugin
+   * actors with `authorId: "plugin:<id>"`). Roster/`"user"`/`"system"`
+   * authors resolve their names automatically when omitted.
+   */
+  authorName?: string
   text: string
   attachments?: Array<Omit<TaskCommentAttachment, "id">>
 }

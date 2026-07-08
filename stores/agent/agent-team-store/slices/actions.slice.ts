@@ -779,9 +779,10 @@ export const createAgentTeamActionsSlice = (
     if (!text) return null
     const author = get().teammates[input.authorId]
     const authorName =
-      input.authorId === "user"
+      input.authorName ||
+      (input.authorId === "user"
         ? "You"
-        : author?.name || (input.authorId === "system" ? "System" : "Unknown")
+        : author?.name || (input.authorId === "system" ? "System" : "Unknown"))
     const comment: AgentTaskComment = {
       id: nanoid(),
       taskId: input.taskId,

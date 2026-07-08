@@ -402,6 +402,8 @@ export type PluginPermission =
   | "git:write" // Mutate the active repo (stage/commit/checkout/push/stash/discard)
   | "goal:read" // Read the user's goals and their progress
   | "goal:write" // Create, update, complete, and decompose goals
+  | "team:read" // Read agent teams, rosters, and their task boards
+  | "team:write" // Create tasks / comment / guarded card moves on team boards (no run control)
   | "subscription:read" // Read subscription plan + usage metrics (never raw credentials)
   | "perf:read" // Read performance dashboard snapshots + live sample stream
   | "connectors:read" // List connector adapters + subscribe to inbound bus events

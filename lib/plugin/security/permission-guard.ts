@@ -103,6 +103,7 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   ],
   git: ["git:read", "git:write"],
   goal: ["goal:read", "goal:write"],
+  team: ["team:read", "team:write"],
   connectors: ["connectors:read", "connectors:send", "connectors:manage"],
   share: ["share:read", "share:create"],
   backup: ["backup:read", "backup:write"],
@@ -158,6 +159,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "git:write": "Stage, commit, branch, push, stash, or discard changes in the active repository",
   "goal:read": "Read your goals and their progress",
   "goal:write": "Create, update, complete, and decompose your goals",
+  "team:read": "Read your agent teams and their task boards",
+  "team:write":
+    "Create tasks, comment, and move cards on your agent-team boards (never starts runs)",
   "subscription:read": "Read subscription plan and usage metrics",
   "perf:read": "Read performance dashboard snapshots and the live sample stream",
   "connectors:read": "List connector adapters and observe inbound platform events",

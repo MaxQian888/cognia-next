@@ -137,6 +137,7 @@ import { createChatAPI, type PluginChatAPI } from "../api/chat-api"
 import { createCapabilitiesAPI, type PluginCapabilitiesAPI } from "../api/capabilities-api"
 import { createGitAPI, type PluginGitAPI } from "../api/git-api"
 import { createGoalAPI, type PluginGoalAPI } from "../api/goal-api"
+import { createTeamAPI, type PluginTeamAPI } from "../api/team-api"
 import { createSubscriptionAPI, type PluginSubscriptionAPI } from "../api/subscription-api"
 import { createTerminalAPI, type PluginTerminalAPI } from "../api/terminal-api"
 import { createPerfAPI, type PluginPerfAPI } from "../api/perf-api"
@@ -209,6 +210,8 @@ export type FullPluginContext = Omit<PluginContext, "storage"> &
     git: PluginGitAPI
     /** Self-driving goal read/drive (gated `goal:read`/`goal:write`). */
     goals: PluginGoalAPI
+    /** Agent-Team board read + guarded task writes (gated `team:read`/`team:write`; no run control). */
+    team: PluginTeamAPI
     /** Read-only subscription plan + usage metrics (gated `subscription:read`). */
     subscription: PluginSubscriptionAPI
     /** Integrated-terminal dock spawn/write/kill (gated `terminal:*`, ownership-checked). */
@@ -389,6 +392,7 @@ export function createFullPluginContext(
     capabilities: createCapabilitiesAPI(),
     git: createGitAPI(pluginId),
     goals: createGoalAPI(pluginId),
+    team: createTeamAPI(pluginId),
     subscription: createSubscriptionAPI(pluginId),
     terminal: createTerminalAPI(pluginId),
     perf: createPerfAPI(pluginId),

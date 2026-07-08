@@ -77,6 +77,7 @@ export type {
 export { createMessagePartAPI, purgeMessagePartRenderersForPlugin } from "./message-part-api"
 export { createGitAPI, NoActiveRepoError } from "./git-api"
 export { createGoalAPI, NoJudgeModelError } from "./goal-api"
+export { createTeamAPI } from "./team-api"
 export { createSubscriptionAPI } from "./subscription-api"
 export { createTerminalAPI, TerminalAccessError } from "./terminal-api"
 export { createPerfAPI } from "./perf-api"
@@ -138,6 +139,7 @@ export type {
   PluginGitConflictResolution,
 } from "./git-api"
 export type { PluginGoalAPI, PluginGoalCreateInput } from "./goal-api"
+export type { PluginTeamAPI, PluginTeamMoveResult, PluginTeamTaskCreateInput } from "./team-api"
 export type { PluginSubscriptionAPI, PluginUsageSnapshot } from "./subscription-api"
 export type {
   PluginTerminalAPI,

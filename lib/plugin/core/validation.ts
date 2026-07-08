@@ -103,6 +103,8 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "git:write",
   "goal:read",
   "goal:write",
+  "team:read",
+  "team:write",
   "subscription:read",
   "perf:read",
   "connectors:read",
