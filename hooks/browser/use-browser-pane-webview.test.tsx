@@ -141,3 +141,52 @@ it("setVisible forwards to the client with the current rect", async () => {
   })
   expect(browserClient.embedSetVisible).toHaveBeenCalledWith(false, RECT)
 })
+
+it("parks the webview off-screen right after creating it when starting hidden", async () => {
+  renderHook(() => useBrowserPaneWebview(ref, { url: "http://localhost:3000/", visible: false }))
+  await act(async () => {
+    mockOnRect?.(RECT)
+    await Promise.resolve()
+  })
+  expect(browserClient.embedCreate).toHaveBeenCalled()
+  expect(browserClient.embedSetVisible).toHaveBeenCalledWith(false, RECT)
+})
+
+it("reveals / parks the webview when the visible prop flips", () => {
+  const { rerender } = renderHook(
+    ({ visible }) => useBrowserPaneWebview(ref, { url: "http://localhost:3000/", visible }),
+    {
+      initialProps: { visible: true },
+    }
+  )
+  deliverRect()
+  ;(browserClient.embedSetVisible as jest.Mock).mockClear()
+
+  rerender({ visible: false })
+  expect(browserClient.embedSetVisible).toHaveBeenCalledWith(false, RECT)
+  ;(browserClient.embedSetVisible as jest.Mock).mockClear()
+  rerender({ visible: true })
+  expect(browserClient.embedSetVisible).toHaveBeenCalledWith(true, RECT)
+})
+
+it("does not churn bounds while parked, then reveals at the fresh rect", () => {
+  const { rerender } = renderHook(
+    ({ visible }) => useBrowserPaneWebview(ref, { url: "http://localhost:3000/", visible }),
+    {
+      initialProps: { visible: true },
+    }
+  )
+  deliverRect()
+  rerender({ visible: false })
+  ;(browserClient.embedSetBounds as jest.Mock).mockClear()
+
+  // Rect churn while parked must not move the (off-screen) webview.
+  const moved = { x: 9, y: 9, width: 300, height: 200 }
+  act(() => mockOnRect?.(moved))
+  expect(browserClient.embedSetBounds).not.toHaveBeenCalled()
+
+  // Revealing uses the latest rect the observer recorded while hidden.
+  ;(browserClient.embedSetVisible as jest.Mock).mockClear()
+  rerender({ visible: true })
+  expect(browserClient.embedSetVisible).toHaveBeenCalledWith(true, moved)
+})

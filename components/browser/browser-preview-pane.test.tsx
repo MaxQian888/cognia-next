@@ -15,13 +15,27 @@ let mockNavigated: BrowserNavigated | null = null
 let mockTauri = true
 let mockSelectMode = false
 let mockRect: ElementRect | null = { x: 0, y: 0, width: 100, height: 100 }
+let mockPhase: "idle" | "loading" | "ready" = "idle"
+let mockHasPainted = false
+const mockBeginLoad = jest.fn()
+let mockRegionVisible = true
+let mockWebviewVisible: boolean | undefined
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockTauri }))
 jest.mock("@/lib/tauri/opener", () => ({
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
 }))
 jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
-  useBrowserPaneWebview: () => ({ getRect: () => mockRect, setVisible: jest.fn() }),
+  useBrowserPaneWebview: (_ref: unknown, opts: { visible?: boolean }) => {
+    mockWebviewVisible = opts?.visible
+    return { getRect: () => mockRect, setVisible: jest.fn() }
+  },
+}))
+jest.mock("@/hooks/browser/use-browser-loading", () => ({
+  useBrowserLoading: () => ({ phase: mockPhase, hasPainted: mockHasPainted, begin: mockBeginLoad }),
+}))
+jest.mock("@/hooks/browser/use-region-visibility", () => ({
+  useRegionVisibility: () => mockRegionVisible,
 }))
 jest.mock("@/hooks/browser/use-element-selection", () => ({
   useElementSelection: () => ({
@@ -78,6 +92,11 @@ beforeEach(() => {
   mockTauri = true
   mockSelectMode = false
   mockRect = { x: 0, y: 0, width: 100, height: 100 }
+  mockPhase = "idle"
+  mockHasPainted = false
+  mockRegionVisible = true
+  mockWebviewVisible = undefined
+  mockBeginLoad.mockClear()
   mockSetSelectMode.mockClear()
   mockClearSelection.mockClear()
   mockSendComment.mockClear().mockResolvedValue(true)
@@ -107,16 +126,14 @@ it("falls back to the sandboxed WebPreview URL bar + iframe outside Tauri", () =
 
 it("renders the empty state and URL bar in Tauri", () => {
   renderPane(<BrowserPreviewPane />)
-  expect(screen.getByText("Preview a local dev server")).toBeInTheDocument()
+  expect(screen.getByText("Preview a web page")).toBeInTheDocument()
   expect(urlBar()).toBeInTheDocument()
 })
 
 it("commits a typed URL via Enter and clears the empty state", async () => {
   renderPane(<BrowserPreviewPane />)
   commitUrl("localhost:3000")
-  await waitFor(() =>
-    expect(screen.queryByText("Preview a local dev server")).not.toBeInTheDocument()
-  )
+  await waitFor(() => expect(screen.queryByText("Preview a web page")).not.toBeInTheDocument())
   // The address bar reflects the normalized URL.
   expect(urlBar()).toHaveValue("http://localhost:3000/")
 })
@@ -131,9 +148,7 @@ it("re-navigates when the same address is committed again", () => {
 it("opens a quick-open chip directly", async () => {
   renderPane(<BrowserPreviewPane />)
   fireEvent.click(screen.getByRole("button", { name: "localhost:5173" }))
-  await waitFor(() =>
-    expect(screen.queryByText("Preview a local dev server")).not.toBeInTheDocument()
-  )
+  await waitFor(() => expect(screen.queryByText("Preview a web page")).not.toBeInTheDocument())
   expect(urlBar()).toHaveValue("http://localhost:5173")
 })
 
@@ -269,7 +284,7 @@ it("rejects an unparseable URL with an error toast", () => {
   renderPane(<BrowserPreviewPane />)
   commitUrl("   ")
   expect(toast.error).toHaveBeenCalled()
-  expect(screen.getByText("Preview a local dev server")).toBeInTheDocument()
+  expect(screen.getByText("Preview a web page")).toBeInTheDocument()
 })
 
 it("shows the no-session toast when the bridge reports no delivery", async () => {
@@ -300,4 +315,48 @@ it("surfaces an error toast when the send throws", async () => {
   })
   fireEvent.click(screen.getByRole("button", { name: /Send to chat/i }))
   await waitFor(() => expect(toast.error).toHaveBeenCalled())
+})
+
+// --- loading UX + layer/visibility wiring ---------------------------------
+
+it("shows the top progress bar only while loading", () => {
+  const { rerender } = renderPane(<BrowserPreviewPane />)
+  expect(screen.queryByTestId("browser-progress")).not.toBeInTheDocument()
+  mockPhase = "loading"
+  rerender(<TooltipProvider>{<BrowserPreviewPane />}</TooltipProvider>)
+  expect(screen.getByTestId("browser-progress")).toBeInTheDocument()
+})
+
+it("shows the first-load placeholder until the page paints, then reveals the page", () => {
+  const { rerender } = renderPane(<BrowserPreviewPane />)
+  commitUrl("localhost:3000")
+  // Not painted yet: placeholder is up and the native webview stays hidden.
+  expect(screen.getByTestId("browser-loading")).toBeInTheDocument()
+  expect(screen.getByText("Loading localhost:3000…")).toBeInTheDocument()
+  expect(mockWebviewVisible).toBe(false)
+
+  // Painted: placeholder gone, webview revealed.
+  mockHasPainted = true
+  rerender(<TooltipProvider>{<BrowserPreviewPane />}</TooltipProvider>)
+  expect(screen.queryByTestId("browser-loading")).not.toBeInTheDocument()
+  expect(mockWebviewVisible).toBe(true)
+})
+
+it("keeps the native webview hidden while a modal / off-screen state covers the region", () => {
+  mockHasPainted = true
+  mockRegionVisible = false
+  renderPane(<BrowserPreviewPane />)
+  commitUrl("localhost:3000")
+  // Region not visible → webview parked so the overlay isn't blocked (no freeze).
+  expect(mockWebviewVisible).toBe(false)
+})
+
+it("begins a load on commit, reload, back and forward", () => {
+  renderPane(<BrowserPreviewPane />)
+  commitUrl("localhost:3000")
+  expect(mockBeginLoad).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole("button", { name: "Reload" }))
+  fireEvent.click(screen.getByRole("button", { name: "Back" }))
+  fireEvent.click(screen.getByRole("button", { name: "Forward" }))
+  expect(mockBeginLoad).toHaveBeenCalledTimes(4)
 })

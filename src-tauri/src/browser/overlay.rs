@@ -16,12 +16,22 @@ pub const OVERLAY_JS: &str = include_str!("../../../lib/browser/overlay.injected
 /// never resolves, so even an un-cancelled navigation cannot leak anywhere.
 pub const SENTINEL_HOST: &str = "cognia.invalid";
 pub const SENTINEL_PATH: &str = "/__cognia_select";
+/// Sentinel path the overlay hits to report SPA navigations (history.pushState
+/// / replaceState / popstate / hashchange), which never reach `on_navigation`
+/// as real document loads.
+pub const NAV_SENTINEL_PATH: &str = "/__cognia_nav";
+/// Sentinel path the overlay hits once a real document has finished loading
+/// (`window` `load`). `on_navigation` never fires a "load complete" event, so
+/// the page reports it here — letting the preview pane swap its loading
+/// placeholder for the painted page.
+pub const LOADED_SENTINEL_PATH: &str = "/__cognia_loaded";
 
-/// Parse a navigation URL into a selection payload, or `None` if it is not the
-/// selection sentinel. The `url` crate percent-decodes the `data` query for us.
-pub fn parse_selection(raw: &str) -> Option<serde_json::Value> {
+/// Parse a sentinel navigation (`https://cognia.invalid/<path>?data=<json>`)
+/// into its JSON payload, or `None` if `raw` is not that sentinel. The `url`
+/// crate percent-decodes the `data` query for us.
+fn parse_sentinel(raw: &str, path: &str) -> Option<serde_json::Value> {
     let parsed = url::Url::parse(raw).ok()?;
-    if parsed.host_str() != Some(SENTINEL_HOST) || parsed.path() != SENTINEL_PATH {
+    if parsed.host_str() != Some(SENTINEL_HOST) || parsed.path() != path {
         return None;
     }
     let data = parsed
@@ -29,6 +39,24 @@ pub fn parse_selection(raw: &str) -> Option<serde_json::Value> {
         .find(|(k, _)| k == "data")
         .map(|(_, v)| v.into_owned())?;
     serde_json::from_str::<serde_json::Value>(&data).ok()
+}
+
+/// Parse a navigation URL into a selection payload, or `None` if it is not the
+/// selection sentinel.
+pub fn parse_selection(raw: &str) -> Option<serde_json::Value> {
+    parse_sentinel(raw, SENTINEL_PATH)
+}
+
+/// Parse a navigation URL into an SPA-navigation payload (`{"url": …}`), or
+/// `None` if it is not the SPA-nav sentinel.
+pub fn parse_spa_navigation(raw: &str) -> Option<serde_json::Value> {
+    parse_sentinel(raw, NAV_SENTINEL_PATH)
+}
+
+/// Parse a navigation URL into a load-complete payload (`{"url": …}`), or
+/// `None` if it is not the load-complete sentinel.
+pub fn parse_loaded(raw: &str) -> Option<serde_json::Value> {
+    parse_sentinel(raw, LOADED_SENTINEL_PATH)
 }
 
 #[cfg(test)]
@@ -45,6 +73,8 @@ mod tests {
     fn overlay_js_is_embedded() {
         assert!(OVERLAY_JS.contains("__cogniaSetSelectMode"));
         assert!(OVERLAY_JS.contains("__cognia_select"));
+        assert!(OVERLAY_JS.contains("__cognia_nav"));
+        assert!(OVERLAY_JS.contains("__cognia_loaded"));
     }
 
     #[test]
@@ -74,5 +104,45 @@ mod tests {
     fn rejects_sentinel_without_valid_json() {
         let url = sentinel("not-json");
         assert!(parse_selection(&url).is_none());
+    }
+
+    #[test]
+    fn parses_spa_navigation_payload() {
+        let mut u = url::Url::parse("https://cognia.invalid/__cognia_nav").unwrap();
+        u.query_pairs_mut()
+            .append_pair("data", r#"{"url":"http://localhost:3000/app#tab"}"#);
+        let payload = parse_spa_navigation(u.as_str()).expect("should parse");
+        assert_eq!(payload["url"], "http://localhost:3000/app#tab");
+    }
+
+    #[test]
+    fn spa_and_selection_sentinels_do_not_cross_match() {
+        let sel = sentinel(r##"{"selector":"#x"}"##);
+        assert!(parse_spa_navigation(&sel).is_none());
+        let mut u = url::Url::parse("https://cognia.invalid/__cognia_nav").unwrap();
+        u.query_pairs_mut().append_pair("data", r#"{"url":"http://a/"}"#);
+        assert!(parse_selection(u.as_str()).is_none());
+    }
+
+    #[test]
+    fn parses_loaded_payload() {
+        let mut u = url::Url::parse("https://cognia.invalid/__cognia_loaded").unwrap();
+        u.query_pairs_mut()
+            .append_pair("data", r#"{"url":"http://localhost:3000/"}"#);
+        let payload = parse_loaded(u.as_str()).expect("should parse");
+        assert_eq!(payload["url"], "http://localhost:3000/");
+    }
+
+    #[test]
+    fn loaded_sentinel_does_not_cross_match_selection_or_nav() {
+        let sel = sentinel(r##"{"selector":"#x"}"##);
+        assert!(parse_loaded(&sel).is_none());
+        let mut nav = url::Url::parse("https://cognia.invalid/__cognia_nav").unwrap();
+        nav.query_pairs_mut().append_pair("data", r#"{"url":"http://a/"}"#);
+        assert!(parse_loaded(nav.as_str()).is_none());
+        let mut loaded = url::Url::parse("https://cognia.invalid/__cognia_loaded").unwrap();
+        loaded.query_pairs_mut().append_pair("data", r#"{"url":"http://a/"}"#);
+        assert!(parse_selection(loaded.as_str()).is_none());
+        assert!(parse_spa_navigation(loaded.as_str()).is_none());
     }
 }

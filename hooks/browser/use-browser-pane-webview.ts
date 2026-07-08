@@ -22,6 +22,13 @@ export interface UseBrowserPaneWebviewOptions {
    * entirely ref-driven — a scroll/resize burst never re-renders the caller.
    */
   onRectChange?: (rect: ElementRect) => void
+  /**
+   * When false, the native webview is parked off-screen so the React layer
+   * (loading placeholder, or whatever now covers the pane) shows through. The
+   * webview floats above React and can't be clipped, so this is the only way to
+   * yield to a loading state / modal / hidden route. Defaults to true.
+   */
+  visible?: boolean
 }
 
 /**
@@ -36,11 +43,12 @@ export function useBrowserPaneWebview(
   ref: RefObject<HTMLElement | null>,
   options: UseBrowserPaneWebviewOptions
 ): UseBrowserPaneWebview {
-  const { url, onRectChange } = options
+  const { url, onRectChange, visible = true } = options
   const createdRef = useRef(false)
   const lastUrlRef = useRef<string | null>(null)
   const rectRef = useRef<ElementRect | null>(null)
   const urlRef = useRef(url)
+  const visibleRef = useRef(visible)
   const onRectChangeRef = useRef(onRectChange)
   useEffect(() => {
     onRectChangeRef.current = onRectChange
@@ -56,9 +64,18 @@ export function useBrowserPaneWebview(
     if (!createdRef.current) {
       createdRef.current = true
       lastUrlRef.current = target
-      void browserClient.embedCreate(target, rect).catch(() => {
-        createdRef.current = false
-      })
+      void browserClient.embedCreate(target, rect).then(
+        () => {
+          // Created visible at `rect`; if the caller wants it hidden (e.g. the
+          // first-load placeholder is showing), park it immediately.
+          if (!visibleRef.current) {
+            void browserClient.embedSetVisible(false, rectRef.current ?? rect).catch(() => {})
+          }
+        },
+        () => {
+          createdRef.current = false
+        }
+      )
     } else if (target !== lastUrlRef.current) {
       lastUrlRef.current = target
       void browserClient.embedNavigate(target).catch(() => {})
@@ -70,8 +87,13 @@ export function useBrowserPaneWebview(
       rectRef.current = next
       onRectChangeRef.current?.(next)
       if (!isTauri()) return
-      if (createdRef.current) void browserClient.embedSetBounds(next).catch(() => {})
-      else sync()
+      if (!createdRef.current) {
+        sync()
+        return
+      }
+      // While parked (hidden) the webview sits off-screen; don't churn its
+      // bounds — it's revealed at the fresh rect by the visibility effect.
+      if (visibleRef.current) void browserClient.embedSetBounds(next).catch(() => {})
     },
     [sync]
   )
@@ -82,6 +104,15 @@ export function useBrowserPaneWebview(
     urlRef.current = url
     sync()
   }, [url, sync])
+
+  // Drive native visibility: reveal at the current rect, or park off-screen.
+  useEffect(() => {
+    visibleRef.current = visible
+    if (!isTauri() || !createdRef.current) return
+    void browserClient
+      .embedSetVisible(visible, rectRef.current ?? { x: 0, y: 0, width: 0, height: 0 })
+      .catch(() => {})
+  }, [visible])
 
   useEffect(() => {
     return () => {

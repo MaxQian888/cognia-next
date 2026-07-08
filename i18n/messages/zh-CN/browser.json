@@ -35,9 +35,13 @@
     "lastAction": "最近操作：{action}"
   },
   "empty": {
-    "title": "预览本地开发服务器",
-    "hint": "输入 localhost 地址即可在此渲染，然后选择元素进行评论。",
+    "title": "预览网页",
+    "hint": "输入任意网址或 localhost 地址即可在此渲染，然后选择元素进行评论。",
     "quickOpen": "快速打开："
+  },
+  "loading": {
+    "title": "正在加载 {host}…",
+    "label": "页面加载中"
   },
   "errors": {
     "navigate": "无法导航到该地址"

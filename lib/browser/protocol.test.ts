@@ -2,6 +2,7 @@ import {
   BROWSER_EVENTS,
   type BrowserSelection,
   formatSelectionComment,
+  isLocalHostname,
   normalizePreviewUrl,
   resolveTrustTier,
   screenshotToFile,
@@ -42,17 +43,51 @@ describe("formatSelectionComment", () => {
 })
 
 describe("normalizePreviewUrl", () => {
-  it("defaults a bare host to http://", () => {
+  it("defaults a bare local host to http://", () => {
     expect(normalizePreviewUrl("localhost:3000")).toBe("http://localhost:3000/")
+    expect(normalizePreviewUrl("127.0.0.1:5173")).toBe("http://127.0.0.1:5173/")
+    expect(normalizePreviewUrl("192.168.1.20:8080")).toBe("http://192.168.1.20:8080/")
+    expect(normalizePreviewUrl("mymac.local:3000")).toBe("http://mymac.local:3000/")
+  })
+  it("defaults a bare public host to https://", () => {
+    expect(normalizePreviewUrl("github.com")).toBe("https://github.com/")
+    expect(normalizePreviewUrl("example.com/path?q=1")).toBe("https://example.com/path?q=1")
   })
   it("keeps an explicit scheme", () => {
     expect(normalizePreviewUrl("https://example.com/x")).toBe("https://example.com/x")
+    expect(normalizePreviewUrl("http://example.com/x")).toBe("http://example.com/x")
   })
   it("returns null for empty input", () => {
     expect(normalizePreviewUrl("   ")).toBeNull()
   })
   it("returns null for an unparseable URL", () => {
     expect(normalizePreviewUrl("http://[bad")).toBeNull()
+  })
+})
+
+describe("isLocalHostname", () => {
+  it("classifies loopback, RFC-1918 and mDNS hosts as local", () => {
+    for (const h of [
+      "localhost",
+      "LOCALHOST",
+      "app.localhost",
+      "::1",
+      "[::1]",
+      "0.0.0.0",
+      "127.0.0.1",
+      "10.1.2.3",
+      "192.168.0.1",
+      "172.16.0.1",
+      "172.31.255.255",
+      "dev.local",
+    ]) {
+      expect(isLocalHostname(h)).toBe(true)
+    }
+  })
+  it("classifies public hosts as non-local", () => {
+    for (const h of ["github.com", "172.32.0.1", "1720.16.0.1", "mylocal.com", "8.8.8.8"]) {
+      expect(isLocalHostname(h)).toBe(false)
+    }
   })
 })
 
@@ -89,5 +124,10 @@ describe("BROWSER_EVENTS", () => {
     expect(BROWSER_EVENTS.snapshot).toBe("browser://snapshot")
     expect(BROWSER_EVENTS.console).toBe("browser://console")
     expect(BROWSER_EVENTS.network).toBe("browser://network")
+  })
+
+  it("exposes the navigation lifecycle event names", () => {
+    expect(BROWSER_EVENTS.navigated).toBe("browser://navigated")
+    expect(BROWSER_EVENTS.loaded).toBe("browser://loaded")
   })
 })

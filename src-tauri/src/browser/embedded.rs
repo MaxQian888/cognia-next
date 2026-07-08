@@ -69,8 +69,9 @@ pub async fn browser_embed_create(
         use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl};
 
         if let Some(wv) = app.get_webview(EMBED_LABEL) {
-            let js = format!("window.location.assign({})", js_string(parsed.as_str())?);
-            wv.eval(&js).map_err(|e| e.to_string())?;
+            // Native navigation (not eval'd `location.assign`) so it works even
+            // when the current page's JS context is broken, blank, or blocked.
+            wv.navigate(parsed).map_err(|e| e.to_string())?;
             return Ok(EMBED_LABEL.to_string());
         }
         let window = app
@@ -432,10 +433,13 @@ pub async fn browser_embed_navigate(app: AppHandle, url: String) -> Result<(), S
     let parsed = validate_external_url(&url)?;
     #[cfg(desktop)]
     {
-        eval_embed(
-            &app,
-            &format!("window.location.assign({})", js_string(parsed.as_str())?),
-        )
+        use tauri::Manager;
+        // Native navigation (not eval'd `location.assign`) so it works even
+        // when the current page's JS context is broken, blank, or blocked.
+        app.get_webview(EMBED_LABEL)
+            .ok_or_else(|| "embedded preview is not open".to_string())?
+            .navigate(parsed)
+            .map_err(|e| e.to_string())
     }
     #[cfg(not(desktop))]
     {
@@ -448,7 +452,12 @@ pub async fn browser_embed_navigate(app: AppHandle, url: String) -> Result<(), S
 pub async fn browser_embed_reload(app: AppHandle) -> Result<(), String> {
     #[cfg(desktop)]
     {
-        eval_embed(&app, "window.location.reload()")
+        use tauri::Manager;
+        // Native reload for the same robustness as `browser_embed_navigate`.
+        app.get_webview(EMBED_LABEL)
+            .ok_or_else(|| "embedded preview is not open".to_string())?
+            .reload()
+            .map_err(|e| e.to_string())
     }
     #[cfg(not(desktop))]
     {

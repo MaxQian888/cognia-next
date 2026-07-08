@@ -144,6 +144,16 @@ type Win = Record<string, unknown> & {
       key: string
     }
     networkState: () => { pending: number; completed: number }
+    absoluteHttpUrl: (u: string) => string | null
+    navTo: (u: string) => boolean
+    makeWindowStub: () => {
+      closed: boolean
+      close: () => void
+      location: { href: string; assign: (u: string) => boolean }
+    }
+    scheduleNavReport: () => void
+    signalLoaded: () => void
+    installLoadHook: () => void
   }
 }
 
@@ -409,5 +419,151 @@ describe("console + network capture", () => {
       status: 200,
       ok: true,
     })
+  })
+})
+
+describe("navigation plumbing", () => {
+  beforeEach(() => {
+    document.body.innerHTML = ""
+    delete (window as unknown as Record<string, unknown>).__cogniaNavTo
+    delete (window as unknown as Record<string, unknown>).__cogniaSignalNav
+    install()
+  })
+
+  it("absoluteHttpUrl resolves relative urls and rejects non-http schemes", () => {
+    const api = win().__cogniaOverlay
+    expect(api.absoluteHttpUrl("/next")).toBe("http://localhost/next")
+    expect(api.absoluteHttpUrl("https://example.com/a")).toBe("https://example.com/a")
+    expect(api.absoluteHttpUrl("javascript:alert(1)")).toBeNull()
+    expect(api.absoluteHttpUrl("file:///etc/passwd")).toBeNull()
+  })
+
+  it("window.open navigates in-view and returns a live stub", () => {
+    const navTo = jest.fn()
+    ;(window as unknown as Record<string, unknown>).__cogniaNavTo = navTo
+    const stub = window.open("https://example.com/popup") as unknown as {
+      closed: boolean
+      close: () => void
+      location: { href: string }
+    }
+    expect(navTo).toHaveBeenCalledWith("https://example.com/popup")
+    expect(stub).not.toBeNull()
+    // Deferred-popup pattern: writing the stub's location navigates in-view.
+    stub.location.href = "https://example.com/deferred"
+    expect(navTo).toHaveBeenCalledWith("https://example.com/deferred")
+    stub.close()
+    expect(stub.closed).toBe(true)
+  })
+
+  it("window.open without a url only returns the stub", () => {
+    const navTo = jest.fn()
+    ;(window as unknown as Record<string, unknown>).__cogniaNavTo = navTo
+    const stub = window.open()
+    expect(stub).not.toBeNull()
+    expect(navTo).not.toHaveBeenCalled()
+  })
+
+  it("rewrites target=_blank anchor clicks to in-view navigation", () => {
+    const navTo = jest.fn()
+    ;(window as unknown as Record<string, unknown>).__cogniaNavTo = navTo
+    document.body.innerHTML = `<a href="https://example.com/out" target="_blank"><span>out</span></a>`
+    const span = document.querySelector("span")!
+    span.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expect(navTo).toHaveBeenCalledWith("https://example.com/out")
+  })
+
+  it("leaves _blank clicks alone when the page already handled them", () => {
+    const navTo = jest.fn()
+    ;(window as unknown as Record<string, unknown>).__cogniaNavTo = navTo
+    document.body.innerHTML = `<a href="https://example.com/out" target="_blank">out</a>`
+    const a = document.querySelector("a")!
+    a.addEventListener("click", (e) => e.preventDefault())
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expect(navTo).not.toHaveBeenCalled()
+  })
+
+  it("ignores normal (non-_blank) anchor clicks", () => {
+    const navTo = jest.fn()
+    ;(window as unknown as Record<string, unknown>).__cogniaNavTo = navTo
+    document.body.innerHTML = `<a href="https://example.com/self">self</a>`
+    document
+      .querySelector("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expect(navTo).not.toHaveBeenCalled()
+  })
+
+  it("reports SPA pushState url changes (debounced, deduped)", () => {
+    jest.useFakeTimers()
+    try {
+      const signal = jest.fn()
+      ;(window as unknown as Record<string, unknown>).__cogniaSignalNav = signal
+      window.history.pushState({}, "", "/spa-page")
+      window.history.replaceState({}, "", "/spa-page-2")
+      jest.advanceTimersByTime(200)
+      expect(signal).toHaveBeenCalledTimes(1)
+      expect(signal).toHaveBeenCalledWith({ url: "http://localhost/spa-page-2" })
+      // No further URL change → no further report.
+      jest.advanceTimersByTime(500)
+      expect(signal).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("load-complete signal", () => {
+  beforeEach(() => {
+    document.body.innerHTML = ""
+    delete (window as unknown as Record<string, unknown>).__cogniaLoadHookInstalled
+    delete (window as unknown as Record<string, unknown>).__cogniaSignalLoaded
+  })
+
+  it("reports the page url once the document is already complete", () => {
+    jest.useFakeTimers()
+    try {
+      const signal = jest.fn()
+      ;(window as unknown as Record<string, unknown>).__cogniaSignalLoaded = signal
+      // jsdom documents report readyState "complete" → immediate (deferred) fire.
+      install()
+      expect(signal).not.toHaveBeenCalled() // deferred a tick
+      jest.advanceTimersByTime(1)
+      expect(signal).toHaveBeenCalledWith({ url: window.location.href })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("waits for the window load event while the document is still loading", () => {
+    jest.useFakeTimers()
+    const readyState = Object.getOwnPropertyDescriptor(Document.prototype, "readyState")
+    try {
+      Object.defineProperty(document, "readyState", { value: "loading", configurable: true })
+      const signal = jest.fn()
+      ;(window as unknown as Record<string, unknown>).__cogniaSignalLoaded = signal
+      install()
+      jest.advanceTimersByTime(1)
+      expect(signal).not.toHaveBeenCalled() // not loaded yet
+      window.dispatchEvent(new Event("load"))
+      jest.advanceTimersByTime(1)
+      expect(signal).toHaveBeenCalledWith({ url: window.location.href })
+    } finally {
+      if (readyState) Object.defineProperty(document, "readyState", readyState)
+      else delete (document as unknown as Record<string, unknown>).readyState
+      jest.useRealTimers()
+    }
+  })
+
+  it("installs the window load listener only once per document", () => {
+    const addSpy = jest.spyOn(window, "addEventListener")
+    try {
+      Object.defineProperty(document, "readyState", { value: "loading", configurable: true })
+      install()
+      install() // second init-script run against the same window
+      const loadListeners = addSpy.mock.calls.filter(([type]) => type === "load")
+      expect(loadListeners).toHaveLength(1)
+    } finally {
+      addSpy.mockRestore()
+      Object.defineProperty(document, "readyState", { value: "complete", configurable: true })
+    }
   })
 })

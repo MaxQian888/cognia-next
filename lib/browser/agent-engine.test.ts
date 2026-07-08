@@ -193,6 +193,75 @@ describe("EmbeddedEngine.waitForText", () => {
   })
 })
 
+describe("EmbeddedEngine.waitForLoad", () => {
+  const loaded = (url: string, ready = "complete") => ({ ok: true, value: { url, ready } })
+
+  it("resolves once the target url is loaded", async () => {
+    mockClient.embedEvaluate.mockResolvedValue(loaded("http://localhost/next"))
+    const res = await new EmbeddedEngine().waitForLoad({
+      targetUrl: "http://localhost/next",
+      fromUrl: "http://localhost/",
+      timeoutMs: 1000,
+    })
+    expect(res).toEqual({ ok: true, timedOut: false })
+  })
+
+  it("counts leaving fromUrl as arrival (redirects land elsewhere)", async () => {
+    mockClient.embedEvaluate.mockResolvedValue(loaded("https://redirected.example/"))
+    const res = await new EmbeddedEngine().waitForLoad({
+      targetUrl: "http://localhost/a",
+      fromUrl: "http://localhost/",
+      timeoutMs: 1000,
+    })
+    expect(res.ok).toBe(true)
+  })
+
+  it("matches urls loosely (hash and trailing slash ignored)", async () => {
+    mockClient.embedEvaluate.mockResolvedValue(loaded("http://localhost/app/#tab"))
+    const res = await new EmbeddedEngine().waitForLoad({
+      targetUrl: "http://localhost/app",
+      timeoutMs: 1000,
+    })
+    expect(res.ok).toBe(true)
+  })
+
+  it("times out while still on fromUrl", async () => {
+    mockClient.embedEvaluate.mockResolvedValue(loaded("http://localhost/"))
+    const res = await new EmbeddedEngine().waitForLoad({
+      fromUrl: "http://localhost/",
+      timeoutMs: 0,
+    })
+    expect(res).toEqual({ ok: false, timedOut: true })
+  })
+
+  it("without target/from it waits for readyState complete", async () => {
+    mockClient.embedEvaluate
+      .mockResolvedValueOnce(loaded("http://localhost/", "loading"))
+      .mockResolvedValue(loaded("http://localhost/"))
+    const res = await new EmbeddedEngine().waitForLoad({ timeoutMs: 1000, intervalMs: 1 })
+    expect(res.ok).toBe(true)
+    expect(mockClient.embedEvaluate.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it("keeps polling through eval rejections mid document swap", async () => {
+    mockClient.embedEvaluate
+      .mockRejectedValueOnce(new Error("webview busy"))
+      .mockResolvedValue(loaded("http://localhost/next"))
+    const res = await new EmbeddedEngine().waitForLoad({
+      targetUrl: "http://localhost/next",
+      timeoutMs: 1000,
+      intervalMs: 1,
+    })
+    expect(res.ok).toBe(true)
+  })
+
+  it("honors the initial delay before the first poll", async () => {
+    mockClient.embedEvaluate.mockResolvedValue(loaded("http://localhost/"))
+    const res = await new EmbeddedEngine().waitForLoad({ timeoutMs: 1000, initialDelayMs: 1 })
+    expect(res.ok).toBe(true)
+  })
+})
+
 describe("EmbeddedEngine.screenshot", () => {
   afterEach(() => setActivePaneRect(null))
 

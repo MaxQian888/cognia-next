@@ -6,6 +6,7 @@ import {
   CameraIcon,
   ExternalLinkIcon,
   GlobeIcon,
+  Loader2Icon,
   MousePointerSquareDashedIcon,
   RotateCwIcon,
   SendIcon,
@@ -29,9 +30,12 @@ import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
+import { useBrowserLoading } from "@/hooks/browser/use-browser-loading"
 import { useBrowserPaneWebview } from "@/hooks/browser/use-browser-pane-webview"
 import { useElementSelection } from "@/hooks/browser/use-element-selection"
+import { useRegionVisibility } from "@/hooks/browser/use-region-visibility"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import { browserClient } from "@/lib/browser/client"
 import { setActivePaneRect } from "@/lib/browser/pane-rect"
@@ -46,6 +50,16 @@ const QUICK_OPEN_URLS = [
   "http://localhost:5173",
   "http://localhost:8080",
 ] as const
+
+/** Host of a URL for display, or the raw string / "" if it can't be parsed. */
+function hostOf(url: string | null): string {
+  if (!url) return ""
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
 
 /**
  * The v0/Lovable-style preview pane: browser chrome (back / forward / reload +
@@ -77,9 +91,19 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
     if (committedUrlRef.current) setActivePaneRect(rect)
   }, [])
 
+  // Load lifecycle + whether the reserved region is genuinely on screen. The
+  // native webview floats above React and can't be clipped, so it may only be
+  // shown once the page has painted AND the region is visible — otherwise it is
+  // parked off-screen so the loading placeholder (or a covering modal) shows and
+  // the always-on-top layer stops eating input.
+  const { phase, hasPainted, begin: beginLoad } = useBrowserLoading({ url: committedUrl })
+  const regionVisible = useRegionVisibility(reservedRef)
+  const shouldShowLivePage = !!committedUrl && hasPainted && regionVisible
+
   const { getRect } = useBrowserPaneWebview(reservedRef, {
     url: committedUrl,
     onRectChange: handleRectChange,
+    visible: shouldShowLivePage,
   })
   const { selection, navigated, selectMode, setSelectMode, clearSelection } = useElementSelection({
     driver: browserClient.embedSetSelectMode,
@@ -114,6 +138,7 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
         return
       }
       setUrlInput(next)
+      beginLoad()
       if (next === committedUrl) {
         // Re-committing the same address still navigates — the page may have
         // moved elsewhere since (in-page navigation, redirect).
@@ -123,7 +148,7 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
       }
       urlInputRef.current?.blur()
     },
-    [urlInput, committedUrl, t]
+    [urlInput, committedUrl, t, beginLoad]
   )
 
   const onUrlKeyDown = useCallback(
@@ -214,13 +239,26 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
 
   return (
     <div className="@container flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-1.5 border-b px-2 py-1.5">
+      <div className="relative flex items-center gap-1.5 border-b px-2 py-1.5">
+        {phase === "loading" && (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden"
+            role="progressbar"
+            aria-label={t("loading.label")}
+            data-testid="browser-progress"
+          >
+            <div className="browser-progress-bar h-full w-1/3 rounded-full bg-primary" />
+          </div>
+        )}
         <div className="flex items-center">
           <TooltipIconButton
             tooltip={t("actions.back")}
             aria-label={t("actions.back")}
             disabled={!committedUrl}
-            onClick={() => void browserClient.embedBack()}
+            onClick={() => {
+              beginLoad()
+              void browserClient.embedBack()
+            }}
           >
             <ArrowLeftIcon />
           </TooltipIconButton>
@@ -228,7 +266,10 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
             tooltip={t("actions.forward")}
             aria-label={t("actions.forward")}
             disabled={!committedUrl}
-            onClick={() => void browserClient.embedForward()}
+            onClick={() => {
+              beginLoad()
+              void browserClient.embedForward()
+            }}
           >
             <ArrowRightIcon />
           </TooltipIconButton>
@@ -236,7 +277,10 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
             tooltip={t("actions.reload")}
             aria-label={t("actions.reload")}
             disabled={!committedUrl}
-            onClick={() => void browserClient.embedReload()}
+            onClick={() => {
+              beginLoad()
+              void browserClient.embedReload()
+            }}
           >
             <RotateCwIcon />
           </TooltipIconButton>
@@ -297,6 +341,27 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
       </div>
 
       <div ref={reservedRef} className="relative min-h-0 flex-1">
+        {committedUrl && !hasPainted && (
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-background p-6 text-center"
+            role="status"
+            aria-live="polite"
+            data-testid="browser-loading"
+          >
+            <div className="flex flex-col items-center gap-3">
+              <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                {t("loading.title", { host: hostOf(currentUrl) })}
+              </p>
+            </div>
+            <div className="w-full max-w-sm space-y-2.5" aria-hidden>
+              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-5/6" />
+              <Skeleton className="h-3 w-2/3" />
+            </div>
+          </div>
+        )}
         {!committedUrl && (
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
             <div className="flex size-12 items-center justify-center rounded-2xl bg-muted">

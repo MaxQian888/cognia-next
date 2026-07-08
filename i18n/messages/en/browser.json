@@ -35,9 +35,13 @@
     "lastAction": "Last action: {action}"
   },
   "empty": {
-    "title": "Preview a local dev server",
-    "hint": "Enter a localhost URL to render it here, then select an element to comment on it.",
+    "title": "Preview a web page",
+    "hint": "Enter any web address or a localhost URL to render it here, then select an element to comment on it.",
     "quickOpen": "Quick open:"
+  },
+  "loading": {
+    "title": "Loading {host}…",
+    "label": "Loading page"
   },
   "errors": {
     "navigate": "Could not navigate to that URL"

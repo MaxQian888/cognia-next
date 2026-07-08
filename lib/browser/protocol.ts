@@ -10,8 +10,10 @@ import type { SubmittedFile } from "@/lib/chat/attachments/dispatch"
 export const BROWSER_EVENTS = {
   /** Emitted when the user clicks an element in select mode. */
   elementSelected: "browser://element-selected",
-  /** Emitted on each top-level navigation of the preview. */
+  /** Emitted on each top-level navigation of the preview (nav *start*). */
   navigated: "browser://navigated",
+  /** Emitted once a real document has finished loading (`window` `load`). */
+  loaded: "browser://loaded",
   /** Emitted when a fresh agent snapshot is available. */
   snapshot: "browser://snapshot",
   /** Emitted when console output is captured. */
@@ -47,6 +49,12 @@ export interface BrowserNavigated {
   url: string
 }
 
+/** Payload for `browser://loaded` — the preview finished loading a document. */
+export interface BrowserLoaded {
+  paneId: string
+  url: string
+}
+
 /**
  * Compose the chat prompt for a selected element + the user's comment. The
  * agent uses the selector / dom path / outerHTML to grep the project source
@@ -65,15 +73,37 @@ export function formatSelectionComment(sel: BrowserSelection, comment: string): 
 }
 
 /**
- * Normalize a user-typed address into a loadable http(s) URL, defaulting a
- * bare host to `http://`. Returns null for empty/unparseable input.
+ * Whether a hostname is local/private by convention (dev servers, LAN) —
+ * these are typically served over plain http. Public hosts get https.
+ */
+export function isLocalHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, "")
+  return (
+    h === "localhost" ||
+    h === "::1" ||
+    h === "0.0.0.0" ||
+    h.endsWith(".localhost") ||
+    h.endsWith(".local") ||
+    /^127\./.test(h) ||
+    /^10\./.test(h) ||
+    /^192\.168\./.test(h) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(h)
+  )
+}
+
+/**
+ * Normalize a user-typed address into a loadable http(s) URL. A bare host
+ * defaults to `https://` for public hosts and `http://` for local/private ones
+ * (dev servers). Returns null for empty/unparseable input.
  */
 export function normalizePreviewUrl(input: string): string | null {
   const trimmed = input.trim()
   if (!trimmed) return null
-  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
   try {
-    return new URL(withScheme).toString()
+    if (/^https?:\/\//i.test(trimmed)) return new URL(trimmed).toString()
+    const probe = new URL(`http://${trimmed}`)
+    const scheme = isLocalHostname(probe.hostname) ? "http" : "https"
+    return new URL(`${scheme}://${trimmed}`).toString()
   } catch {
     return null
   }

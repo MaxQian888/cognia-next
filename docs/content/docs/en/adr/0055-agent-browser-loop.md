@@ -186,3 +186,38 @@ provider so the model picks the right family: `computer_use`/`click_text` for
 native apps & arbitrary screens, `browser_*` for the localhost preview,
 `mcp__playwright__*` for public sites, `web_fetch`/`web_search` for read-only
 content.
+
+## Addendum (2026-07-08) — navigation & trust hardening round
+
+Fixes for real-world public-site browsing and automation correctness:
+
+- **Scheme escape closed.** `on_navigation` used to allow any non-http(s)
+  scheme to proceed (only sentinels and http(s) were classified). A remote page
+  redirecting to `file://` / custom protocols now gets **blocked**; `about:`
+  documents stay allowed. Pure `classify_navigation` disposition is unit-tested.
+- **Native navigate/reload.** `browser_embed_navigate`, the re-navigate path of
+  `browser_embed_create`, and `browser_embed_reload` use `Webview::navigate` /
+  `Webview::reload` instead of eval'd `location.assign` — navigation works even
+  when the current page's JS context is broken, blank, or blocked.
+- **Popups land in-view.** The overlay overrides `window.open` (returning a
+  navigating window stub for the deferred-popup pattern) and rewrites
+  `target="_blank"` anchor clicks (bubble phase, respects `defaultPrevented`)
+  to same-view navigations — links on public sites are no longer dead ends.
+- **SPA URL tracking.** pushState/replaceState/popstate/hashchange report the
+  new URL through a second sentinel (`/__cognia_nav`, debounced 150 ms), which
+  Rust re-emits as `browser://navigated` — the pane's address bar and the
+  `paneId` payload stay accurate on client-routed apps.
+- **Live-URL trust gating.** `browser_evaluate` (and the `untrusted` flag on
+  `browser_navigate`) now resolve the trust tier from the page's **live** URL
+  (`getPage()`), not the last URL the model asked for — a localhost page that
+  redirects to a public origin loses `trusted` immediately. Fail-closed to the
+  last known URL when the live one is unreadable.
+- **Load-settled snapshots.** New `EmbeddedEngine.waitForLoad` (URL +
+  `readyState` poll, tolerant of mid-swap eval failures). `browser_navigate`
+  waits for the target document; every mutating tool settles (3 s cap) before
+  its inline snapshot so click-triggered navigations return the page they
+  produced; back/forward/reload add a 250 ms initial delay so the old
+  document's `complete` can't satisfy the check.
+- **Address-bar https default.** `normalizePreviewUrl` defaults bare public
+  hosts to `https://` (local/private hosts — loopback, RFC-1918, `.local` —
+  keep `http://`), via the new `isLocalHostname` helper.

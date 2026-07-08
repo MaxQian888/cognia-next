@@ -43,6 +43,8 @@ export interface BrowserEngine {
   waitForText(text: string, opts?: WaitForOptions): Promise<WaitForResult>
   waitForSelector(selector: string, opts?: WaitForOptions): Promise<WaitForResult>
   waitForNetworkIdle(opts?: NetworkIdleOptions): Promise<WaitForResult>
+  /** Wait for a just-triggered navigation to land (document loaded). */
+  waitForLoad(opts?: WaitForLoadOptions): Promise<WaitForResult>
   screenshot(): Promise<Screenshot>
 }
 
@@ -69,6 +71,31 @@ export interface NetworkIdleOptions {
 export interface WaitForResult {
   ok: boolean
   timedOut: boolean
+}
+
+export interface WaitForLoadOptions {
+  /** URL the navigation should land on (redirects may change it — see fromUrl). */
+  targetUrl?: string
+  /** URL before the navigation; leaving it also counts as "arrived". */
+  fromUrl?: string
+  timeoutMs?: number
+  intervalMs?: number
+  /** Delay before the first poll (lets a same-URL reload actually start). */
+  initialDelayMs?: number
+}
+
+/** Loose URL equality for load-waiting: ignore hash + trailing slash. */
+function sameUrl(a: string, b: string): boolean {
+  const norm = (u: string) => {
+    try {
+      const p = new URL(u)
+      p.hash = ""
+      return p.toString().replace(/\/$/, "")
+    } catch {
+      return u
+    }
+  }
+  return norm(a) === norm(b)
 }
 
 /**
@@ -175,6 +202,43 @@ export class EmbeddedEngine implements BrowserEngine {
         stableSince = now
       }
       if (now >= deadline) return { ok: false, timedOut: true }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    }
+  }
+  /**
+   * Poll the page's URL + readyState until the navigation lands: the URL
+   * matches `targetUrl` (or has left `fromUrl` — redirects) and the document is
+   * `complete`. Eval failures mid-swap count as "not ready yet". Without
+   * target/from it degrades to a readyState-complete wait, which is the right
+   * shape for reload/back/forward and for settling after a click that may or
+   * may not navigate.
+   */
+  async waitForLoad(opts: WaitForLoadOptions = {}): Promise<WaitForResult> {
+    const timeoutMs = opts.timeoutMs ?? 8000
+    const intervalMs = opts.intervalMs ?? 150
+    if (opts.initialDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, opts.initialDelayMs))
+    }
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      try {
+        const res = await browserClient.embedEvaluate(
+          "({url:String(window.location.href),ready:String(document.readyState)})"
+        )
+        if (res.ok && res.value && typeof res.value === "object") {
+          const { url, ready } = res.value as { url?: string; ready?: string }
+          const cur = String(url ?? "")
+          const arrived = opts.targetUrl
+            ? sameUrl(cur, opts.targetUrl) || (opts.fromUrl != null && !sameUrl(cur, opts.fromUrl))
+            : opts.fromUrl != null
+              ? !sameUrl(cur, opts.fromUrl)
+              : true
+          if (arrived && ready === "complete") return { ok: true, timedOut: false }
+        }
+      } catch {
+        // Document mid-swap — the eval bridge can reject; keep polling.
+      }
+      if (Date.now() >= deadline) return { ok: false, timedOut: true }
       await new Promise((resolve) => setTimeout(resolve, intervalMs))
     }
   }
