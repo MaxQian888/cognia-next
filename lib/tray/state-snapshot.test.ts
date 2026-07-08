@@ -120,18 +120,26 @@ describe("useTrayStateSnapshot", () => {
   })
 
   it("reports decayed needs when the pet subsystem is enabled with a profile", () => {
-    petSettingsEnabled = true
-    livePetProfile = {
-      ...createDefaultProfile("acct-1", 0),
-      soul: { name: "Boba", personality: "x", hatchDate: "" },
-      stage: "baby",
-      // A recent tick so decay is negligible — this asserts the wiring
-      // reaches `computePetView`, not the decay-rate math (covered by that
-      // module's own tests).
-      needs: { energy: 70, mood: 65, bond: 40, lastTickAt: new Date().toISOString() },
+    // Pin wall clock so `lastTickAt` and the `Date.now()` inside `computePetView`
+    // are the same instant → zero elapsed → zero decay. Without this the tiny
+    // real-time gap between the two occasionally floors a need down by a point,
+    // making the assertion flaky. This asserts the wiring reaches
+    // `computePetView`, not the decay-rate math (covered by that module's tests).
+    const fixedNow = Date.parse("2026-01-01T00:00:00.000Z")
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(fixedNow)
+    try {
+      petSettingsEnabled = true
+      livePetProfile = {
+        ...createDefaultProfile("acct-1", 0),
+        soul: { name: "Boba", personality: "x", hatchDate: "" },
+        stage: "baby",
+        needs: { energy: 70, mood: 65, bond: 40, lastTickAt: new Date(fixedNow).toISOString() },
+      }
+      const { result } = renderHook(() => useTrayStateSnapshot())
+      expect(result.current.pet).toEqual({ enabled: true, energy: 70, mood: 65, bond: 40 })
+    } finally {
+      nowSpy.mockRestore()
     }
-    const { result } = renderHook(() => useTrayStateSnapshot())
-    expect(result.current.pet).toEqual({ enabled: true, energy: 70, mood: 65, bond: 40 })
   })
 
   it("marks automation running when an automation event arrives, then clears the kill switch", async () => {

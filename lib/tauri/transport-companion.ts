@@ -43,6 +43,7 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "read_text_file",
   "default_export_dir",
   "fs_search_workspace",
+  "fs_search_content_workspace",
   "fs_read_workspace_file",
   "fs_list_workspace_dir",
   "fs_stat_workspace_file",

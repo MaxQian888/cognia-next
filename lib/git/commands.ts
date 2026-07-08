@@ -291,6 +291,18 @@ export async function gitWorktreeCommit(
   return transport.call<string | null>("git_worktree_commit", { worktreePath, message })
 }
 
+/**
+ * `git worktree prune` — drop administrative entries for worktrees whose
+ * directories were removed out-of-band (crash/GC recovery). Reclaims the
+ * `.git/worktrees/<id>` bookkeeping so a later branch delete isn't blocked by a
+ * "checked out in a worktree" ref that no longer has a working tree. No-op on
+ * web (no git backend).
+ */
+export async function gitWorktreePrune(repoPath: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("git_worktree_prune", { repoPath })
+}
+
 export async function gitFetch(repoPath: string, remote?: string, prune = false): Promise<void> {
   if (!isTauri()) return
   await transport.call("git_fetch", { repoPath, remote: remote ?? null, prune })

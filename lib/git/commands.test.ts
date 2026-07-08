@@ -49,6 +49,7 @@ import {
   gitWorktreeAdd,
   gitWorktreeCommit,
   gitWorktreeList,
+  gitWorktreePrune,
   gitWorktreeRemove,
 } from "./commands"
 import { EMPTY_REPO_STATE, EMPTY_STATUS } from "@/types/git"
@@ -84,6 +85,7 @@ describe("when not in Tauri", () => {
     expect(await gitWorktreeCommit("/wt", "m")).toBeNull()
     await gitWorktreeAdd("/r", "/wt", "agent/x")
     await gitWorktreeRemove("/r", "/wt", true, "agent/x")
+    await gitWorktreePrune("/r")
     expect(callMock).not.toHaveBeenCalled()
   })
 })
@@ -245,6 +247,9 @@ describe("when in Tauri", () => {
       message: "agent work",
     })
     expect(sha).toBe("sha123")
+
+    await gitWorktreePrune("/r")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_prune", { repoPath: "/r" })
   })
 
   it("network ops", async () => {

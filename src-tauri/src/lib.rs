@@ -39,6 +39,7 @@ pub mod sandbox;
 mod scheduler;
 mod secret_store;
 mod session_import;
+mod session_import_watch;
 mod settings;
 mod shell;
 mod skills;
@@ -222,6 +223,14 @@ pub fn run() {
             .plugin(tauri_plugin_cli::init());
     }
 
+    // macOS: the desktop-pet windows are reclassed to non-activating NSPanels
+    // (`pet_window/macos_panel.rs`); `WebviewWindow::to_panel` needs this
+    // plugin's manager to be registered.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(tauri_nspanel::init());
+    }
+
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -352,6 +361,7 @@ pub fn run() {
         // emits `ccswitch://db-changed` so the CCSwitch section refreshes when
         // the user switches providers in cc-switch itself.
         .manage(ccswitch::watcher::CcswitchWatcherState::new())
+        .manage(session_import_watch::SessionImportWatcherState::new())
         .manage(plugin_api::vscode::VscodeExtensionState::new(
             dirs::data_dir()
                 .map(|d| d.join("cognia").join("vscode-extensions"))
@@ -391,6 +401,8 @@ pub fn run() {
             // ADR-0062 — external-agent session-history import. Reads OpenCode's
             // local SQLite store read-only for the session importer.
             session_import::opencode_sessions_read,
+            session_import_watch::session_import_watch_start,
+            session_import_watch::session_import_watch_stop,
             ccswitch::commands::ccswitch_status,
             ccswitch::commands::ccswitch_list_providers,
             ccswitch::commands::ccswitch_list_mcp_servers,
@@ -488,6 +500,7 @@ pub fn run() {
             files::read_claude_user_config,
             files::default_export_dir,
             files::fs_search_workspace,
+            files::fs_search_content_workspace,
             files::fs_read_workspace_file,
             files::fs_write_workspace_file,
             files::fs_list_workspace_dir,
@@ -962,6 +975,7 @@ pub fn run() {
             git::commands::git_worktree_remove,
             git::commands::git_worktree_list,
             git::commands::git_worktree_commit,
+            git::commands::git_worktree_prune,
             git::commands::git_fetch,
             git::commands::git_pull,
             git::commands::git_push,

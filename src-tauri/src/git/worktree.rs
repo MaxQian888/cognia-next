@@ -339,6 +339,47 @@ branch refs/heads/agent/run_x/alice/t1
     }
 
     #[tokio::test]
+    async fn prune_reclaims_dangling_worktree_entry() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        init_repo_with_commit(&repo);
+        let repo_str = repo.to_string_lossy().into_owned();
+
+        let wt_path = tmp.path().join("wt-crash");
+        let wt_str = wt_path.to_string_lossy().into_owned();
+        add(&repo_str, &wt_str, "agent/crash", None)
+            .await
+            .expect("worktree add");
+
+        // Simulate a crashed dispatch: the working directory vanishes without a
+        // `git worktree remove`, so git still holds a stale administrative entry.
+        std::fs::remove_dir_all(&wt_path).unwrap();
+        assert!(
+            list(&repo_str)
+                .await
+                .unwrap()
+                .iter()
+                .any(|w| w.branch.as_deref() == Some("agent/crash")),
+            "stale entry still listed before prune"
+        );
+
+        prune(&repo_str).await.expect("worktree prune");
+
+        assert!(
+            !list(&repo_str)
+                .await
+                .unwrap()
+                .iter()
+                .any(|w| w.branch.as_deref() == Some("agent/crash")),
+            "prune reclaimed the dangling administrative entry"
+        );
+    }
+
+    #[tokio::test]
     async fn add_rejects_same_branch_twice() {
         if !git_on_path() {
             return;

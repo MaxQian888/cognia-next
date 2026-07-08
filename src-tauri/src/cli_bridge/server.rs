@@ -53,6 +53,12 @@ pub async fn spawn(state: SharedState) -> Result<(u16, watch::Sender<()>)> {
 }
 
 pub fn build_router(state: SharedState) -> Router {
+    // NOTE: the `/api/v1/dev/*` prefix is a stable wire path shared with the
+    // `cognia-agent` CLI (see `cli/src/handoff/client.ts`) — it is NOT a
+    // debug/dev-build gate. This bridge is started unconditionally in release
+    // too (`mod.rs::init`); only the *dev-build binary discovery* is
+    // debug-gated. Do not rename these routes without a coordinated CLI change,
+    // or already-installed CLIs stop reaching the desktop.
     Router::new()
         .route("/api/v1/dev/health", get(handlers::health))
         // ── Read endpoints ──────────────────────────────────────────────

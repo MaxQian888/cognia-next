@@ -78,6 +78,7 @@ import { getLiveSession } from "@/lib/terminal/session-registry"
 import { matchFileLinks, resolveLinkPath } from "@/lib/terminal/terminal-links"
 import type { IntegrationEvent } from "@/lib/terminal/types"
 import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
+import { openInProjectEditor } from "@/lib/files/project-editor-bridge"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalAutocomplete } from "@/hooks/terminal/use-terminal-autocomplete"
@@ -1102,9 +1103,12 @@ function TerminalInstanceImpl(
             },
             activate: () => {
               const cwd = useTerminalStore.getState().sessions[sessionId]?.cwd ?? null
-              useFileViewerStore
-                .getState()
-                .openFile(resolveLinkPath(cwd, mm.path), mm.line, mm.column)
+              const abs = resolveLinkPath(cwd, mm.path)
+              // Prefer a live project editor rooted at this path (editable +
+              // LSP); fall back to the read-only viewer when none is open.
+              if (!openInProjectEditor(abs, mm.line, mm.column)) {
+                useFileViewerStore.getState().openFile(abs, mm.line, mm.column)
+              }
             },
           }))
           callback(links)

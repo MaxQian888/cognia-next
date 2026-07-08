@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { listen } from "@tauri-apps/api/event"
 import { TAURI_EVENTS, onTauriEvent } from "@/lib/tauri"
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useChatStore } from "@/stores/chat"
 import { useUIStore } from "@/stores/ui"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
@@ -235,23 +236,23 @@ export function useTauriEvents(): void {
       })
 
       if (cancelled) {
-        trayNewChat()
-        traySettings()
-        trayOpenLogs()
-        unlistenNewChat()
-        unlistenMenuOpenLogs()
-        unlistenDocs()
-        cliMatches()
-        cliSecondInstance()
-        deepLink()
-        trayItemClicked()
-        shortcutTriggered()
-        trayOpenDataFolder()
-        trayCopyDiagnostics()
-        trayOpenDocs()
-        trayReportIssue()
-        trayCheckUpdates()
-        trayToggleAutostart()
+        safeUnlisten(trayNewChat)
+        safeUnlisten(traySettings)
+        safeUnlisten(trayOpenLogs)
+        safeUnlisten(unlistenNewChat)
+        safeUnlisten(unlistenMenuOpenLogs)
+        safeUnlisten(unlistenDocs)
+        safeUnlisten(cliMatches)
+        safeUnlisten(cliSecondInstance)
+        safeUnlisten(deepLink)
+        safeUnlisten(trayItemClicked)
+        safeUnlisten(shortcutTriggered)
+        safeUnlisten(trayOpenDataFolder)
+        safeUnlisten(trayCopyDiagnostics)
+        safeUnlisten(trayOpenDocs)
+        safeUnlisten(trayReportIssue)
+        safeUnlisten(trayCheckUpdates)
+        safeUnlisten(trayToggleAutostart)
         return
       }
 
@@ -280,13 +281,7 @@ export function useTauriEvents(): void {
 
     return () => {
       cancelled = true
-      for (const fn of unsubscribers) {
-        try {
-          fn()
-        } catch (err) {
-          console.warn("tauri-event unsubscribe failed", err)
-        }
-      }
+      for (const fn of unsubscribers) safeUnlisten(fn)
     }
   }, [router])
 }

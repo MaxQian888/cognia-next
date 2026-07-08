@@ -85,6 +85,7 @@ import { getTeam } from "@/lib/db/teams"
 import { guildFromSession } from "@/lib/claude/guild"
 import { loggers } from "@/lib/logging"
 import type { Character, SendContent, Team } from "@/lib/claude/types"
+import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { impact, notify } from "@/lib/capacitor/haptics"
 
 const log = loggers.shell
@@ -247,7 +248,7 @@ export function AppShellMobile() {
     decision: Parameters<typeof directChat.respondToApproval>[1]
   ) => {
     if (!approval) return Promise.resolve()
-    return approval.sessionId.includes("::char::")
+    return decodeSubSession(approval.sessionId) !== null
       ? teamChat.respondToApproval(approval, decision)
       : directChat.respondToApproval(approval, decision)
   }
@@ -537,6 +538,11 @@ export function AppShellMobile() {
               showHeader={false}
               onSend={handleSend}
               onStop={stop}
+              // Steer parity with desktop: without these the RunStatusBar's
+              // "steer now" button never renders and an errored settle would
+              // strand the queued steer with no flush affordance.
+              onSteerNow={isTeamSession ? teamChat.interruptAndSteer : directChat.interruptAndSteer}
+              onSteerFlush={isTeamSession ? teamChat.flushSteer : directChat.flushSteer}
               onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
               onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
               onCreate={handleNewDirect}

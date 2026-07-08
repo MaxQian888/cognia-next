@@ -305,6 +305,11 @@ pub async fn git_worktree_commit(
 }
 
 #[tauri::command]
+pub async fn git_worktree_prune(repo_path: String) -> Result<(), GitError> {
+    worktree::prune(&repo_path).await
+}
+
+#[tauri::command]
 pub async fn git_fetch(
     repo_path: String,
     remote: Option<String>,

@@ -28,6 +28,7 @@ import { computePetView } from "@/lib/pet/runtime/pet-view"
 import { APP_VERSION } from "@/lib/app-version"
 import { isAutostartEnabled } from "@/lib/tauri/autostart"
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { isMainAppWindow } from "@/lib/pet/window-role"
 import type { PetProfile } from "@/types/pet"
 
@@ -133,31 +134,25 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
     }
 
     void listen("automation:event", markRunning).then((off) => {
-      if (cancelled) off()
+      if (cancelled) safeUnlisten(off)
       else offHandles.push(off)
     })
     void listen("automation:consent-request", markRunning).then((off) => {
-      if (cancelled) off()
+      if (cancelled) safeUnlisten(off)
       else offHandles.push(off)
     })
     void listen("automation:kill-switch", () => {
       if (cancelled) return
       setAutomation({ running: false, armed: false })
     }).then((off) => {
-      if (cancelled) off()
+      if (cancelled) safeUnlisten(off)
       else offHandles.push(off)
     })
 
     return () => {
       cancelled = true
       if (activityTimer) clearTimeout(activityTimer)
-      for (const off of offHandles) {
-        try {
-          off()
-        } catch {
-          /* unsubscribe failure is non-fatal */
-        }
-      }
+      for (const off of offHandles) safeUnlisten(off)
     }
   }, [])
 

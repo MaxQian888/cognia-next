@@ -18,6 +18,7 @@
 
 import { useEffect } from "react"
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
 import { emitSchedulerEvent } from "@/lib/scheduler/event-integration"
@@ -149,11 +150,11 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
       })
 
       if (cancelled) {
-        off1()
-        off2()
-        off3()
-        off4()
-        off5()
+        safeUnlisten(off1)
+        safeUnlisten(off2)
+        safeUnlisten(off3)
+        safeUnlisten(off4)
+        safeUnlisten(off5)
       } else {
         unlisteners.push(off1, off2, off3, off4, off5)
       }
@@ -163,7 +164,7 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
 
     return () => {
       cancelled = true
-      while (unlisteners.length) unlisteners.pop()?.()
+      while (unlisteners.length) safeUnlisten(unlisteners.pop())
     }
   }, [])
 

@@ -322,6 +322,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "ensure_dir_confined",
     "default_export_dir",
     "fs_search_workspace",
+    "fs_search_content_workspace",
     "fs_read_workspace_file",
     "fs_write_workspace_file",
     // File-tree browser: list/stat (reads) + mkdir/delete/rename/copy (writes),
@@ -463,6 +464,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "read_text_file",
     "default_export_dir",
     "fs_search_workspace",
+    "fs_search_content_workspace",
     "fs_read_workspace_file",
     // File-tree browser reads — same (root, relPath) returns the same listing/stat.
     "fs_list_workspace_dir",
@@ -2115,6 +2117,26 @@ pub(super) async fn dispatch(
             let limit: Option<usize> = optional(&args, "limit")?;
             tokio::task::spawn_blocking(move || {
                 crate::files::fs_search_workspace(root, query, limit)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "fs_search_content_workspace" => {
+            let root: String = required(&args, "root")?;
+            let query: String = optional(&args, "query")?.unwrap_or_default();
+            let is_regex: Option<bool> = optional(&args, "isRegex")?;
+            let case_sensitive: Option<bool> = optional(&args, "caseSensitive")?;
+            let max_results: Option<usize> = optional(&args, "maxResults")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_search_content_workspace(
+                    root,
+                    query,
+                    is_regex,
+                    case_sensitive,
+                    max_results,
+                )
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
