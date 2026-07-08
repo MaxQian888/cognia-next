@@ -117,6 +117,87 @@ describe("runCliSubagent", () => {
     })
   })
 
+  it("advertises the nesting manifest and registers/retires the child dispatch context", async () => {
+    const manifest = { name: "dispatch_agent", description: "d", input_schema: {} }
+    const register = jest.fn()
+    const unregister = jest.fn()
+    const capture = jest.fn(async (...args: unknown[]) => {
+      // The context must be registered BEFORE the turn runs (a mid-run
+      // dispatch_agent call resolves it), and retired only after.
+      expect(register).toHaveBeenCalledWith(args[0])
+      expect(unregister).not.toHaveBeenCalled()
+      return captureResult()
+    })
+    await runCliSubagent(def(), "go", "parent", {
+      config: cfg(),
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set(),
+      disabledMcpTools: new Set(),
+      resolveOptions: async () => ({ provider: "opencode-go" }) as unknown as SendOptions,
+      capture,
+      closeSession: async () => undefined,
+      mintId: () => "kid",
+      nesting: {
+        manifest: manifest as never,
+        register,
+        unregister,
+      },
+    })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.pluginTools).toEqual(expect.arrayContaining([manifest]))
+    expect(register).toHaveBeenCalledWith("parent::sub-kid")
+    expect(unregister).toHaveBeenCalledWith("parent::sub-kid")
+  })
+
+  it("retires the child dispatch context even when the turn throws, without masking the error", async () => {
+    const unregister = jest.fn()
+    await expect(
+      runCliSubagent(def(), "go", "parent", {
+        config: cfg(),
+        home: "/h",
+        cwd: "/work",
+        gate: createPermissionGate({ yes: true }),
+        mcpServers: [],
+        approvedTools: new Set(),
+        disabledMcpTools: new Set(),
+        resolveOptions: async () => ({}) as unknown as SendOptions,
+        capture: async () => {
+          throw new Error("turn boom")
+        },
+        closeSession: async () => undefined,
+        mintId: () => "kid",
+        nesting: {
+          manifest: null,
+          register: jest.fn(),
+          unregister,
+        },
+      })
+    ).rejects.toThrow("turn boom")
+    expect(unregister).toHaveBeenCalledWith("parent::sub-kid")
+  })
+
+  it("appends no manifest (and never registers) when nesting is omitted — the child is a leaf", async () => {
+    const capture = jest.fn(async (..._args: unknown[]) => captureResult())
+    await runCliSubagent(def(), "go", "parent", {
+      config: cfg(),
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set(),
+      disabledMcpTools: new Set(),
+      resolveOptions: async () => ({}) as unknown as SendOptions,
+      capture,
+      closeSession: async () => undefined,
+      mintId: () => "kid",
+    })
+    const sendOptions = capture.mock.calls[0]![2] as unknown as SendOptions
+    expect(sendOptions.pluginTools).toBeUndefined()
+  })
+
   it("uses def.maxTurns as the step budget, else inherits the config aiSdkMaxSteps", async () => {
     const capture = jest.fn().mockResolvedValue(captureResult())
     const base = {

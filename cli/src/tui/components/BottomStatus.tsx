@@ -163,7 +163,9 @@ function BottomStatusImpl({
     if (!treePolling) return
     const read = () => {
       const rows = buildLiveAgentTreeRows(getLiveEntries(sessionId))
-      const sig = rows.map((r) => `${r.liveId} ${r.name} ${r.stats} ${r.activity}`).join("\n")
+      const sig = rows
+        .map((r) => `${r.liveId} ${r.depth} ${r.name} ${r.stats} ${r.activity}`)
+        .join("\n")
       if (sig === treeSigRef.current) return
       treeSigRef.current = sig
       setTreeRows(rows)
@@ -302,11 +304,17 @@ function BottomStatusImpl({
             const last = i === visibleTree.length - 1 && hiddenTree === 0
             const branch = last ? "└" : "├"
             const cont = last ? " " : "│"
+            // Nested dispatches (a subagent's own subagents) indent under their
+            // parent row — `depth` comes from the live store's parent edges.
+            const indent = "  ".repeat(row.depth)
             return (
               <Box key={row.liveId} flexDirection="column">
                 <Text wrap="truncate-end">
                   {" "}
-                  <Text color={theme.muted}>{branch}</Text>{" "}
+                  <Text color={theme.muted}>
+                    {indent}
+                    {branch}
+                  </Text>{" "}
                   <Text color={theme.accent} bold>
                     {row.name}
                   </Text>
@@ -317,6 +325,7 @@ function BottomStatusImpl({
                 </Text>
                 <Text wrap="truncate-end" color={theme.muted} dimColor>
                   {" "}
+                  {indent}
                   {cont}
                   {"  ⎿ "}
                   {row.activity}

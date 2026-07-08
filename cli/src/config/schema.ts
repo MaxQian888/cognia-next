@@ -686,6 +686,15 @@ export const cliConfigFileSchema = z
      * to disable.
      */
     subagentStreamIdleTimeoutMs: z.number().int().min(0).optional(),
+    /**
+     * Max subagent nesting depth for `dispatch_agent` (Task). Depth 1 is a
+     * subagent dispatched by the chat turn; a running subagent may itself
+     * dispatch until the cap is reached, at which point the tool is simply not
+     * advertised to it (the depth-N generalization of Claude Code dropping the
+     * Agent tool from subagents — mirrors the desktop's dispatch path). Absent
+     * ⇒ 2. Set `1` to make every subagent a leaf.
+     */
+    subagentMaxDepth: z.number().int().min(1).optional(),
   })
   .strict()
 
@@ -843,6 +852,11 @@ export interface ResolvedConfig {
    * really bounded by `toolExecutionTimeoutMs` + the step/turn budget, with this
    * only catching a genuinely dead stream. Absent ⇒ 300000; `0` disables. */
   subagentStreamIdleTimeoutMs?: number
+  /** Max subagent nesting depth for `dispatch_agent` (Task). A subagent may
+   * itself dispatch until this cap; at the cap the tool is withheld so the run
+   * is a leaf. Cycles on the dispatch chain are always refused regardless of
+   * depth. Absent ⇒ 2; `1` restores the old leaf-only CLI behavior. */
+  subagentMaxDepth?: number
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */
@@ -862,4 +876,5 @@ export const DEFAULT_RESOLVED_CONFIG: Omit<ResolvedConfig, "cwd"> = {
   aiSdkMaxSteps: 256,
   toolExecutionTimeoutMs: 120_000,
   subagentStreamIdleTimeoutMs: 300_000,
+  subagentMaxDepth: 2,
 }

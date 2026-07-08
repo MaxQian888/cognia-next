@@ -200,6 +200,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     toolExecutionTimeoutMs: layer.toolExecutionTimeoutMs ?? acc.toolExecutionTimeoutMs,
     subagentStreamIdleTimeoutMs:
       layer.subagentStreamIdleTimeoutMs ?? acc.subagentStreamIdleTimeoutMs,
+    subagentMaxDepth: layer.subagentMaxDepth ?? acc.subagentMaxDepth,
   }
 }
 

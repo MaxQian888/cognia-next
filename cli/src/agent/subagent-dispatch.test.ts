@@ -1,6 +1,10 @@
 /**
  * @jest-environment node
  */
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
 import {
   buildCliSubagentToolManifest,
   clearCliSubagentContext,
@@ -384,6 +388,190 @@ describe("live-output wiring", () => {
     resolveRun({ text: "bg done" })
     await Promise.resolve()
     await Promise.resolve()
+  })
+})
+
+describe("nested dispatch (depth / chain / tree edges)", () => {
+  afterEach(() => {
+    // Child contexts registered under child session ids during these tests.
+    clearCliSubagentContext("s1::sub-child")
+  })
+
+  it("stamps depth 1 and no parent edge on a top-level dispatch", async () => {
+    registerCliSubagentContext("s1", makeCtx())
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    const entry = listLiveSubagents("s1")[0]
+    expect(entry.depth).toBe(1)
+    expect(entry.parentLiveId).toBeUndefined()
+    expect(entry.sessionId).toBe("s1")
+  })
+
+  it("grants the child a nesting seam below the cap, with a non-null manifest", async () => {
+    const run = jest.fn(async (..._args: unknown[]) => ({ text: "ran" }))
+    registerCliSubagentContext("s1", makeCtx({ run })) // depth 0, default maxDepth 2
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    const deps = run.mock.calls[0]![3] as unknown as import("./subagent-runner").RunCliSubagentDeps
+    expect(deps.nesting).toBeDefined()
+    expect(deps.nesting?.manifest?.name).toBe(DISPATCH_AGENT_TOOL_NAME)
+  })
+
+  it("withholds the nesting seam at the cap (the child is a leaf)", async () => {
+    const run = jest.fn(async (..._args: unknown[]) => ({ text: "ran" }))
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({ run, depth: 1, maxDepth: 2, parentChain: ["outer"], rootSessionId: "root" })
+    )
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    const deps = run.mock.calls[0]![3] as unknown as import("./subagent-runner").RunCliSubagentDeps
+    expect(deps.nesting).toBeUndefined()
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it("registers the child context (depth+1, extended chain, live edge, root session) via the seam", async () => {
+    const run = jest.fn(async (_def, _prompt, _parent, deps) => {
+      deps.nesting!.register("s1::sub-child")
+      return { text: "ran" }
+    })
+    registerCliSubagentContext("s1", makeCtx({ run }))
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    const child = getCliSubagentContext("s1::sub-child")
+    expect(child).toMatchObject({
+      depth: 1,
+      maxDepth: 2,
+      parentChain: ["reviewer"],
+      rootSessionId: "s1",
+    })
+    expect(child?.selfLiveId).toBe(listLiveSubagents("s1")[0].liveId)
+    if (child) clearCliSubagentContext("s1::sub-child")
+  })
+
+  it("runs a depth-2 dispatch end-to-end: root-owned live entry with a parent edge", async () => {
+    // The outer run simulates the child model calling dispatch_agent mid-run.
+    // The seam-registered child context inherits the parent's injected `run`
+    // (which would recurse), so the outer run swaps the child's runner for
+    // `innerRun` right after registering — exactly what a test-only child
+    // runner needs; production inherits the real `runCliSubagent` default.
+    const innerRun = jest.fn(async (..._args: unknown[]) => ({ text: "inner ran" }))
+    const outerRun = jest.fn(async (_def, _prompt, _parent, deps) => {
+      deps.nesting!.register("s1::sub-child")
+      const childCtx = getCliSubagentContext("s1::sub-child")!
+      registerCliSubagentContext("s1::sub-child", { ...childCtx, run: innerRun })
+      const resp = await handleCliDispatchAgent({
+        type: "plugin_tool_exec",
+        sessionId: "s1::sub-child",
+        toolUseId: "t2",
+        name: DISPATCH_AGENT_TOOL_NAME,
+        args: { subagentId: "helper", prompt: "dig deeper" },
+      })
+      deps.nesting!.unregister("s1::sub-child")
+      expect(resp.result).toContain("inner ran")
+      return { text: "outer ran" }
+    })
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({ agents: [agent("reviewer"), agent("helper")], run: outerRun })
+    )
+    const resp = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    expect(resp.result).toContain("outer ran")
+    expect(innerRun).toHaveBeenCalledTimes(1)
+
+    // BOTH runs are owned by the root chat session, tree edge intact.
+    const entries = listLiveSubagents("s1")
+    expect(entries).toHaveLength(2)
+    const outer = entries.find((e) => e.name === "reviewer")!
+    const inner = entries.find((e) => e.name === "helper")!
+    expect(outer.depth).toBe(1)
+    expect(inner.depth).toBe(2)
+    expect(inner.parentLiveId).toBe(outer.liveId)
+    expect(inner.sessionId).toBe("s1")
+    // Depth 2 with maxDepth 2 ⇒ the inner run got NO nesting seam.
+    const innerDeps = innerRun.mock
+      .calls[0]![3] as unknown as import("./subagent-runner").RunCliSubagentDeps
+    expect(innerDeps.nesting).toBeUndefined()
+  })
+
+  it("refuses a cyclic dispatch (target already on the chain) without running", async () => {
+    const run = jest.fn(async () => ({ text: "ran" }))
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({ run, depth: 1, maxDepth: 3, parentChain: ["reviewer"] })
+    )
+    const resp = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "again" }))
+    expect(resp.error).toContain("Cycles are not allowed")
+    expect(resp.error).toContain("reviewer → reviewer")
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it("refuses a dispatch past the max depth without running (belt-and-braces)", async () => {
+    const run = jest.fn(async () => ({ text: "ran" }))
+    registerCliSubagentContext("s1", makeCtx({ run, depth: 2, maxDepth: 2, parentChain: ["a"] }))
+    const resp = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    expect(resp.error).toContain("max nesting depth (2)")
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it("refuses a cyclic background dispatch synchronously (nothing parked)", async () => {
+    const run = jest.fn(async () => ({ text: "ran" }))
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({ run, depth: 1, maxDepth: 3, parentChain: ["reviewer"] })
+    )
+    const resp = await handleCliDispatchAgent(
+      req({ subagentId: "reviewer", prompt: "go", background: true })
+    )
+    expect(resp.error).toContain("Cycles are not allowed")
+    expect(resp.error).not.toContain("started in background")
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it("reads the cap from config.subagentMaxDepth when the context has none", async () => {
+    const run = jest.fn(async (..._args: unknown[]) => ({ text: "ran" }))
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        run,
+        config: {
+          ...DEFAULT_RESOLVED_CONFIG,
+          builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
+          cwd: "/work",
+          subagentMaxDepth: 1,
+        },
+      })
+    )
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
+    // maxDepth 1 ⇒ the depth-1 child is already at the cap: no nesting seam.
+    const deps = run.mock.calls[0]![3] as unknown as import("./subagent-runner").RunCliSubagentDeps
+    expect(deps.nesting).toBeUndefined()
+  })
+
+  it("parks a nested background run under the root session so the root can collect it", async () => {
+    // A writable journal home — the shared "/home/.cognia" fixture path is not
+    // creatable on macOS, which reds the journal flush in afterEach.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-nested-bg-"))
+    const run = jest.fn(async () => ({ text: "nested bg done" }))
+    registerCliSubagentContext("s1::sub-child", {
+      ...makeCtx({ agents: [agent("helper")], run, mintRunId: () => "bg-nested", home }),
+      depth: 1,
+      maxDepth: 2,
+      parentChain: ["reviewer"],
+      rootSessionId: "s1",
+    })
+    const ok = await handleCliDispatchAgent({
+      type: "plugin_tool_exec",
+      sessionId: "s1::sub-child",
+      toolUseId: "t3",
+      name: DISPATCH_AGENT_TOOL_NAME,
+      args: { subagentId: "helper", prompt: "go", background: true },
+    })
+    expect(ok.result).toContain("bg-nested")
+    await Promise.resolve()
+    await Promise.resolve()
+    // The live entry (and the parked record) belong to the ROOT session.
+    expect(getLiveSubagent("bg-nested", "s1")).toBeDefined()
+    // The root chat session can collect the nested child's background run.
+    registerCliSubagentContext("s1", makeCtx())
+    const collected = await handleCliDispatchAgent(req({ collect: "bg-nested" }))
+    expect(collected.result).toContain("nested bg done")
   })
 })
 

@@ -61,8 +61,15 @@ export interface SubagentLiveEntry {
   name: string
   /** The task prompt (truncated for display). */
   task: string
-  /** The chat session that started the run — the cross-session isolation key. */
+  /** The chat session that OWNS the run — the cross-session isolation key.
+   * Nested runs carry the ROOT chat session id (not the ephemeral parent
+   * subagent session id), so the whole tree stays visible to its owner. */
   sessionId: string
+  /** Nesting level: 1 = dispatched by the chat turn, 2 = by a subagent, … */
+  depth?: number
+  /** The `liveId` of the subagent that dispatched this run — the tree edge.
+   * Absent for a run dispatched by the chat turn itself. */
+  parentLiveId?: string
   status: SubagentLiveStatus
   startedAt: number
   settledAt?: number
@@ -104,6 +111,10 @@ export interface StartLiveSubagentMeta {
   name: string
   task: string
   sessionId: string
+  /** Nesting level (1 = dispatched by the chat turn); omitted ⇒ 1. */
+  depth?: number
+  /** Dispatching subagent's `liveId` (the tree edge); omitted for depth-1 runs. */
+  parentLiveId?: string
   /** Defaults to `Date.now()`. */
   startedAt?: number
 }
@@ -195,6 +206,8 @@ export function startLiveSubagent(meta: StartLiveSubagentMeta): string {
     name: meta.name,
     task: meta.task.length > TASK_CAP ? meta.task.slice(0, TASK_CAP) : meta.task,
     sessionId: meta.sessionId,
+    ...(meta.depth !== undefined ? { depth: meta.depth } : {}),
+    ...(meta.parentLiveId !== undefined ? { parentLiveId: meta.parentLiveId } : {}),
     status: "running",
     startedAt: meta.startedAt ?? Date.now(),
     text: "",

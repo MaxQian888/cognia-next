@@ -334,6 +334,13 @@ describe("settingsSections", () => {
     expect(idle.value).toBe("60000")
     const autoCompact = advanced.rows.find((r) => r.id === "autoCompact")!
     expect((autoCompact.control as { current: boolean }).current).toBe(true)
+    // Subagent nesting depth knob (default 2, editable as a numeric enum).
+    const nesting = advanced.rows.find((r) => r.id === "subagentMaxDepth")!
+    expect(nesting.value).toBe("2")
+    expect(nesting.control).toMatchObject({
+      type: "enum",
+      apply: { kind: "numberValue", key: "subagentMaxDepth" },
+    })
   })
 })
 

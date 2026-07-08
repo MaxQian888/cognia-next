@@ -11,10 +11,15 @@
  * `runAndCaptureAssistantReply` on a fresh child session id over the live
  * transport. The result reads back inline as the dispatching tool's output.
  *
- * Depth policy: the child's send options deliberately do NOT re-surface the
- * `dispatch_agent` tool (that is appended only on the main session), so a
- * subagent runs as a leaf and cannot itself spawn — a single, safe level of
- * delegation rather than unbounded nesting.
+ * Depth policy: nesting is depth-tracked, not leaf-only. When the dispatcher
+ * passes a {@link CliSubagentNesting} seam (only while the child would run
+ * BELOW the configured `subagentMaxDepth`), the child's send options re-surface
+ * the `dispatch_agent` tool and a dispatch context is registered under the
+ * child session id — so a subagent can itself delegate, with the depth cap,
+ * cycle guard, and shared root-session ownership enforced by the dispatch
+ * handler. At the cap the seam is omitted and the child runs as a leaf (the
+ * depth-N generalization of Claude Code dropping the Agent tool from
+ * subagents; mirrors the desktop's `dispatch_agent` path).
  */
 
 import {
@@ -29,12 +34,29 @@ import {
 import { closeSession as defaultCloseSession } from "@/lib/claude/ipc"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { McpServer, SendOptions } from "@/lib/claude/types"
+import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 
 import { type ResolvedConfig } from "../config/schema"
 import { toBuildContext } from "../config/to-build-context"
 import { type PermissionResponder } from "./permission-gate"
 import { withCliAutoApprovedTools, withCliDisabledMcpTools } from "./tool-suppression"
+
+/**
+ * Nesting seam handed down by the dispatch handler when the child is allowed to
+ * delegate further (i.e. it would run BELOW the configured max depth). The
+ * runner stays registry-agnostic: it only knows the child session id, so the
+ * dispatcher supplies the manifest to advertise plus register/unregister
+ * callbacks that publish/retire the child's dispatch context under that id.
+ */
+export interface CliSubagentNesting {
+  /** `dispatch_agent` manifest to advertise to the child (`null` ⇒ none). */
+  manifest: PluginToolManifestEntry | null
+  /** Publish the child's dispatch context once its session id is minted. */
+  register: (childSessionId: string) => void
+  /** Retire the child's dispatch context when the run settles (always called). */
+  unregister: (childSessionId: string) => void
+}
 
 /** Everything a subagent run needs that the dispatching turn already resolved. */
 export interface RunCliSubagentDeps {
@@ -60,6 +82,10 @@ export interface RunCliSubagentDeps {
    * SAME {@link CaptureStreamEvent} stream the main turn parses — best-effort, so
    * a throwing sink never affects the run. Omitted ⇒ no live capture. */
   onEvent?: (event: CaptureStreamEvent) => void
+  /** Present ⇔ the child may itself dispatch (depth-gated by the caller):
+   * advertises `dispatch_agent` to the child and registers its dispatch
+   * context for the duration of the run. Omitted ⇒ the child is a leaf. */
+  nesting?: CliSubagentNesting
   // ── Injected seams (tests) ──────────────────────────────────────────────────
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
   capture?: typeof defaultCapture
@@ -185,6 +211,15 @@ export async function runCliSubagent(
     withCliAutoApprovedTools(sendOptions, deps.approvedTools),
     deps.disabledMcpTools
   )
+  // Nested delegation (depth-gated by the dispatcher): advertise the
+  // `dispatch_agent` tool to the child and publish its dispatch context under
+  // the child session id so a mid-run dispatch resolves its depth/chain/gate.
+  if (deps.nesting) {
+    if (deps.nesting.manifest) {
+      sendOptions.pluginTools = [...(sendOptions.pluginTools ?? []), deps.nesting.manifest]
+    }
+    deps.nesting.register(childSessionId)
+  }
 
   let result: RunAndCaptureResult
   try {
@@ -209,6 +244,13 @@ export async function runCliSubagent(
       ...(deps.onEvent ? { onEvent: deps.onEvent } : {}),
     })
   } finally {
+    // Retire the child's dispatch context (if nesting was granted) BEFORE the
+    // session, so a stale tool-call arriving after settle finds no context.
+    try {
+      deps.nesting?.unregister(childSessionId)
+    } catch {
+      // best-effort — an unregister throw must never mask the run's outcome
+    }
     // Retire the child session's sidecar loop regardless of outcome.
     await closeSession(childSessionId).catch(() => undefined)
   }

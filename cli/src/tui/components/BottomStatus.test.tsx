@@ -257,6 +257,34 @@ describe("BottomStatus running-agents tree", () => {
     expect(ref.current).toBeNull()
   })
 
+  it("indents nested runs under their parent (depth from the live store's edges)", () => {
+    const { container } = renderWithTree(
+      <BottomStatus
+        turnStatus="streaming"
+        since={Date.now()}
+        sessionId="s1"
+        getLiveEntries={() => [
+          liveEntry({ liveId: "parent", name: "outer-agent", startedAt: 1 }),
+          liveEntry({
+            liveId: "kid",
+            name: "inner-agent",
+            startedAt: 2,
+            depth: 2,
+            parentLiveId: "parent",
+          }),
+        ]}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("Running 2 agents…")
+    // The child renders below the parent with a two-space indent on its branch.
+    const parentAt = text.indexOf("outer-agent")
+    const childAt = text.indexOf("inner-agent")
+    expect(parentAt).toBeGreaterThanOrEqual(0)
+    expect(childAt).toBeGreaterThan(parentAt)
+    expect(text).toContain("  └ inner-agent")
+  })
+
   it("keeps the fallback ◆ chip when the live store has no entries", () => {
     const { container } = renderWithTree(
       <BottomStatus

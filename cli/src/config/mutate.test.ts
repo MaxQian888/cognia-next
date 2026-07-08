@@ -410,6 +410,7 @@ describe("setNumberConfig", () => {
       ["aiSdkMaxSteps", 512],
       ["toolExecutionTimeoutMs", 0],
       ["subagentStreamIdleTimeoutMs", 600000],
+      ["subagentMaxDepth", 3],
     ]
     for (const [key, value] of cases) {
       const m = memFs()

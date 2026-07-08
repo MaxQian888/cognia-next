@@ -148,9 +148,14 @@ export function AgentsPanel({
             const selected = row === safeIndex
             const badge = agentRowBadge(agentRow.status)
             const task = agentRow.task ? agentRow.task.replace(/\s+/g, " ").slice(0, 60) : ""
+            // Nested dispatches indent under their parent row (the hierarchical
+            // ordering pass stamped `depth` and seated children below parents).
+            const indent = "  ".repeat(agentRow.depth ?? 0)
             return (
               <Text key={agentRow.id} color={selected ? theme.accent : undefined} bold={selected}>
                 {selected ? "❯ " : "  "}
+                {indent}
+                {agentRow.depth ? <Text color={theme.muted}>└ </Text> : null}
                 <Text color={theme[badge.token]}>{badge.glyph}</Text> {agentRow.name}
                 <Text color={theme.muted}>
                   {" "}

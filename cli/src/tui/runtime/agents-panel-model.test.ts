@@ -7,6 +7,7 @@ import {
   formatElapsed,
   formatTokenCount,
   liveAgentActivity,
+  orderRowsHierarchically,
   refreshAgentPanelRows,
   type AgentPanelRow,
   type AgentPanelSources,
@@ -342,9 +343,90 @@ describe("buildLiveAgentTreeRows", () => {
     ])
     expect(rows.map((r) => r.liveId)).toEqual(["a", "b"])
     expect(rows[0].name).toBe("Finder: Rust")
+    expect(rows[0].depth).toBe(0)
     expect(rows[0].stats).toBe("1 tool use · 1.0k tokens")
     expect(rows[0].activity).toBe("Searching for 1 pattern…")
     expect(rows[1].stats).toBe("13 tool uses · 130.8k tokens")
+  })
+
+  it("nests children depth-first under their parent with bumped depth", () => {
+    const rows = buildLiveAgentTreeRows([
+      // Deliberately unordered input; grandchild → child → other root → root.
+      liveEntry({ liveId: "grand", parentLiveId: "child", startedAt: 4_000 }),
+      liveEntry({ liveId: "child", parentLiveId: "root", startedAt: 3_000 }),
+      liveEntry({ liveId: "other", startedAt: 2_000 }),
+      liveEntry({ liveId: "root", startedAt: 1_000 }),
+    ])
+    expect(rows.map((r) => `${r.liveId}:${r.depth}`)).toEqual([
+      "root:0",
+      "child:1",
+      "grand:2",
+      "other:0",
+    ])
+  })
+
+  it("re-roots a running child whose parent is not running", () => {
+    const rows = buildLiveAgentTreeRows([
+      liveEntry({ liveId: "orphan", parentLiveId: "settled-parent", startedAt: 2_000 }),
+      liveEntry({ liveId: "settled-parent", status: "done", startedAt: 1_000 }),
+    ])
+    expect(rows.map((r) => `${r.liveId}:${r.depth}`)).toEqual(["orphan:0"])
+  })
+
+  it("surfaces mutually-parented entries flat instead of dropping them", () => {
+    const rows = buildLiveAgentTreeRows([
+      liveEntry({ liveId: "x", parentLiveId: "y", startedAt: 1_000 }),
+      liveEntry({ liveId: "y", parentLiveId: "x", startedAt: 2_000 }),
+    ])
+    expect(rows.map((r) => r.liveId).sort()).toEqual(["x", "y"])
+  })
+})
+
+describe("orderRowsHierarchically", () => {
+  const row = (over: Partial<AgentPanelRow>): AgentPanelRow => ({
+    id: `live:${over.liveId ?? "r"}`,
+    kind: "inflight",
+    name: "n",
+    task: "t",
+    status: "running",
+    ...over,
+  })
+
+  it("seats children directly under their parent and stamps depth", () => {
+    const ordered = orderRowsHierarchically([
+      row({ liveId: "child", parentLiveId: "root" }),
+      row({ liveId: "root" }),
+      row({ liveId: "other" }),
+    ])
+    expect(ordered.map((r) => `${r.liveId}:${r.depth ?? 0}`)).toEqual([
+      "root:0",
+      "child:1",
+      "other:0",
+    ])
+  })
+
+  it("keeps rows without a present parent (and non-live rows) in place at depth 0", () => {
+    const journalRow: AgentPanelRow = {
+      id: "bg:j1",
+      kind: "background",
+      name: "j",
+      task: "t",
+      status: "done",
+    }
+    const ordered = orderRowsHierarchically([
+      row({ liveId: "lost-child", parentLiveId: "gone" }),
+      journalRow,
+    ])
+    expect(ordered.map((r) => r.id)).toEqual(["live:lost-child", "bg:j1"])
+    expect(ordered[0].depth ?? 0).toBe(0)
+  })
+
+  it("appends cycle remnants flat instead of looping or dropping them", () => {
+    const ordered = orderRowsHierarchically([
+      row({ liveId: "x", parentLiveId: "y" }),
+      row({ liveId: "y", parentLiveId: "x" }),
+    ])
+    expect(ordered.map((r) => r.liveId).sort()).toEqual(["x", "y"])
   })
 })
 

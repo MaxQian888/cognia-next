@@ -53,6 +53,30 @@ describe("startLiveSubagent", () => {
   })
 })
 
+describe("nesting fields", () => {
+  it("seeds depth and parentLiveId onto the entry when supplied", () => {
+    const id = startLiveSubagent({
+      name: "helper",
+      task: "t",
+      sessionId: "root-session",
+      depth: 2,
+      parentLiveId: "live-parent",
+    })
+    const entry = getLiveSubagent(id)!
+    expect(entry.depth).toBe(2)
+    expect(entry.parentLiveId).toBe("live-parent")
+    // Nested runs are owned by the root chat session for cross-session scoping.
+    expect(getLiveSubagent(id, "root-session")).toBe(entry)
+  })
+
+  it("omits the nesting fields when not supplied (top-level shape unchanged)", () => {
+    const id = startLiveSubagent({ name: "x", task: "t", sessionId: "s1" })
+    const entry = getLiveSubagent(id)!
+    expect("depth" in entry).toBe(false)
+    expect("parentLiveId" in entry).toBe(false)
+  })
+})
+
 describe("applyLiveSubagentEvent", () => {
   const ev = <T extends CaptureStreamEvent>(e: T): CaptureStreamEvent => e
 

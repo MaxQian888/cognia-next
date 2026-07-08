@@ -41,6 +41,11 @@ export interface AgentPanelRow {
   toolUses?: number
   /** Token spend — exact once the run's usage lands, else a live estimate. */
   tokens?: number
+  /** Dispatching subagent's live id (the tree edge) — live rows only. */
+  parentLiveId?: string
+  /** Indent level for nested runs (0 = dispatched by the chat turn), stamped
+   * by the hierarchical ordering pass. */
+  depth?: number
 }
 
 export interface AgentPanelSources {
@@ -86,9 +91,49 @@ function liveEntryRow(entry: SubagentLiveEntry, bgRunIds: Set<string>): AgentPan
     liveId: entry.liveId,
     ...(isBackground ? { runId: entry.liveId } : {}),
     ...(entry.text ? { output: entry.text } : {}),
+    ...(entry.parentLiveId ? { parentLiveId: entry.parentLiveId } : {}),
     toolUses: entry.toolUseCount,
     tokens,
   }
+}
+
+/**
+ * Re-seat nested rows directly under their dispatching parent and stamp each
+ * row's `depth` for the indent. Rows whose parent is absent from the list
+ * (evicted, other session) stay where the status sort put them, at depth 0.
+ * Sibling relative order (the status/recency sort) is preserved; a defensive
+ * seen-set breaks would-be cycles instead of looping.
+ */
+export function orderRowsHierarchically(rows: AgentPanelRow[]): AgentPanelRow[] {
+  const present = new Map<string, AgentPanelRow>()
+  for (const row of rows) if (row.liveId) present.set(row.liveId, row)
+  const children = new Map<string, AgentPanelRow[]>()
+  const roots: AgentPanelRow[] = []
+  for (const row of rows) {
+    if (row.parentLiveId && present.has(row.parentLiveId)) {
+      const list = children.get(row.parentLiveId) ?? []
+      list.push(row)
+      children.set(row.parentLiveId, list)
+    } else {
+      roots.push(row)
+    }
+  }
+  const ordered: AgentPanelRow[] = []
+  const seen = new Set<string>()
+  const visit = (row: AgentPanelRow, depth: number): void => {
+    if (row.liveId) {
+      if (seen.has(row.liveId)) return
+      seen.add(row.liveId)
+    }
+    ordered.push(depth > 0 || row.depth !== undefined ? { ...row, depth } : row)
+    if (row.liveId) for (const child of children.get(row.liveId) ?? []) visit(child, depth + 1)
+  }
+  for (const root of roots) visit(root, 0)
+  // Cycle remnants (mutually-parented rows) never got visited — append them flat.
+  for (const row of rows) {
+    if (row.liveId && !seen.has(row.liveId)) visit(row, 0)
+  }
+  return ordered
 }
 
 /**
@@ -174,7 +219,7 @@ export function buildAgentPanelRows({
     }
   }
 
-  return rows.sort(compareRows)
+  return orderRowsHierarchically(rows.sort(compareRows))
 }
 
 /**
@@ -205,7 +250,7 @@ export function refreshAgentPanelRows(
       return next && next !== row.status ? { ...row, status: next } : row
     })
 
-  return [...liveRows, ...kept].sort(compareRows)
+  return orderRowsHierarchically([...liveRows, ...kept].sort(compareRows))
 }
 
 /** Compact token count: `842`, `115.0k`, `2.3M` (Claude Code's tree format). */
@@ -291,6 +336,8 @@ export interface LiveAgentTreeRow {
   liveId: string
   name: string
   task: string
+  /** Indent level: 0 = dispatched by the chat turn, 1 = by a subagent, … */
+  depth: number
   /** `10 tool uses · 115.0k tokens` — the dimmed suffix after the name. */
   stats: string
   /** `Searching for 3 patterns, reading 6 files…` */
@@ -299,24 +346,48 @@ export interface LiveAgentTreeRow {
 
 /**
  * Rows for the Claude-Code-style running-agents tree pinned above the composer.
- * Running entries only, oldest first (dispatch order — the tree stays stable
- * while counters move).
+ * Running entries only, in depth-first tree order: roots oldest first (dispatch
+ * order — the tree stays stable while counters move), each run's nested
+ * children directly beneath it with `depth` bumped for the indent. A child
+ * whose parent is not running (settled early, evicted) re-roots at depth 0.
  */
 export function buildLiveAgentTreeRows(entries: SubagentLiveEntry[]): LiveAgentTreeRow[] {
-  return entries
+  const running = entries
     .filter((e) => e.status === "running")
     .sort((a, b) => a.startedAt - b.startedAt)
-    .map((entry) => {
-      const { tokens } = liveTokenCount(entry)
-      const uses = entry.toolUseCount
-      return {
-        liveId: entry.liveId,
-        name: entry.name,
-        task: entry.task,
-        stats: `${uses} tool use${uses === 1 ? "" : "s"} · ${formatTokenCount(tokens)} tokens`,
-        activity: liveAgentActivity(entry),
-      }
+  const present = new Set(running.map((e) => e.liveId))
+  const children = new Map<string, SubagentLiveEntry[]>()
+  const roots: SubagentLiveEntry[] = []
+  for (const entry of running) {
+    if (entry.parentLiveId && present.has(entry.parentLiveId)) {
+      const list = children.get(entry.parentLiveId) ?? []
+      list.push(entry)
+      children.set(entry.parentLiveId, list)
+    } else {
+      roots.push(entry)
+    }
+  }
+  const rows: LiveAgentTreeRow[] = []
+  const seen = new Set<string>()
+  const visit = (entry: SubagentLiveEntry, depth: number): void => {
+    if (seen.has(entry.liveId)) return // defensive cycle break
+    seen.add(entry.liveId)
+    const { tokens } = liveTokenCount(entry)
+    const uses = entry.toolUseCount
+    rows.push({
+      liveId: entry.liveId,
+      name: entry.name,
+      task: entry.task,
+      depth,
+      stats: `${uses} tool use${uses === 1 ? "" : "s"} · ${formatTokenCount(tokens)} tokens`,
+      activity: liveAgentActivity(entry),
     })
+    for (const child of children.get(entry.liveId) ?? []) visit(child, depth + 1)
+  }
+  for (const root of roots) visit(root, 0)
+  // Cycle remnants (mutually-parented entries) never got visited — surface flat.
+  for (const entry of running) if (!seen.has(entry.liveId)) visit(entry, 0)
+  return rows
 }
 
 /** The leading status bullet: glyph + theme token for the component to colour. */

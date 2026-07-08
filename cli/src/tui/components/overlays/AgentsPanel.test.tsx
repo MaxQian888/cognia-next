@@ -147,6 +147,34 @@ describe("AgentsPanel", () => {
     expect(text).toContain("2m 35s")
   })
 
+  it("indents a nested row under its parent with the depth glyph", () => {
+    const text =
+      wrap({
+        rows: [
+          {
+            id: "live:outer",
+            kind: "inflight",
+            name: "outer-agent",
+            task: "t",
+            status: "running",
+            liveId: "outer",
+          },
+          {
+            id: "live:inner",
+            kind: "inflight",
+            name: "inner-agent",
+            task: "t",
+            status: "running",
+            liveId: "inner",
+            parentLiveId: "outer",
+            depth: 1,
+          },
+        ],
+      }).container.textContent ?? ""
+    expect(text.indexOf("inner-agent")).toBeGreaterThan(text.indexOf("outer-agent"))
+    expect(text).toContain("└ ")
+  })
+
   it("re-reads the rows from the refresher on the 1s tick", () => {
     jest.useFakeTimers()
     try {

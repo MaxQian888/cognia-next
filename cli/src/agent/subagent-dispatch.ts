@@ -53,7 +53,17 @@ import { errorMessage } from "../tui/runtime/shared"
  */
 const CLI_MAX_CONCURRENT_SUBAGENTS = 8
 
-/** Per-turn context the `dispatch_agent` handler reads, keyed by chat session id. */
+/**
+ * Fallback nesting cap when neither the context nor the resolved config carry
+ * one — same value as the desktop's `DEFAULT_NESTING_MAX_DEPTH` (kept local so
+ * the CLI never imports the Dexie-backed desktop handler module).
+ */
+export const CLI_DEFAULT_SUBAGENT_MAX_DEPTH = 2
+
+/** Per-turn context the `dispatch_agent` handler reads, keyed by session id —
+ * the chat session for the main turn, or a child subagent session when the run
+ * was granted nested delegation (registered by {@link handleCliDispatchAgent}
+ * through the runner's nesting seam). */
 export interface CliSubagentDispatchContext {
   /** Subagents the model may target (drives the tool enum AND id resolution). */
   agents: AgentSummary[]
@@ -65,6 +75,18 @@ export interface CliSubagentDispatchContext {
   mcpServers: McpServer[]
   approvedTools: Set<string>
   disabledMcpTools: Set<string>
+  // ── Nesting (absent on the main chat session ⇒ depth 0 / fresh chain) ──────
+  /** The CALLER's depth: 0 = the chat turn, 1 = a subagent, … */
+  depth?: number
+  /** Nesting cap for the whole tree; defaults from `config.subagentMaxDepth`. */
+  maxDepth?: number
+  /** Subagent ids on the dispatch chain above the caller (cycle guard). */
+  parentChain?: string[]
+  /** The caller's own live-output id (the tree edge for its children). */
+  selfLiveId?: string
+  /** The ROOT chat session that owns the whole tree — live entries are keyed to
+   * it so nested runs stay visible to the owning TUI session. */
+  rootSessionId?: string
   /** Injected subagent runner (tests); defaults to {@link runCliSubagent}. */
   run?: (
     def: AgentSummary["def"],
@@ -148,12 +170,14 @@ export async function handleCliDispatchAgent(
   const parsed = parseDispatchAgentArgs(req.args)
   if (parsed.mode === "error") return { ...base, result: parsed.message }
   if (parsed.mode === "collect") {
-    // Scope the collect to the requesting session so a run started by a different
-    // chat session (or one cleared away with `/clear`) reads as unknown rather
-    // than leaking another session's subagent output back to this model.
+    // Scope the collect to the OWNING chat session so a run started by a
+    // different chat session (or one cleared away with `/clear`) reads as
+    // unknown rather than leaking another session's subagent output back to
+    // this model. Background runs are owned by the root chat session even when
+    // a nested subagent started them, so any member of the tree may collect.
     const collected = await collectCliBackgroundResult(parsed.runId, {
       home: ctx.home,
-      owner: req.sessionId,
+      owner: ctx.rootSessionId ?? req.sessionId,
     })
     if (collected === undefined) {
       return {
@@ -166,6 +190,35 @@ export async function handleCliDispatchAgent(
 
   const run = ctx.run ?? runCliSubagent
   const mintRunId = ctx.mintRunId ?? defaultMintRunId
+
+  // ── Nesting state for THIS caller ───────────────────────────────────────────
+  // The main chat session registers no nesting fields (depth 0, fresh chain);
+  // a child session's context was registered by its dispatching `executeOne`.
+  const depth = ctx.depth ?? 0
+  const maxDepth = ctx.maxDepth ?? ctx.config.subagentMaxDepth ?? CLI_DEFAULT_SUBAGENT_MAX_DEPTH
+  const parentChain = ctx.parentChain ?? []
+  const rootSessionId = ctx.rootSessionId ?? req.sessionId
+  const childDepth = depth + 1
+
+  /** Refuse a dispatch the nesting policy forbids (cycle / depth cap), mirroring
+   * the desktop's `dispatchSubagent` guards. `null` ⇒ the dispatch may run.
+   * Depth is belt-and-braces: at the cap the tool isn't even advertised. */
+  const refuseByPolicy = (d: NormalizedDispatch, label: string): DispatchOutcome | null => {
+    if (parentChain.includes(d.subagentId)) {
+      const chain = [...parentChain, d.subagentId].join(" → ")
+      return {
+        text: `[${label}] Dispatch refused — "${d.subagentId}" is already on the dispatch chain (${chain}). Cycles are not allowed.`,
+        ok: false,
+      }
+    }
+    if (childDepth > maxDepth) {
+      return {
+        text: `[${label}] Dispatch refused — max nesting depth (${maxDepth}) reached.`,
+        ok: false,
+      }
+    }
+    return null
+  }
 
   /** One dispatch's outcome: the line shown to the model + whether it FAILED.
    * `ok: false` is reserved for genuine faults (the run threw, or an unknown
@@ -183,6 +236,8 @@ export async function handleCliDispatchAgent(
     label: string,
     liveId?: string
   ): Promise<DispatchOutcome> => {
+    const refused = refuseByPolicy(d, label)
+    if (refused) return refused
     const match = ctx.agents.find((a) => a.id === d.subagentId)
     if (!match) {
       const known = ctx.agents.map((a) => a.id).join(", ") || "(none)"
@@ -192,12 +247,37 @@ export async function handleCliDispatchAgent(
       }
     }
     // Register the live-output entry so the TUI run-page can stream this run.
+    // Keyed to the ROOT chat session (not the ephemeral parent subagent
+    // session), so a nested run stays visible to the owning TUI session.
     const live = startLiveSubagent({
       ...(liveId ? { liveId } : {}),
       name: d.subagentId,
       task: d.prompt,
-      sessionId: req.sessionId,
+      sessionId: rootSessionId,
+      depth: childDepth,
+      ...(ctx.selfLiveId ? { parentLiveId: ctx.selfLiveId } : {}),
     })
+    // Grant the child nested delegation only while it would run BELOW the cap:
+    // at the cap the tool is simply not advertised (the child is a leaf), the
+    // depth-N generalization of Claude Code dropping the Agent tool from
+    // subagents. The child's dispatch context inherits this caller's resolved
+    // turn state and extends the chain for the cycle guard.
+    const nesting =
+      childDepth < maxDepth
+        ? {
+            manifest: buildCliSubagentToolManifest(ctx.agents),
+            register: (childSessionId: string) =>
+              registerCliSubagentContext(childSessionId, {
+                ...ctx,
+                depth: childDepth,
+                maxDepth,
+                parentChain: [...parentChain, d.subagentId],
+                selfLiveId: live,
+                rootSessionId,
+              }),
+            unregister: clearCliSubagentContext,
+          }
+        : undefined
     try {
       const r = await run(match.def, d.prompt, req.sessionId, {
         config: ctx.config,
@@ -209,6 +289,7 @@ export async function handleCliDispatchAgent(
         approvedTools: ctx.approvedTools,
         disabledMcpTools: ctx.disabledMcpTools,
         onEvent: (event) => applyLiveSubagentEvent(live, event),
+        ...(nesting ? { nesting } : {}),
       })
       settleLiveSubagent(live, "done")
       return { text: `[${label}]${metaSuffix(r)}\n${r.text}`, ok: true }
@@ -228,8 +309,11 @@ export async function handleCliDispatchAgent(
 
   const runOne = async (d: NormalizedDispatch, label: string): Promise<DispatchOutcome> => {
     if (!d.background) return executeOne(d, label)
-    // Background: surface an unknown id synchronously (cheap, avoids a useless
-    // parked run), otherwise start the run, park it, and return its runId now.
+    // Background: surface a policy refusal or an unknown id synchronously
+    // (cheap, avoids a useless parked run), otherwise start the run, park it,
+    // and return its runId now.
+    const refused = refuseByPolicy(d, label)
+    if (refused) return refused
     const match = ctx.agents.find((a) => a.id === d.subagentId)
     if (!match) {
       const known = ctx.agents.map((a) => a.id).join(", ") || "(none)"
@@ -245,7 +329,9 @@ export async function handleCliDispatchAgent(
         kind: "subagent",
         subagentId: d.subagentId,
         prompt: d.prompt,
-        sessionId: req.sessionId,
+        // Owned by the ROOT chat session (nested dispatchers park runs the
+        // whole tree — and the user's panel — can see and collect).
+        sessionId: rootSessionId,
         host: "cli",
         startedAt: Date.now(),
         home: ctx.home,

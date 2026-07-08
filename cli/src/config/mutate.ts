@@ -357,6 +357,7 @@ export const NUMBER_CONFIG_KEYS = [
   "aiSdkMaxSteps",
   "toolExecutionTimeoutMs",
   "subagentStreamIdleTimeoutMs",
+  "subagentMaxDepth",
 ] as const
 export type NumberConfigKey = (typeof NUMBER_CONFIG_KEYS)[number]
 
