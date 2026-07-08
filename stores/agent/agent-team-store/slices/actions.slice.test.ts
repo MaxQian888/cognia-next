@@ -640,6 +640,131 @@ describe("useAgentTeamStore Task CRUD", () => {
   })
 })
 
+describe("useAgentTeamStore moveTask / reorderTask", () => {
+  beforeEach(() => reset())
+
+  const setup = () => {
+    const state = useAgentTeamStore.getState()
+    const team = state.createTeam({ name: "T", task: "t" })
+    const task = state.createTask({ teamId: team.id, title: "X", description: "" })
+    return { team, task }
+  }
+
+  it("returns task-not-found for unknown ids", () => {
+    expect(useAgentTeamStore.getState().moveTask("missing", "cancelled")).toEqual({
+      ok: false,
+      reason: "task-not-found",
+    })
+  })
+
+  it("denies illegal transitions with the guard's reason and leaves the task untouched", () => {
+    const { task } = setup()
+    const result = useAgentTeamStore.getState().moveTask(task.id, "completed")
+    expect(result).toEqual({ ok: false, reason: "illegal-transition" })
+    expect(useAgentTeamStore.getState().tasks[task.id].status).toBe("pending")
+  })
+
+  it("pending → cancelled stamps completedAt", () => {
+    const { task } = setup()
+    expect(useAgentTeamStore.getState().moveTask(task.id, "cancelled")).toEqual({ ok: true })
+    const moved = useAgentTeamStore.getState().tasks[task.id]
+    expect(moved.status).toBe("cancelled")
+    expect(moved.completedAt).toBeInstanceOf(Date)
+  })
+
+  it("failed → pending (manual retry) clears run-owned fields", () => {
+    const { task } = setup()
+    useAgentTeamStore.getState().updateTask(task.id, {
+      status: "failed",
+      error: "boom",
+      claimedBy: "tm-1",
+      startedAt: new Date(Date.now() - 5000),
+      completedAt: new Date(),
+      actualDuration: 5000,
+    })
+    expect(useAgentTeamStore.getState().moveTask(task.id, "pending")).toEqual({ ok: true })
+    const moved = useAgentTeamStore.getState().tasks[task.id]
+    expect(moved.status).toBe("pending")
+    expect(moved.error).toBeUndefined()
+    expect(moved.claimedBy).toBeUndefined()
+    expect(moved.startedAt).toBeUndefined()
+    expect(moved.completedAt).toBeUndefined()
+    expect(moved.actualDuration).toBeUndefined()
+  })
+
+  it("review → completed stamps completedAt and actualDuration from startedAt", () => {
+    const { task } = setup()
+    const startedAt = new Date(Date.now() - 3000)
+    useAgentTeamStore.getState().updateTask(task.id, { status: "review", startedAt })
+    expect(useAgentTeamStore.getState().moveTask(task.id, "completed")).toEqual({ ok: true })
+    const moved = useAgentTeamStore.getState().tasks[task.id]
+    expect(moved.status).toBe("completed")
+    expect(moved.completedAt).toBeInstanceOf(Date)
+    expect(moved.actualDuration).toBeGreaterThanOrEqual(3000)
+  })
+
+  it("claimed → pending at rest releases the teammate's currentTaskId mirror", () => {
+    const { team, task } = setup()
+    const state = useAgentTeamStore.getState()
+    const mate = state.addTeammate({
+      teamId: team.id,
+      name: "W",
+      description: "",
+      role: "teammate",
+    })
+    state.claimTask(task.id, mate.id)
+    expect(useAgentTeamStore.getState().tasks[task.id].status).toBe("claimed")
+    expect(useAgentTeamStore.getState().teammates[mate.id].currentTaskId).toBe(task.id)
+
+    expect(useAgentTeamStore.getState().moveTask(task.id, "pending")).toEqual({ ok: true })
+    expect(useAgentTeamStore.getState().tasks[task.id].status).toBe("pending")
+    expect(useAgentTeamStore.getState().tasks[task.id].claimedBy).toBeUndefined()
+    expect(useAgentTeamStore.getState().teammates[mate.id].currentTaskId).toBeUndefined()
+  })
+
+  it("claimed → pending is denied while the team is executing", () => {
+    const { team, task } = setup()
+    const state = useAgentTeamStore.getState()
+    const mate = state.addTeammate({
+      teamId: team.id,
+      name: "W",
+      description: "",
+      role: "teammate",
+    })
+    state.claimTask(task.id, mate.id)
+    state.setTeamStatus(team.id, "executing")
+    expect(useAgentTeamStore.getState().moveTask(task.id, "pending")).toEqual({
+      ok: false,
+      reason: "runtime-owned",
+    })
+    expect(useAgentTeamStore.getState().tasks[task.id].status).toBe("claimed")
+  })
+
+  it("reorderTask renumbers only the task's own column", () => {
+    const state = useAgentTeamStore.getState()
+    const team = state.createTeam({ name: "T", task: "t" })
+    const a = state.createTask({ teamId: team.id, title: "a", description: "" })
+    const b = state.createTask({ teamId: team.id, title: "b", description: "" })
+    const c = state.createTask({ teamId: team.id, title: "c", description: "" })
+    // A task in another column keeps its order untouched.
+    const other = state.createTask({ teamId: team.id, title: "other", description: "" })
+    state.updateTask(other.id, { status: "cancelled" })
+
+    useAgentTeamStore.getState().reorderTask(a.id, 2)
+    const tasks = useAgentTeamStore.getState().tasks
+    expect(tasks[b.id].order).toBe(0)
+    expect(tasks[c.id].order).toBe(1)
+    expect(tasks[a.id].order).toBe(2)
+    expect(tasks[other.id].order).toBe(3)
+  })
+
+  it("reorderTask is a no-op for unknown ids", () => {
+    const before = useAgentTeamStore.getState().tasks
+    useAgentTeamStore.getState().reorderTask("missing", 0)
+    expect(useAgentTeamStore.getState().tasks).toBe(before)
+  })
+})
+
 describe("useAgentTeamStore Messages", () => {
   beforeEach(() => reset())
 

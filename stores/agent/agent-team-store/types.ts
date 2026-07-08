@@ -30,6 +30,7 @@ import {
   type StructuredMessagePayload,
 } from "@/types/agent/agent-team"
 import type { CapabilityAuditWarning } from "@/lib/ai/agent/team/capability-audit"
+import type { TaskMoveError } from "@/lib/ai/agent/team/task-move-guard"
 
 export interface AgentTeamState {
   // Data
@@ -110,6 +111,16 @@ export interface AgentTeamState {
   updateTask: (taskId: string, updates: Partial<AgentTeamTask>) => void
   deleteTask: (taskId: string) => void
   setTaskStatus: (taskId: string, status: TeamTaskStatus, result?: string, error?: string) => void
+  /**
+   * Human-owned board move (drag, action sheet, RPC, plugin API). Validates
+   * the transition through `canMoveTask` — the single guard shared with the
+   * board UI and remote surfaces — and applies status side-effects (claim
+   * release + timestamp resets on `→ pending`, completion stamps on
+   * terminal statuses).
+   */
+  moveTask: (taskId: string, to: TeamTaskStatus) => { ok: boolean; reason?: TaskMoveError }
+  /** Same-column reorder: place the task at `targetIndex` and renumber. */
+  reorderTask: (taskId: string, targetIndex: number) => void
   claimTask: (taskId: string, teammateId: string) => void
   assignTask: (taskId: string, teammateId: string) => void
   addTaskComment: (input: AddTaskCommentInput) => AgentTaskComment | null

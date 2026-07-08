@@ -14,6 +14,7 @@ import {
   type TeammateCapabilityOverlay,
 } from "@/types/agent/agent-team"
 import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "@/lib/ai/agent/agent-team-compat"
+import { canMoveTask, reorderColumn, sortColumn } from "@/lib/ai/agent/team/task-move-guard"
 import { loggers } from "@/lib/logging"
 import { useProjectStore } from "@/stores/project/project-store"
 import { initialState, builtInTemplatesMap } from "../initial-state"
@@ -661,6 +662,78 @@ export const createAgentTeamActionsSlice = (
       return {
         tasks: { ...state.tasks, [taskId]: { ...task, ...updates } },
       }
+    })
+  },
+
+  moveTask: (taskId, to) => {
+    const task = get().tasks[taskId]
+    if (!task) return { ok: false, reason: "task-not-found" }
+    const team = get().teams[task.teamId]
+    const verdict = canMoveTask(task, task.status, to, team?.status ?? "idle")
+    if (!verdict.allowed) return { ok: false, reason: verdict.reason }
+    if (task.status === to) return { ok: true }
+
+    set((state) => {
+      const current = state.tasks[taskId]
+      if (!current) return state
+
+      const updates: Partial<AgentTeamTask> = { status: to }
+      if (to === "pending") {
+        // Un-strand / manual retry: clear the run-owned fields so the next
+        // run (or resume) re-dispatches the task from a clean slate.
+        updates.claimedBy = undefined
+        updates.startedAt = undefined
+        updates.completedAt = undefined
+        updates.actualDuration = undefined
+        updates.error = undefined
+      } else if (to === "completed" || to === "failed" || to === "cancelled") {
+        updates.completedAt = new Date()
+        if (current.startedAt) {
+          updates.actualDuration = updates.completedAt.getTime() - current.startedAt.getTime()
+        }
+      }
+
+      // Release the claim mirror when the task leaves a claimed state.
+      const claimedBy = current.claimedBy
+      const teammate = claimedBy ? state.teammates[claimedBy] : undefined
+      const releaseTeammate = to === "pending" && teammate?.currentTaskId === taskId
+
+      return {
+        tasks: { ...state.tasks, [taskId]: { ...current, ...updates } },
+        ...(releaseTeammate && claimedBy
+          ? {
+              teammates: {
+                ...state.teammates,
+                [claimedBy]: { ...teammate, currentTaskId: undefined },
+              },
+            }
+          : {}),
+      }
+    })
+    return { ok: true }
+  },
+
+  reorderTask: (taskId, targetIndex) => {
+    const task = get().tasks[taskId]
+    if (!task) return
+
+    set((state) => {
+      const current = state.tasks[taskId]
+      if (!current) return state
+      const column = sortColumn(
+        Object.values(state.tasks).filter(
+          (t) => t.teamId === current.teamId && t.status === current.status
+        )
+      )
+      const changes = reorderColumn(column, taskId, targetIndex)
+      if (changes.length === 0) return state
+
+      const tasks = { ...state.tasks }
+      for (const { id, order } of changes) {
+        const row = tasks[id]
+        if (row) tasks[id] = { ...row, order }
+      }
+      return { tasks }
     })
   },
 
