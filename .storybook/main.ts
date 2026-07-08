@@ -42,7 +42,21 @@ const PIXI_PREBUNDLED_ABS = path.resolve(process.cwd(), "node_modules/pixi.js/di
 const FOLLOW_UPS_MOCK = path.resolve(process.cwd(), "hooks/chat/use-follow-up-suggestions.mock.ts")
 
 const config: StorybookConfig = {
-  framework: "@storybook/nextjs",
+  framework: {
+    name: "@storybook/nextjs",
+    options: {
+      builder: {
+        // Persistent webpack cache in node_modules/.cache/webpack — turns the
+        // ~50s cold compile into a warm-start of a few seconds.
+        fsCache: true,
+        // Compile stories on demand (dev only). With 1200+ story files the
+        // eager preview bundle pulls in effectively the whole app; lazy
+        // compilation makes startup compile just the preview shell and pays
+        // for each story the first time it is opened.
+        lazyCompilation: true,
+      },
+    },
+  },
   // addon-mcp serves the local Storybook AI MCP at http://localhost:6006/mcp
   // while `pnpm storybook` is running (registered in .mcp.json).
   addons: ["@storybook/addon-docs", "@storybook/addon-mcp"],
@@ -52,16 +66,40 @@ const config: StorybookConfig = {
   // graph (e.g. lib/platform/viewport-store.ts); preview doesn't need prop tables.
   typescript: { reactDocgen: false },
   webpackFinal: async (cfg) => {
-    // `storybook dev` crashes right after the first compile in webpack's file
-    // watcher: `FileSystemInfo._resolveContextTimestamp` hashes a watched
-    // directory (context) whose entry resolves to `undefined`, throwing
-    // "Cannot read properties of undefined (reading 'length')" / "data argument
-    // must be ... Received undefined". It's a webpack-5 bug aggravated by pnpm's
-    // symlinked node_modules. Fix: make the watcher IGNORE node_modules so it
-    // never snapshots those symlinked directory contexts, and skip the
-    // persistent cache. `storybook build` uses a different path and is fine.
-    cfg.cache = false
-    cfg.watchOptions = { ...(cfg.watchOptions ?? {}), ignored: /[\\/]node_modules[\\/]/ }
+    // `storybook dev` crashes in webpack's watcher after a compile:
+    // `FileSystemInfo._resolveContextTimestamp` hashes a snapshotted directory
+    // (context) whose nested-symlink entry resolves to an `undefined`
+    // timestampHash, throwing "Cannot read properties of undefined (reading
+    // 'length')" (webpack-5 bug aggravated by pnpm symlinks, see
+    // webpack/discussions#17373). The offending contexts are the pnpm
+    // *workspace package* directories (`packages/*`, `mobile`, `docs`,
+    // `plugin-sdk/*`) that `resolve.symlinks` realpaths out of node_modules,
+    // so ignoring node_modules alone only fixed the first-compile crash — the
+    // first *re*build still died. Fix: watch-ignore every directory Storybook
+    // doesn't serve stories from (anchored at the repo root so e.g.
+    // `components/mobile/` stays watched). Tradeoff: edits under packages/*
+    // need a Storybook restart to show up.
+    const IGNORED_ROOT_DIRS = [
+      "node_modules",
+      "packages",
+      "mobile",
+      "docs",
+      "plugin-sdk",
+      "sidecar",
+      "services",
+      "src-tauri",
+      "cli",
+      "out",
+      "\\.next",
+      "\\.git",
+    ]
+    const escapedRoot = process.cwd().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    cfg.watchOptions = {
+      ...(cfg.watchOptions ?? {}),
+      ignored: new RegExp(
+        `(^${escapedRoot}[\\\\/](${IGNORED_ROOT_DIRS.join("|")})[\\\\/])|([\\\\/]node_modules[\\\\/])`
+      ),
+    }
 
     // Disable React Fast Refresh. Its `registerExportsForReactRefresh` eagerly
     // reads each module's default export during init; a benign circular import
@@ -98,6 +136,20 @@ const config: StorybookConfig = {
       }
     }
     walkRules(cfg.module?.rules as unknown[] | undefined)
+
+    // Memory/disk bounds for the fsCache enabled above. Without these the
+    // filesystem cache is unbounded in both directions: the on-disk pack
+    // (node_modules/.cache/webpack) grows past 10 GB because entries default
+    // to a 60-day maxAge with no compression, and the dev process RSS creeps
+    // toward the heap ceiling because deserialized cache entries stay in the
+    // in-memory cache for 5 idle compilations (webpack's dev default) and
+    // serialization buffers are never released.
+    if (cfg.cache && typeof cfg.cache === "object" && cfg.cache.type === "filesystem") {
+      cfg.cache.compression = "gzip"
+      cfg.cache.maxAge = 7 * 24 * 60 * 60 * 1000
+      cfg.cache.allowCollectingMemory = true
+      if (cfg.mode === "development") cfg.cache.maxMemoryGenerations = 1
+    }
 
     cfg.resolve ??= {}
     // Mirror of next.config.ts:181 — Node built-ins resolve to `false` in the

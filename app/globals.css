@@ -1709,6 +1709,22 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
 }
 
+/* In-app browser: indeterminate top progress bar. A short segment sweeps left
+ * to right while the previewed page loads (the native webview can't paint its
+ * own chrome, so this lives in the React toolbar seam). */
+.browser-progress-bar {
+  animation: browser-progress 1.1s ease-in-out infinite;
+}
+
+@keyframes browser-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
 /* iOS auto-zoom prevention: any text input that's <16px on focus triggers
  * an unwanted zoom-in. Apply to every native form control globally so we
  * don't have to remember per-component. The visual size at the desktop's

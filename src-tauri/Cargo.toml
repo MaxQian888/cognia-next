@@ -405,6 +405,11 @@ enigo = "0.6"
 core-graphics = "0.25"
 core-graphics-types = "0.2"
 core-foundation = "0.10"
+# Non-activating NSPanel conversion for the desktop-pet overlay + popup windows
+# (pet_window/macos_panel.rs): floats over all Spaces + full-screen apps and
+# never steals foreground focus. macOS-only; pulls objc2* transitively. Cargo.lock
+# pins the resolved v2.1 commit for reproducibility.
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
 # macOS Accessibility (AX) element tree — backs the bounded `read_tree` / `find`
 # Computer Use surface (ADR-0020 cross-platform subset, ax/mod.rs + ax/raw.rs).
 # The high-level `accessibility` crate covers reading role/title/children; the

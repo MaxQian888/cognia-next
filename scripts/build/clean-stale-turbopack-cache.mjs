@@ -50,17 +50,22 @@ export function dirSizeBytes(dir) {
  * Purge `cacheDir` when its on-disk size exceeds `thresholdBytes`.
  * Returns `{ cleaned, sizeBytes }`; never throws on a missing directory.
  */
-export function cleanStaleTurbopackCache({ cacheDir, thresholdBytes, log = console.log }) {
+export function cleanStaleTurbopackCache({
+  cacheDir,
+  thresholdBytes,
+  log = console.log,
+  label = ".next/dev",
+}) {
   const sizeBytes = dirSizeBytes(cacheDir)
   const gb = (sizeBytes / BYTES_PER_GB).toFixed(1)
   const thresholdGb = (thresholdBytes / BYTES_PER_GB).toFixed(1)
   if (sizeBytes > thresholdBytes) {
     rmSync(cacheDir, { recursive: true, force: true })
-    log(`[clean-cache] .next/dev was ${gb} GB (> ${thresholdGb} GB threshold) — purged.`)
+    log(`[clean-cache] ${label} was ${gb} GB (> ${thresholdGb} GB threshold) — purged.`)
     return { cleaned: true, sizeBytes }
   }
   if (sizeBytes > 0) {
-    log(`[clean-cache] .next/dev is ${gb} GB (under ${thresholdGb} GB threshold) — kept.`)
+    log(`[clean-cache] ${label} is ${gb} GB (under ${thresholdGb} GB threshold) — kept.`)
   }
   return { cleaned: false, sizeBytes }
 }

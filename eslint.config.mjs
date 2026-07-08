@@ -118,6 +118,11 @@ const eslintConfig = defineConfig([
       "stores/chat/chat-store.test.ts",
       "lib/claude/ipc.test.ts",
       "components/chat/message-renderer.test.tsx",
+      // Project-editor component tests flatten Radix primitives via
+      // `require("react")` inside jest.mock factories (hoisting-safe idiom).
+      "components/agent/workspace/editor/project-root-switcher.test.tsx",
+      "components/agent/workspace/editor/project-monaco.test.tsx",
+      "components/agent/workspace/editor/project-file-tree.test.tsx",
     ],
     rules: {
       "@typescript-eslint/no-require-imports": "off",
