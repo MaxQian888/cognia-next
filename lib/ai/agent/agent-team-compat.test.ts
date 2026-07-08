@@ -62,11 +62,22 @@ describe("dispatchAgentTeam", () => {
     expect(r1.reason).toMatch(/teamId is required/i)
   })
 
-  it("returns ok=false when the runtime hasn't been configured", async () => {
-    useAgentTeamStore.getState().upsertTeam(makeTeam())
-    const result = await dispatchAgentTeam({ teamId: "t1" })
-    expect(result.ok).toBe(false)
-    expect(result.reason).toMatch(/not configured/i)
+  it("self-heals with default deps when the runtime hasn't been configured", async () => {
+    // `ensureConfiguredDeps` deliberately auto-configures via
+    // `buildAgentTeamRuntimeDeps()` instead of throwing "not configured"
+    // (headless / scheduler / CLI dispatch paths have no React initializer).
+    // The run still fails here — the team has no materialized teammates or
+    // tasks — but through the normal lifecycle, with the auto-config warning.
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      useAgentTeamStore.getState().upsertTeam(makeTeam())
+      const result = await dispatchAgentTeam({ teamId: "t1" })
+      expect(result.ok).toBe(false)
+      expect(result.reason).toMatch(/run ended failed/i)
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("auto-configured"))
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it("returns ok=false when the team doesn't exist", async () => {

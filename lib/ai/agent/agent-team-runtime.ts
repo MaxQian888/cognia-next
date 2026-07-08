@@ -21,7 +21,7 @@ import {
   validateInstanceCapabilitiesWith,
   refreshAllInstanceCapabilityWarnings,
 } from "@/lib/ai/agent/team/capability-audit"
-import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
+import { runWorkflow, type RunWorkflowResult } from "@/lib/workflow/runtime/orchestrator"
 import type { VisualWorkflow, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
@@ -803,13 +803,34 @@ export async function runTeamLifecycle(
           team.config.progressLedger?.enabled === true
             ? createLedgerCheckpoint({ ctx: waveCtx, signal: ac.signal })
             : undefined
+        // Every wave reuses the same runId so the run row is overwritten in
+        // place (single-run view), but the orchestrator's ownership guard
+        // (ADR-0061 P4) short-circuits on a terminal row — wave N-1's
+        // "succeeded" would silently skip every later wave. Re-open the row
+        // between waves; a "cancelled" row is a companion soft-cancel and
+        // must still kill the run, so it is honored, never resurrected.
+        let executedWaves = 0
+        const runWaveReentrant = async (wf: VisualWorkflow): Promise<RunWorkflowResult> => {
+          if (executedWaves > 0) {
+            const { getDb } = await import("@/lib/db/schema")
+            const row = await getDb().workflowRuns.get(runId)
+            if (row?.status === "cancelled") {
+              return { runId, status: "cancelled" }
+            }
+            if (row && (row.status === "succeeded" || row.status === "failed")) {
+              await getDb().workflowRuns.update(runId, { status: "running" })
+            }
+          }
+          executedWaves += 1
+          return runOneWorkflow(wf)
+        }
         const waveRes = await runTeamWaves({
           teamCtx: waveCtx,
           tasks,
           initialConcurrency: concurrency.get(),
           ...(team.config.defaultTimeout ? { wallClockTimeoutMs: team.config.defaultTimeout } : {}),
           signal: ac.signal,
-          runWave: runOneWorkflow,
+          runWave: runWaveReentrant,
           ...(ledgerCheckpoint ? { checkpoint: ledgerCheckpoint } : {}),
         })
         // A no-task run (or one with no executed wave) has no lastResult; the

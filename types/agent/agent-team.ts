@@ -83,15 +83,20 @@ export type TeamExecutionPattern =
   | "ultracode_orchestration"
 
 /**
- * Main workspace tabs for the dedicated Agent Team page
+ * Main workspace tabs for the dedicated Agent Team page. Must stay in sync
+ * with `WORKSPACE_TABS` in `components/agent/workspace/workspace-tab-nav.tsx`
+ * — the nav renders exactly these, in this order. Stale persisted values
+ * (e.g. the removed "graph"/"analytics") are guarded at the workspace page,
+ * which falls back to "overview" for unknown tabs.
  */
 export type AgentTeamWorkspaceTab =
   | "overview"
-  | "graph"
   | "tasks"
   | "chat"
   | "activity"
-  | "analytics"
+  | "worktrees"
+  | "members"
+  | "settings"
 
 /**
  * Current operator focus inside the Agent Team workspace

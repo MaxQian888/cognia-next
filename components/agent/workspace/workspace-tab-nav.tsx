@@ -9,6 +9,7 @@
 // Must be mounted inside a `<SidebarProvider>`.
 
 import { useTranslations } from "next-intl"
+import type { AgentTeamWorkspaceTab } from "@/types/agent/agent-team"
 import {
   ActivityIcon,
   ArrowLeftIcon,
@@ -35,7 +36,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 
-export const WORKSPACE_TABS: ReadonlyArray<{ value: string; icon: LucideIcon }> = [
+export const WORKSPACE_TABS: ReadonlyArray<{ value: AgentTeamWorkspaceTab; icon: LucideIcon }> = [
   { value: "overview", icon: BarChart3Icon },
   { value: "tasks", icon: ListTodoIcon },
   { value: "chat", icon: MessageCircleIcon },
