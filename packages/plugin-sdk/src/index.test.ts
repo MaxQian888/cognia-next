@@ -57,6 +57,7 @@ describe("plugin-sdk root barrel", () => {
       "defineQuickAction",
       "defineExternalAgentPreset",
       "defineExternalAgentAdapter",
+      "defineSessionImporter",
       "defineSharedMemoryAdapter",
       "defineBalanceAdapter",
       "defineLimitsSource",

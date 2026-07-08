@@ -99,6 +99,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
         "deployment-filter",
         "protocol-adapter",
         "external-agent-adapter",
+        "session-importer",
         "tool-route",
         "context-provider",
         "scheduler",
@@ -108,7 +109,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
     )
     // Lock the count — silent growth means the manager dispatch loop picked
     // up new behaviour that may need verification.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(20)
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(21)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {

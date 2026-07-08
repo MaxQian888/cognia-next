@@ -83,10 +83,12 @@ export function PluginViewContainerPanel({ containerId }: Props) {
 
   return (
     <div className="flex h-full flex-col outline-none" data-plugin-view-container={containerId}>
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <ResolvedRailIcon name={entry.def.icon} className="size-4 text-muted-foreground" />
-        <span className="truncate text-sm font-medium">{entry.def.title}</span>
-      </div>
+      {!entry.def.hideHeader && (
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+          <ResolvedRailIcon name={entry.def.icon} className="size-4 text-muted-foreground" />
+          <span className="truncate text-sm font-medium">{entry.def.title}</span>
+        </div>
+      )}
       {isEmpty ? (
         <div className="flex flex-1 items-center justify-center p-6 text-center">
           <p className="text-xs text-muted-foreground">{t("empty")}</p>
@@ -100,6 +102,11 @@ export function PluginViewContainerPanel({ containerId }: Props) {
             <section
               key={`${v.pluginId}:${v.viewId}`}
               data-plugin-view={`${v.pluginId}:${v.viewId}`}
+              // Tree views are hug-height lists; custom React panels are full-
+              // bleed and rely on a definite-height parent (their inner
+              // `h-full`/`flex-1` chain collapses otherwise). Give the latter the
+              // same fill treatment as the webview branch below.
+              className={v.kind === "tree" ? undefined : "flex min-h-0 flex-1 flex-col"}
             >
               {v.title && (
                 <h3 className="px-3 py-1.5 text-xs font-medium uppercase text-muted-foreground">

@@ -65,9 +65,11 @@ import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
 import type { PluginDeploymentFilterDef } from "./plugin-deployment-filter"
 import type { PluginProtocolAdapterDef } from "./plugin-protocol-adapter"
 import type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
+import type { PluginSessionImporterDef } from "./plugin-session-importer"
 // Re-exported so the SDK manifest barrel (`@cognia/plugin-sdk/manifest`) can
 // source it from this module, the documented source of truth.
 export type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
+export type { PluginSessionImporterDef } from "./plugin-session-importer"
 import type { PluginToolRouteDef } from "./plugin-tool-route"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
 // added by Task #10. Importing the real type keeps the manifest schema and
@@ -1114,6 +1116,16 @@ export interface PluginManifest {
    * protocol, not just a preset over a built-in one.
    */
   externalAgentAdapters?: PluginExternalAgentAdapterDef[]
+
+  /**
+   * External-agent SESSION IMPORTERS (`session-importer` capability, ADR-0062).
+   * Each entry lazy-imports a `() => AgentSessionSourceAdapter` factory on enable
+   * and registers it into the session-source registry under the namespaced id
+   * `${pluginId}:${id}`. Lets a plugin add a new agent's on-disk session-history
+   * importer (Cursor, Cline, Windsurf, …) with no host change — field-driven
+   * module bridge, mirroring `externalAgentAdapters`.
+   */
+  sessionImporters?: PluginSessionImporterDef[]
 
   /**
    * Semantic tool routes: example utterances attached to this plugin's

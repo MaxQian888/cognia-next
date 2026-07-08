@@ -175,6 +175,52 @@ describe("applyPluginTables", () => {
     expect(db.verno).toBe(vernoAfterFirst)
   })
 
+  it("bumps above the true native version after cross-session drift (no SchemaDiff auto-bump)", async () => {
+    // Regression: `db.verno + 1` used the code-declared ceiling, not the
+    // persisted native IndexedDB version, so on a fresh process it landed on a
+    // version the physical DB had already passed. Dexie then logged
+    // "Schema was extended without increasing the number passed to db.version()"
+    // and force-bumped the native version behind our back — colliding with any
+    // other open connection.
+    const name = `test-drift-${Math.random().toString(36).slice(2)}`
+
+    // --- Prior session: static ceiling v1, then two plugin bumps push the
+    // physical native version to 3 (native == verno * 10 == 30). ---
+    {
+      const prior = new Dexie(name)
+      prior.version(1).stores({ pluginDexieMeta: "&pluginId, appliedAt" })
+      __setTestDb(prior)
+      await applyPluginTables(prior, "plugin-a", { tables: [{ name: "t", schema: "&id" }] })
+      await applyPluginTables(prior, "plugin-b", { tables: [{ name: "t", schema: "&id" }] })
+      expect(prior.backendDB().version).toBe(30)
+      prior.close()
+    }
+
+    // --- Fresh process: a NEW instance re-declares only the static ceiling v1,
+    // so db.verno starts at 1 — well below the persisted native v3. ---
+    const fresh = new Dexie(name)
+    fresh.version(1).stores({ pluginDexieMeta: "&pluginId, appliedAt" })
+    __setTestDb(fresh)
+
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await applyPluginTables(fresh, "plugin-c", { tables: [{ name: "t", schema: "&id" }] })
+    } finally {
+      warn.mockRestore()
+    }
+
+    // Store created via a clean EXPLICIT upgrade at native + 1 (v4), so verno
+    // advanced to 4 (with the buggy code it would have declared v2).
+    expect(fresh.tables.map((t) => t.name)).toContain("plugin-c:t")
+    expect(fresh.verno).toBe(4)
+    const schemaDiffWarned = warn.mock.calls.some((call) =>
+      call.some((arg) => typeof arg === "string" && arg.includes("SchemaDiff"))
+    )
+    expect(schemaDiffWarned).toBe(false)
+
+    await fresh.delete()
+  })
+
   it("throws when more than MAX_TABLES_PER_PLUGIN tables are declared", async () => {
     const tables = Array.from({ length: 21 }, (_, i) => ({
       name: `table${i}`,

@@ -30,4 +30,11 @@ export interface PluginViewContainerDef {
    * visibility — e.g. `"project.active"`. Absent = always shown.
    */
   when?: string
+  /**
+   * Suppress the host-drawn panel header (icon + title bar) for this
+   * container. Set by containers whose sole view is a full-bleed custom panel
+   * that renders its own (typically already-localized) chrome — avoids a
+   * duplicate title bar. Absent/false = host renders the standard header.
+   */
+  hideHeader?: boolean
 }

@@ -186,6 +186,21 @@ export const CANONICAL_EXTENSION_POINTS = [
   // live external-agent session. Context bag: `sessionId` / `isExecuting` /
   // `hasPlan` / `hasCommands`.
   "agent.external-session.toolbar",
+  // Employee Digital Twin workbench (ADR-0003) — brings the twin panel to
+  // parity with the other panels: plugins mount contributed UI in its four
+  // main regions. Context bags carry ids + numeric aggregates ONLY (PII
+  // red-line — never chunk text, persona content, or source bodies):
+  //   • twin.panel.header   — header toolbar actions. Bag: `twinId` / `tab`.
+  //   • twin.persona.panel  — insight panel below the persona sub-tabs. Bag:
+  //     `twinId` / `entityCount` / `playbookCount` / `styleCount`.
+  //   • twin.settings.cards — extra card at the foot of the Settings column.
+  //     Bag: `twinId`.
+  //   • twin.overview.panel — metric tile beside the overview charts. Bag:
+  //     `twinId` / `sourceCount` / `chunkCount`.
+  "twin.panel.header",
+  "twin.persona.panel",
+  "twin.settings.cards",
+  "twin.overview.panel",
   "panel.header",
   "panel.footer",
   "settings.general",
@@ -250,6 +265,10 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "agent.team.task.actions",
   "agent.team.board.toolbar",
   "agent.external-session.toolbar",
+  "twin.panel.header",
+  "twin.persona.panel",
+  "twin.settings.cards",
+  "twin.overview.panel",
   "settings.general",
   "settings.appearance",
   "settings.ai",
@@ -333,6 +352,10 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "agent.team.task.actions": "components/agent/workspace/board/task-card.tsx",
   "agent.team.board.toolbar": "components/agent/workspace/board/board-toolbar.tsx",
   "agent.external-session.toolbar": "components/agent/external-agent/session-panel.tsx",
+  "twin.panel.header": "components/twin/twin-plugin-slots.tsx",
+  "twin.persona.panel": "components/twin/twin-plugin-slots.tsx",
+  "twin.settings.cards": "components/twin/twin-plugin-slots.tsx",
+  "twin.overview.panel": "components/twin/twin-plugin-slots.tsx",
   "settings.general": "components/settings/agent-runtime/tabs/defaults-tab.tsx",
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",
   "settings.ai": "components/settings/provider/anthropic-subscription-reuse-card.tsx",

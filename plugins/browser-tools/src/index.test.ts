@@ -1,6 +1,12 @@
 jest.mock("@/lib/browser/agent-engine", () => {
+  // Stateful current URL: navigate moves it, getPage reports it — mirroring the
+  // real engine so the live-URL trust gating is exercisable (incl. redirects
+  // via __setUrl).
+  const state = { url: "http://localhost/" }
   const engine = {
-    navigate: jest.fn(async () => {}),
+    navigate: jest.fn(async (u: string) => {
+      state.url = u
+    }),
     snapshot: jest.fn(async () => ({
       generation: 3,
       url: "http://localhost/",
@@ -13,7 +19,7 @@ jest.mock("@/lib/browser/agent-engine", () => {
     evaluate: jest.fn(async () => ({ ok: true, value: "Home" })),
     readConsole: jest.fn(async () => [{ level: "warn", text: "x", ts: 1 }]),
     readNetwork: jest.fn(async () => []),
-    getPage: jest.fn(async () => ({ url: "http://localhost/", title: "t" })),
+    getPage: jest.fn(async () => ({ url: state.url, title: "t" })),
     back: jest.fn(async () => {}),
     forward: jest.fn(async () => {}),
     reload: jest.fn(async () => {}),
@@ -21,10 +27,14 @@ jest.mock("@/lib/browser/agent-engine", () => {
     waitForText: jest.fn(async () => ({ ok: true, timedOut: false })),
     waitForSelector: jest.fn(async () => ({ ok: true, timedOut: false })),
     waitForNetworkIdle: jest.fn(async () => ({ ok: true, timedOut: false })),
+    waitForLoad: jest.fn(async () => ({ ok: true, timedOut: false })),
     screenshot: jest.fn(async () => ({ bytes: "AAAA", width: 10, height: 10, capturedAt: 0 })),
   }
   return {
     __engine: engine,
+    __setUrl: (u: string) => {
+      state.url = u
+    },
     // URL-aware so the public-URL (untrusted) branch is exercisable: anything
     // off localhost is treated as a public origin, mirroring resolveTrustTier.
     routeEngine: (url: string) => {
@@ -45,6 +55,7 @@ import definition from "@/plugins/browser-tools/src/index"
 import * as engineModule from "@/lib/browser/agent-engine"
 
 const engine = (engineModule as unknown as { __engine: Record<string, jest.Mock> }).__engine
+const setLiveUrl = (engineModule as unknown as { __setUrl: (u: string) => void }).__setUrl
 
 type Tools = Record<string, (args: unknown) => Promise<unknown>>
 
@@ -64,7 +75,10 @@ async function collectTools(): Promise<Tools> {
   return tools
 }
 
-beforeEach(() => Object.values(engine).forEach((m) => m.mockClear()))
+beforeEach(() => {
+  Object.values(engine).forEach((m) => m.mockClear())
+  setLiveUrl("http://localhost/")
+})
 
 describe("browser-tools plugin", () => {
   it("registers the full Phase-1 tool surface", async () => {
@@ -146,6 +160,28 @@ describe("browser-tools plugin", () => {
     await tools.browser_navigate({ url: "http://localhost:3000/" })
   })
 
+  it("browser_evaluate is blocked when the page redirected off localhost since the last navigate", async () => {
+    const tools = await collectTools()
+    await tools.browser_navigate({ url: "http://localhost:3000/" })
+    // The page redirected (or the human navigated) to a public origin.
+    setLiveUrl("https://evil.example/phish")
+    const res = (await tools.browser_evaluate({ expression: "document.cookie" })) as {
+      ok: boolean
+      error: string
+    }
+    expect(res.ok).toBe(false)
+    expect(engine.evaluate).not.toHaveBeenCalled()
+  })
+
+  it("browser_evaluate falls back to the last known url when the live page is unreadable", async () => {
+    const tools = await collectTools()
+    await tools.browser_navigate({ url: "http://localhost:3000/" })
+    engine.getPage.mockRejectedValueOnce(new Error("preview is not open"))
+    const res = (await tools.browser_evaluate({ expression: "1+1" })) as { ok: boolean }
+    expect(res.ok).toBe(true)
+    expect(engine.evaluate).toHaveBeenCalledWith("1+1")
+  })
+
   it("browser_wait_for waits on a CSS selector when given", async () => {
     const tools = await collectTools()
     await tools.browser_wait_for({ selector: ".ready", timeoutMs: 500 })
@@ -170,10 +206,26 @@ describe("browser-tools plugin", () => {
       untrusted: boolean
     }
     expect(engine.navigate).toHaveBeenCalledWith("http://localhost:3000/")
+    // Waits for the target document to load before snapshotting.
+    expect(engine.waitForLoad).toHaveBeenCalledWith(
+      expect.objectContaining({ targetUrl: "http://localhost:3000/" })
+    )
     expect(res.navigated).toBe("http://localhost:3000/")
     expect(res.snapshot.generation).toBe(3)
     expect(res.untrusted).toBe(false)
     expect("hint" in res).toBe(false)
+  })
+
+  it("browser_navigate flags untrusted from the LANDED url when a redirect leaves localhost", async () => {
+    const tools = await collectTools()
+    engine.navigate.mockImplementationOnce(async () => {
+      // Server-side redirect: asked for localhost, landed on a public origin.
+      setLiveUrl("https://sso.example.com/login")
+    })
+    const res = (await tools.browser_navigate({ url: "http://localhost:3000/admin" })) as {
+      untrusted: boolean
+    }
+    expect(res.untrusted).toBe(true)
   })
 
   it("browser_navigate to a PUBLIC url flags untrusted and steers to the Playwright MCP tools", async () => {
@@ -232,6 +284,11 @@ describe("browser-tools plugin", () => {
     expect(engine.back).toHaveBeenCalled()
     expect(back.ok).toBe(true)
     expect(back.snapshot.generation).toBe(3)
+    // Same-URL loads get a settle delay so the readyState check can't pass on
+    // the OLD document before the reload/back even starts.
+    expect(engine.waitForLoad).toHaveBeenCalledWith(
+      expect.objectContaining({ initialDelayMs: 250 })
+    )
     await tools.browser_forward({})
     await tools.browser_reload({})
     await tools.browser_stop({})

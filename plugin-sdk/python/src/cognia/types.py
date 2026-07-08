@@ -175,6 +175,7 @@ class ViewContainerDef:
     location: Optional[str] = None
     order: Optional[int] = None
     when: Optional[str] = None
+    hide_header: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"id": self.id, "title": self.title}
@@ -186,6 +187,8 @@ class ViewContainerDef:
             out["order"] = self.order
         if self.when is not None:
             out["when"] = self.when
+        if self.hide_header is not None:
+            out["hideHeader"] = self.hide_header
         return out
 
 

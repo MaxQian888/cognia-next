@@ -20,7 +20,8 @@
       "title": "Security",
       "icon": "ShieldAlert",
       "location": "rail",
-      "when": "platform.tauri"
+      "when": "platform.tauri",
+      "hideHeader": true
     }
   ],
   "dexie": {

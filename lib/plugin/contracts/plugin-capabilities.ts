@@ -694,6 +694,30 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // cognia-next-specific extension (ADR-0062). Plugins declaring this
+    // capability contribute external-agent SESSION IMPORTERS — a
+    // `() => AgentSessionSourceAdapter` factory lazy-imported on enable and
+    // registered into the session-source registry under `${pluginId}:${id}` via
+    // the session-importers module bridge. Lets a plugin add a new agent's
+    // on-disk session-history importer (Cursor, Cline, Windsurf, …) with no host
+    // change — the escape valve for the fragile formats the host won't maintain.
+    id: "session-importer",
+    support: "supported",
+    manifestFields: ["sessionImporters"],
+    runtimeBinding:
+      "session-importers-bridge → registerSessionSource (lib/session-import/registry.ts)",
+    hostBindings: [
+      "lib/session-import/registry.ts",
+      "lib/plugin/bridge/session-importers-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+    ],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-session-importer.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    builtinContributionPaths: [],
+    docs: "docs/content/docs/en/adr/0062-external-agent-session-import.md",
+    requiredTests: ["lib/plugin/bridge/session-importers-bridge.test.ts"],
+  },
+  {
     // Plugin-first Computer Use plan (M1·T4). Plugins declaring this
     // capability contribute MCP server presets (Playwright MCP, Stagehand
     // MCP, E2B sandbox, …) that flow into the dynamic overlay at

@@ -13,16 +13,39 @@ import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { routeEngine } from "@/lib/browser/agent-engine"
 import { defineContextProvider } from "@cognia/plugin-sdk"
 
-// The URL the human/agent last navigated the preview to — used to pick the
-// engine for subsequent ref-based calls (Phase 1 always embedded).
+// Last known preview URL — a fallback for when the live URL is unreadable
+// (preview not open yet / document mid-swap).
 let lastUrl = "http://localhost:3000/"
 
 function engineFor() {
   return routeEngine(lastUrl)
 }
 
-async function withSnapshot(result: Record<string, unknown>) {
-  const snapshot = await engineFor().engine.snapshot()
+/**
+ * Resolve the route from the page's LIVE URL, not the last URL the model asked
+ * for — the page may have redirected (or the human navigated) to a different
+ * origin since, and the trust tier must follow the actual content.
+ */
+async function currentRoute() {
+  const { engine } = engineFor()
+  try {
+    const { url } = await engine.getPage()
+    if (url) lastUrl = url
+  } catch {
+    // Preview not open / mid-navigation: fall back to the last known URL.
+  }
+  return routeEngine(lastUrl)
+}
+
+async function withSnapshot(result: Record<string, unknown>, initialDelayMs?: number) {
+  const engine = engineFor().engine
+  // A mutating action may have triggered a navigation (link click, form
+  // submit): settle until the document is loaded so the snapshot reflects the
+  // page the action produced, not the one it left. No-op on a settled page.
+  // `initialDelayMs` gives same-URL loads (reload/back/forward) time to start
+  // before the readyState check can pass on the OLD document.
+  await engine.waitForLoad({ timeoutMs: 3000, initialDelayMs })
+  const snapshot = await engine.snapshot()
   return { ...result, snapshot }
 }
 
@@ -50,7 +73,7 @@ const definition: PluginDefinition = {
         id: "browser-tools:availability",
         name: "Browser tools availability",
         provide: () =>
-          'Browser tools drive the in-app preview webview (best for localhost / your own dev server): browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs; pass includeText:true to also read headings/paragraphs; shadow-DOM and same-origin iframe nodes are included), browser_click (optional modifiers:["ctrl","shift"])/type/fill_form/select/hover (target by ref), browser_press_key (Enter/Tab/Escape/Arrow*/ctrl+a — for shortcuts & navigation; use browser_type for text), browser_scroll (by ref or page direction), browser_evaluate (run a JS expression — trusted localhost only), browser_wait_for (text, a CSS selector, or networkIdle), browser_screenshot (PNG vision fallback), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot. For arbitrary PUBLIC websites the embedded preview is best-effort only (cross-origin iframes are invisible, synthetic events are untrusted, response bodies are unavailable) — prefer the Playwright MCP tools (mcp__playwright__*) for those if the Playwright MCP server is attached.',
+          'Browser tools drive the in-app preview webview (best for localhost / your own dev server): browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs; pass includeText:true to also read headings/paragraphs; shadow-DOM and same-origin iframe nodes are included), browser_click (optional modifiers:["ctrl","shift"])/type/fill_form/select/hover (target by ref), browser_press_key (Enter/Tab/Escape/Arrow*/ctrl+a — for shortcuts & navigation; use browser_type for text), browser_scroll (by ref or page direction), browser_evaluate (run a JS expression — trusted localhost only), browser_wait_for (text, a CSS selector, or networkIdle), browser_screenshot (PNG vision fallback), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot. Links with target="_blank" and window.open() land in the same preview (no tabs/popups), and SPA history navigations are tracked. For arbitrary PUBLIC websites the embedded preview is best-effort only (cross-origin iframes are invisible, synthetic events are untrusted, response bodies are unavailable) — prefer the Playwright MCP tools (mcp__playwright__*) for those if the Playwright MCP server is attached.',
       })
     )
 
@@ -72,9 +95,15 @@ const definition: PluginDefinition = {
       },
       execute: async (args) => {
         const url = String((args as { url?: string })?.url ?? "")
+        const { engine } = engineFor()
+        const pre = await engine.getPage().catch(() => null)
         lastUrl = url
-        const { engine, untrusted } = engineFor()
         await engine.navigate(url)
+        // Wait for the new document (URL change + readyState complete) so the
+        // returned snapshot is of the target page, not the one we left.
+        await engine.waitForLoad({ targetUrl: url, fromUrl: pre?.url, timeoutMs: 8000 })
+        // Trust follows where the page actually landed (redirects included).
+        const { untrusted } = await currentRoute()
         const base = { ...(await withSnapshot({ navigated: url })), untrusted }
         // Steer public-site automation to the Playwright MCP tools — the embedded
         // engine is best-effort off-localhost (see the availability context).
@@ -174,7 +203,9 @@ const definition: PluginDefinition = {
       },
       execute: async (args) => {
         const expr = String((args as { expression?: string })?.expression ?? "")
-        const { engine, untrusted } = engineFor()
+        // Gate on the LIVE page URL: a localhost page may have redirected to a
+        // public origin since the last navigate.
+        const { engine, untrusted } = await currentRoute()
         if (untrusted) {
           return {
             ok: false,
@@ -248,7 +279,12 @@ const definition: PluginDefinition = {
     actTool("browser_hover", "hover", {}, ["ref"], "Hover the ref'd element.")
 
     type Engine = ReturnType<typeof engineFor>["engine"]
-    const navTool = (name: string, desc: string, run: (engine: Engine) => Promise<void>) =>
+    const navTool = (
+      name: string,
+      desc: string,
+      run: (engine: Engine) => Promise<void>,
+      settleMs = 0
+    ) =>
       reg({
         name,
         pluginId: ctx.pluginId,
@@ -259,19 +295,28 @@ const definition: PluginDefinition = {
         },
         execute: async () => {
           await run(engineFor().engine)
-          return withSnapshot({ ok: true })
+          return withSnapshot({ ok: true }, settleMs || undefined)
         },
       })
 
-    navTool("browser_back", "Go back in the preview's history; returns a fresh snapshot.", (e) =>
-      e.back()
+    navTool(
+      "browser_back",
+      "Go back in the preview's history; returns a fresh snapshot.",
+      (e) => e.back(),
+      250
     )
     navTool(
       "browser_forward",
       "Go forward in the preview's history; returns a fresh snapshot.",
-      (e) => e.forward()
+      (e) => e.forward(),
+      250
     )
-    navTool("browser_reload", "Reload the preview; returns a fresh snapshot.", (e) => e.reload())
+    navTool(
+      "browser_reload",
+      "Reload the preview; returns a fresh snapshot.",
+      (e) => e.reload(),
+      250
+    )
     navTool("browser_stop", "Stop the preview's current load.", (e) => e.stop())
 
     reg({

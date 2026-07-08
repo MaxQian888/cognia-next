@@ -95,6 +95,56 @@ describe("PluginViewContainerPanel", () => {
     expect(screen.queryByText("empty")).not.toBeInTheDocument()
   })
 
+  it("mounts a custom react view and gives its section a fill layout", () => {
+    function Panel() {
+      return <div data-testid="react-panel">Panel body</div>
+    }
+    act(() => {
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p" })
+      registerView({
+        kind: "react",
+        pluginId: "p",
+        viewId: "panel",
+        containerId: "p:explorer",
+        component: Panel,
+      })
+    })
+    const { container } = render(<PluginViewContainerPanel containerId="p:explorer" />)
+    expect(screen.getByTestId("react-panel")).toBeInTheDocument()
+    // The wrapping section must establish a definite height so a full-bleed
+    // panel's inner `h-full`/`flex-1` chain resolves (regression guard).
+    const section = container.querySelector("[data-plugin-view='p:panel']")
+    expect(section?.className).toContain("flex-1")
+    expect(section?.className).toContain("min-h-0")
+  })
+
+  it("keeps a tree view section hug-height (no fill classes)", () => {
+    const provider: TreeDataProvider = { getChildren: () => [{ id: "n", label: "Node" }] }
+    act(() => {
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p" })
+      registerView({
+        kind: "tree",
+        pluginId: "p",
+        viewId: "files",
+        containerId: "p:explorer",
+        provider,
+      })
+    })
+    const { container } = render(<PluginViewContainerPanel containerId="p:explorer" />)
+    const section = container.querySelector("[data-plugin-view='p:files']")
+    expect(section?.className ?? "").not.toContain("flex-1")
+  })
+
+  it("suppresses the host header when the container sets hideHeader", () => {
+    act(() => {
+      registerViewContainer({ id: "sec", title: "Security", hideHeader: true }, { pluginId: "p" })
+    })
+    render(<PluginViewContainerPanel containerId="p:sec" />)
+    // No host chrome renders the title; the body (empty-state here) still shows.
+    expect(screen.queryByText("Security")).not.toBeInTheDocument()
+    expect(screen.getByText("empty")).toBeInTheDocument()
+  })
+
   it("hides a view whose when-clause is unmet", () => {
     const provider: TreeDataProvider = { getChildren: () => [{ id: "n", label: "Gated Node" }] }
     act(() => {

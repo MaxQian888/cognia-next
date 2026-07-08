@@ -97,6 +97,10 @@ import {
   unregisterExternalAgentAdaptersForPlugin,
 } from "@/lib/plugin/bridge/external-agent-adapters-bridge"
 import {
+  registerSessionImportersForPlugin,
+  unregisterSessionImportersForPlugin,
+} from "@/lib/plugin/bridge/session-importers-bridge"
+import {
   registerToolRoutesForPlugin,
   unregisterToolRoutesForPlugin,
 } from "@/lib/plugin/bridge/tool-routes-bridge"
@@ -363,6 +367,22 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     // processes) this plugin's protocols back — see the bridge.
     unregister: async (pluginId) => {
       await unregisterExternalAgentAdaptersForPlugin(pluginId)
+    },
+  },
+  "session-importer": {
+    // Declarative `manifest.sessionImporters[]` (ADR-0062 lazy factories) → the
+    // session-source registry under `${pluginId}:${id}`. Lets a plugin add a new
+    // agent's on-disk session-history importer with no host change. Stateless —
+    // disable is a plain registry removal (no live agents to tear down).
+    key: "session-importer",
+    manifestField: "sessionImporters",
+    register: async (ctx) => {
+      await registerSessionImportersForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+      })
+    },
+    unregister: (pluginId) => {
+      unregisterSessionImportersForPlugin(pluginId)
     },
   },
   "tool-route": {

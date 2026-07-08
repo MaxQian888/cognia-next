@@ -29,13 +29,46 @@ export type RetentionMode = "keep" | "purge"
 
 /**
  * A single process-wide lock serializing every schema mutation. The schema
- * bump is a read-modify-write on the shared Dexie instance (`verno + 1 →
- * close → version().stores() → open()`); two plugins enabling concurrently
- * would otherwise read the same `verno`, race close/open, and silently clobber
+ * bump is a read-modify-write on the shared Dexie instance (`nextSchemaVersion
+ * → close → version().stores() → open()`); two plugins enabling concurrently
+ * would otherwise read the same version, race close/open, and silently clobber
  * one schema patch. The lock keeps loads + activate() parallel while making
  * only this critical section mutually exclusive. Reuses `createMutex`.
  */
 const schemaMutex = createMutex()
+
+/**
+ * The next Dexie version to declare for a schema bump, derived from the TRUE
+ * persisted native IndexedDB version rather than `db.verno`.
+ *
+ * `db.verno` reflects only the versions THIS Dexie instance has been told about
+ * in code — on a fresh process that is just the static core ceiling declared by
+ * `new CogniaDB(...)` (e.g. 104). But plugin-table bumps advance the *physical*
+ * IndexedDB native version above that ceiling and persist across reloads (and a
+ * "keep"-mode disable leaves the physical store — and the elevated native
+ * version — in place while dropping the meta row). Declaring `db.verno + 1` can
+ * therefore land on, or below, a version the physical DB already passed. Dexie
+ * then sees the code schema as a superset of the stored schema at an equal-or-
+ * lower version number, logs
+ *   "Dexie SchemaDiff: Schema was extended without increasing the number passed
+ *    to db.version(). Dexie will add missing parts and increment native version
+ *    number to workaround this."
+ * and silently force-upgrades with a rogue native bump — which then collides
+ * with any other open connection ("Upgrade '…' blocked by other connection
+ * holding version N").
+ *
+ * `db.backendDB().version` (available once the db is open) is the ground truth:
+ * the native IDB version, which Dexie stores as `verno * 10`. Taking the max of
+ * that and `db.verno` guarantees the next declared version strictly exceeds
+ * everything already persisted, so every bump is a clean, explicit upgrade with
+ * no SchemaDiff auto-bump. Opening the db first is a no-op when it is already
+ * open and has no side effect on a brand-new db (native version == verno * 10).
+ */
+async function nextSchemaVersion(db: Dexie): Promise<number> {
+  if (!db.isOpen()) await db.open()
+  const nativeVerno = Math.round(db.backendDB().version / 10)
+  return Math.max(db.verno, nativeVerno) + 1
+}
 
 /**
  * Apply a plugin's declared Dexie tables to the shared CogniaDB instance.
@@ -88,7 +121,7 @@ export async function applyPluginTables(
       patch[nsName] = t.schema
     }
 
-    const nextVersion = db.verno + 1
+    const nextVersion = await nextSchemaVersion(db)
     await db.close()
     db.version(nextVersion).stores(patch)
     await db.open()
@@ -116,7 +149,7 @@ export async function applyPluginTables(
  * This reads every `pluginDexieMeta` row, resolves each plugin's schema strings
  * from the supplied manifest map (the authoritative source — meta stores only
  * table names, not index definitions), and re-applies every still-missing table
- * in ONE close→version(verno+1).stores(patch)→open pass. Plugins absent from
+ * in ONE close→version(nextSchemaVersion).stores(patch)→open pass. Plugins absent from
  * the map (uninstalled, but with a lingering meta row) are skipped — their
  * stores are left untouched for `removePluginTables` to reclaim.
  *
@@ -151,7 +184,7 @@ export async function restorePluginTables(
     const restored = Object.keys(patch)
     if (restored.length === 0) return []
 
-    const nextVersion = db.verno + 1
+    const nextVersion = await nextSchemaVersion(db)
     await db.close()
     db.version(nextVersion).stores(patch)
     await db.open()
@@ -182,7 +215,7 @@ export async function removePluginTables(
       for (const name of meta.tableNames) {
         patch[name] = null
       }
-      const nextVersion = db.verno + 1
+      const nextVersion = await nextSchemaVersion(db)
       await db.close()
       db.version(nextVersion).stores(patch)
       await db.open()
