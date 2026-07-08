@@ -3398,6 +3398,7 @@
       "logsTailNote": "仅显示最近 {n} 条日志",
       "noLogsYet": "暂无日志 — 子代理正在初始化。",
       "openInWorkspace": "在工作区打开",
+      "openTranscript": "打开完整记录",
       "rejected": {
         "cycle": "派发被拒 — 会形成循环。",
         "maxDepth": "派发被拒 — 已达最大嵌套深度。"
@@ -7281,6 +7282,29 @@
       "thinkingReset": "重置",
       "thinkingSection": "思考预算",
       "title": "Agent 默认设置"
+    },
+    "agentTeams": {
+      "backToTeams": "团队",
+      "board": {
+        "applied": "已在桌面端应用。",
+        "commandFailed": "被拒绝：{reason}",
+        "commentPlaceholder": "添加评论……",
+        "comments": "{count, plural, =0 {暂无评论} other {# 条评论}}",
+        "empty": "尚无已同步的看板——请与桌面端配对并完成一次同步。",
+        "moveTo": "移动到",
+        "offline": "桌面端不可达——正在显示最后同步的看板。",
+        "run": {
+          "pause": "暂停",
+          "resume": "恢复",
+          "stop": "停止"
+        }
+      },
+      "tabs": {
+        "activity": "动态",
+        "board": "看板",
+        "members": "成员",
+        "overview": "概览"
+      }
     },
     "agentTeamsSettings": {
       "backAria": "返回我的",
@@ -14094,15 +14118,21 @@
     "errorTitle": "导入失败",
     "importSelected": "导入选中的 {count} 项",
     "importing": "正在导入…",
+    "liveSync": "实时同步",
+    "liveSyncHint": "持续监视这些 Agent 并自动导入新会话。已在 Cognia 中续聊的会话会被冻结，永不被覆盖。",
     "messagesLabel": "{count, plural, one {# 条消息} other {# 条消息}}",
     "pickButton": "选择文件…",
     "retry": "重试",
     "scanButton": "扫描已安装的 Agent",
     "scanning": "正在查找会话…",
     "selectAll": "全选",
+    "someSourcesFailed": "部分来源无法读取：{sources}",
     "sources": {
+      "aider": "Aider",
       "claude-code": "Claude Code",
       "codex": "Codex CLI",
+      "continue-dev": "Continue",
+      "gemini-cli": "Gemini CLI",
       "opencode": "OpenCode"
     },
     "title": "导入 Agent 会话",

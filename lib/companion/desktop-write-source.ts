@@ -21,6 +21,14 @@ import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/char
 import type { CharacterDraft } from "@/lib/db/characters"
 import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
 import { attachSession, detachSession } from "@/lib/companion/remote-attach-registry"
+import {
+  handleTeamRunPause,
+  handleTeamRunResume,
+  handleTeamRunStop,
+  handleTeamTaskComment,
+  handleTeamTaskCreate,
+  handleTeamTaskMove,
+} from "@/lib/companion/agent-team-write-handlers"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getDb } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
@@ -222,6 +230,21 @@ export async function dispatchCommand(
       return goalTransition(payload, "resume")
     case "goal_stop":
       return goalTransition(payload, "stop")
+    // Agent-Team board control (team-board CQRS). Handlers revalidate every
+    // move through the shared canMoveTask guard and answer { ok, reason? } —
+    // see lib/companion/agent-team-write-handlers.ts.
+    case "team_task_move":
+      return handleTeamTaskMove(payload)
+    case "team_task_create":
+      return handleTeamTaskCreate(payload)
+    case "team_task_comment":
+      return handleTeamTaskComment(payload)
+    case "team_run_pause":
+      return handleTeamRunPause(payload)
+    case "team_run_resume":
+      return handleTeamRunResume(payload)
+    case "team_run_stop":
+      return handleTeamRunStop(payload)
     // Workflow CRUD (ADR-0027 Wave 4.1). Definitions live in Dexie; these
     // mirror the desktop editor's create/update/delete + schedule pause/resume
     // and a run listing + remote cancel.

@@ -809,6 +809,238 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/team_task_move:
+    post:
+      operationId: rpcTeamTaskMove
+      tags: [rpc-remote-control]
+      summary: Move an Agent-Team board task to another status column (guarded).
+      description: |
+        Team-board CQRS write path. The desktop validates the transition with
+        the same `canMoveTask` guard as its own kanban drag (blocked column is
+        machine-managed; claimed/in_progress are runtime-owned while a run is
+        active) and answers `{ ok, reason? }` — a denial is a normal 200 with
+        `ok: false`. Board state flows back via the `agentTeamBoard` sync table.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teamId, taskId, to]
+              properties:
+                teamId: { type: string }
+                taskId: { type: string }
+                to:
+                  type: string
+                  enum:
+                    [pending, blocked, claimed, in_progress, review, completed, failed, cancelled]
+      responses:
+        "200":
+          description: "`{ ok, reason? }` verdict from the shared move guard."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  reason: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/team_task_create:
+    post:
+      operationId: rpcTeamTaskCreate
+      tags: [rpc-remote-control]
+      summary: Create a task on an Agent-Team board.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teamId, title]
+              properties:
+                teamId: { type: string }
+                title: { type: string }
+                description: { type: string }
+                priority:
+                  type: string
+                  enum: [critical, high, normal, low, background]
+                tags: { type: array, items: { type: string } }
+                assignedTo: { type: string }
+      responses:
+        "200":
+          description: "`{ ok, taskId? }` — the created task's id."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  taskId: { type: string }
+                  reason: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/team_task_comment:
+    post:
+      operationId: rpcTeamTaskComment
+      tags: [rpc-remote-control]
+      summary: Add a comment to an Agent-Team board task.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teamId, taskId, text]
+              properties:
+                teamId: { type: string }
+                taskId: { type: string }
+                text: { type: string }
+      responses:
+        "200":
+          description: "`{ ok, commentId? }`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  commentId: { type: string }
+                  reason: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/team_run_pause:
+    post:
+      operationId: rpcTeamRunPause
+      tags: [rpc-remote-control]
+      summary: Pause a running Agent-Team (abort + mark paused; resumable).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teamId]
+              properties:
+                teamId: { type: string }
+      responses:
+        "200":
+          description: "`{ ok, reason? }`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  reason: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/team_run_resume:
+    post:
+      operationId: rpcTeamRunResume
+      tags: [rpc-remote-control]
+      summary: Resume a paused Agent-Team over its not-yet-done tasks.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teamId]
+              properties:
+                teamId: { type: string }
+      responses:
+        "200":
+          description: "`{ ok, reason? }` — resume is a no-op unless paused."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  reason: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/team_run_stop:
+    post:
+      operationId: rpcTeamRunStop
+      tags: [rpc-remote-control]
+      summary: Cancel an Agent-Team run (terminal).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teamId]
+              properties:
+                teamId: { type: string }
+      responses:
+        "200":
+          description: "`{ ok, reason? }`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  reason: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/goal_create:
     post:
       operationId: rpcGoalCreate

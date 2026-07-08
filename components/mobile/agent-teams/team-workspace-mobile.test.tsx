@@ -45,10 +45,25 @@ jest.mock("@/components/agent/team/runs-list", () => ({
 jest.mock("@/components/agent/team/gate-modals-host", () => ({
   GateModalsHost: () => null,
 }))
+jest.mock("@/components/mobile/agent-teams/team-board-mobile", () => ({
+  TeamBoardMobile: ({ teamId: id }: { teamId: string }) => (
+    <div data-testid="board-section" data-team={id} />
+  ),
+}))
+
+// Synced team-meta fallback (paired phone, empty local store).
+let syncedMeta: { name: string } | undefined
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => syncedMeta,
+}))
+jest.mock("@/lib/db/agent-team-board", () => ({
+  getAgentTeamBoardTeamRow: jest.fn(),
+}))
 
 describe("<TeamWorkspaceMobile />", () => {
   beforeEach(() => {
     teamId = "t1"
+    syncedMeta = undefined
     push.mockClear()
   })
 
@@ -66,6 +81,13 @@ describe("<TeamWorkspaceMobile />", () => {
     expect(screen.getByTestId("runs-list")).toBeInTheDocument()
   })
 
+  it("switches to the synced board tab", async () => {
+    const user = userEvent.setup()
+    render(<TeamWorkspaceMobile />)
+    await user.click(screen.getByTestId("mobile-team-tab-board"))
+    expect(screen.getByTestId("board-section")).toBeInTheDocument()
+  })
+
   it("shows an empty state with a back action when the team is missing", async () => {
     teamId = "missing"
     const user = userEvent.setup()
@@ -73,5 +95,14 @@ describe("<TeamWorkspaceMobile />", () => {
     expect(screen.getByTestId("empty-state")).toBeInTheDocument()
     await user.click(screen.getByTestId("mobile-team-back"))
     expect(push).toHaveBeenCalledWith("/discover")
+  })
+
+  it("falls back to the synced board when the local store is empty but a meta row synced", () => {
+    teamId = "remote-team"
+    syncedMeta = { name: "Remote Alpha" }
+    render(<TeamWorkspaceMobile />)
+    expect(screen.getByText("Remote Alpha")).toBeInTheDocument()
+    expect(screen.getByTestId("board-section")).toBeInTheDocument()
+    expect(screen.queryByTestId("empty-state")).not.toBeInTheDocument()
   })
 })

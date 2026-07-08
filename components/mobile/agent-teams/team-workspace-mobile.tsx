@@ -9,12 +9,20 @@
  * Activity + run history) from the on-device `useAgentTeamStore` and wires
  * Run / Stop through `agentTeamManager`. The @mention composer (Chat tab) and
  * the Settings tab stay desktop-only.
+ *
+ * Paired-phone reality check: the local store only has content when the team
+ * was authored ON this device. A paired phone mirrors the desktop's board via
+ * the Dexie `agentTeamBoard` sync table (v104) instead — when the store is
+ * empty but a synced team-meta row exists, this page falls back to the Board
+ * tab alone (the synced surface), with controls round-tripping as Companion
+ * RPCs.
  */
 
 import { useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
+import { useLiveQuery } from "dexie-react-hooks"
 import { ArrowLeftIcon, UsersIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -26,9 +34,11 @@ import { AgentTeamMembers } from "@/components/agent/workspace/members"
 import { AgentTeamActivity } from "@/components/agent/workspace/activity"
 import { TeamRunsList } from "@/components/agent/team/runs-list"
 import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
+import { TeamBoardMobile } from "@/components/mobile/agent-teams/team-board-mobile"
 import { agentTeamManager } from "@/lib/ai/agent/agent-team"
 import { abortTeam } from "@/lib/ai/agent/agent-team-runtime"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { getAgentTeamBoardTeamRow } from "@/lib/db/agent-team-board"
 
 export function TeamWorkspaceMobile() {
   const searchParams = useSearchParams()
@@ -44,7 +54,41 @@ export function TeamWorkspaceMobile() {
   const events = useAgentTeamStore(useShallow((s) => s.events.filter((e) => e.teamId === teamId)))
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
 
-  const [tab, setTab] = useState<"overview" | "members" | "activity">("overview")
+  const [tab, setTab] = useState<"overview" | "board" | "members" | "activity">("overview")
+
+  // Paired-phone fallback: a synced team-meta row proves the team exists on
+  // the desktop even when the local store is empty.
+  const syncedMeta = useLiveQuery(
+    () => (teamId ? getAgentTeamBoardTeamRow(teamId) : undefined),
+    [teamId]
+  )
+
+  if (!team && syncedMeta && teamId) {
+    return (
+      <main
+        className="flex min-h-[100dvh] flex-col gap-3 bg-background pt-3 safe-area-pt"
+        data-testid="mobile-team-workspace"
+        data-bg-target="chat"
+      >
+        <header className="flex items-center gap-2 px-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2 text-xs"
+            onClick={() => router.push("/discover")}
+            data-testid="mobile-team-back"
+          >
+            <ArrowLeftIcon className="mr-1 size-3" />
+            {tm("backToTeams")}
+          </Button>
+          <span className="truncate text-sm font-semibold">{syncedMeta.name}</span>
+        </header>
+        <div className="px-4 pb-4">
+          <TeamBoardMobile teamId={teamId} />
+        </div>
+      </main>
+    )
+  }
 
   if (!team) {
     return (
@@ -88,9 +132,12 @@ export function TeamWorkspaceMobile() {
       </header>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex-1">
-        <TabsList className="mx-4 grid grid-cols-3">
+        <TabsList className="mx-4 grid grid-cols-4">
           <TabsTrigger value="overview" data-testid="mobile-team-tab-overview">
             {tm("tabs.overview")}
+          </TabsTrigger>
+          <TabsTrigger value="board" data-testid="mobile-team-tab-board">
+            {tm("tabs.board")}
           </TabsTrigger>
           <TabsTrigger value="members" data-testid="mobile-team-tab-members">
             {tm("tabs.members")}
@@ -101,6 +148,9 @@ export function TeamWorkspaceMobile() {
         </TabsList>
 
         <div className="px-4 pb-4 pt-3">
+          <TabsContent value="board">
+            <TeamBoardMobile teamId={team.id} />
+          </TabsContent>
           <TabsContent value="overview">
             <AgentTeamOverview
               team={team}

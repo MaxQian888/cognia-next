@@ -252,6 +252,18 @@ const KNOWN_COMMANDS: &[&str] = &[
     "goal_pause",
     "goal_resume",
     "goal_stop",
+    // Agent-Team board control (team-board CQRS, Dexie v104). State flows to
+    // the phone via the read-only `agentTeamBoard` sync mirror; these commands
+    // are the write path back. The TS arms validate every move through the
+    // same `canMoveTask` guard as the desktop board and return `{ok, reason}`.
+    // Deliberately NOT in the mobile offline queue: a command must validate
+    // against the LIVE run state, not be replayed hours later.
+    "team_task_move",
+    "team_task_create",
+    "team_task_comment",
+    "team_run_pause",
+    "team_run_resume",
+    "team_run_stop",
     // Resolve a host computer-use consent prompt from a remote device.
     // Calls the automation ConsentBroker directly (not via writes-bridge).
     "automation_consent_respond",
@@ -495,6 +507,14 @@ const CONTROL_COMMANDS: &[&str] = &[
     "goal_pause",
     "goal_resume",
     "goal_stop",
+    // Agent-Team board control — moving tasks / driving runs steers host
+    // agent execution, same elevation as the goal loop controls above.
+    "team_task_move",
+    "team_task_create",
+    "team_task_comment",
+    "team_run_pause",
+    "team_run_resume",
+    "team_run_stop",
     "automation_consent_respond",
     // Destructive character mutation — gated for consistency with the other
     // delete surfaces below (Wave 4.1 policy: every remote delete is gated).
@@ -1444,6 +1464,15 @@ pub(super) async fn dispatch(
         | "goal_pause"
         | "goal_resume"
         | "goal_stop"
+        // Agent-Team board control (team-board CQRS) — same generic bridge;
+        // TS arms in `lib/companion/agent-team-write-handlers.ts` validate
+        // through the shared `canMoveTask` guard. Gated by CONTROL_COMMANDS.
+        | "team_task_move"
+        | "team_task_create"
+        | "team_task_comment"
+        | "team_run_pause"
+        | "team_run_resume"
+        | "team_run_stop"
         // Wave 4.1 — Workflow CRUD, Twin source/job control, conversation
         // overrides, and app-data backup. Same generic bridge; TS-side dispatch
         // arms live in `lib/companion/desktop-write-source.ts`. Destructive
