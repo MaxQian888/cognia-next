@@ -91,6 +91,43 @@ describe("AgentTeamOverview", () => {
     expect(screen.queryByTestId("abort-team")).not.toBeInTheDocument()
   })
 
+  it("offers Pause alongside Abort while the run is live", () => {
+    liveStatusOverride = "executing"
+    const onPause = jest.fn()
+    render(
+      <AgentTeamOverview
+        team={baseTeam}
+        teammates={[lead, teammate]}
+        onPause={onPause}
+        onAbort={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("abort-team")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("pause-team"))
+    expect(onPause).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId("start-team")).not.toBeInTheDocument()
+  })
+
+  it("offers Resume + Stop while paused", () => {
+    liveStatusOverride = "paused"
+    const onResume = jest.fn()
+    const onStop = jest.fn()
+    render(
+      <AgentTeamOverview
+        team={{ ...baseTeam, status: "paused" }}
+        teammates={[lead, teammate]}
+        onResume={onResume}
+        onStop={onStop}
+      />
+    )
+    fireEvent.click(screen.getByTestId("resume-team"))
+    expect(onResume).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByTestId("stop-team"))
+    expect(onStop).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId("start-team")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("abort-team")).not.toBeInTheDocument()
+  })
+
   it("shows the lead name and teammate count", () => {
     render(<AgentTeamOverview team={baseTeam} teammates={[lead, teammate]} />)
     expect(screen.getByText("Lead Bot")).toBeInTheDocument()

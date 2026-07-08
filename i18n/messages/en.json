@@ -987,7 +987,9 @@
       "no": "No",
       "noLead": "No lead assigned",
       "pattern": "Pattern",
+      "pauseTeam": "Pause",
       "planApproval": "Plan approval",
+      "resumeTeam": "Resume",
       "routing": {
         "confidence": "Confidence: {pct}%",
         "pattern": "Pattern: {pattern}",
@@ -999,6 +1001,7 @@
       "startTeam": "Run team",
       "startTeamUltracode": "Run with ultracode",
       "status": "Status",
+      "stopTeam": "Cancel team",
       "teammates": "Teammates",
       "tokenInput": "Prompt",
       "tokenOutput": "Completion",

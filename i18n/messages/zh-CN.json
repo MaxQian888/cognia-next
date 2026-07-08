@@ -987,7 +987,9 @@
       "no": "否",
       "noLead": "未指定领队",
       "pattern": "协作模式",
+      "pauseTeam": "暂停",
       "planApproval": "计划审批",
+      "resumeTeam": "恢复",
       "routing": {
         "confidence": "置信度：{pct}%",
         "pattern": "模式：{pattern}",
@@ -999,6 +1001,7 @@
       "startTeam": "启动团队",
       "startTeamUltracode": "以 Ultracode 运行",
       "status": "状态",
+      "stopTeam": "取消团队",
       "teammates": "成员",
       "tokenInput": "输入",
       "tokenOutput": "输出",

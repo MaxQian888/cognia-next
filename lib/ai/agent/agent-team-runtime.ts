@@ -123,6 +123,15 @@ export interface RunTeamLifecycleDeps {
     repoFullName: string
   ) => Promise<import("@/lib/github/pr-observe/types").OctokitLike | null>
   runPrReview?: import("./team/pr-feedback/reviewer").RunReview
+  /**
+   * Optional filter applied to the team's task list before synthesis — used
+   * by `agentTeamManager.resume()` to skip already-done work. Filtered-out
+   * task ids are threaded as `satisfiedDependencyIds` so surviving tasks that
+   * depend on them synthesize cleanly (their blackboard results remain
+   * readable via `readDependencyResults`). Omitted → all tasks run
+   * (unchanged behavior).
+   */
+  taskFilter?: (task: AgentTeamTask) => boolean
 }
 
 export interface RunTeamLifecycleResult {
@@ -251,7 +260,15 @@ export async function runTeamLifecycle(
     if (workers.length === 0) {
       return { runId: "", status: "failed", reason: "No teammates available" }
     }
-    const tasks = deps.storeReader.getTeamTasks(teamId)
+    const allTasks = deps.storeReader.getTeamTasks(teamId)
+    // Resume support: `taskFilter` drops already-done tasks; their ids become
+    // externally-satisfied dependencies for synthesis (the wave runner treats
+    // absent ids as satisfied natively — see team-wave-runner.ts ready-set).
+    const tasks = deps.taskFilter ? allTasks.filter(deps.taskFilter) : allTasks
+    const externallySatisfiedIds =
+      tasks.length === allTasks.length
+        ? undefined
+        : new Set(allTasks.filter((t) => !tasks.includes(t)).map((t) => t.id))
     // Ultracode runs are driven by the team objective (team.task string) + a
     // planned pattern composition, not the flat task list — so they don't
     // require pre-seeded tasks. Flat runs still do.
@@ -749,6 +766,7 @@ export async function runTeamLifecycle(
         tasks,
         initialConcurrency: concurrency.get(),
         wallClockTimeoutMs: team.config.defaultTimeout,
+        ...(externallySatisfiedIds ? { satisfiedDependencyIds: externallySatisfiedIds } : {}),
       }))
     }
 

@@ -327,6 +327,9 @@ function AgentTeamWorkspaceInner() {
                 void agentTeamManager.start(team.id, { ultracode: true }).catch(() => undefined)
               }
               onAbort={() => void abortTeam(team.id, new Error("user-aborted"))}
+              onPause={() => void agentTeamManager.pause(team.id).catch(() => undefined)}
+              onResume={() => void agentTeamManager.resume(team.id).catch(() => undefined)}
+              onStop={() => void agentTeamManager.shutdown(team.id).catch(() => undefined)}
               onUpdateTeam={(updates) => {
                 updateTeam(team.id, updates)
                 toast.success(t("teamUpdated"))

@@ -24,6 +24,12 @@ export interface AgentTeamOverviewProps {
   /** Manual ultracode run — forces the pattern composition regardless of autoMode. */
   onStartUltracode?: () => void
   onAbort?: () => void
+  /** Pause the live run (abort + mark paused; resumable). */
+  onPause?: () => void
+  /** Resume a paused team over its not-yet-done tasks. */
+  onResume?: () => void
+  /** Cancel a paused team for good (shutdown). */
+  onStop?: () => void
   onUpdateTeam?: (updates: Partial<AgentTeam>) => void
 }
 
@@ -33,6 +39,9 @@ export function AgentTeamOverview({
   onStart,
   onStartUltracode,
   onAbort,
+  onPause,
+  onResume,
+  onStop,
   onUpdateTeam,
 }: AgentTeamOverviewProps) {
   const t = useTranslations("agentTeamsWorkspace.overview")
@@ -239,10 +248,28 @@ export function AgentTeamOverview({
 
       {/* Actions */}
       <div className="flex items-center justify-end gap-2">
-        {liveStatus === "executing" || liveStatus === "planning" ? (
-          <Button variant="outline" size="sm" onClick={onAbort} data-testid="abort-team">
-            {t("abortTeam")}
-          </Button>
+        {isLive ? (
+          <>
+            {onPause && (
+              <Button variant="outline" size="sm" onClick={onPause} data-testid="pause-team">
+                {t("pauseTeam")}
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={onAbort} data-testid="abort-team">
+              {t("abortTeam")}
+            </Button>
+          </>
+        ) : liveStatus === "paused" ? (
+          <>
+            {onStop && (
+              <Button variant="outline" size="sm" onClick={onStop} data-testid="stop-team">
+                {t("stopTeam")}
+              </Button>
+            )}
+            <Button size="sm" onClick={onResume} data-testid="resume-team">
+              {t("resumeTeam")}
+            </Button>
+          </>
         ) : (
           <>
             {team.config.ultracode?.enabled && onStartUltracode && (

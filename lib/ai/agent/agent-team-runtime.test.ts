@@ -345,6 +345,26 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     expect(deps._taskStatuses).toMatchObject({ t1: "completed", t2: "completed" })
   })
 
+  it("taskFilter skips done tasks and treats them as satisfied dependencies", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    // t1 already completed in a previous run; t2 depends on it. The filter
+    // (resume semantics) drops t1 — synthesis must treat the dependency as
+    // externally satisfied instead of throwing invalid_dep, and t1 must not
+    // be re-dispatched.
+    const done = { ...task("t1"), status: "completed" as const, result: "prior result" }
+    const deps = buildDeps(baseTeam, [done, task("t2", ["t1"])], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      taskFilter: (t) => t.status !== "completed",
+    })
+    expect(result.status).toBe("completed")
+    expect(deps._taskStatuses).toMatchObject({ t2: "completed" })
+    expect(deps._taskStatuses.t1).toBeUndefined()
+  })
+
   it("prevents double-start of the same team", async () => {
     ;(executeAgent as jest.Mock).mockImplementation(
       () =>
