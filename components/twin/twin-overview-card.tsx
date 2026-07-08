@@ -42,6 +42,7 @@ import {
 import { listTwinChunksByTwin } from "@/lib/db/twin-chunks"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import type { ChunkingStrategyId, TwinChunk, TwinSource } from "@/types/twin"
+import { TwinOverviewPluginSlot } from "./twin-plugin-slots"
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const GROWTH_WINDOW_DAYS = 7
@@ -196,6 +197,12 @@ export function TwinOverviewCard({ twinId }: Props) {
           </ChartContainer>
         </div>
       </div>
+
+      <TwinOverviewPluginSlot
+        twinId={twinId}
+        sourceCount={sources.length}
+        chunkCount={chunks.length}
+      />
     </Card>
   )
 }

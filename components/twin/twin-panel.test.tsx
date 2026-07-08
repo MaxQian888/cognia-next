@@ -118,6 +118,10 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createCharacter } from "@/lib/db/characters"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { createTwinDraft } from "@/lib/db/twin-drafts"
+import {
+  registerMockExtension,
+  clearAllMockExtensions,
+} from "@/components/plugins/test-utils/register-mock-extension"
 
 // Dexie + RTL integration flows; give a cold IndexedDB open headroom over 5s.
 jest.setTimeout(20000)
@@ -135,6 +139,10 @@ beforeEach(async () => {
     db.twinJobs.clear(),
     db.twinProfile.clear(),
   ])
+})
+
+afterEach(() => {
+  clearAllMockExtensions()
 })
 
 describe("TwinPanel", () => {
@@ -163,6 +171,19 @@ describe("TwinPanel", () => {
     // The wizard must ADVANCE to step 2 (sources), not remount back to step 1.
     await screen.findByTestId("twin-wizard-sources-count")
     expect(screen.queryByTestId("twin-wizard-name")).not.toBeInTheDocument()
+  })
+
+  it("mounts the twin.panel.header plugin slot in the header once a twin exists", async () => {
+    await createCharacter({
+      name: "Alice",
+      systemPrompt: "you are alice",
+      twinId: "twin_alice",
+    })
+    registerMockExtension("twin.panel.header", () => (
+      <span data-testid="twin-header-plugin">header plugin</span>
+    ))
+    render(<TwinPanel />)
+    expect(await screen.findByTestId("twin-header-plugin")).toBeInTheDocument()
   })
 
   it("backfills a registry row from a legacy character.twinId and shows it in the switcher", async () => {

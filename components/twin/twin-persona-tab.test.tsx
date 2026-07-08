@@ -52,12 +52,20 @@ jest.mock("@/components/ui/tabs", () => {
 import { TwinPersonaTab } from "./twin-persona-tab"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { addEntity, appendPlaybooks, appendStyleSamples } from "@/lib/db/twin-profile"
+import {
+  registerMockExtension,
+  clearAllMockExtensions,
+} from "@/components/plugins/test-utils/register-mock-extension"
 
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
+})
+
+afterEach(() => {
+  clearAllMockExtensions()
 })
 
 describe("TwinPersonaTab", () => {
@@ -67,6 +75,14 @@ describe("TwinPersonaTab", () => {
     expect(screen.getByTestId("persona-count-playbooks").textContent).toMatch(/0/)
     expect(screen.getByTestId("persona-count-style").textContent).toMatch(/0/)
     expect(screen.getByTestId("tabpanel-entities")).toBeTruthy()
+  })
+
+  it("mounts the twin.persona.panel plugin slot below the sub-tabs", () => {
+    registerMockExtension("twin.persona.panel", () => (
+      <span data-testid="persona-plugin">persona plugin</span>
+    ))
+    render(<TwinPersonaTab twinId="twin_empty" />)
+    expect(screen.getByTestId("persona-plugin")).toBeInTheDocument()
   })
 
   it("switches between sub-tabs", async () => {

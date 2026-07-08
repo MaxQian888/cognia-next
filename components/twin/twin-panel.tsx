@@ -37,6 +37,7 @@ import { TwinSettingsTab } from "./twin-settings-tab"
 import { TwinSelector } from "./twin-selector"
 import { TwinCreationWizard } from "./twin-creation-wizard"
 import { useTwinWorkerStatus } from "./use-twin-worker"
+import { TwinHeaderPluginSlot } from "./twin-plugin-slots"
 
 type TabKey = "sources" | "jobs" | "drafts" | "persona" | "settings"
 const VALID_TABS: TabKey[] = ["sources", "jobs", "drafts", "persona", "settings"]
@@ -220,6 +221,7 @@ function TwinPanelInner() {
           >
             {workerStatus.active ? t("workerActive") : t("workerIdle")}
           </span>
+          <TwinHeaderPluginSlot twinId={effectiveTwinId} tab={tab} />
         </header>
 
         <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col">

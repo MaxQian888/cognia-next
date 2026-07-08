@@ -156,6 +156,10 @@ import { toast } from "sonner"
 import { saveTwinRuntimeSettings, observeTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
 import { TwinSettingsTab } from "./twin-settings-tab"
+import {
+  registerMockExtension,
+  clearAllMockExtensions,
+} from "@/components/plugins/test-utils/register-mock-extension"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -181,6 +185,10 @@ beforeEach(() => {
   jest.clearAllMocks()
   // Default: not running under Tauri
   mockedIsTauri.mockReturnValue(false)
+})
+
+afterEach(() => {
+  clearAllMockExtensions()
 })
 
 // ── Test suite ────────────────────────────────────────────────────────────────
@@ -412,6 +420,17 @@ describe("TwinSettingsTab — native vector backend", () => {
 })
 
 // ── Embedding / distill provider support ───────────────────────────────────────
+
+describe("TwinSettingsTab — plugin slot", () => {
+  it("mounts the twin.settings.cards plugin slot at the foot of the column", () => {
+    mockedUsePlatform.mockReturnValue("web")
+    registerMockExtension("twin.settings.cards", () => (
+      <span data-testid="settings-plugin">settings plugin</span>
+    ))
+    renderTab()
+    expect(screen.getByTestId("settings-plugin")).toBeInTheDocument()
+  })
+})
 
 describe("TwinSettingsTab — embedding & distill providers", () => {
   const embeddingFieldset = () => screen.getByText("Embedding").closest("fieldset") as HTMLElement

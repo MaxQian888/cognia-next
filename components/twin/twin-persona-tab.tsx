@@ -23,6 +23,7 @@ import type { TwinProfile } from "@/types/twin"
 import { EntitiesSubtab } from "./persona/entities-subtab"
 import { PlaybooksSubtab } from "./persona/playbooks-subtab"
 import { StyleSamplesSubtab } from "./persona/style-samples-subtab"
+import { TwinPersonaPluginSlot } from "./twin-plugin-slots"
 
 type SubTab = "entities" | "playbooks" | "style"
 
@@ -78,6 +79,13 @@ export function TwinPersonaTab({ twinId }: { twinId: string }) {
           <StyleSamplesSubtab twinId={twinId} styleSamples={safeProfile.styleSamples} />
         </TabsContent>
       </Tabs>
+
+      <TwinPersonaPluginSlot
+        twinId={twinId}
+        entityCount={safeProfile.entities.length}
+        playbookCount={safeProfile.playbooks.length}
+        styleCount={safeProfile.styleSamples.length}
+      />
     </div>
   )
 }

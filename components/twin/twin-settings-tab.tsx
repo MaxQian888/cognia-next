@@ -53,6 +53,7 @@ import {
 import { TwinOverviewCard } from "./twin-overview-card"
 import { TwinCronCard } from "./twin-cron-card"
 import { TwinInjectLogCard } from "./twin-inject-log-card"
+import { TwinSettingsPluginSlot } from "./twin-plugin-slots"
 
 const VECTOR_BACKENDS: VectorBackend[] = [
   "qdrant",
@@ -103,6 +104,7 @@ export function TwinSettingsTab({ twinId }: { twinId: string }) {
       </Card>
       <RuntimeConfigCard />
       <TwinInjectLogCard twinId={twinId} />
+      <TwinSettingsPluginSlot twinId={twinId} />
     </div>
   )
 }
