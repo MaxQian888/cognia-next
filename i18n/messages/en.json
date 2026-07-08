@@ -935,6 +935,39 @@
       "emptyHint": "Add a description…",
       "saveAriaLabel": "Save"
     },
+    "editor": {
+      "action": {
+        "copyPath": "Copy Path",
+        "copyRelativePath": "Copy Relative Path",
+        "format": "Format Document",
+        "save": "Save",
+        "searchProject": "Search in Project"
+      },
+      "cancel": "Cancel",
+      "closeTab": "Close {name}",
+      "delete": "Delete",
+      "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
+      "emptyEditor": "Open a file from the tree to start editing.",
+      "externallyChanged": "Changed on disk",
+      "filesTab": "Files",
+      "newFile": "New File",
+      "newFolder": "New Folder",
+      "noWorkingDir": "This team has no working directory set.",
+      "refresh": "Refresh",
+      "rename": "Rename",
+      "rootLabel": "Project root",
+      "rootMain": "main (repository)",
+      "saveAll": "Save All ({count})",
+      "saveFailed": "Save failed: {error}",
+      "search": "Search",
+      "searchEmpty": "No matches",
+      "searchPlaceholder": "Search in project…",
+      "searchTab": "Search",
+      "treeAria": "Project files",
+      "treeEmpty": "No files",
+      "unavailableDesc": "The project editor needs a desktop app or a paired device to reach the project files.",
+      "unavailableTitle": "Editor unavailable"
+    },
     "listDescription": "Multi-agent teams that plan, divide work, and execute in parallel.",
     "listEmpty": "No teams yet. Create one from scratch or pick a template below.",
     "listTitle": "Agent Teams",
@@ -1301,6 +1334,7 @@
     "tabs": {
       "activity": "Activity",
       "chat": "Chat",
+      "editor": "Editor",
       "members": "Members",
       "overview": "Overview",
       "settings": "Settings",
@@ -1898,12 +1932,16 @@
       "title": "Comment on this element"
     },
     "empty": {
-      "hint": "Enter a localhost URL to render it here, then select an element to comment on it.",
+      "hint": "Enter any web address or a localhost URL to render it here, then select an element to comment on it.",
       "quickOpen": "Quick open:",
-      "title": "Preview a local dev server"
+      "title": "Preview a web page"
     },
     "errors": {
       "navigate": "Could not navigate to that URL"
+    },
+    "loading": {
+      "label": "Loading page",
+      "title": "Loading {host}…"
     },
     "screenshot": {
       "failed": "Could not capture the preview",
@@ -2895,6 +2933,9 @@
       "bareMode": "Bare mode",
       "briefMode": "Brief output",
       "cancel": "Cancel",
+      "compactAria": "Compact",
+      "compactStarted": "Context compaction started",
+      "compactTooltip": "Compact the conversation context on the agent side",
       "cwdFallbackHint": "Character default: {path}",
       "cwdReset": "Reset",
       "debugMode": "Debug mode",
@@ -5124,14 +5165,35 @@
       "chatFailurePolicyFallback": "Fallback to built-in agent",
       "chatFailurePolicyStrict": "Strict failure (no fallback)",
       "codexAppServer": {
+        "account": "Account",
         "mcpServers": "MCP servers",
         "noMcpServers": "No MCP servers configured.",
         "noSkills": "No skills found.",
         "notConnected": "Connect the agent to view its Codex app-server status.",
+        "rateLimitReached": "Rate limit reached",
         "refresh": "Refresh status",
+        "resetsAt": "Resets {time}",
+        "signInRequired": "Sign-in required",
         "skills": "Skills",
-        "title": "Codex app-server"
+        "title": "Codex app-server",
+        "usage": "Usage",
+        "usedPercent": "{percent}% used"
       },
+      "codexDefaultEffort": "Default reasoning effort",
+      "codexModelDefault": "Model default",
+      "codexNetworkAccess": "Network access",
+      "codexNetworkAccessDesc": "Allow sandboxed commands to reach the network.",
+      "codexReasoningSummary": "Reasoning summary",
+      "codexSandboxDangerFullAccess": "Full access (dangerous)",
+      "codexSandboxMode": "Sandbox mode",
+      "codexSandboxModeDesc": "How much filesystem access Codex commands get by default.",
+      "codexSandboxReadOnly": "Read only",
+      "codexSandboxWorkspaceWrite": "Workspace write",
+      "codexServerDefault": "Server default",
+      "codexSummaryAuto": "Auto",
+      "codexSummaryConcise": "Concise",
+      "codexSummaryDetailed": "Detailed",
+      "codexSummaryNone": "None",
       "command": "Command",
       "commandRequired": "Command is required for stdio transport",
       "configuredAgents": "Configured Agents",
@@ -5248,6 +5310,15 @@
       "latency": "Latency",
       "success": "Success",
       "title": "Health breakdown"
+    },
+    "userInput": {
+      "autoResolveIn": "Auto-resolves in {seconds}s",
+      "description": "Codex needs your input to continue this turn.",
+      "other": "Other…",
+      "otherPlaceholder": "Type your answer",
+      "skip": "Skip",
+      "submit": "Submit answers",
+      "title": "The agent has a question"
     }
   },
   "featureShell": {
@@ -10107,6 +10178,14 @@
         "Take a look?",
         "Ready for review."
       ],
+      "scheduledRunDue": [
+        "Reminder! Your scheduled task is due.",
+        "Hey, it's time for your scheduled task!"
+      ],
+      "scheduledRunStarting": [
+        "On it — running your task…",
+        "Task time! Working on it…"
+      ],
       "slept": {
         "0": "Zzz…",
         "1": "So cozy…"
@@ -10172,6 +10251,27 @@
         "title": "Your pet isn't feeling great"
       }
     },
+    "chat": {
+      "degrade": {
+        "disabled": "Pet chat is off right now.",
+        "empty": "Hmm, I didn't have anything to say to that.",
+        "error": "Something went wrong reaching the model. Try again?",
+        "noClient": "No chat model is configured yet — check the pet settings.",
+        "pii": "That looked like personal info, so I kept it private and didn't send it.",
+        "rateLimited": "Give me a moment to catch my breath…"
+      },
+      "empty": "Say hi to your pet — it can chat back now.",
+      "enableCta": {
+        "action": "Enable chat",
+        "body": "Let your pet actually talk back using your configured model. It stays playful and never sends personal data.",
+        "title": "Turn on pet chat"
+      },
+      "openFullChat": "Open full chat",
+      "openPanel": "Chat",
+      "petFallbackName": "Pet",
+      "sending": "{name} is thinking…",
+      "you": "You"
+    },
     "condition": {
       "unwell": "Needs care"
     },
@@ -10183,6 +10283,7 @@
       "tabs": {
         "achievements": "Achievements",
         "binding": "Characters",
+        "chat": "Chat",
         "customize": "Customize",
         "dex": "Dex",
         "insights": "Insights",
@@ -10278,6 +10379,13 @@
       "bond": "Bond",
       "energy": "Energy",
       "mood": "Mood"
+    },
+    "notifications": {
+      "scheduledDue": {
+        "body": "\"{taskName}\" is due right now.",
+        "bodyGeneric": "One of your scheduled tasks is due right now.",
+        "title": "Scheduled task due"
+      }
     },
     "overlay": {
       "petLabel": "Desktop pet",
@@ -16553,7 +16661,15 @@
           },
           "title": "Mention strategy"
         },
+        "authorizeButton": "Connect account",
+        "authorizeNeedsAppId": "Save the App ID first — authorization needs it.",
+        "authorizeNeedsSavedAdapter": "Save the adapter first; authorizing needs the saved credentials.",
+        "authorizeOpened": "Authorization opened in your browser. Approve there, then return.",
+        "authorizeRequiresDesktop": "Connecting your account requires the desktop runtime.",
         "cancel": "Cancel",
+        "connectedAccountLabel": "Connected account",
+        "connectedAccountNone": "No account connected — the bot sends as itself.",
+        "connectedAccountValue": "Connected as {name}",
         "connectedAs": "Connected: {appId}",
         "connectedToast": "Connected: {appId}",
         "connectionFailedLabel": "Connection failed",
@@ -16577,6 +16693,7 @@
           "help": "Configure the menu in the Lark console (Bot → Bot menu) with an event_key, subscribe application.bot.menu_v6, then map each event_key to an action here. Feishu has no API to create menus — registration is console-only."
         },
         "quietHoursIncomplete": "Quiet hours requires From, To, and Timezone.",
+        "reauthorizeButton": "Reconnect",
         "save": "Save",
         "saving": "Saving…",
         "sectionAdvanced": "Advanced",
@@ -16587,6 +16704,8 @@
         "sectionIdentityDesc": "App credentials and bot identity.",
         "sectionQuickCommands": "Quick commands",
         "sectionQuickCommandsDesc": "Map Feishu bot-menu (快捷指令) event keys to a prompt or slash command.",
+        "sectionSendAsUser": "Send as me",
+        "sectionSendAsUserDesc": "Connect your Lark account so replies are sent under your identity instead of the bot's.",
         "selfBotOpenIdHelp": "Resolved automatically when the adapter starts. Refresh after changing App ID / App Secret.",
         "selfBotOpenIdHelpAfterSave": "Available after saving the adapter — Lark resolves the open_id from your App credentials.",
         "selfBotOpenIdLabel": "Bot open_id",
@@ -16596,6 +16715,8 @@
         "selfBotOpenIdRefreshFailed": "Refresh failed: {reason}",
         "selfBotOpenIdRefreshed": "Bot open_id refreshed.",
         "selfBotOpenIdUnknown": "Not resolved yet",
+        "sendAsUserHelp": "When on and an account is connected, replies are sent as you (user access token) instead of the bot. Falls back to the bot if the authorization expires.",
+        "sendAsUserLabel": "Send replies as me",
         "testButtonLabel": "Test",
         "testConnectionAria": "Test connection",
         "testRequiresDesktop": "Connection testing requires the desktop runtime.",
@@ -17072,6 +17193,25 @@
           "title": "Adapter webhook URLs",
           "tunnelOff": "Start the tunnel above to surface a public URL."
         }
+      },
+      "usagePresence": {
+        "conversationHelp": "Conversation key hosting the pinned usage card (e.g. lark:<adapterId>:<chatId>). The card is created on the first refresh and edited in place afterwards.",
+        "conversationLabel": "Card conversation",
+        "enableHelp": "Periodically publish your local token usage (tokens, cost) to this platform — as a status badge next to your name and/or a pinned card that updates in place.",
+        "enableLabel": "Show token usage on this platform",
+        "intervalLabel": "Refresh interval (minutes)",
+        "lastError": "Last refresh issue: {error}",
+        "modeBadge": "Status badge",
+        "modeBoth": "Badge + pinned card",
+        "modeCard": "Pinned card",
+        "modeLabel": "Display mode",
+        "targetsHelp": "Platform user ids (one per line) the status badge is applied to — e.g. Lark open_id (ou_…). Leave empty to only maintain the status text.",
+        "targetsLabel": "Badge target users",
+        "title": "Usage status",
+        "window30d": "Last 30 days",
+        "window7d": "Last 7 days",
+        "windowLabel": "Usage window",
+        "windowToday": "Today"
       },
       "webModeBanner": {
         "ariaLabel": "Web mode banner",

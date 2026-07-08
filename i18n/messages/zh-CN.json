@@ -935,6 +935,39 @@
       "emptyHint": "添加描述…",
       "saveAriaLabel": "保存"
     },
+    "editor": {
+      "action": {
+        "copyPath": "复制路径",
+        "copyRelativePath": "复制相对路径",
+        "format": "格式化文档",
+        "save": "保存",
+        "searchProject": "在项目中搜索"
+      },
+      "cancel": "取消",
+      "closeTab": "关闭 {name}",
+      "delete": "删除",
+      "deleteConfirm": "删除“{name}”？此操作无法撤销。",
+      "emptyEditor": "从文件树打开一个文件开始编辑。",
+      "externallyChanged": "磁盘已变更",
+      "filesTab": "文件",
+      "newFile": "新建文件",
+      "newFolder": "新建文件夹",
+      "noWorkingDir": "该团队未设置工作目录。",
+      "refresh": "刷新",
+      "rename": "重命名",
+      "rootLabel": "项目根目录",
+      "rootMain": "main（主仓库）",
+      "saveAll": "全部保存（{count}）",
+      "saveFailed": "保存失败：{error}",
+      "search": "搜索",
+      "searchEmpty": "无匹配",
+      "searchPlaceholder": "在项目中搜索…",
+      "searchTab": "搜索",
+      "treeAria": "项目文件",
+      "treeEmpty": "暂无文件",
+      "unavailableDesc": "项目编辑器需要桌面应用或已配对的设备才能访问项目文件。",
+      "unavailableTitle": "编辑器不可用"
+    },
     "listDescription": "多智能体团队：规划、分工并并行执行。",
     "listEmpty": "暂无团队。从模板快速创建，或从零开始搭建。",
     "listTitle": "智能体团队",
@@ -1301,6 +1334,7 @@
     "tabs": {
       "activity": "活动",
       "chat": "对话",
+      "editor": "编辑器",
       "members": "成员",
       "overview": "概览",
       "settings": "设置",
@@ -1898,12 +1932,16 @@
       "title": "对该元素评论"
     },
     "empty": {
-      "hint": "输入 localhost 地址即可在此渲染，然后选择元素进行评论。",
+      "hint": "输入任意网址或 localhost 地址即可在此渲染，然后选择元素进行评论。",
       "quickOpen": "快速打开：",
-      "title": "预览本地开发服务器"
+      "title": "预览网页"
     },
     "errors": {
       "navigate": "无法导航到该地址"
+    },
+    "loading": {
+      "label": "页面加载中",
+      "title": "正在加载 {host}…"
     },
     "screenshot": {
       "failed": "无法截取预览画面",
@@ -2895,6 +2933,9 @@
       "bareMode": "极简模式",
       "briefMode": "简短输出",
       "cancel": "取消",
+      "compactAria": "压缩",
+      "compactStarted": "已开始压缩上下文",
+      "compactTooltip": "在智能体侧压缩会话上下文",
       "cwdFallbackHint": "角色默认: {path}",
       "cwdReset": "重置",
       "debugMode": "调试模式",
@@ -5124,14 +5165,35 @@
       "chatFailurePolicyFallback": "回退到内置代理",
       "chatFailurePolicyStrict": "严格失败（不回退）",
       "codexAppServer": {
+        "account": "账号",
         "mcpServers": "MCP 服务器",
         "noMcpServers": "未配置 MCP 服务器。",
         "noSkills": "未发现技能。",
         "notConnected": "连接该智能体以查看其 Codex app-server 状态。",
+        "rateLimitReached": "已达到用量上限",
         "refresh": "刷新状态",
+        "resetsAt": "{time} 重置",
+        "signInRequired": "需要登录",
         "skills": "技能",
-        "title": "Codex app-server"
+        "title": "Codex app-server",
+        "usage": "用量",
+        "usedPercent": "已使用 {percent}%"
       },
+      "codexDefaultEffort": "默认推理力度",
+      "codexModelDefault": "模型默认",
+      "codexNetworkAccess": "网络访问",
+      "codexNetworkAccessDesc": "允许沙箱内的命令访问网络。",
+      "codexReasoningSummary": "推理摘要",
+      "codexSandboxDangerFullAccess": "完全访问（危险）",
+      "codexSandboxMode": "沙箱模式",
+      "codexSandboxModeDesc": "Codex 命令默认获得的文件系统访问级别。",
+      "codexSandboxReadOnly": "只读",
+      "codexSandboxWorkspaceWrite": "工作区可写",
+      "codexServerDefault": "服务端默认",
+      "codexSummaryAuto": "自动",
+      "codexSummaryConcise": "简洁",
+      "codexSummaryDetailed": "详细",
+      "codexSummaryNone": "关闭",
       "command": "命令",
       "commandRequired": "stdio 传输需要填写命令",
       "configuredAgents": "已配置的代理",
@@ -5248,6 +5310,15 @@
       "latency": "延迟",
       "success": "成功率",
       "title": "健康度明细"
+    },
+    "userInput": {
+      "autoResolveIn": "{seconds} 秒后自动跳过",
+      "description": "Codex 需要你的输入才能继续本轮任务。",
+      "other": "其他…",
+      "otherPlaceholder": "输入你的回答",
+      "skip": "跳过",
+      "submit": "提交回答",
+      "title": "智能体有问题需要确认"
     }
   },
   "featureShell": {
@@ -10107,6 +10178,14 @@
         "来看看？",
         "可以检查啦。"
       ],
+      "scheduledRunDue": [
+        "提醒！你的定时任务到点啦。",
+        "嘿，该执行你的定时任务了！"
+      ],
+      "scheduledRunStarting": [
+        "收到——正在跑你的任务…",
+        "任务时间到！开工啦…"
+      ],
       "slept": {
         "0": "呼呼…",
         "1": "好舒服…"
@@ -10172,6 +10251,27 @@
         "title": "你的宠物不太舒服"
       }
     },
+    "chat": {
+      "degrade": {
+        "disabled": "宠物聊天当前已关闭。",
+        "empty": "唔，这个我暂时没什么好说的。",
+        "error": "连接模型时出错了，要不再试一次？",
+        "noClient": "还没有配置聊天模型——去宠物设置里看看吧。",
+        "pii": "这看起来像是个人信息，我帮你保密没有发送。",
+        "rateLimited": "让我喘口气，稍等一下…"
+      },
+      "empty": "跟你的宠物打个招呼吧——它现在能回话啦。",
+      "enableCta": {
+        "action": "开启聊天",
+        "body": "让宠物用你配置的模型真正回话。它依然俏皮，也绝不会发送个人信息。",
+        "title": "开启宠物聊天"
+      },
+      "openFullChat": "打开完整对话",
+      "openPanel": "聊天",
+      "petFallbackName": "宠物",
+      "sending": "{name} 正在思考…",
+      "you": "你"
+    },
     "condition": {
       "unwell": "需要照顾"
     },
@@ -10183,6 +10283,7 @@
       "tabs": {
         "achievements": "成就",
         "binding": "角色",
+        "chat": "聊天",
         "customize": "自定义",
         "dex": "图鉴",
         "insights": "洞察",
@@ -10278,6 +10379,13 @@
       "bond": "亲密",
       "energy": "精力",
       "mood": "心情"
+    },
+    "notifications": {
+      "scheduledDue": {
+        "body": "「{taskName}」现在到点啦。",
+        "bodyGeneric": "你有一个定时任务现在到点啦。",
+        "title": "定时任务到点"
+      }
     },
     "overlay": {
       "petLabel": "桌面宠物",
@@ -16553,7 +16661,15 @@
           },
           "title": "响应策略"
         },
+        "authorizeButton": "连接账号",
+        "authorizeNeedsAppId": "请先保存 App ID —— 授权需要它。",
+        "authorizeNeedsSavedAdapter": "请先保存适配器；授权需要已保存的凭据。",
+        "authorizeOpened": "已在浏览器中打开授权页面。请在那里确认后返回。",
+        "authorizeRequiresDesktop": "连接账号需要桌面端运行环境。",
         "cancel": "取消",
+        "connectedAccountLabel": "已连接账号",
+        "connectedAccountNone": "尚未连接账号 —— 机器人以自身身份发送。",
+        "connectedAccountValue": "已连接为 {name}",
         "connectedAs": "已连接：{appId}",
         "connectedToast": "已连接：{appId}",
         "connectionFailedLabel": "连接失败",
@@ -16577,6 +16693,7 @@
           "help": "在飞书开发者后台（机器人 → 机器人菜单）配置菜单并设置 event_key，订阅 application.bot.menu_v6 事件，然后在此把每个 event_key 映射到一个动作。飞书没有创建菜单的 API——只能在后台配置。"
         },
         "quietHoursIncomplete": "免打扰时段需要同时填写开始、结束与时区。",
+        "reauthorizeButton": "重新连接",
         "save": "保存",
         "saving": "保存中…",
         "sectionAdvanced": "高级",
@@ -16587,6 +16704,8 @@
         "sectionIdentityDesc": "应用凭证与机器人身份。",
         "sectionQuickCommands": "快捷指令",
         "sectionQuickCommandsDesc": "将飞书机器人菜单（快捷指令）的 event_key 映射到一条提示词或斜杠命令。",
+        "sectionSendAsUser": "以我的身份发送",
+        "sectionSendAsUserDesc": "连接你的飞书账号，使回复以你的身份发送，而不是机器人身份。",
         "selfBotOpenIdHelp": "适配器启动时自动解析。修改 App ID / App Secret 后请刷新。",
         "selfBotOpenIdHelpAfterSave": "保存适配器后可用——飞书会根据 App 凭证解析 open_id。",
         "selfBotOpenIdLabel": "机器人 open_id",
@@ -16596,6 +16715,8 @@
         "selfBotOpenIdRefreshFailed": "刷新失败：{reason}",
         "selfBotOpenIdRefreshed": "机器人 open_id 已刷新。",
         "selfBotOpenIdUnknown": "尚未解析",
+        "sendAsUserHelp": "开启且已连接账号后，回复将以你的身份（用户 access token）发送，而非机器人。授权过期时自动回退为机器人身份。",
+        "sendAsUserLabel": "以我的身份发送回复",
         "testButtonLabel": "测试",
         "testConnectionAria": "测试连接",
         "testRequiresDesktop": "测试连接需要桌面运行时。",
@@ -17072,6 +17193,25 @@
           "title": "各适配器的 webhook 地址",
           "tunnelOff": "请先启动隧道以生成公网地址。"
         }
+      },
+      "usagePresence": {
+        "conversationHelp": "承载置顶用量卡片的会话 key（例如 lark:<adapterId>:<chatId>）。首次刷新时创建卡片，之后原地更新。",
+        "conversationLabel": "卡片会话",
+        "enableHelp": "定期把本机的 token 用量（tokens、成本）发布到该平台——以用户名旁的状态徽章和/或原地更新的置顶卡片呈现。",
+        "enableLabel": "在此平台展示 token 用量",
+        "intervalLabel": "刷新间隔（分钟）",
+        "lastError": "上次刷新异常：{error}",
+        "modeBadge": "状态徽章",
+        "modeBoth": "徽章 + 置顶卡片",
+        "modeCard": "置顶卡片",
+        "modeLabel": "展示方式",
+        "targetsHelp": "状态徽章要挂载的平台用户 ID（每行一个），例如飞书 open_id（ou_…）。留空则只维护状态文案。",
+        "targetsLabel": "徽章目标用户",
+        "title": "用量状态",
+        "window30d": "近 30 天",
+        "window7d": "近 7 天",
+        "windowLabel": "统计窗口",
+        "windowToday": "今日"
       },
       "webModeBanner": {
         "ariaLabel": "Web 模式提示",
