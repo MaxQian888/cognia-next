@@ -12,6 +12,7 @@ import {
   parseSessions,
   registerSessionSource,
   resolveScanInput,
+  scanAllSources,
 } from "./index"
 import type { AgentSessionSourceAdapter, SessionScanInput } from "./types"
 
@@ -87,11 +88,74 @@ describe("session-import runner", () => {
     expect(counts).toEqual({ sessions: 1, messages: 3 })
   })
 
+  it("scanAllSources collects per-source failures instead of swallowing them", async () => {
+    const good = source("good", 1)
+    const bad: AgentSessionSourceAdapter = {
+      ...source("bad", 0),
+      id: "bad",
+      listSessions: async () => {
+        throw new Error("db locked")
+      },
+    }
+    registerSessionSource(good, { pluginId: "p" })
+    registerSessionSource(bad, { pluginId: "p" })
+    const { summaries, errors } = await scanAllSources(input)
+    expect(summaries.length).toBeGreaterThanOrEqual(1)
+    expect(errors).toContainEqual({ sourceId: "p:bad", message: "db locked" })
+  })
+
   it("skips refs whose source is unknown", async () => {
     const parsed = await parseSessions(
       [{ sourceId: "ghost", originalSessionId: "x", locator: "x" }],
       input
     )
     expect(parsed).toEqual([])
+  })
+
+  it("flattens nested subagent conversations and stamps their projectId", async () => {
+    const nesting: AgentSessionSourceAdapter = {
+      ...source("nest", 1),
+      id: "nest",
+      parseSession: async (ref) => ({
+        session: { id: ref.originalSessionId, title: "main", createdAt: 0, updatedAt: 0 } as never,
+        messages: [
+          {
+            id: "m0",
+            sessionId: ref.originalSessionId,
+            role: "user",
+            parts: [],
+            createdAt: 0,
+          } as never,
+        ],
+        nested: [
+          {
+            session: {
+              id: `${ref.originalSessionId}:sub:a`,
+              title: "sub",
+              kind: "subagent",
+              createdAt: 0,
+              updatedAt: 0,
+            } as never,
+            messages: [
+              {
+                id: "n0",
+                sessionId: `${ref.originalSessionId}:sub:a`,
+                role: "user",
+                parts: [],
+                createdAt: 0,
+              } as never,
+            ],
+          },
+        ],
+      }),
+    }
+    registerSessionSource(nesting, { pluginId: "p" })
+    const refs = [{ sourceId: "p:nest", originalSessionId: "x", locator: "x" }]
+    const parsed = await parseSessions(refs, input, "proj-Z")
+    // Main + the nested subagent transcript are both top-level, both stamped.
+    expect(parsed).toHaveLength(2)
+    expect(parsed[1].session.id).toBe("x:sub:a")
+    expect(parsed[1].session.projectId).toBe("proj-Z")
+    expect(parsed[1].messages[0].projectId).toBe("proj-Z")
   })
 })

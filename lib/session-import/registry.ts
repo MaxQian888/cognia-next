@@ -4,8 +4,11 @@
 // overlay: static sources are authoritative, plugin sources are appended and
 // namespaced `${pluginId}:${id}`, and a plugin can never shadow a built-in.
 
+import { aiderSessionSource } from "./adapters/aider"
 import { claudeCodeSessionSource } from "./adapters/claude-code"
 import { codexSessionSource } from "./adapters/codex"
+import { continueDevSessionSource } from "./adapters/continue-dev"
+import { geminiCliSessionSource } from "./adapters/gemini-cli"
 import { opencodeSessionSource } from "./adapters/opencode"
 import type { AgentSessionSourceAdapter, PickedSessionFile } from "./types"
 
@@ -14,6 +17,9 @@ const STATIC_SOURCES: AgentSessionSourceAdapter[] = [
   claudeCodeSessionSource,
   codexSessionSource,
   opencodeSessionSource,
+  geminiCliSessionSource,
+  continueDevSessionSource,
+  aiderSessionSource,
 ]
 
 interface RegisteredSource {

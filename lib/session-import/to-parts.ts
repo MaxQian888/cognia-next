@@ -140,7 +140,14 @@ function partToText(p: Record<string, unknown>): string {
   return ""
 }
 
-/** Build the imported ChatSession skeleton (continuable via branchSeed). */
+/**
+ * Build the imported ChatSession skeleton (continuable via branchSeed).
+ *
+ * `kind` defaults to `"direct"`; a hidden nested subagent transcript passes
+ * `"subagent"`. `suppressSeed` omits the `branchSeed` entirely — read-only
+ * nested subagent sessions (ADR-0062) have no continuation path, so they carry
+ * no seed and never reach `resolveSendOptions`.
+ */
 export function buildSession(opts: {
   id: string
   projectId?: string
@@ -150,14 +157,16 @@ export function buildSession(opts: {
   createdAt: number
   updatedAt: number
   seedMessages: StoredMessage[]
+  kind?: ChatSession["kind"]
+  suppressSeed?: boolean
 }): ChatSession {
-  const seed = renderTranscriptSeed(opts.seedMessages)
+  const seed = opts.suppressSeed ? "" : renderTranscriptSeed(opts.seedMessages)
   return {
     id: opts.id,
     ...(opts.projectId ? { projectId: opts.projectId } : {}),
     title: opts.title,
     titleAuto: true,
-    kind: "direct",
+    kind: opts.kind ?? "direct",
     ...(opts.model ? { model: opts.model } : {}),
     ...(opts.workingDir ? { workingDir: opts.workingDir } : {}),
     ...(seed

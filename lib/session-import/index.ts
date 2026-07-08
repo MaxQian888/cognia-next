@@ -46,17 +46,39 @@ export async function listSessionsForSource(
   return source.listSessions(input)
 }
 
-/** List sessions across every registered source (scan mode). */
-export async function listAllSessions(input: SessionScanInput): Promise<SessionSummary[]> {
-  const out: SessionSummary[] = []
+/** A source that threw during a scan, surfaced instead of silently swallowed. */
+export interface SessionScanError {
+  sourceId: string
+  message: string
+}
+
+/**
+ * Scan every registered source, returning the summaries AND the per-source
+ * failures (a failing source must not sink the whole scan, but the user should
+ * still see that e.g. OpenCode's DB couldn't be read).
+ */
+export async function scanAllSources(
+  input: SessionScanInput
+): Promise<{ summaries: SessionSummary[]; errors: SessionScanError[] }> {
+  const summaries: SessionSummary[] = []
+  const errors: SessionScanError[] = []
   for (const source of getSessionSources()) {
     try {
-      out.push(...(await source.listSessions(input)))
-    } catch {
-      // A failing source must not sink the whole scan.
+      summaries.push(...(await source.listSessions(input)))
+    } catch (err) {
+      errors.push({
+        sourceId: source.id,
+        message: err instanceof Error ? err.message : String(err),
+      })
     }
   }
-  return out.sort((a, b) => b.updatedAt - a.updatedAt)
+  summaries.sort((a, b) => b.updatedAt - a.updatedAt)
+  return { summaries, errors }
+}
+
+/** List sessions across every registered source (scan mode). */
+export async function listAllSessions(input: SessionScanInput): Promise<SessionSummary[]> {
+  return (await scanAllSources(input)).summaries
 }
 
 /**
@@ -74,11 +96,20 @@ export async function parseSessions(
     if (!source) continue
     try {
       const conv = await source.parseSession(ref, input)
+      const nested = conv.nested ?? []
       if (projectId) {
         conv.session.projectId = projectId
         for (const m of conv.messages) m.projectId = projectId
+        for (const n of nested) {
+          n.session.projectId = projectId
+          for (const m of n.messages) m.projectId = projectId
+        }
       }
-      if (conv.messages.length > 0) conversations.push(conv)
+      if (conv.messages.length > 0) {
+        // Persist the main conversation plus any nested subagent transcripts
+        // (ADR-0062) as top-level rows in one pass.
+        conversations.push({ session: conv.session, messages: conv.messages }, ...nested)
+      }
     } catch {
       // Skip a session that fails to parse.
     }

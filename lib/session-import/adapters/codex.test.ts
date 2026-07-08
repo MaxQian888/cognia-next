@@ -64,6 +64,45 @@ describe("parseCodexRollout", () => {
     expect(tool.input).toEqual({ cmd: "ls" })
   })
 
+  it("marks a failed tool result as an error (non-zero exit_code)", () => {
+    const lines = [
+      {
+        type: "response_item",
+        payload: { type: "function_call", name: "shell", arguments: "{}", call_id: "c1" },
+      },
+      {
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          call_id: "c1",
+          output: { output: "nope", metadata: { exit_code: 1 } },
+        },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const parsed = parseCodexRollout(lines, "r.jsonl")
+    const tool = parsed.messages[0].parts[0] as Record<string, unknown>
+    expect(tool.state).toBe("output-error")
+    expect(tool.errorText).toContain("nope")
+  })
+
+  it("emits a system marker for a compacted line (previously dropped)", () => {
+    const lines = [
+      {
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+      },
+      { type: "compacted", payload: { message: "history summarized" } },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const parsed = parseCodexRollout(lines, "r.jsonl")
+    const marker = parsed.messages.find((m) => m.role === "system")
+    expect(marker).toBeTruthy()
+    expect((marker!.parts[0] as Record<string, unknown>).text).toBe("history summarized")
+  })
+
   it("skips corrupt lines and still parses", () => {
     const parsed = parseCodexRollout(CONTENT + "\n{oops", "r.jsonl")
     expect(parsed.messages.length).toBeGreaterThan(0)

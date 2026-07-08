@@ -19,11 +19,17 @@ import type { StoredMessage } from "@/lib/claude/types"
 import { walkFiles } from "../fs"
 import { importedUsageMetadata } from "../usage"
 import {
+  extractSidechains,
+  linearizeActiveLeaf,
+  splitMainAndSidechain,
+  type SidechainGroup,
+} from "./claude-code-dag"
+import { buildSubagentSnapshot } from "./claude-code-subagent"
+import {
   buildMessage,
   buildSession,
   deriveTitle,
   filePart,
-  importedMessageId,
   importedSessionId,
   reasoningPart,
   textPart,
@@ -47,7 +53,7 @@ interface ClaudeUsage {
   cache_read_input_tokens?: number
 }
 
-interface ClaudeLine {
+export interface ClaudeLine {
   type?: string
   uuid?: string
   parentUuid?: string | null
@@ -55,6 +61,8 @@ interface ClaudeLine {
   cwd?: string
   timestamp?: string
   isSidechain?: boolean
+  /** Top-level content string carried on `type: "system"` records. */
+  content?: unknown
   message?: {
     role?: string
     model?: string
@@ -101,6 +109,16 @@ interface ParsedSession {
   model?: string
   title: string
   messages: StoredMessage[]
+  /**
+   * Subagent (Task/sidechain) runs extracted from this transcript, each
+   * linearized to its own active leaf (raw form; kept for transparency/tests).
+   */
+  sidechains: SidechainGroup<ClaudeLine>[]
+  /**
+   * Hidden `kind: "subagent"` inner-transcript sessions reconstructed from the
+   * sidechains. Persisted as top-level rows alongside the main conversation.
+   */
+  nestedConversations: ImportedConversation[]
   createdAt: number
   updatedAt: number
 }
@@ -131,35 +149,163 @@ export function parseClaudeTranscript(
     }
   }
 
-  const messages: StoredMessage[] = []
-  // toolCallId → { messageIndex, partIndex } so a later tool_result patches it.
-  const toolIndex = new Map<string, { m: number; p: number }>()
+  // Resolve the DAG: keep only the active-leaf chain of the main thread
+  // (dropping abandoned edit/re-run branches) and pull subagent sidechains out
+  // into their own runs for separate reconstruction (T2a-sub).
+  const { main } = splitMainAndSidechain(records)
+  const mainLinear = linearizeActiveLeaf(main)
+  const sidechains = extractSidechains(records)
+
+  // Metadata scan over ALL records — sessionId/cwd/model can appear on any
+  // record, and updatedAt should reflect the latest activity (incl. sidechains).
   let sessionId = ""
   let cwd: string | undefined
-  let model: string | undefined
-  let firstUserText = ""
+  let scanModel: string | undefined
   let summary = ""
   let createdAt = 0
   let updatedAt = 0
-  let msgCounter = 0
-
-  const sid = () => importedSessionId("claude-code", sessionId || locatorId)
-
   for (const rec of records) {
     if (rec.sessionId && !sessionId) sessionId = rec.sessionId
     if (rec.cwd && !cwd) cwd = rec.cwd
+    if (rec.message?.model && !scanModel) scanModel = rec.message.model
+    if (rec.type === "summary" && typeof rec.summary === "string" && !summary) {
+      summary = rec.summary
+    }
     const ms = tsToMs(rec.timestamp, updatedAt || Date.now())
     if (!createdAt) createdAt = ms
     updatedAt = Math.max(updatedAt, ms)
+  }
 
-    if (rec.type === "summary") {
-      if (typeof rec.summary === "string" && !summary) summary = rec.summary
+  const finalId = importedSessionId("claude-code", sessionId || locatorId)
+  const built = recordsToMessages(mainLinear, finalId, projectId)
+
+  // Reconstruct subagents (T2a-sub): each sidechain becomes a `SubagentPart`
+  // snapshot attached to its spawning turn PLUS a hidden nested session holding
+  // the full inner transcript to drill into.
+  const nestedConversations: ImportedConversation[] = []
+  for (const group of sidechains) {
+    const subagentId = group.rootUuid
+    const nestedId = `${finalId}:sub:${subagentId}`
+    const nested = recordsToMessages(group.records, nestedId, projectId)
+    if (nested.messages.length === 0) continue
+
+    const startedAt = tsToMs(group.records[0]?.timestamp, createdAt || Date.now())
+    const completedAt = tsToMs(group.records[group.records.length - 1]?.timestamp, startedAt)
+
+    // Attach the snapshot to the spawning main turn; fall back to the last one.
+    const spawnIdx =
+      group.spawnParentUuid != null
+        ? built.uuidToMessageIndex.get(group.spawnParentUuid)
+        : undefined
+    const hostMsg =
+      spawnIdx != null ? built.messages[spawnIdx] : built.messages[built.messages.length - 1]
+    const name = subagentNameFrom(hostMsg) ?? "Subagent"
+
+    const part = buildSubagentSnapshot({
+      subagentId,
+      parentSessionId: finalId,
+      name,
+      nestedSessionId: nestedId,
+      messages: nested.messages,
+      startedAt,
+      completedAt,
+    })
+    if (hostMsg) (hostMsg.parts as unknown[]).push(part)
+
+    const nestedSession = buildSession({
+      id: nestedId,
+      projectId,
+      title: deriveTitle(nested.firstUserText || name, name),
+      kind: "subagent",
+      suppressSeed: true,
+      workingDir: cwd,
+      createdAt: startedAt,
+      updatedAt: completedAt,
+      seedMessages: [],
+    })
+    nestedConversations.push({ session: nestedSession, messages: nested.messages })
+  }
+
+  const title = deriveTitle(built.firstUserText || summary, "Claude Code session")
+  const now = Date.now()
+  return {
+    originalSessionId: sessionId || locatorId,
+    cwd,
+    model: built.model ?? scanModel,
+    title,
+    messages: built.messages,
+    sidechains,
+    nestedConversations,
+    createdAt: createdAt || now,
+    updatedAt: updatedAt || now,
+  }
+}
+
+/** Derive a display name for an imported subagent from its spawning Task turn. */
+function subagentNameFrom(msg: StoredMessage | undefined): string | undefined {
+  if (!msg) return undefined
+  for (const p of msg.parts as Array<Record<string, unknown>>) {
+    if (p.type !== "tool-Task") continue
+    const input = p.input as { subagent_type?: string; description?: string } | undefined
+    if (typeof input?.subagent_type === "string" && input.subagent_type) return input.subagent_type
+    if (typeof input?.description === "string" && input.description) return input.description
+  }
+  return undefined
+}
+
+/**
+ * Turn a linearized record chain into `StoredMessage`s. Shared by the main
+ * thread (`parseClaudeTranscript`) and by each subagent's inner transcript
+ * (`claude-code-subagent.ts`). Emits `system` records too (previously dropped),
+ * patches tool_result blocks onto their tool part (preferring a structured
+ * top-level `toolUseResult` when the block content is empty), and captures the
+ * first user text for the title. Message ids/sessionIds are final on emit — the
+ * chain is already root→leaf so no re-keying is needed.
+ */
+export function recordsToMessages(
+  records: ClaudeLine[],
+  sessionIdForParts: string,
+  projectId: string | undefined
+): {
+  messages: StoredMessage[]
+  firstUserText: string
+  model?: string
+  /** Source record uuid → index of the message it produced (for subagent attach). */
+  uuidToMessageIndex: Map<string, number>
+} {
+  const messages: StoredMessage[] = []
+  // toolCallId → { messageIndex, partIndex } so a later tool_result patches it.
+  const toolIndex = new Map<string, { m: number; p: number }>()
+  const uuidToMessageIndex = new Map<string, number>()
+  let firstUserText = ""
+  let model: string | undefined
+  let counter = 0
+  const now = Date.now()
+
+  for (const rec of records) {
+    if (rec.message?.model && !model) model = rec.message.model
+    const ms = tsToMs(rec.timestamp, now)
+
+    // `system` records (hooks, meta, command output) were previously dropped.
+    if (rec.type === "system") {
+      const sysText = systemText(rec)
+      if (!sysText) continue
+      messages.push(
+        buildMessage({
+          sessionId: sessionIdForParts,
+          projectId,
+          index: counter++,
+          role: "system" as StoredMessage["role"],
+          parts: [textPart(sysText)],
+          createdAt: ms,
+        })
+      )
+      if (rec.uuid) uuidToMessageIndex.set(rec.uuid, messages.length - 1)
       continue
     }
     if (rec.type !== "user" && rec.type !== "assistant") continue
 
     const role = rec.type
-    if (rec.message?.model && !model) model = rec.message.model
     const blocks = normalizeContent(rec.message?.content)
 
     // A user record that only carries tool_result blocks patches the prior
@@ -168,7 +314,7 @@ export function parseClaudeTranscript(
     const nonResult = blocks.filter((b) => b.type !== "tool_result")
 
     if (role === "user" && resultBlocks.length > 0) {
-      for (const b of resultBlocks) patchToolResult(messages, toolIndex, b)
+      for (const b of resultBlocks) patchToolResult(messages, toolIndex, b, rec.toolUseResult)
       if (nonResult.length === 0) continue
     }
 
@@ -183,43 +329,34 @@ export function parseClaudeTranscript(
     }
     if (parts.length === 0) continue
 
-    if (role === "user" && !firstUserText) {
-      firstUserText = plainTextOf(parts)
-    }
+    if (role === "user" && !firstUserText) firstUserText = plainTextOf(parts)
 
     const metadata = role === "assistant" ? claudeUsageMeta(rec) : undefined
     messages.push(
       buildMessage({
-        sessionId: sid(),
+        sessionId: sessionIdForParts,
         projectId,
-        index: msgCounter++,
+        index: counter++,
         role,
         parts,
         createdAt: ms,
         ...(metadata ? { metadata } : {}),
       })
     )
+    if (rec.uuid) uuidToMessageIndex.set(rec.uuid, messages.length - 1)
   }
 
-  const finalId = sid()
-  // Re-key message ids/sessionIds now that sessionId is settled (the first
-  // record may have been a summary with no sessionId).
-  messages.forEach((m, i) => {
-    m.sessionId = finalId
-    m.id = importedMessageId(finalId, i)
-  })
+  return { messages, firstUserText, model, uuidToMessageIndex }
+}
 
-  const title = deriveTitle(firstUserText || summary, "Claude Code session")
-  const now = Date.now()
-  return {
-    originalSessionId: sessionId || locatorId,
-    cwd,
-    model,
-    title,
-    messages,
-    createdAt: createdAt || now,
-    updatedAt: updatedAt || now,
-  }
+/** Extract the display text of a `type: "system"` record. */
+function systemText(rec: ClaudeLine): string {
+  if (typeof rec.content === "string" && rec.content.trim()) return rec.content
+  const blocks = normalizeContent(rec.message?.content)
+  return blocks
+    .filter((b) => b.type === "text" && typeof b.text === "string" && b.text)
+    .map((b) => b.text as string)
+    .join("\n")
 }
 
 interface Block {
@@ -276,7 +413,8 @@ function blockToPart(b: Block): Part | null {
 function patchToolResult(
   messages: StoredMessage[],
   toolIndex: Map<string, { m: number; p: number }>,
-  b: Block
+  b: Block,
+  toolUseResult?: unknown
 ): void {
   const id = b.tool_use_id
   if (!id) return
@@ -286,7 +424,12 @@ function patchToolResult(
   if (!msg) return
   const part = msg.parts[loc.p] as Record<string, unknown> | undefined
   if (!part) return
-  const output = resultToOutput(b.content)
+  let output = resultToOutput(b.content)
+  // Recover the structured top-level result when the block content is empty
+  // (Claude Code sometimes leaves the block bare but records rich output here).
+  if ((output === "" || output == null) && toolUseResult !== undefined) {
+    output = toolUseResult
+  }
   msg.parts[loc.p] = {
     ...part,
     state: b.is_error ? "output-error" : "output-available",
@@ -340,7 +483,11 @@ function toConversation(parsed: ParsedSession, projectId?: string): ImportedConv
     updatedAt: parsed.updatedAt,
     seedMessages: parsed.messages,
   })
-  return { session, messages: parsed.messages }
+  return {
+    session,
+    messages: parsed.messages,
+    ...(parsed.nestedConversations.length > 0 ? { nested: parsed.nestedConversations } : {}),
+  }
 }
 
 export const claudeCodeSessionSource: AgentSessionSourceAdapter = {

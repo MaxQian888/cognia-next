@@ -221,6 +221,22 @@ export function parseCodexRollout(
       }
       continue
     }
+    // Context-compaction boundary — previously dropped. Surface it as a system
+    // marker so the compacted history is visible in the imported transcript.
+    if (rec.type === "compacted") {
+      const note = messageText(payload) || asString(payload.message) || "Context compacted"
+      messages.push(
+        buildMessage({
+          sessionId: sid(),
+          projectId,
+          index: msgCounter++,
+          role: "system",
+          parts: [textPart(note)],
+          createdAt: ms,
+        })
+      )
+      continue
+    }
     if (rec.type !== "response_item") continue
 
     const itemType = asString(payload.type)
@@ -291,10 +307,13 @@ export function parseCodexRollout(
       const part = msg?.parts[loc.p] as Record<string, unknown> | undefined
       if (!part) continue
       const output = extractOutput(payload.output)
+      const isError = isCodexToolError(payload.output)
       msg.parts[loc.p] = {
         ...part,
-        state: "output-available",
-        output,
+        state: isError ? "output-error" : "output-available",
+        ...(isError
+          ? { errorText: typeof output === "string" ? output : JSON.stringify(output) }
+          : { output }),
       } as unknown as Part
     }
   }
@@ -334,6 +353,29 @@ function extractOutput(output: unknown): unknown {
     if (typeof o.content === "string") return o.content
   }
   return output ?? ""
+}
+
+/**
+ * Whether a Codex tool result signals failure. Codex records exec results as
+ * `{ output, metadata: { exit_code } }` and other tools as `{ success, error }`;
+ * a JSON-string output is unwrapped first. Non-error results fall through.
+ */
+function isCodexToolError(output: unknown): boolean {
+  if (typeof output === "string") {
+    try {
+      return isCodexToolError(JSON.parse(output))
+    } catch {
+      return false
+    }
+  }
+  if (!output || typeof output !== "object") return false
+  const o = output as Record<string, unknown>
+  if (o.success === false) return true
+  if (typeof o.error === "string" && o.error) return true
+  if (typeof o.exit_code === "number" && o.exit_code !== 0) return true
+  const md = o.metadata as Record<string, unknown> | undefined
+  if (md && typeof md.exit_code === "number" && md.exit_code !== 0) return true
+  return false
 }
 
 function summarize(parsed: ParsedSession, locator: string): SessionSummary {

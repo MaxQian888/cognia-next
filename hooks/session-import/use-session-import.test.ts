@@ -25,7 +25,7 @@ function summary(id: string): SessionSummary {
 function deps(over: Parameters<typeof useSessionImport>[0] = {}) {
   return {
     resolveScanInput: jest.fn(async () => input),
-    listAllSessions: jest.fn(async () => [summary("a"), summary("b")]),
+    scanAllSources: jest.fn(async () => ({ summaries: [summary("a"), summary("b")], errors: [] })),
     listSessionsForSource: jest.fn(async () => [summary("a")]),
     importSessions: jest.fn(async () => ({ sessions: 2, messages: 6 })),
     pick: jest.fn(async () => [{ name: "a.jsonl", path: "/p/a.jsonl", content: "{}" }]),
@@ -57,6 +57,23 @@ describe("useSessionImport", () => {
       status: "done",
       sessionsAdded: 2,
       messagesAdded: 6,
+    })
+  })
+
+  it("surfaces per-source scan failures as list warnings", async () => {
+    const d = deps({
+      scanAllSources: jest.fn(async () => ({
+        summaries: [summary("a")],
+        errors: [{ sourceId: "opencode", message: "db locked" }],
+      })),
+    })
+    const { result } = renderHook(() => useSessionImport(d))
+    await act(async () => {
+      await result.current.scan()
+    })
+    expect(result.current.state).toMatchObject({
+      status: "list",
+      warnings: [{ sourceId: "opencode", message: "db locked" }],
     })
   })
 

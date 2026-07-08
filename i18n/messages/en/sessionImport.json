@@ -21,9 +21,15 @@
   "messagesLabel": "{count, plural, one {# message} other {# messages}}",
   "doneTitle": "Import complete",
   "doneBody": "Added {sessions, plural, one {# conversation} other {# conversations}} with {messages, plural, one {# message} other {# messages}}.",
+  "liveSync": "Live sync",
+  "liveSyncHint": "Keep watching these agents and import new sessions automatically. A session you continue in Cognia is frozen and never overwritten.",
+  "someSourcesFailed": "Some sources couldn't be read: {sources}",
   "sources": {
     "claude-code": "Claude Code",
     "codex": "Codex CLI",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "gemini-cli": "Gemini CLI",
+    "continue-dev": "Continue",
+    "aider": "Aider"
   }
 }

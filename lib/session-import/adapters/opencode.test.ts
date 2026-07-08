@@ -65,6 +65,21 @@ describe("opencodeToConversation", () => {
     expect(meta.model).toBe("claude-x")
   })
 
+  it("surfaces patch/snapshot markers (previously dropped) but still drops step markers", () => {
+    const conv = opencodeToConversation({
+      ...SESSION,
+      messages: [
+        {
+          role: "assistant",
+          createdAt: 1,
+          parts: [{ type: "patch", text: "a.ts" }, { type: "snapshot" }, { type: "step-finish" }],
+        },
+      ],
+    })
+    const parts = conv.messages[0].parts as Array<Record<string, unknown>>
+    expect(parts.map((p) => p.text)).toEqual(["[patch applied: a.ts]", "[snapshot]"])
+  })
+
   it("marks an errored tool part", () => {
     const conv = opencodeToConversation({
       ...SESSION,

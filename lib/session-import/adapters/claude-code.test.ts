@@ -168,6 +168,234 @@ describe("parseClaudeTranscript", () => {
     const parsed = parseClaudeTranscript(line, "s.jsonl")
     expect(parsed.messages[0].metadata).toBeUndefined()
   })
+
+  it("linearizes to the active leaf, dropping an abandoned edit branch", () => {
+    const lines = [
+      {
+        type: "user",
+        uuid: "u1",
+        parentUuid: null,
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:01Z",
+        message: { role: "user", content: "first" },
+      },
+      // Abandoned re-run of the answer (older).
+      {
+        type: "assistant",
+        uuid: "a_old",
+        parentUuid: "u1",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:02Z",
+        message: { role: "assistant", content: [{ type: "text", text: "ABANDONED" }] },
+      },
+      // The kept answer (newer) → the active leaf.
+      {
+        type: "assistant",
+        uuid: "a_new",
+        parentUuid: "u1",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:05Z",
+        message: { role: "assistant", content: [{ type: "text", text: "KEPT" }] },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const parsed = parseClaudeTranscript(lines, "s.jsonl")
+    const texts = parsed.messages.flatMap((m) =>
+      (m.parts as Array<Record<string, unknown>>).map((p) => p.text)
+    )
+    expect(texts).toContain("KEPT")
+    expect(texts).not.toContain("ABANDONED")
+  })
+
+  it("includes system records (previously dropped)", () => {
+    const lines = [
+      {
+        type: "user",
+        uuid: "u1",
+        parentUuid: null,
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:00Z",
+        message: { role: "user", content: "hi" },
+      },
+      {
+        type: "system",
+        uuid: "sys1",
+        parentUuid: "u1",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:01Z",
+        content: "Hook ran: format.sh",
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const parsed = parseClaudeTranscript(lines, "s.jsonl")
+    const sys = parsed.messages.find((m) => m.role === "system")
+    expect(sys).toBeTruthy()
+    expect((sys!.parts as Array<Record<string, unknown>>)[0].text).toBe("Hook ran: format.sh")
+  })
+
+  it("falls back to structured toolUseResult when the result block is empty", () => {
+    const lines = [
+      {
+        type: "assistant",
+        uuid: "a1",
+        parentUuid: null,
+        sessionId: "s",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "t", name: "Read", input: {} }],
+        },
+      },
+      {
+        type: "user",
+        uuid: "u2",
+        parentUuid: "a1",
+        sessionId: "s",
+        toolUseResult: { filePath: "/x.ts", lines: 42 },
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "t", content: "" }],
+        },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const parsed = parseClaudeTranscript(lines, "s.jsonl")
+    const tool = (parsed.messages[0].parts as Array<Record<string, unknown>>)[0]
+    expect(tool.state).toBe("output-available")
+    expect(tool.output).toEqual({ filePath: "/x.ts", lines: 42 })
+  })
+
+  it("extracts subagent sidechains out of the main thread", () => {
+    const lines = [
+      {
+        type: "user",
+        uuid: "u1",
+        parentUuid: null,
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:00Z",
+        message: { role: "user", content: "do it" },
+      },
+      {
+        type: "assistant",
+        uuid: "a1",
+        parentUuid: "u1",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:01Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "task-1", name: "Task", input: { prompt: "sub" } }],
+        },
+      },
+      // Sidechain (subagent) turns — must NOT appear in the main thread.
+      {
+        type: "user",
+        uuid: "sc1",
+        parentUuid: "a1",
+        isSidechain: true,
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:02Z",
+        message: { role: "user", content: "sub prompt" },
+      },
+      {
+        type: "assistant",
+        uuid: "sc2",
+        parentUuid: "sc1",
+        isSidechain: true,
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:03Z",
+        message: { role: "assistant", content: [{ type: "text", text: "SUBAGENT OUTPUT" }] },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const parsed = parseClaudeTranscript(lines, "s.jsonl")
+    // Main thread has the user turn + the assistant Task turn only.
+    const mainTexts = parsed.messages.flatMap((m) =>
+      (m.parts as Array<Record<string, unknown>>).map((p) => p.text ?? p.type)
+    )
+    expect(mainTexts).not.toContain("SUBAGENT OUTPUT")
+    // The sidechain is captured for reconstruction.
+    expect(parsed.sidechains).toHaveLength(1)
+    expect(parsed.sidechains[0].spawnParentUuid).toBe("a1")
+    expect(parsed.sidechains[0].records.map((r) => r.uuid)).toEqual(["sc1", "sc2"])
+  })
+
+  it("reconstructs a subagent snapshot on the spawning turn + a nested session", () => {
+    const lines = [
+      {
+        type: "user",
+        uuid: "u1",
+        parentUuid: null,
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:00Z",
+        message: { role: "user", content: "do it" },
+      },
+      {
+        type: "assistant",
+        uuid: "a1",
+        parentUuid: "u1",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:01Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "task-1",
+              name: "Task",
+              input: { subagent_type: "researcher", prompt: "sub" },
+            },
+          ],
+        },
+      },
+      {
+        type: "user",
+        uuid: "sc1",
+        parentUuid: "a1",
+        isSidechain: true,
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:02Z",
+        message: { role: "user", content: "sub prompt" },
+      },
+      {
+        type: "assistant",
+        uuid: "sc2",
+        parentUuid: "sc1",
+        isSidechain: true,
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:03Z",
+        message: { role: "assistant", content: [{ type: "text", text: "SUBAGENT DONE" }] },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const parsed = parseClaudeTranscript(lines, "s.jsonl")
+
+    // The spawning assistant turn now carries a subagent part.
+    const spawnTurn = parsed.messages.find((m) =>
+      (m.parts as Array<Record<string, unknown>>).some((p) => p.type === "subagent")
+    )
+    expect(spawnTurn).toBeTruthy()
+    const subPart = (spawnTurn!.parts as Array<Record<string, unknown>>).find(
+      (p) => p.type === "subagent"
+    )!
+    expect(subPart.name).toBe("researcher")
+    expect(subPart.status).toBe("completed")
+    expect(subPart.nestedSessionId).toBe("import:claude-code:s:sub:sc1")
+
+    // A hidden nested session with the full inner transcript is produced.
+    expect(parsed.nestedConversations).toHaveLength(1)
+    const nested = parsed.nestedConversations[0]
+    expect(nested.session.kind).toBe("subagent")
+    expect(nested.session.branchSeed).toBeUndefined() // read-only, no continuation
+    expect(nested.session.id).toBe("import:claude-code:s:sub:sc1")
+    const nestedTexts = nested.messages.flatMap((m) =>
+      (m.parts as Array<Record<string, unknown>>).map((p) => p.text)
+    )
+    expect(nestedTexts).toContain("SUBAGENT DONE")
+  })
 })
 
 describe("claudeCodeSessionSource", () => {

@@ -15,11 +15,12 @@ import { createLogger } from "@/lib/logging"
 import {
   detectSourceForFiles,
   importSessions as importSessionsDefault,
-  listAllSessions as listAllSessionsDefault,
+  scanAllSources as scanAllSourcesDefault,
   listSessionsForSource as listSessionsForSourceDefault,
   resolveScanInput as resolveScanInputDefault,
   type PickedSessionFile,
   type SessionRef,
+  type SessionScanError,
   type SessionScanInput,
   type SessionSummary,
 } from "@/lib/session-import"
@@ -29,7 +30,7 @@ const log = createLogger("session-import")
 export type SessionImportState =
   | { status: "idle" }
   | { status: "scanning" }
-  | { status: "list"; summaries: SessionSummary[] }
+  | { status: "list"; summaries: SessionSummary[]; warnings?: SessionScanError[] }
   | { status: "importing" }
   | { status: "done"; sessionsAdded: number; messagesAdded: number }
   | { status: "error"; message: string }
@@ -41,7 +42,7 @@ export function summaryKey(ref: SessionRef): string {
 
 export interface UseSessionImportDeps {
   resolveScanInput?: typeof resolveScanInputDefault
-  listAllSessions?: typeof listAllSessionsDefault
+  scanAllSources?: typeof scanAllSourcesDefault
   listSessionsForSource?: typeof listSessionsForSourceDefault
   importSessions?: typeof importSessionsDefault
   pick?: typeof pickAndReadFiles
@@ -50,7 +51,7 @@ export interface UseSessionImportDeps {
 
 export function useSessionImport(deps: UseSessionImportDeps = {}) {
   const resolveScanInput = deps.resolveScanInput ?? resolveScanInputDefault
-  const listAllSessions = deps.listAllSessions ?? listAllSessionsDefault
+  const scanAllSources = deps.scanAllSources ?? scanAllSourcesDefault
   const listSessionsForSource = deps.listSessionsForSource ?? listSessionsForSourceDefault
   const importSessions = deps.importSessions ?? importSessionsDefault
   const pick = deps.pick ?? pickAndReadFiles
@@ -66,25 +67,28 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
     inputRef.current = null
   }, [])
 
-  const showList = useCallback((summaries: SessionSummary[], input: SessionScanInput) => {
-    inputRef.current = input
-    // Pre-select everything found — the common case is "import them all".
-    setSelected(new Set(summaries.map((s) => summaryKey(s.ref))))
-    setState({ status: "list", summaries })
-  }, [])
+  const showList = useCallback(
+    (summaries: SessionSummary[], input: SessionScanInput, warnings?: SessionScanError[]) => {
+      inputRef.current = input
+      // Pre-select everything found — the common case is "import them all".
+      setSelected(new Set(summaries.map((s) => summaryKey(s.ref))))
+      setState({ status: "list", summaries, ...(warnings?.length ? { warnings } : {}) })
+    },
+    []
+  )
 
-  /** Desktop auto-scan of every source. */
+  /** Desktop auto-scan of every source. Per-source failures surface as warnings. */
   const scan = useCallback(async () => {
     setState({ status: "scanning" })
     try {
       const input = await resolveScanInput()
-      const summaries = await listAllSessions(input)
-      showList(summaries, input)
+      const { summaries, errors } = await scanAllSources(input)
+      showList(summaries, input, errors)
     } catch (err) {
       log.error("session-import-scan-failed", { error: err })
       setState({ status: "error", message: err instanceof Error ? err.message : String(err) })
     }
-  }, [resolveScanInput, listAllSessions, showList])
+  }, [resolveScanInput, scanAllSources, showList])
 
   /** File-picker fallback. Optionally forces a source; else auto-detects. */
   const pickFiles = useCallback(

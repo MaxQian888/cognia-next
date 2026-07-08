@@ -71,6 +71,16 @@ function mapPart(part: OpencodePart): Part | null {
             filename: part.filename,
           })
         : null
+    case "patch":
+    case "snapshot": {
+      // Structural markers between turns — previously dropped. Surface a compact
+      // marker so an applied patch / snapshot is visible in the imported
+      // transcript (the full diff isn't in the normalized shape). Truly empty
+      // control markers (step-start / step-finish) still fall through to null.
+      const label = part.type === "patch" ? "patch applied" : "snapshot"
+      const detail = part.text || part.filename || ""
+      return textPart(detail ? `[${label}: ${detail}]` : `[${label}]`)
+    }
     default:
       return null
   }

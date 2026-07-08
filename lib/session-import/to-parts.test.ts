@@ -113,4 +113,27 @@ describe("to-parts builders", () => {
     expect(session.branchSeed).toMatchObject({ kind: "transcript" })
     expect(session.branchSeed?.content).toContain("hi")
   })
+
+  it("builds a read-only subagent session with no branchSeed when suppressed", () => {
+    const msgs = [
+      buildMessage({
+        sessionId: "s",
+        index: 0,
+        role: "user",
+        parts: [textPart("hi")],
+        createdAt: 1,
+      }),
+    ]
+    const session = buildSession({
+      id: "import:claude-code:s:sub:x",
+      title: "Sub",
+      kind: "subagent",
+      suppressSeed: true,
+      createdAt: 1,
+      updatedAt: 2,
+      seedMessages: msgs,
+    })
+    expect(session.kind).toBe("subagent")
+    expect(session.branchSeed).toBeUndefined()
+  })
 })

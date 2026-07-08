@@ -21,9 +21,15 @@
   "messagesLabel": "{count, plural, one {# 条消息} other {# 条消息}}",
   "doneTitle": "导入完成",
   "doneBody": "已添加 {sessions, plural, one {# 个对话} other {# 个对话}}，共 {messages, plural, one {# 条消息} other {# 条消息}}。",
+  "liveSync": "实时同步",
+  "liveSyncHint": "持续监视这些 Agent 并自动导入新会话。已在 Cognia 中续聊的会话会被冻结，永不被覆盖。",
+  "someSourcesFailed": "部分来源无法读取：{sources}",
   "sources": {
     "claude-code": "Claude Code",
     "codex": "Codex CLI",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "gemini-cli": "Gemini CLI",
+    "continue-dev": "Continue",
+    "aider": "Aider"
   }
 }

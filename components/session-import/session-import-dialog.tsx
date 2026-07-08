@@ -21,9 +21,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { Switch } from "@/components/ui/switch"
 import { isTauri } from "@/lib/tauri"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSessionImport, summaryKey } from "@/hooks/session-import/use-session-import"
+import { useSessionImportWatch } from "@/hooks/session-import/use-session-import-watch"
 import type { SessionSummary } from "@/lib/session-import"
 
 export interface SessionImportDialogProps {
@@ -37,6 +39,9 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const { state, selected, selectedCount, scan, pickFiles, toggle, setAll, importSelected, reset } =
     useSessionImport()
+  const { enabled: watching, toggle: toggleWatch } = useSessionImportWatch({
+    projectId: activeProjectId ?? undefined,
+  })
 
   const onOpenChange = (next: boolean) => {
     setOpen(next)
@@ -81,6 +86,19 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
                 <span className="text-sm font-medium">{t("pickButton")}</span>
               </Button>
             </div>
+            {desktop && (
+              <label className="flex items-start justify-between gap-3 rounded-md border p-3">
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{t("liveSync")}</span>
+                  <span className="block text-xs text-muted-foreground">{t("liveSyncHint")}</span>
+                </span>
+                <Switch
+                  checked={watching}
+                  onCheckedChange={(on) => void toggleWatch(on)}
+                  aria-label={t("liveSync")}
+                />
+              </label>
+            )}
           </div>
         )}
 
@@ -92,13 +110,22 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
         )}
 
         {state.status === "list" && (
-          <SessionList
-            summaries={state.summaries}
-            selected={selected}
-            onToggle={toggle}
-            sourceLabel={(id) => t(`sources.${id}` as never)}
-            messagesLabel={(n) => t("messagesLabel", { count: n })}
-          />
+          <div className="space-y-2">
+            {state.warnings && state.warnings.length > 0 && (
+              <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                {t("someSourcesFailed", {
+                  sources: state.warnings.map((w) => w.sourceId).join(", "),
+                })}
+              </p>
+            )}
+            <SessionList
+              summaries={state.summaries}
+              selected={selected}
+              onToggle={toggle}
+              sourceLabel={(id) => t(`sources.${id}` as never)}
+              messagesLabel={(n) => t("messagesLabel", { count: n })}
+            />
+          </div>
         )}
 
         {state.status === "done" && (
