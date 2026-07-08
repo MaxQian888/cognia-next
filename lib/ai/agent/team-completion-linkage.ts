@@ -19,8 +19,14 @@
  *      the payload lands in run records and downstream LLM nodes via
  *      `{{ $trigger.payload }}`.
  *
- * Best-effort and never throws into the lifecycle's finally block.
+ * Best-effort and never throws into the lifecycle's finally block. The
+ * shared fan-out mechanics (lazy runtime load, match → dispatch with
+ * per-match isolation, PII text gate) live in
+ * `lib/runtime/completion-linkage-core.ts`; this wrapper keeps the
+ * team-specific chain-depth guard + payload shape.
  */
+
+import { dispatchCompletionFanout, gateModelText } from "@/lib/runtime/completion-linkage-core"
 
 /** Max team-completion → workflow → team chain length before fan-out stops. */
 export const MAX_TEAM_TRIGGER_CHAIN_DEPTH = 3
@@ -44,59 +50,30 @@ export async function dispatchTeamCompletedTriggers(event: TeamCompletedEvent): 
   // Gate 1 — chain-depth loop guard.
   if (event.chainDepth >= MAX_TEAM_TRIGGER_CHAIN_DEPTH) return
 
-  try {
-    // Lazy-load the workflow runtime + redaction gate so the team subsystem
-    // stays cheap to import (matches the goal/terminal linkages).
-    const [{ dispatchTrigger }, { findMatchingWorkflows }, { hasNoLeakingPii }] = await Promise.all(
-      [
-        import("@/lib/workflow/runtime/trigger-bridge"),
-        import("@/lib/workflow/runtime/trigger-subscriptions"),
-        import("@/lib/twin/ingest/redact"),
-      ]
-    )
+  // Gate 2 — PII red-line on model-produced text. Omit-when-unsafe (not
+  // empty-string) so downstream templates can distinguish "no result".
+  const [reason, finalResult] = await Promise.all([
+    gateModelText(event.reason),
+    gateModelText(event.finalResult, FINAL_RESULT_MAX_CHARS),
+  ])
 
-    const matches = findMatchingWorkflows("trigger.team", {
+  await dispatchCompletionFanout({
+    kind: "trigger.team",
+    match: { teamId: event.teamId, status: event.status },
+    payload: {
+      // `event` distinguishes user-workflow fan-out payloads from the
+      // synthesized team-run marker payload (exactly `{ teamId }`) that
+      // shares the "trigger.team" kind — the runs-list filter and the
+      // CLI status projection both key on it.
+      event: "team.completed",
       teamId: event.teamId,
+      teamName: event.teamName,
+      runId: event.runId,
       status: event.status,
-    })
-    if (matches.length === 0) return
-
-    // Gate 2 — PII red-line on model-produced text. Omit-when-unsafe (not
-    // empty-string) so downstream templates can distinguish "no result".
-    const reason = event.reason && hasNoLeakingPii(event.reason) ? event.reason : undefined
-    const finalResult =
-      event.finalResult && hasNoLeakingPii(event.finalResult)
-        ? event.finalResult.slice(0, FINAL_RESULT_MAX_CHARS)
-        : undefined
-
-    const originAt = Date.now()
-    await Promise.all(
-      matches.map((match) =>
-        dispatchTrigger({
-          workflowId: match.workflowId,
-          kind: "trigger.team",
-          payload: {
-            // `event` distinguishes user-workflow fan-out payloads from the
-            // synthesized team-run marker payload (exactly `{ teamId }`) that
-            // shares the "trigger.team" kind — the runs-list filter and the
-            // CLI status projection both key on it.
-            event: "team.completed",
-            teamId: event.teamId,
-            teamName: event.teamName,
-            runId: event.runId,
-            status: event.status,
-            ...(reason ? { reason } : {}),
-            ...(finalResult ? { finalResult } : {}),
-            chainDepth: event.chainDepth + 1,
-          },
-          originAt,
-          binding: { teamId: event.teamId },
-        }).catch(() => {
-          // Per-match isolation — one bad workflow can't block the others.
-        })
-      )
-    )
-  } catch {
-    // Workflow runtime unavailable (e.g. web-only build path) — best-effort.
-  }
+      ...(reason ? { reason } : {}),
+      ...(finalResult ? { finalResult } : {}),
+      chainDepth: event.chainDepth + 1,
+    },
+    binding: { teamId: event.teamId },
+  })
 }

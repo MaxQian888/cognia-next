@@ -18,6 +18,7 @@
 import type { Goal } from "@/types/goal"
 import type { GoalHookPayload } from "@/types/plugin/plugin-hooks"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
+import { dispatchCompletionFanout } from "@/lib/runtime/completion-linkage-core"
 
 /**
  * Project a `Goal` row down to the redacted snapshot handed to plugin goal
@@ -84,43 +85,25 @@ async function notifyGoalTerminal(goal: Goal): Promise<void> {
 }
 
 async function dispatchGoalCompletedTriggers(goal: Goal): Promise<void> {
-  try {
-    // Lazy-load the workflow runtime so the goal subsystem stays cheap to
-    // import (matches the dispatchChatMessageTriggers pattern).
-    const [{ dispatchTrigger }, { findMatchingWorkflows }] = await Promise.all([
-      import("@/lib/workflow/runtime/trigger-bridge"),
-      import("@/lib/workflow/runtime/trigger-subscriptions"),
-    ])
-    const matches = findMatchingWorkflows("trigger.goal.completed", {
+  // Shared fan-out mechanics (lazy runtime load, match → dispatch with
+  // per-match isolation, outer best-effort) live in the core module. The
+  // payload carries the pre-redacted `safeObjective` only — never the raw
+  // text — so no additional PII gate is needed here.
+  await dispatchCompletionFanout({
+    kind: "trigger.goal.completed",
+    match: {
       characterId: goal.characterId,
       sessionId: goal.sessionId,
       goalId: goal.id,
       status: goal.status,
-    })
-    if (matches.length === 0) return
-
-    const originAt = Date.now()
-    await Promise.all(
-      matches.map((match) =>
-        dispatchTrigger({
-          workflowId: match.workflowId,
-          kind: "trigger.goal.completed",
-          payload: {
-            goalId: goal.id,
-            status: goal.status,
-            // Redacted objective only — never the raw text (PII red-line).
-            safeObjective: goal.safeObjective,
-            turnsUsed: goal.turnsUsed,
-            tokensUsed: goal.tokensUsed,
-          },
-          originAt,
-          binding: { sessionId: goal.sessionId, characterId: goal.characterId, goalId: goal.id },
-        }).catch(() => {
-          // Per-match isolation — one bad workflow can't block the others.
-        })
-      )
-    )
-  } catch {
-    // Workflow runtime unavailable (e.g. web-only build path) — best-effort.
-  }
+    },
+    payload: {
+      goalId: goal.id,
+      status: goal.status,
+      safeObjective: goal.safeObjective,
+      turnsUsed: goal.turnsUsed,
+      tokensUsed: goal.tokensUsed,
+    },
+    binding: { sessionId: goal.sessionId, characterId: goal.characterId, goalId: goal.id },
+  })
 }
