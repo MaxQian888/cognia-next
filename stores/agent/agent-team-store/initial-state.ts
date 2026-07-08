@@ -37,6 +37,7 @@ export const initialState = {
   displayMode: "expanded" as TeamDisplayMode,
   isPanelOpen: false,
   workspaceTab: "overview" as const,
+  tasksView: "list" as const,
   workspaceFocus: {
     teammateId: null,
     taskId: null,

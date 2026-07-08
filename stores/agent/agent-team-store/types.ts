@@ -58,6 +58,8 @@ export interface AgentTeamState {
   workspaceTab: AgentTeamWorkspaceTab
   workspaceFocus: AgentTeamWorkspaceFocus
   workspaceDetailOpen: boolean
+  /** Tasks tab presentation: flat list or kanban board. Persisted. */
+  tasksView: "list" | "board"
 
   // Settings
   defaultConfig: AgentTeamConfig
@@ -156,6 +158,7 @@ export interface AgentTeamState {
   setDisplayMode: (mode: TeamDisplayMode) => void
   setIsPanelOpen: (open: boolean) => void
   setWorkspaceTab: (tab: AgentTeamWorkspaceTab) => void
+  setTasksView: (view: "list" | "board") => void
   setWorkspaceFocus: (focus: Partial<AgentTeamWorkspaceFocus>) => void
   setWorkspaceTeamFromRoute: (teamId: string | null | undefined) => void
   closeAgentTeamWorkspaceDetail: () => void

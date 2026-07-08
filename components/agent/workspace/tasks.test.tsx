@@ -41,10 +41,25 @@ jest.mock("next-intl", () => ({
 // ── store: expose jest.fn() mocks so we can assert calls ─────────────────────
 const createTaskMock = jest.fn()
 const deleteTaskMock = jest.fn()
+const setTasksViewMock = jest.fn()
+// Mutable so individual tests can flip the persisted view or provide a team.
+const mockStoreState: Record<string, unknown> = {}
 
 jest.mock("@/stores/agent/agent-team-store", () => ({
   useAgentTeamStore: (selector: (s: unknown) => unknown) =>
-    selector({ createTask: createTaskMock, deleteTask: deleteTaskMock }),
+    selector({
+      createTask: createTaskMock,
+      deleteTask: deleteTaskMock,
+      setTasksView: setTasksViewMock,
+      tasksView: "list",
+      teams: {},
+      ...mockStoreState,
+    }),
+}))
+
+// ── board stub — the kanban has its own suite; keep this one's graph light ───
+jest.mock("./board/task-board", () => ({
+  TaskBoard: () => <div data-testid="mock-task-board" />,
 }))
 
 // ── sonner ───────────────────────────────────────────────────────────────────
@@ -139,12 +154,30 @@ function makeTeammate(id: string, name: string): AgentTeammate {
 beforeEach(() => {
   createTaskMock.mockClear()
   deleteTaskMock.mockClear()
+  setTasksViewMock.mockClear()
   toastSuccess.mockClear()
+  for (const key of Object.keys(mockStoreState)) delete mockStoreState[key]
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("AgentTeamTasks", () => {
+  // ── view toggle ────────────────────────────────────────────────────────────
+
+  it("persists the view choice through setTasksView", () => {
+    render(<AgentTeamTasks teamId="t1" tasks={[makeTask("a")]} teammates={[]} />)
+    fireEvent.click(screen.getByTestId("tasks-view-board"))
+    expect(setTasksViewMock).toHaveBeenCalledWith("board")
+  })
+
+  it("renders the board view when tasksView is board and the team exists", () => {
+    mockStoreState.tasksView = "board"
+    mockStoreState.teams = { t1: { id: "t1" } }
+    render(<AgentTeamTasks teamId="t1" tasks={[makeTask("a")]} teammates={[]} />)
+    expect(screen.getByTestId("mock-task-board")).toBeInTheDocument()
+    expect(screen.queryByTestId("task-a")).not.toBeInTheDocument()
+  })
+
   // ── empty state ────────────────────────────────────────────────────────────
 
   it("renders the empty state when no tasks are provided", () => {

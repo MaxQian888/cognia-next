@@ -158,7 +158,8 @@ export const CANONICAL_EXTENSION_POINTS = [
   "terminal.toolbar",
   // Agent-Team workspace — plugins mount an insight/governance panel in the
   // team overview tab (alongside the consensus/delegation views). Context bag:
-  // `teamId` + `status`.
+  // `teamId` / `status` / `teammateCount` / `taskCount` / `completedTaskCount`
+  // (ids + aggregates only).
   "agent.team.panel",
   // Agent-Team execution report — plugins mount a custom analytics section
   // beneath the native KPI / taskline / token-burn cards in the activity
@@ -171,6 +172,15 @@ export const CANONICAL_EXTENSION_POINTS = [
   // send directive / attach a capability). Context bag: `teamId` /
   // `teammateId` / `role` / `status` / `runtime` / `specialization`.
   "agent.teammate.actions",
+  // Task-board card menu — plugins mount per-task actions inside each kanban
+  // card's "⋯" dropdown (e.g. push to an external tracker, generate
+  // subtasks). Context bag: `teamId` / `taskId` / `status` / `assignedTo` /
+  // `tags` (ids + labels only — no task description/result bodies).
+  "agent.team.task.actions",
+  // Task-board toolbar — plugins mount board-scoped controls next to the
+  // filter/swimlane toggles (e.g. import issues from an external tracker).
+  // Context bag: `teamId` + the active `filter` (tags/priorities/assignees).
+  "agent.team.board.toolbar",
   // External-agent live session toolbar — plugins mount controls in the
   // ACP/OpenCode/Codex run header (next to commands / config / fork) during a
   // live external-agent session. Context bag: `sessionId` / `isExecuting` /
@@ -237,6 +247,8 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "agent.team.panel",
   "agent.team.report",
   "agent.teammate.actions",
+  "agent.team.task.actions",
+  "agent.team.board.toolbar",
   "agent.external-session.toolbar",
   "settings.general",
   "settings.appearance",
@@ -318,6 +330,8 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "agent.team.panel": "components/agent/workspace/overview.tsx",
   "agent.team.report": "components/agent/workspace/activity-report/report-plugin-slot.tsx",
   "agent.teammate.actions": "components/agent/workspace/members.tsx",
+  "agent.team.task.actions": "components/agent/workspace/board/task-card.tsx",
+  "agent.team.board.toolbar": "components/agent/workspace/board/board-toolbar.tsx",
   "agent.external-session.toolbar": "components/agent/external-agent/session-panel.tsx",
   "settings.general": "components/settings/agent-runtime/tabs/defaults-tab.tsx",
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",

@@ -152,6 +152,7 @@ describe("partializeAgentTeamState", () => {
       defaultConfig: initialState.defaultConfig,
       displayMode: initialState.displayMode,
       workspaceTab: initialState.workspaceTab,
+      tasksView: initialState.tasksView,
       lastAdapterSyncVersion: initialState.lastAdapterSyncVersion,
       teams: { team_a: persistedTeam("team_a", "Alpha") },
       teammates: { mate_a: { id: "mate_a" } },

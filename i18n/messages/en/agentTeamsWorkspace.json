@@ -661,6 +661,32 @@
   "tasks": {
     "addTask": "Add task",
     "assignee": "Assignee",
+    "board": {
+      "cardMenu": "Task actions",
+      "clearFilters": "Clear",
+      "denied": {
+        "blocked-column": "Blocked is managed automatically — cards enter and leave it with their dependencies.",
+        "illegal-transition": "That move isn't allowed from this column.",
+        "runtime-owned": "The team is running this task — pause the run to move it.",
+        "task-not-found": "Task no longer exists."
+      },
+      "emptyColumn": "No tasks",
+      "filterAssignee": "Assignee",
+      "filterPriority": "Priority",
+      "filterTags": "Tags",
+      "filters": "Filters",
+      "lockedBy": "Blocked by: {titles}",
+      "pause": "Pause",
+      "resume": "Resume",
+      "run": "Run",
+      "swimlanes": "Swimlanes",
+      "unassignedLane": "Unassigned",
+      "viewBoard": "Board view",
+      "viewList": "List view",
+      "viewToggle": "Tasks view",
+      "wip": "WIP {active}/{capacity}",
+      "wipOver": "More tasks are active than the team can run at once ({capacity})."
+    },
     "cancel": "Cancel",
     "comments": {
       "add": "Add comment",

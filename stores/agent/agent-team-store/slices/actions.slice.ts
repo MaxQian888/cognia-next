@@ -1160,6 +1160,8 @@ export const createAgentTeamActionsSlice = (
   setDisplayMode: (mode) => set({ displayMode: mode }),
   setIsPanelOpen: (open) => set({ isPanelOpen: open }),
   setWorkspaceTab: (tab) => set({ workspaceTab: tab }),
+
+  setTasksView: (view) => set({ tasksView: view }),
   setWorkspaceFocus: (focus) =>
     set((state) => ({
       workspaceFocus: {

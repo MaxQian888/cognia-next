@@ -15,6 +15,8 @@ import { MotionReveal, useFlowMotion } from "@/components/chat/motion/motion-rev
 import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
 import { useCountUp } from "@/hooks/usage/use-count-up"
 import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { useShallow } from "zustand/react/shallow"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
 export interface AgentTeamOverviewProps {
@@ -72,6 +74,20 @@ export function AgentTeamOverview({
   const duration = team.totalDuration
     ? `${Math.floor(team.totalDuration / 60000)}m ${Math.floor((team.totalDuration % 60000) / 1000)}s`
     : null
+
+  // Task aggregates for the plugin panel context (ids + counts only).
+  const taskStats = useAgentTeamStore(
+    useShallow((s) => {
+      let total = 0
+      let completed = 0
+      for (const task of Object.values(s.tasks)) {
+        if (task.teamId !== team.id) continue
+        total += 1
+        if (task.status === "completed") completed += 1
+      }
+      return { total, completed }
+    })
+  )
 
   // Derive the displayed status from the durable workflowRuns row (with the
   // optimistic store status winning only while in-flight). See ADR-0022 "PR 5".
@@ -289,11 +305,18 @@ export function AgentTeamOverview({
         )}
       </div>
 
-      {/* Plugin-contributed team insight / governance panels. */}
+      {/* Plugin-contributed team insight / governance panels. Context carries
+          ids + aggregates only (never task/message bodies). */}
       <PluginExtensionSlot
         point="agent.team.panel"
         className="space-y-4"
-        context={{ teamId: team.id, status: liveStatus }}
+        context={{
+          teamId: team.id,
+          status: liveStatus,
+          teammateCount: workers.length,
+          taskCount: taskStats.total,
+          completedTaskCount: taskStats.completed,
+        }}
       />
     </div>
   )

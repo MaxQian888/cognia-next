@@ -179,6 +179,7 @@ export function partializeAgentTeamState(state: AgentTeamState) {
     defaultConfig: state.defaultConfig,
     displayMode: state.displayMode,
     workspaceTab: state.workspaceTab,
+    tasksView: state.tasksView,
     lastAdapterSyncVersion: state.lastAdapterSyncVersion,
     teams: state.teams,
     teammates: state.teammates,

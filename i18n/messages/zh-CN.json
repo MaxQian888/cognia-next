@@ -1310,6 +1310,32 @@
     "tasks": {
       "addTask": "新建任务",
       "assignee": "负责人",
+      "board": {
+        "cardMenu": "任务操作",
+        "clearFilters": "清除",
+        "denied": {
+          "blocked-column": "「已阻塞」列由依赖关系自动管理，卡片会随依赖完成自动进出。",
+          "illegal-transition": "不允许从当前列移动到该列。",
+          "runtime-owned": "团队正在执行此任务——暂停运行后才能移动。",
+          "task-not-found": "任务已不存在。"
+        },
+        "emptyColumn": "暂无任务",
+        "filterAssignee": "负责人",
+        "filterPriority": "优先级",
+        "filterTags": "标签",
+        "filters": "筛选",
+        "lockedBy": "被阻塞于：{titles}",
+        "pause": "暂停",
+        "resume": "恢复",
+        "run": "运行",
+        "swimlanes": "泳道",
+        "unassignedLane": "未指派",
+        "viewBoard": "看板视图",
+        "viewList": "列表视图",
+        "viewToggle": "任务视图",
+        "wip": "进行中 {active}/{capacity}",
+        "wipOver": "活跃任务数超过团队并发能力（{capacity}）。"
+      },
       "cancel": "取消",
       "comments": {
         "add": "添加评论",
@@ -2752,10 +2778,21 @@
         }
       },
       "voice": {
-        "holdToTalk": "按住说话",
+        "errors": {
+          "generic": "语音输入失败，请重试。",
+          "noMicrophone": "没有可用的麦克风，请检查音频设备。",
+          "noSpeech": "未检测到语音，请靠近麦克风再试。",
+          "permissionDenied": "麦克风权限被拒绝，请为应用开启麦克风权限后重试。"
+        },
+        "grantMicAccess": "允许访问麦克风",
         "languageLabel": "语言",
+        "listening": "正在聆听…",
+        "micPermissionDenied": "麦克风访问已被禁止——请在系统或浏览器设置中开启。",
         "microphoneLabel": "麦克风",
+        "noMicFound": "未找到麦克风。",
         "selectMicAria": "选择麦克风",
+        "startListening": "开始语音输入",
+        "stopListening": "停止录音",
         "voiceSettings": "语音设置"
       },
       "webLabel": "Web",
