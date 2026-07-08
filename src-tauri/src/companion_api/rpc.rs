@@ -228,6 +228,20 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
+    // ADR-0059 T-A5 — connector command plane for the headless brain's
+    // connector-runtime. Same names as the Tauri commands; each arm
+    // delegates to the same free function the command wraps.
+    "connectors_health",
+    "connectors_keyring_set",
+    "connectors_keyring_get",
+    "connectors_keyring_delete",
+    "connectors_keyring_list",
+    "connectors_http_request",
+    "connectors_attachment_fetch",
+    "connectors_attachment_read",
+    "connectors_media_upload",
+    "connectors_lark_upload_file",
+    "connectors_lark_upload_image",
     // Mobile outbound-queue RPCs — round-trip through desktop_writes_bridge.
     // Mirror `MOBILE_OUTBOUND_COMMANDS` in `lib/db/mobile-outbound-types.ts`.
     // Spec-parity test (`spec_parity.rs`) asserts these stay in lockstep
@@ -648,6 +662,19 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
+    // ADR-0059 T-A5 — the connector command plane carries credentials and
+    // arbitrary outbound HTTP; only the brain's service token may touch it.
+    "connectors_health",
+    "connectors_keyring_set",
+    "connectors_keyring_get",
+    "connectors_keyring_delete",
+    "connectors_keyring_list",
+    "connectors_http_request",
+    "connectors_attachment_fetch",
+    "connectors_attachment_read",
+    "connectors_media_upload",
+    "connectors_lark_upload_file",
+    "connectors_lark_upload_image",
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
@@ -1702,6 +1729,164 @@ pub(super) async fn dispatch(
                 })
                 .collect();
             Ok(serde_json::json!({ "adapters": adapters }))
+        }
+
+        // ── Connector command plane for the headless brain (ADR-0059 T-A5) ──
+        // The brain's connector-runtime routes the `connectors_*` TS wrappers
+        // here (same names, camelCase args verbatim). Every arm delegates to
+        // the SAME free function its Tauri command wraps — the desktop path
+        // (src/connectors/commands.rs) stays untouched and no logic is
+        // duplicated. `required_aliased` accepts the snake_case spelling too
+        // for parity with the R12 register/unregister arms.
+        "connectors_health" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let count = services.connectors.inner.lock().registered_adapters.len();
+            // On the headless front door the `/connectors` ingress router is
+            // mounted by the companion server itself — there is no separately
+            // started local axum server (and thus no distinct bound address).
+            to_json(crate::connectors::types::ConnectorsHealth {
+                server_running: true,
+                bound_addr: None,
+                registered_adapter_count: count,
+            })
+        }
+
+        "connectors_keyring_set" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let credential: String = required(&args, "credential")?;
+            let value: String = required(&args, "value")?;
+            crate::connectors::keyring::set(&adapter_id, &credential, &value)
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_keyring_get" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let credential: String = required(&args, "credential")?;
+            let value = crate::connectors::keyring::get(&adapter_id, &credential)
+                .map_err(RpcError::internal)?;
+            to_json(value)
+        }
+
+        "connectors_keyring_delete" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let credential: String = required(&args, "credential")?;
+            crate::connectors::keyring::delete(&adapter_id, &credential)
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_keyring_list" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let accounts: Vec<String> = required(&args, "accounts")?;
+            let present = crate::connectors::keyring::list(&adapter_id, &accounts)
+                .map_err(RpcError::internal)?;
+            to_json(present)
+        }
+
+        "connectors_http_request" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::types::TauriHttpRequest = required(&args, "req")?;
+            let resp = crate::connectors::http_client::http_request(req)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(resp)
+        }
+
+        "connectors_attachment_fetch" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let remote_ref: String = required_aliased(&args, "remote_ref", "remoteRef")?;
+            let source_url: String = required_aliased(&args, "source_url", "sourceUrl")?;
+            let headers: Option<std::collections::HashMap<String, String>> =
+                optional(&args, "headers")?;
+            let attachment = crate::connectors::attachments::fetch_attachment(
+                adapter_id, remote_ref, source_url, headers,
+            )
+            .await
+            .map_err(RpcError::internal)?;
+            to_json(attachment)
+        }
+
+        "connectors_attachment_read" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let remote_ref: String = required_aliased(&args, "remote_ref", "remoteRef")?;
+            let max_bytes: u64 = required_aliased(&args, "max_bytes", "maxBytes")?;
+            let bytes =
+                crate::connectors::attachments::read_attachment_base64(
+                    &adapter_id,
+                    &remote_ref,
+                    max_bytes,
+                )
+                .map_err(RpcError::internal)?;
+            to_json(bytes)
+        }
+
+        "connectors_media_upload" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let req: crate::connectors::types::ConnectorMediaUploadRequest =
+                required(&args, "req")?;
+            let uri = crate::connectors::media_upload::upload_media(req)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(uri)
+        }
+
+        "connectors_lark_upload_file" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let access_token: String = required_aliased(&args, "access_token", "accessToken")?;
+            let source_url: String = required_aliased(&args, "source_url", "sourceUrl")?;
+            let file_type: String = required_aliased(&args, "file_type", "fileType")?;
+            let file_name: String = required_aliased(&args, "file_name", "fileName")?;
+            let duration_ms: Option<u64> = match optional(&args, "duration_ms")? {
+                Some(v) => Some(v),
+                None => optional(&args, "durationMs")?,
+            };
+            let file_key = crate::connectors::lark_upload::upload_file(
+                &access_token,
+                &source_url,
+                &file_type,
+                &file_name,
+                duration_ms,
+            )
+            .await
+            .map_err(RpcError::internal)?;
+            to_json(file_key)
+        }
+
+        "connectors_lark_upload_image" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let access_token: String = required_aliased(&args, "access_token", "accessToken")?;
+            let source_url: String = required_aliased(&args, "source_url", "sourceUrl")?;
+            let image_type: Option<String> = match optional(&args, "image_type")? {
+                Some(v) => Some(v),
+                None => optional(&args, "imageType")?,
+            };
+            let image_key = crate::connectors::lark_upload::upload_image(
+                &access_token,
+                &source_url,
+                image_type.as_deref(),
+            )
+            .await
+            .map_err(RpcError::internal)?;
+            to_json(image_key)
         }
 
         // Remote Session Control — resolve a host computer-use HITL consent
@@ -2898,6 +3083,18 @@ mod tests {
             "connectors_register",
             "connectors_unregister",
             "connectors_list_adapters",
+            // ADR-0059 T-A5 — connector command plane.
+            "connectors_health",
+            "connectors_keyring_set",
+            "connectors_keyring_get",
+            "connectors_keyring_delete",
+            "connectors_keyring_list",
+            "connectors_http_request",
+            "connectors_attachment_fetch",
+            "connectors_attachment_read",
+            "connectors_media_upload",
+            "connectors_lark_upload_file",
+            "connectors_lark_upload_image",
         ] {
             assert!(is_service_only_command(name), "{name} must be service-only");
             assert!(KNOWN_COMMANDS.contains(&name), "{name} must be allowlisted");
@@ -2973,6 +3170,131 @@ mod tests {
         .await
         .expect("list after unregister");
         assert_eq!(listed["adapters"].as_array().unwrap().len(), 0);
+    }
+
+    // ── Connector command plane arms (ADR-0059 T-A5) ─────────────────────────
+
+    /// Keyring set → list → get → delete through the dispatch arms, mixing
+    /// the camelCase TS-wrapper arg shape with the snake_case alias — both
+    /// must resolve to the same secret-store entry the webhook verifiers
+    /// read (hermetic via the `cfg(test)` in-memory secret store).
+    #[tokio::test]
+    async fn connectors_keyring_arms_round_trip_camel_and_snake() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+
+        macro_rules! call {
+            ($name:expr, $args:expr) => {
+                dispatch(
+                    $name,
+                    $args,
+                    &state,
+                    &host,
+                    "brain-local",
+                    Some(ACCOUNT_ID),
+                    Some("service"),
+                )
+                .await
+            };
+        }
+
+        // Set via the camelCase wrapper shape.
+        call!(
+            "connectors_keyring_set",
+            json!({ "adapterId": "tg-arm-kr", "credential": "botToken", "value": "s3cret" })
+        )
+        .expect("set");
+
+        let listed = call!(
+            "connectors_keyring_list",
+            json!({ "adapterId": "tg-arm-kr", "accounts": ["botToken", "missing"] })
+        )
+        .expect("list");
+        assert_eq!(listed, json!(["botToken"]));
+
+        // Get via the snake_case alias — same entry.
+        let got = call!(
+            "connectors_keyring_get",
+            json!({ "adapter_id": "tg-arm-kr", "credential": "botToken" })
+        )
+        .expect("get");
+        assert_eq!(got, json!("s3cret"));
+
+        call!(
+            "connectors_keyring_delete",
+            json!({ "adapterId": "tg-arm-kr", "credential": "botToken" })
+        )
+        .expect("delete");
+        let got = call!(
+            "connectors_keyring_get",
+            json!({ "adapterId": "tg-arm-kr", "credential": "botToken" })
+        )
+        .expect("get after delete");
+        assert_eq!(got, Value::Null);
+    }
+
+    /// `connectors_health` reflects the always-mounted headless ingress and
+    /// the shared registry count (camelCase payload, wrapper parity).
+    #[tokio::test]
+    async fn connectors_health_reports_the_headless_ingress() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+
+        dispatch(
+            "connectors_register",
+            json!({ "adapter_id": "tg-health", "adapter_type": "telegram" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("register");
+
+        let health = dispatch(
+            "connectors_health",
+            json!({}),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("health");
+        assert_eq!(
+            health,
+            json!({
+                "serverRunning": true,
+                "boundAddr": Value::Null,
+                "registeredAdapterCount": 1,
+            })
+        );
+    }
+
+    /// Malformed args map to 400 malformed_request, not a panic or 500.
+    #[tokio::test]
+    async fn connectors_http_request_rejects_malformed_args() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+
+        let err = dispatch(
+            "connectors_http_request",
+            json!({}),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("missing req must 400");
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(err.1 .0.code, "malformed_request");
     }
 
     /// `sync_pull` on a headless host routes through the connected brain's

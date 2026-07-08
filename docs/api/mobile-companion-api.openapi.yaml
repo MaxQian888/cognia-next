@@ -2825,6 +2825,435 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  # ── Connector command plane (ADR-0059 T-A5, service scope only) ──────────
+  # The headless brain's connector-runtime drives the same `connectors_*`
+  # wrappers the desktop uses; these arms delegate to the free functions the
+  # Tauri commands wrap. Args are the camelCase Tauri-wrapper shapes
+  # (snake_case aliases accepted for the multi-word fields).
+
+  /api/v1/_rpc/connectors_health:
+    post:
+      operationId: rpcConnectorsHealth
+      tags: [rpc-control]
+      summary: Connector ingress health snapshot (service scope only).
+      description: |
+        ADR-0059 T-A5. On a headless install the `/connectors` ingress is
+        always mounted by the companion server, so `serverRunning` is true
+        and `boundAddr` is null.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Health snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [serverRunning, registeredAdapterCount]
+                properties:
+                  serverRunning: { type: boolean }
+                  boundAddr: { type: string, nullable: true }
+                  registeredAdapterCount: { type: integer }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_keyring_set:
+    post:
+      operationId: rpcConnectorsKeyringSet
+      tags: [rpc-control]
+      summary: Store a connector credential in the server secret store (service scope only).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapterId, credential, value]
+              properties:
+                adapterId: { type: string }
+                credential: { type: string }
+                value: { type: string }
+      responses:
+        "200": { description: Stored., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_keyring_get:
+    post:
+      operationId: rpcConnectorsKeyringGet
+      tags: [rpc-control]
+      summary: Read a connector credential from the server secret store (service scope only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapterId, credential]
+              properties:
+                adapterId: { type: string }
+                credential: { type: string }
+      responses:
+        "200":
+          description: The credential value, or null when unset.
+          content:
+            application/json:
+              schema: { type: string, nullable: true }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_keyring_delete:
+    post:
+      operationId: rpcConnectorsKeyringDelete
+      tags: [rpc-control]
+      summary: Delete a connector credential from the server secret store (service scope only).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapterId, credential]
+              properties:
+                adapterId: { type: string }
+                credential: { type: string }
+      responses:
+        "200":
+          { description: Deleted., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_keyring_list:
+    post:
+      operationId: rpcConnectorsKeyringList
+      tags: [rpc-control]
+      summary: Probe which connector credentials are set (service scope only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapterId, accounts]
+              properties:
+                adapterId: { type: string }
+                accounts:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: The subset of `accounts` that have a stored value.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_http_request:
+    post:
+      operationId: rpcConnectorsHttpRequest
+      tags: [rpc-control]
+      summary: Outbound HTTP proxy for connector adapters (service scope only).
+      description: |
+        ADR-0059 T-A5. The single egress path every connector adapter's
+        send/auth/whoami call uses. Carries arbitrary outbound HTTP —
+        service scope only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [req]
+              properties:
+                req:
+                  type: object
+                  required: [url, method]
+                  properties:
+                    url: { type: string }
+                    method: { type: string }
+                    headers:
+                      type: object
+                      additionalProperties: { type: string }
+                    body: { type: string }
+                    timeoutMs: { type: integer }
+      responses:
+        "200":
+          description: The upstream response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, headers, body]
+                properties:
+                  status: { type: integer }
+                  headers:
+                    type: object
+                    additionalProperties: { type: string }
+                  body: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_attachment_fetch:
+    post:
+      operationId: rpcConnectorsAttachmentFetch
+      tags: [rpc-control]
+      summary: Fetch an inbound attachment into the encrypted connector cache (service scope only).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapterId, remoteRef, sourceUrl]
+              properties:
+                adapterId: { type: string }
+                remoteRef: { type: string }
+                sourceUrl: { type: string }
+                headers:
+                  type: object
+                  additionalProperties: { type: string }
+      responses:
+        "200":
+          description: The cached attachment reference.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [localUrl, remoteRef]
+                properties:
+                  localUrl: { type: string }
+                  remoteRef: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_attachment_read:
+    post:
+      operationId: rpcConnectorsAttachmentRead
+      tags: [rpc-control]
+      summary: Read a cached attachment's plaintext bytes as base64 (service scope only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapterId, remoteRef, maxBytes]
+              properties:
+                adapterId: { type: string }
+                remoteRef: { type: string }
+                maxBytes: { type: integer }
+      responses:
+        "200":
+          description: Base64 bytes, or null when uncached / over the size cap.
+          content:
+            application/json:
+              schema: { type: string, nullable: true }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_media_upload:
+    post:
+      operationId: rpcConnectorsMediaUpload
+      tags: [rpc-control]
+      summary: Upload media to a platform endpoint (service scope only).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [req]
+              properties:
+                req:
+                  type: object
+                  required: [uploadUrl]
+                  properties:
+                    uploadUrl: { type: string }
+                    headers:
+                      type: object
+                      additionalProperties: { type: string }
+                    sourceUrl: { type: string }
+                    localPath: { type: string }
+                    contentType: { type: string }
+      responses:
+        "200":
+          description: The platform's opaque content reference.
+          content:
+            application/json:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_lark_upload_file:
+    post:
+      operationId: rpcConnectorsLarkUploadFile
+      tags: [rpc-control]
+      summary: Upload a file to Lark and return the file_key (service scope only).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accessToken, sourceUrl, fileType, fileName]
+              properties:
+                accessToken: { type: string }
+                sourceUrl: { type: string }
+                fileType: { type: string }
+                fileName: { type: string }
+                durationMs: { type: integer }
+      responses:
+        "200":
+          description: The opaque Lark file_key.
+          content:
+            application/json:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/connectors_lark_upload_image:
+    post:
+      operationId: rpcConnectorsLarkUploadImage
+      tags: [rpc-control]
+      summary: Upload an image to Lark and return the image_key (service scope only).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accessToken, sourceUrl]
+              properties:
+                accessToken: { type: string }
+                sourceUrl: { type: string }
+                imageType: { type: string, enum: [message, avatar] }
+      responses:
+        "200":
+          description: The opaque Lark image_key.
+          content:
+            application/json:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/twin_ingest_source:
     post:
       operationId: rpcTwinIngestSource
