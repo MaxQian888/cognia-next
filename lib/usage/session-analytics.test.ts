@@ -269,7 +269,7 @@ describe("analyzeUsageContributors", () => {
 describe("export", () => {
   it("emits a header-only CSV for no rows", () => {
     expect(toUsageCsv([])).toBe(
-      "messageId,sessionId,characterId,surface,at,model,inputTokens,outputTokens,cacheCreationTokens,cacheReadTokens,costUsd,effectiveCostUsd,durationMs"
+      "messageId,sessionId,characterId,surface,at,model,inputTokens,outputTokens,cacheCreationTokens,cacheReadTokens,reasoningTokens,contextInputTokens,costUsd,effectiveCostUsd,durationMs"
     )
   })
 
@@ -289,8 +289,8 @@ describe("export", () => {
       priceFor
     )
     const cells = csv.split("\n")[1].split(",")
-    expect(cells[10]).toBe("0") // costUsd (raw)
-    expect(Number(cells[11])).toBeCloseTo(3) // effectiveCostUsd (1M input @ $3/1M)
+    expect(cells[12]).toBe("0") // costUsd (raw)
+    expect(Number(cells[13])).toBeCloseTo(3) // effectiveCostUsd (1M input @ $3/1M)
   })
 
   it("carries the workflow surface through CSV", () => {

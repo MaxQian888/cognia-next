@@ -514,6 +514,36 @@ describe("recordResultUsage", () => {
     expect(list[0].costUsd).toBeCloseTo(0.99)
   })
 
+  it("persists reasoning + context tokens when the provider reports them", async () => {
+    const written = await recordResultUsage({
+      sessionId: "s1",
+      messageId: "m-reason",
+      result: makeResult({
+        usage: {
+          input_tokens: 50,
+          output_tokens: 25,
+          reasoning_tokens: 12,
+          context_input_tokens: 4096,
+        },
+      }),
+    })
+    expect(written!.reasoningTokens).toBe(12)
+    expect(written!.contextInputTokens).toBe(4096)
+    const list = await listUsageForSession("s1")
+    expect(list[0].reasoningTokens).toBe(12)
+    expect(list[0].contextInputTokens).toBe(4096)
+  })
+
+  it("omits reasoning/context fields on turns that don't report them", async () => {
+    const written = await recordResultUsage({
+      sessionId: "s1",
+      messageId: "m-plain",
+      result: makeResult(),
+    })
+    expect(written!.reasoningTokens).toBeUndefined()
+    expect(written!.contextInputTokens).toBeUndefined()
+  })
+
   it("captures cost-only results without a usage object", async () => {
     const costOnly = {
       type: "result",

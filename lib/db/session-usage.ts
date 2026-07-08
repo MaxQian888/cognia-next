@@ -52,6 +52,16 @@ export interface SessionUsageRow {
   costUsd: number
   /** SDK-reported turn duration. May be 0 when missing. */
   durationMs: number
+  /**
+   * Extended-thinking output tokens (subset of `outputTokens`). Only present
+   * when the turn actually reasoned — absent means "no reasoning", not 0.
+   */
+  reasoningTokens?: number
+  /**
+   * Effective context size the SDK reported for the turn (prompt incl. cache
+   * tiers). Optional — legacy rows and providers that don't report it omit it.
+   */
+  contextInputTokens?: number
   /** Producing surface. Absent on legacy rows ⇒ treated as `"chat"`. */
   surface?: UsageSurface
 }
@@ -102,6 +112,14 @@ export async function recordResultUsage(args: {
     cacheReadTokens: usage.cacheReadInputTokens ?? 0,
     costUsd: usage.totalCostUsd ?? 0,
     durationMs: usage.durationMs ?? 0,
+    reasoningTokens:
+      typeof usage.reasoningTokens === "number" && usage.reasoningTokens > 0
+        ? usage.reasoningTokens
+        : undefined,
+    contextInputTokens:
+      typeof usage.contextInputTokens === "number" && usage.contextInputTokens > 0
+        ? usage.contextInputTokens
+        : undefined,
     surface: "chat",
   }
   await upsertSessionUsage(row)
@@ -125,6 +143,8 @@ export interface SurfaceUsageInput {
   cacheCreationTokens?: number
   costUsd?: number
   durationMs?: number
+  reasoningTokens?: number
+  contextInputTokens?: number
   model?: string
   providerId?: string
 }
@@ -157,6 +177,9 @@ function buildSurfaceRow(args: {
     cacheReadTokens: num(usage.cacheReadTokens),
     costUsd: num(usage.costUsd),
     durationMs: num(usage.durationMs),
+    reasoningTokens: num(usage.reasoningTokens) > 0 ? num(usage.reasoningTokens) : undefined,
+    contextInputTokens:
+      num(usage.contextInputTokens) > 0 ? num(usage.contextInputTokens) : undefined,
     surface: args.surface,
   }
 }
@@ -185,6 +208,8 @@ export async function recordConnectorUsage(args: {
       cacheCreationTokens: args.usage.cacheCreationInputTokens,
       costUsd: args.usage.totalCostUsd,
       durationMs: args.usage.durationMs,
+      reasoningTokens: args.usage.reasoningTokens,
+      contextInputTokens: args.usage.contextInputTokens,
     },
     at,
   })
@@ -217,6 +242,8 @@ export async function recordGoalUsage(args: {
       cacheCreationTokens: args.usage.cacheCreationInputTokens,
       costUsd: args.usage.totalCostUsd,
       durationMs: args.usage.durationMs,
+      reasoningTokens: args.usage.reasoningTokens,
+      contextInputTokens: args.usage.contextInputTokens,
     },
     at: args.at ?? Date.now(),
   })

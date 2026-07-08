@@ -293,6 +293,8 @@ const CSV_COLUMNS = [
   "outputTokens",
   "cacheCreationTokens",
   "cacheReadTokens",
+  "reasoningTokens",
+  "contextInputTokens",
   "costUsd",
   // Cost actually charged: the SDK figure when present, else priced from the
   // model's tokens. Without this column non-Anthropic rows export as $0.
