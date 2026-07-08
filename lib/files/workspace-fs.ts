@@ -13,11 +13,23 @@ import { transport } from "@/lib/tauri"
 import {
   fromRawWorkspaceEntry,
   fromRawWorkspaceStat,
+  fromRawWorkspaceContentMatch,
   type RawWorkspaceEntry,
   type RawWorkspaceStat,
+  type RawWorkspaceContentMatch,
   type WorkspaceEntry,
   type WorkspaceStat,
+  type WorkspaceContentMatch,
 } from "@/lib/files/types"
+
+export interface WorkspaceContentSearchOptions {
+  /** Interpret `query` as a Rust regex. Invalid patterns reject. */
+  isRegex?: boolean
+  /** Case-sensitive match (default: false). */
+  caseSensitive?: boolean
+  /** Cap the number of returned matches (Rust hard-limit: 500). */
+  maxResults?: number
+}
 
 /**
  * List the immediate children of `root`/`relPath` (omit `relPath` for the root
@@ -48,6 +60,26 @@ export async function statWorkspaceFile(root: string, relPath: string): Promise<
     relPath,
   })
   return fromRawWorkspaceStat(raw)
+}
+
+/**
+ * Project-wide content search under `root` (respects `.gitignore`). Returns
+ * per-line matches with 1-based line/column and a trimmed preview. Empty query
+ * returns `[]`. Throws if `root` isn't a directory or the regex is invalid.
+ */
+export async function searchWorkspaceContent(
+  root: string,
+  query: string,
+  options: WorkspaceContentSearchOptions = {}
+): Promise<WorkspaceContentMatch[]> {
+  const raw = await transport.call<RawWorkspaceContentMatch[]>("fs_search_content_workspace", {
+    root,
+    query,
+    isRegex: options.isRegex,
+    caseSensitive: options.caseSensitive,
+    maxResults: options.maxResults,
+  })
+  return raw.map(fromRawWorkspaceContentMatch)
 }
 
 /** Read a text file relative to `root` (truncated to `maxBytes` when given). */

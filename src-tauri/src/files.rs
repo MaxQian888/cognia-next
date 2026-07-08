@@ -509,6 +509,129 @@ fn rank_search_results(entries: &mut [WorkspaceEntry], needle_lower: &str) {
     });
 }
 
+/// A single content-search hit inside a workspace file.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WorkspaceContentMatch {
+    /// Path relative to the search root, forward-slashed.
+    pub rel_path: String,
+    pub absolute_path: String,
+    /// 1-based line number of the match.
+    pub line: u32,
+    /// 1-based column (char offset) where the match starts on that line.
+    pub column: u32,
+    /// The matching line, trimmed to `CONTENT_PREVIEW_MAX` chars.
+    pub preview: String,
+}
+
+const CONTENT_SEARCH_MAX_MATCHES: usize = 500;
+/// Skip files larger than this (bytes) — they are almost always generated or
+/// binary and would dominate the walk.
+const CONTENT_SEARCH_MAX_FILE_BYTES: u64 = 2_000_000;
+const CONTENT_PREVIEW_MAX: usize = 400;
+
+/// Project-wide content search. Walks `root` (respecting `.gitignore` + the
+/// standard ignore set, like `fs_search_workspace`), reads each UTF-8 text
+/// file, and returns up to `max_results` line matches for `query`.
+///
+/// `is_regex` interprets `query` as a Rust regex (invalid patterns error out);
+/// otherwise it is matched literally. `case_sensitive` defaults to false.
+///
+/// The `root` is validated as a directory; individual files are range-safe by
+/// construction (we only read paths yielded by the walker under `root`). Binary
+/// / non-UTF-8 / oversized files are skipped silently.
+#[tauri::command]
+pub fn fs_search_content_workspace(
+    root: String,
+    query: String,
+    is_regex: Option<bool>,
+    case_sensitive: Option<bool>,
+    max_results: Option<usize>,
+) -> Result<Vec<WorkspaceContentMatch>, String> {
+    let root_path = PathBuf::from(&root);
+    if !root_path.is_dir() {
+        return Err(format!("root is not a directory: {}", root));
+    }
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let cap = max_results
+        .unwrap_or(CONTENT_SEARCH_MAX_MATCHES)
+        .min(CONTENT_SEARCH_MAX_MATCHES);
+    let case_sensitive = case_sensitive.unwrap_or(false);
+
+    let pattern = if is_regex.unwrap_or(false) {
+        query.clone()
+    } else {
+        regex::escape(&query)
+    };
+    let matcher = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .map_err(|e| format!("invalid search pattern: {}", e))?;
+
+    let walker = WalkBuilder::new(&root_path)
+        .hidden(false)
+        .git_ignore(true)
+        .git_exclude(true)
+        .git_global(true)
+        .require_git(false)
+        .max_depth(Some(SEARCH_MAX_DEPTH))
+        .build();
+
+    let mut out: Vec<WorkspaceContentMatch> = Vec::new();
+    'walk: for dent in walker.flatten() {
+        if dent.depth() == 0 {
+            continue;
+        }
+        let file_type = dent.file_type();
+        // Skip directories AND symlinks: `read_to_string` would follow a
+        // symlink and read a target that may resolve OUTSIDE `root`, escaping
+        // the sandbox (the size guard sees the link's own size, not the
+        // target's). Real files only.
+        if file_type.map(|t| t.is_dir() || t.is_symlink()).unwrap_or(true) {
+            continue;
+        }
+        let path = dent.path();
+        if dent
+            .metadata()
+            .ok()
+            .map(|m| m.len())
+            .unwrap_or(0)
+            > CONTENT_SEARCH_MAX_FILE_BYTES
+        {
+            continue;
+        }
+        let contents = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue, // binary / non-UTF-8 / unreadable → skip
+        };
+        let rel = match path.strip_prefix(&root_path) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        let abs = path.to_string_lossy().to_string();
+        for (idx, raw_line) in contents.lines().enumerate() {
+            if let Some(m) = matcher.find(raw_line) {
+                // 1-based char column of the match start.
+                let column = raw_line[..m.start()].chars().count() as u32 + 1;
+                let preview: String = raw_line.chars().take(CONTENT_PREVIEW_MAX).collect();
+                out.push(WorkspaceContentMatch {
+                    rel_path: rel.clone(),
+                    absolute_path: abs.clone(),
+                    line: idx as u32 + 1,
+                    column,
+                    preview,
+                });
+                if out.len() >= cap {
+                    break 'walk;
+                }
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 /// Read a text file inside a workspace, with a sandboxed path-traversal check.
 /// `rel_path` is joined to `root` and must canonicalize back inside `root`.
 #[tauri::command]
@@ -1701,6 +1824,131 @@ mod tests {
             "include_ignored shows everything: {:?}",
             all_names
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_content_finds_line_matches_with_position() {
+        let root = make_sandbox("grep");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("src").join("a.ts"),
+            "const x = 1\nconst needle = 2\nplain\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("b.ts"), "no match here\n").unwrap();
+
+        let hits = fs_search_content_workspace(
+            root.to_string_lossy().to_string(),
+            "needle".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1, "one line matches: {:?}", hits);
+        let hit = &hits[0];
+        assert_eq!(hit.rel_path, "src/a.ts");
+        assert_eq!(hit.line, 2);
+        assert_eq!(hit.column, 7); // "const " = 6 chars, match starts at col 7
+        assert!(hit.preview.contains("needle"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_content_is_case_insensitive_by_default_and_literal() {
+        let root = make_sandbox("grep-case");
+        // `.` would be a regex wildcard if not escaped — literal mode escapes it.
+        std::fs::write(root.join("f.txt"), "Foo.Bar\nfxoxo\n").unwrap();
+
+        let ci = fs_search_content_workspace(
+            root.to_string_lossy().to_string(),
+            "foo.bar".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(ci.len(), 1, "case-insensitive literal match: {:?}", ci);
+
+        let sensitive = fs_search_content_workspace(
+            root.to_string_lossy().to_string(),
+            "foo.bar".into(),
+            None,
+            Some(true),
+            None,
+        )
+        .unwrap();
+        assert!(sensitive.is_empty(), "case-sensitive misses: {:?}", sensitive);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_content_regex_mode_and_gitignore_and_empty_query() {
+        let root = make_sandbox("grep-regex");
+        std::fs::write(root.join(".gitignore"), "ignored.txt\n").unwrap();
+        std::fs::write(root.join("ignored.txt"), "TODO: skip me\n").unwrap();
+        std::fs::write(root.join("keep.txt"), "TODO: fix\nTODONT\n").unwrap();
+
+        let regex_hits = fs_search_content_workspace(
+            root.to_string_lossy().to_string(),
+            r"TODO:\s".into(),
+            Some(true),
+            None,
+            None,
+        )
+        .unwrap();
+        // gitignored file excluded; only keep.txt line 1 matches `TODO: `.
+        assert_eq!(regex_hits.len(), 1, "regex + gitignore: {:?}", regex_hits);
+        assert_eq!(regex_hits[0].rel_path, "keep.txt");
+        assert_eq!(regex_hits[0].line, 1);
+
+        // Empty query yields nothing (guards against a full-file dump).
+        let empty = fs_search_content_workspace(
+            root.to_string_lossy().to_string(),
+            "".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(empty.is_empty());
+
+        // Invalid regex errors out rather than matching everything.
+        let bad = fs_search_content_workspace(
+            root.to_string_lossy().to_string(),
+            "(".into(),
+            Some(true),
+            None,
+            None,
+        );
+        assert!(bad.is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn search_content_does_not_follow_symlinks_out_of_root() {
+        let root = make_sandbox("grep-symlink");
+        // A secret file OUTSIDE the workspace root.
+        let outside = std::env::temp_dir().join(format!("cognia-secret-{}.txt", std::process::id()));
+        std::fs::write(&outside, "SUPER_SECRET_TOKEN\n").unwrap();
+        // A symlink inside the workspace pointing at it.
+        std::os::unix::fs::symlink(&outside, root.join("link.txt")).unwrap();
+        std::fs::write(root.join("real.txt"), "SUPER_SECRET_TOKEN in-repo\n").unwrap();
+
+        let hits = fs_search_content_workspace(
+            root.to_string_lossy().to_string(),
+            "SUPER_SECRET_TOKEN".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        // Only the real in-repo file matches; the symlink's target is never read.
+        assert_eq!(hits.len(), 1, "symlink target must not be read: {:?}", hits);
+        assert_eq!(hits[0].rel_path, "real.txt");
+        let _ = std::fs::remove_file(&outside);
         let _ = std::fs::remove_dir_all(&root);
     }
 

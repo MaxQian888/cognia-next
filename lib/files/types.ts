@@ -56,3 +56,34 @@ export function fromRawWorkspaceStat(raw: RawWorkspaceStat): WorkspaceStat {
     mtimeMs: raw.mtime_ms ?? null,
   }
 }
+
+/** A single content-search hit (mirrors Rust `WorkspaceContentMatch`). */
+export interface WorkspaceContentMatch {
+  relPath: string
+  absolutePath: string
+  /** 1-based line number. */
+  line: number
+  /** 1-based column (char offset) where the match starts. */
+  column: number
+  /** The matching line, trimmed on the Rust side. */
+  preview: string
+}
+
+/** Raw shape from `fs_search_content_workspace` (snake_case). */
+export interface RawWorkspaceContentMatch {
+  rel_path: string
+  absolute_path: string
+  line: number
+  column: number
+  preview: string
+}
+
+export function fromRawWorkspaceContentMatch(raw: RawWorkspaceContentMatch): WorkspaceContentMatch {
+  return {
+    relPath: raw.rel_path,
+    absolutePath: raw.absolute_path,
+    line: raw.line,
+    column: raw.column,
+    preview: raw.preview,
+  }
+}

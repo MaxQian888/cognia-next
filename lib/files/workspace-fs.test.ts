@@ -6,12 +6,60 @@ import {
   listWorkspaceDir,
   readWorkspaceFile,
   renameWorkspaceEntry,
+  searchWorkspaceContent,
   statWorkspaceFile,
   writeWorkspaceFile,
 } from "./workspace-fs"
 
 afterEach(() => {
   jest.restoreAllMocks()
+})
+
+describe("searchWorkspaceContent", () => {
+  it("forwards options and maps raw matches", async () => {
+    const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce([
+      {
+        rel_path: "src/a.ts",
+        absolute_path: "/repo/src/a.ts",
+        line: 2,
+        column: 7,
+        preview: "const needle = 2",
+      },
+    ])
+    const out = await searchWorkspaceContent("/repo", "needle", {
+      isRegex: true,
+      caseSensitive: false,
+      maxResults: 100,
+    })
+    expect(callSpy).toHaveBeenCalledWith("fs_search_content_workspace", {
+      root: "/repo",
+      query: "needle",
+      isRegex: true,
+      caseSensitive: false,
+      maxResults: 100,
+    })
+    expect(out).toEqual([
+      {
+        relPath: "src/a.ts",
+        absolutePath: "/repo/src/a.ts",
+        line: 2,
+        column: 7,
+        preview: "const needle = 2",
+      },
+    ])
+  })
+
+  it("defaults options to undefined", async () => {
+    const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce([])
+    await searchWorkspaceContent("/repo", "x")
+    expect(callSpy).toHaveBeenCalledWith("fs_search_content_workspace", {
+      root: "/repo",
+      query: "x",
+      isRegex: undefined,
+      caseSensitive: undefined,
+      maxResults: undefined,
+    })
+  })
 })
 
 describe("listWorkspaceDir", () => {

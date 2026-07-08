@@ -46,6 +46,7 @@ import { AgentTeamTasks } from "@/components/agent/workspace/tasks"
 import { AgentTeamChat } from "@/components/agent/workspace/chat"
 import { AgentTeamActivity } from "@/components/agent/workspace/activity"
 import { WorktreesPanel } from "@/components/agent/workspace/worktrees-panel"
+import { AgentTeamEditor } from "@/components/agent/workspace/editor/agent-team-editor"
 import { AgentTeamMembers } from "@/components/agent/workspace/members"
 import { AgentTeamSettings } from "@/components/agent/workspace/settings"
 import { WorkspaceTabNav } from "@/components/agent/workspace/workspace-tab-nav"
@@ -79,6 +80,7 @@ const ALL_TABS = [
   "chat",
   "activity",
   "worktrees",
+  "editor",
   "members",
   "settings",
 ] as const
@@ -363,6 +365,7 @@ function AgentTeamWorkspaceInner() {
             />
           )}
           {tab === "worktrees" && <WorktreesPanel team={team} />}
+          {tab === "editor" && <AgentTeamEditor team={team} />}
           {tab === "members" && (
             <AgentTeamMembers team={team} teammates={teammates} leadId={team.leadId} />
           )}

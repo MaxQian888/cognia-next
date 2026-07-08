@@ -238,6 +238,30 @@ describe("buildWorkbenchUri", () => {
       })
     ).toBe("experiment:///node-9.json")
   })
+
+  it("builds a real file:// URI for the `file` surface from absolutePath", () => {
+    expect(
+      buildWorkbenchUri({
+        surface: "file",
+        documentId: "src/index.ts",
+        absolutePath: "/home/me/project/src/index.ts",
+        projectRoot: "/home/me/project",
+        language: "typescript",
+        initialContent: "",
+      })
+    ).toBe("file:///home/me/project/src/index.ts")
+  })
+
+  it("throws when the `file` surface has no absolutePath", () => {
+    expect(() =>
+      buildWorkbenchUri({
+        surface: "file",
+        documentId: "src/index.ts",
+        language: "typescript",
+        initialContent: "",
+      })
+    ).toThrow(/absolutePath/)
+  })
 })
 
 describe("mountMonacoWorkbench", () => {
@@ -405,5 +429,24 @@ describe("mountMonacoWorkbench", () => {
     handle.dispose()
     expect(bridge.notifyEditorUnmounted).toHaveBeenCalledTimes(1)
     expect(lightBindingDispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("mounts the `file` surface with a real file:// model URI and file context", () => {
+    const { monaco, createCalls } = makeFakeMonaco()
+    const { editor } = makeFakeEditor("ed-file")
+    const handle = mountMonacoWorkbench(editor, monaco, {
+      surface: "file",
+      documentId: "src/a.ts",
+      absolutePath: "/proj/src/a.ts",
+      projectRoot: "/proj",
+      language: "typescript",
+      initialContent: "export const a = 1\n",
+    })
+    expect(handle.uri).toBe("file:///proj/src/a.ts")
+    expect(createCalls[0]?.uri).toBe("file:///proj/src/a.ts")
+    expect(bindingMock.bindMonacoEditorContext).toHaveBeenCalledWith(
+      expect.objectContaining({ contextId: "file", documentId: "src/a.ts" })
+    )
+    handle.dispose()
   })
 })

@@ -19,7 +19,15 @@
  *   - canvas:///{sessionId}/{documentId}.{ext}
  *   - skill:///{skillId}/{file or documentId}.{ext}
  *   - artifact:///{documentId}.{ext}
+ *   - file → the document's real `file://{absolutePath}` URI (project editor)
  *   - any other surface → {surface}:///{documentId}.{ext}
+ *
+ * The `file` surface is special: its models are backed by real on-disk files
+ * (project editor rooted at a team `workingDir`/worktree), so it addresses
+ * them with genuine `file://` URIs. This lets the LSP `workspaceFolder` point
+ * at the actual project root and makes cross-file navigation / project-wide
+ * diagnostics resolve against real paths — unlike the synthetic per-document
+ * schemes used by canvas/skill/artifact.
  */
 
 import { bindMonacoEditorContext } from "./monaco-context-binding"
@@ -34,6 +42,7 @@ import {
   type MonacoTextModel as BridgeMonacoTextModel,
 } from "@/lib/plugin/vscode-shim/monaco-bridge"
 import { getFileExtension } from "@/lib/canvas/utils"
+import { pathToFileUri } from "@/lib/files/path-uri"
 
 // ────────────────────────────────────────────────────────────────────────
 // Minimal real-monaco interface shapes (decoupled from monaco-editor pkg).
@@ -99,7 +108,7 @@ export interface MonacoNamespace {
 // Workbench API
 // ────────────────────────────────────────────────────────────────────────
 
-export type WorkbenchSurface = "canvas" | "skill" | "artifact" | (string & {})
+export type WorkbenchSurface = "canvas" | "skill" | "artifact" | "file" | (string & {})
 
 export interface MonacoWorkbenchSpec {
   /** Surface identifier — keys the URI scheme. */
@@ -112,6 +121,18 @@ export interface MonacoWorkbenchSpec {
   skillId?: string
   /** Optional path segments for skill / artifact / future surfaces. */
   pathSegments?: string[]
+  /**
+   * Absolute on-disk path of the document. REQUIRED for the `file` surface —
+   * it becomes the `file://` model URI so the LSP resolves it against the real
+   * project. Ignored by the synthetic surfaces.
+   */
+  absolutePath?: string
+  /**
+   * Absolute path of the project root this document belongs to (`file`
+   * surface only). Threaded to the LSP workspace manager so the
+   * `workspaceFolder` points at the real project directory.
+   */
+  projectRoot?: string
   /** Monaco language id (e.g. "typescript", "python"). */
   language: string
   /** Content used only when no existing model is found at the URI. */
@@ -146,6 +167,14 @@ export function buildWorkbenchUri(spec: MonacoWorkbenchSpec): string {
     }
     case "artifact": {
       return `artifact:///${spec.documentId}.${ext}`
+    }
+    case "file": {
+      if (!spec.absolutePath) {
+        throw new Error(
+          "monaco-workbench: the `file` surface requires spec.absolutePath (the document's real on-disk path)"
+        )
+      }
+      return pathToFileUri(spec.absolutePath)
     }
     default: {
       return `${spec.surface}:///${spec.documentId}.${ext}`

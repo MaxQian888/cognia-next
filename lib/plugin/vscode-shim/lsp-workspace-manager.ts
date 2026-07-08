@@ -35,11 +35,12 @@
  */
 
 import { loggers } from "@/lib/logging"
+import { pathToFileUri } from "@/lib/files/path-uri"
 
 const workspaceLogger = loggers.plugin.child("lsp-workspace-manager")
 
-/** Surface key matching the workbench URI scheme (`skill` / `canvas` / `artifact`). */
-export type LspWorkspaceSurface = "skill" | "canvas" | "artifact" | (string & {})
+/** Surface key matching the workbench URI scheme (`skill` / `canvas` / `artifact` / `file`). */
+export type LspWorkspaceSurface = "skill" | "canvas" | "artifact" | "file" | (string & {})
 
 /** Input for `ensureWorkspace` — uniquely identifies a materialised workspace. */
 export interface LspWorkspaceSpec {
@@ -110,11 +111,89 @@ export function configureLspWorkspaceManager(adapter: LspWorkspaceFsAdapter | nu
 export function __resetLspWorkspaceManagerForTesting(): void {
   workspaces.clear()
   monacoUriToWorkspace.clear()
+  projectWorkspaces.clear()
   fsImpl = null
 }
 
 const workspaces = new Map<string, AllocatedWorkspace>()
 const monacoUriToWorkspace = new Map<string, string>()
+
+// ────────────────────────────────────────────────────────────────────────
+// Real-project workspaces (the Monaco `file` surface / project editor).
+//
+// Unlike the synthetic per-document workspaces above, these point at a real
+// on-disk directory (a team `workingDir` or a git worktree). Nothing is
+// materialised — the files already exist on disk — so there is no flush and
+// no cleanup sweep. The manager only needs to answer the sidecar's
+// `workspace.workspaceFolders` / `getWorkspaceFolder(uri)` queries for
+// `file://` documents so real Language Servers (rust-analyzer / gopls /
+// pyright / tsserver) root at the actual project and resolve cross-file.
+// ────────────────────────────────────────────────────────────────────────
+
+interface ProjectWorkspace {
+  /** Absolute on-disk root path (normalised to forward slashes). */
+  root: string
+  /** `file://` URI of the root — the `workspaceFolder.uri` the sidecar sees. */
+  rootUri: string
+  /** Human-facing folder name (defaults to the last path segment). */
+  name: string
+}
+
+/** Keyed by `rootUri` so re-registering the same root is idempotent. */
+const projectWorkspaces = new Map<string, ProjectWorkspace>()
+
+function deriveWorkspaceName(root: string): string {
+  const normalised = root.replace(/\\/g, "/").replace(/\/+$/g, "")
+  const segments = normalised.split("/").filter(Boolean)
+  return segments[segments.length - 1] ?? normalised
+}
+
+/**
+ * Register a real project root as an LSP `workspaceFolder`. Idempotent per
+ * root. Returns the `file://` root URI the sidecar will expose. Call this when
+ * a project editor mounts (or switches root); pair with
+ * `unregisterProjectWorkspace(root)` on unmount / root change.
+ */
+export function registerProjectWorkspace(root: string, name?: string): string {
+  const rootUri = pathToFileUri(root.replace(/\/+$/g, ""))
+  const existing = projectWorkspaces.get(rootUri)
+  if (existing) {
+    if (name && name !== existing.name) existing.name = name
+    return rootUri
+  }
+  projectWorkspaces.set(rootUri, {
+    root,
+    rootUri,
+    name: name ?? deriveWorkspaceName(root),
+  })
+  workspaceLogger.debug("project workspace registered", { root, rootUri })
+  return rootUri
+}
+
+/** Remove a previously-registered project root. Idempotent. */
+export function unregisterProjectWorkspace(root: string): void {
+  const rootUri = pathToFileUri(root.replace(/\/+$/g, ""))
+  projectWorkspaces.delete(rootUri)
+}
+
+/** Test-only helper mirroring the reset above for focused suites. */
+export function __resetProjectWorkspacesForTesting(): void {
+  projectWorkspaces.clear()
+}
+
+/**
+ * Longest-prefix match of a `file://` document URI against the registered
+ * project roots. Returns the enclosing project workspace or `null`.
+ */
+function matchProjectWorkspace(fileUri: string): ProjectWorkspace | null {
+  let best: ProjectWorkspace | null = null
+  for (const ws of projectWorkspaces.values()) {
+    if (fileUri === ws.rootUri || fileUri.startsWith(`${ws.rootUri}/`)) {
+      if (!best || ws.rootUri.length > best.rootUri.length) best = ws
+    }
+  }
+  return best
+}
 
 function makeKey(spec: Pick<LspWorkspaceSpec, "surface" | "documentId">): string {
   return `${spec.surface}::${spec.documentId}`
@@ -310,6 +389,13 @@ export async function disposeAllWorkspaces(): Promise<void> {
  * safe to call on every keystroke.
  */
 export function resolveWorkspaceFolder(monacoUri: string): { uri: string; name: string } | null {
+  // Real project (`file://`) documents win: return the enclosing project root
+  // so cross-file navigation resolves against the actual directory.
+  if (monacoUri.startsWith("file://")) {
+    const project = matchProjectWorkspace(monacoUri)
+    if (project) return { uri: project.rootUri, name: project.name }
+  }
+
   const key = monacoUriToWorkspace.get(monacoUri)
   if (!key) return null
   const record = workspaces.get(key)
@@ -328,7 +414,7 @@ export function resolveWorkspaceFolder(monacoUri: string): { uri: string; name: 
  * specified a URI. Stable insertion order.
  */
 export function listWorkspaceFolders(): Array<{ uri: string; name: string; documentUri: string }> {
-  return [...workspaces.values()].map((record) => {
+  const synthetic = [...workspaces.values()].map((record) => {
     const dirUri = record.fileUri.substring(0, record.fileUri.lastIndexOf("/"))
     return {
       uri: dirUri,
@@ -336,6 +422,15 @@ export function listWorkspaceFolders(): Array<{ uri: string; name: string; docum
       documentUri: record.fileUri,
     }
   })
+  // Real project roots are listed first — they are the primary workspace for
+  // the editor, and a server keying off the first folder should see the
+  // project, not a materialised per-document scratch dir.
+  const projects = [...projectWorkspaces.values()].map((ws) => ({
+    uri: ws.rootUri,
+    name: ws.name,
+    documentUri: ws.rootUri,
+  }))
+  return [...projects, ...synthetic]
 }
 
 /**
@@ -378,13 +473,9 @@ export async function createDefaultTauriFsAdapter(): Promise<LspWorkspaceFsAdapt
         .join("/")
     },
     pathToFileUri(absolutePath) {
-      // Convert backslashes (Windows) to forward slashes and prepend
-      // `file://`. Drive letters get a leading `/` so `C:\x` → `file:///C:/x`.
-      const normalised = absolutePath.replace(/\\/g, "/")
-      if (/^[a-zA-Z]:/.test(normalised)) {
-        return `file:///${normalised}`
-      }
-      return normalised.startsWith("/") ? `file://${normalised}` : `file:///${normalised}`
+      // Shared with the Monaco workbench `file` surface so on-disk documents
+      // and their materialised counterparts share byte-identical URIs.
+      return pathToFileUri(absolutePath)
     },
   }
 }

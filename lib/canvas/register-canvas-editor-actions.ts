@@ -8,6 +8,11 @@
  * action per editor-scoped binding so the stored combo actually drives the
  * command.
  *
+ * This is now a thin wrapper over the shared surface-aware engine
+ * (`lib/editor-workbench/register-editor-actions.ts`) — canvas keeps its exact
+ * action ids (`canvas.kb.<actionId>`), trigger source, and the net-new
+ * word-wrap/minimap toggles, while every surface shares one registration path.
+ *
  * Scope split (mirrors how the global window handler in
  * `use-canvas-keyboard-shortcuts.ts` divides responsibility):
  *  - `canvas.save` / `canvas.saveVersion` are app-level and handled globally
@@ -20,67 +25,66 @@
  *    word-wrap/minimap toggles, line duplicate/comment, and folding) is registered here.
  */
 
-import { keyComboToMonaco } from "./keybinding-monaco"
+import {
+  registerEditorActions,
+  type EditorActionDef,
+  type EditorActionDisposable,
+} from "@/lib/editor-workbench/register-editor-actions"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Monaco is dynamic-imported.
 type MonacoNamespace = any
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MonacoEditor = any
-export interface MonacoDisposable {
-  dispose: () => void
-}
+export type MonacoDisposable = EditorActionDisposable
 
-/** Editor-scoped binding action → built-in Monaco command id run via `editor.trigger`. */
-const MONACO_COMMAND_BY_ACTION: Record<string, { command: string; label: string }> = {
-  "canvas.find": { command: "actions.find", label: "Find" },
-  "canvas.replace": { command: "editor.action.startFindReplaceAction", label: "Replace" },
-  "canvas.goToLine": { command: "editor.action.gotoLine", label: "Go to Line…" },
-  "canvas.format": { command: "editor.action.formatDocument", label: "Format Document" },
-  "edit.duplicate": { command: "editor.action.copyLinesDownAction", label: "Duplicate Line" },
-  "edit.comment": { command: "editor.action.commentLine", label: "Toggle Line Comment" },
-  "fold.foldAll": { command: "editor.foldAll", label: "Fold All" },
-  "fold.unfoldAll": { command: "editor.unfoldAll", label: "Unfold All" },
-  "fold.foldLevel1": { command: "editor.foldLevel1", label: "Fold Level 1" },
-  "fold.foldLevel2": { command: "editor.foldLevel2", label: "Fold Level 2" },
-}
+/** Editor-scoped canvas actions: built-in Monaco commands + the two toggles. */
+const CANVAS_ACTIONS: EditorActionDef[] = [
+  { id: "canvas.find", label: "Find", monacoCommand: "actions.find" },
+  {
+    id: "canvas.replace",
+    label: "Replace",
+    monacoCommand: "editor.action.startFindReplaceAction",
+  },
+  { id: "canvas.goToLine", label: "Go to Line…", monacoCommand: "editor.action.gotoLine" },
+  { id: "canvas.format", label: "Format Document", monacoCommand: "editor.action.formatDocument" },
+  {
+    id: "edit.duplicate",
+    label: "Duplicate Line",
+    monacoCommand: "editor.action.copyLinesDownAction",
+  },
+  { id: "edit.comment", label: "Toggle Line Comment", monacoCommand: "editor.action.commentLine" },
+  { id: "fold.foldAll", label: "Fold All", monacoCommand: "editor.foldAll" },
+  { id: "fold.unfoldAll", label: "Unfold All", monacoCommand: "editor.unfoldAll" },
+  { id: "fold.foldLevel1", label: "Fold Level 1", monacoCommand: "editor.foldLevel1" },
+  { id: "fold.foldLevel2", label: "Fold Level 2", monacoCommand: "editor.foldLevel2" },
+  {
+    id: "canvas.toggleWordWrap",
+    label: "Toggle Word Wrap",
+    run: () => {
+      const store = useCanvasSettingsStore.getState()
+      store.updateEditorSettings({ wordWrap: !store.settings.editor.wordWrap })
+    },
+  },
+  {
+    id: "canvas.toggleMinimap",
+    label: "Toggle Minimap",
+    run: () => {
+      const store = useCanvasSettingsStore.getState()
+      store.updateEditorSettings({ minimap: !store.settings.editor.minimap })
+    },
+  },
+]
 
 export function registerCanvasEditorActions(
   editor: MonacoEditor,
   monaco: MonacoNamespace,
   bindings: Record<string, string>
 ): MonacoDisposable[] {
-  if (!editor?.addAction || !monaco) return []
-  const disposables: MonacoDisposable[] = []
-
-  const add = (actionId: string, label: string, run: (ed: MonacoEditor) => void) => {
-    const combo = bindings[actionId]
-    if (!combo) return
-    const keybinding = keyComboToMonaco(combo, monaco)
-    if (keybinding === null) return
-    const disposable = editor.addAction({
-      id: `canvas.kb.${actionId}`,
-      label,
-      keybindings: [keybinding],
-      run,
-    })
-    if (disposable?.dispose) disposables.push(disposable)
-  }
-
-  for (const [actionId, { command, label }] of Object.entries(MONACO_COMMAND_BY_ACTION)) {
-    add(actionId, label, (ed) => ed.trigger?.("canvas-keybinding", command, null))
-  }
-
-  // Word-wrap / minimap have no native Monaco keybinding — flipping the
-  // persisted setting re-derives the editor options and re-applies them.
-  add("canvas.toggleWordWrap", "Toggle Word Wrap", () => {
-    const store = useCanvasSettingsStore.getState()
-    store.updateEditorSettings({ wordWrap: !store.settings.editor.wordWrap })
+  return registerEditorActions(editor, monaco, {
+    idPrefix: "canvas.kb.",
+    triggerSource: "canvas-keybinding",
+    bindings,
+    actions: CANVAS_ACTIONS,
   })
-  add("canvas.toggleMinimap", "Toggle Minimap", () => {
-    const store = useCanvasSettingsStore.getState()
-    store.updateEditorSettings({ minimap: !store.settings.editor.minimap })
-  })
-
-  return disposables
 }

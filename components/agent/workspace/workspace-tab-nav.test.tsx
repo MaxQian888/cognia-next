@@ -22,13 +22,14 @@ describe("WorkspaceTabNav", () => {
     }
   })
 
-  it("exposes the seven canonical tabs in order", () => {
+  it("exposes the eight canonical tabs in order", () => {
     expect(WORKSPACE_TABS.map((t) => t.value)).toEqual([
       "overview",
       "tasks",
       "chat",
       "activity",
       "worktrees",
+      "editor",
       "members",
       "settings",
     ])

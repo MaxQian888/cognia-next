@@ -1,4 +1,4 @@
-import { fromRawWorkspaceEntry, fromRawWorkspaceStat } from "./types"
+import { fromRawWorkspaceEntry, fromRawWorkspaceStat, fromRawWorkspaceContentMatch } from "./types"
 
 describe("fromRawWorkspaceEntry", () => {
   it("converts snake_case Rust shape to camelCase frontend shape", () => {
@@ -59,6 +59,26 @@ describe("fromRawWorkspaceStat", () => {
       isDir: false,
       size: 0,
       mtimeMs: null,
+    })
+  })
+})
+
+describe("fromRawWorkspaceContentMatch", () => {
+  it("maps a raw content match to camelCase", () => {
+    expect(
+      fromRawWorkspaceContentMatch({
+        rel_path: "src/a.ts",
+        absolute_path: "/repo/src/a.ts",
+        line: 12,
+        column: 5,
+        preview: "const needle = 1",
+      })
+    ).toEqual({
+      relPath: "src/a.ts",
+      absolutePath: "/repo/src/a.ts",
+      line: 12,
+      column: 5,
+      preview: "const needle = 1",
     })
   })
 })

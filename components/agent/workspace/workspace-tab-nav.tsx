@@ -14,6 +14,7 @@ import {
   ActivityIcon,
   ArrowLeftIcon,
   BarChart3Icon,
+  FileCode2Icon,
   GitBranchIcon,
   ListTodoIcon,
   MessageCircleIcon,
@@ -42,6 +43,7 @@ export const WORKSPACE_TABS: ReadonlyArray<{ value: AgentTeamWorkspaceTab; icon:
   { value: "chat", icon: MessageCircleIcon },
   { value: "activity", icon: ActivityIcon },
   { value: "worktrees", icon: GitBranchIcon },
+  { value: "editor", icon: FileCode2Icon },
   { value: "members", icon: UsersIcon },
   { value: "settings", icon: Settings2Icon },
 ]
