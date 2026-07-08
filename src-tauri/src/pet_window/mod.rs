@@ -208,7 +208,24 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     // Space + full-screen apps and never steals the foreground app's focus.
     // No-op on Windows/Linux (the builder flags already suffice there). Runs
     // while the window is still hidden — converting a hidden window is fine.
-    macos_panel::apply_pet_panel_behavior(&window, macos_panel::PetPanelRole::Sprite)?;
+    //
+    // MUST run on the main thread: `to_panel` issues raw AppKit calls
+    // (`-[NSPanel setFloatingPanel:]`) that trap (EXC_BREAKPOINT) off-main,
+    // and the `open_pet_window` command is async → tokio worker (the island
+    // crashed exactly this way; see fleet/island_window.rs). Fire-and-forget
+    // is safe: the window is created hidden and only revealed by the renderer
+    // after first paint, well after this closure has run.
+    {
+        let win = window.clone();
+        app.run_on_main_thread(move || {
+            if let Err(e) =
+                macos_panel::apply_pet_panel_behavior(&win, macos_panel::PetPanelRole::Sprite)
+            {
+                log::warn!("pet: applying panel behavior failed: {e}");
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    }
 
     // Intentionally do NOT `show()` here. On Windows a `transparent(true)` window
     // shown before its WebView has committed a first paint renders an opaque

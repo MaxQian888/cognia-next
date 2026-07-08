@@ -110,7 +110,23 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     // no focus theft). `can_become_key_window: true` keeps the talk composer
     // typeable; the `WindowEvent::Focused(false)` blur-to-close above is kept as
     // the cross-platform dismiss path. No-op off macOS.
-    super::macos_panel::apply_pet_panel_behavior(&window, super::macos_panel::PetPanelRole::Popup)?;
+    //
+    // Main-thread dispatch: `to_panel`'s raw AppKit calls trap off-main and
+    // this runs inside an async command (tokio worker) — same crash class as
+    // the fleet island (see fleet/island_window.rs). The window is hidden
+    // until the renderer's first-paint reveal, so fire-and-forget is safe.
+    {
+        let win = window.clone();
+        app.run_on_main_thread(move || {
+            if let Err(e) = super::macos_panel::apply_pet_panel_behavior(
+                &win,
+                super::macos_panel::PetPanelRole::Popup,
+            ) {
+                log::warn!("pet popup: applying panel behavior failed: {e}");
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    }
 
     // Intentionally do NOT `show()` / `set_focus()` here. Like the sprite
     // window (`mod.rs`), a `transparent(true)` window shown before its WebView
