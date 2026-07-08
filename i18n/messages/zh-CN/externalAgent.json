@@ -145,7 +145,13 @@
       "notConnected": "连接该智能体以查看其 Codex app-server 状态。",
       "refresh": "刷新状态",
       "skills": "技能",
-      "title": "Codex app-server"
+      "title": "Codex app-server",
+      "account": "账号",
+      "signInRequired": "需要登录",
+      "usage": "用量",
+      "usedPercent": "已使用 {percent}%",
+      "resetsAt": "{time} 重置",
+      "rateLimitReached": "已达到用量上限"
     },
     "command": "命令",
     "commandRequired": "stdio 传输需要填写命令",
@@ -249,7 +255,22 @@
     "transportHttpLabel": "HTTP (远程)",
     "transportStdioLabel": "Stdio (本地进程)",
     "useThisPreset": "使用该预设",
-    "workingDirectory": "工作目录"
+    "workingDirectory": "工作目录",
+    "codexSandboxMode": "沙箱模式",
+    "codexSandboxModeDesc": "Codex 命令默认获得的文件系统访问级别。",
+    "codexSandboxReadOnly": "只读",
+    "codexSandboxWorkspaceWrite": "工作区可写",
+    "codexSandboxDangerFullAccess": "完全访问（危险）",
+    "codexNetworkAccess": "网络访问",
+    "codexNetworkAccessDesc": "允许沙箱内的命令访问网络。",
+    "codexDefaultEffort": "默认推理力度",
+    "codexReasoningSummary": "推理摘要",
+    "codexModelDefault": "模型默认",
+    "codexServerDefault": "服务端默认",
+    "codexSummaryAuto": "自动",
+    "codexSummaryConcise": "简洁",
+    "codexSummaryDetailed": "详细",
+    "codexSummaryNone": "关闭"
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",
@@ -263,5 +284,14 @@
     "latency": "延迟",
     "success": "成功率",
     "title": "健康度明细"
+  },
+  "userInput": {
+    "title": "智能体有问题需要确认",
+    "description": "Codex 需要你的输入才能继续本轮任务。",
+    "autoResolveIn": "{seconds} 秒后自动跳过",
+    "other": "其他…",
+    "otherPlaceholder": "输入你的回答",
+    "submit": "提交回答",
+    "skip": "跳过"
   }
 }

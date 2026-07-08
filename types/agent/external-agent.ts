@@ -1082,6 +1082,12 @@ export interface AcpPermissionResponse {
   scope?: "once" | "session" | "always"
   /** Option ID selected from ACP permission options */
   optionId?: string
+  /**
+   * Per-question answers for interactive user-input requests (Codex
+   * `item/tool/requestUserInput`): question id → selected/typed answers.
+   * Absent for plain approval decisions.
+   */
+  answers?: Record<string, string[]>
 }
 
 // ============================================================================
@@ -1201,6 +1207,9 @@ export interface ExternalAgentConfig {
   /** Tools requiring manual approval */
   requireApprovalFor?: string[]
 
+  /** Codex app-server specific defaults (sandbox / reasoning options) */
+  codexOptions?: CodexAgentOptions
+
   /** Execution timeout (ms) */
   timeout?: number
   /** Retry configuration */
@@ -1237,6 +1246,7 @@ export interface CreateExternalAgentInput {
   defaultPermissionMode?: AcpPermissionMode
   autoApprovePatterns?: string[]
   requireApprovalFor?: string[]
+  codexOptions?: CodexAgentOptions
   timeout?: number
   retryConfig?: Partial<ExternalAgentRetryConfig>
   tags?: string[]
@@ -1256,11 +1266,30 @@ export interface UpdateExternalAgentInput {
   defaultPermissionMode?: AcpPermissionMode
   autoApprovePatterns?: string[]
   requireApprovalFor?: string[]
+  codexOptions?: CodexAgentOptions
   timeout?: number
   retryConfig?: Partial<ExternalAgentRetryConfig>
   tags?: string[]
   metadata?: Record<string, unknown>
   validitySnapshot?: ExternalAgentValiditySnapshot
+}
+
+/**
+ * Codex app-server per-agent option defaults. Applied at session creation
+ * (thread/start `sandbox`, turn/start `sandboxPolicy` / `effort` / `summary`)
+ * and adjustable per session via synthesized config options.
+ */
+export interface CodexAgentOptions {
+  /** Sandbox mode for command execution (`SandboxPolicy` tag). */
+  sandboxMode?: "readOnly" | "workspaceWrite" | "dangerFullAccess"
+  /** Allow network access inside the sandbox (readOnly/workspaceWrite). */
+  networkAccess?: boolean
+  /** Extra writable roots for workspaceWrite. */
+  writableRoots?: string[]
+  /** Default reasoning effort (model-specific values, e.g. "low"…"xhigh"). */
+  defaultReasoningEffort?: string
+  /** Reasoning summary verbosity: "auto" | "concise" | "detailed" | "none". */
+  reasoningSummary?: "auto" | "concise" | "detailed" | "none"
 }
 
 // ============================================================================

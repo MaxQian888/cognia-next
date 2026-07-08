@@ -376,6 +376,29 @@ describe("normalizeExternalAgentConfigInput", () => {
     expect(acp.defaultPermissionMode).toBe("dontAsk")
   })
 
+  it("passes codexOptions through to the normalized config", () => {
+    const cfg = normalizeExternalAgentConfigInput(
+      {
+        name: "Codex",
+        protocol: "codex-app-server",
+        transport: "stdio",
+        codexOptions: {
+          sandboxMode: "workspaceWrite",
+          networkAccess: true,
+          defaultReasoningEffort: "high",
+          reasoningSummary: "detailed",
+        },
+      } as never,
+      { runtimeIsTauri: true }
+    )
+    expect(cfg.codexOptions).toEqual({
+      sandboxMode: "workspaceWrite",
+      networkAccess: true,
+      defaultReasoningEffort: "high",
+      reasoningSummary: "detailed",
+    })
+  })
+
   it("flags an unsupported protocol in metadata", () => {
     const cfg = normalizeExternalAgentConfigInput(
       {

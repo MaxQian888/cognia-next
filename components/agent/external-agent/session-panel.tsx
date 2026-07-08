@@ -22,7 +22,7 @@ import {
   usePluginSlotHasExtensions,
 } from "@/components/plugins/plugin-extension-slot"
 import { Button } from "@/components/ui/button"
-import { GitBranchIcon } from "lucide-react"
+import { GitBranchIcon, Shrink } from "lucide-react"
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
@@ -45,6 +45,8 @@ export function ExternalAgentSessionPanel({ className }: Props) {
     setConfigOption,
     execute,
     forkSession,
+    compactSession,
+    supportsCompaction,
   } = useExternalAgent()
 
   const hasPluginToolbar = usePluginSlotHasExtensions("agent.external-session.toolbar")
@@ -70,6 +72,16 @@ export function ExternalAgentSessionPanel({ className }: Props) {
         toast.error(t("forkUnsupported"))
         return
       }
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleCompact = async () => {
+    if (!activeSession) return
+    try {
+      await compactSession(activeSession.id)
+      toast.success(t("compactStarted"))
+    } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }
   }
@@ -110,6 +122,21 @@ export function ExternalAgentSessionPanel({ className }: Props) {
             >
               <GitBranchIcon className="size-3.5" />
               {t("forkAria")}
+            </Button>
+          )}
+          {Boolean(activeSession) && supportsCompaction && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={() => void handleCompact()}
+              disabled={isExecuting}
+              aria-label={t("compactAria")}
+              title={t("compactTooltip")}
+              data-testid="session-compact-button"
+            >
+              <Shrink className="size-3.5" />
+              {t("compactAria")}
             </Button>
           )}
           {/* Plugin-contributed external-session controls. */}

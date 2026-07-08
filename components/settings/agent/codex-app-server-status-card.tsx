@@ -1,9 +1,10 @@
 "use client"
 
-import { useTranslations } from "next-intl"
-import { RefreshCw, Server, Sparkles } from "lucide-react"
+import { useTranslations, useFormatter } from "next-intl"
+import { Gauge, RefreshCw, Server, Sparkles, UserRound } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
 import { useCodexAppServerStatus } from "@/hooks/agent/use-codex-app-server-status"
 
 interface CodexAppServerStatusCardProps {
@@ -19,6 +20,7 @@ interface CodexAppServerStatusCardProps {
  */
 export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerStatusCardProps) {
   const t = useTranslations("externalAgent.settings.codexAppServer")
+  const format = useFormatter()
   const { status, loading, available, refresh } = useCodexAppServerStatus(agentId, connected)
 
   if (!connected || !available) {
@@ -45,6 +47,66 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
         </Button>
       </div>
+
+      {/* Account (from account/read + account/updated) */}
+      {(status.account !== undefined || status.requiresOpenaiAuth) && (
+        <div className="space-y-1" data-testid="codex-account-section">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <UserRound className="h-3.5 w-3.5" />
+            {t("account")}
+          </div>
+          {status.account ? (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span data-testid="codex-account-email">
+                {status.account.email ?? status.account.type ?? "—"}
+              </span>
+              {status.account.planType && (
+                <Badge variant="outline" className="text-[10px]" data-testid="codex-account-plan">
+                  {status.account.planType}
+                </Badge>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground" data-testid="codex-account-signin">
+              {t("signInRequired")}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Rate limits (from account/rateLimits/read + account/rateLimits/updated) */}
+      {status.rateLimits?.primary && (
+        <div className="space-y-1" data-testid="codex-rate-limits">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <Gauge className="h-3.5 w-3.5" />
+            {t("usage")}
+          </div>
+          <div className="flex items-center gap-2">
+            <Progress
+              value={Math.min(100, Math.max(0, status.rateLimits.primary.usedPercent))}
+              className="h-1.5 flex-1"
+            />
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {t("usedPercent", { percent: status.rateLimits.primary.usedPercent })}
+            </span>
+          </div>
+          {typeof status.rateLimits.primary.resetsAt === "number" && (
+            <p className="text-xs text-muted-foreground" data-testid="codex-rate-limit-reset">
+              {t("resetsAt", {
+                time: format.dateTime(new Date(status.rateLimits.primary.resetsAt * 1000), {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }),
+              })}
+            </p>
+          )}
+          {status.rateLimits.rateLimitReachedType && (
+            <Badge variant="destructive" className="text-[10px]" data-testid="codex-rate-limited">
+              {t("rateLimitReached")}
+            </Badge>
+          )}
+        </div>
+      )}
 
       <div className="space-y-1">
         <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">

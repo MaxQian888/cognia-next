@@ -34,6 +34,16 @@ export interface JsonRpcPeerOptions {
     method: string,
     params: Record<string, unknown> | undefined
   ) => Promise<unknown> | unknown
+  /**
+   * Process server→client requests concurrently instead of awaiting each one
+   * before reading the next inbound message. Required for protocols where a
+   * request can stay pending on user interaction while the server keeps
+   * streaming notifications (Codex app-server approvals / requestUserInput —
+   * e.g. `serverRequest/resolved` must be deliverable while the request it
+   * resolves is still awaiting an answer). Off by default to preserve ACP's
+   * strictly sequential handler ordering.
+   */
+  concurrentServerRequests?: boolean
   /** Default per-request timeout in ms. */
   defaultTimeout?: number
 }
@@ -156,7 +166,12 @@ export class JsonRpcPeer {
         }
         const hasId = "id" in parsed && parsed.id !== null && parsed.id !== undefined
         if (hasId && typeof parsed.method === "string") {
-          await this.handleServerRequest(parsed.id!, parsed.method, parsed.params)
+          if (this.opts.concurrentServerRequests) {
+            // handleServerRequest never rejects (errors become error responses).
+            void this.handleServerRequest(parsed.id!, parsed.method, parsed.params)
+          } else {
+            await this.handleServerRequest(parsed.id!, parsed.method, parsed.params)
+          }
         } else if (hasId) {
           this.handleResponse(parsed)
         } else if (typeof parsed.method === "string") {

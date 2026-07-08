@@ -469,6 +469,7 @@ export function normalizeExternalAgentConfigInput(
     ).mode,
     autoApprovePatterns: input.autoApprovePatterns,
     requireApprovalFor: input.requireApprovalFor,
+    codexOptions: input.codexOptions,
     timeout: input.timeout ?? DEFAULT_TIMEOUT,
     retryConfig: {
       maxRetries: input.retryConfig?.maxRetries ?? DEFAULT_RETRY_CONFIG.maxRetries,

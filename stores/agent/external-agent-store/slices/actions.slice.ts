@@ -221,6 +221,7 @@ export const createExternalAgentActionsSlice = (
         defaultPermissionMode: updates.defaultPermissionMode ?? agent.defaultPermissionMode,
         autoApprovePatterns: updates.autoApprovePatterns ?? agent.autoApprovePatterns,
         requireApprovalFor: updates.requireApprovalFor ?? agent.requireApprovalFor,
+        codexOptions: updates.codexOptions ?? agent.codexOptions,
         timeout: updates.timeout ?? agent.timeout,
         retryConfig: updates.retryConfig
           ? ({

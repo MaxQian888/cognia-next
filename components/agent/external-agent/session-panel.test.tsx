@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import en from "@/i18n/messages/en.json"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -88,6 +88,35 @@ describe("ExternalAgentSessionPanel", () => {
     const slot = screen.getByTestId("slot-agent.external-session.toolbar")
     const ctx = JSON.parse(slot.getAttribute("data-context") ?? "{}")
     expect(ctx).toMatchObject({ isExecuting: false, hasPlan: false, hasCommands: false })
+  })
+
+  it("shows the compact button only when the adapter supports compaction and triggers it", async () => {
+    const compactSession = jest.fn(async () => {})
+    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    useExternalAgentMock.mockReturnValue({
+      ...baseAgentState,
+      activeSession: { id: "thr_1" },
+      forkSession: jest.fn(),
+      compactSession,
+      supportsCompaction: true,
+    })
+    render(wrap(<ExternalAgentSessionPanel />))
+    const button = screen.getByTestId("session-compact-button")
+    fireEvent.click(button)
+    await waitFor(() => expect(compactSession).toHaveBeenCalledWith("thr_1"))
+  })
+
+  it("hides the compact button when compaction is unsupported", () => {
+    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    useExternalAgentMock.mockReturnValue({
+      ...baseAgentState,
+      activeSession: { id: "thr_1" },
+      forkSession: jest.fn(),
+      compactSession: jest.fn(),
+      supportsCompaction: false,
+    })
+    render(wrap(<ExternalAgentSessionPanel />))
+    expect(screen.queryByTestId("session-compact-button")).not.toBeInTheDocument()
   })
 
   it("renders the execution plan when entries are available", () => {

@@ -185,4 +185,37 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     // The preset picker only appears in create mode.
     expect(screen.queryByTestId("preset-picker")).not.toBeInTheDocument()
   })
+
+  it("shows the Codex options section for codex-app-server and saves codexOptions", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-codex-app-server"))
+    })
+    // The preset prefills protocol codex-app-server → the Codex section renders.
+    const section = await screen.findByTestId("codex-options-section")
+    expect(section).toBeInTheDocument()
+    expect(screen.getByTestId("codex-sandbox-mode")).toBeInTheDocument()
+    expect(screen.getByTestId("codex-default-effort")).toBeInTheDocument()
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /^add$/i }))
+    })
+    expect(addAgentMock).toHaveBeenCalledTimes(1)
+    const input = addAgentMock.mock.calls[0][0]
+    expect(input.protocol).toBe("codex-app-server")
+    // Defaults: workspaceWrite sandbox with network off; no effort/summary
+    // overrides until the user picks them.
+    expect(input.codexOptions).toEqual({ sandboxMode: "workspaceWrite", networkAccess: false })
+  })
+
+  it("does not render the Codex options section for non-codex protocols", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-claude-code"))
+    })
+    expect(await screen.findByTestId("preset-picker")).toBeInTheDocument()
+    expect(screen.queryByTestId("codex-options-section")).not.toBeInTheDocument()
+  })
 })

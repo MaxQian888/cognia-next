@@ -179,6 +179,49 @@ describe("JsonRpcPeer", () => {
       const sent = JSON.parse(writes.at(-1)!)
       expect(sent.error).toMatchObject({ code: -32603, message: "boom" })
     })
+
+    it("blocks later notifications behind a pending request by default", async () => {
+      const notifications: string[] = []
+      let resolveHandler!: (value: unknown) => void
+      const peer = new JsonRpcPeer({
+        writeRaw: () => {},
+        onNotification: (method) => notifications.push(method),
+        onServerRequest: () => new Promise((resolve) => (resolveHandler = resolve)),
+      })
+      peer.ingest(JSON.stringify({ id: 9, method: "needs/answer" }))
+      peer.ingest(JSON.stringify({ method: "some/notification" }))
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(notifications).toEqual([])
+      resolveHandler({})
+      // The processing loop resumes across several microtask turns.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(notifications).toEqual(["some/notification"])
+    })
+
+    it("keeps processing notifications while a request is pending with concurrentServerRequests", async () => {
+      const notifications: string[] = []
+      let resolveHandler!: (value: unknown) => void
+      const writes: string[] = []
+      const peer = new JsonRpcPeer({
+        concurrentServerRequests: true,
+        writeRaw: (m) => {
+          writes.push(m)
+        },
+        onNotification: (method) => notifications.push(method),
+        onServerRequest: () => new Promise((resolve) => (resolveHandler = resolve)),
+      })
+      peer.ingest(JSON.stringify({ id: 9, method: "item/tool/requestUserInput" }))
+      peer.ingest(JSON.stringify({ method: "serverRequest/resolved" }))
+      await Promise.resolve()
+      await Promise.resolve()
+      // The notification is delivered even though the request has no answer yet.
+      expect(notifications).toEqual(["serverRequest/resolved"])
+      resolveHandler({ answers: {} })
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(JSON.parse(writes.at(-1)!)).toMatchObject({ id: 9, result: { answers: {} } })
+    })
   })
 
   describe("rejectAll", () => {

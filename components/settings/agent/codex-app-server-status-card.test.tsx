@@ -26,6 +26,12 @@ const messages = {
         noMcpServers: "No MCP servers configured.",
         noSkills: "No skills found.",
         notConnected: "Connect the agent to view its Codex app-server status.",
+        account: "Account",
+        signInRequired: "Sign-in required",
+        usage: "Usage",
+        usedPercent: "{percent}% used",
+        resetsAt: "Resets {time}",
+        rateLimitReached: "Rate limit reached",
       },
     },
   },
@@ -101,5 +107,47 @@ describe("CodexAppServerStatusCard", () => {
     renderCard()
     await user.click(screen.getByTestId("codex-app-server-refresh"))
     expect(refresh).toHaveBeenCalled()
+  })
+
+  it("renders the account email, plan badge, and usage with reset time", () => {
+    hookValue.status = {
+      mcpServers: [],
+      skills: [],
+      account: { type: "chatgpt", email: "dev@example.com", planType: "pro" },
+      requiresOpenaiAuth: false,
+      rateLimits: {
+        planType: "pro",
+        primary: { usedPercent: 42, windowDurationMins: 300, resetsAt: 1750010000 },
+      },
+    }
+    renderCard()
+    expect(screen.getByTestId("codex-account-email")).toHaveTextContent("dev@example.com")
+    expect(screen.getByTestId("codex-account-plan")).toHaveTextContent("pro")
+    expect(screen.getByTestId("codex-rate-limits")).toHaveTextContent("42% used")
+    expect(screen.getByTestId("codex-rate-limit-reset")).toBeInTheDocument()
+    expect(screen.queryByTestId("codex-rate-limited")).not.toBeInTheDocument()
+  })
+
+  it("shows sign-in required when signed out and the rate-limited badge when capped", () => {
+    hookValue.status = {
+      mcpServers: [],
+      skills: [],
+      account: null,
+      requiresOpenaiAuth: true,
+      rateLimits: {
+        primary: { usedPercent: 100 },
+        rateLimitReachedType: "rate_limit_reached",
+      },
+    }
+    renderCard()
+    expect(screen.getByTestId("codex-account-signin")).toBeInTheDocument()
+    expect(screen.getByTestId("codex-rate-limited")).toBeInTheDocument()
+  })
+
+  it("omits account and usage sections when the surface was never fetched", () => {
+    hookValue.status = { mcpServers: [], skills: [] }
+    renderCard()
+    expect(screen.queryByTestId("codex-account-section")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("codex-rate-limits")).not.toBeInTheDocument()
   })
 })

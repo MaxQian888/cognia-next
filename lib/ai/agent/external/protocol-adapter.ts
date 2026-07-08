@@ -138,6 +138,14 @@ export interface ProtocolAdapter {
   getConfigOptions?: (sessionId: string) => AcpConfigOption[] | undefined
 
   /**
+   * Optional: Append user input to the session's in-flight turn without
+   * interrupting it (Codex app-server `turn/steer`). Rejects when no turn is
+   * active or the backend lacks the method — callers keep their
+   * queue-and-replay fallback for that case.
+   */
+  steerTurn?: (sessionId: string, text: string) => Promise<void>
+
+  /**
    * Optional: List sessions (ACP extension / unstable)
    */
   listSessions?: () => Promise<

@@ -37,6 +37,10 @@ import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapt
 import { JsonRpcPeer } from "./json-rpc-peer"
 import { buildAgentEnv } from "./env-builder"
 import { MODE_RANK } from "./permission-cascade"
+import {
+  createExternalAgentUnsupportedSessionExtensionError,
+  isExternalAgentMethodNotFoundError,
+} from "./session-extension-errors"
 import type {
   ExternalAgentConfig,
   ExternalAgentSession,
@@ -44,13 +48,17 @@ import type {
   ExternalAgentEvent,
   ExternalAgentExecutionOptions,
   ExternalAgentContent,
+  AcpConfigOption,
   AcpPermissionMode,
   AcpPermissionResponse,
   AcpPermissionRequest,
   AcpPlanEntry,
+  AcpSessionModelState,
   AcpStopReason,
   ExternalAgentTokenUsage,
+  ExternalAgentSessionExtensionMethod,
   ExternalAgentSessionExtensionSupport,
+  ExternalAgentExtensionSupportStatus,
 } from "@/types/agent/external-agent"
 
 const log = loggers.agent
@@ -62,6 +70,16 @@ const HEALTH_PROBE_TIMEOUT_MS = 5000
 // Codex app-server wire types (local — kept out of the public type surface)
 // ============================================================================
 
+// Wire-format ground truth: verified against `codex app-server generate-json-schema`
+// (codex-cli 0.141.0). Key invariants encoded below:
+// - `approvalPolicy` (AskForApproval) is kebab-case: "untrusted" | "on-failure" |
+//   "on-request" | "never".
+// - `sandboxPolicy` is a `type`-tagged camelCase union (see CodexSandboxPolicy).
+// - `effort` is a free-form model-advertised string; `summary` is
+//   "auto" | "concise" | "detailed" | "none".
+// - `thread/start` accepts `developerInstructions` (system-prompt channel) and
+//   `sandbox` (same SandboxPolicy union as turn/start's `sandboxPolicy`).
+
 /** A user input item for `thread/start` / `turn/start`. */
 type CodexUserInput =
   | { type: "text"; text: string }
@@ -71,6 +89,86 @@ type CodexUserInput =
 /** Approval decision enums (camelCase on the wire). */
 type CodexCommandDecision = "accept" | "acceptForSession" | "decline" | "cancel"
 type CodexFileChangeDecision = "accept" | "acceptForSession" | "decline" | "cancel"
+
+/** Sandbox modes the client exposes (externalSandbox is server-managed only). */
+export type CodexSandboxMode = "readOnly" | "workspaceWrite" | "dangerFullAccess"
+
+/** `SandboxPolicy` tagged union as serialized on the wire. */
+export type CodexSandboxPolicy =
+  | { type: "dangerFullAccess" }
+  | { type: "readOnly"; networkAccess?: boolean }
+  | {
+      type: "workspaceWrite"
+      writableRoots?: string[]
+      networkAccess?: boolean
+      excludeSlashTmp?: boolean
+      excludeTmpdirEnvVar?: boolean
+    }
+
+/** Per-session Codex option overrides carried via session metadata. */
+export interface CodexSessionOptions {
+  sandboxMode?: CodexSandboxMode
+  networkAccess?: boolean
+  writableRoots?: string[]
+  defaultReasoningEffort?: string
+  reasoningSummary?: string
+}
+
+/** `model/list` entry (v2 `Model`). */
+export interface CodexModelInfo {
+  id: string
+  model?: string
+  displayName?: string
+  description?: string
+  hidden?: boolean
+  isDefault?: boolean
+  defaultReasoningEffort?: string
+  supportedReasoningEfforts: Array<{ reasoningEffort: string; description?: string }>
+  supportsPersonality?: boolean
+}
+
+/** `account/read` result (v2 `Account` union, flattened for the status card). */
+export interface CodexAccountInfo {
+  type?: string
+  email?: string
+  planType?: string
+}
+
+/** One `RateLimitWindow` from a `RateLimitSnapshot`. */
+export interface CodexRateLimitWindow {
+  usedPercent: number
+  windowDurationMins?: number
+  /** Unix timestamp in seconds. */
+  resetsAt?: number
+}
+
+/** Flattened `account/rateLimits/read` snapshot for the status card. */
+export interface CodexRateLimitsInfo {
+  planType?: string
+  primary?: CodexRateLimitWindow
+  secondary?: CodexRateLimitWindow
+  rateLimitReachedType?: string
+}
+
+/** A `thread/list` entry (v2 `Thread`, subset the session UI needs). */
+interface CodexThreadSummary {
+  id?: string
+  name?: string | null
+  preview?: string | null
+  /** Unix timestamp in seconds. */
+  createdAt?: number
+  updatedAt?: number
+}
+
+/** One `item/tool/requestUserInput` question (EXPERIMENTAL wire shape). */
+export interface CodexUserInputQuestion {
+  id: string
+  header?: string
+  question: string
+  options?: Array<{ label: string; description?: string }> | null
+  isOther?: boolean
+  isSecret?: boolean
+}
 
 interface CodexThreadItem {
   id?: string
@@ -98,6 +196,8 @@ interface CodexThreadItem {
   error?: unknown
   // webSearch
   query?: string
+  // imageView
+  path?: string
 }
 
 interface CodexMcpServerStatus {
@@ -120,12 +220,25 @@ interface CodexSkill {
 export interface CodexAppServerStatus {
   mcpServers: CodexMcpServerStatus[]
   skills: CodexSkill[]
+  /** `account/read` — null means signed out; undefined means not yet fetched. */
+  account?: CodexAccountInfo | null
+  requiresOpenaiAuth?: boolean
+  /** `account/rateLimits/read` / `account/rateLimits/updated` snapshot. */
+  rateLimits?: CodexRateLimitsInfo | null
 }
 
 interface PendingApproval {
   resolve: (decision: { decision: string }) => void
   request: AcpPermissionRequest
   kind: "command" | "fileChange"
+  sessionId?: string
+}
+
+interface PendingUserInput {
+  resolve: (response: { answers: Record<string, { answers: string[] }> }) => void
+  sessionId?: string
+  questions: CodexUserInputQuestion[]
+  timer?: ReturnType<typeof setTimeout>
 }
 
 // ============================================================================
@@ -152,6 +265,17 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   private sentSystemPrompt = new Set<string>()
   // Pending approval requests awaiting a UI decision.
   private pendingApprovals = new Map<string, PendingApproval>()
+  // Pending `item/tool/requestUserInput` requests awaiting a UI answer.
+  private pendingUserInputs = new Map<string, PendingUserInput>()
+  // `agentMessage` itemId → MessagePhase ("commentary" | "final_answer") from
+  // item/started, so deltas (which carry no phase) can route to thinking.
+  private itemPhases = new Map<string, string>()
+  // Full model catalog cached from `model/list` (drives effort options).
+  private modelCache: CodexModelInfo[] = []
+  // Per-method support cache for graceful degradation on older codex CLIs.
+  private unsupportedMethods = new Set<string>()
+  private _sessionExtensionSupport: ExternalAgentSessionExtensionSupport =
+    createDefaultCodexSessionExtensionSupport()
 
   // Status surfaced to the read-only UI panel.
   private status: CodexAppServerStatus = { mcpServers: [], skills: [] }
@@ -181,6 +305,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     try {
       this.peer = new JsonRpcPeer({
         omitJsonRpcVersion: true,
+        // Approvals / requestUserInput stay pending on user interaction while
+        // the server keeps streaming (and may resolve them via
+        // serverRequest/resolved) — never block the inbound pipeline on them.
+        concurrentServerRequests: true,
         writeRaw: (message) => this.writeToProcess(message),
         onNotification: (method, params) => this.handleNotification(method, params),
         onServerRequest: (method, params) => this.handleServerRequest(method, params),
@@ -204,6 +332,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         platformOs?: string
       }>("initialize", {
         clientInfo: { name: "cognia", title: "Cognia", version: "1.0.0" },
+        // `experimentalApi` opts into experimental methods/fields — required for
+        // `item/tool/requestUserInput` (marked EXPERIMENTAL in the 0.141 schema).
+        // Unknown experimental notifications fall through the default branch.
+        capabilities: { experimentalApi: true },
       })
       this.serverInfo = {
         userAgent: result?.userAgent,
@@ -211,6 +343,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         platformOs: result?.platformOs,
       }
       this.peer.sendNotification("initialized")
+      this.clearSessionExtensionSupportCache()
+      // Best-effort account + rate-limit snapshot for the status card; older
+      // CLIs without the account surface degrade silently via callOptional.
+      void this.refreshAccount()
 
       this._capabilities = {
         streaming: true,
@@ -248,6 +384,11 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       pending.resolve({ decision: "cancel" })
     }
     this.pendingApprovals.clear()
+    for (const [, pending] of this.pendingUserInputs) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.resolve({ answers: emptyAnswersFor(pending.questions) })
+    }
+    this.pendingUserInputs.clear()
     this.processId = undefined
     this.peer = undefined
     this._sessions.clear()
@@ -255,8 +396,34 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     this.lastTokenUsage.clear()
     this.streamedItems.clear()
     this.sentSystemPrompt.clear()
+    this.itemPhases.clear()
+    this.modelCache = []
+    this.clearSessionExtensionSupportCache()
     this._connectionStatus = "disconnected"
     log.info("Disconnected from Codex app-server")
+  }
+
+  /**
+   * Call a method that may not exist on older codex CLIs. A JSON-RPC
+   * method-not-found (`-32601`) marks the method unsupported (cached until the
+   * next connect) and returns `undefined`; any other failure propagates.
+   */
+  private async callOptional<T>(
+    method: string,
+    params?: Record<string, unknown>,
+    timeout?: number
+  ): Promise<T | undefined> {
+    if (!this.peer || this.unsupportedMethods.has(method)) return undefined
+    try {
+      return await this.peer.sendRequest<T>(method, params, timeout)
+    } catch (error) {
+      if (isExternalAgentMethodNotFoundError(error)) {
+        this.unsupportedMethods.add(method)
+        log.info("Codex app-server method unsupported", { method })
+        return undefined
+      }
+      throw error
+    }
   }
 
   /**
@@ -324,7 +491,25 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   async createSession(options?: SessionCreateOptions): Promise<ExternalAgentSession> {
     if (!this.isConnected() || !this.peer) throw new Error("Not connected to Codex app-server")
 
-    const result = await this.peer.sendRequest<{ thread?: { id?: string } }>("thread/start", {})
+    const metadata = this.buildSessionMetadata(options)
+    const params: Record<string, unknown> = {
+      approvalPolicy: this.approvalPolicyFor(
+        (options?.permissionMode || "default") as AcpPermissionMode
+      ),
+    }
+    const cwd = readString(metadata.cwd) || this._config?.process?.cwd
+    if (cwd) params.cwd = cwd
+    const model = readString(metadata.selectedModel)
+    if (model) params.model = model
+    const sandbox = this.sandboxPolicyFrom(metadata)
+    if (sandbox) params.sandbox = sandbox
+    // `developerInstructions` is the native system-prompt channel (verified in
+    // the 0.141 schema) — carrying it here supersedes the first-turn text
+    // prepend, which stays as the fallback for resumed/forked threads only.
+    const systemPrompt = resolveSystemPromptText(metadata)
+    if (systemPrompt) params.developerInstructions = systemPrompt
+
+    const result = await this.peer.sendRequest<{ thread?: { id?: string } }>("thread/start", params)
     const threadId = result?.thread?.id
     if (!threadId) throw new Error("Codex app-server did not return a thread id")
 
@@ -338,16 +523,68 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       messages: [],
       createdAt: new Date(),
       lastActivityAt: new Date(),
-      metadata: {
-        ...(options?.metadata ?? {}),
-        ...(options?.cwd ? { cwd: options.cwd } : {}),
-        ...(options?.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-        ...(options?.briefMode ? { briefMode: true } : {}),
-      },
+      metadata,
     }
     this._sessions.set(session.id, session)
+    // The system prompt already rode in via developerInstructions.
+    if (systemPrompt) this.sentSystemPrompt.add(threadId)
     log.info("Created Codex thread", { threadId })
     return session
+  }
+
+  /** Session metadata assembled from create options + per-agent codexOptions. */
+  private buildSessionMetadata(options?: SessionCreateOptions): Record<string, unknown> {
+    const metadata: Record<string, unknown> = {
+      ...(options?.metadata ?? {}),
+      ...(options?.cwd ? { cwd: options.cwd } : {}),
+      ...(options?.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+      ...(options?.briefMode ? { briefMode: true } : {}),
+    }
+    // Per-agent defaults plumbed by the manager as metadata.codexOptions;
+    // resolve into flat runtime keys the turn builder + config options read.
+    const defaults = readObject(metadata.codexOptions) as CodexSessionOptions | undefined
+    if (defaults?.sandboxMode && metadata.sandboxMode === undefined) {
+      metadata.sandboxMode = defaults.sandboxMode
+    }
+    if (defaults?.networkAccess !== undefined && metadata.networkAccess === undefined) {
+      metadata.networkAccess = defaults.networkAccess
+    }
+    if (defaults?.writableRoots && metadata.writableRoots === undefined) {
+      metadata.writableRoots = defaults.writableRoots
+    }
+    if (defaults?.defaultReasoningEffort && metadata.reasoningEffort === undefined) {
+      metadata.reasoningEffort = defaults.defaultReasoningEffort
+    }
+    if (defaults?.reasoningSummary && metadata.reasoningSummary === undefined) {
+      metadata.reasoningSummary = defaults.reasoningSummary
+    }
+    return metadata
+  }
+
+  /** Build the wire `SandboxPolicy` from resolved session metadata, if any. */
+  private sandboxPolicyFrom(
+    metadata: Record<string, unknown> | undefined
+  ): CodexSandboxPolicy | undefined {
+    const mode = readString(metadata?.sandboxMode)
+    if (mode === "dangerFullAccess") return { type: "dangerFullAccess" }
+    if (mode === "readOnly") {
+      const policy: CodexSandboxPolicy = { type: "readOnly" }
+      if (typeof metadata?.networkAccess === "boolean")
+        policy.networkAccess = metadata.networkAccess
+      return policy
+    }
+    if (mode === "workspaceWrite") {
+      const policy: CodexSandboxPolicy = { type: "workspaceWrite" }
+      if (typeof metadata?.networkAccess === "boolean")
+        policy.networkAccess = metadata.networkAccess
+      if (Array.isArray(metadata?.writableRoots) && metadata.writableRoots.length > 0) {
+        policy.writableRoots = metadata.writableRoots.filter(
+          (root): root is string => typeof root === "string"
+        )
+      }
+      return policy
+    }
+    return undefined
   }
 
   async closeSession(sessionId: string): Promise<void> {
@@ -364,24 +601,191 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     this._sessions.delete(sessionId)
   }
 
-  /**
-   * The Codex app-server protocol exposes only `thread/start` + `thread/unsubscribe`
-   * — there is no `session/list`, `session/fork`, or `session/resume` equivalent.
-   * Report these as deterministically `unsupported` (rather than leaving the
-   * manager at `unknown`) so session-extension gating short-circuits with a clear
-   * reason instead of attempting an optimistic dispatch that would always fail.
-   */
+  // --------------------------------------------------------------------------
+  // Session extension (thread/list, thread/resume, thread/fork, thread/delete)
+  //
+  // The app-server implements the full thread-persistence surface (verified in
+  // the 0.141 schema). Support is probed per method and cached like the ACP
+  // adapter: a `-32601` marks the method unsupported for this connection and
+  // throws the shared typed error so manager gating behaves identically.
+  // --------------------------------------------------------------------------
+
   getSessionExtensionSupport(): ExternalAgentSessionExtensionSupport {
-    const unsupported = {
-      state: "unsupported" as const,
-      lastCheckedAt: new Date(),
-      reason: "Codex app-server does not implement session list/fork/resume.",
+    return { ...this._sessionExtensionSupport }
+  }
+
+  clearSessionExtensionSupportCache(): void {
+    this._sessionExtensionSupport = createDefaultCodexSessionExtensionSupport()
+    this.unsupportedMethods.clear()
+  }
+
+  private setExtensionSupport(
+    method: ExternalAgentSessionExtensionMethod,
+    state: ExternalAgentExtensionSupportStatus["state"],
+    reason?: string
+  ): void {
+    this._sessionExtensionSupport = {
+      ...this._sessionExtensionSupport,
+      [method]: {
+        state,
+        reasonCode: state === "supported" ? ("ok" as const) : ("extension_unsupported" as const),
+        reason,
+        lastCheckedAt: new Date(),
+      },
     }
-    return {
-      "session/list": unsupported,
-      "session/fork": unsupported,
-      "session/resume": unsupported,
+  }
+
+  /** Wrap a thread/* call in the probe-cache + typed unsupported error dance. */
+  private async callSessionExtension<T>(
+    extension: ExternalAgentSessionExtensionMethod,
+    wireMethod: string,
+    params: Record<string, unknown>
+  ): Promise<T> {
+    if (!this.peer) throw new Error("Not connected to Codex app-server")
+    if (this.unsupportedMethods.has(wireMethod)) {
+      this.setExtensionSupport(extension, "unsupported", `${wireMethod} is not supported`)
+      throw createExternalAgentUnsupportedSessionExtensionError(extension)
     }
+    try {
+      const result = await this.peer.sendRequest<T>(wireMethod, params)
+      this.setExtensionSupport(extension, "supported")
+      return result
+    } catch (error) {
+      if (isExternalAgentMethodNotFoundError(error)) {
+        this.unsupportedMethods.add(wireMethod)
+        this.setExtensionSupport(extension, "unsupported", `${wireMethod} is not supported`)
+        throw createExternalAgentUnsupportedSessionExtensionError(extension)
+      }
+      throw error
+    }
+  }
+
+  async listSessions(): Promise<
+    Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>
+  > {
+    const result = await this.callSessionExtension<{ data?: CodexThreadSummary[] }>(
+      "session/list",
+      "thread/list",
+      { limit: 50, sortKey: "updated_at", sortDirection: "desc" }
+    )
+    return (result?.data ?? [])
+      .filter((thread): thread is CodexThreadSummary & { id: string } => !!readString(thread.id))
+      .map((thread) => ({
+        sessionId: thread.id,
+        title: readString(thread.name) ?? readString(thread.preview),
+        createdAt: unixSecondsToIso(thread.createdAt),
+        updatedAt: unixSecondsToIso(thread.updatedAt),
+      }))
+  }
+
+  async resumeSession(
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
+    const metadata = this.buildSessionMetadata(options)
+    const params: Record<string, unknown> = { threadId: sessionId }
+    const model = readString(metadata.selectedModel)
+    if (model) params.model = model
+    const sandbox = this.sandboxPolicyFrom(metadata)
+    if (sandbox) params.sandbox = sandbox
+
+    const result = await this.callSessionExtension<{
+      thread?: { id?: string }
+      model?: string
+      reasoningEffort?: string
+      initialTurnsPage?: { data?: Array<{ items?: CodexThreadItem[] }> }
+    }>("session/resume", "thread/resume", params)
+
+    const threadId = readString(result?.thread?.id) ?? sessionId
+    if (result?.model && metadata.selectedModel === undefined) {
+      metadata.selectedModel = result.model
+    }
+    if (result?.reasoningEffort && metadata.reasoningEffort === undefined) {
+      metadata.reasoningEffort = result.reasoningEffort
+    }
+    const messages = hydrateMessagesFromTurns(result?.initialTurnsPage?.data)
+    const session: ExternalAgentSession = {
+      id: threadId,
+      agentId: this._config!.id,
+      status: "active",
+      permissionMode: (options?.permissionMode || "default") as AcpPermissionMode,
+      capabilities: this._capabilities,
+      tools: this._tools ?? [],
+      messages,
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+      metadata,
+    }
+    this._sessions.set(session.id, session)
+    // A resumed thread already carries its history; never re-prepend the prompt.
+    this.sentSystemPrompt.add(session.id)
+    log.info("Resumed Codex thread", { threadId, messages: messages.length })
+    return session
+  }
+
+  async forkSession(sessionId: string): Promise<ExternalAgentSession> {
+    const source = this._sessions.get(sessionId)
+    const result = await this.callSessionExtension<{ thread?: { id?: string } }>(
+      "session/fork",
+      "thread/fork",
+      { threadId: sessionId }
+    )
+    const threadId = readString(result?.thread?.id)
+    if (!threadId) throw new Error("Codex app-server did not return a forked thread id")
+    const session: ExternalAgentSession = {
+      id: threadId,
+      agentId: this._config!.id,
+      status: "active",
+      permissionMode: source?.permissionMode ?? "default",
+      capabilities: this._capabilities,
+      tools: this._tools ?? [],
+      messages: [...(source?.messages ?? [])],
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+      metadata: { ...(source?.metadata ?? {}), forkedFrom: sessionId },
+    }
+    this._sessions.set(session.id, session)
+    this.sentSystemPrompt.add(session.id)
+    log.info("Forked Codex thread", { from: sessionId, threadId })
+    return session
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.callOptional("thread/delete", { threadId: sessionId })
+    this._sessions.delete(sessionId)
+    this.activeTurns.delete(sessionId)
+  }
+
+  // Codex-specific thread housekeeping, reached via getCodexAppServerAdapter().
+
+  /** Trigger server-side context compaction for a thread. */
+  async compactSession(sessionId: string): Promise<void> {
+    if (!this.peer) throw new Error("Not connected to Codex app-server")
+    await this.peer.sendRequest("thread/compact/start", { threadId: sessionId })
+  }
+
+  /** Remove the last `numTurns` turns from the thread's context. */
+  async rollbackSession(sessionId: string, numTurns: number): Promise<void> {
+    if (!this.peer) throw new Error("Not connected to Codex app-server")
+    await this.peer.sendRequest("thread/rollback", { threadId: sessionId, numTurns })
+  }
+
+  /** Set the user-facing thread name (mirrored back via thread/name/updated). */
+  async setThreadName(sessionId: string, name: string): Promise<void> {
+    await this.callOptional("thread/name/set", { threadId: sessionId, name })
+  }
+
+  async archiveThread(sessionId: string): Promise<void> {
+    await this.callOptional("thread/archive", { threadId: sessionId })
+  }
+
+  async unarchiveThread(sessionId: string): Promise<void> {
+    await this.callOptional("thread/unarchive", { threadId: sessionId })
+  }
+
+  /** Whether this adapter supports server-side context compaction. */
+  supportsCompaction(): boolean {
+    return this.isConnected() && !this.unsupportedMethods.has("thread/compact/start")
   }
 
   // --------------------------------------------------------------------------
@@ -477,10 +881,44 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     if (cwd) params.cwd = cwd
     const model = session?.metadata?.selectedModel
     if (typeof model === "string") params.model = model
+    const effort = readString(session?.metadata?.reasoningEffort)
+    if (effort) params.effort = effort
+    const summary = readString(session?.metadata?.reasoningSummary)
+    if (summary) params.summary = summary
+    const sandboxPolicy = this.sandboxPolicyFrom(session?.metadata)
+    if (sandboxPolicy) params.sandboxPolicy = sandboxPolicy
 
     const result = await this.peer.sendRequest<{ turn?: { id?: string } }>("turn/start", params)
     const turnId = result?.turn?.id
     if (turnId) this.activeTurns.set(sessionId, turnId)
+  }
+
+  /**
+   * Append input to the session's in-flight turn (`turn/steer`). Throws when no
+   * turn is active or the server predates the method; callers fall back to
+   * their queue-and-replay path in that case.
+   */
+  async steerTurn(sessionId: string, text: string): Promise<void> {
+    if (!this.peer) throw new Error("Not connected to Codex app-server")
+    const expectedTurnId = this.activeTurns.get(sessionId)
+    if (!expectedTurnId) throw new Error("No active turn to steer")
+    if (this.unsupportedMethods.has("turn/steer")) {
+      throw new Error("turn/steer is not supported by this Codex version")
+    }
+    try {
+      const result = await this.peer.sendRequest<{ turnId?: string }>("turn/steer", {
+        threadId: sessionId,
+        expectedTurnId,
+        input: [{ type: "text", text }],
+      })
+      if (result?.turnId) this.activeTurns.set(sessionId, result.turnId)
+    } catch (error) {
+      if (isExternalAgentMethodNotFoundError(error)) {
+        this.unsupportedMethods.add("turn/steer")
+        throw new Error("turn/steer is not supported by this Codex version")
+      }
+      throw error
+    }
   }
 
   async cancel(sessionId: string): Promise<void> {
@@ -545,17 +983,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
    * adapter's brief snippet.
    */
   private resolveSystemPrompt(sessionId: string): string | undefined {
-    const metadata = this._sessions.get(sessionId)?.metadata
-    const systemPrompt =
-      typeof metadata?.systemPrompt === "string" ? metadata.systemPrompt : undefined
-    const briefMode = metadata?.briefMode === true
-    if (!systemPrompt && !briefMode) return undefined
-    const briefSnippet =
-      "Respond concisely. Skip preamble, headers, and bullet-list filler. Direct answers only — match length to the question."
-    if (briefMode) {
-      return systemPrompt ? `${briefSnippet}\n\n${systemPrompt}` : briefSnippet
-    }
-    return systemPrompt
+    return resolveSystemPromptText(this._sessions.get(sessionId)?.metadata)
   }
 
   private mapContent(content: ExternalAgentContent): CodexUserInput | null {
@@ -597,6 +1025,22 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       void this.refreshSkills()
       return
     }
+    if (method === "mcpServer/oauthLogin/completed") {
+      void this.refreshMcpServers()
+      return
+    }
+    if (method === "account/updated" || method === "account/login/completed") {
+      void this.refreshAccount()
+      return
+    }
+    if (method === "account/rateLimits/updated") {
+      const rateLimits = mapRateLimits(readObject(p.rateLimits))
+      if (rateLimits) {
+        this.status = { ...this.status, rateLimits }
+        this.notifyStatus()
+      }
+      return
+    }
 
     const sessionId = this.resolveSessionId(p)
     if (!sessionId) return
@@ -614,16 +1058,18 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         // emits a dedicated `error` event (not only `done{success:false}`), so
         // downstream consumers that branch on `error` surface Codex failures the
         // same way. The terminal `done` still follows for turn bookkeeping.
+        // An `interrupted` turn is a user cancellation, NOT a failure: it ends
+        // with `done{success:false, stopReason:"cancelled"}` and no error event.
         if (status === "failed") {
+          const turnError = readObject(turn?.error)
           const failureMessage =
-            readString(readObject(turn?.error)?.message) ??
-            readString(turn?.error) ??
-            "Codex turn failed"
+            readString(turnError?.message) ?? readString(turn?.error) ?? "Codex turn failed"
           this.emit(sessionId, {
             type: "error",
             sessionId,
             timestamp: new Date(),
             error: failureMessage,
+            code: mapCodexErrorCode(turnError?.codexErrorInfo),
             recoverable: false,
           })
         }
@@ -669,6 +1115,18 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         const delta = readString(p.delta) ?? readString(readObject(p.delta)?.text) ?? ""
         if (delta) {
           this.streamedItems.add(itemId)
+          // Commentary-phase assistant text (mid-turn narration) streams as
+          // thinking so the final answer stays clean. The delta carries no
+          // phase; it was registered from the item/started payload.
+          if (this.itemPhases.get(itemId) === "commentary") {
+            this.emit(sessionId, {
+              type: "thinking",
+              sessionId,
+              timestamp: new Date(),
+              thinking: delta,
+            })
+            return
+          }
           this.emit(sessionId, {
             type: "message_delta",
             sessionId,
@@ -692,6 +1150,16 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
             thinking: text,
           })
         }
+        return
+      }
+      case "item/reasoning/summaryPartAdded": {
+        // Boundary between reasoning summary sections — keep them readable.
+        this.emit(sessionId, {
+          type: "thinking",
+          sessionId,
+          timestamp: new Date(),
+          thinking: "\n\n",
+        })
         return
       }
       case "item/commandExecution/outputDelta": {
@@ -742,8 +1210,82 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         }
         return
       }
+      case "thread/name/updated": {
+        const name = readString(p.threadName) ?? readString(p.name)
+        const s = this._sessions.get(sessionId)
+        if (s && name !== undefined) s.metadata = { ...s.metadata, title: name }
+        return
+      }
+      case "thread/status/changed": {
+        // Mirror the server-side thread status onto the local session so a
+        // wedged/errored thread is visible without waiting on turn events.
+        const statusType = readString(readObject(p.status)?.type)
+        const s = this._sessions.get(sessionId)
+        if (!s) return
+        if (statusType === "active") this.updateSession(sessionId, { status: "executing" })
+        else if (statusType === "idle") this.updateSession(sessionId, { status: "idle" })
+        else if (statusType === "systemError") this.updateSession(sessionId, { status: "error" })
+        return
+      }
+      case "thread/closed": {
+        if (this._sessions.has(sessionId)) {
+          this.emit(sessionId, {
+            type: "session_end",
+            sessionId,
+            timestamp: new Date(),
+            reason: "completed",
+          })
+          this.activeTurns.delete(sessionId)
+          this._sessions.delete(sessionId)
+        }
+        return
+      }
+      case "thread/deleted": {
+        this._sessions.delete(sessionId)
+        this.activeTurns.delete(sessionId)
+        return
+      }
+      case "thread/started":
+      case "thread/archived":
+      case "thread/unarchived":
+        // Bookkeeping-only notifications; session state already tracks these.
+        return
+      case "serverRequest/resolved": {
+        // The server resolved an outstanding request (approval / user input)
+        // elsewhere — unblock any pending resolver for this thread; the late
+        // JSON-RPC response is ignored server-side.
+        this.resolvePendingForThread(sessionId, "resolved_elsewhere")
+        return
+      }
       default:
         return
+    }
+  }
+
+  /** Resolve all pending approvals + user-input requests for a thread. */
+  private resolvePendingForThread(sessionId: string, reason: string): void {
+    for (const [id, pending] of this.pendingApprovals) {
+      if (pending.sessionId !== sessionId) continue
+      this.pendingApprovals.delete(id)
+      pending.resolve({ decision: "decline" })
+      this.emit(sessionId, {
+        type: "permission_response",
+        sessionId,
+        timestamp: new Date(),
+        response: { requestId: id, granted: false, reason },
+      })
+    }
+    for (const [id, pending] of this.pendingUserInputs) {
+      if (pending.sessionId !== sessionId) continue
+      this.pendingUserInputs.delete(id)
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.resolve({ answers: emptyAnswersFor(pending.questions) })
+      this.emit(sessionId, {
+        type: "permission_response",
+        sessionId,
+        timestamp: new Date(),
+        response: { requestId: id, granted: false, reason },
+      })
     }
   }
 
@@ -752,6 +1294,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const id = item.id
     switch (item.type) {
       case "agentMessage":
+        // Register the message phase so deltas (phase-less) can route
+        // commentary to thinking. Commentary items emit no message_start.
+        if (typeof item.phase === "string") this.itemPhases.set(id, item.phase)
+        if (item.phase === "commentary") return
         this.emit(sessionId, {
           type: "message_start",
           sessionId,
@@ -794,6 +1340,18 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           rawInput: asRecord(item.arguments ?? item.toolInput),
         })
         return
+      case "collabAgentToolCall":
+        // Multi-agent collaboration tool call (agent-to-agent messaging).
+        this.emit(sessionId, {
+          type: "tool_use_start",
+          sessionId,
+          timestamp: new Date(),
+          toolUseId: id,
+          toolName: item.tool || item.toolName || "collab_agent",
+          kind: "other",
+          rawInput: asRecord(item.arguments ?? item.toolInput),
+        })
+        return
       case "webSearch":
         this.emit(sessionId, {
           type: "tool_use_start",
@@ -805,6 +1363,28 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           rawInput: { query: item.query },
         })
         return
+      case "enteredReviewMode":
+        this.emit(sessionId, {
+          type: "mode_update",
+          sessionId,
+          timestamp: new Date(),
+          modeId: "review",
+        })
+        return
+      case "contextCompaction": {
+        // Server-side history compaction in progress; surface as progress and
+        // flag the session so the UI can annotate the context reset.
+        const s = this._sessions.get(sessionId)
+        if (s) s.metadata = { ...s.metadata, contextCompacted: true }
+        this.emit(sessionId, {
+          type: "progress",
+          sessionId,
+          timestamp: new Date(),
+          progress: 0,
+          message: "context_compaction",
+        })
+        return
+      }
       default:
         return
     }
@@ -815,7 +1395,22 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const id = item.id
     switch (item.type) {
       case "agentMessage": {
+        const phase = readString(item.phase) ?? this.itemPhases.get(id)
         const text = readString(item.text) ?? extractText(item.content)
+        // Commentary text is mid-turn narration: emit as thinking (when not
+        // already streamed) and skip the message_start/end envelope.
+        if (phase === "commentary") {
+          if (text && !this.streamedItems.has(id)) {
+            this.emit(sessionId, {
+              type: "thinking",
+              sessionId,
+              timestamp: new Date(),
+              thinking: text,
+            })
+          }
+          this.itemPhases.delete(id)
+          return
+        }
         if (text && !this.streamedItems.has(id)) {
           this.emit(sessionId, {
             type: "message_delta",
@@ -831,6 +1426,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           timestamp: new Date(),
           messageId: id,
         })
+        this.itemPhases.delete(id)
         return
       }
       case "reasoning": {
@@ -884,7 +1480,8 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         return
       }
       case "mcpToolCall":
-      case "dynamicToolCall": {
+      case "dynamicToolCall":
+      case "collabAgentToolCall": {
         this.emit(sessionId, {
           type: "tool_use_end",
           sessionId,
@@ -899,6 +1496,28 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           toolUseId: id,
           result: (item.result as string | Record<string, unknown>) ?? "",
           isError: item.error != null,
+        })
+        return
+      }
+      case "imageView": {
+        // The agent surfaced an image (path/url) — report as a tool result so
+        // the transcript records it.
+        this.emit(sessionId, {
+          type: "tool_result",
+          sessionId,
+          timestamp: new Date(),
+          toolUseId: id,
+          result: { path: readString(item.path) ?? "" },
+          isError: false,
+        })
+        return
+      }
+      case "exitedReviewMode": {
+        this.emit(sessionId, {
+          type: "mode_update",
+          sessionId,
+          timestamp: new Date(),
+          modeId: "default",
         })
         return
       }
@@ -955,38 +1574,76 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   }
 
   /**
-   * Codex mid-turn `item/tool/requestUserInput` — the agent asks the user 1–3
-   * questions. Without a dedicated question UI we surface the question text into
-   * the stream so it is not silently dropped, then respond with the contract's
-   * empty-answers shape so Codex can fall back to its own auto-resolution
-   * (`autoResolutionMs` / `isOther`) instead of the turn erroring on a
-   * method-not-found. Response shape: `{ answers: { [id]: { answers: [] } } }`.
+   * Codex mid-turn `item/tool/requestUserInput` — the agent asks the user
+   * questions ({@link CodexUserInputQuestion}). Surface them as a
+   * `permission_request` (rendered by the existing tool-approval dialog in
+   * question mode via `metadata.codexUserInput`) and await
+   * {@link respondToPermission}, whose `answers` map is forwarded verbatim as
+   * `{ answers: { [id]: { answers: [...] } } }`. When `autoResolutionMs` is set
+   * the request self-resolves with empty answers (server-side auto-resolution)
+   * once the window elapses.
    */
-  private handleRequestUserInput(params: Record<string, unknown>): {
-    answers: Record<string, { answers: string[] }>
-  } {
+  private handleRequestUserInput(
+    params: Record<string, unknown>
+  ): Promise<{ answers: Record<string, { answers: string[] }> }> {
     const sessionId = this.resolveSessionId(params)
-    const questions = Array.isArray(params.questions) ? params.questions : []
-    const answers: Record<string, { answers: string[] }> = {}
-    const lines: string[] = []
-    for (const raw of questions) {
-      const q = readObject(raw)
-      if (!q) continue
-      const id = readString(q.id)
-      const text = readString(q.question) ?? readString(q.header)
-      if (text) lines.push(`❓ ${text}`)
-      if (id) answers[id] = { answers: [] }
+    const questions = parseUserInputQuestions(params.questions)
+    const requestId = readString(params.itemId) ?? `user_input_${Date.now()}`
+    if (!sessionId || questions.length === 0) {
+      return Promise.resolve({ answers: emptyAnswersFor(questions) })
     }
-    if (sessionId && lines.length > 0) {
+
+    const autoResolutionMs = readNumber(params.autoResolutionMs)
+    const first = questions[0]
+    const request: AcpPermissionRequest = {
+      id: requestId,
+      requestId,
+      sessionId,
+      title: first.header || first.question,
+      kind: "other",
+      toolInfo: { id: requestId, name: "request_user_input", category: "other" },
+      // Single-question single-select renders directly from ACP options; the
+      // full multi-question payload rides in metadata for the question-mode UI.
+      options: (first.options ?? []).map((option, index) => ({
+        optionId: `${first.id}:${option.label}`,
+        name: option.label,
+        description: option.description,
+        kind: "allow_once" as const,
+        isDefault: index === 0,
+      })),
+      autoApproveTimeout: autoResolutionMs,
+      metadata: {
+        codexUserInput: {
+          requestId,
+          questions,
+          ...(autoResolutionMs !== undefined ? { autoResolutionMs } : {}),
+        },
+      },
+    }
+
+    return new Promise((resolve) => {
+      const pending: PendingUserInput = { resolve, sessionId, questions }
+      if (autoResolutionMs && autoResolutionMs > 0) {
+        pending.timer = setTimeout(() => {
+          if (!this.pendingUserInputs.has(requestId)) return
+          this.pendingUserInputs.delete(requestId)
+          resolve({ answers: emptyAnswersFor(questions) })
+          this.emit(sessionId, {
+            type: "permission_response",
+            sessionId,
+            timestamp: new Date(),
+            response: { requestId, granted: false, reason: "auto_resolved" },
+          })
+        }, autoResolutionMs)
+      }
+      this.pendingUserInputs.set(requestId, pending)
       this.emit(sessionId, {
-        type: "message_delta",
+        type: "permission_request",
         sessionId,
         timestamp: new Date(),
-        messageId: readString(params.itemId) ?? "request_user_input",
-        delta: { type: "text", text: `\n${lines.join("\n")}\n` },
+        request,
       })
-    }
-    return { answers }
+    })
   }
 
   private async handleApproval(
@@ -1013,13 +1670,28 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       reason: readString(params.reason),
     }
 
+    // Forward protocol context the approval dialog can use (ordered decision
+    // list, parsed command actions, network approval context).
+    const availableDecisions = Array.isArray(params.availableDecisions)
+      ? params.availableDecisions.filter((d): d is string => typeof d === "string")
+      : undefined
+    if (availableDecisions || params.commandActions || params.networkApprovalContext) {
+      request.metadata = {
+        ...(availableDecisions ? { availableDecisions } : {}),
+        ...(params.commandActions ? { commandActions: params.commandActions } : {}),
+        ...(params.networkApprovalContext
+          ? { networkApprovalContext: params.networkApprovalContext }
+          : {}),
+      }
+    }
+
     const mode = session?.permissionMode ?? "default"
     const auto = this.autoDecision(mode, kind)
     if (auto) return { decision: auto }
 
     // Surface to the UI and await `respondToPermission`.
     return new Promise<{ decision: string }>((resolve) => {
-      this.pendingApprovals.set(itemId, { resolve, request, kind })
+      this.pendingApprovals.set(itemId, { resolve, request, kind, sessionId })
       if (sessionId) {
         this.emit(sessionId, {
           type: "permission_request",
@@ -1051,6 +1723,23 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   }
 
   async respondToPermission(_sessionId: string, response: AcpPermissionResponse): Promise<void> {
+    // requestUserInput answers take precedence: same dialog surface, distinct
+    // wire reply ({answers} instead of {decision}).
+    const userInput = this.pendingUserInputs.get(response.requestId)
+    if (userInput) {
+      this.pendingUserInputs.delete(response.requestId)
+      if (userInput.timer) clearTimeout(userInput.timer)
+      userInput.resolve({ answers: this.buildUserInputAnswers(userInput.questions, response) })
+      const sessionId = userInput.sessionId || _sessionId
+      this.emit(sessionId, {
+        type: "permission_response",
+        sessionId,
+        timestamp: new Date(),
+        response,
+      })
+      return
+    }
+
     const pending = this.pendingApprovals.get(response.requestId)
     if (!pending) return
     this.pendingApprovals.delete(response.requestId)
@@ -1066,6 +1755,33 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       timestamp: new Date(),
       response,
     })
+  }
+
+  /** Map a UI permission response onto the Codex requestUserInput answer map. */
+  private buildUserInputAnswers(
+    questions: CodexUserInputQuestion[],
+    response: AcpPermissionResponse
+  ): Record<string, { answers: string[] }> {
+    const answers = emptyAnswersFor(questions)
+    if (!response.granted) return answers
+    // Preferred channel: the question-mode dialog supplies per-question answers.
+    if (response.answers) {
+      for (const [questionId, values] of Object.entries(response.answers)) {
+        answers[questionId] = { answers: values.filter((v) => typeof v === "string") }
+      }
+      return answers
+    }
+    // Fallback: a plain option pick from the standard approval dialog
+    // (`optionId` is `<questionId>:<label>`).
+    if (response.optionId) {
+      const splitAt = response.optionId.indexOf(":")
+      if (splitAt > 0) {
+        const questionId = response.optionId.slice(0, splitAt)
+        const label = response.optionId.slice(splitAt + 1)
+        if (answers[questionId]) answers[questionId] = { answers: [label] }
+      }
+    }
+    return answers
   }
 
   // --------------------------------------------------------------------------
@@ -1084,26 +1800,167 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         data?: Array<Record<string, unknown>>
         models?: Array<Record<string, unknown>>
       }>("model/list", { includeHidden: false })
-      return (result?.data ?? result?.models ?? []).map((m) => ({
-        id: readString(m.id) ?? readString(m.model) ?? "",
-        name: readString(m.displayName) ?? readString(m.name),
-      }))
+      this.modelCache = (result?.data ?? result?.models ?? []).map((m) => mapModelInfo(m))
+      return this.modelCache.map((m) => ({ id: m.id, name: m.displayName }))
     } catch (error) {
       log.warn("model/list failed", { error })
       return []
     }
   }
 
+  /** Full cached model catalog (rich `model/list` fields). */
+  getModelCatalog(): CodexModelInfo[] {
+    return [...this.modelCache]
+  }
+
+  getSessionModels(sessionId: string): AcpSessionModelState | undefined {
+    const session = this._sessions.get(sessionId)
+    if (!session || this.modelCache.length === 0) return undefined
+    const selected = readString(session.metadata?.selectedModel)
+    const current = selected ?? this.modelCache.find((m) => m.isDefault)?.id
+    return {
+      availableModels: this.modelCache.map((m) => ({
+        modelId: m.id,
+        name: m.displayName ?? m.id,
+        description: m.description,
+      })),
+      currentModelId: current ?? this.modelCache[0].id,
+    }
+  }
+
   async setSessionModel(sessionId: string, modelId: string): Promise<void> {
     const session = this._sessions.get(sessionId)
     if (!session) throw new Error(`Session not found: ${sessionId}`)
-    this.updateSession(sessionId, { metadata: { ...session.metadata, selectedModel: modelId } })
+    // Switching models invalidates the effort choice — each model advertises
+    // its own supported efforts; reset to the new model's default.
+    const model = this.modelCache.find((m) => m.id === modelId)
+    const metadata: Record<string, unknown> = { ...session.metadata, selectedModel: modelId }
+    if (model?.defaultReasoningEffort) {
+      metadata.reasoningEffort = model.defaultReasoningEffort
+    }
+    this.updateSession(sessionId, { metadata })
+    this.emitConfigOptions(sessionId)
     log.info("Codex session model set", { sessionId, modelId })
   }
 
   async setSessionMode(sessionId: string, modeId: AcpPermissionMode): Promise<void> {
     if (!this._sessions.has(sessionId)) throw new Error(`Session not found: ${sessionId}`)
     this.updateSession(sessionId, { permissionMode: modeId })
+  }
+
+  // --------------------------------------------------------------------------
+  // Session config options (synthesized — effort + sandbox)
+  //
+  // Codex has no native config-option surface; we synthesize ACP-shaped options
+  // so the existing session-panel control renders effort/sandbox pickers with
+  // zero new chat UI. Values write into session metadata consumed by turn/start.
+  // --------------------------------------------------------------------------
+
+  getConfigOptions(sessionId: string): AcpConfigOption[] | undefined {
+    const session = this._sessions.get(sessionId)
+    if (!session) return undefined
+    const options: AcpConfigOption[] = []
+
+    const selectedModel = readString(session.metadata?.selectedModel)
+    const model =
+      this.modelCache.find((m) => m.id === selectedModel) ??
+      this.modelCache.find((m) => m.isDefault)
+    const efforts =
+      model && model.supportedReasoningEfforts.length > 0
+        ? model.supportedReasoningEfforts
+        : DEFAULT_REASONING_EFFORTS
+    const currentEffort =
+      readString(session.metadata?.reasoningEffort) ?? model?.defaultReasoningEffort
+    options.push({
+      id: "reasoningEffort",
+      name: "Reasoning effort",
+      category: "thought_level",
+      type: "select",
+      currentValue: currentEffort ?? efforts[Math.floor(efforts.length / 2)].reasoningEffort,
+      options: efforts.map((e) => ({
+        value: e.reasoningEffort,
+        name: e.reasoningEffort,
+        description: e.description,
+      })),
+    })
+
+    options.push({
+      id: "sandboxMode",
+      name: "Sandbox",
+      category: "mode",
+      type: "select",
+      currentValue: readString(session.metadata?.sandboxMode) ?? "workspaceWrite",
+      options: [
+        { value: "readOnly", name: "Read only" },
+        { value: "workspaceWrite", name: "Workspace write" },
+        { value: "dangerFullAccess", name: "Full access" },
+      ],
+    })
+    return options
+  }
+
+  async setConfigOption(
+    sessionId: string,
+    configId: string,
+    value: string
+  ): Promise<AcpConfigOption[]> {
+    const session = this._sessions.get(sessionId)
+    if (!session) throw new Error(`Session not found: ${sessionId}`)
+    if (configId === "reasoningEffort") {
+      this.updateSession(sessionId, {
+        metadata: { ...session.metadata, reasoningEffort: value },
+      })
+    } else if (configId === "sandboxMode") {
+      this.updateSession(sessionId, {
+        metadata: { ...session.metadata, sandboxMode: value },
+      })
+    } else {
+      throw new Error(`Unknown config option: ${configId}`)
+    }
+    this.emitConfigOptions(sessionId)
+    return this.getConfigOptions(sessionId) ?? []
+  }
+
+  private emitConfigOptions(sessionId: string): void {
+    const configOptions = this.getConfigOptions(sessionId)
+    if (!configOptions) return
+    this.emit(sessionId, {
+      type: "config_options_update",
+      sessionId,
+      timestamp: new Date(),
+      configOptions,
+    })
+  }
+
+  // --------------------------------------------------------------------------
+  // Account + rate limits (status card)
+  // --------------------------------------------------------------------------
+
+  /** Fetch account + rate-limit snapshots (best-effort; degrades on old CLIs). */
+  async refreshAccount(): Promise<void> {
+    try {
+      const account = await this.callOptional<{
+        account?: Record<string, unknown> | null
+        requiresOpenaiAuth?: boolean
+      }>("account/read", { refreshToken: false })
+      if (account !== undefined) {
+        this.status = {
+          ...this.status,
+          account: account.account ? mapAccountInfo(account.account) : null,
+          requiresOpenaiAuth: account.requiresOpenaiAuth === true,
+        }
+      }
+      // `account/rateLimits/read` takes no params (serde unit) — omit them.
+      const limits = await this.callOptional<{ rateLimits?: Record<string, unknown> }>(
+        "account/rateLimits/read"
+      )
+      if (limits !== undefined) {
+        this.status = { ...this.status, rateLimits: mapRateLimits(readObject(limits.rateLimits)) }
+      }
+      this.notifyStatus()
+    } catch (error) {
+      log.warn("Codex account refresh failed", { error })
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -1162,7 +2019,11 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   }
 
   getStatus(): CodexAppServerStatus {
-    return { mcpServers: [...this.status.mcpServers], skills: [...this.status.skills] }
+    return {
+      ...this.status,
+      mcpServers: [...this.status.mcpServers],
+      skills: [...this.status.skills],
+    }
   }
 
   onStatusUpdate(listener: (status: CodexAppServerStatus) => void): () => void {
@@ -1321,4 +2182,189 @@ function decodeBase64(value: string): string {
   } catch {
     return value
   }
+}
+
+/** Fallback effort list when the model catalog has not been fetched yet. */
+const DEFAULT_REASONING_EFFORTS: Array<{ reasoningEffort: string; description?: string }> = [
+  { reasoningEffort: "low" },
+  { reasoningEffort: "medium" },
+  { reasoningEffort: "high" },
+]
+
+function createDefaultCodexSessionExtensionSupport(): ExternalAgentSessionExtensionSupport {
+  const unknown: ExternalAgentExtensionSupportStatus = { state: "unknown" }
+  return {
+    "session/list": { ...unknown },
+    "session/fork": { ...unknown },
+    "session/resume": { ...unknown },
+  }
+}
+
+/** Resolve the (brief-aware) system prompt from session-creation metadata. */
+function resolveSystemPromptText(
+  metadata: Record<string, unknown> | undefined
+): string | undefined {
+  const systemPrompt =
+    typeof metadata?.systemPrompt === "string" ? metadata.systemPrompt : undefined
+  const briefMode = metadata?.briefMode === true
+  if (!systemPrompt && !briefMode) return undefined
+  const briefSnippet =
+    "Respond concisely. Skip preamble, headers, and bullet-list filler. Direct answers only — match length to the question."
+  if (briefMode) {
+    return systemPrompt ? `${briefSnippet}\n\n${systemPrompt}` : briefSnippet
+  }
+  return systemPrompt
+}
+
+function unixSecondsToIso(value: number | undefined): string | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined
+  return new Date(value * 1000).toISOString()
+}
+
+function parseUserInputQuestions(raw: unknown): CodexUserInputQuestion[] {
+  if (!Array.isArray(raw)) return []
+  const questions: CodexUserInputQuestion[] = []
+  for (const entry of raw) {
+    const q = readObject(entry)
+    const id = readString(q?.id)
+    const question = readString(q?.question)
+    if (!q || !id || !question) continue
+    let options: Array<{ label: string; description?: string }> | null = null
+    if (Array.isArray(q.options)) {
+      options = []
+      for (const o of q.options) {
+        const opt = readObject(o)
+        const label = readString(opt?.label)
+        if (!label) continue
+        const description = readString(opt?.description)
+        options.push(description !== undefined ? { label, description } : { label })
+      }
+    }
+    questions.push({
+      id,
+      question,
+      header: readString(q.header),
+      options,
+      isOther: q.isOther === true,
+      isSecret: q.isSecret === true,
+    })
+  }
+  return questions
+}
+
+function emptyAnswersFor(
+  questions: CodexUserInputQuestion[]
+): Record<string, { answers: string[] }> {
+  const answers: Record<string, { answers: string[] }> = {}
+  for (const q of questions) answers[q.id] = { answers: [] }
+  return answers
+}
+
+function mapModelInfo(raw: Record<string, unknown>): CodexModelInfo {
+  const efforts: Array<{ reasoningEffort: string; description?: string }> = []
+  if (Array.isArray(raw.supportedReasoningEfforts)) {
+    for (const e of raw.supportedReasoningEfforts) {
+      const obj = readObject(e)
+      const effort = readString(obj?.reasoningEffort) ?? readString(e)
+      if (!effort) continue
+      const description = readString(obj?.description)
+      efforts.push(
+        description !== undefined
+          ? { reasoningEffort: effort, description }
+          : { reasoningEffort: effort }
+      )
+    }
+  }
+  return {
+    id: readString(raw.id) ?? readString(raw.model) ?? "",
+    model: readString(raw.model),
+    displayName: readString(raw.displayName) ?? readString(raw.name),
+    description: readString(raw.description),
+    hidden: raw.hidden === true,
+    isDefault: raw.isDefault === true,
+    defaultReasoningEffort: readString(raw.defaultReasoningEffort),
+    supportedReasoningEfforts: efforts,
+    supportsPersonality: raw.supportsPersonality === true,
+  }
+}
+
+function mapAccountInfo(raw: Record<string, unknown>): CodexAccountInfo {
+  return {
+    type: readString(raw.type),
+    email: readString(raw.email),
+    planType: readString(raw.planType),
+  }
+}
+
+function mapRateLimitWindow(
+  raw: Record<string, unknown> | undefined
+): CodexRateLimitWindow | undefined {
+  const usedPercent = readNumber(raw?.usedPercent)
+  if (raw === undefined || usedPercent === undefined) return undefined
+  return {
+    usedPercent,
+    windowDurationMins: readNumber(raw.windowDurationMins),
+    resetsAt: readNumber(raw.resetsAt),
+  }
+}
+
+function mapRateLimits(raw: Record<string, unknown> | undefined): CodexRateLimitsInfo | null {
+  if (!raw) return null
+  return {
+    planType: readString(raw.planType),
+    primary: mapRateLimitWindow(readObject(raw.primary)),
+    secondary: mapRateLimitWindow(readObject(raw.secondary)),
+    rateLimitReachedType: readString(raw.rateLimitReachedType),
+  }
+}
+
+/**
+ * Map a `codexErrorInfo` union onto a stable snake_case error code
+ * ("contextWindowExceeded" → "context_window_exceeded"; object variants use
+ * their tag, e.g. `{httpConnectionFailed: {...}}` → "http_connection_failed").
+ */
+function mapCodexErrorCode(raw: unknown): string | undefined {
+  const variant =
+    readString(raw) ??
+    (() => {
+      const obj = readObject(raw)
+      return obj ? Object.keys(obj)[0] : undefined
+    })()
+  if (!variant) return undefined
+  return variant.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()
+}
+
+/** Rebuild session history from a `thread/resume` initialTurnsPage payload. */
+function hydrateMessagesFromTurns(
+  turns: Array<{ items?: CodexThreadItem[] }> | undefined
+): ExternalAgentMessage[] {
+  if (!Array.isArray(turns)) return []
+  const messages: ExternalAgentMessage[] = []
+  for (const turn of turns) {
+    for (const item of turn.items ?? []) {
+      if (!item || typeof item !== "object") continue
+      if (item.type === "userMessage") {
+        const text = readString(item.text) ?? extractText(item.content)
+        if (text) {
+          messages.push({
+            id: item.id ?? `user_${messages.length}`,
+            role: "user",
+            content: [{ type: "text", text }],
+            timestamp: new Date(),
+          })
+        }
+      } else if (item.type === "agentMessage" && item.phase !== "commentary") {
+        const text = readString(item.text) ?? extractText(item.content)
+        if (text) {
+          messages.push({
+            id: item.id ?? `assistant_${messages.length}`,
+            role: "assistant",
+            content: [{ type: "text", text }],
+            timestamp: new Date(),
+          })
+        }
+      }
+    }
+  }
+  return messages
 }

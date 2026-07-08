@@ -1,8 +1,14 @@
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { useCodexAppServerStatus } from "./use-codex-app-server-status"
 
+// getStatus reflects the refreshed snapshot the hook now reads after
+// refreshMcpServers/refreshSkills/refreshAccount complete.
 const fakeAdapter = {
-  getStatus: jest.fn(() => ({ mcpServers: [{ name: "fs" }], skills: [] })),
+  getStatus: jest.fn(() => ({
+    mcpServers: [{ name: "fs", status: "running" }],
+    skills: [{ name: "deploy", path: "/s" }],
+    account: { type: "chatgpt", email: "dev@example.com", planType: "pro" },
+  })),
   onStatusUpdate: jest.fn((cb: (s: unknown) => void) => {
     statusListener = cb
     return () => {
@@ -11,6 +17,7 @@ const fakeAdapter = {
   }),
   refreshMcpServers: jest.fn(async () => [{ name: "fs", status: "running" }]),
   refreshSkills: jest.fn(async () => [{ name: "deploy", path: "/s" }]),
+  refreshAccount: jest.fn(async () => {}),
 }
 let statusListener: ((s: unknown) => void) | undefined
 let adapterForAgent: typeof fakeAdapter | null = fakeAdapter
@@ -41,6 +48,8 @@ describe("useCodexAppServerStatus", () => {
       expect(result.current.status.mcpServers[0]).toMatchObject({ name: "fs", status: "running" })
     )
     expect(result.current.status.skills[0]).toMatchObject({ name: "deploy" })
+    expect(result.current.status.account).toMatchObject({ email: "dev@example.com" })
+    expect(fakeAdapter.refreshAccount).toHaveBeenCalled()
     expect(fakeAdapter.onStatusUpdate).toHaveBeenCalled()
   })
 

@@ -496,6 +496,68 @@ describe("Session lifecycle (createSession / closeSession / getSession)", () => 
     await m.closeSession("agent-1", s.id)
     expect(m.getSession("agent-1", s.id)).toBeUndefined()
   })
+
+  it("plumbs per-agent codexOptions into the execution session options metadata", async () => {
+    const m = freshManager()
+    await m.addAgent(
+      buildBaseConfig({
+        codexOptions: { sandboxMode: "readOnly", defaultReasoningEffort: "high" },
+      })
+    )
+    await m.execute("agent-1", "hello")
+    const session = currentMock.getSessions()[0]
+    // The MockAdapter records the SessionCreateOptions it received as metadata.
+    const receivedOptions = session.metadata as {
+      metadata?: { codexOptions?: Record<string, unknown> }
+    }
+    expect(receivedOptions.metadata?.codexOptions).toEqual({
+      sandboxMode: "readOnly",
+      defaultReasoningEffort: "high",
+    })
+  })
+})
+
+describe("steerSession / supportsSteering", () => {
+  it("reports no steering support and throws when the adapter lacks steerTurn", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    expect(m.supportsSteering("agent-1")).toBe(false)
+    await expect(m.steerSession("agent-1", "s_1", "hint")).rejects.toThrow(
+      /does not support steering/i
+    )
+  })
+
+  it("delegates to the adapter's steerTurn with an explicit session id", async () => {
+    const steerTurn = jest.fn(async () => {})
+    ;(currentMock as unknown as { steerTurn: unknown }).steerTurn = steerTurn
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    expect(m.supportsSteering("agent-1")).toBe(true)
+    await m.steerSession("agent-1", "s_explicit", "focus on tests")
+    expect(steerTurn).toHaveBeenCalledWith("s_explicit", "focus on tests")
+  })
+
+  it("resolves the executing session when no session id is given", async () => {
+    const steerTurn = jest.fn(async () => {})
+    ;(currentMock as unknown as { steerTurn: unknown }).steerTurn = steerTurn
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const session = await m.createSession("agent-1")
+    currentMock.getSession(session.id)!.status = "executing"
+    await m.steerSession("agent-1", undefined, "look here")
+    expect(steerTurn).toHaveBeenCalledWith(session.id, "look here")
+  })
+
+  it("throws when no session is executing and none was specified", async () => {
+    const steerTurn = jest.fn(async () => {})
+    ;(currentMock as unknown as { steerTurn: unknown }).steerTurn = steerTurn
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    await m.createSession("agent-1")
+    await expect(m.steerSession("agent-1", undefined, "hint")).rejects.toThrow(
+      /no executing session/i
+    )
+  })
 })
 
 describe("execute / cancel", () => {

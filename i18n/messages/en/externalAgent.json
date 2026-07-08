@@ -145,7 +145,13 @@
       "notConnected": "Connect the agent to view its Codex app-server status.",
       "refresh": "Refresh status",
       "skills": "Skills",
-      "title": "Codex app-server"
+      "title": "Codex app-server",
+      "account": "Account",
+      "signInRequired": "Sign-in required",
+      "usage": "Usage",
+      "usedPercent": "{percent}% used",
+      "resetsAt": "Resets {time}",
+      "rateLimitReached": "Rate limit reached"
     },
     "command": "Command",
     "commandRequired": "Command is required for stdio transport",
@@ -249,7 +255,22 @@
     "transportHttpLabel": "HTTP (remote)",
     "transportStdioLabel": "Stdio (local process)",
     "useThisPreset": "Use this preset",
-    "workingDirectory": "Working Directory"
+    "workingDirectory": "Working Directory",
+    "codexSandboxMode": "Sandbox mode",
+    "codexSandboxModeDesc": "How much filesystem access Codex commands get by default.",
+    "codexSandboxReadOnly": "Read only",
+    "codexSandboxWorkspaceWrite": "Workspace write",
+    "codexSandboxDangerFullAccess": "Full access (dangerous)",
+    "codexNetworkAccess": "Network access",
+    "codexNetworkAccessDesc": "Allow sandboxed commands to reach the network.",
+    "codexDefaultEffort": "Default reasoning effort",
+    "codexReasoningSummary": "Reasoning summary",
+    "codexModelDefault": "Model default",
+    "codexServerDefault": "Server default",
+    "codexSummaryAuto": "Auto",
+    "codexSummaryConcise": "Concise",
+    "codexSummaryDetailed": "Detailed",
+    "codexSummaryNone": "None"
   },
   "statusConnected": "Connected",
   "statusConnecting": "Connecting",
@@ -263,5 +284,14 @@
     "latency": "Latency",
     "success": "Success",
     "title": "Health breakdown"
+  },
+  "userInput": {
+    "title": "The agent has a question",
+    "description": "Codex needs your input to continue this turn.",
+    "autoResolveIn": "Auto-resolves in {seconds}s",
+    "other": "Other…",
+    "otherPlaceholder": "Type your answer",
+    "submit": "Submit answers",
+    "skip": "Skip"
   }
 }

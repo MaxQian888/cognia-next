@@ -33,11 +33,14 @@ export function useCodexAppServerStatus(
     if (!adapter) return
     setLoading(true)
     try {
-      const [mcpServers, skills] = await Promise.all([
+      // refreshAccount folds account + rate limits into the adapter status;
+      // read the merged snapshot afterwards so all sections stay coherent.
+      await Promise.all([
         adapter.refreshMcpServers(),
         adapter.refreshSkills(),
+        adapter.refreshAccount(),
       ])
-      setStatus({ mcpServers, skills })
+      setStatus(adapter.getStatus())
     } finally {
       setLoading(false)
     }

@@ -256,6 +256,31 @@ export class ExternalAgentManager {
   }
 
   /**
+   * Append user input to a session's in-flight turn without interrupting it
+   * (Codex `turn/steer`). Throws when the adapter lacks the capability or no
+   * turn is active — callers fall back to their queue-and-replay path.
+   */
+  async steerSession(agentId: string, sessionId: string | undefined, text: string): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.steerTurn) {
+      throw new Error("Agent does not support steering an active turn")
+    }
+    // The chat layer knows its own session id, not the external thread id —
+    // resolve the agent's single executing session when omitted.
+    const targetSessionId =
+      sessionId ?? adapter.getSessions().find((session) => session.status === "executing")?.id
+    if (!targetSessionId) {
+      throw new Error("No executing session to steer")
+    }
+    await adapter.steerTurn(targetSessionId, text)
+  }
+
+  /** Whether the agent's adapter can steer an in-flight turn. */
+  supportsSteering(agentId: string): boolean {
+    return typeof this.adapters.get(agentId)?.steerTurn === "function"
+  }
+
+  /**
    * Return the live Codex `app-server` adapter for an agent, or null when the
    * agent isn't connected through the native app-server protocol. Lets UI
    * surfaces read MCP-server / skills status (and the native methods) without
@@ -1498,6 +1523,9 @@ export class ExternalAgentManager {
     const metadataPayload = {
       ...(options?.traceContext?.metadata || {}),
       instructionEnvelope: options?.instructionEnvelope,
+      // Per-agent Codex defaults (sandbox mode / reasoning effort / summary)
+      // ride to the adapter through metadata — same channel as selectedModel.
+      codexOptions: instance.config.codexOptions,
     } as Record<string, unknown>
     const metadata =
       Object.entries(metadataPayload).filter(([, value]) => value !== undefined).length > 0

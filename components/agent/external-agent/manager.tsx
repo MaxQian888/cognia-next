@@ -21,7 +21,7 @@
  * the analytics hook + health badge are local stubs that no-op gracefully.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertCircle,
@@ -69,7 +69,7 @@ import { useAgentTraceAnalytics } from "@/hooks/agent-trace"
 import { ExternalAgentCommands } from "./commands"
 import { ExternalAgentPlan } from "./plan"
 import { ExternalAgentConfigOptions } from "./config-options"
-import { ToolApprovalDialog } from "./tool-approval-dialog"
+import { ToolApprovalDialog, type ToolApprovalRequest } from "./tool-approval-dialog"
 import { TraceHealthBadge } from "./trace-health-badge"
 import { ConnectionStatusBadge } from "./connection-status-badge"
 
@@ -1208,6 +1208,35 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     [pendingPermission, respondToPermission, buildPermissionResponseRequestId]
   )
 
+  const handlePermissionSubmitAnswers = useCallback(
+    async (_id: string, answers: Record<string, string[]>) => {
+      if (!pendingPermission) return
+      const requestId = buildPermissionResponseRequestId()
+      await respondToPermission({
+        requestId,
+        granted: true,
+        answers,
+      })
+    },
+    [pendingPermission, respondToPermission, buildPermissionResponseRequestId]
+  )
+
+  // Interactive question payload attached by the Codex app-server adapter
+  // (item/tool/requestUserInput) — switches the approval dialog to question mode.
+  const pendingUserInput = useMemo(() => {
+    const raw = pendingPermission?.metadata?.codexUserInput as
+      | { questions?: unknown; autoResolutionMs?: unknown }
+      | undefined
+    if (!raw || !Array.isArray(raw.questions) || raw.questions.length === 0) return undefined
+    const userInput: NonNullable<ToolApprovalRequest["userInput"]> = {
+      questions: raw.questions as NonNullable<ToolApprovalRequest["userInput"]>["questions"],
+    }
+    if (typeof raw.autoResolutionMs === "number") {
+      userInput.autoResolutionMs = raw.autoResolutionMs
+    }
+    return userInput
+  }, [pendingPermission])
+
   useEffect(() => {
     if (!activeAgentId || !canUseSessionActions) {
       // Noop when already empty; otherwise clear stale entries when the
@@ -1629,6 +1658,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                     ? "high"
                     : pendingPermission.riskLevel || "medium",
                 acpOptions: mapAcpOptions(pendingPermission.options),
+                userInput: pendingUserInput,
               }
             : null
         }
@@ -1646,6 +1676,9 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         }}
         onSelectOption={(id, optionId) => {
           void handlePermissionSelectOption(id, optionId)
+        }}
+        onSubmitAnswers={(id, answers) => {
+          void handlePermissionSubmitAnswers(id, answers)
         }}
       />
     </div>

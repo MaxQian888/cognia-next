@@ -115,6 +115,10 @@ export interface UseExternalAgentActions {
   ) => Promise<Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>>
   /** Fork a session (ACP extension) */
   forkSession: (sessionId: string) => Promise<ExternalAgentSession>
+  /** Trigger server-side context compaction (Codex app-server only) */
+  compactSession: (sessionId: string) => Promise<void>
+  /** Whether the active agent supports server-side context compaction */
+  supportsCompaction: boolean
   /** Resume a session (ACP extension) */
   resumeSession: (
     sessionId: string,
@@ -258,6 +262,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const [activeBenchmarkCapabilities, setActiveBenchmarkCapabilities] = useState<
     ExternalAgentBenchmarkCapabilityEntry[]
   >([])
+  const [supportsCompaction, setSupportsCompaction] = useState(false)
   const activeAgentId = storeActiveAgentId
 
   // Type for the external agent manager
@@ -965,6 +970,46 @@ export function useExternalAgent(): UseExternalAgentReturn {
     [getManager, activeAgentId, syncActiveAgentValidityFromRuntime]
   )
 
+  // Probe compaction support whenever the active agent or session changes —
+  // gates the session-panel "Compact context" button on the live adapter
+  // capability instead of a protocol-string check.
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      if (!activeAgentId || !activeSession) {
+        if (active) setSupportsCompaction(false)
+        return
+      }
+      try {
+        const manager = await getManager()
+        const adapter = manager.getCodexAppServerAdapter(activeAgentId)
+        if (active) setSupportsCompaction(adapter?.supportsCompaction() ?? false)
+      } catch {
+        if (active) setSupportsCompaction(false)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [activeAgentId, activeSession, getManager])
+
+  // Server-side context compaction — Codex app-server only (thread/compact/start).
+  // Exposed behind a capability probe so UI gates on the adapter, not protocol.
+  const compactSession = useCallback(
+    async (sessionId: string): Promise<void> => {
+      if (!activeAgentId) {
+        throw new Error("No active agent selected")
+      }
+      const manager = await getManager()
+      const adapter = manager.getCodexAppServerAdapter(activeAgentId)
+      if (!adapter?.supportsCompaction()) {
+        throw new Error("Agent does not support context compaction")
+      }
+      await adapter.compactSession(sessionId)
+    },
+    [getManager, activeAgentId]
+  )
+
   const resumeSession = useCallback(
     async (
       sessionId: string,
@@ -1362,6 +1407,8 @@ export function useExternalAgent(): UseExternalAgentReturn {
     closeSession,
     listSessions,
     forkSession,
+    compactSession,
+    supportsCompaction,
     resumeSession,
     execute,
     executeStreaming,

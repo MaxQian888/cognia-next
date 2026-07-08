@@ -119,6 +119,13 @@ interface AgentFormData {
   retryExponentialBackoff: boolean
   retryMaxDelayMs: string
   retryOnErrors: string
+  // Codex app-server options (shown only for protocol === "codex-app-server")
+  codexSandboxMode: "readOnly" | "workspaceWrite" | "dangerFullAccess"
+  codexNetworkAccess: boolean
+  /** Empty string = model default */
+  codexDefaultEffort: string
+  /** Empty string = server default */
+  codexReasoningSummary: "" | "auto" | "concise" | "detailed" | "none"
 }
 
 const DEFAULT_TIMEOUT_MS = "300000"
@@ -143,7 +150,15 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   retryExponentialBackoff: true,
   retryMaxDelayMs: DEFAULT_RETRY_MAX_DELAY_MS,
   retryOnErrors: "",
+  codexSandboxMode: "workspaceWrite",
+  codexNetworkAccess: false,
+  codexDefaultEffort: "",
+  codexReasoningSummary: "",
 }
+
+/** Static effort choices offered as per-agent defaults; the true per-model
+ * list is session-level (from `model/list` supportedReasoningEfforts). */
+const CODEX_EFFORT_CHOICES = ["minimal", "low", "medium", "high", "xhigh"] as const
 
 // =============================================================================
 // Connection Status Components
@@ -241,6 +256,10 @@ function AgentEditorDialog({
       retryExponentialBackoff: agent.retryConfig?.exponentialBackoff ?? true,
       retryMaxDelayMs: String(agent.retryConfig?.maxRetryDelay ?? DEFAULT_RETRY_MAX_DELAY_MS),
       retryOnErrors: agent.retryConfig?.retryOnErrors?.join(", ") || "",
+      codexSandboxMode: agent.codexOptions?.sandboxMode ?? "workspaceWrite",
+      codexNetworkAccess: agent.codexOptions?.networkAccess ?? false,
+      codexDefaultEffort: agent.codexOptions?.defaultReasoningEffort ?? "",
+      codexReasoningSummary: agent.codexOptions?.reasoningSummary ?? "",
     }
   })
 
@@ -328,6 +347,21 @@ function AgentEditorDialog({
       input.network = {
         endpoint: formData.networkEndpoint.trim(),
         apiKey: formData.networkApiKey || undefined,
+      }
+    }
+
+    if (formData.protocol === "codex-app-server") {
+      input.codexOptions = {
+        sandboxMode: formData.codexSandboxMode,
+        ...(formData.codexSandboxMode !== "dangerFullAccess"
+          ? { networkAccess: formData.codexNetworkAccess }
+          : {}),
+        ...(formData.codexDefaultEffort
+          ? { defaultReasoningEffort: formData.codexDefaultEffort }
+          : {}),
+        ...(formData.codexReasoningSummary
+          ? { reasoningSummary: formData.codexReasoningSummary }
+          : {}),
       }
     }
 
@@ -557,6 +591,107 @@ function AgentEditorDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Codex app-server options — sandbox + reasoning defaults applied at
+              thread/start (sandbox) and turn/start (sandboxPolicy/effort/summary).
+              Session-level overrides remain available via config options. */}
+          {formData.protocol === "codex-app-server" && (
+            <>
+              <Separator />
+              <div className="grid gap-2" data-testid="codex-options-section">
+                <Label>{t("codexSandboxMode")}</Label>
+                <p className="text-sm text-muted-foreground">{t("codexSandboxModeDesc")}</p>
+                <Select
+                  value={formData.codexSandboxMode}
+                  onValueChange={(v) =>
+                    setFormData({
+                      ...formData,
+                      codexSandboxMode: v as AgentFormData["codexSandboxMode"],
+                    })
+                  }
+                >
+                  <SelectTrigger data-testid="codex-sandbox-mode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="readOnly">{t("codexSandboxReadOnly")}</SelectItem>
+                    <SelectItem value="workspaceWrite">
+                      {t("codexSandboxWorkspaceWrite")}
+                    </SelectItem>
+                    <SelectItem value="dangerFullAccess">
+                      {t("codexSandboxDangerFullAccess")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {formData.codexSandboxMode !== "dangerFullAccess" && (
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="codexNetworkAccess">{t("codexNetworkAccess")}</Label>
+                    <p className="text-sm text-muted-foreground">{t("codexNetworkAccessDesc")}</p>
+                  </div>
+                  <Switch
+                    id="codexNetworkAccess"
+                    checked={formData.codexNetworkAccess}
+                    onCheckedChange={(checked) =>
+                      setFormData({ ...formData, codexNetworkAccess: checked })
+                    }
+                  />
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label>{t("codexDefaultEffort")}</Label>
+                  <Select
+                    value={formData.codexDefaultEffort || "model-default"}
+                    onValueChange={(v) =>
+                      setFormData({
+                        ...formData,
+                        codexDefaultEffort: v === "model-default" ? "" : v,
+                      })
+                    }
+                  >
+                    <SelectTrigger data-testid="codex-default-effort">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="model-default">{t("codexModelDefault")}</SelectItem>
+                      {CODEX_EFFORT_CHOICES.map((effort) => (
+                        <SelectItem key={effort} value={effort}>
+                          {effort}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>{t("codexReasoningSummary")}</Label>
+                  <Select
+                    value={formData.codexReasoningSummary || "server-default"}
+                    onValueChange={(v) =>
+                      setFormData({
+                        ...formData,
+                        codexReasoningSummary: (v === "server-default"
+                          ? ""
+                          : v) as AgentFormData["codexReasoningSummary"],
+                      })
+                    }
+                  >
+                    <SelectTrigger data-testid="codex-reasoning-summary">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="server-default">{t("codexServerDefault")}</SelectItem>
+                      <SelectItem value="auto">{t("codexSummaryAuto")}</SelectItem>
+                      <SelectItem value="concise">{t("codexSummaryConcise")}</SelectItem>
+                      <SelectItem value="detailed">{t("codexSummaryDetailed")}</SelectItem>
+                      <SelectItem value="none">{t("codexSummaryNone")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </>
+          )}
 
           <Separator />
           <div className="grid gap-2">
