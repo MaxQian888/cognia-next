@@ -161,6 +161,16 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Durable terminal command history (read-only mirror for the mobile /me/command-history viewer)".to_string(),
             has_tombstones: false,
         },
+        // v104 — Agent-Team board projection (team-board CQRS). One-way mirror
+        // of the desktop task board (task rows + team-meta rows) so the mobile
+        // workspace renders the kanban offline; edits travel back as the
+        // `team_task_*` / `team_run_*` control RPCs, never as data writes.
+        // Task/team deletions are tombstoned by the desktop projector.
+        SyncTableDescriptor {
+            name: "agentTeamBoard".to_string(),
+            description: "Agent-Team task board projection (read-only mirror; controls go through team_* RPCs)".to_string(),
+            has_tombstones: true,
+        },
     ]
 }
 
@@ -179,6 +189,7 @@ mod tests {
         assert!(r.contains("mcpServers"));
         assert!(r.contains("terminalHistory"));
         assert!(r.contains("settings"));
+        assert!(r.contains("agentTeamBoard"));
         assert!(!r.contains("ohai"));
     }
 

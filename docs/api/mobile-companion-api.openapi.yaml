@@ -1591,11 +1591,33 @@ paths:
               properties:
                 table:
                   type: string
-                  enum: [characters, skills, sessions, messages]
+                  enum:
+                    [
+                      characters,
+                      skills,
+                      sessions,
+                      messages,
+                      workflows,
+                      workflowRuns,
+                      twinProfile,
+                      plugins,
+                      adapterInstances,
+                      settings,
+                      conversationOverrides,
+                      goals,
+                      memories,
+                      mcpServers,
+                      terminalHistory,
+                      agentTeamBoard,
+                    ]
                   description: |
-                    Allowlist; mirror of `lib/sync/types.ts:SyncableTable`. Any other
-                    value returns 400 to prevent a malicious phone from asking for
-                    arbitrary tables.
+                    Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live
+                    registry: `sync_registry.rs::default_tables`, listable via
+                    `sync_list_tables`). Any other value returns 400 to prevent a
+                    malicious phone from asking for arbitrary tables.
+                    `agentTeamBoard` (v104) is the one-way Agent-Team board mirror —
+                    board edits travel back as `team_*` control RPCs, never as sync
+                    writes.
                 since:
                   type: integer
                   format: int64

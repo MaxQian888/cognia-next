@@ -56,6 +56,11 @@ export type SyncableTable =
   // `updatedAt`/`createdAt` — recency lives on the indexed `ts`, which the
   // desktop projector cursors on (see readTerminalHistoryDelta).
   | "terminalHistory"
+  // v104 — Agent-Team board projection (team-board CQRS). One-way mirror of
+  // the desktop agent-team-store (tasks + team-meta rows) so the phone can
+  // render the kanban offline. Mobile is a viewer; edits travel back as
+  // Companion RPC commands (`team_task_*`), never as data-level writes.
+  | "agentTeamBoard"
 
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */

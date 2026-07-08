@@ -682,6 +682,58 @@ describe("getDb", () => {
     ).toEqual(["r1:pr1"])
   })
 
+  // v104 — Agent-Team board projection (team-board CQRS). Task rows and the
+  // team-meta row share the table; the sync delta cursors on `updatedAt` and
+  // the mobile board liveQueries `[teamId+updatedAt]`.
+  it("v104 adds the agentTeamBoard table with team/updatedAt/kind indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(104)
+
+    await db.agentTeamBoard.bulkPut([
+      {
+        id: "task-1",
+        kind: "task",
+        teamId: "team-a",
+        title: "Ship",
+        description: "",
+        status: "pending",
+        priority: "normal",
+        dependencies: [],
+        tags: [],
+        order: 0,
+        commentCount: 0,
+        comments: [],
+        attachmentsCount: 0,
+        createdAt: 100,
+        updatedAt: 100,
+      },
+      {
+        id: "team:team-a",
+        kind: "team",
+        teamId: "team-a",
+        name: "Alpha",
+        status: "idle",
+        maxConcurrentTeammates: 2,
+        teammates: [{ id: "w1", name: "W", role: "teammate", status: "idle" }],
+        knowledgeTwinIds: [],
+        updatedAt: 150,
+      },
+    ])
+
+    expect(await db.agentTeamBoard.where("teamId").equals("team-a").count()).toBe(2)
+    expect(await db.agentTeamBoard.where("updatedAt").above(120).primaryKeys()).toEqual([
+      "team:team-a",
+    ])
+    expect(await db.agentTeamBoard.where("kind").equals("task").primaryKeys()).toEqual(["task-1"])
+    expect(
+      await db.agentTeamBoard
+        .where("[teamId+updatedAt]")
+        .between(["team-a", 0], ["team-a", Infinity])
+        .primaryKeys()
+    ).toEqual(["task-1", "team:team-a"])
+  })
+
   // v50 — Built-in characters → first-party character pack (ADR-0030
   // Amendment). The legacy `char_builtin_*` Dexie rows must pick up
   // `sourcePluginId`, `sourcePackId`, `clonedFromPackCharacterId`, and

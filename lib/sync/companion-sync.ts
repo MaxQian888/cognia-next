@@ -31,6 +31,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 
 import { clearCursors, loadCursors, saveCursor } from "./cursor-store"
 import { syncAdapterInstances } from "./handlers/adapter-instances"
+import { syncAgentTeamBoard } from "./handlers/agent-team-board"
 import { syncAppSettings } from "./handlers/app-settings"
 import { syncCharacters } from "./handlers/characters"
 import { syncConversationOverrides } from "./handlers/conversation-overrides"
@@ -89,6 +90,10 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // mirror (desktop → phone) powering the mobile `/me/command-history` browse
   // /search viewer; the phone has no shell, so it never writes back.
   { table: "terminalHistory", run: syncTerminalHistory },
+  // v104 — Agent-Team board projection (team-board CQRS). One-way mirror of
+  // the desktop task board (tasks + team-meta rows) so the mobile workspace
+  // can render the kanban offline; controls travel back as Companion RPC.
+  { table: "agentTeamBoard", run: syncAgentTeamBoard },
 ]
 
 /**

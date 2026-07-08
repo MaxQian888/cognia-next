@@ -120,6 +120,7 @@ import type { CalibrationItemRow } from "./calibration-items"
 import type { CalibrationRunRow } from "./calibration-runs"
 import type { BackgroundTaskJournalRow } from "./background-tasks"
 import type { TeamPrObservationRow } from "./team-pr-observations"
+import type { AgentTeamBoardRow } from "./agent-team-board"
 import type { WasmGrantLedgerRow } from "./wasm-grant-ledger"
 import type { RunRecordRow } from "./run-records"
 import type { Memory } from "@/types/memory/memory"
@@ -381,6 +382,9 @@ export class CogniaDB extends Dexie {
   backgroundTasks!: Table<BackgroundTaskJournalRow, string>
   // v103 — Agent Team PR feedback observations. See `lib/db/team-pr-observations.ts`.
   teamPrObservations!: Table<TeamPrObservationRow, string>
+  // v104 — Agent-Team board projection (one-way store→Dexie mirror for mobile
+  // sync). See `lib/db/agent-team-board.ts`.
+  agentTeamBoard!: Table<AgentTeamBoardRow, string>
   // v88 — Durable WASM preopen grant ledger. See `lib/db/wasm-grant-ledger.ts`.
   wasmGrantLedger!: Table<WasmGrantLedgerRow, string>
   // v89 — Per-turn Run Records (Run Panel). See `lib/db/run-records.ts`.
@@ -2265,6 +2269,20 @@ export class CogniaDB extends Dexie {
     // — no upgrade hook. See `lib/db/team-pr-observations.ts`.
     this.version(103).stores({
       teamPrObservations: "&id, teamId, [teamId+updatedAt], runId, derivedStatus",
+    })
+
+    // v104 — Agent-Team board projection (team-board CQRS). A one-way mirror
+    // of the localStorage-persisted agent-team-store (the single write source)
+    // so the mobile sync pipeline can carry the task board to the phone: task
+    // rows (`kind: "task"`, id = taskId) + one team-meta row per team
+    // (`kind: "team"`, id = `team:<teamId>`) carrying the roster the mobile
+    // board needs for swimlanes/guards. Desktop-only writer
+    // (`lib/db/agent-team-projection.ts`); Dexie NEVER writes back to the
+    // store. `updatedAt` cursors the sync delta; `[teamId+updatedAt]` powers
+    // per-team liveQueries on the phone. Pure additive — no upgrade hook.
+    // See `lib/db/agent-team-board.ts`.
+    this.version(104).stores({
+      agentTeamBoard: "&id, teamId, [teamId+updatedAt], updatedAt, kind, status",
     })
   }
 

@@ -147,6 +147,8 @@ export async function readDexieDelta(
       return readGoalsDelta(since)
     case "memories":
       return readMemoriesDelta(since)
+    case "agentTeamBoard":
+      return readAgentTeamBoardDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -302,6 +304,13 @@ async function readMemoriesDelta(since: number): Promise<SyncDelta<unknown>> {
   const all = await getDb().memories.toArray()
   const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
   return finalizeDelta("memories", rows as UpdatedAtRow[], since)
+}
+
+async function readAgentTeamBoardDelta(since: number): Promise<SyncDelta<unknown>> {
+  // v104 board projection rows carry an indexed `updatedAt` stamped by the
+  // desktop projector (`lib/db/agent-team-projection.ts`) — cursor directly.
+  const rows = await getDb().agentTeamBoard.where("updatedAt").above(since).toArray()
+  return finalizeDelta("agentTeamBoard", rows as UpdatedAtRow[], since)
 }
 
 /**
