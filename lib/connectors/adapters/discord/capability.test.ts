@@ -37,8 +37,8 @@ describe("DISCORD_CAPS", () => {
     expect(DISCORD_CAPS).toContain("history.fetch")
   })
 
-  it("has exactly 15 entries (Phase-1 + send.a2ui + send.voice + send.video + send.reaction + history.fetch)", () => {
-    expect(DISCORD_CAPS).toHaveLength(15)
+  it("has exactly 17 entries (Phase-1 + send.a2ui + send.voice + send.video + send.reaction + history.fetch + pin + presence.status)", () => {
+    expect(DISCORD_CAPS).toHaveLength(17)
   })
 })
 

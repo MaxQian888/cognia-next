@@ -6,6 +6,8 @@ describe("LARK_CAPS", () => {
       "delete",
       "edit",
       "history.fetch",
+      "pin",
+      "presence.status",
       "rich-card.lark",
       "send.a2ui",
       "send.card",

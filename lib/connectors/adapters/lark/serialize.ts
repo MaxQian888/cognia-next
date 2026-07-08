@@ -65,15 +65,19 @@ function buildReceiveIdParams(
 }
 
 /**
- * Build a POST /im/v1/messages?receive_id_type=<type> call.
+ * Resolve the Lark `receive_id_type` + `receive_id` for an outbound request.
+ *
+ * A4 — honours an explicit `receiveIdType` + `receiveId` (or the convenience
+ * `openId` / `userId` / `email`) carried on the conversation ref, falling back
+ * to the prefix-sniff on the chat id for legacy bindings. Shared by BOTH the
+ * sync `serializeSend` and the async `serializeOutboundAsync` (the one the
+ * production `send()` actually calls) so the async path no longer silently
+ * collapses user_id / email targets down to chat_id.
  */
-export function serializeSend(req: OutboundRequest): SerializedLarkCall {
-  const chatId = chatIdFromRef(req)
-  const threadId = threadIdFromRef(req)
-  // A4 — honour explicit receiveIdType + receiveId when the conversation
-  // ref carries them. Closes the Phase-2 marker that previously forced
-  // every send through chat_id even when the caller wanted to target a
-  // user by open_id / user_id / email.
+function resolveReceiveId(
+  req: OutboundRequest,
+  chatId: string
+): { receiveIdType: string; receiveId: string } {
   const ref = req.conversationRef as Record<string, unknown>
   const explicitType =
     typeof ref["receiveIdType"] === "string" ? (ref["receiveIdType"] as string) : undefined
@@ -96,7 +100,16 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
         : typeof ref["email"] === "string"
           ? "email"
           : undefined)
-  const { receiveIdType, receiveId } = buildReceiveIdParams(chatId, inferredType, explicitReceiveId)
+  return buildReceiveIdParams(chatId, inferredType, explicitReceiveId)
+}
+
+/**
+ * Build a POST /im/v1/messages?receive_id_type=<type> call.
+ */
+export function serializeSend(req: OutboundRequest): SerializedLarkCall {
+  const chatId = chatIdFromRef(req)
+  const threadId = threadIdFromRef(req)
+  const { receiveIdType, receiveId } = resolveReceiveId(req, chatId)
 
   const body = segmentsToLarkBody(req.segments)
 
@@ -179,7 +192,11 @@ export async function serializeOutboundAsync(
 ): Promise<SerializedLarkCall> {
   const chatId = chatIdFromRef(req)
   const threadId = threadIdFromRef(req)
-  const { receiveIdType, receiveId } = buildReceiveIdParams(chatId)
+  // A4 — honour explicit open_id / user_id / email routing on the async path
+  // too (the production `send()` uses this serialiser). Previously this passed
+  // only the chat id, so a reply targeted at a user by user_id / email was
+  // silently delivered to a chat_id instead.
+  const { receiveIdType, receiveId } = resolveReceiveId(req, chatId)
 
   const body = await segmentsToLarkBodyAsync(req.segments, {
     adapterId,

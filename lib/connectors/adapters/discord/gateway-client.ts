@@ -27,6 +27,7 @@ import type { DiscordDispatch } from "./parse"
 const OP_DISPATCH = 0
 const OP_HEARTBEAT = 1
 const OP_IDENTIFY = 2
+const OP_PRESENCE_UPDATE = 3
 const OP_RESUME = 6
 const OP_RECONNECT = 7
 const OP_INVALID_SESSION = 9
@@ -58,6 +59,14 @@ export interface GatewayClient {
   readonly selfId: string
   /** The async generator of dispatched events. */
   readonly dispatches: AsyncGenerator<DiscordDispatch>
+  /**
+   * Send a Presence Update (op 3) with a Custom Status activity carrying
+   * `state`. Returns false when no gateway connection is currently live
+   * (presence has no REST fallback — it is gateway-only). Best-effort:
+   * Discord allows ~5 presence updates/min per connection, so callers
+   * should refresh at minute-cadence or slower.
+   */
+  updatePresence(state: string): Promise<boolean>
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
@@ -92,6 +101,8 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
 
   let selfId = ""
   let attempts = 0
+  /** Live WS handle for out-of-band sends (presence). Null between connections. */
+  let activeHandleId: string | null = null
 
   async function* generateDispatches(): AsyncGenerator<DiscordDispatch> {
     while (!opts.signal.aborted) {
@@ -116,6 +127,7 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
       }
 
       if (opts.signal.aborted) return
+      activeHandleId = handleId
 
       // Queue + wake pattern for inbound events
       const queue: string[] = []
@@ -258,6 +270,7 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
           }
         }
       } finally {
+        activeHandleId = null
         if (heartbeatTimer !== null) clearTimeout(heartbeatTimer)
         opts.signal.removeEventListener("abort", abortHandler)
         unlisten()
@@ -290,10 +303,34 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
 
   const dispatches = generateDispatches()
 
+  async function updatePresence(state: string): Promise<boolean> {
+    const handle = activeHandleId
+    if (!handle) return false
+    try {
+      await connectorsWsSend(
+        handle,
+        JSON.stringify({
+          op: OP_PRESENCE_UPDATE,
+          d: {
+            since: null,
+            // Activity type 4 = Custom Status; bots render the `state` text.
+            activities: [{ name: "Custom Status", type: 4, state }],
+            status: "online",
+            afk: false,
+          },
+        })
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
+
   return {
     get selfId() {
       return selfId
     },
     dispatches,
+    updatePresence,
   }
 }

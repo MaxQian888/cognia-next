@@ -117,6 +117,99 @@ describe("parseLarkEventEnvelope", () => {
     })
   })
 
+  describe("rich-media message types (Phase 2 ingestion)", () => {
+    const receive = (messageType: string, content: unknown): LarkEventEnvelope => ({
+      schema: "2.0",
+      header: { event_id: "evt_rm", event_type: "im.message.receive_v1", app_id: "cli_app" },
+      event: {
+        sender: { sender_id: { open_id: "ou_user_rm" } },
+        message: {
+          message_id: "om_rm",
+          chat_id: "oc_rm",
+          chat_type: "group",
+          message_type: messageType,
+          content: JSON.stringify(content),
+        },
+      },
+    })
+
+    it("file → file segment with key, name, mime, sizeBytes", () => {
+      const r = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        receive("file", { file_key: "file_v3_x", file_name: "report.pdf" })
+      )
+      expect(r!.segments[0]).toEqual({
+        type: "file",
+        url: "file_v3_x",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 0,
+      })
+      expect(r!.plainText).toContain("[file:report.pdf]")
+    })
+
+    it("audio → voice segment with duration in seconds", () => {
+      const r = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        receive("audio", { file_key: "file_v3_a", duration: 3000 })
+      )
+      expect(r!.segments[0]).toEqual({ type: "voice", url: "file_v3_a", durationSec: 3 })
+    })
+
+    it("media → video segment with cover thumbnail + duration", () => {
+      const r = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        receive("media", { file_key: "file_v3_v", image_key: "img_cover", duration: 8000 })
+      )
+      expect(r!.segments[0]).toEqual({
+        type: "video",
+        url: "file_v3_v",
+        thumbnailUrl: "img_cover",
+        durationSec: 8,
+      })
+    })
+
+    it("sticker → text marker", () => {
+      const r = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        receive("sticker", { file_key: "stk_1" })
+      )
+      expect(r!.segments[0]).toEqual({ type: "text", text: "[sticker]" })
+    })
+
+    it("post (locale-wrapped) → markdown text + embedded image segments", () => {
+      const content = {
+        zh_cn: {
+          title: "标题",
+          content: [
+            [
+              { tag: "text", text: "看这个 " },
+              { tag: "a", text: "链接", href: "https://x.test" },
+              { tag: "at", user_id: "ou_a", user_name: "Alice" },
+            ],
+            [{ tag: "img", image_key: "img_in_post" }],
+          ],
+        },
+      }
+      const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, receive("post", content))
+      expect(r!.segments[0]).toEqual({
+        type: "markdown",
+        md: "标题\n看这个 链接 (https://x.test)@Alice",
+      })
+      expect(r!.segments[1]).toEqual({ type: "image", url: "img_in_post", alt: "image" })
+    })
+
+    it("post (already-unwrapped {title,content}) → markdown text", () => {
+      const content = { title: "T", content: [[{ tag: "text", text: "body" }]] }
+      const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, receive("post", content))
+      expect(r!.segments[0]).toEqual({ type: "markdown", md: "T\nbody" })
+    })
+  })
+
   describe("unsupported event types", () => {
     it("returns null for im.message.read_v1 (legacy event name)", () => {
       const envelope: LarkEventEnvelope = {

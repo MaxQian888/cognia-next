@@ -21,6 +21,9 @@ export const DISCORD_CAPS: readonly Capability[] = [
   // returns newest-first; the cursor for the next (older) page is the
   // oldest message id in the previous response.
   "history.fetch",
+  // `PUT /channels/{channel}/pins/{message}` + gateway op 3 Custom Status.
+  "pin",
+  "presence.status",
   "send.a2ui",
   "send.file",
   "send.image",

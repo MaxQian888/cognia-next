@@ -164,6 +164,43 @@ describe("startGatewayClient", () => {
     expect(dispatches[1].t).toBe("MESSAGE_CREATE")
   }, 10000)
 
+  it("updatePresence returns false before connect and sends op 3 once connected", async () => {
+    const session = createFakeWsSession()
+    mockListen.mockImplementation(session.listenImpl)
+    mockWsOpen.mockResolvedValue("ws-1")
+    mockWsSend.mockResolvedValue(undefined)
+
+    const ctrl = new AbortController()
+    const client = startGatewayClient({
+      botToken: async () => "BOT_TOKEN",
+      signal: ctrl.signal,
+      _gatewayUrl: "wss://fake-gateway",
+      _backoffBaseMs: 1,
+    })
+
+    // Generator not iterated yet — no live connection.
+    expect(await client.updatePresence("AI 1k")).toBe(false)
+
+    const collectorDone = (async () => {
+      for await (const _d of client.dispatches) {
+        break
+      }
+    })()
+    await session.waitForListeners()
+
+    expect(await client.updatePresence("AI 1.2M $3.4")).toBe(true)
+    const presenceFrame = mockWsSend.mock.calls
+      .map(([, data]: [string, string]) => JSON.parse(data) as { op: number; d?: unknown })
+      .find((f) => f.op === 3)
+    expect(presenceFrame).toBeDefined()
+    const d = presenceFrame!.d as { activities: Array<{ type: number; state: string }> }
+    expect(d.activities[0]).toMatchObject({ type: 4, state: "AI 1.2M $3.4" })
+
+    ctrl.abort()
+    session.triggerClose()
+    await collectorDone
+  }, 10000)
+
   it("sends IDENTIFY after HELLO with correct token and intents=33281", async () => {
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)

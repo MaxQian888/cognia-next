@@ -93,6 +93,14 @@ export type CallbackHandler = (
   boundConversationKey: string | null
 ) => void | Promise<void>
 
+/**
+ * Retention window for the per-conversation last-bot-reply timestamp used by
+ * the `cooldown-after-bot-reply` blocker. Entries older than this are pruned on
+ * write. 10 minutes comfortably exceeds any realistic cooldown (the default is
+ * 3 s) while keeping the map bounded across long-lived sessions.
+ */
+const BOT_REPLY_RETENTION_MS = 10 * 60_000
+
 export class ConnectorBus {
   private adapters = new Map<string, PlatformAdapter>()
   private inboundHandler: BusInboundHandler | null = null
@@ -132,6 +140,28 @@ export class ConnectorBus {
   private policyState: PolicyEvalState = {
     recentBotReplyAtByConversation: {},
     recentByUserAndChannel: {},
+  }
+
+  /**
+   * Record that the bot delivered a reply on `conversationKey` at `at`.
+   *
+   * This is the sole writer of `policyState.recentBotReplyAtByConversation`,
+   * which the `cooldown-after-bot-reply` trigger blocker reads. That blocker is
+   * part of the default group-chat policy (`defaultGroupChatPolicy`), so without
+   * this write the group anti-spam cooldown never fired. Production wires this
+   * to the outbound runner's `onDelivered` callback so it covers every reply
+   * path (ai-run / team / workflow / digest) at the single delivery choke point.
+   *
+   * Prunes entries older than the largest plausible cooldown window on write so
+   * the map cannot grow without bound across long-lived sessions.
+   */
+  recordBotReply(conversationKey: string, at: number = Date.now()): void {
+    const map = this.policyState.recentBotReplyAtByConversation
+    map[conversationKey] = at
+    const cutoff = at - BOT_REPLY_RETENTION_MS
+    for (const key in map) {
+      if (map[key] < cutoff) delete map[key]
+    }
   }
 
   registerAdapter(adapter: PlatformAdapter): void {

@@ -12,16 +12,24 @@ import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "new-lark-id" })
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
+const mockConnectorsKeyringGet = jest.fn().mockResolvedValue("cli_app_x")
 const mockConnectorsHttpRequest = jest.fn()
+const mockOpenUrl = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/db/adapter-instances", () => ({
   createAdapterInstance: (...args: unknown[]) => mockCreateAdapterInstance(...args),
   updateAdapterInstance: (...args: unknown[]) => mockUpdateAdapterInstance(...args),
+  getAdapterInstance: jest.fn().mockResolvedValue(null),
 }))
 
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...args: unknown[]) => mockConnectorsKeyringSet(...args),
+  connectorsKeyringGet: (...args: unknown[]) => mockConnectorsKeyringGet(...args),
   connectorsHttpRequest: (...args: unknown[]) => mockConnectorsHttpRequest(...args),
+}))
+
+jest.mock("@/lib/native/opener", () => ({
+  openUrl: (...args: unknown[]) => mockOpenUrl(...args),
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
@@ -35,7 +43,7 @@ jest.mock("@/hooks/use-tunnel-status", () => ({
   }),
 }))
 
-jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }))
 
 import { toast } from "sonner"
 const mockToastSuccess = toast.success as jest.Mock
@@ -273,6 +281,67 @@ describe("LarkConfigDialog — edit existing", () => {
     // Must be `/webhook/lark/...` (matches axum_app.rs), NOT the old
     // `/connectors/lark/...` prefix that 404'd.
     expect(input.value).toBe("https://demo.trycloudflare.com/webhook/lark/lark-existing")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tests — send as user (OAuth connect + opt-in identity toggle)
+// ---------------------------------------------------------------------------
+
+describe("LarkConfigDialog — send as user", () => {
+  const baseRow: AdapterInstanceRow = {
+    id: "lark-existing",
+    type: "lark",
+    displayName: "Prod Lark Bot",
+    enabled: true,
+    transportMode: "gateway",
+    settings: { transport: "long-connection" },
+    credentialsRef: {
+      keyringService: "com.cognia.platforms",
+      accounts: ["appId", "appSecret", "encryptKey", "verificationToken"],
+    },
+    trigger: defaultPrivateChatPolicy(),
+    defaultMode: "auto",
+    createdAt: 1000,
+    updatedAt: 2000,
+  }
+
+  const rowWithUser: AdapterInstanceRow = {
+    ...baseRow,
+    settings: {
+      transport: "long-connection",
+      connectedUser: { openId: "ou_x", name: "Alice", expiresAtMs: 0, refreshExpiresAtMs: 0 },
+    },
+  }
+
+  it("is hidden for a new (unsaved) adapter", () => {
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.queryByText("Send as me")).not.toBeInTheDocument()
+  })
+
+  it("opens the OAuth authorize URL and stores the CSRF state on Connect", async () => {
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={baseRow} />)
+    fireEvent.click(screen.getByText("Send as me")) // expand the collapsed section
+    fireEvent.click(screen.getByRole("button", { name: /connect account/i }))
+
+    await waitFor(() => expect(mockOpenUrl).toHaveBeenCalledTimes(1))
+    const url = mockOpenUrl.mock.calls[0][0] as string
+    expect(url).toContain("open.feishu.cn")
+    expect(url).toContain("authen/v1/authorize")
+    expect(sessionStorage.getItem("connector-oauth-state")).toMatch(/^lark:lark-existing:/)
+  })
+
+  it("shows 'Connected as' and enables the toggle when a user is connected", () => {
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={rowWithUser} />)
+    fireEvent.click(screen.getByText("Send as me"))
+    expect(screen.getByText(/connected as alice/i)).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: /send replies as me/i })).not.toBeDisabled()
+  })
+
+  it("disables the toggle when no user is connected", () => {
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={baseRow} />)
+    fireEvent.click(screen.getByText("Send as me"))
+    expect(screen.getByRole("switch", { name: /send replies as me/i })).toBeDisabled()
   })
 })
 

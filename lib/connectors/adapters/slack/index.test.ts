@@ -327,6 +327,50 @@ describe("createSlackAdapter", () => {
   // drive it via `bus.listAdapters().find(...).setSuggestedPrompts(...)`).
   // -------------------------------------------------------------------------
 
+  describe("presence", () => {
+    function httpCalls() {
+      return mockInvoke.mock.calls.filter(([cmd]: [string]) => cmd === "connectors_http_request")
+    }
+
+    it("setPresenceStatus posts users.profile.set with the user token", async () => {
+      const adapter = createSlackAdapter({
+        id: "sl-1",
+        displayName: "Bot",
+        botToken: async () => "xoxb-test-token",
+        signingSecret: async () => "secret",
+        userToken: async () => "xoxp-user-token",
+        selfId: "UBOT123",
+        transport: "socket-mode",
+      })
+      await adapter.setPresenceStatus!({ text: "AI 1.2M $3.4", expiresAt: 1_800_000_000_000 })
+      const [, args] = httpCalls()[0]
+      const req = (args as { req: { url: string; headers: Record<string, string>; body: string } })
+        .req
+      expect(req.url).toContain("users.profile.set")
+      expect(req.headers.Authorization).toBe("Bearer xoxp-user-token")
+      const body = JSON.parse(req.body) as {
+        profile: { status_text: string; status_expiration: number }
+      }
+      expect(body.profile.status_text).toBe("AI 1.2M $3.4")
+      expect(body.profile.status_expiration).toBe(1_800_000_000)
+    })
+
+    it("setPresenceStatus throws without a user token", async () => {
+      const adapter = makeAdapter()
+      await expect(adapter.setPresenceStatus!({ text: "AI" })).rejects.toThrow(/user token/)
+      expect(httpCalls()).toHaveLength(0)
+    })
+
+    it("pinMessage posts pins.add with channel + timestamp", async () => {
+      const adapter = makeAdapter()
+      await adapter.pinMessage!("slack:sl-1:C01", "1600000000.000100")
+      const [, args] = httpCalls()[0]
+      const req = (args as { req: { url: string; body: string } }).req
+      expect(req.url).toContain("pins.add")
+      expect(JSON.parse(req.body)).toEqual({ channel: "C01", timestamp: "1600000000.000100" })
+    })
+  })
+
   describe("setSuggestedPrompts", () => {
     type WithSuggested = ReturnType<typeof createSlackAdapter> & {
       setSuggestedPrompts: (

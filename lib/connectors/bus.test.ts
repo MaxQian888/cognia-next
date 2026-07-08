@@ -10,6 +10,8 @@ import type {
   ConnectorCallbackEvent,
 } from "@/types/connectors"
 import { getBus, __resetBusForTesting } from "./bus"
+import { evaluatePolicy } from "./policy-eval"
+import type { TriggerPolicy } from "@/types/connectors/policy"
 
 // The callback dispatch path touches Dexie via dedup / audit / binding lookup.
 // Stub those three out so the observer wiring can be exercised in isolation —
@@ -381,5 +383,55 @@ describe("ConnectorBus — passive callback observers", () => {
       throw new Error("cb observer boom")
     })
     await expect(bus.dispatchConnectorCallback(makeCallback())).resolves.toBeUndefined()
+  })
+})
+
+describe("ConnectorBus — recordBotReply (cooldown bookkeeping)", () => {
+  beforeEach(() => __resetBusForTesting())
+
+  const cooldownEvent = (conversationKey: string) =>
+    ({
+      conversationKey,
+      sender: { id: "u1" },
+      channel: { id: "c1" },
+      mentions: { selfMentioned: false, users: [] },
+      plainText: "hi",
+    }) as unknown as NormalizedInboundEvent
+
+  const cooldownPolicy: TriggerPolicy = {
+    rules: [],
+    blockers: [{ kind: "cooldown-after-bot-reply", secs: 5 }],
+    storeUnmatchedInDraftMode: false,
+  }
+
+  it("writes the last-reply timestamp the cooldown blocker reads (was never written before)", () => {
+    const bus = getBus()
+    const ck = "lark:lark-1:oc_chat"
+    bus.recordBotReply(ck, 10_000)
+
+    const state = bus.__getPolicyStateForTesting()
+    expect(state.recentBotReplyAtByConversation[ck]).toBe(10_000)
+
+    // Within the 5 s window → blocked; after it → allowed.
+    expect(evaluatePolicy(cooldownPolicy, cooldownEvent(ck), state, 12_000).blocked).toBe(true)
+    expect(evaluatePolicy(cooldownPolicy, cooldownEvent(ck), state, 20_000).blocked).toBe(false)
+  })
+
+  it("defaults the timestamp to now when omitted", () => {
+    const bus = getBus()
+    const before = Date.now()
+    bus.recordBotReply("k")
+    const at = bus.__getPolicyStateForTesting().recentBotReplyAtByConversation["k"]
+    expect(at).toBeGreaterThanOrEqual(before)
+  })
+
+  it("prunes entries older than the retention window on write", () => {
+    const bus = getBus()
+    bus.recordBotReply("old", 0)
+    // 20 min later — retention window is 10 min, so `old` is pruned.
+    bus.recordBotReply("fresh", 20 * 60_000)
+    const map = bus.__getPolicyStateForTesting().recentBotReplyAtByConversation
+    expect(map["old"]).toBeUndefined()
+    expect(map["fresh"]).toBe(20 * 60_000)
   })
 })

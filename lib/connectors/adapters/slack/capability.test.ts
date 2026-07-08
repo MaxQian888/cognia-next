@@ -11,6 +11,8 @@ describe("SLACK_CAPS", () => {
       "delete",
       "edit",
       "history.fetch",
+      "pin",
+      "presence.status",
       "rich-card.slack",
       "rich-markdown.slack",
       "send.a2ui",

@@ -714,6 +714,99 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     expect(await getDb().outboundQueue.count()).toBe(0)
   })
 
+  // PII red-line: the team/workflow branches forward `event.plainText` straight
+  // into their runtimes, bypassing `safeSendPrompt`. The runtime now gates that
+  // text with the real `hasNoLeakingPii` before dispatch (fail-closed).
+  it("blocks team dispatch + audits pii_blocked when inbound text leaks PII", async () => {
+    const key = "telegram:adapter_1:chat_team_pii"
+    await seedAdapter("adapter_1")
+    await getDb().sessions.add({
+      id: "s_team_pii",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({
+      conversationKey: key,
+      sessionId: "s_team_pii",
+      teamId: "team_r",
+    })
+
+    await callHandler(
+      makeEvent({
+        conversationKey: key,
+        segments: [{ type: "text", text: "email me at alice@corp.com" }],
+        plainText: "email me at alice@corp.com",
+      }),
+      "ai-run"
+    )
+
+    expect(mockStartTeamRunFromIM).not.toHaveBeenCalled()
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "adapter.error" && r.reason === "pii_blocked")).toBe(true)
+    expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+
+  it("blocks workflow dispatch + audits pii_blocked when inbound text leaks PII", async () => {
+    const key = "telegram:adapter_1:chat_wf_pii"
+    await seedAdapter("adapter_1")
+    await getDb().sessions.add({
+      id: "s_wf_pii",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({
+      conversationKey: key,
+      sessionId: "s_wf_pii",
+      workflowId: "wf_n",
+    })
+
+    await callHandler(
+      makeEvent({
+        conversationKey: key,
+        segments: [{ type: "text", text: "reach bob@corp.com about it" }],
+        plainText: "reach bob@corp.com about it",
+      }),
+      "ai-run"
+    )
+
+    expect(mockStartWorkflowFromIM).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "adapter.error" && r.reason === "pii_blocked")).toBe(true)
+    expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+
+  it("still dispatches to the team when inbound text is PII-clean", async () => {
+    const key = "telegram:adapter_1:chat_team_clean"
+    await seedAdapter("adapter_1")
+    await getDb().sessions.add({
+      id: "s_team_clean",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({
+      conversationKey: key,
+      sessionId: "s_team_clean",
+      teamId: "team_r",
+    })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
+  })
+
   it("teamId wins when both teamId and workflowId are set", async () => {
     const key = "telegram:adapter_1:chat_both"
     await seedAdapter("adapter_1")
@@ -1059,6 +1152,55 @@ describe("inboundEventToSendContent", () => {
         source: { type: "base64", media_type: "image/jpeg", data: "AAA" },
       })
     }
+  })
+
+  it("surfaces a file segment's name and extracted text (ADR-0009 rich media)", () => {
+    const event = makeEvent({
+      segments: [
+        {
+          type: "file",
+          url: "file_k",
+          name: "report.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 0,
+          ocrText: "Q3 revenue up 12%",
+        },
+      ],
+      plainText: "",
+    })
+    expect(inboundEventToSendContent(event)).toBe("[file: report.pdf]\nQ3 revenue up 12%")
+  })
+
+  it("shows a file marker with just the name when no text was extracted", () => {
+    const event = makeEvent({
+      segments: [
+        {
+          type: "file",
+          url: "file_k",
+          name: "archive.zip",
+          mimeType: "application/zip",
+          sizeBytes: 0,
+        },
+      ],
+      plainText: "",
+    })
+    expect(inboundEventToSendContent(event)).toBe("[file: archive.zip]")
+  })
+
+  it("hands back a voice transcript when present, else a marker", () => {
+    expect(
+      inboundEventToSendContent(
+        makeEvent({
+          segments: [{ type: "voice", url: "v_k", transcript: "hi there" }],
+          plainText: "",
+        })
+      )
+    ).toBe("hi there")
+    expect(
+      inboundEventToSendContent(
+        makeEvent({ segments: [{ type: "voice", url: "v_k" }], plainText: "" })
+      )
+    ).toBe("[voice message]")
   })
 })
 

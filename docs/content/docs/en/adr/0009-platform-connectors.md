@@ -293,6 +293,35 @@ improvements. All shipped behind the same plan file under
 
 ---
 
+## Revision — 2026-07 (Lark link-completeness pass)
+
+A connector-chain audit found several Lark/pipeline gaps that were built-but-not-wired.
+This pass closes them (TypeScript-only — no Rust changes; the Rust attachment cache and
+OAuth completion handler already existed):
+
+- **Inbound rich-media ingestion (closes the "Phase 2 attachment caching" marker).**
+  `lib/connectors/adapters/lark/inbound-media.ts:enrichLarkInboundMedia` runs as a second
+  pass in the adapter's `dispatchEnvelope`, downloading image/file bytes through the existing
+  encrypted cache (`connectors_attachment_fetch` / `connectors_attachment_read`) and attaching
+  inline `dataBase64` (consumed by the already-wired inbound OCR + model vision paths) and,
+  for document files, extracted text via `processDocumentAsync`. `parse.ts:buildSegments` now
+  projects `post` / `file` / `audio` / `media` into typed segments instead of `[type]` stubs.
+- **Send-as-user (closes the "OAuth partial" marker).** `auth.ts:getUserAccessToken` /
+  `refreshUserToken` resolve + silently refresh the `user_token` the OAuth handler persists;
+  `index.ts:doRequest` uses it (opt-in `settings.sendAsUser`) with refresh-on-401 and a
+  graceful fall-back to the bot identity. `lark-config.tsx` gains an "Send as me" section with
+  an OAuth **Connect account** button (opens the authorize URL; the deep-link router completes
+  it) + the opt-in toggle.
+- **Pipeline fixes:** the `cooldown-after-bot-reply` blocker is now actually fed
+  (`ConnectorBus.recordBotReply`, wired from the outbound runner's `onDelivered` — the default
+  group-chat anti-spam cooldown had never fired); team/workflow IM dispatch now passes the same
+  fail-closed PII gate as the single-character path (`runtime.ts`, closing a confirmed red-line
+  bypass); the async outbound serializer honours explicit open_id/user_id/email routing;
+  `larkInboundToA2UI` unwraps the real event envelope; and the dead `segments-to-a2ui.ts`
+  module + the orphan `connectors_bind_webhook_route` invoke were removed.
+
+---
+
 ## References
 
 - Original spec: `C:\Users\qwdma\.claude\plans\d-project-agentforge-astrbot-fluttering-cerf.md`

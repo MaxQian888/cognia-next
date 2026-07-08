@@ -42,6 +42,7 @@ import { LarkAtStrategy } from "../../forms/lark/lark-at-strategy"
 import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
 import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
+import { UsagePresence } from "../../forms/usage-presence"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterTransportLabelKey } from "../platform-meta"
 
@@ -117,6 +118,10 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
       {/* Cross-provider help / welcome card settings. Self-managing, so a
        * single mount here covers every platform. */}
       <HelpAndWelcome adapterId={row.id} />
+
+      {/* Token-usage presence (badge / pinned card). Self-managing; the
+       * badge tier auto-hides on platforms without `presence.status`. */}
+      <UsagePresence adapterId={row.id} />
 
       {/* In-chat control-command permission gate (control-plane). Self-
        * managing; one mount covers every platform. */}

@@ -19,7 +19,7 @@
  * Rust-side `connectors_lark_upload_*` commands surface).
  */
 
-import { clearTokenCache } from "./auth"
+import { clearTokenCache, refreshUserToken } from "./auth"
 
 /** Lark error codes signalling the tenant access token is no longer valid. */
 export const TAT_INVALIDATION_CODES: ReadonlySet<number> = new Set([
@@ -92,6 +92,61 @@ export async function withTatRefresh<T>(ctx: TatRefreshContext, fn: () => Promis
   } catch (err) {
     if (!isLarkTatInvalidation(err)) throw err
     clearTokenCache(ctx.appId, ctx.appSecret)
+    return await fn()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// User access token refresh (send-as-user path)
+// ---------------------------------------------------------------------------
+
+/** Lark error codes signalling the user access token is no longer valid. */
+export const USER_TOKEN_INVALIDATION_CODES: ReadonlySet<number> = new Set([
+  99991677, // invalid user access token
+  99991668, // access token expired (variant)
+])
+
+/**
+ * Return true when the error looks like the Lark USER access token was
+ * invalidated (HTTP 401, or a code in `USER_TOKEN_INVALIDATION_CODES`).
+ */
+export function isLarkUserTokenInvalidation(err: unknown): boolean {
+  if (err instanceof LarkApiError) {
+    if (err.status === 401) return true
+    if (err.code !== null && USER_TOKEN_INVALIDATION_CODES.has(err.code)) return true
+    return false
+  }
+  if (err instanceof Error) {
+    const msg = err.message
+    if (/(^|\s)401(\b|\D)/.test(msg)) return true
+    for (const code of USER_TOKEN_INVALIDATION_CODES) {
+      if (msg.includes(`code=${code}`) || msg.includes(`code: ${code}`)) return true
+    }
+  }
+  return false
+}
+
+export interface UserTokenRefreshContext {
+  adapterId: string
+  appId: string
+  appSecret: string
+}
+
+/**
+ * Run `fn` once. If it throws a user-token-invalidation error, refresh the
+ * user access token (rotating + persisting it) and retry exactly once. Any
+ * other error — or a failure on the retry — propagates so the caller can
+ * decide whether to fall back to the bot (tenant) identity.
+ */
+export async function withUserTokenRefresh<T>(
+  ctx: UserTokenRefreshContext,
+  fn: () => Promise<T>
+): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    if (!isLarkUserTokenInvalidation(err)) throw err
+    await refreshUserToken(ctx)
     return await fn()
   }
 }

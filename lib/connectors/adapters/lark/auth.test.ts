@@ -1,16 +1,27 @@
-import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import {
+  connectorsHttpRequest,
+  connectorsKeyringGet,
+  connectorsKeyringSet,
+} from "@/lib/connectors/tauri/commands"
 import {
   getTenantAccessToken,
   clearTokenCache,
   buildLarkOAuthUrl,
   exchangeCodeForUserAccessToken,
   refreshUserAccessToken,
+  getUserAccessToken,
+  refreshUserToken,
+  clearUserTokenCache,
 } from "./auth"
 
 const mockHttp = connectorsHttpRequest as jest.Mock
+const mockKeyringGet = connectorsKeyringGet as jest.Mock
+const mockKeyringSet = connectorsKeyringSet as jest.Mock
 
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsHttpRequest: jest.fn(),
+  connectorsKeyringGet: jest.fn(),
+  connectorsKeyringSet: jest.fn(),
 }))
 
 function makeTokenResponse(token = "t-test-tat-123", expire = 7200, code = 0) {
@@ -243,5 +254,62 @@ describe("refreshUserAccessToken", () => {
     await expect(
       refreshUserAccessToken({ refreshToken: "expired", appAccessToken: "tat" })
     ).rejects.toThrow(/refresh token expired/)
+  })
+})
+
+describe("getUserAccessToken / refreshUserToken (send-as-user)", () => {
+  beforeEach(() => {
+    mockHttp.mockReset()
+    mockKeyringGet.mockReset()
+    mockKeyringSet.mockReset()
+    clearTokenCache("cli_app", "secret")
+    clearUserTokenCache("lark-u")
+  })
+
+  it("returns null when no user token is stored", async () => {
+    mockKeyringGet.mockResolvedValue(null)
+    expect(await getUserAccessToken("lark-u")).toBeNull()
+  })
+
+  it("reads the keyring once then serves the cached token", async () => {
+    mockKeyringGet.mockResolvedValue("u-stored")
+    expect(await getUserAccessToken("lark-u")).toBe("u-stored")
+    expect(await getUserAccessToken("lark-u")).toBe("u-stored")
+    // Only one keyring read — the second call is served from the cache.
+    expect(mockKeyringGet).toHaveBeenCalledTimes(1)
+  })
+
+  it("refreshes via the refresh token + TAT and persists the rotated pair", async () => {
+    mockKeyringGet.mockImplementation(async (_id: string, cred: string) =>
+      cred === "user_refresh_token" ? "old-refresh" : null
+    )
+    // 1st http = tenant token, 2nd http = OIDC refresh with a rotated pair.
+    mockHttp
+      .mockResolvedValueOnce(makeTokenResponse("tat-for-refresh"))
+      .mockResolvedValueOnce(
+        makeOidcResponse({ accessToken: "u-new-access", refreshToken: "u-new-refresh" })
+      )
+
+    const token = await refreshUserToken({
+      adapterId: "lark-u",
+      appId: "cli_app",
+      appSecret: "secret",
+    })
+
+    expect(token).toBe("u-new-access")
+    // Rotated tokens persisted back to the keyring.
+    expect(mockKeyringSet).toHaveBeenCalledWith("lark-u", "user_token", "u-new-access")
+    expect(mockKeyringSet).toHaveBeenCalledWith("lark-u", "user_refresh_token", "u-new-refresh")
+    // The refreshed token is now cached (no keyring read needed).
+    mockKeyringGet.mockClear()
+    expect(await getUserAccessToken("lark-u")).toBe("u-new-access")
+    expect(mockKeyringGet).not.toHaveBeenCalled()
+  })
+
+  it("throws when there is no refresh token to use", async () => {
+    mockKeyringGet.mockResolvedValue(null)
+    await expect(
+      refreshUserToken({ adapterId: "lark-u", appId: "cli_app", appSecret: "secret" })
+    ).rejects.toThrow(/no refresh token/)
   })
 })

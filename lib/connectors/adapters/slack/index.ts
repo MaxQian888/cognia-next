@@ -47,6 +47,13 @@ export interface SlackAdapterOptions {
   appToken?: () => Promise<string>
   /** Used to verify webhook signatures from Slack. */
   signingSecret: () => Promise<string>
+  /**
+   * Optional xoxp-... user token with `users.profile:write`. Bots cannot set
+   * a *user's* status — `setPresenceStatus` requires this token and throws a
+   * clear error when it is absent so the presence runner can surface the
+   * misconfiguration instead of failing silently.
+   */
+  userToken?: () => Promise<string>
   /** Bot's own user id (from auth.test). */
   selfId: string
   transport: "socket-mode" | "events-api-webhook"
@@ -76,6 +83,7 @@ const SLACK_CONFIG_SCHEMA = {
   properties: {
     botToken: { type: "string", title: "Bot Token (xoxb-...)" },
     appToken: { type: "string", title: "App Token (xapp-...)" },
+    userToken: { type: "string", title: "User Token (xoxp-..., status updates)" },
     signingSecret: { type: "string", title: "Signing Secret" },
     transport: {
       type: "string",
@@ -382,6 +390,44 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     // No-op: all token resolvers call fresh on each request.
   }
 
+  /**
+   * Set the connected user's profile status via `users.profile.set`
+   * (status_text ≤ 100 chars). Requires the optional user token — Slack has
+   * no API for a bot to set someone else's status. `targetUserIds` is
+   * ignored: the token itself identifies the user.
+   */
+  async function setPresenceStatus(input: { text: string; expiresAt?: number }): Promise<void> {
+    const token = await opts.userToken?.().catch(() => "")
+    if (!token) {
+      throw new Error("Slack presence requires a user token (xoxp-…) with users.profile:write")
+    }
+    const resp = await connectorsHttpRequest({
+      url: `${SLACK_API_BASE}/users.profile.set`,
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({
+        profile: {
+          status_text: input.text.slice(0, 100),
+          status_emoji: ":robot_face:",
+          status_expiration: input.expiresAt ? Math.floor(input.expiresAt / 1000) : 0,
+        },
+      }),
+    })
+    const parsed = resp.body ? (JSON.parse(resp.body) as { ok?: boolean; error?: string }) : null
+    if (resp.status >= 400 || parsed?.ok === false) {
+      throw new Error(`Slack users.profile.set failed: ${parsed?.error ?? resp.status}`)
+    }
+  }
+
+  /** Pin a message in its channel via `pins.add` (bot token). */
+  async function pinMessage(conversationKey: string, messageId: string): Promise<void> {
+    const parsed = parseConversationKey(conversationKey)
+    await doRequest("POST", "pins.add", { channel: parsed.remoteChatId, timestamp: messageId })
+  }
+
   async function addReaction(channel: string, ts: string, name: string): Promise<void> {
     const call = serializeReaction(channel, ts, name)
     await doRequest("POST", "reactions.add", call.payload)
@@ -411,6 +457,8 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     fetchHistory,
     setTyping,
     refreshCredentials,
+    setPresenceStatus,
+    pinMessage,
     a2uiCapability: () => SLACK_A2UI_CAPABILITY,
     addReaction,
     setSuggestedPrompts,

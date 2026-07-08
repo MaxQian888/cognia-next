@@ -220,33 +220,36 @@ describe("buildAdapterContext", () => {
     error.mockRestore()
   })
 
-  it("bindWebhookRoute delegates to the Rust command", async () => {
-    mockInvoke.mockResolvedValueOnce(undefined)
+  // No adapter registers a per-adapter HTTP route in v1, and the underlying
+  // `connectors_bind_webhook_route` Rust command does not exist. These now
+  // throw a clear, self-documenting error (via `notImplemented`) rather than
+  // firing a phantom `invoke` that would surface an opaque "command not found".
+  it("bindWebhookRoute throws a self-documenting error and never invokes a phantom command", () => {
     const bus = makeBus()
     const ctx = buildAdapterContext({
       adapterId: "lark-a",
       signal: new AbortController().signal,
       bus,
     })
-    await ctx.tauri.bindWebhookRoute("lark-a", "/lark-webhook")
-    expect(mockInvoke).toHaveBeenCalledWith("connectors_bind_webhook_route", {
-      adapterId: "lark-a",
-      path: "/lark-webhook",
-    })
+    expect(() => ctx.tauri.bindWebhookRoute("lark-a", "/lark-webhook")).toThrow(
+      /bindWebhookRoute is not wired/
+    )
+    expect(mockInvoke).not.toHaveBeenCalledWith("connectors_bind_webhook_route", expect.anything())
   })
 
-  it("unbindWebhookRoute delegates to the Rust command", async () => {
-    mockInvoke.mockResolvedValueOnce(undefined)
+  it("unbindWebhookRoute throws a self-documenting error and never invokes a phantom command", () => {
     const bus = makeBus()
     const ctx = buildAdapterContext({
       adapterId: "lark-b",
       signal: new AbortController().signal,
       bus,
     })
-    await ctx.tauri.unbindWebhookRoute("lark-b", "/lark-webhook")
-    expect(mockInvoke).toHaveBeenCalledWith("connectors_unbind_webhook_route", {
-      adapterId: "lark-b",
-      path: "/lark-webhook",
-    })
+    expect(() => ctx.tauri.unbindWebhookRoute("lark-b", "/lark-webhook")).toThrow(
+      /unbindWebhookRoute is not wired/
+    )
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      "connectors_unbind_webhook_route",
+      expect.anything()
+    )
   })
 })

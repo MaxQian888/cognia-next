@@ -185,6 +185,7 @@ export async function buildSlackAdapter(row: AdapterInstanceRow): Promise<Platfo
     botToken: () => connectorsKeyringGet(row.id, "botToken").then((t) => t ?? ""),
     appToken: () => connectorsKeyringGet(row.id, "appToken").then((t) => t ?? ""),
     signingSecret: () => connectorsKeyringGet(row.id, "signingSecret").then((t) => t ?? ""),
+    userToken: () => connectorsKeyringGet(row.id, "userToken").then((t) => t ?? ""),
     selfId,
     transport,
   })
@@ -273,6 +274,7 @@ export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<Platfor
     verificationToken: () => connectorsKeyringGet(row.id, "verificationToken").then((v) => v ?? ""),
     selfBotOpenId,
     quickCommands: normalizeQuickCommandList(settings.quickCommands),
+    sendAsUser: settings.sendAsUser === true,
     transport,
   })
 }

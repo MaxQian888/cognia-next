@@ -21,6 +21,7 @@ import type { A2UICapabilityMatrix } from "@/types/connectors/capability"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
 import type { ConversationReference, PlatformIdentity } from "@/types/connectors/event"
 import type { AuditEntry } from "@/types/connectors/audit"
+import type { UsagePresenceConfig, UsagePresenceState } from "@/types/connectors/presence"
 import type { MessageSegment } from "@/types/connectors/segment"
 import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction"
 
@@ -184,6 +185,16 @@ export interface AdapterInstanceRow {
    * cached value; the probe runs the first time the operator opens the
    * detail panel.
    */
+  /**
+   * Token-usage presence settings + runner state (cross-provider, same
+   * non-indexed-JSON placement rationale as `welcomeCardEnabled` — no
+   * schema bump). `presence` is operator config; `presenceState` is
+   * refresh-runner state (pinned-card message id, last refresh, last
+   * error). Read/written by
+   * `lib/connectors/presence/usage-status-runner.ts`.
+   */
+  presence?: UsagePresenceConfig
+  presenceState?: UsagePresenceState
   lastWhoamiAt?: number
   lastWhoamiResult?: {
     /** Bot display name as registered on the Lark Developer Console. */

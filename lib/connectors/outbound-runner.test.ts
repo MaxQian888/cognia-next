@@ -82,6 +82,7 @@ function createRunner(
   options?: {
     now?: () => number
     jitter?: () => number
+    onDelivered?: (conversationKey: string) => void
   }
 ): { promise: Promise<void>; stop: () => void } {
   const controller = new AbortController()
@@ -91,6 +92,7 @@ function createRunner(
     signal: controller.signal,
     now: options?.now,
     jitter: options?.jitter ?? (() => 0),
+    onDelivered: options?.onDelivered,
   })
   return {
     promise,
@@ -107,6 +109,7 @@ async function runOnce(
   options?: {
     now?: () => number
     jitter?: () => number
+    onDelivered?: (conversationKey: string) => void
   }
 ): Promise<void> {
   const { promise, stop } = createRunner(adapters, options)
@@ -226,6 +229,54 @@ describe("outbound-runner — successful delivery", () => {
     const row = await readForResolution(conversationKey)
     expect(row?.nextResponseDueAt).toBeUndefined()
     expect(row?.firstRespondedAt).toBeDefined()
+  })
+})
+
+describe("outbound-runner — onDelivered (cooldown bookkeeping)", () => {
+  it("fires onDelivered with the conversationKey after a successful send", async () => {
+    const adapterId = "a_deliv"
+    const conversationKey = `telegram:${adapterId}:chat`
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_d" }))
+    const onDelivered = jest.fn()
+
+    await enqueue(adapterId, conversationKey)
+    await runOnce(new Map([[adapterId, adapter]]), { onDelivered })
+
+    expect(onDelivered).toHaveBeenCalledWith(conversationKey)
+  })
+
+  it("fires onDelivered on the idempotency-cache short-circuit too", async () => {
+    const adapterId = "a_idem"
+    const conversationKey = `telegram:${adapterId}:chat`
+    const idem = "same-key"
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_i" }))
+    const onDelivered = jest.fn()
+
+    // First delivery seeds the idempotency cache; second hits the short-circuit.
+    await enqueue(adapterId, conversationKey, idem)
+    await runOnce(new Map([[adapterId, adapter]]), { onDelivered })
+    await enqueue(adapterId, conversationKey, idem)
+    await runOnce(new Map([[adapterId, adapter]]), { onDelivered })
+
+    expect(onDelivered.mock.calls.every((c) => c[0] === conversationKey)).toBe(true)
+    expect(onDelivered.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it("a throwing onDelivered never breaks delivery (job still marked sent)", async () => {
+    const adapterId = "a_throw"
+    const conversationKey = `telegram:${adapterId}:chat`
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_t" }))
+    const onDelivered = jest.fn(() => {
+      throw new Error("boom")
+    })
+
+    await enqueue(adapterId, conversationKey)
+    await runOnce(new Map([[adapterId, adapter]]), { onDelivered })
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs[0].status).toBe("sent")
+    const audits = await listRecent(adapterId)
+    expect(audits.some((a) => a.kind === "delivery.success")).toBe(true)
   })
 })
 

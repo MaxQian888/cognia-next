@@ -234,6 +234,16 @@ export interface OutboundRunnerOptions {
    * Default: `() => Math.random() * 500`.
    */
   jitter?: () => number
+  /**
+   * Fired best-effort after a job is successfully delivered (or served from
+   * the idempotency cache), with the delivered conversation key. Production
+   * wires this to `ConnectorBus.recordBotReply` so the `cooldown-after-bot-reply`
+   * trigger blocker (a default group-chat anti-spam rule) actually has a
+   * `lastReplyAt` to read — the bus's policy state has no other writer. Kept
+   * as an injected callback so the runner stays decoupled from the bus and
+   * unit-testable. Must never throw.
+   */
+  onDelivered?: (conversationKey: string) => void
 }
 
 // ── Per-adapter state ────────────────────────────────────────────────────────
@@ -443,6 +453,11 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     if (idempotencyCache.has(idempotencyKey)) {
       const platformMsgId = idempotencyCache.get(idempotencyKey)!
       await markSent(job.id, platformMsgId)
+      try {
+        opts.onDelivered?.(conversationKey)
+      } catch {
+        /* best-effort — cooldown bookkeeping must never break delivery */
+      }
       await appendAudit({
         adapterId,
         kind: "delivery.success",
@@ -630,6 +645,11 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     if (result.ok) {
       const platformMsgId = result.platformMessageId ?? idempotencyKey
       await markSent(job.id, platformMsgId)
+      try {
+        opts.onDelivered?.(conversationKey)
+      } catch {
+        /* best-effort — cooldown bookkeeping must never break delivery */
+      }
       breaker.recordSuccess()
       idempotencyCache.set(idempotencyKey, platformMsgId)
       await appendAudit({

@@ -28,6 +28,14 @@ export const ALL_CAPABILITIES = [
   "delete",
   "typing",
   "history.fetch",
+  // presence — the adapter can surface a short, periodically refreshed
+  // status text next to a user/bot identity (Lark 系统状态 badge, Slack
+  // users.profile.set, Discord gateway presence). Declared when the
+  // adapter implements `setPresenceStatus()`.
+  "presence.status",
+  // The adapter can pin a message so a periodically edited card stays
+  // visible at the top of a conversation (`pinMessage()`).
+  "pin",
   // platform-specific rich content (escape hatches)
   "rich-markdown.telegram",
   "rich-markdown.slack",

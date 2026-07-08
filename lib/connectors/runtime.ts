@@ -43,6 +43,7 @@ import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
+import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
 import { appendAudit } from "./audit"
 import { getBus } from "./bus"
 import { createPlatformSession, findActiveSessionForConversation } from "./session-bindings"
@@ -59,6 +60,24 @@ import { resolveActivityI18n } from "./activity/i18n"
  * resolves before the turn times out, while still bounding a stuck sidecar.
  */
 const CONNECTOR_TURN_TIMEOUT_MS = 15 * 60 * 1000
+
+/**
+ * PII red-line gate for the inbound text a team / workflow dispatch forwards to
+ * the model.
+ *
+ * The single-character ai-run path runs through `safeSendPrompt` (which calls
+ * `hasNoLeakingPii` on the prompt before the model call). But the team and
+ * workflow branches dispatch `event.plainText` straight into their own runtimes
+ * (`startTeamRunFromIM` seeds it as the team objective, `startWorkflowFromIM`
+ * as `$trigger.payload.message`) and never reach that gate — a confirmed
+ * bypass. Mirror the same fail-closed check here so an IM-triggered team /
+ * workflow run cannot leak locally-derived PII to the model. `event.plainText`
+ * already folds in any OCR text lifted from inbound images, so gating it covers
+ * that sink too. Returns true when safe to dispatch.
+ */
+function isInboundTextPiiSafe(event: NormalizedInboundEvent): boolean {
+  return hasNoLeakingPii(event.plainText)
+}
 
 /**
  * Capture-aware Claude turn driver. Production wires it to
@@ -180,9 +199,24 @@ export function inboundEventToSendContent(event: NormalizedInboundEvent): SendCo
       }
       continue
     }
-    // file / voice / video / unknown — degrade to a text marker. We use
-    // `seg.type` so the model can at least see what kind of attachment
-    // arrived, instead of silently swallowing it.
+    // file — surface the name plus any text the inbound-media pass extracted
+    // (ADR-0009 rich-media) so the model can read the document's contents.
+    if (seg.type === "file") {
+      const text =
+        seg.ocrText && seg.ocrText.length > 0
+          ? `[file: ${seg.name}]\n${seg.ocrText}`
+          : `[file: ${seg.name}]`
+      blocks.push({ type: "text", text })
+      continue
+    }
+    // voice — hand back the transcript when an adapter resolved one.
+    if (seg.type === "voice") {
+      blocks.push({ type: "text", text: seg.transcript ? seg.transcript : "[voice message]" })
+      continue
+    }
+    // video / unknown — degrade to a text marker. We use `seg.type` so the
+    // model can at least see what kind of attachment arrived, instead of
+    // silently swallowing it.
     blocks.push({ type: "text", text: `[${seg.type}]` })
   }
 
@@ -220,6 +254,9 @@ export async function insertInboundMessage(
       }
       if (seg.type === "image") {
         return { type: "text" as const, text: `[image: ${seg.url}]` }
+      }
+      if (seg.type === "file") {
+        return { type: "text" as const, text: `[file: ${seg.name}]` }
       }
       // Other segment types degrade to a text placeholder for Phase 1
       return { type: "text" as const, text: event.plainText }
@@ -454,6 +491,27 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // "adapter.error" audit row, not an unhandled rejection.
         // `adapterRow` and `override` were already fetched by the bus and
         // threaded in — no re-read here.
+        // ── PII gate for team / workflow dispatch ──
+        // Both branches below forward `event.plainText` straight into their own
+        // runtimes, bypassing `safeSendPrompt`. Enforce the same fail-closed
+        // red-line here (single choke point covering both) before any dispatch.
+        if ((override?.teamId || override?.workflowId) && !isInboundTextPiiSafe(event)) {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "adapter.error",
+            at: Date.now(),
+            conversationKey: event.conversationKey,
+            reason: "pii_blocked",
+            message: "team/workflow dispatch prompt rejected by PII gate before dispatch",
+            fields: {
+              ...(override?.teamId ? { teamId: override.teamId } : {}),
+              ...(override?.workflowId ? { workflowId: override.workflowId } : {}),
+              sourceMessageId: storedMsg.id,
+            },
+          })
+          break
+        }
+
         // ── Team dispatch (control-plane multi-agent) ──
         // When the conversation is bound to an Agent Team, route the turn to
         // the team runtime instead of the single-character `runAndCapture`

@@ -10,6 +10,15 @@ import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 const mockInvoke = invoke as jest.Mock
 const mockListen = listen as jest.Mock
 
+// Inbound rich-media enrichment is exercised in its own suite
+// (inbound-media.test.ts). Here we only assert the adapter WIRES it into the
+// dispatch path — mock it to a no-op spy so no real download is attempted.
+const mockEnrich = jest.fn(async () => undefined)
+jest.mock("./inbound-media", () => ({
+  __esModule: true,
+  enrichLarkInboundMedia: (...args: unknown[]) => mockEnrich(...(args as [])),
+}))
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -118,6 +127,7 @@ describe("createLarkAdapter", () => {
   beforeEach(() => {
     mockInvoke.mockReset()
     mockListen.mockReset()
+    mockEnrich.mockClear()
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "connectors_lark_ws_open") return "lark-ws-handle"
       if (cmd === "connectors_lark_ws_close") return undefined
@@ -292,6 +302,51 @@ describe("createLarkAdapter", () => {
     expect(emitted[0].messageId).toBe("om_evt_001")
   }, 15000)
 
+  it("runs inbound rich-media enrichment on the emitted event before dispatch", async () => {
+    const session = createFakeLongConnSession()
+    mockListen.mockImplementation(session.listenImpl)
+
+    const adapter = createLarkAdapter({
+      id: "lark-img",
+      displayName: "Image Test Bot",
+      appId: async () => "cli_app_img",
+      appSecret: async () => "secret-img",
+      verificationToken: async () => "token-img",
+      selfBotOpenId: "ou_bot_img",
+      transport: "long-connection",
+    })
+
+    const { ctx, emitted } = makeCtx()
+    await adapter.start(ctx)
+    await session.waitForListeners()
+
+    session.push({
+      schema: "2.0",
+      header: { event_id: "evt_img", event_type: "im.message.receive_v1" },
+      event: {
+        sender: { sender_id: { open_id: "ou_user_img" } },
+        message: {
+          message_id: "om_img_1",
+          chat_id: "oc_chat_img",
+          chat_type: "p2p",
+          message_type: "image",
+          content: '{"image_key":"img_v3_xyz"}',
+          create_time: "1714900000000",
+        },
+      },
+    })
+
+    await new Promise((r) => setTimeout(r, 30))
+    await adapter.stop()
+
+    // Enrichment ran on the parsed event before it was emitted to the bus.
+    expect(mockEnrich).toHaveBeenCalledTimes(1)
+    const enrichedEvent = mockEnrich.mock.calls[0][0] as NormalizedInboundEvent
+    expect(enrichedEvent.messageId).toBe("om_img_1")
+    expect(enrichedEvent.segments[0]).toMatchObject({ type: "image", url: "img_v3_xyz" })
+    expect(emitted.length).toBeGreaterThanOrEqual(1)
+  }, 15000)
+
   it("maps a bot-menu (快捷指令) click to its configured action", async () => {
     const session = createFakeLongConnSession()
     mockListen.mockImplementation(session.listenImpl)
@@ -367,6 +422,148 @@ describe("createLarkAdapter", () => {
       .req
     expect(reqPayload.url).toContain("/im/v1/messages")
     expect(reqPayload.headers["Authorization"]).toContain("Bearer t-send-tat")
+  })
+
+  // ── send-as-user (opt-in user identity, ADR-0009 v41 / A4) ──
+  // Returns the LAST send call so the refresh test sees the retried request.
+  const findSend = () => {
+    const sends = mockInvoke.mock.calls.filter(
+      ([cmd, args]: [string, unknown]) =>
+        cmd === "connectors_http_request" &&
+        (args as { req: { url: string } }).req.url.includes("/im/v1/messages")
+    )
+    return sends[sends.length - 1]
+  }
+
+  const sendHeaders = (call: unknown[] | undefined) =>
+    (call![1] as { req: { headers: Record<string, string> } }).req.headers
+
+  it("send() uses the user access token when sendAsUser is on and a user token is connected", async () => {
+    const adapter = createLarkAdapter({
+      id: "lark-asuser",
+      displayName: "As-User Bot",
+      appId: async () => "cli_asuser",
+      appSecret: async () => "secret_asuser",
+      verificationToken: async () => "token",
+      selfBotOpenId: "ou_bot",
+      sendAsUser: true,
+      transport: "long-connection",
+    })
+
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") {
+        return (args as { credential: string }).credential === "user_token" ? "u-access-tok" : null
+      }
+      if (cmd === "connectors_http_request") return makeSendOkResp()
+      return undefined
+    })
+
+    const result = await adapter.send({
+      conversationRef: { platform: "lark", adapterId: "lark-asuser", channelId: "oc_chat_u" },
+      segments: [{ type: "text", text: "hi as me" }],
+      metadata: { idempotencyKey: "ku" },
+    })
+
+    expect(result.ok).toBe(true)
+    expect(sendHeaders(findSend())["Authorization"]).toBe("Bearer u-access-tok")
+  })
+
+  it("send() falls back to the bot token when sendAsUser is on but no user token is connected", async () => {
+    const adapter = createLarkAdapter({
+      id: "lark-nouser",
+      displayName: "No-User Bot",
+      appId: async () => "cli_nouser",
+      appSecret: async () => "secret_nouser",
+      verificationToken: async () => "token",
+      selfBotOpenId: "ou_bot",
+      sendAsUser: true,
+      transport: "long-connection",
+    })
+
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null // no user token connected
+      if (cmd === "connectors_http_request") {
+        const req = (args as { req: { url: string } }).req
+        return req.url.includes("tenant_access_token") ? makeTatOkResp("t-bot") : makeSendOkResp()
+      }
+      return undefined
+    })
+
+    const result = await adapter.send({
+      conversationRef: { platform: "lark", adapterId: "lark-nouser", channelId: "oc_chat_b" },
+      segments: [{ type: "text", text: "hi from bot" }],
+      metadata: { idempotencyKey: "kb" },
+    })
+
+    expect(result.ok).toBe(true)
+    expect(sendHeaders(findSend())["Authorization"]).toBe("Bearer t-bot")
+  })
+
+  it("refreshes the user token on invalidation and retries the send once", async () => {
+    const adapter = createLarkAdapter({
+      id: "lark-refresh",
+      displayName: "Refresh Bot",
+      appId: async () => "cli_refresh",
+      appSecret: async () => "secret_refresh",
+      verificationToken: async () => "token",
+      selfBotOpenId: "ou_bot",
+      sendAsUser: true,
+      transport: "long-connection",
+    })
+
+    let sendAttempts = 0
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") {
+        const cred = (args as { credential: string }).credential
+        if (cred === "user_token") return "u-old"
+        if (cred === "user_refresh_token") return "u-refresh-old"
+        return null
+      }
+      if (cmd === "connectors_keyring_set") return undefined
+      if (cmd === "connectors_http_request") {
+        const req = (args as { req: { url: string; headers: Record<string, string> } }).req
+        if (req.url.includes("tenant_access_token")) return makeTatOkResp("tat-r")
+        if (req.url.includes("/oidc/refresh_access_token")) {
+          return {
+            status: 200,
+            headers: {},
+            body: JSON.stringify({
+              code: 0,
+              data: {
+                access_token: "u-new",
+                refresh_token: "u-refresh-new",
+                expires_in: 7200,
+                refresh_expires_in: 31_104_000,
+                open_id: "ou_u",
+                token_type: "Bearer",
+              },
+            }),
+          }
+        }
+        if (req.url.includes("/im/v1/messages")) {
+          sendAttempts++
+          if (req.headers["Authorization"] === "Bearer u-old") {
+            return {
+              status: 401,
+              headers: {},
+              body: JSON.stringify({ code: 99991677, msg: "invalid user access token" }),
+            }
+          }
+          return makeSendOkResp()
+        }
+      }
+      return undefined
+    })
+
+    const result = await adapter.send({
+      conversationRef: { platform: "lark", adapterId: "lark-refresh", channelId: "oc_chat_r" },
+      segments: [{ type: "text", text: "retry me" }],
+      metadata: { idempotencyKey: "kr" },
+    })
+
+    expect(result.ok).toBe(true)
+    expect(sendAttempts).toBe(2) // failed once (old token), succeeded on the refreshed token
+    expect(sendHeaders(findSend())["Authorization"]).toBe("Bearer u-new")
   })
 
   it("setTyping() is a no-op (returns without calling API)", async () => {

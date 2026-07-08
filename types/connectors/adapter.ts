@@ -2,6 +2,7 @@ import type { PlatformKind } from "./platform-kind"
 import type { A2UICapabilityMatrix, Capability } from "./capability"
 import type { ConversationReference, NormalizedInboundEvent } from "./event"
 import type { OutboundRequest, OutboundResult } from "./outbound"
+import type { PresenceStatusInput } from "./presence"
 
 export type TransportMode =
   | "longpoll"
@@ -166,6 +167,20 @@ export interface PlatformAdapter {
     opts: HistoryFetchOpts
   ): AsyncIterable<NormalizedInboundEvent>
   refreshCredentials?(): Promise<void>
+  /**
+   * Surface a short, periodically refreshed status text on the platform
+   * (Lark 系统状态 badge, Slack `users.profile.set`, Discord gateway
+   * presence). Optional — only adapters whose platform exposes a status
+   * API implement it; they must also declare the `presence.status`
+   * capability. Callers treat a throw as a soft failure (audited, retried
+   * on the next refresh tick) — it must never break another flow.
+   */
+  setPresenceStatus?(input: PresenceStatusInput): Promise<void>
+  /**
+   * Pin a platform message so a periodically edited card stays visible at
+   * the top of a conversation. Optional; paired with the `pin` capability.
+   */
+  pinMessage?(conversationKey: string, messageId: string): Promise<void>
   /**
    * Per-adapter A2UI projection matrix. Returned synchronously so
    * `build-options.ts:resolveSendOptions` can inject a capability-aware

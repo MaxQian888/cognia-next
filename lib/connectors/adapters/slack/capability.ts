@@ -23,6 +23,9 @@ export const SLACK_CAPS: readonly Capability[] = [
   "delete",
   "edit",
   "history.fetch",
+  // `pins.add` (bot token) + `users.profile.set` (optional user token).
+  "pin",
+  "presence.status",
   "rich-card.slack",
   "rich-markdown.slack",
   "send.a2ui",

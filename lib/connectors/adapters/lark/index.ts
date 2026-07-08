@@ -32,9 +32,11 @@ import {
   serializeDelete,
   serializeReaction,
 } from "./serialize"
-import { getTenantAccessToken } from "./auth"
-import { LarkApiError, withTatRefresh } from "./auth-retry"
+import { getTenantAccessToken, getUserAccessToken } from "./auth"
+import { LarkApiError, withTatRefresh, withUserTokenRefresh } from "./auth-retry"
 import { resolveLarkMediaKeys } from "./upload"
+import { enrichLarkInboundMedia } from "./inbound-media"
+import { createLarkPresence } from "./presence"
 import { startLarkLongConn } from "./transport-long-conn"
 import { startLarkWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
@@ -62,6 +64,14 @@ export interface LarkAdapterOptions {
    * factory itself re-normalises as defense-in-depth.
    */
   quickCommands?: LarkQuickCommand[]
+  /**
+   * When true and a user access token is connected (via the OAuth flow in
+   * `oauth-handler.ts`), outbound `send()` acts on behalf of the authorised
+   * user (user_access_token) instead of the bot (tenant_access_token). Opt-in
+   * per adapter via `settings.sendAsUser`. Falls back to the bot identity when
+   * no user token is connected or it cannot be refreshed.
+   */
+  sendAsUser?: boolean
   transport: "webhook" | "long-connection"
   /**
    * Cap on `/im/v1/messages` pages walked per `fetchHistory` call. Each
@@ -123,39 +133,73 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     return { appId, appSecret }
   }
 
+  /** Issue one authenticated Lark API call with an explicit bearer token. */
+  async function sendHttp(
+    method: "GET" | "POST" | "PATCH" | "DELETE",
+    urlPath: string,
+    body: unknown,
+    token: string
+  ): Promise<unknown> {
+    const resp = await connectorsHttpRequest({
+      url: `${LARK_API_BASE}${urlPath}`,
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+    if (resp.status >= 400) {
+      throw new LarkApiError({
+        status: resp.status,
+        code: null,
+        message: `Lark API ${method} ${urlPath} → ${resp.status}: ${resp.body}`,
+      })
+    }
+    const parsed = resp.body ? (JSON.parse(resp.body) as { code?: number; msg?: string }) : null
+    if (parsed && typeof parsed.code === "number" && parsed.code !== 0) {
+      throw new LarkApiError({
+        status: resp.status,
+        code: parsed.code,
+        message: `Lark API error: code=${parsed.code}, msg=${parsed.msg ?? "unknown"}`,
+      })
+    }
+    return parsed
+  }
+
   async function doRequest(
     method: "GET" | "POST" | "PATCH" | "DELETE",
     urlPath: string,
-    body?: unknown
+    body?: unknown,
+    reqOpts?: { asUser?: boolean }
   ): Promise<unknown> {
     const creds = await resolveCredentials()
+
+    // Opt-in send-as-user path: act on behalf of the connected user when a user
+    // token is present, refreshing it once on invalidation. Any failure of the
+    // user path degrades to the bot (tenant) identity so the message still
+    // goes out — the user just needs to re-authorise to restore their identity.
+    if (reqOpts?.asUser) {
+      const userToken = await getUserAccessToken(opts.id).catch(() => null)
+      if (userToken) {
+        try {
+          return await withUserTokenRefresh({ adapterId: opts.id, ...creds }, async () => {
+            const tok = (await getUserAccessToken(opts.id)) ?? userToken
+            return sendHttp(method, urlPath, body, tok)
+          })
+        } catch (err) {
+          loggers.network.warn("[lark] user-token send failed; falling back to bot identity", {
+            id: opts.id,
+            reason: err instanceof Error ? err.message : String(err),
+          })
+          // fall through to the tenant path below
+        }
+      }
+    }
+
     return withTatRefresh(creds, async () => {
       const tat = await getTenantAccessToken(creds)
-      const resp = await connectorsHttpRequest({
-        url: `${LARK_API_BASE}${urlPath}`,
-        method,
-        headers: {
-          Authorization: `Bearer ${tat}`,
-          "Content-Type": "application/json; charset=utf-8",
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      })
-      if (resp.status >= 400) {
-        throw new LarkApiError({
-          status: resp.status,
-          code: null,
-          message: `Lark API ${method} ${urlPath} → ${resp.status}: ${resp.body}`,
-        })
-      }
-      const parsed = resp.body ? (JSON.parse(resp.body) as { code?: number; msg?: string }) : null
-      if (parsed && typeof parsed.code === "number" && parsed.code !== 0) {
-        throw new LarkApiError({
-          status: resp.status,
-          code: parsed.code,
-          message: `Lark API error: code=${parsed.code}, msg=${parsed.msg ?? "unknown"}`,
-        })
-      }
-      return parsed
+      return sendHttp(method, urlPath, body, tat)
     })
   }
 
@@ -268,6 +312,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       }
       lastActivityAt = Date.now()
       loggers.network.info("[lark] inbound event passed gate → emit to bus", { id: opts.id })
+      // Second pass: download inbound rich media (image / file bytes) so the
+      // model + inbound OCR see actual content rather than a bare platform key.
+      // Best-effort and self-contained — never blocks or fails the dispatch.
+      await enrichLarkInboundMedia(event, { adapterId: opts.id, getAccessToken: getTat })
       await ctx.emit(event)
     }
 
@@ -352,7 +400,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       )
       const call = await serializeOutboundAsync({ ...req, segments: resolvedSegments }, opts.id)
       const urlPath = call.url.replace(LARK_API_BASE, "")
-      await doRequest(call.method, urlPath, call.payload)
+      // Replies are the identity-bearing path — send as the connected user when
+      // opted in. Edits / deletes / reactions stay on the bot identity (they act
+      // on bot-owned messages such as live-activity / progress cards).
+      await doRequest(call.method, urlPath, call.payload, { asUser: opts.sendAsUser === true })
       return { ok: true }
     } catch (err) {
       return {
@@ -478,6 +529,27 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     // All token resolvers call fresh on each request; cache handles the rest.
   }
 
+  // Presence (系统状态 badge + pin). Status-id persistence rides the adapter
+  // row's `presenceState` JSON column via lazy imports so the Dexie graph
+  // stays out of the adapter's eager bundle.
+  const presence = createLarkPresence({
+    adapterId: opts.id,
+    request: (method, urlPath, body) => doRequest(method, urlPath, body),
+    getStatusId: async () => {
+      const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
+      const row = await getAdapterInstance(opts.id)
+      return row?.presenceState?.platformStatusId
+    },
+    setStatusId: async (id) => {
+      const { getAdapterInstance, updateAdapterInstance } =
+        await import("@/lib/db/adapter-instances")
+      const row = await getAdapterInstance(opts.id)
+      await updateAdapterInstance(opts.id, {
+        presenceState: { ...row?.presenceState, platformStatusId: id },
+      })
+    },
+  })
+
   async function addReaction(messageId: string, emojiType: string): Promise<void> {
     const call = serializeReaction(messageId, emojiType)
     const urlPath = call.url.replace(LARK_API_BASE, "")
@@ -505,6 +577,8 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     fetchHistory,
     setTyping,
     refreshCredentials,
+    setPresenceStatus: presence.setPresenceStatus,
+    pinMessage: presence.pinMessage,
     a2uiCapability: () => LARK_A2UI_CAPABILITY,
     platformSkillCapabilities: () => {
       // Lazy ESM import via the synchronous bundler entry. The barrel

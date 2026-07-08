@@ -1,4 +1,10 @@
-import { serializeSend, serializeEdit, serializeDelete, serializeReaction } from "./serialize"
+import {
+  serializeSend,
+  serializeOutboundAsync,
+  serializeEdit,
+  serializeDelete,
+  serializeReaction,
+} from "./serialize"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 
 function makeReq(opts: { channelId: string; threadTs?: string; text?: string }): OutboundRequest {
@@ -101,6 +107,73 @@ describe("serializeSend", () => {
     const call = serializeSend(makeReq({ channelId: "oc_chat_legacy" }))
     expect(call.url).toContain("receive_id_type=chat_id")
     expect(call.payload["receive_id"]).toBe("oc_chat_legacy")
+  })
+})
+
+// The production adapter `send()` uses `serializeOutboundAsync`, not the sync
+// `serializeSend`. Before the fix it passed only the chat id to
+// `buildReceiveIdParams`, so open_id / user_id / email routing (the A4 marker)
+// was silently dropped on the actual send path. These guard that regression.
+describe("serializeOutboundAsync (explicit recipient routing)", () => {
+  const ADAPTER = "lark-1"
+
+  it("honours explicit receiveIdType + receiveId on the async path", async () => {
+    const call = await serializeOutboundAsync(
+      {
+        conversationRef: {
+          platform: "lark",
+          adapterId: ADAPTER,
+          channelId: "ignored",
+          receiveIdType: "email",
+          receiveId: "alice@example.com",
+        } as unknown as OutboundRequest["conversationRef"],
+        segments: [{ type: "text", text: "hi" }],
+        metadata: { idempotencyKey: "k1" },
+      },
+      ADAPTER
+    )
+    expect(call.method).toBe("POST")
+    expect(call.url).toContain("receive_id_type=email")
+    expect(call.payload["receive_id"]).toBe("alice@example.com")
+  })
+
+  it("infers user_id from ref.userId instead of collapsing to chat_id", async () => {
+    const call = await serializeOutboundAsync(
+      {
+        conversationRef: {
+          platform: "lark",
+          adapterId: ADAPTER,
+          channelId: "ignored",
+          userId: "u999",
+        } as unknown as OutboundRequest["conversationRef"],
+        segments: [{ type: "text", text: "hi" }],
+        metadata: { idempotencyKey: "k1" },
+      },
+      ADAPTER
+    )
+    expect(call.url).toContain("receive_id_type=user_id")
+    expect(call.payload["receive_id"]).toBe("u999")
+  })
+
+  it("sniffs open_id from an ou_ prefixed chat id on the async path", async () => {
+    const call = await serializeOutboundAsync(makeReq({ channelId: "ou_user_abc" }), ADAPTER)
+    expect(call.url).toContain("receive_id_type=open_id")
+    expect(call.payload["receive_id"]).toBe("ou_user_abc")
+  })
+
+  it("falls back to chat_id prefix sniff on the async path (legacy)", async () => {
+    const call = await serializeOutboundAsync(makeReq({ channelId: "oc_chat_legacy" }), ADAPTER)
+    expect(call.url).toContain("receive_id_type=chat_id")
+    expect(call.payload["receive_id"]).toBe("oc_chat_legacy")
+  })
+
+  it("still threads reply_in_thread + parent_id on the async path", async () => {
+    const call = await serializeOutboundAsync(
+      makeReq({ channelId: "oc_chat_001", threadTs: "thr_root_001" }),
+      ADAPTER
+    )
+    expect(call.payload["reply_in_thread"]).toBe(true)
+    expect(call.payload["parent_id"]).toBe("thr_root_001")
   })
 })
 

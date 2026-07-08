@@ -123,6 +123,117 @@ function detectMentions(
   return acc.finalize()
 }
 
+/** A single node inside a Lark `post` (rich text) paragraph. */
+interface LarkPostNode {
+  tag?: string
+  text?: string
+  href?: string
+  user_id?: string
+  user_name?: string
+  image_key?: string
+  emoji_type?: string
+}
+
+/**
+ * Flatten a Lark `post` (rich text) payload into a plain-text string plus any
+ * embedded image keys. Handles both the already-unwrapped `{title, content}`
+ * shape and the locale-keyed `{zh_cn:{…}, en_us:{…}}` shape (the locale wrapper
+ * Feishu sends on inbound). Unknown node tags contribute their `text` when
+ * present so nothing is silently dropped.
+ */
+function parseLarkPost(parsed: Record<string, unknown>): { text: string; imageKeys: string[] } {
+  let block = parsed as { title?: unknown; content?: unknown }
+  if (!Array.isArray(block.content)) {
+    for (const key of Object.keys(parsed)) {
+      const v = parsed[key] as { content?: unknown } | undefined
+      if (v && typeof v === "object" && Array.isArray(v.content)) {
+        block = v as { title?: unknown; content?: unknown }
+        break
+      }
+    }
+  }
+
+  const title = typeof block.title === "string" ? block.title : ""
+  const paragraphs = Array.isArray(block.content) ? (block.content as LarkPostNode[][]) : []
+  const imageKeys: string[] = []
+  const lines: string[] = []
+  if (title) lines.push(title)
+
+  for (const para of paragraphs) {
+    if (!Array.isArray(para)) continue
+    let line = ""
+    for (const node of para) {
+      switch (node?.tag) {
+        case "text":
+          line += node.text ?? ""
+          break
+        case "a":
+          line += node.href ? `${node.text ?? node.href} (${node.href})` : (node.text ?? "")
+          break
+        case "at":
+          line += `@${node.user_name ?? node.user_id ?? ""}`
+          break
+        case "emotion":
+          line += node.emoji_type ? `[${node.emoji_type}]` : ""
+          break
+        case "img":
+          if (node.image_key) imageKeys.push(node.image_key)
+          break
+        default:
+          if (typeof node?.text === "string") line += node.text
+      }
+    }
+    lines.push(line)
+  }
+
+  return { text: lines.join("\n").trim(), imageKeys }
+}
+
+/** Best-effort MIME guess from a file name so the segment carries a type hint. */
+function guessMimeFromName(name: string): string {
+  const dot = name.lastIndexOf(".")
+  const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : ""
+  switch (ext) {
+    case "pdf":
+      return "application/pdf"
+    case "doc":
+      return "application/msword"
+    case "docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    case "xls":
+      return "application/vnd.ms-excel"
+    case "xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    case "ppt":
+      return "application/vnd.ms-powerpoint"
+    case "pptx":
+      return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    case "txt":
+      return "text/plain"
+    case "csv":
+      return "text/csv"
+    case "png":
+      return "image/png"
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg"
+    case "gif":
+      return "image/gif"
+    case "zip":
+      return "application/zip"
+    default:
+      return "application/octet-stream"
+  }
+}
+
+/**
+ * Project an inbound Lark message's content JSON into typed `MessageSegment[]`.
+ *
+ * Rich media (image / post / file / audio / media) carries only its platform
+ * media *ref* here (image_key / file_key); `inbound-media.ts:enrichLarkInboundMedia`
+ * is the async second pass that downloads the bytes and attaches
+ * `dataBase64` / `ocrText`. Stickers keep a text marker (no useful bytes).
+ */
 function buildSegments(message: LarkMessage): MessageSegment[] {
   const segments: MessageSegment[] = []
 
@@ -141,22 +252,68 @@ function buildSegments(message: LarkMessage): MessageSegment[] {
       case "image": {
         const imageKey = typeof parsed["image_key"] === "string" ? parsed["image_key"] : ""
         if (imageKey) {
+          segments.push({ type: "image", url: imageKey, alt: "image" })
+        }
+        break
+      }
+
+      case "post": {
+        const { text, imageKeys } = parseLarkPost(parsed)
+        if (text) segments.push({ type: "markdown", md: text })
+        for (const key of imageKeys) {
+          segments.push({ type: "image", url: key, alt: "image" })
+        }
+        break
+      }
+
+      case "file": {
+        const fileKey = typeof parsed["file_key"] === "string" ? parsed["file_key"] : ""
+        const fileName = typeof parsed["file_name"] === "string" ? parsed["file_name"] : "file"
+        if (fileKey) {
           segments.push({
-            type: "image",
-            url: imageKey,
-            alt: "image",
+            type: "file",
+            url: fileKey,
+            name: fileName,
+            mimeType: guessMimeFromName(fileName),
+            sizeBytes: 0,
           })
         }
         break
       }
 
-      case "post":
-      case "file":
-      case "audio":
-      case "video":
+      case "audio": {
+        const fileKey = typeof parsed["file_key"] === "string" ? parsed["file_key"] : ""
+        const duration = typeof parsed["duration"] === "number" ? parsed["duration"] : undefined
+        if (fileKey) {
+          segments.push({
+            type: "voice",
+            url: fileKey,
+            ...(duration !== undefined ? { durationSec: Math.round(duration / 1000) } : {}),
+          })
+        }
+        break
+      }
+
+      // Feishu sends video as `media` (file_key + cover image_key); accept the
+      // legacy `video` label too.
+      case "media":
+      case "video": {
+        const fileKey = typeof parsed["file_key"] === "string" ? parsed["file_key"] : ""
+        const cover = typeof parsed["image_key"] === "string" ? parsed["image_key"] : undefined
+        const duration = typeof parsed["duration"] === "number" ? parsed["duration"] : undefined
+        if (fileKey) {
+          segments.push({
+            type: "video",
+            url: fileKey,
+            ...(cover ? { thumbnailUrl: cover } : {}),
+            ...(duration !== undefined ? { durationSec: Math.round(duration / 1000) } : {}),
+          })
+        }
+        break
+      }
+
       case "sticker": {
-        // Phase 1: represent as text with the raw type label
-        segments.push({ type: "text", text: `[${message.message_type}]` })
+        segments.push({ type: "text", text: "[sticker]" })
         break
       }
 

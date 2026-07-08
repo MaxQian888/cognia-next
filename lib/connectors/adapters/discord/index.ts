@@ -326,6 +326,29 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     }
   }
 
+  /**
+   * Bot presence (Custom Status activity) — gateway-only (op 3), no REST
+   * fallback. `targetUserIds` is ignored: Discord presence is bot-global.
+   * Throws when the gateway is not connected so the presence runner can
+   * audit + retry on the next tick.
+   */
+  async function setPresenceStatus(input: { text: string }): Promise<void> {
+    const ok = await _gatewayClient?.updatePresence(input.text)
+    if (!ok) {
+      throw new Error("Discord gateway not connected; presence update skipped")
+    }
+  }
+
+  /** Pin a message: `PUT /channels/{channel}/pins/{message}`. */
+  async function pinMessage(conversationKey: string, messageId: string): Promise<void> {
+    // messageId is "<channelId>:<msgId>" (same convention as delete/edit);
+    // fall back to the conversationKey's channel when only a bare id is given.
+    const parts = messageId.split(":")
+    const channelId = parts.length === 2 ? parts[0] : conversationKey.split(":")[2]
+    const msgId = parts.length === 2 ? parts[1] : messageId
+    await doRequest("PUT", `/channels/${channelId}/pins/${msgId}`)
+  }
+
   async function refreshCredentials(): Promise<void> {
     // No-op: botToken is a resolver function called fresh on each request
   }
@@ -349,6 +372,8 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     edit,
     delete: deleteMessage,
     setTyping,
+    setPresenceStatus,
+    pinMessage,
     addReaction,
     removeReaction,
     fetchHistory,

@@ -234,6 +234,38 @@ describe("createDiscordAdapter", () => {
     expect(reqPayload.url).toContain("/channels/channel-xyz/typing")
   })
 
+  it("pinMessage PUTs /channels/:channel/pins/:message", async () => {
+    mockInvoke.mockResolvedValue(makeTypingOkResp())
+
+    const adapter = makeAdapter()
+    await adapter.pinMessage!("discord:dc-1:channel-xyz", "channel-abc:msg-42")
+
+    const httpCalls = mockInvoke.mock.calls.filter(
+      ([cmd]: [string]) => cmd === "connectors_http_request"
+    )
+    const reqPayload = (httpCalls[0][1] as { req: { url: string; method: string } }).req
+    expect(reqPayload.url).toContain("/channels/channel-abc/pins/msg-42")
+    expect(reqPayload.method).toBe("PUT")
+  })
+
+  it("pinMessage falls back to the conversationKey channel for bare message ids", async () => {
+    mockInvoke.mockResolvedValue(makeTypingOkResp())
+
+    const adapter = makeAdapter()
+    await adapter.pinMessage!("discord:dc-1:channel-xyz", "msg-42")
+
+    const httpCalls = mockInvoke.mock.calls.filter(
+      ([cmd]: [string]) => cmd === "connectors_http_request"
+    )
+    const reqPayload = (httpCalls[0][1] as { req: { url: string } }).req
+    expect(reqPayload.url).toContain("/channels/channel-xyz/pins/msg-42")
+  })
+
+  it("setPresenceStatus throws when the gateway is not connected", async () => {
+    const adapter = makeAdapter()
+    await expect(adapter.setPresenceStatus!({ text: "AI 1k" })).rejects.toThrow(/gateway/)
+  })
+
   it("setTyping(on=false) is a no-op", async () => {
     const adapter = makeAdapter()
     await adapter.setTyping!("discord:dc-1:channel-xyz", false)

@@ -33,7 +33,18 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { Switch } from "@/components/ui/switch"
+import { openUrl } from "@/lib/native/opener"
+import {
+  connectorsHttpRequest,
+  connectorsKeyringGet,
+  connectorsKeyringSet,
+} from "@/lib/connectors/tauri/commands"
+import { buildLarkOAuthUrl } from "@/lib/connectors/adapters/lark/auth"
+import {
+  buildLarkOAuthState,
+  type LarkConnectedUser,
+} from "@/lib/connectors/adapters/lark/oauth-handler"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -65,6 +76,10 @@ interface LarkPersistedSettings {
   selfBotOpenId?: string
   /** Bot-menu (快捷指令) `event_key` → action mappings. */
   quickCommands?: LarkQuickCommand[]
+  /** Opt-in: send replies as the connected user (user_access_token) not the bot. */
+  sendAsUser?: boolean
+  /** Stamped by the OAuth handler after a successful user-token exchange. */
+  connectedUser?: LarkConnectedUser
   /** Index signature so the row's open-ended `Record<string, unknown>` accepts us. */
   [key: string]: unknown
 }
@@ -133,9 +148,13 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
     persistedSettings.quickCommands ?? []
   )
 
+  const [sendAsUser, setSendAsUser] = useState<boolean>(persistedSettings.sendAsUser === true)
+  const connectedUser = persistedSettings.connectedUser
+
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TatTestResult | null>(null)
   const [refreshingOpenId, setRefreshingOpenId] = useState(false)
+  const [authorizing, setAuthorizing] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const desktop = isTauri()
@@ -154,6 +173,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
     transport !== (persistedSettings.transport ?? "long-connection") ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null) ||
+    sendAsUser !== (persistedSettings.sendAsUser === true) ||
     JSON.stringify(quickCommands) !== JSON.stringify(persistedSettings.quickCommands ?? [])
 
   // ── Handlers ─────────────────────────────────────────────────────────────
@@ -191,6 +211,36 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
       }
     } finally {
       setRefreshingOpenId(false)
+    }
+  }
+
+  const handleAuthorize = async () => {
+    if (!row) {
+      toast.error(t("authorizeNeedsSavedAdapter"))
+      return
+    }
+    setAuthorizing(true)
+    try {
+      const appIdVal = (await connectorsKeyringGet(row.id, "appId")) ?? ""
+      if (!appIdVal) {
+        toast.error(t("authorizeNeedsAppId"))
+        return
+      }
+      const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 16)
+      const state = buildLarkOAuthState(row.id, nonce)
+      // The deep-link router validates the redirect's state against this key.
+      sessionStorage.setItem("connector-oauth-state", state)
+      const url = buildLarkOAuthUrl({
+        appId: appIdVal,
+        redirectUri: "cognia://connector/oauth/lark",
+        state,
+      })
+      await openUrl(url)
+      toast.info(t("authorizeOpened"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAuthorizing(false)
     }
   }
 
@@ -236,6 +286,10 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         transport,
         ...(selfBotOpenId ? { selfBotOpenId } : {}),
         ...(quickCommands.length > 0 ? { quickCommands } : {}),
+        // Preserve the OAuth-stamped connected-user metadata across saves —
+        // rebuilding nextSettings from scratch would otherwise drop it.
+        ...(connectedUser ? { connectedUser } : {}),
+        ...(sendAsUser ? { sendAsUser: true } : {}),
       }
 
       if (isNew) {
@@ -412,6 +466,27 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
     ),
   }
 
+  // Send-as-user is only meaningful once the adapter exists (authorize needs a
+  // saved adapter id to scope the OAuth state), so it is hidden for new rows.
+  const sendAsUserSection: FormSection | null = row
+    ? {
+        id: "send-as-user",
+        label: t("sectionSendAsUser"),
+        description: t("sectionSendAsUserDesc"),
+        children: (
+          <SendAsUserFields
+            connectedUser={connectedUser}
+            sendAsUser={sendAsUser}
+            onSendAsUserChange={setSendAsUser}
+            onAuthorize={handleAuthorize}
+            authorizing={authorizing}
+            saving={saving}
+            desktop={desktop}
+          />
+        ),
+      }
+    : null
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-3xl">
@@ -421,7 +496,13 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
 
         <div className="-mx-6 flex-1 overflow-y-auto px-6">
           <AdapterFormSections
-            sections={[identitySection, deliverySection, quickCommandsSection, advancedSection]}
+            sections={[
+              identitySection,
+              deliverySection,
+              ...(sendAsUserSection ? [sendAsUserSection] : []),
+              quickCommandsSection,
+              advancedSection,
+            ]}
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
@@ -431,6 +512,82 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Send-as-user section — OAuth connect + opt-in identity toggle (ADR-0009 A4)
+// ---------------------------------------------------------------------------
+
+interface SendAsUserFieldsProps {
+  connectedUser?: LarkConnectedUser
+  sendAsUser: boolean
+  onSendAsUserChange: (v: boolean) => void
+  onAuthorize: () => void
+  authorizing: boolean
+  saving: boolean
+  desktop: boolean
+}
+
+function SendAsUserFields(p: SendAsUserFieldsProps) {
+  const t = useTranslations("settings.connections.lark")
+  const connectedLabel =
+    p.connectedUser?.name ??
+    p.connectedUser?.email ??
+    p.connectedUser?.enterpriseEmail ??
+    p.connectedUser?.openId
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/30 px-3 py-2.5">
+        <div className="min-w-0 space-y-0.5">
+          <Label className="text-xs font-medium">{t("connectedAccountLabel")}</Label>
+          <p className="text-xs text-muted-foreground break-all">
+            {p.connectedUser
+              ? t("connectedAccountValue", { name: connectedLabel ?? "" })
+              : t("connectedAccountNone")}
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={p.onAuthorize}
+          disabled={p.authorizing || p.saving || !p.desktop}
+          className="shrink-0"
+        >
+          {p.authorizing ? (
+            <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+          ) : p.connectedUser ? (
+            t("reauthorizeButton")
+          ) : (
+            t("authorizeButton")
+          )}
+        </Button>
+      </div>
+
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-0.5">
+          <Label htmlFor="lk-send-as-user" className="text-sm">
+            {t("sendAsUserLabel")}
+          </Label>
+          <p className="text-xs leading-relaxed text-muted-foreground">{t("sendAsUserHelp")}</p>
+        </div>
+        <Switch
+          id="lk-send-as-user"
+          checked={p.sendAsUser}
+          onCheckedChange={p.onSendAsUserChange}
+          disabled={p.saving || !p.connectedUser}
+          aria-label={t("sendAsUserLabel")}
+        />
+      </div>
+
+      {!p.desktop && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          {t("authorizeRequiresDesktop")}
+        </p>
+      )}
+    </div>
   )
 }
 

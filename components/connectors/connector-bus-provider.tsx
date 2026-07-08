@@ -35,6 +35,7 @@ import { getBus } from "@/lib/connectors/bus"
 import { installRuntime } from "@/lib/connectors/runtime"
 import { startOutboundRunner } from "@/lib/connectors/outbound-runner"
 import { installScheduledOutboundHandlers } from "@/lib/connectors/scheduled-outbound"
+import { installUsagePresenceHandlers } from "@/lib/connectors/presence/usage-status-runner"
 import {
   connectorsRegisterAdapter,
   connectorsResetAllWs,
@@ -75,6 +76,7 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
     if (!isTauri()) return
 
     installScheduledOutboundHandlers()
+    installUsagePresenceHandlers()
 
     const ac = new AbortController()
     let cancelled = false
@@ -326,7 +328,15 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
 
       // Build the adapter map for the outbound runner.
       const adapters = new Map(bus.listAdapters().map((a) => [a.id, a]))
-      void startOutboundRunner({ adapters, signal: ac.signal })
+      // `onDelivered` feeds the bus's `cooldown-after-bot-reply` bookkeeping —
+      // the delivery choke point is the only place every reply path (ai-run /
+      // team / workflow / digest) converges, so recording here makes the
+      // default group-chat cooldown blocker actually fire.
+      void startOutboundRunner({
+        adapters,
+        signal: ac.signal,
+        onDelivered: (conversationKey) => bus.recordBotReply(conversationKey),
+      })
 
       // Single consolidated heartbeat sweep (v51) — one timer services every
       // running adapter (active heartbeat each tick + passive probe every
