@@ -6,7 +6,7 @@
  * generator yields each decrypted message XML string. Stops on abort.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen as listen } from "@/lib/connectors/events"
 
 export interface WechatOaWebhookOptions {
   adapterId: string

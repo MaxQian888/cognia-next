@@ -8,7 +8,7 @@
  * Yields each LarkEventEnvelope as it arrives; stops cleanly when signal fires.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen as listen } from "@/lib/connectors/events"
 import type { LarkEventEnvelope } from "./parse"
 
 export interface LarkWebhookOptions {
