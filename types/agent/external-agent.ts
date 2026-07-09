@@ -58,22 +58,13 @@ export type ExternalAgentBranchReasonCode =
  * Canonical branch outcome for external-agent orchestration.
  */
 export type ExternalAgentBranchOutcome =
-  | "external"
-  | "fallback"
-  | "strict_failure"
-  | "builtin"
-  | "blocked"
+  "external" | "fallback" | "strict_failure" | "builtin" | "blocked"
 
 /**
  * Lifecycle completeness stages used by manager/store/UI diagnostics.
  */
 export type ExternalAgentLifecycleCompletenessStage =
-  | "config"
-  | "connect"
-  | "session_extensions"
-  | "execution"
-  | "fallback"
-  | "recovery"
+  "config" | "connect" | "session_extensions" | "execution" | "fallback" | "recovery"
 
 /**
  * Canonical execution eligibility state.
@@ -94,19 +85,13 @@ export type ExternalAgentEcosystemExecutionMode = "direct" | "guided" | "externa
  * Status of an individual ecosystem prerequisite.
  */
 export type ExternalAgentEcosystemPrerequisiteState =
-  | "satisfied"
-  | "missing"
-  | "unknown"
-  | "not-applicable"
+  "satisfied" | "missing" | "unknown" | "not-applicable"
 
 /**
  * Aggregated prerequisite status projected for UI/runtime consumers.
  */
 export type ExternalAgentEcosystemPrerequisiteStatus =
-  | "ready"
-  | "action-required"
-  | "unknown"
-  | "not-applicable"
+  "ready" | "action-required" | "unknown" | "not-applicable"
 
 export interface ExternalAgentEcosystemPrerequisite {
   id: string
@@ -173,10 +158,7 @@ export type ExternalAgentBenchmarkGapGrade = "blocking" | "major" | "minor"
  * Adaptation status for benchmark capabilities.
  */
 export type ExternalAgentBenchmarkAdaptationStatus =
-  | "not-started"
-  | "in-progress"
-  | "validated"
-  | "intentional-deviation"
+  "not-started" | "in-progress" | "validated" | "intentional-deviation"
 
 /**
  * Evidence kinds accepted for benchmark adaptation validation.
@@ -294,11 +276,7 @@ export interface ExternalAgentValiditySnapshot {
  * Connection status for external agents
  */
 export type ExternalAgentConnectionStatus =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "error"
+  "disconnected" | "connecting" | "connected" | "reconnecting" | "error"
 
 /**
  * External agent execution status
@@ -595,12 +573,7 @@ export type AcpSessionUpdateType =
  * ACP Tool call status
  */
 export type AcpToolCallStatus =
-  | "pending"
-  | "in_progress"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "error"
+  "pending" | "in_progress" | "completed" | "failed" | "cancelled" | "error"
 
 /**
  * ACP Tool call kind
@@ -866,9 +839,7 @@ export interface AcpToolCallRegularContent {
  * Union of all tool call content types
  */
 export type AcpToolCallContent =
-  | AcpToolCallRegularContent
-  | AcpToolCallDiffContent
-  | AcpToolCallTerminalContent
+  AcpToolCallRegularContent | AcpToolCallDiffContent | AcpToolCallTerminalContent
 
 /**
  * File location affected by a tool call (for follow-along features)
@@ -924,10 +895,7 @@ export interface AcpTerminalOutputParams {
  * @see https://agentclientprotocol.com/protocol/tool-calls
  */
 export type AcpPermissionOptionKind =
-  | "allow_once"
-  | "allow_always"
-  | "reject_once"
-  | "reject_always"
+  "allow_once" | "allow_always" | "reject_once" | "reject_always"
 
 /**
  * Permission option presented to the user
@@ -1300,14 +1268,7 @@ export interface CodexAgentOptions {
  * Session status
  */
 export type ExternalAgentSessionStatus =
-  | "creating"
-  | "active"
-  | "idle"
-  | "executing"
-  | "waiting"
-  | "error"
-  | "closing"
-  | "closed"
+  "creating" | "active" | "idle" | "executing" | "waiting" | "error" | "closing" | "closed"
 
 /**
  * External agent session
@@ -1321,6 +1282,11 @@ export interface ExternalAgentSession {
   status: ExternalAgentSessionStatus
   /** Permission mode for this session */
   permissionMode?: AcpPermissionMode
+  /**
+   * Pre-approved tool allow-list for `dontAsk` mode. A tool matching an entry
+   * is silently approved; everything else is denied without a UI prompt.
+   */
+  allowedTools?: string[]
   /** Discovered capabilities */
   capabilities?: AcpCapabilities
   /** Available tools in this session */
@@ -1396,13 +1362,7 @@ export type ExternalAgentMessageRole = "user" | "assistant" | "system" | "tool"
  * Content block types
  */
 export type ExternalAgentContentType =
-  | "text"
-  | "image"
-  | "file"
-  | "tool_use"
-  | "tool_result"
-  | "thinking"
-  | "error"
+  "text" | "image" | "file" | "tool_use" | "tool_result" | "thinking" | "error"
 
 /**
  * Text content block
@@ -1870,6 +1830,14 @@ export interface ExternalAgentExecutionOptions {
   /** Permission mode override */
   permissionMode?: AcpPermissionMode
   /**
+   * Pre-approved tool allow-list. Under the `dontAsk` permission mode the ACP
+   * client silently approves a tool whose name matches an entry here and
+   * rejects everything else (no UI prompt). Ignored by other modes. Entries are
+   * bare tool names or `Tool(specifier)` patterns (the Claude Agent SDK
+   * `allowedTools` format); see `deriveExternalSessionPermission`.
+   */
+  allowedTools?: string[]
+  /**
    * Cognia-specific brief-output mode. When true, the ACP client prepends a
    * concise-output snippet to the resolved `systemPrompt` for `session/new`.
    * No-op if the spawned agent doesn't honour `systemPrompt` (we ship a
@@ -2251,9 +2219,7 @@ export function isStreamingTextEvent(
 export function isToolUseEvent(
   event: ExternalAgentEvent
 ): event is
-  | ExternalAgentToolUseStartEvent
-  | ExternalAgentToolUseDeltaEvent
-  | ExternalAgentToolUseEndEvent {
+  ExternalAgentToolUseStartEvent | ExternalAgentToolUseDeltaEvent | ExternalAgentToolUseEndEvent {
   return (
     event.type === "tool_use_start" ||
     event.type === "tool_use_delta" ||

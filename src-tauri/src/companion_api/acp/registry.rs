@@ -42,6 +42,13 @@ pub struct SessionEntry {
     pub sdk_session_id: Option<String>,
     /// Resume target for the *next* prompt (set by `session/load`).
     pub resume_session_id: Option<String>,
+    /// Mode id selected via `session/set_mode`, injected as
+    /// `SendOptions.permission_mode` on each subsequent prompt.
+    pub selected_mode_id: Option<String>,
+    /// Model id selected via `session/set_model`, injected as
+    /// `SendOptions.model` on each subsequent prompt (the `default` pseudo-id
+    /// injects nothing — the account default stands).
+    pub selected_model_id: Option<String>,
     /// Per-turn translation dedup state.
     pub turn: TurnState,
     /// True once a prompt has been dispatched on this session (used to decide

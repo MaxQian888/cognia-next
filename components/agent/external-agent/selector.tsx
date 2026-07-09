@@ -272,11 +272,11 @@ export function ExternalAgentSelector({
 
       {/* External Agent Manager Dialog */}
       <Dialog open={manageDialogOpen} onOpenChange={setManageDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
+          <DialogHeader className="shrink-0">
             <DialogTitle>{t("manageAgents")}</DialogTitle>
           </DialogHeader>
-          <ExternalAgentManager />
+          <ExternalAgentManager className="min-h-0 flex-1" />
         </DialogContent>
       </Dialog>
     </DropdownMenu>

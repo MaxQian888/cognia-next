@@ -57,6 +57,15 @@ const IDLE_TIMEOUT_SECS: u64 = 90;
 /// larger than the events channel's 64 KiB but still bounds a hostile peer.
 const MAX_WS_FRAME_BYTES: usize = 256 * 1024;
 
+/// Coerce a JSON-RPC response `id` back to the `u64` this server minted for a
+/// server→client request. We always send numeric ids, but a strict-but-quirky
+/// client may echo them stringified (`"5"`); accept that too rather than
+/// silently dropping the response.
+fn as_response_id(id: &Value) -> Option<u64> {
+    id.as_u64()
+        .or_else(|| id.as_str().and_then(|s| s.parse::<u64>().ok()))
+}
+
 /// Axum handler for `GET /ws/v1/acp`. Mounted inside the protected block, so
 /// `require_device_jwt` has already verified the token; the [`DeviceContext`]
 /// is read off the request extensions *before* the upgrade consumes them
@@ -181,6 +190,8 @@ impl AcpConnection {
             )],
             "session/new" => self.handle_session_new(id, params),
             "session/load" => self.handle_session_load(id, params),
+            "session/set_mode" => self.handle_session_set_mode(id, params),
+            "session/set_model" => self.handle_session_set_model(id, params),
             "session/prompt" => self.handle_session_prompt(id, params).await,
             _ => vec![types::rpc_error(
                 id,
@@ -211,7 +222,73 @@ impl AcpConnection {
                 sdk_session_id: None,
             },
         );
-        vec![types::rpc_response(id, json!({ "sessionId": session_id }))]
+        vec![types::rpc_response(id, types::session_new_result(&session_id))]
+    }
+
+    fn handle_session_set_mode(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+        let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session/set_mode requires `sessionId`",
+            )];
+        };
+        let Some(mode_id) = params.get("modeId").and_then(Value::as_str) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session/set_mode requires `modeId`",
+            )];
+        };
+        if !types::is_valid_mode(mode_id) {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                &format!("unknown mode \"{mode_id}\""),
+            )];
+        }
+        let Some(entry) = self.sessions.get_mut(session_id) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                &format!("unknown session \"{session_id}\""),
+            )];
+        };
+        entry.selected_mode_id = Some(mode_id.to_string());
+        vec![types::rpc_response(id, Value::Null)]
+    }
+
+    fn handle_session_set_model(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+        let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session/set_model requires `sessionId`",
+            )];
+        };
+        let Some(model_id) = params.get("modelId").and_then(Value::as_str) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session/set_model requires `modelId`",
+            )];
+        };
+        if !types::is_valid_model(model_id) {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                &format!("unknown model \"{model_id}\""),
+            )];
+        }
+        let Some(entry) = self.sessions.get_mut(session_id) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                &format!("unknown session \"{session_id}\""),
+            )];
+        };
+        entry.selected_model_id = Some(model_id.to_string());
+        vec![types::rpc_response(id, Value::Null)]
     }
 
     fn handle_session_load(&mut self, id: &Value, params: &Value) -> Vec<Value> {
@@ -266,7 +343,7 @@ impl AcpConnection {
         };
 
         // Validate session + single-turn invariant, and collect send options.
-        let (cwd, resume_session_id) = {
+        let (cwd, resume_session_id, selected_mode_id, selected_model_id) = {
             let Some(entry) = self.sessions.get_mut(&session_id) else {
                 return vec![types::rpc_error(
                     id,
@@ -281,7 +358,12 @@ impl AcpConnection {
                     "a prompt turn is already in flight for this session",
                 )];
             }
-            (entry.cwd.clone(), entry.resume_session_id.take())
+            (
+                entry.cwd.clone(),
+                entry.resume_session_id.take(),
+                entry.selected_mode_id.clone(),
+                entry.selected_model_id.clone(),
+            )
         };
 
         let mut options = serde_json::Map::new();
@@ -290,6 +372,20 @@ impl AcpConnection {
         }
         if let Some(resume) = resume_session_id {
             options.insert("resumeSessionId".to_string(), json!(resume));
+        }
+        // `session/set_mode` selection → SendOptions.permission_mode (identity).
+        if let Some(mode_id) = selected_mode_id {
+            options.insert(
+                "permissionMode".to_string(),
+                json!(types::map_acp_mode_to_send(&mode_id)),
+            );
+        }
+        // `session/set_model` selection → SendOptions.model. The `default`
+        // pseudo-id injects nothing so the account default stands.
+        if let Some(model_id) = selected_model_id {
+            if model_id != types::DEFAULT_MODEL_ID {
+                options.insert("model".to_string(), json!(model_id));
+            }
         }
         // Streaming deltas are what agent_message_chunk forwarding rides on.
         options.insert("includePartialMessages".to_string(), json!(true));
@@ -344,7 +440,7 @@ impl AcpConnection {
 
     /// A response to a server→client `session/request_permission` request.
     async fn handle_permission_response(&mut self, msg: &JsonRpcIncoming) -> Vec<Value> {
-        let Some(out_id) = msg.id.as_ref().and_then(Value::as_u64) else {
+        let Some(out_id) = msg.id.as_ref().and_then(as_response_id) else {
             return Vec::new();
         };
         let Some((session_id, request_id)) = self.pending_permissions.remove(&out_id) else {
@@ -713,6 +809,101 @@ mod tests {
             .handle_message(r#"{"jsonrpc":"2.0","id":9,"method":"session/fork","params":{}}"#)
             .await;
         assert_eq!(out[0]["error"]["code"], rpc_error_code::METHOD_NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn session_new_advertises_modes_and_models() {
+        let mut conn = test_conn();
+        initialize(&mut conn).await;
+        let out = conn
+            .handle_message(
+                r#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/repo"}}"#,
+            )
+            .await;
+        let result = &out[0]["result"];
+        assert!(result["sessionId"].as_str().is_some());
+        assert_eq!(result["modes"]["currentModeId"], types::DEFAULT_MODE_ID);
+        assert!(!result["modes"]["availableModes"].as_array().unwrap().is_empty());
+        assert_eq!(result["models"]["currentModelId"], types::DEFAULT_MODEL_ID);
+        assert!(!result["models"]["availableModels"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn set_mode_persists_and_validates() {
+        let mut conn = test_conn();
+        initialize(&mut conn).await;
+        let session_id = new_session(&mut conn).await;
+
+        // Valid mode is stored on the session entry.
+        let msg = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"session/set_mode","params":{{"sessionId":"{session_id}","modeId":"plan"}}}}"#
+        );
+        let out = conn.handle_message(&msg).await;
+        assert!(out[0].get("result").is_some());
+        assert_eq!(
+            conn.sessions.get_mut(&session_id).unwrap().selected_mode_id,
+            Some("plan".to_string())
+        );
+
+        // Unknown mode → INVALID_PARAMS.
+        let msg = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"session/set_mode","params":{{"sessionId":"{session_id}","modeId":"bogus"}}}}"#
+        );
+        let out = conn.handle_message(&msg).await;
+        assert_eq!(out[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
+
+        // Unknown session → INVALID_PARAMS.
+        let out = conn
+            .handle_message(
+                r#"{"jsonrpc":"2.0","id":4,"method":"session/set_mode","params":{"sessionId":"nope","modeId":"plan"}}"#,
+            )
+            .await;
+        assert_eq!(out[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
+
+        // Missing modeId → INVALID_PARAMS.
+        let msg = format!(
+            r#"{{"jsonrpc":"2.0","id":5,"method":"session/set_mode","params":{{"sessionId":"{session_id}"}}}}"#
+        );
+        let out = conn.handle_message(&msg).await;
+        assert_eq!(out[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn set_model_persists_and_validates() {
+        let mut conn = test_conn();
+        initialize(&mut conn).await;
+        let session_id = new_session(&mut conn).await;
+
+        let msg = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"session/set_model","params":{{"sessionId":"{session_id}","modelId":"claude-opus-4-8"}}}}"#
+        );
+        let out = conn.handle_message(&msg).await;
+        assert!(out[0].get("result").is_some());
+        assert_eq!(
+            conn.sessions.get_mut(&session_id).unwrap().selected_model_id,
+            Some("claude-opus-4-8".to_string())
+        );
+
+        // Unknown model → INVALID_PARAMS.
+        let msg = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"session/set_model","params":{{"sessionId":"{session_id}","modelId":"gpt-4"}}}}"#
+        );
+        let out = conn.handle_message(&msg).await;
+        assert_eq!(out[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
+    }
+
+    #[test]
+    fn response_id_accepts_numeric_and_stringified() {
+        // Numeric ids (what we mint) and a strict client's stringified echo both
+        // resolve; garbage does not.
+        assert_eq!(as_response_id(&json!(5)), Some(5));
+        assert_eq!(as_response_id(&json!("7")), Some(7));
+        assert_eq!(as_response_id(&json!("nan")), None);
+        assert_eq!(as_response_id(&json!(-1)), None);
+        assert_eq!(as_response_id(&Value::Null), None);
     }
 
     #[tokio::test]

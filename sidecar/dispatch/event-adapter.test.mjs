@@ -3,7 +3,11 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { createEventAdapter, shapeToolResultContent } from "./event-adapter.mjs"
+import {
+  createEventAdapter,
+  finishReasonToStopReason,
+  shapeToolResultContent,
+} from "./event-adapter.mjs"
 
 const baseCtx = () => ({
   sessionId: "client-sess-1",
@@ -99,6 +103,44 @@ test("AI SDK message metadata chunks update the sealed assistant metadata", () =
   const sealed = adapter.sealAssistant().find((m) => m.type === "assistant")
   assert.equal(sealed.message.id, "sdk-message-1")
   assert.deepEqual(sealed.message.metadata, { phase: "finish" })
+})
+
+test("finishReasonToStopReason maps only length/content-filter", () => {
+  assert.equal(finishReasonToStopReason("length"), "max_tokens")
+  assert.equal(finishReasonToStopReason("content-filter"), "refusal")
+  assert.equal(finishReasonToStopReason("stop"), null)
+  assert.equal(finishReasonToStopReason("tool-calls"), null)
+  assert.equal(finishReasonToStopReason(undefined), null)
+})
+
+test("sealed assistant carries stop_reason mapped from the finish reason", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", text: "partial" })
+  adapter.handle({ type: "finish", finishReason: "length" })
+  const sealed = adapter.sealAssistant().find((m) => m.type === "assistant")
+  assert.equal(sealed.message.stop_reason, "max_tokens")
+
+  // A clean finish leaves stop_reason null (treated as end_turn downstream).
+  const clean = createEventAdapter(baseCtx())
+  clean.handle({ type: "text-delta", text: "done" })
+  clean.handle({ type: "finish", finishReason: "stop" })
+  assert.equal(clean.sealAssistant().find((m) => m.type === "assistant").message.stop_reason, null)
+})
+
+test("reset() clears the captured stop_reason between turns", () => {
+  const adapter = createEventAdapter(baseCtx())
+  adapter.handle({ type: "text-delta", text: "a" })
+  adapter.handle({ type: "finish", finishReason: "content-filter" })
+  assert.equal(
+    adapter.sealAssistant().find((m) => m.type === "assistant").message.stop_reason,
+    "refusal"
+  )
+  adapter.reset()
+  adapter.handle({ type: "text-delta", text: "b" })
+  assert.equal(
+    adapter.sealAssistant().find((m) => m.type === "assistant").message.stop_reason,
+    null
+  )
 })
 
 test("AI SDK message metadata chunks deep-merge non-null updates", () => {

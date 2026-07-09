@@ -1676,6 +1676,13 @@ export interface UserProfile {
    * raw FileReader result here (settings row syncs to companions).
    */
   avatarDataUrl?: string
+  /**
+   * Preferred IANA timezone (e.g. "America/New_York"). Empty/undefined →
+   * the device zone. Resolved everywhere via `resolveUserTimeZone()`
+   * (`lib/profile/timezone.ts`); consumed by notification DND, pet/twin
+   * proactive greetings, and as the default zone for goal/schedule pacing.
+   */
+  timezone?: string
   /** Epoch ms of the last profile edit. */
   updatedAt?: number
 }
@@ -2269,33 +2276,13 @@ export interface AppSettings {
      * `"normal"`. Accepts CSS keywords or the 100–900 numeric-string scale.
      */
     fontWeight?:
-      | "normal"
-      | "bold"
-      | "100"
-      | "200"
-      | "300"
-      | "400"
-      | "500"
-      | "600"
-      | "700"
-      | "800"
-      | "900"
+      "normal" | "bold" | "100" | "200" | "300" | "400" | "500" | "600" | "700" | "800" | "900"
     /**
      * Font weight used for bold text (xterm `fontWeightBold`). Defaults to
      * `"bold"`. Same accepted values as {@link fontWeight}.
      */
     fontWeightBold?:
-      | "normal"
-      | "bold"
-      | "100"
-      | "200"
-      | "300"
-      | "400"
-      | "500"
-      | "600"
-      | "700"
-      | "800"
-      | "900"
+      "normal" | "bold" | "100" | "200" | "300" | "400" | "500" | "600" | "700" | "800" | "900"
     /**
      * Enable programming-font ligatures via `@xterm/addon-ligatures`. Off by
      * default — the addon shapes glyph runs at render time, a small cost only

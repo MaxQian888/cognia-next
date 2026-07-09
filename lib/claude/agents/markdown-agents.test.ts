@@ -64,6 +64,22 @@ body`
     expect(r.def.externalPresetId).toBe("codex")
   })
 
+  it("parses `mcp-server-ids` (and the camelCase alias) into a list", () => {
+    const kebab = parseMarkdownAgent(
+      "a",
+      `---\ndescription: x\nmcp-server-ids:\n  - github\n  - linear\n---\nbody`
+    )
+    if (!("def" in kebab)) throw new Error("expected def")
+    expect(kebab.def.mcpServerIds).toEqual(["github", "linear"])
+
+    const camel = parseMarkdownAgent(
+      "a",
+      `---\ndescription: x\nmcpServerIds:\n  - github\n---\nbody`
+    )
+    if (!("def" in camel)) throw new Error("expected def")
+    expect(camel.def.mcpServerIds).toEqual(["github"])
+  })
+
   it("errors on a missing description", () => {
     const r = parseMarkdownAgent("a", `---\nmodel: opus\n---\nbody`)
     expect("error" in r).toBe(true)
@@ -81,6 +97,7 @@ body`
     expect(r.def.tools).toBeUndefined()
     expect(r.def.disallowedTools).toBeUndefined()
     expect(r.def.externalPresetId).toBeUndefined()
+    expect(r.def.mcpServerIds).toBeUndefined()
   })
 })
 

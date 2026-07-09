@@ -247,6 +247,11 @@ export interface SessionCreateOptions {
   mcpServers?: import("@/types/agent/external-agent").AcpMcpServerConfig[]
   /** Permission mode for the session */
   permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk"
+  /**
+   * Pre-approved tool allow-list, consulted only under `dontAsk` to silently
+   * approve matching tools (see `ExternalAgentExecutionOptions.allowedTools`).
+   */
+  allowedTools?: string[]
   /** Context to pass to the agent */
   context?: Record<string, unknown>
   /** Structured instruction payload for protocol-specific metadata bridging */

@@ -85,9 +85,7 @@ const externalAgentManagerLogger = loggers.agent.child("external-manager")
  * Distinguishes between "unsupported", "ok with data", and "error".
  */
 export type AgentCapabilityResult<T> =
-  | { status: "ok"; data: T }
-  | { status: "unsupported" }
-  | { status: "error"; error: Error }
+  { status: "ok"; data: T } | { status: "unsupported" } | { status: "error"; error: Error }
 
 // ============================================================================
 // External Agent Manager
@@ -1538,6 +1536,7 @@ export class ExternalAgentManager {
       context: options?.context as Record<string, unknown> | undefined,
       instructionEnvelope: options?.instructionEnvelope,
       permissionMode: this.resolveEffectivePermissionMode(instance, options?.permissionMode),
+      allowedTools: options?.allowedTools,
       timeout: options?.timeout,
       mcpServers,
       metadata,

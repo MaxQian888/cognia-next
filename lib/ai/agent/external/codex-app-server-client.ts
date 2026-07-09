@@ -25,6 +25,7 @@
 
 import { isTauri } from "@/lib/utils"
 import { loggers } from "@/lib/logging"
+import { truncateForLog } from "@/lib/logging/truncate"
 import {
   spawnExternalAgent,
   sendToExternalAgent,
@@ -453,8 +454,11 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     }).then((un) => this.unsubscribers.push(un))
 
     void onExternalAgentStderr((event) => {
+      // Routine subprocess stderr, per-chunk on a chatty stream: keep it at
+      // `debug` (below the Next dev server's forwarded warn+ threshold, so it
+      // can't flood the forwarded-console buffer) and bound each chunk's size.
       if (event.agentId === this.processId)
-        log.warn("Codex app-server stderr", { data: event.data })
+        log.debug("Codex app-server stderr", { data: truncateForLog(event.data) })
     }).then((un) => this.unsubscribers.push(un))
 
     void onExternalAgentExit((event) => {

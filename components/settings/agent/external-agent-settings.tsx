@@ -20,9 +20,8 @@ import {
   Loader2,
   Terminal,
   Globe,
-  ChevronDown,
-  ChevronRight,
 } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { toast } from "@/components/ui/sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -56,8 +55,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Empty, EmptyMedia, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
@@ -80,6 +77,7 @@ import {
 } from "@/lib/ai/agent/external/permission-modes"
 import type {
   ExternalAgentConnectionStatus,
+  ExternalAgentConfig,
   CreateExternalAgentInput,
   AcpPermissionMode,
   ExternalAgentProtocol,
@@ -409,13 +407,13 @@ function AgentEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[500px]">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{editingAgentId ? t("editAgent") : t("addAgent")}</DialogTitle>
           <DialogDescription>{t("agentConfigDescription")}</DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 py-4">
+        <div className="-mx-1 grid min-h-0 flex-1 gap-4 overflow-y-auto px-1 py-4">
           {/* Quick start preset — only shown when creating, not when editing,
               to avoid silently overwriting hand-tuned fields. */}
           {!editingAgentId && (
@@ -472,7 +470,9 @@ function AgentEditorDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                {/* i18n-exempt: protocol identifier (brand/technical) */}
                 <SelectItem value="acp">ACP (Agent Client Protocol)</SelectItem>
+                {/* i18n-exempt: protocol identifier (brand/technical) */}
                 <SelectItem value="opencode">OpenCode (HTTP + SSE)</SelectItem>
               </SelectContent>
             </Select>
@@ -517,6 +517,7 @@ function AgentEditorDialog({
                   id="command"
                   value={formData.processCommand}
                   onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
+                  // i18n-exempt: example CLI command, not UI prose
                   placeholder="npx @anthropics/claude-code"
                 />
               </div>
@@ -526,6 +527,7 @@ function AgentEditorDialog({
                   id="args"
                   value={formData.processArgs}
                   onChange={(e) => setFormData({ ...formData, processArgs: e.target.value })}
+                  // i18n-exempt: example CLI arguments, not UI prose
                   placeholder="--stdio --model claude-sonnet"
                 />
               </div>
@@ -775,7 +777,7 @@ function AgentEditorDialog({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {tCommon("cancel")}
           </Button>
@@ -908,6 +910,227 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
 }
 
 // =============================================================================
+// Agent Detail Panel
+// =============================================================================
+
+interface AgentDetailProps {
+  agent: ExternalAgentConfig
+  isConnecting: boolean
+  onConnect: () => void
+  onDisconnect: () => void
+  onEdit: () => void
+  onDelete: () => void
+}
+
+/**
+ * Right-hand detail pane for the selected agent. Renders the full connection
+ * config, ecosystem metadata, the native Codex app-server status (when
+ * applicable), and the connect/edit/delete actions. Replaces the old per-row
+ * `Collapsible` drawer so the wide settings frame is actually used.
+ */
+function AgentDetail({
+  agent,
+  isConnecting,
+  onConnect,
+  onDisconnect,
+  onEdit,
+  onDelete,
+}: AgentDetailProps) {
+  const t = useTranslations("externalAgent.settings")
+  const tCommon = useTranslations("common")
+  const { getConnectionStatus, getAgentValidity } = useExternalAgentStore()
+
+  const status = getConnectionStatus(agent.id)
+  const isConnected = status === "connected"
+  const runtimeValidity = getAgentValidity(agent.id)
+  const executionBlockedReason =
+    (runtimeValidity?.executable === false ? runtimeValidity.blockingReason : null) ??
+    getExternalAgentExecutionBlockReason(agent)
+  const ecosystem =
+    runtimeValidity?.ecosystem ??
+    agent.validitySnapshot?.ecosystem ??
+    getExternalAgentEcosystemReadiness(agent)
+  const supportTier = ecosystem?.supportTier
+  const supportTierVariant =
+    supportTier === "documented-only"
+      ? "destructive"
+      : supportTier === "guided"
+        ? "secondary"
+        : "outline"
+
+  return (
+    <Card data-testid={`agent-detail-${agent.id}`}>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <ConnectionStatusIcon status={status} />
+              <CardTitle className="truncate">{agent.name}</CardTitle>
+              <Badge variant="outline" className="text-xs">
+                {agent.protocol.toUpperCase()}
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                {agent.transport}
+              </Badge>
+              {supportTier && (
+                <Badge variant={supportTierVariant} className="text-xs">
+                  {supportTier}
+                </Badge>
+              )}
+            </div>
+            {agent.description && <CardDescription>{agent.description}</CardDescription>}
+            {executionBlockedReason && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">{executionBlockedReason}</p>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {isConnected ? (
+              <Button variant="outline" size="sm" onClick={onDisconnect}>
+                <PowerOff className="mr-1 h-4 w-4" />
+                {t("disconnect")}
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onConnect}
+                disabled={isConnecting || !!executionBlockedReason}
+              >
+                {isConnecting ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Power className="mr-1 h-4 w-4" />
+                )}
+                {t("connect")}
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Agent Details */}
+        <div className="grid grid-cols-1 gap-4 text-sm @lg/agents-pane:grid-cols-2">
+          <div>
+            <span className="text-muted-foreground">{t("transport")}:</span>
+            <span className="ml-2">{agent.transport}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">{t("detailTimeout")}:</span>
+            <span className="ml-2">{agent.timeout ?? 300000}ms</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">{t("detailRetry")}:</span>
+            <span className="ml-2">
+              {agent.retryConfig?.maxRetries ?? 3} @ {agent.retryConfig?.retryDelay ?? 1000}ms
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">{t("detailBackoff")}:</span>
+            <span className="ml-2">
+              {(agent.retryConfig?.exponentialBackoff ?? true)
+                ? t("backoffExponential")
+                : t("backoffFixed")}
+            </span>
+          </div>
+          {agent.process && (
+            <>
+              <div>
+                <span className="text-muted-foreground">{t("command")}:</span>
+                <code className="ml-2 rounded bg-muted px-1 text-xs">{agent.process.command}</code>
+              </div>
+              {agent.process.cwd && (
+                <div className="@lg/agents-pane:col-span-2">
+                  <span className="text-muted-foreground">{t("workingDirectory")}:</span>
+                  <code className="ml-2 rounded bg-muted px-1 text-xs">{agent.process.cwd}</code>
+                </div>
+              )}
+            </>
+          )}
+          {agent.network && (
+            <div className="@lg/agents-pane:col-span-2">
+              <span className="text-muted-foreground">{t("endpoint")}:</span>
+              <code className="ml-2 rounded bg-muted px-1 text-xs">{agent.network.endpoint}</code>
+            </div>
+          )}
+          {ecosystem?.adapterName && (
+            <div>
+              <span className="text-muted-foreground">{t("detailsAdapter")}:</span>
+              <span className="ml-2">{ecosystem.adapterName}</span>
+            </div>
+          )}
+          {ecosystem?.surfaceName && (
+            <div>
+              <span className="text-muted-foreground">{t("detailsSurface")}:</span>
+              <span className="ml-2">{ecosystem.surfaceName}</span>
+            </div>
+          )}
+          {supportTier && (
+            <div>
+              <span className="text-muted-foreground">{t("detailsSupportTier")}:</span>
+              <span className="ml-2">{supportTier}</span>
+            </div>
+          )}
+          {ecosystem?.prerequisiteStatus && (
+            <div>
+              <span className="text-muted-foreground">{t("detailsPrerequisiteStatus")}:</span>
+              <span className="ml-2">{ecosystem.prerequisiteStatus}</span>
+            </div>
+          )}
+          {ecosystem?.docsUrl && (
+            <div className="@lg/agents-pane:col-span-2">
+              <span className="text-muted-foreground">{t("detailsOfficialDocs")}:</span>
+              <a
+                href={ecosystem.docsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-2 inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                {t("detailsDocsLink")}
+              </a>
+            </div>
+          )}
+          {ecosystem?.limitationNote && (
+            <div className="@lg/agents-pane:col-span-2">
+              <span className="text-muted-foreground">{t("detailsLimitation")}:</span>
+              <span className="ml-2">{ecosystem.limitationNote}</span>
+            </div>
+          )}
+          {ecosystem?.recommendedActions?.length ? (
+            <div className="@lg/agents-pane:col-span-2">
+              <span className="text-muted-foreground">{t("detailsRecommendedActions")}:</span>
+              <span className="ml-2">{ecosystem.recommendedActions.join(" | ")}</span>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Native Codex app-server status (MCP servers + skills) */}
+        {agent.protocol === "codex-app-server" && (
+          <CodexAppServerStatusCard agentId={agent.id} connected={isConnected} />
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={onEdit}>
+            <Edit className="mr-1 h-4 w-4" />
+            {tCommon("edit")}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={onDelete}
+          >
+            <Trash2 className="mr-1 h-4 w-4" />
+            {tCommon("delete")}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// =============================================================================
 // Main Settings Component
 // =============================================================================
 
@@ -952,7 +1175,9 @@ export function ExternalAgentSettings() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set())
+  // Master/detail selection: the agent whose config is shown in the right pane.
+  // `null` keeps the quick-start preset gallery in view.
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   // Preset id seeded into the AgentEditorDialog when opening from the
   // quick-start gallery. Empty when the user opens the manual "Add agent"
   // button.
@@ -1031,177 +1256,165 @@ export function ExternalAgentSettings() {
     [disconnect, t]
   )
 
-  const toggleExpanded = useCallback((agentId: string) => {
-    setExpandedAgents((prev) => {
-      const next = new Set(prev)
-      if (next.has(agentId)) {
-        next.delete(agentId)
-      } else {
-        next.add(agentId)
-      }
-      return next
-    })
-  }, [])
+  // Keep the selection valid: if the selected agent is removed, fall back to
+  // the gallery (null) so the detail pane never points at a missing agent.
+  const selectedAgent = selectedAgentId
+    ? agents.find((agent) => agent.id === selectedAgentId)
+    : undefined
 
   return (
-    <div className="space-y-6">
-      {/* Global Settings */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ExternalLink className="h-5 w-5" />
-            {t("title")}
-          </CardTitle>
-          <CardDescription>{t("description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Enable External Agents */}
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>{t("enableExternalAgents")}</Label>
-              <p className="text-sm text-muted-foreground">{t("enableExternalAgentsDesc")}</p>
-            </div>
-            <Switch checked={enabled} onCheckedChange={setEnabled} />
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
+      {/* Page header — title, the master enable switch, and the add action stay
+          pinned above the scrolling body so they are always reachable. */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b pb-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <ExternalLink className="h-5 w-5 shrink-0" />
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-semibold">{t("title")}</h2>
+            <p className="text-sm text-muted-foreground">{t("description")}</p>
           </div>
-
-          <Separator />
-
-          {/* Auto Connect */}
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>{t("autoConnect")}</Label>
-              <p className="text-sm text-muted-foreground">{t("autoConnectDesc")}</p>
-            </div>
-            <Switch
-              checked={autoConnectOnStartup}
-              onCheckedChange={setAutoConnectOnStartup}
-              disabled={!enabled}
-            />
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="enable-external-agents" className="text-sm">
+              {t("enableExternalAgents")}
+            </Label>
+            <Switch id="enable-external-agents" checked={enabled} onCheckedChange={setEnabled} />
           </div>
+          <Button
+            onClick={() => {
+              setSelectedPresetForNew("")
+              setEditingAgentId(null)
+              setEditorOpen(true)
+            }}
+            disabled={!enabled}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            {t("addAgent")}
+          </Button>
+        </div>
+      </div>
 
-          {/* Notifications */}
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>{t("showNotifications")}</Label>
-              <p className="text-sm text-muted-foreground">{t("showNotificationsDesc")}</p>
+      {/* Scrolling body — owns the vertical scroll and declares the container so
+          the master/detail split responds to the panel's own width, not the
+          viewport. */}
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pt-4 pr-0.5 @container/agents-pane">
+        {/* Global Settings */}
+        <Card>
+          <CardContent className="space-y-4 pt-6">
+            {/* Auto Connect */}
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>{t("autoConnect")}</Label>
+                <p className="text-sm text-muted-foreground">{t("autoConnectDesc")}</p>
+              </div>
+              <Switch
+                checked={autoConnectOnStartup}
+                onCheckedChange={setAutoConnectOnStartup}
+                disabled={!enabled}
+              />
             </div>
-            <Switch
-              checked={showConnectionNotifications}
-              onCheckedChange={setShowConnectionNotifications}
-              disabled={!enabled}
-            />
-          </div>
 
-          <Separator />
-
-          {/* Default Permission Mode */}
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>{t("defaultPermissionMode")}</Label>
-              <p className="text-sm text-muted-foreground">{t("defaultPermissionModeDesc")}</p>
+            {/* Notifications */}
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>{t("showNotifications")}</Label>
+                <p className="text-sm text-muted-foreground">{t("showNotificationsDesc")}</p>
+              </div>
+              <Switch
+                checked={showConnectionNotifications}
+                onCheckedChange={setShowConnectionNotifications}
+                disabled={!enabled}
+              />
             </div>
-            <Select
-              value={defaultPermissionMode}
-              onValueChange={(v) =>
-                setDefaultPermissionMode(
-                  v as "default" | "acceptEdits" | "bypassPermissions" | "plan"
-                )
-              }
-              disabled={!enabled}
-            >
-              <SelectTrigger className="w-full sm:w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default">{t("permissionDefault")}</SelectItem>
-                <SelectItem value="acceptEdits">{t("permissionAcceptEdits")}</SelectItem>
-                <SelectItem value="bypassPermissions">{t("permissionBypass")}</SelectItem>
-                <SelectItem value="plan">{t("permissionPlan")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
 
-          <Separator />
+            <Separator />
 
-          {/* External Failure Policy */}
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>{t("chatFailurePolicy")}</Label>
-              <p className="text-sm text-muted-foreground">{t("chatFailurePolicyDesc")}</p>
+            {/* Default Permission Mode */}
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>{t("defaultPermissionMode")}</Label>
+                <p className="text-sm text-muted-foreground">{t("defaultPermissionModeDesc")}</p>
+              </div>
+              <Select
+                value={defaultPermissionMode}
+                onValueChange={(v) =>
+                  setDefaultPermissionMode(
+                    v as "default" | "acceptEdits" | "bypassPermissions" | "plan"
+                  )
+                }
+                disabled={!enabled}
+              >
+                <SelectTrigger className="w-full sm:w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">{t("permissionDefault")}</SelectItem>
+                  <SelectItem value="acceptEdits">{t("permissionAcceptEdits")}</SelectItem>
+                  <SelectItem value="bypassPermissions">{t("permissionBypass")}</SelectItem>
+                  <SelectItem value="plan">{t("permissionPlan")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <Select
-              value={chatFailurePolicy}
-              onValueChange={(value) => setChatFailurePolicy(value as "fallback" | "strict")}
-              disabled={!enabled}
-            >
-              <SelectTrigger className="w-full sm:w-[220px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fallback">{t("chatFailurePolicyFallback")}</SelectItem>
-                <SelectItem value="strict">{t("chatFailurePolicyStrict")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Rule-based delegation — route matching chat turns to an external
-          agent automatically (Thread B). */}
-      <DelegationRulesSection disabled={!enabled} />
+            <Separator />
 
-      {/* Quick-start preset gallery — surfaces the four shipping presets +
-          any plugin-contributed presets. Picking a card opens the editor with
-          the form pre-filled, so the user only edits the truly variable bits
-          (env, cwd, custom args). */}
-      <PresetGalleryCard
-        disabled={!enabled}
-        onPick={(presetId) => {
-          setSelectedPresetForNew(presetId)
-          setEditingAgentId(null)
-          setEditorOpen(true)
-        }}
-      />
-
-      {/* Agent List */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>{t("configuredAgents")}</CardTitle>
-              <CardDescription>{t("configuredAgentsDesc")}</CardDescription>
+            {/* External Failure Policy */}
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>{t("chatFailurePolicy")}</Label>
+                <p className="text-sm text-muted-foreground">{t("chatFailurePolicyDesc")}</p>
+              </div>
+              <Select
+                value={chatFailurePolicy}
+                onValueChange={(value) => setChatFailurePolicy(value as "fallback" | "strict")}
+                disabled={!enabled}
+              >
+                <SelectTrigger className="w-full sm:w-[220px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fallback">{t("chatFailurePolicyFallback")}</SelectItem>
+                  <SelectItem value="strict">{t("chatFailurePolicyStrict")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <Button
-              onClick={() => {
-                setSelectedPresetForNew("")
-                setEditingAgentId(null)
-                setEditorOpen(true)
-              }}
-              disabled={!enabled}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              {t("addAgent")}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {agents.length === 0 ? (
-            <Empty className="py-8 border-0">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <ExternalLink className="h-6 w-6" />
-                </EmptyMedia>
-                <EmptyTitle>{t("noAgentsConfigured")}</EmptyTitle>
-                <EmptyDescription>{t("addAgentToStart")}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <ScrollArea className="max-h-[min(400px,60vh)]">
-              <div className="space-y-3">
+          </CardContent>
+        </Card>
+
+        {/* Rule-based delegation — route matching chat turns to an external
+            agent automatically (Thread B). */}
+        <DelegationRulesSection disabled={!enabled} />
+
+        {/* Master/detail split — the agent list is the master on the left; the
+            selected agent's full config (or the quick-start preset gallery when
+            nothing is selected) fills the detail pane on the right. Collapses to
+            a single stacked column below the @3xl container breakpoint. */}
+        <div className="flex flex-col gap-4 @3xl/agents-pane:flex-row @3xl/agents-pane:items-start">
+          {/* Master: agent list */}
+          <aside className="space-y-2 @3xl/agents-pane:sticky @3xl/agents-pane:top-0 @3xl/agents-pane:max-h-[calc(100dvh-14rem)] @3xl/agents-pane:w-72 @3xl/agents-pane:shrink-0 @3xl/agents-pane:self-start @3xl/agents-pane:overflow-y-auto @3xl/agents-pane:pr-1">
+            <div className="flex items-center justify-between gap-2 px-0.5">
+              <h3 className="text-sm font-medium">{t("configuredAgents")}</h3>
+              {agents.length > 0 && (
+                <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                  {agents.length}
+                </Badge>
+              )}
+            </div>
+            {agents.length === 0 ? (
+              <Empty className="border-0 py-8">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <ExternalLink className="h-6 w-6" />
+                  </EmptyMedia>
+                  <EmptyTitle>{t("noAgentsConfigured")}</EmptyTitle>
+                  <EmptyDescription>{t("addAgentToStart")}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <div className="space-y-2">
                 {agents.map((agent) => {
                   const status = getConnectionStatus(agent.id)
-                  const isExpanded = expandedAgents.has(agent.id)
-                  const isConnected = status === "connected"
                   const runtimeValidity = getAgentValidity(agent.id)
                   const executionBlockedReason =
                     (runtimeValidity?.executable === false
@@ -1218,258 +1431,88 @@ export function ExternalAgentSettings() {
                       : supportTier === "guided"
                         ? "secondary"
                         : "outline"
-
                   const fromPresetId = isFromPreset(agent)
                   const fromPresetName = fromPresetId
                     ? getPresetDisplayInfo(fromPresetId)?.name
                     : null
+                  const isSelected = selectedAgentId === agent.id
 
                   return (
-                    <Collapsible
+                    <button
                       key={agent.id}
-                      open={isExpanded}
-                      onOpenChange={() => toggleExpanded(agent.id)}
+                      type="button"
+                      data-testid={`agent-row-${agent.id}`}
+                      onClick={() => setSelectedAgentId(agent.id)}
+                      aria-pressed={isSelected}
+                      className={cn(
+                        "w-full rounded-lg border p-3 text-left transition-colors hover:bg-accent/50",
+                        isSelected && "border-primary bg-accent ring-1 ring-primary"
+                      )}
                     >
-                      <div className="border rounded-lg p-4" data-testid={`agent-row-${agent.id}`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <ConnectionStatusIcon status={status} />
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="font-medium">{agent.name}</span>
-                                <Badge variant="outline" className="text-xs">
-                                  {agent.protocol.toUpperCase()}
-                                </Badge>
-                                <Badge variant="secondary" className="text-xs">
-                                  {agent.transport}
-                                </Badge>
-                                {supportTier && (
-                                  <Badge variant={supportTierVariant} className="text-xs">
-                                    {supportTier}
-                                  </Badge>
-                                )}
-                                {fromPresetName && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-xs"
-                                    data-testid={`agent-from-preset-${agent.id}`}
-                                  >
-                                    {t("fromPreset", { name: fromPresetName })}
-                                  </Badge>
-                                )}
-                              </div>
-                              {agent.description && (
-                                <p className="text-sm text-muted-foreground">{agent.description}</p>
-                              )}
-                              {ecosystem?.surfaceName && (
-                                <p className="text-xs text-muted-foreground">
-                                  {ecosystem.surfaceName}
-                                </p>
-                              )}
-                              {executionBlockedReason && (
-                                <p className="text-xs text-amber-600 dark:text-amber-400">
-                                  {executionBlockedReason}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {isConnected ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleDisconnect(agent.id)}
-                              >
-                                <PowerOff className="h-4 w-4 mr-1" />
-                                {t("disconnect")}
-                              </Button>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleConnect(agent.id)}
-                                disabled={isConnecting(agent.id) || !!executionBlockedReason}
-                              >
-                                {isConnecting(agent.id) ? (
-                                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                ) : (
-                                  <Power className="h-4 w-4 mr-1" />
-                                )}
-                                {t("connect")}
-                              </Button>
-                            )}
-                            <CollapsibleTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                {isExpanded ? (
-                                  <ChevronDown className="h-4 w-4" />
-                                ) : (
-                                  <ChevronRight className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </CollapsibleTrigger>
-                          </div>
-                        </div>
-
-                        <CollapsibleContent className="mt-4 pt-4 border-t space-y-4">
-                          {/* Agent Details */}
-                          <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-                            <div>
-                              <span className="text-muted-foreground">{t("transport")}:</span>
-                              <span className="ml-2">{agent.transport}</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">{t("detailTimeout")}:</span>
-                              <span className="ml-2">{agent.timeout ?? 300000}ms</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">{t("detailRetry")}:</span>
-                              <span className="ml-2">
-                                {agent.retryConfig?.maxRetries ?? 3} @{" "}
-                                {agent.retryConfig?.retryDelay ?? 1000}ms
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">{t("detailBackoff")}:</span>
-                              <span className="ml-2">
-                                {(agent.retryConfig?.exponentialBackoff ?? true)
-                                  ? t("backoffExponential")
-                                  : t("backoffFixed")}
-                              </span>
-                            </div>
-                            {agent.process && (
-                              <>
-                                <div>
-                                  <span className="text-muted-foreground">{t("command")}:</span>
-                                  <code className="ml-2 text-xs bg-muted px-1 rounded">
-                                    {agent.process.command}
-                                  </code>
-                                </div>
-                                {agent.process.cwd && (
-                                  <div className="col-span-2">
-                                    <span className="text-muted-foreground">
-                                      {t("workingDirectory")}:
-                                    </span>
-                                    <code className="ml-2 text-xs bg-muted px-1 rounded">
-                                      {agent.process.cwd}
-                                    </code>
-                                  </div>
-                                )}
-                              </>
-                            )}
-                            {agent.network && (
-                              <div className="col-span-2">
-                                <span className="text-muted-foreground">{t("endpoint")}:</span>
-                                <code className="ml-2 text-xs bg-muted px-1 rounded">
-                                  {agent.network.endpoint}
-                                </code>
-                              </div>
-                            )}
-                            {ecosystem?.adapterName && (
-                              <div>
-                                <span className="text-muted-foreground">
-                                  {t("detailsAdapter")}:
-                                </span>
-                                <span className="ml-2">{ecosystem.adapterName}</span>
-                              </div>
-                            )}
-                            {ecosystem?.surfaceName && (
-                              <div>
-                                <span className="text-muted-foreground">
-                                  {t("detailsSurface")}:
-                                </span>
-                                <span className="ml-2">{ecosystem.surfaceName}</span>
-                              </div>
-                            )}
+                      <div className="flex items-start gap-2">
+                        <ConnectionStatusIcon status={status} />
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="truncate text-sm font-medium">{agent.name}</span>
+                            <Badge variant="outline" className="text-[10px]">
+                              {agent.protocol.toUpperCase()}
+                            </Badge>
+                            <Badge variant="secondary" className="text-[10px]">
+                              {agent.transport}
+                            </Badge>
                             {supportTier && (
-                              <div>
-                                <span className="text-muted-foreground">
-                                  {t("detailsSupportTier")}:
-                                </span>
-                                <span className="ml-2">{supportTier}</span>
-                              </div>
+                              <Badge variant={supportTierVariant} className="text-[10px]">
+                                {supportTier}
+                              </Badge>
                             )}
-                            {ecosystem?.prerequisiteStatus && (
-                              <div>
-                                <span className="text-muted-foreground">
-                                  {t("detailsPrerequisiteStatus")}:
-                                </span>
-                                <span className="ml-2">{ecosystem.prerequisiteStatus}</span>
-                              </div>
+                            {fromPresetName && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px]"
+                                data-testid={`agent-from-preset-${agent.id}`}
+                              >
+                                {t("fromPreset", { name: fromPresetName })}
+                              </Badge>
                             )}
-                            {ecosystem?.docsUrl && (
-                              <div className="col-span-2">
-                                <span className="text-muted-foreground">
-                                  {t("detailsOfficialDocs")}:
-                                </span>
-                                <a
-                                  href={ecosystem.docsUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="ml-2 inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-                                >
-                                  <ExternalLink className="h-3.5 w-3.5" />
-                                  {t("detailsDocsLink")}
-                                </a>
-                              </div>
-                            )}
-                            {ecosystem?.limitationNote && (
-                              <div className="col-span-2">
-                                <span className="text-muted-foreground">
-                                  {t("detailsLimitation")}:
-                                </span>
-                                <span className="ml-2">{ecosystem.limitationNote}</span>
-                              </div>
-                            )}
-                            {ecosystem?.recommendedActions?.length ? (
-                              <div className="col-span-2">
-                                <span className="text-muted-foreground">
-                                  {t("detailsRecommendedActions")}:
-                                </span>
-                                <span className="ml-2">
-                                  {ecosystem.recommendedActions.join(" | ")}
-                                </span>
-                              </div>
-                            ) : null}
                           </div>
-
-                          {/* Native Codex app-server status (MCP servers + skills) */}
-                          {agent.protocol === "codex-app-server" && (
-                            <CodexAppServerStatusCard
-                              agentId={agent.id}
-                              connected={status === "connected"}
-                            />
+                          {executionBlockedReason && (
+                            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                              {executionBlockedReason}
+                            </p>
                           )}
-
-                          {/* Actions */}
-                          <div className="flex gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleEditAgent(agent.id)}
-                            >
-                              <Edit className="h-4 w-4 mr-1" />
-                              {tCommon("edit")}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="text-destructive hover:text-destructive"
-                              onClick={() => setDeleteConfirmId(agent.id)}
-                            >
-                              <Trash2 className="h-4 w-4 mr-1" />
-                              {tCommon("delete")}
-                            </Button>
-                          </div>
-                        </CollapsibleContent>
+                        </div>
                       </div>
-                    </Collapsible>
+                    </button>
                   )
                 })}
               </div>
-            </ScrollArea>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </aside>
+
+          {/* Detail: the selected agent's config, or the quick-start gallery */}
+          <section className="min-w-0 flex-1">
+            {selectedAgent ? (
+              <AgentDetail
+                agent={selectedAgent}
+                isConnecting={isConnecting(selectedAgent.id)}
+                onConnect={() => handleConnect(selectedAgent.id)}
+                onDisconnect={() => handleDisconnect(selectedAgent.id)}
+                onEdit={() => handleEditAgent(selectedAgent.id)}
+                onDelete={() => setDeleteConfirmId(selectedAgent.id)}
+              />
+            ) : (
+              <PresetGalleryCard
+                disabled={!enabled}
+                onPick={(presetId) => {
+                  setSelectedPresetForNew(presetId)
+                  setEditingAgentId(null)
+                  setEditorOpen(true)
+                }}
+              />
+            )}
+          </section>
+        </div>
+      </div>
 
       {/* Agent Editor Dialog */}
       <AgentEditorDialog

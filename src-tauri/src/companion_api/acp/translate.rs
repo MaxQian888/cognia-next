@@ -26,12 +26,17 @@ pub struct TurnState {
     /// Whether any `text_delta` stream events were forwarded this turn (the
     /// final `assistant` text block is then a duplicate and is skipped).
     saw_text_delta: bool,
+    /// The most recent assistant `stop_reason` seen this turn. The `result`
+    /// frame carries no stop reason of its own (only `subtype`/`is_error`), so
+    /// we capture it here to distinguish `max_tokens` / `refusal` at turn end.
+    last_stop_reason: Option<String>,
 }
 
 impl TurnState {
     pub fn reset(&mut self) {
         self.seen_tool_calls.clear();
         self.saw_text_delta = false;
+        self.last_stop_reason = None;
     }
 }
 
@@ -107,7 +112,7 @@ fn translate_sdk_event(event: &Value, turn: &mut TurnState) -> Vec<AcpOutbound> 
         Some("stream_event") => translate_stream_event(event, turn),
         Some("assistant") => translate_assistant(event, turn),
         Some("user") => translate_user(event),
-        Some("result") => translate_result(event),
+        Some("result") => translate_result(event, turn),
         _ => Vec::new(),
     }
 }
@@ -162,8 +167,21 @@ fn translate_stream_event(event: &Value, turn: &mut TurnState) -> Vec<AcpOutboun
 /// only forwarded when no streaming deltas were seen (non-streaming turns);
 /// tool_use blocks upgrade already-announced calls to `in_progress`.
 fn translate_assistant(event: &Value, turn: &mut TurnState) -> Vec<AcpOutbound> {
-    let Some(blocks) = event
-        .get("message")
+    let message = event.get("message");
+
+    // Capture the assistant's stop reason for turn-end mapping. `tool_use` is
+    // an intermediate stop (the turn continues), so ignore it — keep the last
+    // *terminal* reason (`end_turn` / `max_tokens` / `refusal`).
+    if let Some(stop_reason) = message
+        .and_then(|m| m.get("stop_reason"))
+        .and_then(Value::as_str)
+    {
+        if stop_reason != "tool_use" {
+            turn.last_stop_reason = Some(stop_reason.to_string());
+        }
+    }
+
+    let Some(blocks) = message
         .and_then(|m| m.get("content"))
         .and_then(Value::as_array)
     else {
@@ -312,8 +330,10 @@ fn tool_result_text(content: &Value) -> String {
     }
 }
 
-/// `SDKResultMessage` — the turn is over.
-fn translate_result(event: &Value) -> Vec<AcpOutbound> {
+/// `SDKResultMessage` — the turn is over. The `result` frame carries no stop
+/// reason itself, so the final assistant `stop_reason` (captured on `turn`)
+/// distinguishes `max_tokens` / `refusal` from a plain `end_turn`.
+fn translate_result(event: &Value, turn: &TurnState) -> Vec<AcpOutbound> {
     let subtype = event.get("subtype").and_then(Value::as_str).unwrap_or("");
     let is_error = event
         .get("is_error")
@@ -330,7 +350,14 @@ fn translate_result(event: &Value) -> Vec<AcpOutbound> {
                 .to_string();
             vec![AcpOutbound::TurnFailed(message)]
         }
-        _ => vec![AcpOutbound::TurnEnded(StopReason::EndTurn)],
+        _ => {
+            let reason = match turn.last_stop_reason.as_deref() {
+                Some("max_tokens") => StopReason::MaxTokens,
+                Some("refusal") => StopReason::Refusal,
+                _ => StopReason::EndTurn,
+            };
+            vec![AcpOutbound::TurnEnded(reason)]
+        }
     }
 }
 
@@ -663,6 +690,62 @@ mod tests {
         assert_eq!(
             translate_frame("s1", &errored, &mut turn),
             vec![AcpOutbound::TurnFailed("bad".into())]
+        );
+    }
+
+    #[test]
+    fn result_maps_assistant_stop_reason() {
+        // A `max_tokens` stop_reason on the assistant message carries through to
+        // the turn-end stop reason (the result frame itself has none).
+        let mut turn = TurnState::default();
+        let assistant = envelope(
+            "s1",
+            json!({
+                "type": "assistant",
+                "message": { "stop_reason": "max_tokens", "content": [] },
+            }),
+        );
+        translate_frame("s1", &assistant, &mut turn);
+        let result = envelope("s1", json!({ "type": "result", "subtype": "success" }));
+        assert_eq!(
+            translate_frame("s1", &result, &mut turn),
+            vec![AcpOutbound::TurnEnded(StopReason::MaxTokens)]
+        );
+
+        // `refusal` likewise.
+        let mut turn = TurnState::default();
+        let refused = envelope(
+            "s1",
+            json!({
+                "type": "assistant",
+                "message": { "stop_reason": "refusal", "content": [] },
+            }),
+        );
+        translate_frame("s1", &refused, &mut turn);
+        let result = envelope("s1", json!({ "type": "result", "subtype": "success" }));
+        assert_eq!(
+            translate_frame("s1", &result, &mut turn),
+            vec![AcpOutbound::TurnEnded(StopReason::Refusal)]
+        );
+
+        // An intermediate `tool_use` stop must NOT override a later terminal
+        // reason — and with no terminal reason we fall back to end_turn.
+        let mut turn = TurnState::default();
+        let tool_stop = envelope(
+            "s1",
+            json!({
+                "type": "assistant",
+                "message": {
+                    "stop_reason": "tool_use",
+                    "content": [{ "type": "tool_use", "id": "t1", "name": "Read", "input": {} }],
+                },
+            }),
+        );
+        translate_frame("s1", &tool_stop, &mut turn);
+        let result = envelope("s1", json!({ "type": "result", "subtype": "success" }));
+        assert_eq!(
+            translate_frame("s1", &result, &mut turn),
+            vec![AcpOutbound::TurnEnded(StopReason::EndTurn)]
         );
     }
 

@@ -276,6 +276,7 @@ async function runExternalBacked(
   const result = await manager.execute(agentId, prompt, {
     systemPrompt,
     ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
+    ...(merged.allowedTools ? { allowedTools: merged.allowedTools } : {}),
     ...((cwdOverride ?? teamCtx.team.config?.workingDir)
       ? { workingDirectory: cwdOverride ?? teamCtx.team.config?.workingDir }
       : {}),

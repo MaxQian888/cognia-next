@@ -20,6 +20,7 @@ import {
 } from "./agent-transport"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { loggers } from "@/lib/logging"
+import { truncateForLog } from "@/lib/logging/truncate"
 import {
   acpTerminalCreate,
   acpTerminalKill,
@@ -36,6 +37,7 @@ import {
   isExternalAgentMethodNotFoundError,
   isExternalAgentSessionExtensionUnsupportedForMethod,
 } from "./session-extension-errors"
+import { isToolPreApproved } from "./tool-preapproval"
 
 const log = loggers.agent
 
@@ -336,9 +338,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   // Cached unsupported methods discovered via probing (-32601)
   private unsupportedMethods: Set<string> = new Set()
 
-  // Latest context-window usage snapshot per session (from `usage_update`),
-  // attached to the turn's `done` event so token/context info reaches the UI.
-  private latestUsage: Map<string, ExternalAgentTokenUsage> = new Map()
+  // Stable per-turn message id, so every `agent_message_chunk` of one turn
+  // shares an id (chunks coalesce) instead of getting a fresh `Date.now()` id
+  // per chunk. Set at prompt start, cleared when the turn's `done`/`error`
+  // resolves. `messageIdSeq` guarantees uniqueness without a wall clock.
+  private turnMessageId: Map<string, string> = new Map()
+  private messageIdSeq = 0
 
   /**
    * Connect to an ACP agent
@@ -535,7 +540,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       "external-agent://stderr",
       (payload) => {
         if (payload.agentId === this.processId) {
-          log.warn("stderr", { data: payload.data })
+          // Subprocess stderr is routine diagnostic output (progress, banners,
+          // verbose logs), not a warning — and it arrives per-chunk on a
+          // potentially chatty stream. Logging every line at `warn` floods the
+          // Next dev server's forwarded-console buffer (warn+ is forwarded)
+          // until its `join` overflows V8's string cap. Keep it at `debug`
+          // (below the forwarded threshold) and bound each chunk's size.
+          log.debug("stderr", { data: truncateForLog(payload.data) })
         }
       }
     )
@@ -983,6 +994,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       agentId: this._config!.id,
       status: "active",
       permissionMode: initialMode,
+      allowedTools: options?.allowedTools,
       capabilities: this._capabilities,
       tools: this._tools ?? [],
       messages: [],
@@ -1032,7 +1044,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
     }
 
-    this.latestUsage.delete(sessionId)
+    this.turnMessageId.delete(sessionId)
     this._sessions.delete(sessionId)
     log.info("Closed session", { sessionId })
   }
@@ -1049,7 +1061,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         log.warn("session/delete failed", { sessionId, error })
       }
     }
-    this.latestUsage.delete(sessionId)
+    this.turnMessageId.delete(sessionId)
     this.sessionCtxCleanup(sessionId)
   }
 
@@ -1288,25 +1300,30 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * session/prompt is a REQUEST that returns a stopReason
    */
   private sendPromptRequest(sessionId: string, params: AcpPromptParams): void {
+    // Start a fresh message id for this turn so all `agent_message_chunk`s
+    // share it (they coalesce into one assistant message).
+    this.turnMessageId.set(sessionId, `msg_${++this.messageIdSeq}`)
     // Send as request but handle response asynchronously
     this.sendRequest<AcpPromptResult>(
       "session/prompt",
       params as unknown as Record<string, unknown>
     )
       .then((result) => {
-        // Emit done event when prompt completes, folding in the latest
-        // context-window usage snapshot reported via `usage_update`.
-        const tokenUsage = this.latestUsage.get(sessionId)
+        // Turn over — retire the per-turn message id.
+        this.turnMessageId.delete(sessionId)
+        // ACP carries no token accounting (only context-window occupancy via
+        // `usage_update`, kept in session metadata); emit `done` without a
+        // fabricated token total.
         this.emitEvent({
           type: "done",
           sessionId,
           timestamp: new Date(),
           success: result.stopReason !== "cancelled" && result.stopReason !== "refusal",
           stopReason: result.stopReason,
-          ...(tokenUsage ? { tokenUsage } : {}),
         })
       })
       .catch((error) => {
+        this.turnMessageId.delete(sessionId)
         // Emit error event on failure
         this.emitEvent({
           type: "error",
@@ -1316,6 +1333,20 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           recoverable: false,
         })
       })
+  }
+
+  /**
+   * The stable message id for the current turn on `sessionId`. Created lazily
+   * (a stray chunk arriving before/after a turn still gets a stable id) and
+   * reused for every chunk until the turn's `done`/`error` clears it.
+   */
+  private currentTurnMessageId(sessionId: string): string {
+    let id = this.turnMessageId.get(sessionId)
+    if (!id) {
+      id = `msg_${++this.messageIdSeq}`
+      this.turnMessageId.set(sessionId, id)
+    }
+    return id
   }
 
   /**
@@ -1563,8 +1594,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         unknown
       >)
       const inheritedMetadata = this._sessions.get(sessionId)?.metadata as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
       const forkedSession: ExternalAgentSession = {
         id: result.sessionId,
         agentId: this._config!.id,
@@ -2026,11 +2056,26 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const allowOption = this.pickAllowPermissionOption(request.options)
     const kind = request.kind || "other"
 
-    // "plan" (no execution) and "dontAsk" (deny unless pre-approved) never
-    // surface UI — they auto-reject every request. We have no pre-approval
-    // registry, so both resolve identically: pick a reject option, or cancel
-    // when the agent offered none.
-    if (session?.permissionMode === "plan" || session?.permissionMode === "dontAsk") {
+    // "plan" mode never executes tools — auto-reject every request (pick a
+    // reject option, or cancel when the agent offered none).
+    if (session?.permissionMode === "plan") {
+      const rejectOption = this.pickRejectPermissionOption(request.options)
+      if (rejectOption) {
+        return { outcome: { outcome: "selected", optionId: rejectOption.optionId } }
+      }
+      return { outcome: { outcome: "cancelled" } }
+    }
+
+    // "dontAsk" mode never surfaces UI: it silently *approves* a tool matching
+    // the session's pre-approval allow-list and *denies* everything else. This
+    // is the distinction from "plan" (which always denies) — a pre-approved
+    // tool runs without a prompt.
+    if (session?.permissionMode === "dontAsk") {
+      const preApproved =
+        !!allowOption && isToolPreApproved(request.title, request.rawInput, session.allowedTools)
+      if (preApproved) {
+        return { outcome: { outcome: "selected", optionId: allowOption.optionId } }
+      }
       const rejectOption = this.pickRejectPermissionOption(request.options)
       if (rejectOption) {
         return { outcome: { outcome: "selected", optionId: rejectOption.optionId } }
@@ -2215,7 +2260,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           type: "message_delta",
           sessionId,
           timestamp,
-          messageId: `msg_${Date.now()}`,
+          messageId: this.currentTurnMessageId(sessionId),
           delta: {
             type: "text",
             text: update.content?.text || "",
@@ -2238,7 +2283,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           type: "message_delta",
           sessionId,
           timestamp,
-          messageId: `msg_${Date.now()}`,
+          // A distinct-but-stable id keeps an echoed user message from
+          // coalescing into the agent's reply within the same turn.
+          messageId: `${this.currentTurnMessageId(sessionId)}:user`,
           delta: {
             type: "text",
             text: update.content?.text || "",
@@ -2407,15 +2454,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
 
       case "usage_update": {
-        // Context-window occupancy + cumulative cost. There is no dedicated
-        // usage event in the canonical stream, so we record the snapshot and
-        // fold it into the turn's terminal `done` event (see sendPromptRequest).
-        const usage: ExternalAgentTokenUsage = {
-          promptTokens: 0,
-          completionTokens: 0,
-          totalTokens: typeof update.used === "number" ? update.used : 0,
-        }
-        this.latestUsage.set(sessionId, usage)
+        // `used` is context-window *occupancy* (tokens currently in context),
+        // NOT a cumulative prompt/completion count — ACP exposes no token
+        // accounting. Record the occupancy + cost snapshot in session metadata
+        // (drives the context-% UI); do NOT fabricate an `ExternalAgentTokenUsage`
+        // that would misreport occupancy as a token total.
         const usageSession = this._sessions.get(sessionId)
         if (usageSession) {
           usageSession.metadata = {

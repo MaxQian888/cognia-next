@@ -58,6 +58,8 @@ import {
   MAX_RAPID_EXITS,
 } from "./acp-client"
 import type { ExternalAgentConfig, AcpPermissionResponse } from "@/types/agent/external-agent"
+import { loggers } from "@/lib/logging"
+import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@/lib/logging/truncate"
 
 const mockIsTauri = isTauri as jest.Mock
 const mockTerminalWrite = acpTerminalWrite as jest.Mock
@@ -106,20 +108,35 @@ type PermissionOption = { optionId: string; name: string; kind: string; isDefaul
 type PermissionParams = {
   sessionId?: string
   kind?: string
+  title?: string
+  rawInput?: Record<string, unknown>
   options?: PermissionOption[]
   // Spec shape nests the tool-call fields under `toolCall`.
-  toolCall?: { toolCallId?: string; title?: string; kind?: string }
+  toolCall?: {
+    toolCallId?: string
+    title?: string
+    kind?: string
+    rawInput?: Record<string, unknown>
+  }
 }
 type PermissionOutcome = { outcome: { outcome: string; optionId?: string } }
 
 const ALLOW: PermissionOption = { optionId: "allow", name: "Allow", kind: "allow_once" }
 const REJECT: PermissionOption = { optionId: "reject", name: "Reject", kind: "reject_once" }
 
-/** Seed a session with just the permissionMode the permission handler reads. */
-function seedSession(a: AcpClientAdapter, id: string, permissionMode: string): void {
-  ;(a as unknown as { _sessions: Map<string, { permissionMode: string }> })._sessions.set(id, {
-    permissionMode,
-  })
+/** Seed a session with the permissionMode (and optional allow-list) the
+ * permission handler reads. */
+function seedSession(
+  a: AcpClientAdapter,
+  id: string,
+  permissionMode: string,
+  allowedTools?: string[]
+): void {
+  ;(
+    a as unknown as {
+      _sessions: Map<string, { permissionMode: string; allowedTools?: string[] }>
+    }
+  )._sessions.set(id, { permissionMode, allowedTools })
 }
 
 function callPermission(a: AcpClientAdapter, params: PermissionParams): Promise<PermissionOutcome> {
@@ -348,10 +365,67 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
     expect(res.outcome).toEqual({ outcome: "selected", optionId: "reject" })
   })
 
-  it("dontAsk mode auto-rejects every request", async () => {
+  it("dontAsk mode rejects a tool that is not pre-approved", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "dontAsk", ["Read"])
+    const res = await callPermission(a, {
+      sessionId: "s",
+      title: "Bash",
+      kind: "execute",
+      options: [ALLOW, REJECT],
+    })
+    expect(res.outcome).toEqual({ outcome: "selected", optionId: "reject" })
+  })
+
+  it("dontAsk mode rejects everything when no allow-list is configured", async () => {
     const a = new AcpClientAdapter()
     seedSession(a, "s", "dontAsk")
-    const res = await callPermission(a, { sessionId: "s", kind: "write", options: [ALLOW, REJECT] })
+    const res = await callPermission(a, {
+      sessionId: "s",
+      title: "Read",
+      kind: "read",
+      options: [ALLOW, REJECT],
+    })
+    expect(res.outcome).toEqual({ outcome: "selected", optionId: "reject" })
+  })
+
+  it("dontAsk mode silently approves a pre-approved tool", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "dontAsk", ["Read", "Bash(git*)"])
+    // Bare-name match.
+    const read = await callPermission(a, {
+      sessionId: "s",
+      title: "Read",
+      kind: "read",
+      options: [ALLOW, REJECT],
+    })
+    expect(read.outcome).toEqual({ outcome: "selected", optionId: "allow" })
+    // Specifier match against the tool's rawInput command.
+    const bash = await callPermission(a, {
+      sessionId: "s",
+      toolCall: { title: "Bash", kind: "execute", rawInput: { command: "git status" } },
+      options: [ALLOW, REJECT],
+    })
+    expect(bash.outcome).toEqual({ outcome: "selected", optionId: "allow" })
+    // Specifier miss → rejected.
+    const rm = await callPermission(a, {
+      sessionId: "s",
+      toolCall: { title: "Bash", kind: "execute", rawInput: { command: "rm -rf /" } },
+      options: [ALLOW, REJECT],
+    })
+    expect(rm.outcome).toEqual({ outcome: "selected", optionId: "reject" })
+  })
+
+  it("dontAsk pre-approval still cancels when no allow option is offered", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "dontAsk", ["Read"])
+    const res = await callPermission(a, {
+      sessionId: "s",
+      title: "Read",
+      kind: "read",
+      options: [REJECT],
+    })
+    // Pre-approved but the agent offered no allow option → reject wins.
     expect(res.outcome).toEqual({ outcome: "selected", optionId: "reject" })
   })
 
@@ -1036,7 +1110,7 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
     expect(ev.configOptions).toHaveLength(1)
   })
 
-  it("records usage_update and folds it into session metadata", () => {
+  it("records usage_update context occupancy in session metadata (no fabricated token total)", () => {
     const a = new AcpClientAdapter()
     seedSession(a, "s1", "default")
     const ev = handleUpdate(a, "s1", {
@@ -1046,11 +1120,35 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
       cost: { amount: 0.04, currency: "USD" },
     })
     expect(ev).toBeNull()
-    const usage = (
-      a as unknown as { latestUsage: Map<string, { totalTokens: number }> }
-    ).latestUsage.get("s1")
-    expect(usage?.totalTokens).toBe(1200)
-    expect(sessionMeta(a, "s1")?.usage).toMatchObject({ used: 1200, size: 200000 })
+    // Context occupancy + cost land in metadata, not as a bogus token total.
+    expect(sessionMeta(a, "s1")?.usage).toMatchObject({
+      used: 1200,
+      size: 200000,
+      cost: { amount: 0.04, currency: "USD" },
+    })
+    // No `latestUsage` map — the honest fix stopped conflating occupancy with tokens.
+    expect((a as unknown as { latestUsage?: unknown }).latestUsage).toBeUndefined()
+  })
+
+  it("gives every agent_message_chunk of a turn the same stable message id", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const first = handleUpdate(a, "s1", {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "Hel" },
+    }) as { messageId: string }
+    const second = handleUpdate(a, "s1", {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "lo" },
+    }) as { messageId: string }
+    expect(first.messageId).toBe(second.messageId)
+    expect(first.messageId).toMatch(/^msg_\d+$/)
+    // A user chunk gets a distinct-but-stable id derived from the same turn id.
+    const user = handleUpdate(a, "s1", {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "hi" },
+    }) as { messageId: string }
+    expect(user.messageId).toBe(`${first.messageId}:user`)
   })
 
   it("applies session_info_update title without emitting an event", () => {
@@ -1114,5 +1212,76 @@ describe("AcpClientAdapter — session/close · session/delete · logout gating"
     expect(spy).toHaveBeenCalledWith("session/delete", { sessionId: "s1" })
     const sessions = (a as unknown as { _sessions: Map<string, unknown> })._sessions
     expect(sessions.has("s1")).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Subprocess stderr forwarding — routine stderr must not flood the Next dev
+// server's forwarded-console buffer. It is logged at `debug` (below the
+// forwarded warn+ threshold) with each chunk size-bounded, never at `warn`.
+// ---------------------------------------------------------------------------
+describe("AcpClientAdapter — stderr forwarding", () => {
+  it("forwards subprocess stderr at debug (not warn) and truncates oversized chunks", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const debugSpy = jest.spyOn(loggers.agent, "debug").mockImplementation(() => {})
+    const warnSpy = jest.spyOn(loggers.agent, "warn").mockImplementation(() => {})
+
+    let stdoutCb: ((e: { payload: { agentId: string; data: string } }) => void) | undefined
+    let stderrCb: ((e: { payload: { agentId: string; data: string } }) => void) | undefined
+    mockListen.mockImplementation(async (channel: string, cb: (e: unknown) => void) => {
+      if (channel === "external-agent://stdout") stdoutCb = cb as typeof stdoutCb
+      if (channel === "external-agent://stderr") stderrCb = cb as typeof stderrCb
+      return jest.fn()
+    })
+    const feed = (frame: Record<string, unknown>) =>
+      stdoutCb?.({ payload: { agentId: "proc-1", data: JSON.stringify(frame) } })
+    mockInvoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "spawn_external_agent") return "proc-1"
+      if (cmd === "send_to_external_agent") {
+        const msg = JSON.parse(args!.message as string) as Record<string, unknown>
+        if (msg.method === "initialize") {
+          queueMicrotask(() =>
+            feed({
+              jsonrpc: "2.0",
+              id: msg.id,
+              result: {
+                protocolVersion: 1,
+                agentCapabilities: { loadSession: true },
+                agentInfo: { name: "codex-acp", version: "1" },
+              },
+            })
+          )
+        }
+      }
+      return undefined
+    })
+
+    const adapter = new AcpClientAdapter()
+    try {
+      await adapter.connect(stdioConfig())
+      expect(stderrCb).toBeDefined()
+
+      const huge = "E".repeat(LOG_VALUE_MAX_CHARS + 4096)
+      stderrCb!({ payload: { agentId: "proc-1", data: huge } })
+
+      expect(debugSpy).toHaveBeenCalledWith("stderr", { data: truncateForLog(huge) })
+      expect(warnSpy).not.toHaveBeenCalledWith("stderr", expect.anything())
+
+      const forwarded = (
+        debugSpy.mock.calls.find((c) => c[0] === "stderr")?.[1] as { data: string }
+      ).data
+      expect(forwarded.length).toBeLessThan(huge.length)
+      expect(forwarded).toContain("chars truncated")
+
+      // stderr from an unrelated process id is ignored.
+      debugSpy.mockClear()
+      stderrCb!({ payload: { agentId: "other-proc", data: "noise" } })
+      expect(debugSpy).not.toHaveBeenCalledWith("stderr", expect.anything())
+
+      await adapter.disconnect()
+    } finally {
+      debugSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
   })
 })

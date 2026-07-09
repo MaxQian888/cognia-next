@@ -43,17 +43,64 @@ const mockAgentManual: ExternalAgentConfig = {
   metadata: undefined,
 }
 
+// A connected, HTTP-network agent carrying a rich ecosystem snapshot — exercises
+// the detail pane's connected/disconnect branch, the network-endpoint row, and
+// every optional ecosystem metadata row.
+const mockAgentRich: ExternalAgentConfig = {
+  id: "agent-3",
+  name: "Rich Agent",
+  description: "Networked agent",
+  protocol: "acp",
+  transport: "http",
+  enabled: true,
+  process: undefined,
+  network: { endpoint: "https://api.example.com/agent" },
+  defaultPermissionMode: "default",
+  tags: [],
+  timeout: 300000,
+  metadata: undefined,
+  validitySnapshot: {
+    executable: true,
+    checkedAt: new Date(0),
+    source: "config",
+    sessionExtensions: {
+      "session/list": { state: "unknown" },
+      "session/fork": { state: "unknown" },
+      "session/resume": { state: "unknown" },
+    },
+    ecosystem: {
+      adapterName: "Anthropic",
+      surfaceName: "Claude Surface",
+      supportTier: "guided",
+      prerequisiteStatus: "ready",
+      docsUrl: "https://docs.example.com",
+      limitationNote: "Beta surface",
+      recommendedActions: ["Install CLI", "Authenticate"],
+    },
+  },
+  createdAt: new Date(0),
+  updatedAt: new Date(0),
+}
+
 const addAgentMock = jest.fn()
 const updateAgentMock = jest.fn()
 const removeAgentMock = jest.fn()
+const connectMock = jest.fn()
+const disconnectMock = jest.fn()
 const getAgentMock = jest.fn((id: string) =>
-  id === "agent-1" ? mockAgentFromPreset : id === "agent-2" ? mockAgentManual : undefined
+  id === "agent-1"
+    ? mockAgentFromPreset
+    : id === "agent-2"
+      ? mockAgentManual
+      : id === "agent-3"
+        ? mockAgentRich
+        : undefined
 )
 
 const externalStoreState = {
-  getAllAgents: () => [mockAgentFromPreset, mockAgentManual],
+  getAllAgents: () => [mockAgentFromPreset, mockAgentManual, mockAgentRich],
   getAgent: getAgentMock,
-  getConnectionStatus: () => "disconnected",
+  getConnectionStatus: (id: string) => (id === "agent-3" ? "connected" : "disconnected"),
   getAgentValidity: () => undefined,
   addAgent: addAgentMock,
   updateAgent: updateAgentMock,
@@ -85,9 +132,15 @@ jest.mock("@/stores/agent/external-agent-store", () => ({
 
 jest.mock("@/hooks/agent/use-external-agent", () => ({
   useExternalAgent: () => ({
-    connect: jest.fn(),
-    disconnect: jest.fn(),
+    connect: connectMock,
+    disconnect: disconnectMock,
   }),
+}))
+
+// The native Codex status card makes Tauri invokes; stub it so the detail pane
+// renders in jsdom without a backend.
+jest.mock("./codex-app-server-status-card", () => ({
+  CodexAppServerStatusCard: () => <div data-testid="codex-status-card" />,
 }))
 
 // Use the real `presets.ts` module — its registry exposes the four shipping
@@ -115,6 +168,8 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     addAgentMock.mockClear()
     updateAgentMock.mockClear()
     removeAgentMock.mockClear()
+    connectMock.mockClear()
+    disconnectMock.mockClear()
   })
 
   // Flush the async preferred-Codex-preset effect so its setState lands inside
@@ -170,15 +225,13 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("the editor dialog hides the preset picker when editing an existing agent", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
-    // The Edit button lives inside a Collapsible drawer that's collapsed by
-    // default, so we have to expand the row first.
-    const row = screen.getByTestId("agent-row-agent-1")
-    const expandToggle = within(row).getAllByRole("button").pop()
-    expect(expandToggle).toBeDefined()
+    // Master/detail: clicking the agent row selects it, revealing the detail
+    // pane (with the Edit action) on the right.
     await act(async () => {
-      await user.click(expandToggle as HTMLElement)
+      await user.click(screen.getByTestId("agent-row-agent-1"))
     })
-    const editButton = await within(row).findByRole("button", { name: /edit/i })
+    const detail = await screen.findByTestId("agent-detail-agent-1")
+    const editButton = within(detail).getByRole("button", { name: /edit/i })
     await act(async () => {
       await user.click(editButton)
     })
@@ -217,5 +270,63 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
     expect(await screen.findByTestId("preset-picker")).toBeInTheDocument()
     expect(screen.queryByTestId("codex-options-section")).not.toBeInTheDocument()
+  })
+
+  it("shows the quick-start gallery in the detail pane until an agent is selected", () => {
+    render(<ExternalAgentSettings />)
+    // Nothing selected → the detail pane hosts the gallery, no agent detail.
+    expect(screen.getByTestId("preset-gallery-card")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-detail-agent-1")).not.toBeInTheDocument()
+  })
+
+  it("renders the selected agent's ecosystem metadata and a disconnect action when connected", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-3"))
+    })
+    const detail = await screen.findByTestId("agent-detail-agent-3")
+    // Ecosystem rows + network endpoint are projected from the validity snapshot.
+    expect(within(detail).getByText("Anthropic")).toBeInTheDocument()
+    expect(within(detail).getByText("Claude Surface")).toBeInTheDocument()
+    expect(within(detail).getByText("Beta surface")).toBeInTheDocument()
+    expect(within(detail).getByText("https://api.example.com/agent")).toBeInTheDocument()
+    expect(within(detail).getByText(/Install CLI \| Authenticate/)).toBeInTheDocument()
+    // Selecting the gallery's slot is replaced by the detail pane.
+    expect(screen.queryByTestId("preset-gallery-card")).not.toBeInTheDocument()
+    // Connected agent → a Disconnect button that calls the hook.
+    const disconnect = within(detail).getByRole("button", { name: /disconnect/i })
+    await act(async () => {
+      await user.click(disconnect)
+    })
+    expect(disconnectMock).toHaveBeenCalledWith("agent-3")
+  })
+
+  it("connects a disconnected agent from the detail pane", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-2"))
+    })
+    const detail = await screen.findByTestId("agent-detail-agent-2")
+    const connect = within(detail).getByRole("button", { name: /connect/i })
+    await act(async () => {
+      await user.click(connect)
+    })
+    expect(connectMock).toHaveBeenCalledWith("agent-2")
+  })
+
+  it("opens the delete confirmation from the detail pane", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-1"))
+    })
+    const detail = await screen.findByTestId("agent-detail-agent-1")
+    await act(async () => {
+      await user.click(within(detail).getByRole("button", { name: /delete/i }))
+    })
+    // The AlertDialog confirmation surfaces (delete title from the messages).
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
   })
 })

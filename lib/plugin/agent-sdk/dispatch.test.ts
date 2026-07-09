@@ -44,6 +44,11 @@ jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
   __esModule: true,
   supportsExternalAgents: (...a: unknown[]) => externalSupported(...a),
 }))
+const externalResolveMcp = jest.fn(async (..._a: unknown[]) => [] as unknown[])
+jest.mock("@/lib/ai/agent/external/resolve-acp-mcp-servers", () => ({
+  __esModule: true,
+  resolveAcpMcpServers: (...a: unknown[]) => externalResolveMcp(...a),
+}))
 
 const mockExecute = executeAgent as jest.MockedFunction<typeof executeAgent>
 const mockGetSubagent = getSubagent as jest.MockedFunction<typeof getSubagent>
@@ -249,6 +254,33 @@ describe("dispatchSubagent — external backing (A2)", () => {
     })
     expect(res.runId).toEqual(expect.any(String))
     expect(mockExecute).not.toHaveBeenCalled() // built-in executor never ran
+  })
+
+  it("forwards declared MCP servers into the external session", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-2", metadata: { preset: "claude-code" } })
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+    externalResolveMcp.mockResolvedValue([{ name: "github", command: "gh-mcp", args: [] }])
+
+    await dispatchSubagent({ ...externalDef, mcpServerIds: ["github"] }, "go", { cwd: "/repo" })
+
+    expect(externalResolveMcp).toHaveBeenCalledWith(["github"])
+    expect(externalExecute).toHaveBeenCalledWith(
+      "ext-2",
+      "go",
+      expect.objectContaining({
+        context: { custom: { mcpServers: [{ name: "github", command: "gh-mcp", args: [] }] } },
+      })
+    )
+  })
+
+  it("does not resolve MCP servers when the subagent declares none", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-3", metadata: { preset: "claude-code" } })
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+
+    await dispatchSubagent(externalDef, "go")
+
+    expect(externalResolveMcp).not.toHaveBeenCalled()
+    expect(externalExecute.mock.calls[0][2]).not.toHaveProperty("context")
   })
 
   it("reuses a live agent already created from the preset", async () => {

@@ -106,9 +106,98 @@ pub fn initialize_result() -> Value {
                 "embeddedContext": true,
             },
         },
+        // Auth is out-of-band: the ACP socket is mounted behind the device-JWT
+        // middleware, so there is no in-protocol `authenticate` step. Advertise
+        // an explicit empty set (rather than an absent field) so an
+        // introspecting client sees "no auth methods" unambiguously.
+        "authMethods": [],
         "agentInfo": {
             "name": "cognia",
             "version": env!("CARGO_PKG_VERSION"),
+        },
+    })
+}
+
+// ---------------------------------------------------------------------------
+// ACP: session modes & models (advertised on session/new; driven by
+// session/set_mode & session/set_model)
+// ---------------------------------------------------------------------------
+
+/// The pseudo model id meaning "let the account/session default decide" — the
+/// initial `currentModelId` and the one selection that injects no explicit
+/// `model` into the per-turn send options.
+pub const DEFAULT_MODEL_ID: &str = "default";
+
+/// Model ids this server advertises on `session/new` and accepts via
+/// `session/set_model`, as `(modelId, displayName)`. The concrete ids mirror
+/// `MODEL_PRESET_VALUES` in `lib/claude/model-presets.ts` — there is no shared
+/// source across the Rust/TS boundary, so keep the two lists in sync.
+pub const ACP_SESSION_MODELS: &[(&str, &str)] = &[
+    (DEFAULT_MODEL_ID, "Default (account model)"),
+    ("claude-opus-4-8", "Claude Opus 4.8"),
+    ("claude-opus-4-7", "Claude Opus 4.7"),
+    ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
+    ("claude-haiku-4-5", "Claude Haiku 4.5"),
+];
+
+/// ACP session modes this server advertises on `session/new` and accepts via
+/// `session/set_mode`, as `(id, name, description)`. Each id is also a valid
+/// sidecar `SendOptions.permission_mode` value, so the mapping to the sidecar
+/// is identity — see [`map_acp_mode_to_send`].
+pub const ACP_SESSION_MODES: &[(&str, &str, &str)] = &[
+    ("default", "Ask", "Prompt for permission on each tool use"),
+    ("acceptEdits", "Accept edits", "Auto-approve file edits"),
+    ("plan", "Plan", "Plan only — do not execute tools"),
+    (
+        "bypassPermissions",
+        "Bypass permissions",
+        "Skip all permission checks",
+    ),
+];
+
+/// The default mode id — the initial `currentModeId` on `session/new`.
+pub const DEFAULT_MODE_ID: &str = "default";
+
+/// True when `mode_id` is one this server advertises / accepts.
+pub fn is_valid_mode(mode_id: &str) -> bool {
+    ACP_SESSION_MODES.iter().any(|(id, _, _)| *id == mode_id)
+}
+
+/// True when `model_id` is one this server advertises / accepts.
+pub fn is_valid_model(model_id: &str) -> bool {
+    ACP_SESSION_MODELS.iter().any(|(id, _)| *id == model_id)
+}
+
+/// Map a selected ACP mode id onto the `SendOptions.permission_mode` value to
+/// inject for the next prompt turn. The advertised ids are all valid sidecar
+/// permission modes, so this is an identity pass-through kept as a function so
+/// the seam is explicit and testable.
+pub fn map_acp_mode_to_send(mode_id: &str) -> &str {
+    mode_id
+}
+
+/// Build the `session/new` result: the minted session id plus the advertised
+/// `modes`/`models` state so a conformant client can drive `session/set_mode`
+/// and `session/set_model`. Shapes mirror `AcpSessionModesState` /
+/// `AcpSessionModelState` (`types/agent/external-agent.ts`).
+pub fn session_new_result(session_id: &str) -> Value {
+    let available_modes: Vec<Value> = ACP_SESSION_MODES
+        .iter()
+        .map(|(id, name, description)| json!({ "id": id, "name": name, "description": description }))
+        .collect();
+    let available_models: Vec<Value> = ACP_SESSION_MODELS
+        .iter()
+        .map(|(model_id, name)| json!({ "modelId": model_id, "name": name }))
+        .collect();
+    json!({
+        "sessionId": session_id,
+        "modes": {
+            "currentModeId": DEFAULT_MODE_ID,
+            "availableModes": available_modes,
+        },
+        "models": {
+            "currentModelId": DEFAULT_MODEL_ID,
+            "availableModels": available_models,
         },
     })
 }
@@ -153,7 +242,13 @@ pub fn prompt_blocks_to_send_content(prompt: &Value) -> Result<Value, String> {
                         "source": { "type": "base64", "media_type": mime, "data": data },
                     }));
                 } else if let Some(uri) = block.get("uri").and_then(Value::as_str) {
-                    out.push(json!({ "type": "text", "text": format!("[image] {uri}") }));
+                    // A URL-sourced image is real embedded content: forward it as
+                    // an image with a `url` source (honored by both the ai-sdk
+                    // and Anthropic dispatch paths) rather than a text label.
+                    out.push(json!({
+                        "type": "image",
+                        "source": { "type": "url", "url": uri },
+                    }));
                 } else {
                     return Err("image block missing both `data` and `uri`".to_string());
                 }
@@ -170,12 +265,27 @@ pub fn prompt_blocks_to_send_content(prompt: &Value) -> Result<Value, String> {
                     .get("resource")
                     .ok_or_else(|| "resource block missing `resource`".to_string())?;
                 let uri = resource.get("uri").and_then(Value::as_str).unwrap_or("");
-                match resource.get("text").and_then(Value::as_str) {
-                    Some(text) => out.push(json!({
+                if let Some(text) = resource.get("text").and_then(Value::as_str) {
+                    // Text resource — inline it verbatim as text content.
+                    out.push(json!({
                         "type": "text",
                         "text": format!("[resource {uri}]\n{text}"),
-                    })),
-                    None => out.push(json!({ "type": "text", "text": format!("[resource] {uri}") })),
+                    }));
+                } else if let Some(blob) = resource.get("blob").and_then(Value::as_str) {
+                    // Binary resource — forward the base64 blob as a `document`
+                    // block so the sidecar (ai-sdk + Anthropic paths) actually
+                    // receives the content instead of dropping it to a label.
+                    let mime = resource
+                        .get("mimeType")
+                        .and_then(Value::as_str)
+                        .unwrap_or("application/octet-stream");
+                    out.push(json!({
+                        "type": "document",
+                        "source": { "type": "base64", "media_type": mime, "data": blob },
+                    }));
+                } else {
+                    // No inline content at all — degrade to a text reference.
+                    out.push(json!({ "type": "text", "text": format!("[resource] {uri}") }));
                 }
             }
             other => {
@@ -383,6 +493,47 @@ mod tests {
         assert_eq!(v["agentCapabilities"]["loadSession"], true);
         assert_eq!(v["agentInfo"]["name"], "cognia");
         assert!(v["agentInfo"]["version"].as_str().is_some());
+        // Auth is out-of-band — advertise an explicit empty method set.
+        assert_eq!(v["authMethods"], json!([]));
+    }
+
+    #[test]
+    fn session_new_result_advertises_modes_and_models() {
+        let v = session_new_result("sess-9");
+        assert_eq!(v["sessionId"], "sess-9");
+
+        // Modes: default is current, and every advertised id validates.
+        assert_eq!(v["modes"]["currentModeId"], DEFAULT_MODE_ID);
+        let modes = v["modes"]["availableModes"].as_array().unwrap();
+        assert!(!modes.is_empty());
+        for m in modes {
+            let id = m["id"].as_str().unwrap();
+            assert!(is_valid_mode(id), "advertised mode {id} must validate");
+            assert!(m["name"].as_str().is_some());
+        }
+        assert!(modes.iter().any(|m| m["id"] == "plan"));
+
+        // Models: the `default` pseudo-id is current and validates.
+        assert_eq!(v["models"]["currentModelId"], DEFAULT_MODEL_ID);
+        let models = v["models"]["availableModels"].as_array().unwrap();
+        assert!(models.len() >= 2);
+        for m in models {
+            let id = m["modelId"].as_str().unwrap();
+            assert!(is_valid_model(id), "advertised model {id} must validate");
+        }
+        assert!(is_valid_model(DEFAULT_MODEL_ID));
+        assert!(models.iter().any(|m| m["modelId"] == "claude-opus-4-8"));
+    }
+
+    #[test]
+    fn mode_and_model_validation_rejects_unknown() {
+        assert!(is_valid_mode("acceptEdits"));
+        assert!(!is_valid_mode("nonsense"));
+        assert!(is_valid_model("claude-haiku-4-5"));
+        assert!(!is_valid_model("gpt-4"));
+        // Mode → send-options mapping is identity for the advertised ids.
+        assert_eq!(map_acp_mode_to_send("plan"), "plan");
+        assert_eq!(map_acp_mode_to_send("bypassPermissions"), "bypassPermissions");
     }
 
     #[test]
@@ -400,20 +551,34 @@ mod tests {
     }
 
     #[test]
-    fn prompt_blocks_resources_degrade_to_text() {
+    fn prompt_blocks_resources_and_embedded_content() {
         let blocks = json!([
+            // resource_link (bare URI, no inline content) → honest text reference.
             { "type": "resource_link", "uri": "file:///a.rs" },
+            // text resource → inlined verbatim as text.
             { "type": "resource", "resource": { "uri": "file:///b.rs", "text": "fn main() {}" } },
+            // image-by-uri → structured image with a url source (embedded content).
             { "type": "image", "uri": "https://x/y.png", "mimeType": "image/png" },
+            // binary resource with a blob → forwarded as a document block.
+            { "type": "resource", "resource": { "uri": "file:///c.pdf", "blob": "JVBERi0=", "mimeType": "application/pdf" } },
+            // resource with neither text nor blob → honest text reference.
+            { "type": "resource", "resource": { "uri": "file:///d.bin" } },
         ]);
         let out = prompt_blocks_to_send_content(&blocks).unwrap();
         let arr = out.as_array().unwrap();
         assert_eq!(arr[0]["text"], "[resource] file:///a.rs");
-        assert!(arr[1]["text"]
-            .as_str()
-            .unwrap()
-            .contains("fn main() {}"));
-        assert_eq!(arr[2]["text"], "[image] https://x/y.png");
+        assert!(arr[1]["text"].as_str().unwrap().contains("fn main() {}"));
+        // image-by-uri is no longer a text label — it is real embedded content.
+        assert_eq!(arr[2]["type"], "image");
+        assert_eq!(arr[2]["source"]["type"], "url");
+        assert_eq!(arr[2]["source"]["url"], "https://x/y.png");
+        // blob resource → document with a base64 source.
+        assert_eq!(arr[3]["type"], "document");
+        assert_eq!(arr[3]["source"]["type"], "base64");
+        assert_eq!(arr[3]["source"]["media_type"], "application/pdf");
+        assert_eq!(arr[3]["source"]["data"], "JVBERi0=");
+        // empty resource still degrades to a text reference.
+        assert_eq!(arr[4]["text"], "[resource] file:///d.bin");
     }
 
     #[test]

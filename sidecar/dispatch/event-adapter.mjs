@@ -56,6 +56,29 @@ export function shapeToolResultContent(payload) {
   }
 }
 
+/**
+ * Map an AI SDK `finishReason` to an Anthropic-style `stop_reason`.
+ *
+ * Only the two reasons that ACP surfaces distinctly are mapped: `length` →
+ * `max_tokens` (the model hit its output cap) and `content-filter` → `refusal`
+ * (the provider blocked the completion). Every other reason (`stop`,
+ * `tool-calls`, `error`, `other`, `unknown`, missing) returns `null`, which
+ * downstream consumers treat as a plain `end_turn`.
+ *
+ * @param {string | undefined | null} finishReason
+ * @returns {"max_tokens" | "refusal" | null}
+ */
+export function finishReasonToStopReason(finishReason) {
+  switch (finishReason) {
+    case "length":
+      return "max_tokens"
+    case "content-filter":
+      return "refusal"
+    default:
+      return null
+  }
+}
+
 function isMergeableMetadataObject(value) {
   return (
     value !== null &&
@@ -133,6 +156,11 @@ export function createEventAdapter(ctx) {
   const sourceKeys = new Set()
   let initEmitted = false
   let lastUsage = null
+  // The AI SDK `finishReason` from the closing `finish` event, mapped to an
+  // Anthropic-style `stop_reason` on the sealed assistant snapshot so downstream
+  // consumers (e.g. the ACP server's turn-end translation) can distinguish a
+  // truncated (`max_tokens`) or refused (`refusal`) turn from a clean `end_turn`.
+  let lastStopReason = null
   // The messageId a `stream_event` `message_start` was already emitted for. Lets
   // the delta path seed the renderer's in-progress assistant preview exactly once
   // per assistant message (idempotent on the renderer, but avoids redundant
@@ -441,7 +469,7 @@ export function createEventAdapter(ctx) {
         role: "assistant",
         model: ctx.model,
         content,
-        stop_reason: null,
+        stop_reason: lastStopReason,
         stop_sequence: null,
         ...(messageMetadata !== undefined ? { metadata: messageMetadata } : {}),
       },
@@ -465,6 +493,7 @@ export function createEventAdapter(ctx) {
       clearMessageContent()
       messageMetadata = undefined
       lastUsage = null
+      lastStopReason = null
       streamStartId = null
     },
 
@@ -815,6 +844,7 @@ export function createEventAdapter(ctx) {
         }
         case "finish": {
           lastUsage = event.usage ?? event.totalUsage ?? null
+          lastStopReason = finishReasonToStopReason(event?.finishReason)
           updateMessageMetadata(event?.messageMetadata)
           // Don't emit `result` here — `finish` is the closing event of the
           // fullStream; the caller invokes `.finish()` to emit the SDK

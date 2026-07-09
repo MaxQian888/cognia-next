@@ -39,7 +39,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Dialog,
   DialogContent,
@@ -410,13 +409,13 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-125">
-        <form onSubmit={handleSubmit}>
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-125">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <DialogHeader>
             <DialogTitle>{tManager("addExternalAgent")}</DialogTitle>
             <DialogDescription>{tManager("configureNewExternalAgentConnection")}</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="-mx-6 grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 py-4">
             {/* Preset Selector */}
             <div className="grid gap-2">
               <Label>{tManager("quickStartPreset")}</Label>
@@ -504,6 +503,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                 id="name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                // i18n-exempt: example agent name (brand), not UI prose
                 placeholder="Claude Code"
                 required
               />
@@ -544,7 +544,9 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     {formData.protocol && !BUILTIN_PROTOCOL_OPTIONS.includes(formData.protocol) && (
                       <SelectItem value={formData.protocol}>{formData.protocol}</SelectItem>
                     )}
+                    {/* i18n-exempt: protocol identifier (brand/technical) */}
                     <SelectItem value="acp">ACP</SelectItem>
+                    {/* i18n-exempt: protocol identifier (brand/technical) */}
                     <SelectItem value="opencode">OpenCode</SelectItem>
                     <SelectItem value="a2a">{tManager("a2aProtocol")}</SelectItem>
                     <SelectItem value="http" disabled>
@@ -610,6 +612,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                         id="command"
                         value={formData.command}
                         onChange={(e) => setFormData({ ...formData, command: e.target.value })}
+                        // i18n-exempt: example CLI command, not UI prose
                         placeholder="opencode"
                       />
                     </div>
@@ -662,6 +665,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     id="command"
                     value={formData.command}
                     onChange={(e) => setFormData({ ...formData, command: e.target.value })}
+                    // i18n-exempt: example CLI command, not UI prose
                     placeholder="npx"
                     required={isStdio}
                   />
@@ -672,6 +676,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     id="args"
                     value={formData.args}
                     onChange={(e) => setFormData({ ...formData, args: e.target.value })}
+                    // i18n-exempt: example CLI arguments, not UI prose
                     placeholder="@anthropics/claude-code --stdio"
                   />
                 </div>
@@ -1225,8 +1230,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   // (item/tool/requestUserInput) — switches the approval dialog to question mode.
   const pendingUserInput = useMemo(() => {
     const raw = pendingPermission?.metadata?.codexUserInput as
-      | { questions?: unknown; autoResolutionMs?: unknown }
-      | undefined
+      { questions?: unknown; autoResolutionMs?: unknown } | undefined
     if (!raw || !Array.isArray(raw.questions) || raw.questions.length === 0) return undefined
     const userInput: NonNullable<ToolApprovalRequest["userInput"]> = {
       questions: raw.questions as NonNullable<ToolApprovalRequest["userInput"]>["questions"],
@@ -1249,9 +1253,9 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   }, [activeAgentId, canUseSessionActions, refreshSessions])
 
   return (
-    <div className={cn("flex flex-col gap-4", className)}>
+    <div className={cn("flex min-h-0 flex-col gap-4", className)}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex shrink-0 items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold">{t("externalAgents")}</h3>
           <p className="text-sm text-muted-foreground">{tSettings("configuredAgentsDesc")}</p>
@@ -1285,10 +1289,12 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         </div>
       )}
 
-      <Separator />
+      <Separator className="shrink-0" />
 
-      {/* Agent List */}
-      <ScrollArea className="max-h-[52vh]">
+      {/* Scrollable body — a single internal scroll region so the header stays
+          fixed and expanding every collapsible never pushes content off-screen. */}
+      <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1">
+        {/* Agent List */}
         {agents.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <Settings className="mb-4 h-12 w-12 text-muted-foreground/50" />
@@ -1314,331 +1320,333 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
             ))}
           </div>
         )}
-      </ScrollArea>
 
-      {/* Session Management */}
-      {activeAgentId && (
-        <Collapsible defaultOpen className="rounded-md border">
-          <div className="flex items-center justify-between gap-2 px-3 py-2">
-            <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium">
-              <span className="truncate">{tManager("sessions")}</span>
-              {sessionList.length > 0 && (
-                <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[10px]">
-                  {sessionList.length}
-                </Badge>
-              )}
-              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-            </CollapsibleTrigger>
-            <Button
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              onClick={refreshSessions}
-              disabled={isLoadingSessions || !canUseSessionActions}
-            >
-              {isLoadingSessions ? tCommon("loading") : tManager("refreshSessions")}
-            </Button>
-          </div>
-          <CollapsibleContent className="px-3 pb-3">
-            {!isActiveAgentExecutable ? (
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                {activeAgentBlockedReason || tDiag("notExecutable")}
-              </p>
-            ) : !isActiveAgentConnected ? (
-              <p className="text-xs text-muted-foreground">{tDiag("connectAgentToList")}</p>
-            ) : listSupport?.state === "unsupported" ? (
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                {listSupport.reason || tDiag("sessionListingUnsupported")}
-              </p>
-            ) : sessionList.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{tManager("noResumableSessions")}</p>
-            ) : (
-              <div className="space-y-2">
-                {sessionList.map((session) => (
-                  <div
-                    key={session.sessionId}
-                    className="flex items-center justify-between rounded border px-2 py-1.5"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-medium">
-                        {session.title || session.sessionId}
-                      </p>
-                      <p className="truncate text-[11px] text-muted-foreground">
-                        {session.sessionId}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleResumeSession(session.sessionId)}
-                        disabled={
-                          isExecuting ||
-                          activeSession?.id === session.sessionId ||
-                          !isActiveAgentExecutable ||
-                          !isActiveAgentConnected ||
-                          resumeSupport?.state === "unsupported"
-                        }
-                      >
-                        {tManager("resume")}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleForkSession(session.sessionId)}
-                        disabled={
-                          isExecuting ||
-                          !isActiveAgentExecutable ||
-                          !isActiveAgentConnected ||
-                          forkSupport?.state === "unsupported"
-                        }
-                      >
-                        {tManager("fork")}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {(resumeSupport?.state === "unsupported" || forkSupport?.state === "unsupported") && (
-              <div className="mt-2 space-y-1 text-[11px] text-amber-700 dark:text-amber-400">
-                {resumeSupport?.state === "unsupported" && (
-                  <p>
-                    {tDiag("resumeUnsupported", {
-                      reason: resumeSupport.reason || tDiag("resumeUnsupportedDefault"),
-                    })}
-                  </p>
-                )}
-                {forkSupport?.state === "unsupported" && (
-                  <p>
-                    {tDiag("forkUnsupported", {
-                      reason: forkSupport.reason || tDiag("forkUnsupportedDefault"),
-                    })}
-                  </p>
-                )}
-              </div>
-            )}
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-
-      {/* Runtime Diagnostics */}
-      {activeAgent && (
-        <CollapsibleSection
-          title={tDiag("runtimeDiagnostics")}
-          defaultOpen
-          dataTestId="external-agent-diagnostics"
-        >
-          <div className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs text-muted-foreground [&>p]:min-w-0 [&>p]:break-words sm:grid-cols-2">
-            <p>
-              {tDiag("protocolTransport", {
-                protocol: activeAgent.config.protocol.toUpperCase(),
-                transport: activeAgent.config.transport,
-              })}
-            </p>
-            <p>
-              {activeAgentValidity?.blockingReasonCode
-                ? tDiag("executableWithCode", {
-                    value: isActiveAgentExecutable ? tDiag("yes") : tDiag("no"),
-                    code: activeAgentValidity.blockingReasonCode,
-                  })
-                : tDiag("executable", {
-                    value: isActiveAgentExecutable ? tDiag("yes") : tDiag("no"),
-                  })}
-            </p>
-            <p>
-              {tDiag("health", {
-                value: activeAgentValidity?.healthStatus || tDiag("unknown"),
-              })}
-            </p>
-            <p>
-              {tDiag("authRequired", {
-                value: activeAgentValidity?.negotiation?.authRequired ? tDiag("yes") : tDiag("no"),
-              })}
-            </p>
-            <p className="sm:col-span-2">
-              {tDiag("authMethods", {
-                methods: activeAgentValidity?.negotiation?.authMethods?.length
-                  ? activeAgentValidity.negotiation.authMethods
-                      .map((method) => method.id)
-                      .join(", ")
-                  : tDiag("none"),
-              })}
-            </p>
-            <p>
-              {tDiag("sessionSupport", {
-                list: listSupport?.state || tDiag("unknown"),
-                fork: forkSupport?.state || tDiag("unknown"),
-                resume: resumeSupport?.state || tDiag("unknown"),
-              })}
-            </p>
-            {activeEcosystem?.adapterName && (
-              <p>{tDiag("adapter", { name: activeEcosystem.adapterName })}</p>
-            )}
-            {activeEcosystem?.surfaceName && (
-              <p>{tDiag("surface", { name: activeEcosystem.surfaceName })}</p>
-            )}
-            {activeEcosystem?.supportTier && (
-              <p>{tDiag("supportTier", { tier: activeEcosystem.supportTier })}</p>
-            )}
-            {activeEcosystem?.prerequisiteStatus && (
-              <p>{tDiag("prerequisiteStatus", { status: activeEcosystem.prerequisiteStatus })}</p>
-            )}
-            <p>{tDiag("contractVersion", { version: contractVersion })}</p>
-            <p>{tDiag("lifecycleStage", { stage: lifecycleStage })}</p>
-            {blockedStage && <p>{tDiag("blockedStage", { stage: blockedStage })}</p>}
-            <p>{tDiag("branchOutcome", { outcome: branchOutcome })}</p>
-            <p className="sm:col-span-2">
-              {canonicalReason
-                ? tDiag("canonicalReasonWithText", {
-                    code: canonicalReasonCode,
-                    reason: canonicalReason,
-                  })
-                : tDiag("canonicalReason", { code: canonicalReasonCode })}
-            </p>
-            {(correlationSessionId || correlationTurnId) && (
-              <p className="sm:col-span-2">
-                {tDiag("correlation", {
-                  session: correlationSessionId || tDiag("naLabel"),
-                  turn: correlationTurnId || tDiag("naLabel"),
-                })}
-              </p>
-            )}
-            {activeLastRunSnapshot && (
-              <div className="rounded border p-2 text-foreground sm:col-span-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span>
-                    {tDiag("latestRun", { outcome: activeLastRunSnapshot.terminalOutcome })}
-                  </span>
-                  <Badge variant="outline" className="text-[10px]">
-                    {activeLastRunSnapshot.branchReasonCode}
+        {/* Session Management */}
+        {activeAgentId && (
+          <Collapsible defaultOpen className="rounded-md border">
+            <div className="flex items-center justify-between gap-2 px-3 py-2">
+              <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium">
+                <span className="truncate">{tManager("sessions")}</span>
+                {sessionList.length > 0 && (
+                  <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[10px]">
+                    {sessionList.length}
                   </Badge>
-                  {lastRunHealthSummary && <TraceHealthBadge summary={lastRunHealthSummary} />}
-                </div>
-                <p className="mt-1 text-muted-foreground">
-                  {activeLastRunSnapshot.timestamp.toLocaleString()}
+                )}
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+              </CollapsibleTrigger>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={refreshSessions}
+                disabled={isLoadingSessions || !canUseSessionActions}
+              >
+                {isLoadingSessions ? tCommon("loading") : tManager("refreshSessions")}
+              </Button>
+            </div>
+            <CollapsibleContent className="px-3 pb-3">
+              {!isActiveAgentExecutable ? (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  {activeAgentBlockedReason || tDiag("notExecutable")}
                 </p>
-                {activeLastRunSnapshot.linkedTraceId && (
-                  <p className="text-muted-foreground">
-                    {tDiag("trace", { trace: activeLastRunSnapshot.linkedTraceId })}
-                  </p>
-                )}
-                {activeLastRunSnapshot.diagnosticText && (
-                  <p className="text-muted-foreground">{activeLastRunSnapshot.diagnosticText}</p>
-                )}
-                {activeLastRunSnapshot.linkedSessionId && (
-                  <p className="text-muted-foreground">
-                    {tDiag("session", { session: activeLastRunSnapshot.linkedSessionId })}
-                  </p>
-                )}
-              </div>
-            )}
-            {activeAgentBlockedReason && (
-              <p className="text-amber-700 sm:col-span-2 dark:text-amber-400">
-                {tDiag("blockingReason", { reason: activeAgentBlockedReason })}
-              </p>
-            )}
-            {recoveryHints.length > 0 && (
-              <p className="sm:col-span-2">
-                {tDiag("recoveryHints", { hints: recoveryHints.join(" | ") })}
-              </p>
-            )}
-            {activeEcosystem?.recommendedActions?.length ? (
-              <p className="sm:col-span-2">
-                {tDiag("recommendedActions", {
-                  actions: activeEcosystem.recommendedActions.join(" | "),
-                })}
-              </p>
-            ) : null}
-          </div>
-        </CollapsibleSection>
-      )}
-
-      {/* Benchmark Adaptation */}
-      {activeAgent && (
-        <CollapsibleSection
-          title={tDiag("benchmarkAdaptation")}
-          count={benchmarkEntries.length}
-          dataTestId="external-agent-benchmark-adaptation"
-        >
-          <div className="text-xs">
-            {benchmarkEntries.length === 0 ? (
-              <p className="text-muted-foreground">{tDiag("noBenchmarkAdaptation")}</p>
-            ) : (
-              <div className="space-y-2">
-                {benchmarkEntries.map((entry) => (
-                  <div key={entry.id} className="rounded border p-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-medium">{entry.title}</p>
-                      <Badge variant="outline" className="text-[11px]">
-                        {entry.status}
-                      </Badge>
-                    </div>
-                    <p className="text-muted-foreground">
-                      {tDiag("gap", { grade: entry.gapGrade })}
-                    </p>
-                    <p className="text-muted-foreground">
-                      {tDiag("target", { target: entry.adaptationTarget })}
-                    </p>
-                    {entry.status === "validated" && (
-                      <p className="text-muted-foreground">
-                        {tDiag("evidence", {
-                          evidence:
-                            entry.evidence.length > 0
-                              ? entry.evidence.map((item) => item.reference).join(", ")
-                              : tDiag("evidenceMissing"),
-                        })}
-                      </p>
-                    )}
-                    {entry.status === "intentional-deviation" && entry.deviation && (
-                      <div className="space-y-1 text-amber-700 dark:text-amber-400">
-                        <p>{tDiag("rationale", { rationale: entry.deviation.rationale })}</p>
-                        <p>{tDiag("tradeOff", { tradeOff: entry.deviation.tradeOff })}</p>
-                        <p>{tDiag("userImpact", { impact: entry.deviation.userImpact })}</p>
-                        <p>
-                          {entry.deviation.review.reviewLink
-                            ? tDiag("reviewWithLink", {
-                                reviewedBy: entry.deviation.review.reviewedBy,
-                                link: entry.deviation.review.reviewLink,
-                              })
-                            : tDiag("review", {
-                                reviewedBy: entry.deviation.review.reviewedBy,
-                              })}
+              ) : !isActiveAgentConnected ? (
+                <p className="text-xs text-muted-foreground">{tDiag("connectAgentToList")}</p>
+              ) : listSupport?.state === "unsupported" ? (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  {listSupport.reason || tDiag("sessionListingUnsupported")}
+                </p>
+              ) : sessionList.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{tManager("noResumableSessions")}</p>
+              ) : (
+                <div className="space-y-2">
+                  {sessionList.map((session) => (
+                    <div
+                      key={session.sessionId}
+                      className="flex items-center justify-between rounded border px-2 py-1.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-medium">
+                          {session.title || session.sessionId}
+                        </p>
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {session.sessionId}
                         </p>
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </CollapsibleSection>
-      )}
-
-      {/* Config Options */}
-      {configOptions.length > 0 && isActiveAgentConnected && (
-        <ExternalAgentConfigOptions
-          configOptions={configOptions}
-          onSetConfigOption={setConfigOption}
-          disabled={commandsDisabled}
-          compact
-        />
-      )}
-
-      {(availableCommands.length > 0 || planEntries.length > 0) &&
-        isActiveAgentConnected &&
-        isActiveAgentExecutable && (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <ExternalAgentCommands
-                commands={availableCommands}
-                onExecute={handleCommandExecute}
-                isExecuting={commandsDisabled}
-              />
-            </div>
-            <ExternalAgentPlan entries={planEntries} currentStep={planStep ?? undefined} />
-          </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleResumeSession(session.sessionId)}
+                          disabled={
+                            isExecuting ||
+                            activeSession?.id === session.sessionId ||
+                            !isActiveAgentExecutable ||
+                            !isActiveAgentConnected ||
+                            resumeSupport?.state === "unsupported"
+                          }
+                        >
+                          {tManager("resume")}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleForkSession(session.sessionId)}
+                          disabled={
+                            isExecuting ||
+                            !isActiveAgentExecutable ||
+                            !isActiveAgentConnected ||
+                            forkSupport?.state === "unsupported"
+                          }
+                        >
+                          {tManager("fork")}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(resumeSupport?.state === "unsupported" || forkSupport?.state === "unsupported") && (
+                <div className="mt-2 space-y-1 text-[11px] text-amber-700 dark:text-amber-400">
+                  {resumeSupport?.state === "unsupported" && (
+                    <p>
+                      {tDiag("resumeUnsupported", {
+                        reason: resumeSupport.reason || tDiag("resumeUnsupportedDefault"),
+                      })}
+                    </p>
+                  )}
+                  {forkSupport?.state === "unsupported" && (
+                    <p>
+                      {tDiag("forkUnsupported", {
+                        reason: forkSupport.reason || tDiag("forkUnsupportedDefault"),
+                      })}
+                    </p>
+                  )}
+                </div>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
         )}
+
+        {/* Runtime Diagnostics */}
+        {activeAgent && (
+          <CollapsibleSection
+            title={tDiag("runtimeDiagnostics")}
+            defaultOpen
+            dataTestId="external-agent-diagnostics"
+          >
+            <div className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs text-muted-foreground [&>p]:min-w-0 [&>p]:break-words sm:grid-cols-2">
+              <p>
+                {tDiag("protocolTransport", {
+                  protocol: activeAgent.config.protocol.toUpperCase(),
+                  transport: activeAgent.config.transport,
+                })}
+              </p>
+              <p>
+                {activeAgentValidity?.blockingReasonCode
+                  ? tDiag("executableWithCode", {
+                      value: isActiveAgentExecutable ? tDiag("yes") : tDiag("no"),
+                      code: activeAgentValidity.blockingReasonCode,
+                    })
+                  : tDiag("executable", {
+                      value: isActiveAgentExecutable ? tDiag("yes") : tDiag("no"),
+                    })}
+              </p>
+              <p>
+                {tDiag("health", {
+                  value: activeAgentValidity?.healthStatus || tDiag("unknown"),
+                })}
+              </p>
+              <p>
+                {tDiag("authRequired", {
+                  value: activeAgentValidity?.negotiation?.authRequired
+                    ? tDiag("yes")
+                    : tDiag("no"),
+                })}
+              </p>
+              <p className="sm:col-span-2">
+                {tDiag("authMethods", {
+                  methods: activeAgentValidity?.negotiation?.authMethods?.length
+                    ? activeAgentValidity.negotiation.authMethods
+                        .map((method) => method.id)
+                        .join(", ")
+                    : tDiag("none"),
+                })}
+              </p>
+              <p>
+                {tDiag("sessionSupport", {
+                  list: listSupport?.state || tDiag("unknown"),
+                  fork: forkSupport?.state || tDiag("unknown"),
+                  resume: resumeSupport?.state || tDiag("unknown"),
+                })}
+              </p>
+              {activeEcosystem?.adapterName && (
+                <p>{tDiag("adapter", { name: activeEcosystem.adapterName })}</p>
+              )}
+              {activeEcosystem?.surfaceName && (
+                <p>{tDiag("surface", { name: activeEcosystem.surfaceName })}</p>
+              )}
+              {activeEcosystem?.supportTier && (
+                <p>{tDiag("supportTier", { tier: activeEcosystem.supportTier })}</p>
+              )}
+              {activeEcosystem?.prerequisiteStatus && (
+                <p>{tDiag("prerequisiteStatus", { status: activeEcosystem.prerequisiteStatus })}</p>
+              )}
+              <p>{tDiag("contractVersion", { version: contractVersion })}</p>
+              <p>{tDiag("lifecycleStage", { stage: lifecycleStage })}</p>
+              {blockedStage && <p>{tDiag("blockedStage", { stage: blockedStage })}</p>}
+              <p>{tDiag("branchOutcome", { outcome: branchOutcome })}</p>
+              <p className="sm:col-span-2">
+                {canonicalReason
+                  ? tDiag("canonicalReasonWithText", {
+                      code: canonicalReasonCode,
+                      reason: canonicalReason,
+                    })
+                  : tDiag("canonicalReason", { code: canonicalReasonCode })}
+              </p>
+              {(correlationSessionId || correlationTurnId) && (
+                <p className="sm:col-span-2">
+                  {tDiag("correlation", {
+                    session: correlationSessionId || tDiag("naLabel"),
+                    turn: correlationTurnId || tDiag("naLabel"),
+                  })}
+                </p>
+              )}
+              {activeLastRunSnapshot && (
+                <div className="rounded border p-2 text-foreground sm:col-span-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>
+                      {tDiag("latestRun", { outcome: activeLastRunSnapshot.terminalOutcome })}
+                    </span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {activeLastRunSnapshot.branchReasonCode}
+                    </Badge>
+                    {lastRunHealthSummary && <TraceHealthBadge summary={lastRunHealthSummary} />}
+                  </div>
+                  <p className="mt-1 text-muted-foreground">
+                    {activeLastRunSnapshot.timestamp.toLocaleString()}
+                  </p>
+                  {activeLastRunSnapshot.linkedTraceId && (
+                    <p className="text-muted-foreground">
+                      {tDiag("trace", { trace: activeLastRunSnapshot.linkedTraceId })}
+                    </p>
+                  )}
+                  {activeLastRunSnapshot.diagnosticText && (
+                    <p className="text-muted-foreground">{activeLastRunSnapshot.diagnosticText}</p>
+                  )}
+                  {activeLastRunSnapshot.linkedSessionId && (
+                    <p className="text-muted-foreground">
+                      {tDiag("session", { session: activeLastRunSnapshot.linkedSessionId })}
+                    </p>
+                  )}
+                </div>
+              )}
+              {activeAgentBlockedReason && (
+                <p className="text-amber-700 sm:col-span-2 dark:text-amber-400">
+                  {tDiag("blockingReason", { reason: activeAgentBlockedReason })}
+                </p>
+              )}
+              {recoveryHints.length > 0 && (
+                <p className="sm:col-span-2">
+                  {tDiag("recoveryHints", { hints: recoveryHints.join(" | ") })}
+                </p>
+              )}
+              {activeEcosystem?.recommendedActions?.length ? (
+                <p className="sm:col-span-2">
+                  {tDiag("recommendedActions", {
+                    actions: activeEcosystem.recommendedActions.join(" | "),
+                  })}
+                </p>
+              ) : null}
+            </div>
+          </CollapsibleSection>
+        )}
+
+        {/* Benchmark Adaptation */}
+        {activeAgent && (
+          <CollapsibleSection
+            title={tDiag("benchmarkAdaptation")}
+            count={benchmarkEntries.length}
+            dataTestId="external-agent-benchmark-adaptation"
+          >
+            <div className="text-xs">
+              {benchmarkEntries.length === 0 ? (
+                <p className="text-muted-foreground">{tDiag("noBenchmarkAdaptation")}</p>
+              ) : (
+                <div className="space-y-2">
+                  {benchmarkEntries.map((entry) => (
+                    <div key={entry.id} className="rounded border p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium">{entry.title}</p>
+                        <Badge variant="outline" className="text-[11px]">
+                          {entry.status}
+                        </Badge>
+                      </div>
+                      <p className="text-muted-foreground">
+                        {tDiag("gap", { grade: entry.gapGrade })}
+                      </p>
+                      <p className="text-muted-foreground">
+                        {tDiag("target", { target: entry.adaptationTarget })}
+                      </p>
+                      {entry.status === "validated" && (
+                        <p className="text-muted-foreground">
+                          {tDiag("evidence", {
+                            evidence:
+                              entry.evidence.length > 0
+                                ? entry.evidence.map((item) => item.reference).join(", ")
+                                : tDiag("evidenceMissing"),
+                          })}
+                        </p>
+                      )}
+                      {entry.status === "intentional-deviation" && entry.deviation && (
+                        <div className="space-y-1 text-amber-700 dark:text-amber-400">
+                          <p>{tDiag("rationale", { rationale: entry.deviation.rationale })}</p>
+                          <p>{tDiag("tradeOff", { tradeOff: entry.deviation.tradeOff })}</p>
+                          <p>{tDiag("userImpact", { impact: entry.deviation.userImpact })}</p>
+                          <p>
+                            {entry.deviation.review.reviewLink
+                              ? tDiag("reviewWithLink", {
+                                  reviewedBy: entry.deviation.review.reviewedBy,
+                                  link: entry.deviation.review.reviewLink,
+                                })
+                              : tDiag("review", {
+                                  reviewedBy: entry.deviation.review.reviewedBy,
+                                })}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CollapsibleSection>
+        )}
+
+        {/* Config Options */}
+        {configOptions.length > 0 && isActiveAgentConnected && (
+          <ExternalAgentConfigOptions
+            configOptions={configOptions}
+            onSetConfigOption={setConfigOption}
+            disabled={commandsDisabled}
+            compact
+          />
+        )}
+
+        {(availableCommands.length > 0 || planEntries.length > 0) &&
+          isActiveAgentConnected &&
+          isActiveAgentExecutable && (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <ExternalAgentCommands
+                  commands={availableCommands}
+                  onExecute={handleCommandExecute}
+                  isExecuting={commandsDisabled}
+                />
+              </div>
+              <ExternalAgentPlan entries={planEntries} currentStep={planStep ?? undefined} />
+            </div>
+          )}
+      </div>
 
       {/* Add Agent Dialog */}
       <AddAgentDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} onAdd={handleAddAgent} />

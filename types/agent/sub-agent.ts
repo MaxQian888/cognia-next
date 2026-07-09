@@ -176,6 +176,13 @@ export interface SubAgentConfig {
    * `lib/plugin/agent-sdk/dispatch.ts` + `lib/ai/agent/external/presets.ts`.
    */
   externalPresetId?: string
+  /**
+   * MCP server ids/names forwarded into the external agent's ACP session
+   * (`session/new` `mcpServers`) when this sub-agent runs on an external preset.
+   * Projected onto `AgentDefinition.mcpServerIds`, resolved via
+   * `resolveAcpMcpServers`. Ignored by the built-in executor.
+   */
+  mcpServerIds?: string[]
 
   // === Nested Dispatch (depth-N subagents) ===
   /** Opt this sub-agent into dispatching its own sub-agents when it runs. */

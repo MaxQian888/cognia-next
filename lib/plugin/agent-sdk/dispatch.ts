@@ -247,6 +247,16 @@ async function runExternalSubagent(
     def.tools && def.tools.length > 0 ? { allowedTools: def.tools } : {}
   )
 
+  // Forward the subagent's declared MCP servers into the external agent's ACP
+  // session (`session/new` mcpServers) so it can call the same tools a built-in
+  // teammate would (the external CLI keeps its own MCP config in addition). Only
+  // the explicitly-listed enabled servers are forwarded — never "all".
+  let mcpServers: import("@/types/agent/external-agent").AcpMcpServerConfig[] = []
+  if (def.mcpServerIds && def.mcpServerIds.length > 0) {
+    const { resolveAcpMcpServers } = await import("@/lib/ai/agent/external/resolve-acp-mcp-servers")
+    mcpServers = await resolveAcpMcpServers(def.mcpServerIds)
+  }
+
   // Live progress: translate the external protocol stream into the same
   // CaptureStreamEvent shape the subagent runtime store already renders, so an
   // external subagent lights up `SubagentPart`'s live progress like a built-in.
@@ -257,6 +267,8 @@ async function runExternalSubagent(
   const result = await manager.execute(agentId, prompt, {
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
     ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
+    ...(merged.allowedTools ? { allowedTools: merged.allowedTools } : {}),
+    ...(mcpServers.length > 0 ? { context: { custom: { mcpServers } } } : {}),
     ...(options.cwd ? { workingDirectory: options.cwd } : {}),
     ...(options.abortSignal ? { signal: options.abortSignal } : {}),
     ...(onEvent ? { onEvent } : {}),

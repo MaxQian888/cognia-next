@@ -103,6 +103,10 @@ export function parseMarkdownAgent(
     def.externalPresetId = externalPreset.trim()
   }
 
+  // MCP servers to forward into an external-preset-backed subagent's ACP session.
+  const mcpServerIds = normalizeToolList(data.mcpServerIds ?? data["mcp-server-ids"])
+  if (mcpServerIds) def.mcpServerIds = mcpServerIds
+
   // Nested dispatch opt-in (depth-N subagents).
   const allowNesting = data.allowNesting ?? data["allow-nesting"]
   if (allowNesting === true || allowNesting === "true") def.allowNesting = true

@@ -69,6 +69,7 @@ function projectPluginSubagent(entry: {
   if (entry.entry.maxTurns !== undefined) def.maxTurns = entry.entry.maxTurns
   if (entry.entry.effort) def.effort = entry.entry.effort
   if (entry.entry.externalPresetId) def.externalPresetId = entry.entry.externalPresetId
+  if (entry.entry.mcpServerIds?.length) def.mcpServerIds = entry.entry.mcpServerIds
   // Anonymous plugins (no pluginId tag) are still legal — emit the bare id
   // so the dispatcher can address them, but flag the empty namespace
   // segment so a malicious plugin cannot masquerade as another's id.
@@ -106,6 +107,7 @@ function projectSubagentTemplate(tpl: SubAgentTemplate): {
   // template names a preset, so the dispatching model runs it on Claude Code /
   // Codex / … instead of the built-in executor.
   if (tpl.config.externalPresetId) def.externalPresetId = tpl.config.externalPresetId
+  if (tpl.config.mcpServerIds?.length) def.mcpServerIds = tpl.config.mcpServerIds
   return { id: `template:${slugifySubagentName(tpl.name)}`, def }
 }
 
@@ -238,6 +240,12 @@ export function resolveDispatchableSubagents(): Array<{ id: string; def: PluginS
         ...(tpl.config.tools ? { tools: tpl.config.tools } : {}),
         ...(tpl.config.model ? { model: tpl.config.model } : {}),
         ...(tpl.config.maxSteps !== undefined ? { maxTurns: tpl.config.maxSteps } : {}),
+        // External-CLI backing (A2): a template naming a preset dispatches to
+        // that external agent, with its declared MCP servers forwarded into the
+        // ACP session. Without these two, `dispatch_agent` would silently route
+        // the template to the built-in executor instead.
+        ...(tpl.config.externalPresetId ? { externalPresetId: tpl.config.externalPresetId } : {}),
+        ...(tpl.config.mcpServerIds?.length ? { mcpServerIds: tpl.config.mcpServerIds } : {}),
         ...(tpl.config.allowNesting ? { allowNesting: true } : {}),
         ...(tpl.config.maxNestingDepth !== undefined
           ? { maxDepth: tpl.config.maxNestingDepth }

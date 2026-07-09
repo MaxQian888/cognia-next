@@ -111,14 +111,18 @@ describe("resolveAllSubagents — direct context", () => {
     }
   })
 
-  it("projects a template's externalPresetId onto the AgentDefinition (A2 external backing)", () => {
+  it("projects a template's externalPresetId + mcpServerIds onto the AgentDefinition (A2)", () => {
     const extTpl: SubAgentTemplate = {
       id: "user-ext-1",
       name: "External Coder",
       description: "codes via an external CLI",
       category: "coding",
       taskTemplate: "build {{x}}",
-      config: { systemPrompt: "You code.", externalPresetId: "claude-code" },
+      config: {
+        systemPrompt: "You code.",
+        externalPresetId: "claude-code",
+        mcpServerIds: ["github", "linear"],
+      },
       isBuiltIn: false,
     }
     useSubagentRuntimeStore.getState().addTemplate(extTpl)
@@ -127,6 +131,7 @@ describe("resolveAllSubagents — direct context", () => {
       expect(direct["template:external-coder"]).toMatchObject({
         prompt: "You code.",
         externalPresetId: "claude-code",
+        mcpServerIds: ["github", "linear"],
       })
     } finally {
       useSubagentRuntimeStore.getState().deleteTemplate("user-ext-1")
@@ -174,6 +179,32 @@ describe("resolveDispatchableSubagents — built-in dispatch targets", () => {
       expect(ids).toContain("template:dispatch-helper")
     } finally {
       useSubagentRuntimeStore.getState().deleteTemplate("user-disp-1")
+    }
+  })
+
+  it("carries a template's externalPresetId + mcpServerIds onto the dispatchable def (A2)", () => {
+    const extTpl: SubAgentTemplate = {
+      id: "user-disp-ext",
+      name: "External Dispatcher",
+      description: "dispatches externally",
+      category: "coding",
+      taskTemplate: "run {{x}}",
+      config: {
+        systemPrompt: "run.",
+        externalPresetId: "claude-code",
+        mcpServerIds: ["github"],
+      },
+      isBuiltIn: false,
+    }
+    useSubagentRuntimeStore.getState().addTemplate(extTpl)
+    try {
+      // This is the def `dispatch_agent` → runExternalSubagent actually runs, so
+      // both fields must be present for external MCP forwarding to fire.
+      const def = getDispatchableSubagentDef("template:external-dispatcher")
+      expect(def?.externalPresetId).toBe("claude-code")
+      expect(def?.mcpServerIds).toEqual(["github"])
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("user-disp-ext")
     }
   })
 })

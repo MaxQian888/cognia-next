@@ -5,6 +5,7 @@ import type { ExternalAgentConfig, ExternalAgentMessage } from "@/types/agent/ex
 // ----------------------------------------------------------------------------
 
 let stdoutCb: ((event: { agentId: string; data: string }) => void) | undefined
+let stderrCb: ((event: { agentId: string; data: string }) => void) | undefined
 let exitCb: ((event: { agentId: string; code: number }) => void) | undefined
 const writes: string[] = []
 const responders: Record<string, (msg: { id: number; params?: unknown }) => unknown> = {}
@@ -43,7 +44,12 @@ jest.mock("@/lib/native/external-agent", () => ({
       stdoutCb = undefined
     }
   }),
-  onExternalAgentStderr: jest.fn(async () => () => {}),
+  onExternalAgentStderr: jest.fn(async (cb: (e: { agentId: string; data: string }) => void) => {
+    stderrCb = cb
+    return () => {
+      stderrCb = undefined
+    }
+  }),
   onExternalAgentExit: jest.fn(async (cb: (e: { agentId: string; code: number }) => void) => {
     exitCb = cb
     return () => {
@@ -53,6 +59,8 @@ jest.mock("@/lib/native/external-agent", () => ({
 }))
 
 import { CodexAppServerAdapter } from "./codex-app-server-client"
+import { loggers } from "@/lib/logging"
+import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@/lib/logging/truncate"
 
 function feed(method: string, params: Record<string, unknown>): void {
   stdoutCb?.({ agentId: "proc-1", data: JSON.stringify({ method, params }) })
@@ -83,6 +91,7 @@ const config: ExternalAgentConfig = {
 
 function resetHarness() {
   stdoutCb = undefined
+  stderrCb = undefined
   exitCb = undefined
   writes.length = 0
   for (const key of Object.keys(responders)) delete responders[key]
@@ -1440,5 +1449,48 @@ describe("CodexAppServerAdapter", () => {
         jest.useRealTimers()
       }
     })
+  })
+})
+
+describe("CodexAppServerAdapter — stderr forwarding", () => {
+  it("forwards subprocess stderr at debug (not warn) and truncates oversized chunks", async () => {
+    const debugSpy = jest.spyOn(loggers.agent, "debug").mockImplementation(() => {})
+    const warnSpy = jest.spyOn(loggers.agent, "warn").mockImplementation(() => {})
+    try {
+      await connectedAdapter()
+      expect(stderrCb).toBeDefined()
+
+      const huge = "E".repeat(LOG_VALUE_MAX_CHARS + 4096)
+      stderrCb!({ agentId: "proc-1", data: huge })
+
+      // Routed to debug (not forwarded by Next's dev server), never to warn.
+      expect(debugSpy).toHaveBeenCalledWith("Codex app-server stderr", {
+        data: truncateForLog(huge),
+      })
+      expect(warnSpy).not.toHaveBeenCalledWith("Codex app-server stderr", expect.anything())
+
+      // The forwarded value is bounded, not the raw multi-KB chunk.
+      const forwarded = (
+        debugSpy.mock.calls.find((c) => c[0] === "Codex app-server stderr")?.[1] as {
+          data: string
+        }
+      ).data
+      expect(forwarded.length).toBeLessThan(huge.length)
+      expect(forwarded).toContain("chars truncated")
+    } finally {
+      debugSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it("ignores stderr emitted for a different agentId", async () => {
+    const debugSpy = jest.spyOn(loggers.agent, "debug").mockImplementation(() => {})
+    try {
+      await connectedAdapter()
+      stderrCb!({ agentId: "other-proc", data: "noise" })
+      expect(debugSpy).not.toHaveBeenCalledWith("Codex app-server stderr", expect.anything())
+    } finally {
+      debugSpy.mockRestore()
+    }
   })
 })

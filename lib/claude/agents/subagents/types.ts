@@ -42,6 +42,12 @@ export interface AgentDefinition {
    */
   externalPresetId?: string
   /**
+   * MCP server ids/names forwarded into the external agent's ACP session when
+   * this subagent runs on an external preset (see {@link PluginSubagentDef}).
+   * Ignored by the built-in executor. Honored at execute-time only.
+   */
+  mcpServerIds?: string[]
+  /**
    * Opt this subagent into nested dispatch — when it runs, expose the
    * `dispatch_agent` tool so it can dispatch further subagents (up to the
    * effective depth cap). Default `false` (leaf). Gated by app-level
