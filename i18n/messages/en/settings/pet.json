@@ -119,6 +119,7 @@
     "import": "Import model",
     "importFolder": "Import folder",
     "importHint": "Choose a model folder or a .zip containing a .model3.json.",
+    "noModelHint": "Pick a model below to start using it — until then the pet stays on the vector mascot.",
     "noModels": "No Live2D models yet. Import one or download a sample.",
     "oneShotLabels": {
       "evolving": "Evolution",

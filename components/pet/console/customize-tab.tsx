@@ -18,10 +18,13 @@ import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/platform/detect"
+import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 import { SettingsCard } from "@/components/settings/common/settings-section"
+import { resolveEffectiveSkin } from "../skins/resolve-effective-skin"
 import { PetAppearanceControls } from "../settings/pet-appearance-controls"
 import { PetCosmeticControls } from "../settings/pet-cosmetic-controls"
+import { PetLive2dLookControls } from "../settings/pet-live2d-look-controls"
 import { PetInteractionControls } from "../settings/pet-interaction-controls"
 import { PetSoundControls } from "../settings/pet-sound-controls"
 import { PetCareControls } from "../settings/pet-care-controls"
@@ -35,14 +38,28 @@ export function CustomizeTab() {
 
   const patch = (next: Partial<PetSettings>) => void save({ petSettings: { ...pet, ...next } })
 
+  // Resolve the effective skin so the Look preview matches the live sprite, and
+  // swap the SVG cosmetic controls for the Live2D look panel when the user has
+  // chosen Live2D — the cosmetic palette/hat/eyes don't touch a Live2D model.
+  const { modelId, coreReady } = useActiveLive2dModel(pet)
+  const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
+    coreReady,
+    hasActiveModel: Boolean(modelId),
+  })
+  const live2dChosen = pet.skinId === "live2d"
+
   return (
     <div data-testid="pet-customize-tab" className="mx-auto w-full max-w-3xl space-y-4">
       <SettingsCard
         icon={<BrushIcon className="size-5" />}
         title={t("look.title")}
-        description={t("look.description")}
+        description={live2dChosen ? t("look.descriptionLive2d") : t("look.description")}
       >
-        <PetCosmeticControls skinId={pet.skinId} />
+        {live2dChosen ? (
+          <PetLive2dLookControls pet={pet} />
+        ) : (
+          <PetCosmeticControls skinId={effectiveSkin} />
+        )}
       </SettingsCard>
 
       <SettingsCard

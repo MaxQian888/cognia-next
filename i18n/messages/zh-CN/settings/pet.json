@@ -119,6 +119,7 @@
     "import": "导入模型",
     "importFolder": "导入文件夹",
     "importHint": "选择模型文件夹，或包含 .model3.json 的 .zip 压缩包。",
+    "noModelHint": "在下方选择一个模型即可开始使用；在此之前宠物会保持矢量形象。",
     "noModels": "暂无 Live2D 模型，请导入或下载示例。",
     "oneShotLabels": {
       "evolving": "进化",

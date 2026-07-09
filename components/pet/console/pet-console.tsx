@@ -111,11 +111,16 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
             <h1 className="text-xl font-semibold">{t("console.title")}</h1>
           )}
           <p className="truncate text-sm text-muted-foreground">{t("console.subtitle")}</p>
+          {pet.skinId === "live2d" && effectiveSkin !== "live2d" && (
+            <p className="truncate text-xs text-amber-600 dark:text-amber-500" role="status">
+              {t("console.live2dFallback")}
+            </p>
+          )}
         </div>
       </header>
 
       <nav
-        className="mt-3 flex items-center gap-1 border-b bg-background/80 px-2 py-2 backdrop-blur"
+        className="mt-3 flex items-center gap-1 overflow-x-auto border-b bg-background/80 px-2 py-2 backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         role="tablist"
       >
         {visibleTabs.map((id) => (
@@ -127,7 +132,7 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
             aria-selected={tab === id}
             data-tab={id}
             onClick={() => setTab(id)}
-            className={cn(tab === id && "font-medium")}
+            className={cn("shrink-0", tab === id && "font-medium")}
           >
             {t(`console.tabs.${id}`)}
           </Button>

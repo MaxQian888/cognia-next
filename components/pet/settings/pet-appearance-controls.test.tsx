@@ -46,6 +46,28 @@ describe("PetAppearanceControls", () => {
     expect(screen.getByText(/runtime isn't ready/i)).toBeInTheDocument()
   })
 
+  it("prompts to pick a model when live2d is ready but none is active", () => {
+    coreAvailable = true
+    render(
+      <PetAppearanceControls
+        pet={{ ...DEFAULT_PET_SETTINGS, skinId: "live2d" }}
+        patch={jest.fn()}
+      />
+    )
+    expect(screen.getByText(/pick a model below/i)).toBeInTheDocument()
+  })
+
+  it("drops the pick-a-model hint once a model is active", () => {
+    coreAvailable = true
+    render(
+      <PetAppearanceControls
+        pet={{ ...DEFAULT_PET_SETTINGS, skinId: "live2d", activeLive2dModelId: "m1" }}
+        patch={jest.fn()}
+      />
+    )
+    expect(screen.queryByText(/pick a model below/i)).toBeNull()
+  })
+
   it("mounts the model manager only for the live2d skin", () => {
     const { rerender } = render(
       <PetAppearanceControls pet={DEFAULT_PET_SETTINGS} patch={jest.fn()} />

@@ -159,6 +159,16 @@ describe("PetConsole", () => {
     settingsValue = { petSettings: { skinId: "live2d" } }
     render(<PetConsole />)
     expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ skinId: "svg" }))
+    // The header explains why the built-in mascot is showing.
+    expect(screen.getByText(/showing the built-in mascot/i)).toBeInTheDocument()
+  })
+
+  it("omits the fallback note once Live2D renders", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    useActiveLive2dModel.mockReturnValue({ modelId: "m1", row: undefined, coreReady: true })
+    settingsValue = { petSettings: { skinId: "live2d" } }
+    render(<PetConsole />)
+    expect(screen.queryByText(/showing the built-in mascot/i)).toBeNull()
   })
 
   it("hides the plugins tab until a pet.console.tab extension registers", () => {

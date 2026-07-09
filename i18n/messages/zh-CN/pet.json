@@ -174,6 +174,7 @@
   "console": {
     "hatch": "孵化",
     "hatchPrompt": "你的蛋可以孵化了。",
+    "live2dFallback": "Live2D 暂时不可用，正在显示内置形象。",
     "loading": "正在唤醒你的宠物…",
     "subtitle": "养育它、装扮它，一起成长。",
     "tabs": {
@@ -248,8 +249,18 @@
       "description": "气泡、对话与主动闲聊。",
       "title": "互动与说话"
     },
+    "live2dLook": {
+      "activeModel": "当前模型",
+      "configure": "调整大小与动作",
+      "mascotNote": "颜色、帽子和眼睛只会改变内置形象——如需编辑，请在「外观」中把皮肤切回「矢量形象」。",
+      "noModel": "还没有 Live2D 模型。在下方「外观」中导入一个即可让它动起来。",
+      "unavailable": {
+        "coreMissing": "Live2D 运行时尚未就绪，暂时显示内置形象。"
+      }
+    },
     "look": {
       "description": "在不改变身份的前提下重新装扮宠物。",
+      "descriptionLive2d": "预览并微调当前使用的 Live2D 模型。",
       "title": "造型"
     },
     "openSettings": "打开完整宠物设置",
@@ -257,6 +268,12 @@
       "description": "音效与免打扰时段。",
       "title": "声音"
     }
+  },
+  "dex": {
+    "live2dEmpty": "还没有 Live2D 模型。从「自定义 → 外观」导入后即可在此看到。",
+    "live2dTitle": "我的 Live2D 模型",
+    "speciesTitle": "内置物种",
+    "useMascot": "使用内置形象"
   },
   "live2d": {
     "loadFailed": "无法加载 Live2D 模型，已改为显示 SVG 宠物。"

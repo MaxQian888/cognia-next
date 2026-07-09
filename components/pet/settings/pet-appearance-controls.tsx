@@ -80,6 +80,9 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
         {skinId === "live2d" && coreReady === false && (
           <p className="text-sm text-destructive">{t("live2d.coreMissing")}</p>
         )}
+        {skinId === "live2d" && coreReady === true && !pet.activeLive2dModelId && (
+          <p className="text-sm text-muted-foreground">{t("live2d.noModelHint")}</p>
+        )}
       </div>
 
       {skinId === "live2d" && <PetModelManager settings={pet} onPatch={patch} />}

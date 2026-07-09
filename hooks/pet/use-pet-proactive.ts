@@ -36,6 +36,7 @@ import { canSpeak } from "@/lib/pet/llm/proactive/gate"
 import {
   applySpoke,
   localDayKey,
+  localHour,
   normalizeProactiveState,
 } from "@/lib/pet/llm/proactive/scheduler-state"
 import { resolveProactiveTuning } from "@/lib/pet/llm/proactive/tiers"
@@ -44,7 +45,7 @@ import { patchPetProfile } from "@/lib/db/pet"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { resolvePreferences } from "@/lib/notifications/preferences"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
-import { localTimeZone } from "@/lib/notifications/routing"
+import { resolveUserTimeZone } from "@/lib/profile/timezone"
 import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { usePetStore } from "@/stores/pet/pet-store"
@@ -119,7 +120,7 @@ export function usePetProactive({ profile, view, enabled }: UsePetProactiveArgs)
 
       // Gate chain: counters/DND → global limiter → PII → client.
       const prefs = resolvePreferences(current.appSettings?.notificationPreferences)
-      const tz = localTimeZone()
+      const tz = resolveUserTimeZone(current.appSettings?.profile)
       const dndActive =
         prefs.quietHours.enabled &&
         isInQuietHours(now, prefs.quietHours.start, prefs.quietHours.end, tz)
@@ -234,7 +235,7 @@ export function usePetProactive({ profile, view, enabled }: UsePetProactiveArgs)
       const current = latest.current
       if (!current.profile || !current.view) return
       const now = Date.now()
-      const tz = localTimeZone()
+      const tz = resolveUserTimeZone(current.appSettings?.profile)
       const state = normalizeProactiveState(current.profile.proactiveState)
       const tier = current.appSettings?.petSettings?.proactive?.tier ?? "normal"
 
@@ -243,7 +244,7 @@ export function usePetProactive({ profile, view, enabled }: UsePetProactiveArgs)
             nowMs: now,
             greetedWindows: state.dayKey === localDayKey(now, tz) ? state.greetedWindows : [],
             dayKey: localDayKey(now, tz),
-            hour: new Date(now).getHours(),
+            hour: localHour(now, tz),
           })
         : null
       const idle =

@@ -177,6 +177,7 @@
   "console": {
     "hatch": "Hatch",
     "hatchPrompt": "Your egg is ready to hatch.",
+    "live2dFallback": "Live2D is unavailable right now — showing the built-in mascot.",
     "loading": "Waking up your pet…",
     "subtitle": "Raise it, dress it, grow together.",
     "tabs": {
@@ -251,8 +252,18 @@
       "description": "Bubbles, talking, and proactive chatter.",
       "title": "Interaction & speech"
     },
+    "live2dLook": {
+      "activeModel": "Active model",
+      "configure": "Adjust size & motion",
+      "mascotNote": "Color, hat, and eyes only restyle the built-in mascot — switch the skin to “Vector mascot” in Appearance to edit those.",
+      "noModel": "No Live2D model yet. Import one under Appearance below to bring it to life.",
+      "unavailable": {
+        "coreMissing": "The Live2D runtime isn't ready, so the built-in mascot is showing for now."
+      }
+    },
     "look": {
       "description": "Restyle your pet without changing who it is.",
+      "descriptionLive2d": "Preview and fine-tune your active Live2D model.",
       "title": "Look"
     },
     "openSettings": "Open full pet settings",
@@ -260,6 +271,12 @@
       "description": "Sound effects and quiet hours.",
       "title": "Sound"
     }
+  },
+  "dex": {
+    "live2dEmpty": "No Live2D models yet. Import one from Customize → Appearance to see it here.",
+    "live2dTitle": "My Live2D models",
+    "speciesTitle": "Built-in species",
+    "useMascot": "Use built-in mascot"
   },
   "live2d": {
     "loadFailed": "The Live2D model couldn't be loaded — showing the SVG pet instead."

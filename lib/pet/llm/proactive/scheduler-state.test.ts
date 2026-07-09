@@ -2,6 +2,7 @@ import {
   EMPTY_PROACTIVE_STATE,
   applySpoke,
   localDayKey,
+  localHour,
   normalizeProactiveState,
 } from "./scheduler-state"
 
@@ -17,6 +18,37 @@ describe("localDayKey", () => {
     expect(localDayKey(NOON_UTC, "Asia/Tokyo")).toBe("2026-06-05")
     // 23:30Z on the 5th is already the 6th in Tokyo.
     expect(localDayKey(Date.UTC(2026, 5, 5, 23, 30), "Asia/Tokyo")).toBe("2026-06-06")
+  })
+})
+
+describe("localHour", () => {
+  it("returns the wall-clock hour (0-23) in the given timezone", () => {
+    expect(localHour(NOON_UTC, "UTC")).toBe(12)
+    // 12:00Z = 21:00 in Tokyo.
+    expect(localHour(NOON_UTC, "Asia/Tokyo")).toBe(21)
+    // 12:00Z = 02:00 in Honolulu (UTC-10).
+    expect(localHour(NOON_UTC, "Pacific/Honolulu")).toBe(2)
+  })
+
+  it("normalizes midnight to 0 rather than 24", () => {
+    // 15:00Z = 00:00 next day in Tokyo (UTC+9).
+    expect(localHour(Date.UTC(2026, 5, 5, 15, 0), "Asia/Tokyo")).toBe(0)
+  })
+
+  it("falls back to the device hour when Intl renders a non-numeric hour", () => {
+    const original = Intl.DateTimeFormat
+    // @ts-expect-error — force the non-numeric parse path
+    Intl.DateTimeFormat = function () {
+      return { format: () => "zz" }
+    }
+    try {
+      const result = localHour(NOON_UTC, "UTC")
+      expect(Number.isInteger(result)).toBe(true)
+      expect(result).toBeGreaterThanOrEqual(0)
+      expect(result).toBeLessThanOrEqual(23)
+    } finally {
+      Intl.DateTimeFormat = original
+    }
   })
 })
 

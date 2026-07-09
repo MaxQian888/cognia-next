@@ -25,6 +25,23 @@ export function localDayKey(nowMs: number, tz?: string): string {
   }).format(new Date(nowMs))
 }
 
+/**
+ * Local hour (0-23) for `nowMs` in `tz` (device zone when omitted). Used by the
+ * time-of-day greeting engine so "good morning" fires on the *user's* clock,
+ * not the device's — the two differ once a profile timezone is set or the app
+ * is mirrored to a companion phone in another zone.
+ */
+export function localHour(nowMs: number, tz?: string): number {
+  const rendered = new Intl.DateTimeFormat("en-US", {
+    ...(tz ? { timeZone: tz } : {}),
+    hour: "2-digit",
+    hour12: false,
+  }).format(new Date(nowMs))
+  const parsed = Number.parseInt(rendered, 10)
+  // Some engines render midnight as "24"; normalize to the 0-23 range.
+  return Number.isFinite(parsed) ? parsed % 24 : new Date(nowMs).getHours()
+}
+
 /** Defensive read of a possibly-missing/stale persisted value. */
 export function normalizeProactiveState(raw: unknown): ProactiveState {
   if (typeof raw !== "object" || raw === null) return EMPTY_PROACTIVE_STATE
