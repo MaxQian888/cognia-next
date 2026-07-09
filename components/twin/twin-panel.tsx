@@ -27,6 +27,7 @@ import { toast } from "sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import { observeTwins, backfillTwinRegistryFromUsage, type DeleteTwinResult } from "@/lib/db/twins"
 import type { Twin } from "@/types/twin"
 import { TwinSourcesTab } from "./twin-sources-tab"
@@ -151,13 +152,13 @@ function TwinPanelInner() {
   // for the active twin.
   const workerStatus = useTwinWorkerStatus(effectiveTwinId)
 
-  // Rendered ONCE at a stable tree position (fragment index 1, always preceded
-  // by a `<div>` at index 0) across every branch below. Creating the first twin
-  // flips `effectiveTwinId` null→non-null in the middle of the wizard flow,
-  // swapping the empty-state branch for the main branch; keeping the wizard at
-  // the same reconciliation position means React PRESERVES it instead of
-  // unmounting + remounting it — a remount would reset it to step 1 and orphan
-  // the just-created twin.
+  // Rendered ONCE at a stable tree position (always the second child of the
+  // shell's center slot, after the branch `<div>`) across every branch below.
+  // Creating the first twin flips `effectiveTwinId` null→non-null in the
+  // middle of the wizard flow, swapping the empty-state branch for the main
+  // branch; keeping the wizard at the same reconciliation position means
+  // React PRESERVES it instead of unmounting + remounting it — a remount
+  // would reset it to step 1 and orphan the just-created twin.
   const wizard = (
     <TwinCreationWizard
       open={wizardOpen}
@@ -166,64 +167,30 @@ function TwinPanelInner() {
     />
   )
 
+  let center: React.ReactNode
   if (twins === undefined) {
-    return (
-      <>
-        <div className="flex h-full items-center justify-center p-6">
-          <p className="text-muted-foreground text-sm">{t("loading")}</p>
-        </div>
-        {wizard}
-      </>
+    center = (
+      <div className="flex h-full items-center justify-center p-6">
+        <p className="text-muted-foreground text-sm">{t("loading")}</p>
+      </div>
     )
-  }
-
-  if (!effectiveTwinId) {
-    return (
-      <>
-        <div className="flex h-full items-center justify-center p-6">
-          <Card className="flex max-w-md flex-col items-center gap-4 p-8 text-center">
-            <div className="space-y-2">
-              <h2 className="text-xl font-semibold">{t("noTwinTitle")}</h2>
-              <p className="text-muted-foreground text-sm">{t("noTwinHint")}</p>
-            </div>
-            <Button onClick={() => setWizardOpen(true)} data-testid="twin-empty-create">
-              {t("createFirst")}
-            </Button>
-          </Card>
-        </div>
-        {wizard}
-      </>
-    )
-  }
-
-  return (
-    <>
-      <div className="flex h-full flex-col gap-3 p-4 sm:gap-4 sm:p-6">
-        <header className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          <div className="flex w-full items-center gap-2 sm:w-auto">
-            <h1 className="text-xl font-semibold">{t("title")}</h1>
-            <TwinSelector
-              twins={twinList}
-              activeTwinId={effectiveTwinId}
-              onSelect={selectTwin}
-              onAfterCreate={(twin) => selectTwin(twin.id)}
-              onAfterDelete={handleAfterDelete}
-              onGuidedCreate={() => setWizardOpen(true)}
-            />
+  } else if (!effectiveTwinId) {
+    center = (
+      <div className="flex h-full items-center justify-center p-6">
+        <Card className="flex max-w-md flex-col items-center gap-4 p-8 text-center">
+          <div className="space-y-2">
+            <h2 className="text-xl font-semibold">{t("noTwinTitle")}</h2>
+            <p className="text-muted-foreground text-sm">{t("noTwinHint")}</p>
           </div>
-          <span
-            className={
-              workerStatus.active
-                ? "text-xs text-emerald-600 dark:text-emerald-400"
-                : "text-muted-foreground text-xs"
-            }
-            title={workerStatus.reasonKey ? t(`workerStatus.${workerStatus.reasonKey}`) : undefined}
-          >
-            {workerStatus.active ? t("workerActive") : t("workerIdle")}
-          </span>
-          <TwinHeaderPluginSlot twinId={effectiveTwinId} tab={tab} />
-        </header>
-
+          <Button onClick={() => setWizardOpen(true)} data-testid="twin-empty-create">
+            {t("createFirst")}
+          </Button>
+        </Card>
+      </div>
+    )
+  } else {
+    center = (
+      <div className="flex h-full flex-col gap-3 overflow-y-auto p-4 @md/twin:gap-4 @md/twin:p-6">
         <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col">
           <div className="-mx-1 overflow-x-auto px-1">
             <TabsList className="w-max">
@@ -261,8 +228,47 @@ function TwinPanelInner() {
           </TabsContent>
         </Tabs>
       </div>
+    )
+  }
+
+  return (
+    <FeaturePageShell
+      storageId="twin"
+      centerClassName="@container/twin"
+      toolbar={
+        <div className="flex w-full min-w-0 items-center gap-2" data-testid="twin-toolbar">
+          <h1 className="shrink-0 text-sm font-semibold">{t("title")}</h1>
+          {twins !== undefined && effectiveTwinId ? (
+            <>
+              <TwinSelector
+                twins={twinList}
+                activeTwinId={effectiveTwinId}
+                onSelect={selectTwin}
+                onAfterCreate={(twin) => selectTwin(twin.id)}
+                onAfterDelete={handleAfterDelete}
+                onGuidedCreate={() => setWizardOpen(true)}
+              />
+              <span
+                className={
+                  workerStatus.active
+                    ? "shrink-0 text-xs text-emerald-600 dark:text-emerald-400"
+                    : "text-muted-foreground shrink-0 text-xs"
+                }
+                title={
+                  workerStatus.reasonKey ? t(`workerStatus.${workerStatus.reasonKey}`) : undefined
+                }
+              >
+                {workerStatus.active ? t("workerActive") : t("workerIdle")}
+              </span>
+              <TwinHeaderPluginSlot twinId={effectiveTwinId} tab={tab} />
+            </>
+          ) : null}
+        </div>
+      }
+    >
+      {center}
       {wizard}
-    </>
+    </FeaturePageShell>
   )
 }
 

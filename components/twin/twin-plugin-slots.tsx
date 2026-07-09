@@ -81,7 +81,7 @@ export function TwinOverviewPluginSlot({
   return (
     <PluginExtensionSlot
       point="twin.overview.panel"
-      className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+      className="grid gap-4 @sm/twin:grid-cols-2 @xl/twin:grid-cols-3"
       context={{ twinId, sourceCount, chunkCount }}
     />
   )

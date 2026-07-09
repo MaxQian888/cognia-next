@@ -80,7 +80,7 @@ export function TwinSettingsTab({ twinId }: { twinId: string }) {
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-lg font-medium">{t("title")}</h2>
-      <Card className="grid gap-3 p-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+      <Card className="grid gap-3 p-4 @sm/twin:grid-cols-2 @md/twin:grid-cols-3 @lg/twin:grid-cols-4">
         <Stat label={t("statsTwinId")} value={twinId} mono />
         <Stat label={t("statsSources")} value={String(sourceCount)} />
         <Stat label={t("statsChunks")} value={String(chunkCount)} />
@@ -333,7 +333,7 @@ function RuntimeConfigCard() {
             <SelectTrigger
               id="twin-reranker-model"
               aria-label={t("rerankerModelLabel")}
-              className="w-full sm:w-[16rem]"
+              className="w-full @sm/twin:w-[16rem]"
             >
               <SelectValue />
             </SelectTrigger>
@@ -361,7 +361,7 @@ function RuntimeConfigCard() {
             <SelectTrigger
               id="twin-query-expansion-strategy"
               aria-label={t("queryExpansionStrategyLabel")}
-              className="w-full sm:w-[16rem]"
+              className="w-full @sm/twin:w-[16rem]"
             >
               <SelectValue />
             </SelectTrigger>
@@ -373,7 +373,7 @@ function RuntimeConfigCard() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2">
+      <div className="grid gap-3 @md/twin:grid-cols-2">
         <FieldGroup legend={t("embedding")} fields={embeddingFields} />
 
         <FieldGroup legend={t("distillLlm")} fields={distillFields} />
@@ -400,7 +400,7 @@ function RuntimeConfigCard() {
             <SelectTrigger
               id="twin-vector-backend"
               aria-label={t("backend")}
-              className="w-full sm:w-[16rem]"
+              className="w-full @sm/twin:w-[16rem]"
             >
               <SelectValue />
             </SelectTrigger>
@@ -448,7 +448,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
   if (backend === "qdrant") {
     const qdrant = settings.storage.qdrant ?? { url: "" }
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @sm/twin:grid-cols-2">
         <Field
           label={t("url")}
           value={qdrant.url}
@@ -466,7 +466,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
   if (backend === "pinecone") {
     const p = settings.storage.pinecone ?? { apiKey: "", indexName: "" }
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @sm/twin:grid-cols-2">
         <Field
           label={t("apiKey")}
           secret
@@ -489,7 +489,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
   if (backend === "weaviate") {
     const w = settings.storage.weaviate ?? { url: "" }
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @sm/twin:grid-cols-2">
         <Field
           label={t("url")}
           value={w.url}
@@ -507,7 +507,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
   if (backend === "milvus") {
     const m = settings.storage.milvus ?? { address: "" }
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @sm/twin:grid-cols-2">
         <Field
           label={t("address")}
           value={m.address}
@@ -527,7 +527,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
     const tChromaMode = (mode: "embedded" | "server") =>
       mode === "embedded" ? t("chromaModeEmbedded") : t("chromaModeServer")
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @sm/twin:grid-cols-2">
         <div className="flex flex-col gap-1">
           <Label htmlFor="twin-chroma-mode">{t("mode")}</Label>
           <Select
@@ -539,7 +539,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
             <SelectTrigger
               id="twin-chroma-mode"
               aria-label={t("mode")}
-              className="w-full sm:w-[12rem]"
+              className="w-full @sm/twin:w-[12rem]"
             >
               <SelectValue>{tChromaMode(c.mode)}</SelectValue>
             </SelectTrigger>

@@ -105,13 +105,13 @@ export function StyleSamplesSubtab({ twinId, styleSamples }: StyleSamplesSubtabP
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+      <div className="flex flex-col items-stretch gap-2 @sm/twin:flex-row @sm/twin:items-center">
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t("searchPlaceholder")}
           data-testid="style-samples-search"
-          className="sm:max-w-xs"
+          className="@sm/twin:max-w-xs"
         />
         <div className="flex-1" />
         <Button size="sm" onClick={openAdd} data-testid="style-samples-add">
