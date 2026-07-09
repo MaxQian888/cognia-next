@@ -31,10 +31,18 @@ export {
 export {
   PLUGIN_TEMPLATES,
   scaffoldPlugin,
+  scaffoldPluginChecked,
   getTemplateById,
   getTemplatesByType,
   getTemplatesByCapability,
   searchTemplates,
   type PluginTemplate,
   type PluginScaffoldOptions,
+  type ScaffoldResult,
 } from "./templates"
+
+export {
+  healthcheckScaffold,
+  type ScaffoldHealthIssue,
+  type ScaffoldHealthReport,
+} from "./scaffold-healthcheck"

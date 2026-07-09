@@ -5,6 +5,7 @@
 import {
   PLUGIN_TEMPLATES,
   scaffoldPlugin,
+  scaffoldPluginChecked,
   getTemplateById,
   getTemplatesByType,
   getTemplatesByCapability,
@@ -452,5 +453,66 @@ describe("New Plugin Templates", () => {
       const processorResults = searchTemplates("filter")
       expect(processorResults.length).toBeGreaterThan(0)
     })
+  })
+})
+
+describe("scaffoldPlugin — emitted test stub", () => {
+  const baseOptions: PluginScaffoldOptions = {
+    name: "Stub Plugin",
+    id: "stub-plugin",
+    description: "Stubbed",
+    author: { name: "A" },
+    type: "frontend",
+    capabilities: ["tools"],
+  }
+
+  it("emits a co-located index.test.ts asserting manifest identity + activate", () => {
+    const files = scaffoldPlugin(baseOptions)
+    const stub = files.get("index.test.ts")
+    expect(stub).toBeDefined()
+    expect(stub).toContain('expect(manifest.id).toBe("stub-plugin")')
+    expect(stub).toContain("activate")
+  })
+
+  it("emits test_main.py for python plugins", () => {
+    const files = scaffoldPlugin({ ...baseOptions, type: "python" })
+    const stub = files.get("test_main.py")
+    expect(stub).toBeDefined()
+    expect(stub).toContain("test_manifest_is_valid_json")
+    expect(stub).toContain("import main")
+  })
+})
+
+describe("scaffoldPluginChecked", () => {
+  const baseOptions: PluginScaffoldOptions = {
+    name: "Checked Plugin",
+    id: "checked-plugin",
+    description: "Checked",
+    author: { name: "A" },
+    type: "frontend",
+    capabilities: ["tools"],
+  }
+
+  it("returns files plus a passing health report for the basic scaffold", () => {
+    const { files, health } = scaffoldPluginChecked(baseOptions)
+    expect(files.has("plugin.json")).toBe(true)
+    expect(health.issues.filter((i) => i.severity === "error")).toEqual([])
+    expect(health.ok).toBe(true)
+  })
+
+  it("every built-in template scaffolds healthy (self-validating templates)", () => {
+    for (const template of PLUGIN_TEMPLATES) {
+      const { health } = scaffoldPluginChecked({
+        name: "Tpl Plugin",
+        id: "tpl-plugin",
+        description: "From template",
+        author: { name: "A" },
+        type: template.type,
+        capabilities: template.capabilities,
+        template: template.id,
+      })
+      const errors = health.issues.filter((i) => i.severity === "error")
+      expect({ template: template.id, errors }).toEqual({ template: template.id, errors: [] })
+    }
   })
 })

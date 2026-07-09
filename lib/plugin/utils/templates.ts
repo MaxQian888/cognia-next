@@ -175,6 +175,7 @@ npm run build
     "name": "{{author.name}}"
   },
   "main": "main.py",
+  "pythonMain": "main.py",
   "pythonDependencies": ["pandas", "numpy"]
 }`,
       },
@@ -1716,6 +1717,88 @@ function processTemplate(content: string, options: PluginScaffoldOptions): strin
     .replace(/"version":\s*"1\.0\.0"/g, `"version": "${version}"`)
 }
 
+/**
+ * Co-located test stub for a scaffolded plugin — the runtime half of the
+ * scaffold healthcheck. The scaffold-time check (`scaffold-healthcheck.ts`)
+ * is static by necessity (the app can't compile the emitted TS); this stub
+ * runs in the plugin author's environment where the module IS compilable and
+ * asserts the manifest parses and the entry actually activates.
+ */
+function buildScaffoldTestFile(
+  options: PluginScaffoldOptions,
+  mainFile: string
+): {
+  path: string
+  content: string
+} {
+  if (options.type === "python" || mainFile.endsWith(".py")) {
+    return {
+      path: "test_main.py",
+      content: `"""Scaffolded smoke test for ${options.name} — extend with real cases."""
+
+import json
+import pathlib
+
+
+def test_manifest_is_valid_json():
+    manifest = json.loads((pathlib.Path(__file__).parent / "plugin.json").read_text())
+    assert manifest["id"] == "${options.id}"
+    assert manifest["main"] == "${mainFile}"
+
+
+def test_entry_module_imports_and_exposes_a_plugin():
+    import main
+
+    assert hasattr(main, "plugin")
+`,
+    }
+  }
+
+  const entryImport = `./${mainFile.replace(/\.(ts|tsx|js)$/, "")}`
+  return {
+    path: mainFile.replace(/\.(ts|tsx|js)$/, ".test.$1"),
+    content: `/**
+ * Scaffolded smoke test for ${options.name} — extend with real cases.
+ *
+ * Asserts the two things the scaffold cannot prove statically: the manifest
+ * round-trips as JSON with the expected identity, and the entry module
+ * compiles + exposes an activatable plugin definition.
+ */
+
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import plugin from "${entryImport}"
+
+describe("${options.id} scaffold", () => {
+  it("ships a parsable manifest with matching identity", () => {
+    const manifest = JSON.parse(readFileSync(join(__dirname, "plugin.json"), "utf8"))
+    expect(manifest.id).toBe("${options.id}")
+    expect(manifest.main).toBe("${mainFile}")
+  })
+
+  it("entry module exposes an activatable plugin", () => {
+    expect(plugin).toBeDefined()
+    expect(typeof (plugin as { activate?: unknown }).activate).toBe("function")
+  })
+})
+`,
+  }
+}
+
+/** Resolve the manifest `main` recorded in an emitted file map (falls back per type). */
+function mainFileOf(files: Map<string, string>, options: PluginScaffoldOptions): string {
+  const raw = files.get("plugin.json")
+  if (raw) {
+    try {
+      const main = (JSON.parse(raw) as { main?: unknown }).main
+      if (typeof main === "string" && main !== "") return main
+    } catch {
+      // healthcheck reports unparsable manifests; fall through to the default
+    }
+  }
+  return options.type === "python" ? "main.py" : "index.ts"
+}
+
 export function scaffoldPlugin(options: PluginScaffoldOptions): Map<string, string> {
   const template = options.template
     ? PLUGIN_TEMPLATES.find((t) => t.id === options.template)
@@ -1724,18 +1807,42 @@ export function scaffoldPlugin(options: PluginScaffoldOptions): Map<string, stri
           t.type === options.type && t.capabilities.some((c) => options.capabilities.includes(c))
       )
 
+  const files = new Map<string, string>()
   if (!template) {
     // Generate basic plugin from scratch
-    return generateBasicPlugin(options)
+    for (const [path, content] of generateBasicPlugin(options)) files.set(path, content)
+  } else {
+    for (const file of template.files) {
+      files.set(file.path, processTemplate(file.content, options))
+    }
   }
 
-  const files = new Map<string, string>()
-
-  for (const file of template.files) {
-    files.set(file.path, processTemplate(file.content, options))
-  }
+  // Every scaffold ships a co-located test (repo rule: no untested modules) —
+  // unless the template already provides one.
+  const testFile = buildScaffoldTestFile(options, mainFileOf(files, options))
+  if (!files.has(testFile.path)) files.set(testFile.path, testFile.content)
 
   return files
+}
+
+export interface ScaffoldResult {
+  files: Map<string, string>
+  health: import("./scaffold-healthcheck").ScaffoldHealthReport
+}
+
+/**
+ * `scaffoldPlugin` + `healthcheckScaffold` in one call. Callers integrating
+ * plugin creation MUST use this variant and surface `health.issues` — a
+ * scaffold with `ok: false` must never be written out as a success.
+ */
+export function scaffoldPluginChecked(options: PluginScaffoldOptions): ScaffoldResult {
+  // Lazy import avoids a cycle: scaffold-healthcheck → core/validation is a
+  // heavier module graph than templates.ts needs at load time.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { healthcheckScaffold } =
+    require("./scaffold-healthcheck") as typeof import("./scaffold-healthcheck")
+  const files = scaffoldPlugin(options)
+  return { files, health: healthcheckScaffold(files) }
 }
 
 function generateBasicPlugin(options: PluginScaffoldOptions): Map<string, string> {
@@ -1752,6 +1859,7 @@ function generateBasicPlugin(options: PluginScaffoldOptions): Map<string, string
     capabilities: options.capabilities,
     author: options.author,
     main: options.type === "python" ? "main.py" : "index.ts",
+    ...(options.type === "python" ? { pythonMain: "main.py" } : {}),
     engines: {
       cognia: ">=0.1.0",
     },
