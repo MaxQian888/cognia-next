@@ -415,6 +415,11 @@ interface ChatState {
   /** Drop the approval with `requestId`. When `sessionId` is omitted the slice
    * holding it is located by scan. */
   clearApproval: (requestId: string, sessionId?: string) => void
+  /** Mark the approval `interrupted` (the sidecar waiter died; the tool was
+   * already denied). The entry stays until Dismiss (`clearApproval`) so the UI
+   * shows an honest notice instead of a silently vanishing dialog. Restores
+   * `awaiting_approval` → `streaming` when no live approvals remain. */
+  markApprovalInterrupted: (requestId: string, sessionId?: string, reason?: string) => void
   setPermissionMode: (mode: PermissionMode | null) => void
   addReferencedPath: (ref: FileReference) => void
   removeReferencedPath: (absolute: string) => void
@@ -640,8 +645,9 @@ export const useChatStore = create<ChatState>((set) => ({
       // `approval.sessionId` keeps the sub-session id for approveTool routing.
       const bucketId = decodeSubSession(approval.sessionId)?.teamSessionId ?? approval.sessionId
       const slice = sliceForId(s, bucketId)
+      const stamped: PendingApproval = { requestedAt: Date.now(), ...approval }
       return patchSliceState(s, bucketId, {
-        pendingApprovals: [...slice.pendingApprovals, approval],
+        pendingApprovals: [...slice.pendingApprovals, stamped],
         ...statusPatch(s, bucketId, "awaiting_approval"),
       })
     }),
@@ -664,6 +670,35 @@ export const useChatStore = create<ChatState>((set) => ({
       return patchSliceState(s, targetId, {
         pendingApprovals: next,
         ...statusPatch(s, targetId, nextStatus),
+      })
+    }),
+  markApprovalInterrupted: (requestId, sessionId, reason) =>
+    set((s) => {
+      // Same routing rules as pushApproval/clearApproval: team sub-session ids
+      // bucket under the parent; omitted sessionId is located by scan.
+      const bucketId = sessionId
+        ? (decodeSubSession(sessionId)?.teamSessionId ?? sessionId)
+        : (Object.keys(s.sessions).find((k) =>
+            s.sessions[k].pendingApprovals.some((a) => a.requestId === requestId)
+          ) ??
+          (s.pendingApprovals.some((a) => a.requestId === requestId)
+            ? s.activeSessionId
+            : undefined))
+      if (bucketId == null) return s
+      const slice = sliceForId(s, bucketId)
+      let changed = false
+      const next = slice.pendingApprovals.map((a) => {
+        if (a.requestId !== requestId || a.status === "interrupted") return a
+        changed = true
+        return { ...a, status: "interrupted" as const, interruptReason: reason ?? "interrupted" }
+      })
+      if (!changed) return s
+      const liveRemain = next.some((a) => a.status !== "interrupted")
+      const nextStatus: ChatStatus =
+        !liveRemain && slice.status === "awaiting_approval" ? "streaming" : slice.status
+      return patchSliceState(s, bucketId, {
+        pendingApprovals: next,
+        ...statusPatch(s, bucketId, nextStatus),
       })
     }),
   setPermissionMode: (mode) => set({ permissionMode: mode }),

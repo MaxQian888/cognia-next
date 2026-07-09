@@ -1856,6 +1856,15 @@ async function handleEvent(
       }
       return
     }
+    case "permission_interrupted": {
+      // The sidecar waiter died (turn aborted / session closed) — the tool was
+      // already denied SDK-side. Mark the approval instead of dropping it so
+      // the dialog shows an honest "interrupted" notice with Dismiss. Team
+      // sub-session ids are re-bucketed inside the store action (same routing
+      // as pushApproval), so this handles direct and team sessions alike.
+      useChatStore.getState().markApprovalInterrupted(evt.requestId, evt.sessionId, evt.reason)
+      return
+    }
     case "permission_request": {
       // Auto-approve if the user has previously allowed this tool.
       if (allowListRef.current.includes(evt.toolName)) {

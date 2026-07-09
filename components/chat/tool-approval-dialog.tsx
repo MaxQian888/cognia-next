@@ -18,6 +18,9 @@ import { ShieldAlertIcon } from "lucide-react"
 interface Props {
   approval: PendingApproval | null
   onRespond: (decision: ApprovalDecision) => void | Promise<void>
+  /** Dismiss an `interrupted` approval (the waiter is gone — there is nothing
+   * to answer). Required to clear the honest-notice card. */
+  onDismiss?: () => void
 }
 
 /** Bare tool name with the cognia-tools MCP prefix stripped. */
@@ -93,9 +96,10 @@ function ApprovalInputPreview({ approval }: { approval: PendingApproval }) {
   return <CodeBlock code={JSON.stringify(approval.input, null, 2)} language="json" />
 }
 
-export function ToolApprovalDialog({ approval, onRespond }: Props) {
+export function ToolApprovalDialog({ approval, onRespond, onDismiss }: Props) {
   const t = useTranslations("chat.toolApproval")
   const open = !!approval
+  const interrupted = approval?.status === "interrupted"
   return (
     <Dialog open={open}>
       <DialogContent
@@ -137,17 +141,33 @@ export function ToolApprovalDialog({ approval, onRespond }: Props) {
             {approval.decisionReason && (
               <p className="text-xs text-muted-foreground">{approval.decisionReason}</p>
             )}
+            {interrupted && (
+              // Honest terminal: the sidecar waiter died with the turn and the
+              // tool was already denied — there is nothing left to answer, so
+              // Approve/Deny would be a lie. Dismiss is the only real action.
+              <p data-testid="approval-interrupted-notice" className="text-xs text-amber-600">
+                {t("interruptedNotice")}
+              </p>
+            )}
           </div>
         )}
 
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="ghost" onClick={() => void onRespond("deny")}>
-            {t("deny")}
-          </Button>
-          <Button variant="secondary" onClick={() => void onRespond("allow_always")}>
-            {t("allowAlways")}
-          </Button>
-          <Button onClick={() => void onRespond("allow")}>{t("allowOnce")}</Button>
+          {interrupted ? (
+            <Button variant="secondary" onClick={() => onDismiss?.()}>
+              {t("dismiss")}
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={() => void onRespond("deny")}>
+                {t("deny")}
+              </Button>
+              <Button variant="secondary" onClick={() => void onRespond("allow_always")}>
+                {t("allowAlways")}
+              </Button>
+              <Button onClick={() => void onRespond("allow")}>{t("allowOnce")}</Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

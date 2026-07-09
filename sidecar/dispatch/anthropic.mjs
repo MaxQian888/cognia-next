@@ -74,14 +74,26 @@ function isAskUserTool(toolName) {
  *   pendingPluginToolCalls?: Map<string, { resolve: (r: any) => void }>,
  * }} maps
  * @param {string} [reason]
+ * @param {(requestId: string) => void} [notifyInterrupted] Called once per
+ *   drained approval BEFORE its deny resolves — lets the host emit a
+ *   `permission_interrupted` event so the renderer can distinguish "user
+ *   denied" from "the waiter died with the turn" instead of a silent deny.
  */
 export function drainPendingRoundTrips(
   { pendingApprovals, pendingPluginToolCalls } = {},
-  reason = "interrupted"
+  reason = "interrupted",
+  notifyInterrupted = undefined
 ) {
   if (pendingApprovals) {
     for (const [id, p] of pendingApprovals) {
       pendingApprovals.delete(id)
+      if (typeof notifyInterrupted === "function") {
+        try {
+          notifyInterrupted(id)
+        } catch {
+          /* notification must never block the drain */
+        }
+      }
       try {
         // A denied permission result the agent SDK accepts as a record.
         p.resolve({ behavior: "deny", message: reason })
@@ -509,6 +521,15 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         if (ctx.signal) {
           onAbort = () => {
             if (pendingApprovals.delete(requestId)) {
+              // Distinct terminal: tell the renderer the waiter is gone (the
+              // SDK still gets its required deny below) so the approval UI can
+              // show "interrupted" instead of silently vanishing.
+              emit({
+                type: "permission_interrupted",
+                sessionId,
+                requestId,
+                reason: "aborted",
+              })
               settle({ behavior: "deny", message: "aborted" })
             }
           }
@@ -568,7 +589,14 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     // closed/crashed renderer would keep the turn alive until the per-call
     // timeout. See `drainPendingRoundTrips`.
     drainPending: (reason) =>
-      drainPendingRoundTrips({ pendingApprovals, pendingPluginToolCalls }, reason),
+      drainPendingRoundTrips({ pendingApprovals, pendingPluginToolCalls }, reason, (requestId) =>
+        emit({
+          type: "permission_interrupted",
+          sessionId,
+          requestId,
+          reason: typeof reason === "string" && reason !== "" ? reason : "interrupted",
+        })
+      ),
     pendingApprovals,
     pendingPluginToolCalls,
     sendOptions,

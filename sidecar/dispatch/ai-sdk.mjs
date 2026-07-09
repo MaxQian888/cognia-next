@@ -1432,6 +1432,9 @@ export function dispatchAiSdk({
         // regardless of which side triggers the interrupt first.
         for (const [id, p] of pendingApprovals) {
           pendingApprovals.delete(id)
+          // Distinct terminal (parity with the Anthropic path): the renderer
+          // learns the waiter died with the turn instead of a silent deny.
+          emit({ type: "permission_interrupted", sessionId, requestId: id, reason: "interrupted" })
           p.resolve({ behavior: "deny", message: "interrupted" })
         }
         for (const [id, p] of pendingPluginToolCalls) {

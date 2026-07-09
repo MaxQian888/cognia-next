@@ -13,6 +13,10 @@
 // Outbound (sidecar -> parent) on stdout, one JSON object per line:
 //   { type: "event",              sessionId, event: SDKMessage }
 //   { type: "permission_request", sessionId, requestId, toolName, input, title?, displayName?, description? }
+//   { type: "permission_interrupted", sessionId, requestId, reason }
+//     — a pending permission_request whose waiter died (turn aborted / session
+//       closed / teardown drain). The SDK already received a deny; the renderer
+//       marks the approval "interrupted" instead of silently dropping it.
 //   { type: "tool_result_review", sessionId, reviewId, toolUseId, toolName, result, isError }
 //   { type: "plugin_tool_exec",   sessionId, toolUseId, name, args }
 //   { type: "session_ended",      sessionId, result?: SDKResultMessage, error?: string }

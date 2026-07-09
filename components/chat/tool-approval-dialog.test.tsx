@@ -172,3 +172,29 @@ describe("ToolApprovalDialog — input previews", () => {
     expect(onRespond).toHaveBeenCalledWith("deny")
   })
 })
+
+describe("ToolApprovalDialog — interrupted state", () => {
+  it("shows the interrupted notice and only a Dismiss action", () => {
+    const onRespond = jest.fn()
+    const onDismiss = jest.fn()
+    render(
+      <ToolApprovalDialog
+        approval={approval({ toolName: "bash", status: "interrupted", interruptReason: "aborted" })}
+        onRespond={onRespond}
+        onDismiss={onDismiss}
+      />
+    )
+    expect(screen.getByTestId("approval-interrupted-notice")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "allowOnce" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "deny" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "dismiss" }))
+    expect(onDismiss).toHaveBeenCalledTimes(1)
+    expect(onRespond).not.toHaveBeenCalled()
+  })
+
+  it("keeps the answerable footer for live approvals", () => {
+    render(<ToolApprovalDialog approval={approval({ toolName: "bash" })} onRespond={jest.fn()} />)
+    expect(screen.queryByTestId("approval-interrupted-notice")).toBeNull()
+    expect(screen.getByRole("button", { name: "allowOnce" })).toBeInTheDocument()
+  })
+})

@@ -485,10 +485,12 @@
     "bareMode": "Bare mode",
     "briefMode": "Brief output",
     "cancel": "Cancel",
-    "cwdFallbackHint": "Character default: {path}",
+    "cwdFallbackHint": "Falls back to: {path}",
     "cwdReset": "Reset",
     "debugMode": "Debug mode",
     "insights": "Session insights",
+    "hideConversations": "Hide conversation list",
+    "showConversations": "Show conversation list",
     "description": "Override defaults for this chat. Empty = use global.",
     "flowDisplay": {
       "aria": "Agent flow display mode",
@@ -1015,7 +1017,9 @@
     "allowAlways": "Allow always",
     "allowOnce": "Allow once",
     "deny": "Deny",
+    "dismiss": "Dismiss",
     "inputLabel": "Input",
+    "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
     "titleFallback": "Allow {tool}?",
     "toolLabel": "Tool"
   },

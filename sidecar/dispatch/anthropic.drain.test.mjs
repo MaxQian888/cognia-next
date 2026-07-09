@@ -53,6 +53,35 @@ test("drainPendingRoundTrips tolerates missing maps / no args (no throw)", () =>
   assert.deepEqual(results, [{ behavior: "deny", message: "interrupted" }])
 })
 
+test("drainPendingRoundTrips notifies interrupted requestIds BEFORE resolving each deny", () => {
+  const order = []
+  const pendingApprovals = new Map([
+    ["r1", { resolve: () => order.push("resolve:r1") }],
+    ["r2", { resolve: () => order.push("resolve:r2") }],
+  ])
+  drainPendingRoundTrips({ pendingApprovals }, "session closed", (id) => order.push(`notify:${id}`))
+  assert.deepEqual(order, ["notify:r1", "resolve:r1", "notify:r2", "resolve:r2"])
+})
+
+test("drainPendingRoundTrips does not notify for plugin tool calls", () => {
+  const notified = []
+  const pendingPluginToolCalls = new Map([["t1", { resolve: () => {} }]])
+  drainPendingRoundTrips({ pendingPluginToolCalls }, "closed", (id) => notified.push(id))
+  assert.deepEqual(notified, [])
+})
+
+test("drainPendingRoundTrips survives a throwing notifier (deny still resolves)", () => {
+  const results = []
+  const pendingApprovals = new Map([["r1", { resolve: (r) => results.push(r) }]])
+  assert.doesNotThrow(() =>
+    drainPendingRoundTrips({ pendingApprovals }, "interrupted", () => {
+      throw new Error("notifier boom")
+    })
+  )
+  assert.equal(pendingApprovals.size, 0)
+  assert.deepEqual(results, [{ behavior: "deny", message: "interrupted" }])
+})
+
 test("drainPendingRoundTrips is defensive against a throwing resolver (still clears the map)", () => {
   const ok = []
   const pendingApprovals = new Map([

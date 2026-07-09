@@ -848,6 +848,19 @@ export interface PermissionRequestEvent {
   suggestions?: unknown[]
 }
 
+/**
+ * A pending `permission_request` whose sidecar waiter died before the user
+ * answered (turn aborted, session closed, teardown drain). The SDK already
+ * received a deny — this event exists so the renderer can mark the approval
+ * `interrupted` (honest terminal) instead of silently dropping the dialog.
+ */
+export interface PermissionInterruptedEvent {
+  type: "permission_interrupted"
+  sessionId: string
+  requestId: string
+  reason: string
+}
+
 export interface SDKEventEnvelope {
   type: "event"
   sessionId: string
@@ -1033,6 +1046,7 @@ export type ClaudeEvent =
   | SessionEndedEvent
   | SdkSessionIdEvent
   | PermissionRequestEvent
+  | PermissionInterruptedEvent
   | SDKEventEnvelope
   | UsageHeadersEvent
   | PluginToolExecEvent
@@ -3519,6 +3533,17 @@ export interface PendingApproval {
   description?: string
   blockedPath?: string
   decisionReason?: string
+  /**
+   * Approval lifecycle. Absent/"pending" = live (answerable). "interrupted" =
+   * the sidecar waiter died (turn aborted / session closed) and the tool was
+   * already denied — the entry stays so the UI can show an honest notice with
+   * a Dismiss action instead of silently dropping the dialog.
+   */
+  status?: "pending" | "interrupted"
+  /** Why the approval was interrupted (sidecar-provided reason). */
+  interruptReason?: string
+  /** Stamped by the store when the request arrives (feeds attention sorting). */
+  requestedAt?: number
 }
 
 // ---- Characters / Skills / Teams -----------------------------------------

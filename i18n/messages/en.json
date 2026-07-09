@@ -2936,7 +2936,7 @@
       "compactAria": "Compact",
       "compactStarted": "Context compaction started",
       "compactTooltip": "Compact the conversation context on the agent side",
-      "cwdFallbackHint": "Character default: {path}",
+      "cwdFallbackHint": "Falls back to: {path}",
       "cwdReset": "Reset",
       "debugMode": "Debug mode",
       "description": "Override defaults for this chat. Empty = use global.",
@@ -2955,6 +2955,7 @@
         "favorites": "Favorites",
         "other": "Other"
       },
+      "hideConversations": "Hide conversation list",
       "insights": "Session insights",
       "noApiKey": "No API key",
       "permissionModeAppDefault": "Use app default",
@@ -2997,6 +2998,7 @@
           "status": "Status"
         }
       },
+      "showConversations": "Show conversation list",
       "skills": {
         "aria": "Skills active in this session",
         "attachedInert": "Disabled for this session — won't be sent",
@@ -3478,7 +3480,9 @@
       "allowAlways": "Allow always",
       "allowOnce": "Allow once",
       "deny": "Deny",
+      "dismiss": "Dismiss",
       "inputLabel": "Input",
+      "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
       "titleFallback": "Allow {tool}?",
       "toolLabel": "Tool"
     },
@@ -4571,6 +4575,7 @@
       "network": "We couldn't reach the network. Check your connection and try again.",
       "offline": "You appear to be offline. We'll retry automatically once you're back online."
     },
+    "copied": "Copied",
     "copyErrorId": "Copy ID",
     "copyErrorIdSuccess": "Error ID copied",
     "description": "An unexpected error occurred. The technical details below can help diagnose the issue.",
@@ -4592,6 +4597,7 @@
     "exportCrashLog": "Export crash log",
     "exportCrashLogFailed": "Failed to export crash log",
     "exportCrashLogSuccess": "Crash log exported",
+    "exportedCrashLog": "Exported",
     "exportingCrashLog": "Exporting…",
     "globalDescription": "The application's main layout failed to load. Try recovering, or close the window using the title bar.",
     "globalTitle": "Cognia stopped working",
@@ -4867,6 +4873,29 @@
       "passAt1": "pass@1 {pct}%",
       "passHatK": "pass^{k} {pct}%"
     },
+    "scorerCatalog": {
+      "assertion": "Assertions",
+      "cost": "Cost",
+      "judge-instruction-following": "Instruction following (LLM judge)",
+      "judge-task-completion": "Task completion (LLM judge)",
+      "rag-answer-relevancy": "Answer relevancy",
+      "rag-context-precision": "Context precision",
+      "rag-context-recall": "Context recall",
+      "rag-faithfulness": "Faithfulness",
+      "tool-args": "Tool arguments",
+      "tool-order": "Tool order",
+      "tool-redundancy": "Tool redundancy",
+      "tool-selection": "Tool selection",
+      "trajectory-unordered": "Trajectory (unordered)"
+    },
+    "scorerPicker": {
+      "all": "All",
+      "groupCount": "{on}/{total}",
+      "llmBadge": "LLM",
+      "llmHint": "Runs an LLM judge",
+      "llmUnavailable": "Configure a judge model to enable this scorer",
+      "none": "None"
+    },
     "settings": {
       "costTitle": "Cost guard",
       "costWarnDescription": "Ask for confirmation before starting a run estimated to cost more than this.",
@@ -4876,9 +4905,13 @@
       "defaultScorersDescription": "Scorers pre-selected when you configure a new run.",
       "defaultScorersLabel": "Default scorers",
       "description": "Project-level defaults applied to every agent evaluation run.",
+      "deterministicActiveHint": "LLM-judged scorers are skipped — only deterministic checks run and the judge model is unused.",
       "deterministicDescription": "Skip LLM-judged scorers and run only deterministic checks.",
       "deterministicLabel": "Deterministic scorers only",
+      "gateActive": "Active",
       "gateDescription": "Thresholds stamped onto newly created datasets.",
+      "gateInactive": "Off",
+      "gateInconsistent": "Min pass^k should not exceed min pass@1 (pass^k ≤ pass@1).",
       "gateMaxCost": "Max total cost (USD)",
       "gateMinPassAt1": "Min pass@1",
       "gateMinPassHatK": "Min pass^k",
@@ -4892,6 +4925,9 @@
       "judgeTitle": "Judge",
       "openWorkspace": "Open workspace",
       "runTitle": "Run defaults",
+      "saved": "Saved",
+      "saving": "Saving…",
+      "scorersSelectedSummary": "{count} of {total} scorers selected",
       "title": "Eval settings"
     },
     "subtitle": "Datasets, scorers, and pass^k reliability for your built-in agents.",
@@ -10318,6 +10354,7 @@
     "console": {
       "hatch": "Hatch",
       "hatchPrompt": "Your egg is ready to hatch.",
+      "live2dFallback": "Live2D is unavailable right now — showing the built-in mascot.",
       "loading": "Waking up your pet…",
       "subtitle": "Raise it, dress it, grow together.",
       "tabs": {
@@ -10392,8 +10429,18 @@
         "description": "Bubbles, talking, and proactive chatter.",
         "title": "Interaction & speech"
       },
+      "live2dLook": {
+        "activeModel": "Active model",
+        "configure": "Adjust size & motion",
+        "mascotNote": "Color, hat, and eyes only restyle the built-in mascot — switch the skin to “Vector mascot” in Appearance to edit those.",
+        "noModel": "No Live2D model yet. Import one under Appearance below to bring it to life.",
+        "unavailable": {
+          "coreMissing": "The Live2D runtime isn't ready, so the built-in mascot is showing for now."
+        }
+      },
       "look": {
         "description": "Restyle your pet without changing who it is.",
+        "descriptionLive2d": "Preview and fine-tune your active Live2D model.",
         "title": "Look"
       },
       "openSettings": "Open full pet settings",
@@ -10401,6 +10448,12 @@
         "description": "Sound effects and quiet hours.",
         "title": "Sound"
       }
+    },
+    "dex": {
+      "live2dEmpty": "No Live2D models yet. Import one from Customize → Appearance to see it here.",
+      "live2dTitle": "My Live2D models",
+      "speciesTitle": "Built-in species",
+      "useMascot": "Use built-in mascot"
     },
     "inventory": {
       "title": "Items"
@@ -18669,9 +18722,17 @@
         "on": "On",
         "saveError": "Couldn't update built-in hooks: {detail}",
         "saved": "Built-in hooks updated.",
+        "summaryAria": "{enabled} of {total} enabled",
         "title": "Built-in hooks"
       },
+      "confirmSwitch": {
+        "cancel": "Keep editing",
+        "description": "You have unsaved hook edits in the current scope. Switching scope will discard them.",
+        "discard": "Discard & switch",
+        "title": "Discard unsaved changes?"
+      },
       "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
+      "eventListLabel": "Events",
       "fleet": {
         "claude": {
           "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
@@ -18719,6 +18780,7 @@
           "stale": "Modified",
           "unavailable": "Claude Code not found"
         },
+        "summaryAria": "{count} integrations active",
         "title": "Agent fleet monitor"
       },
       "group": {
@@ -18733,6 +18795,7 @@
       "handler": {
         "commandLabel": "Shell command",
         "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME ran\"",
+        "commandRequired": "Command can't be empty.",
         "headerKeyPlaceholder": "X-Custom",
         "headerRemoveAria": "Remove header",
         "headerValuePlaceholder": "value",
@@ -18745,10 +18808,14 @@
         "typeCommand": "Command",
         "typeLabel": "Type",
         "typeWebhook": "Webhook",
+        "urlInvalid": "Enter a valid http(s) URL.",
         "urlLabel": "URL",
-        "urlPlaceholder": "https://example.com/hook"
+        "urlPlaceholder": "https://example.com/hook",
+        "urlRequired": "URL is required.",
+        "webhookUnsupported": "Webhooks aren't executed by the desktop runtime yet — this handler is saved but won't fire."
       },
       "loadError": "Could not read settings: {detail}",
+      "loading": "Loading hooks…",
       "noGroupsForEvent": "No groups configured for {event}. Click \"Add group\" to attach a matcher.",
       "noTriggerBadge": "No trigger source yet",
       "noTriggerNote": "This event is recognised and saved, but the runtime has no trigger source for it yet — hooks configured here will not fire.",
@@ -18762,7 +18829,9 @@
         "project": "Project",
         "user": "User"
       },
-      "title": "Lifecycle hooks"
+      "summary": "{count, plural, one {# group} other {# groups}}",
+      "title": "Lifecycle hooks",
+      "unsaved": "Unsaved changes"
     },
     "instructions": {
       "description": "Load on-disk instruction files (CLAUDE.md / AGENTS.md / AGENT.md) from the active workspace into the agent's system prompt, with nested directory discovery and @import expansion.",
@@ -19210,6 +19279,7 @@
         "import": "Import model",
         "importFolder": "Import folder",
         "importHint": "Choose a model folder or a .zip containing a .model3.json.",
+        "noModelHint": "Pick a model below to start using it — until then the pet stays on the vector mascot.",
         "noModels": "No Live2D models yet. Import one or download a sample.",
         "oneShotLabels": {
           "evolving": "Evolution",
@@ -22536,6 +22606,37 @@
     }
   },
   "twin": {
+    "addSource": {
+      "added": "Added {count, plural, =1 {1 source} other {# sources}}.",
+      "adding": "Adding…",
+      "back": "Back",
+      "charCount": "{count} chars",
+      "confirmAdd": "Add {count, plural, =1 {1 source} other {# sources}}",
+      "description": "Choose where the content comes from, preview what was extracted, then confirm.",
+      "extract": "Fetch & preview",
+      "extracting": "Extracting…",
+      "includeAria": "Include {title}",
+      "pickTypeLabel": "Source type",
+      "reviewTitle": "Review before adding",
+      "selectedCount": "{selected} of {count} selected",
+      "skippedFiles": "Some files were skipped",
+      "switchToLark": "Fetch it as a Feishu doc instead",
+      "title": "Add sources",
+      "type": {
+        "file": "Files",
+        "git": "Git repository",
+        "lark": "Feishu doc",
+        "paste": "Paste text",
+        "url": "Web page"
+      },
+      "typeDesc": {
+        "file": "Documents, spreadsheets, chat exports, mailboxes…",
+        "git": "Import commits from a local repository (desktop only).",
+        "lark": "A Feishu doc or wiki page, read with a bound account.",
+        "paste": "Paste any text snippet directly.",
+        "url": "Fetch an article or docs page by URL."
+      }
+    },
     "charts": {
       "description": "Live indexing stats — refreshes as ingest jobs complete in any tab.",
       "growthChunks": "Chunks",
@@ -22676,7 +22777,12 @@
       "title": "Digital twin",
       "twinDeleted": "Deleted \"{name}\" and all its data.",
       "workerActive": "worker ● active",
-      "workerIdle": "worker ○ idle"
+      "workerIdle": "worker ○ idle",
+      "workerStatus": {
+        "disabled": "Background worker is disabled in settings",
+        "incompleteConfig": "Worker configuration is incomplete",
+        "noTwinSelected": "No twin selected"
+      }
     },
     "persona": {
       "actions": {
@@ -22880,8 +22986,20 @@
         "dingTalkParseFailedFallback": "Failed to parse DingTalk export (fallback parser also rejected it)",
         "fileEmpty": "File is empty",
         "formatUnsupported": "Unsupported file format",
+        "gitWalkFailed": "Could not walk the repository: {reason}",
         "importParseFailed": "Failed to parse export",
         "importParseFailedFallback": "Failed to parse export (fallback parser also rejected it)",
+        "larkBrowserUnsupported": "Feishu docs can only be fetched in the desktop app (the browser blocks cross-origin requests).",
+        "larkCliUnavailable": "lark-cli is not available in this environment.",
+        "larkEmptyDoc": "The document {title} has no readable text.",
+        "larkInvalidUrl": "This does not look like a Feishu/Lark doc link or token.",
+        "larkNetwork": "Feishu request failed: {reason}",
+        "larkNoAccount": "No Feishu account selected. Bind one in Settings → Connections first.",
+        "larkNoPermission": "The account {account} has no permission to read this document. Ask for access, or complete the user authorization in Settings → Connections.",
+        "larkNotAuthorized": "The Feishu account {account} is missing credentials. Re-authorize it in Settings → Connections.",
+        "larkNotFound": "Document not found — it may have been deleted, or the link is wrong.",
+        "larkRateLimited": "Feishu rate limit hit — wait a moment and try again.",
+        "larkUnsupportedType": "This link points to a {type} object; only docs and wiki pages are supported for now.",
         "noCommitsFound": "No commits found in the selected repository",
         "noMessagesParsed": "No messages parsed",
         "noTextExtracted": "No text could be extracted",
@@ -22903,6 +23021,20 @@
       "gitRepoTitle": "From a local Git repository",
       "importedSummaryPlural": "Imported {count} sources.",
       "importedSummarySingular": "Imported 1 source.",
+      "lark": {
+        "accountLabel": "Feishu account",
+        "accountPlaceholder": "Choose an account",
+        "appOnlyHint": "This account has no connected user — documents will be read with the bot identity, which usually sees fewer docs. Complete the user authorization for personal permissions.",
+        "browserModeHint": "Feishu fetching requires the desktop app.",
+        "detectedDoc": "Feishu doc link detected",
+        "detectedWiki": "Feishu wiki link detected",
+        "goBind": "Bind one in Settings → Connections",
+        "loadingAccounts": "Loading bound accounts…",
+        "noAccounts": "No Feishu account is bound yet.",
+        "sectionDescription": "Fetch a Feishu doc or wiki page with one of your bound Feishu accounts.",
+        "urlLabel": "Doc link or token",
+        "urlPlaceholder": "https://xxx.feishu.cn/docx/… or doxcn…"
+      },
       "maxCommits": "Max commits",
       "pasteTitle": "Or paste text",
       "perFileSrcPlural": "{count} srcs",
@@ -23005,6 +23137,7 @@
       "notReadyHint": "Set the embedding provider, vector store, and distill LLM in Settings before sources can be ingested.",
       "notReadyTitle": "Runtime not configured yet",
       "openSettings": "Open twin settings",
+      "pickColor": "Pick accent color {color}",
       "queueDistill": "Distill after ingest",
       "queueDistillHint": "Extract style, playbooks, and entities into the persona.",
       "queueError": "Could not queue jobs: {reason}",
@@ -27617,14 +27750,18 @@
     },
     "switcher": {
       "active": "Active workspace: {name}",
+      "allHeading": "All",
+      "clearSearch": "Clear search",
       "empty": "No workspaces yet",
       "folderCount": "{count, plural, one {# folder} other {# folders}}",
       "heading": "Workspaces",
       "manage": "Manage workspaces",
       "newWorkspace": "New workspace",
+      "noMatches": "No matching workspaces",
       "none": "No active workspace",
       "openFolder": "Open folder…",
       "recentHeading": "Recent",
+      "searchPlaceholder": "Search workspaces…",
       "untrustedHint": "Untrusted workspace"
     }
   }

@@ -224,6 +224,77 @@ describe("useChatStore", () => {
       expect(result.current.status).toBe("error")
     })
 
+    it("pushApproval stamps requestedAt on the stored entry", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.pushApproval(approval("r1")))
+      expect(typeof result.current.pendingApprovals[0].requestedAt).toBe("number")
+    })
+
+    it("markApprovalInterrupted flags the entry, keeps it, and restores streaming", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.pushApproval(approval("r1")))
+      expect(result.current.status).toBe("awaiting_approval")
+      act(() => result.current.markApprovalInterrupted("r1", "s1", "aborted"))
+      const entry = result.current.pendingApprovals[0]
+      expect(entry.status).toBe("interrupted")
+      expect(entry.interruptReason).toBe("aborted")
+      // The entry stays for the Dismiss affordance, but the slice is no longer
+      // blocked on an unanswerable dialog.
+      expect(result.current.status).toBe("streaming")
+    })
+
+    it("markApprovalInterrupted keeps awaiting_approval while a live approval remains", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.pushApproval(approval("dead"))
+        result.current.pushApproval(approval("live"))
+      })
+      act(() => result.current.markApprovalInterrupted("dead", "s1"))
+      expect(result.current.status).toBe("awaiting_approval")
+      expect(result.current.pendingApprovals.map((a) => a.status)).toEqual([
+        "interrupted",
+        undefined,
+      ])
+    })
+
+    it("markApprovalInterrupted locates the slice by scan when sessionId is omitted", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.pushApproval({ ...approval("bg"), sessionId: "s2" }))
+      act(() => result.current.markApprovalInterrupted("bg"))
+      expect(result.current.sessions.s2.pendingApprovals[0].status).toBe("interrupted")
+    })
+
+    it("markApprovalInterrupted re-buckets a team sub-session id to the parent slice", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() =>
+        result.current.pushApproval({ ...approval("t1"), sessionId: "team-9::char::alice::t" })
+      )
+      act(() =>
+        result.current.markApprovalInterrupted("t1", "team-9::char::alice::t", "session closed")
+      )
+      expect(result.current.sessions["team-9"].pendingApprovals[0].status).toBe("interrupted")
+    })
+
+    it("markApprovalInterrupted is a no-op for unknown ids and already-interrupted entries", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.pushApproval(approval("r1")))
+      const before = useChatStore.getState()
+      act(() => result.current.markApprovalInterrupted("ghost", "s1"))
+      expect(useChatStore.getState().sessions.s1).toBe(before.sessions.s1)
+      act(() => result.current.markApprovalInterrupted("r1", "s1"))
+      const flagged = useChatStore.getState().sessions.s1
+      act(() => result.current.markApprovalInterrupted("r1", "s1"))
+      expect(useChatStore.getState().sessions.s1).toBe(flagged)
+    })
+
+    it("clearApproval dismisses an interrupted entry", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.pushApproval(approval("r1")))
+      act(() => result.current.markApprovalInterrupted("r1", "s1"))
+      act(() => result.current.clearApproval("r1"))
+      expect(result.current.pendingApprovals).toEqual([])
+    })
+
     it("clearApproval is a no-op for an unknown id", () => {
       const { result } = renderHook(() => useChatStore())
       act(() => result.current.pushApproval(approval("real")))

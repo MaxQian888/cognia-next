@@ -64,11 +64,17 @@ function PaneApprovalGate({
   ) => Promise<void> | void
 }) {
   const approvals = useSessionPendingApprovals(sessionId)
-  const approval = approvals[0] ?? null
+  // Prefer the first LIVE approval — a fresh answerable request must never be
+  // hidden behind a stale interrupted notice. Interrupted entries surface only
+  // when nothing is answerable (Dismiss-only card in the dialog).
+  const approval = approvals.find((a) => a.status !== "interrupted") ?? approvals[0] ?? null
   return (
     <ToolApprovalDialog
       approval={approval}
       onRespond={(decision) => onRespond(approval!, decision)}
+      onDismiss={() =>
+        approval && useChatStore.getState().clearApproval(approval.requestId, sessionId)
+      }
     />
   )
 }
