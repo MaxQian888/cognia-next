@@ -533,5 +533,36 @@
     "templateSelfHint": "复刻我自己的口吻与知识。",
     "title": "创建数字孪生",
     "workerEnabled": "工作器已启用"
+  },
+  "addSource": {
+    "title": "添加来源",
+    "description": "选择内容来源，预览提取结果，确认后再入库。",
+    "pickTypeLabel": "来源类型",
+    "type": {
+      "file": "文件",
+      "url": "网页",
+      "lark": "飞书文档",
+      "paste": "粘贴文本",
+      "git": "Git 仓库"
+    },
+    "typeDesc": {
+      "file": "文档、表格、聊天记录导出、邮箱文件……",
+      "url": "按 URL 抓取文章或文档页面。",
+      "lark": "使用已绑定账号读取飞书文档或知识库页面。",
+      "paste": "直接粘贴任意文本片段。",
+      "git": "从本地仓库导入提交记录（仅桌面端）。"
+    },
+    "back": "返回",
+    "extract": "抓取并预览",
+    "extracting": "提取中…",
+    "switchToLark": "改用飞书文档方式抓取",
+    "reviewTitle": "入库前确认",
+    "selectedCount": "已选 {selected} / {count}",
+    "skippedFiles": "部分文件被跳过",
+    "includeAria": "包含 {title}",
+    "charCount": "{count} 字符",
+    "confirmAdd": "添加 {count} 个来源",
+    "adding": "添加中…",
+    "added": "已添加 {count} 个来源。"
   }
 }

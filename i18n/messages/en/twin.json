@@ -533,5 +533,36 @@
     "templateSelfHint": "A twin of my own voice and knowledge.",
     "title": "Create a digital twin",
     "workerEnabled": "Worker enabled"
+  },
+  "addSource": {
+    "title": "Add sources",
+    "description": "Choose where the content comes from, preview what was extracted, then confirm.",
+    "pickTypeLabel": "Source type",
+    "type": {
+      "file": "Files",
+      "url": "Web page",
+      "lark": "Feishu doc",
+      "paste": "Paste text",
+      "git": "Git repository"
+    },
+    "typeDesc": {
+      "file": "Documents, spreadsheets, chat exports, mailboxes…",
+      "url": "Fetch an article or docs page by URL.",
+      "lark": "A Feishu doc or wiki page, read with a bound account.",
+      "paste": "Paste any text snippet directly.",
+      "git": "Import commits from a local repository (desktop only)."
+    },
+    "back": "Back",
+    "extract": "Fetch & preview",
+    "extracting": "Extracting…",
+    "switchToLark": "Fetch it as a Feishu doc instead",
+    "reviewTitle": "Review before adding",
+    "selectedCount": "{selected} of {count} selected",
+    "skippedFiles": "Some files were skipped",
+    "includeAria": "Include {title}",
+    "charCount": "{count} chars",
+    "confirmAdd": "Add {count, plural, =1 {1 source} other {# sources}}",
+    "adding": "Adding…",
+    "added": "Added {count, plural, =1 {1 source} other {# sources}}."
   }
 }

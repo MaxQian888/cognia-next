@@ -88,12 +88,14 @@ describe("TwinSourcesTab", () => {
     expect(statusBadge.getAttribute("data-variant")).toBe("default")
   })
 
-  it("toggles the uploader when 'Add source' is clicked", async () => {
+  it("opens the add-source dialog when 'Add source' is clicked", async () => {
     render(<TwinSourcesTab twinId="twin_alice" />)
-    const trigger = await screen.findByRole("button", { name: /Add source/i })
-    expect(screen.queryByLabelText(/Pick text files/i)).toBeNull()
+    const trigger = await screen.findByTestId("twin-sources-add")
+    expect(screen.queryByTestId("twin-add-source-flow")).toBeNull()
     await userEvent.click(trigger)
-    expect(await screen.findByLabelText(/Pick text files/i)).toBeInTheDocument()
+    expect(await screen.findByTestId("twin-add-source-flow")).toBeInTheDocument()
+    // Guided flow starts at the type picker.
+    expect(screen.getByTestId("twin-add-source-type-file")).toBeInTheDocument()
   })
 
   it("highlights the row matching ?sourceId on mount", async () => {

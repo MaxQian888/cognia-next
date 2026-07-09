@@ -23,7 +23,7 @@ import { StatusBadge } from "@/components/status-badge"
 import { listTwinSourcesByTwin, deleteTwinSource } from "@/lib/db/twin-sources"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import type { TwinSource, TwinSourceStatus } from "@/types/twin"
-import { TwinSourceUploader } from "./twin-source-uploader"
+import { TwinAddSourceDialog } from "./add-source/add-source-dialog"
 import { TwinSourcePreviewDialog } from "./twin-source-preview-dialog"
 
 const STATUS_VARIANT: Record<
@@ -119,14 +119,17 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">{t("headerCount", { count: sources.length })}</h2>
-        <Button size="sm" onClick={() => setShowUploader((v) => !v)}>
-          {showUploader ? t("cancelAdd") : t("addSource")}
+        <Button size="sm" onClick={() => setShowUploader(true)} data-testid="twin-sources-add">
+          {t("addSource")}
         </Button>
       </div>
 
-      {showUploader ? (
-        <TwinSourceUploader twinId={twinId} onUploaded={() => setShowUploader(false)} />
-      ) : null}
+      <TwinAddSourceDialog
+        twinId={twinId}
+        open={showUploader}
+        onOpenChange={setShowUploader}
+        onAdded={() => setShowUploader(false)}
+      />
 
       {pendingSources.length > 0 ? (
         <Card className="flex flex-wrap items-center justify-between gap-2 border-primary/40 bg-primary/5 p-3">

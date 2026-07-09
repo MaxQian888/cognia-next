@@ -11,7 +11,7 @@
  *   1. **Identity**   — purpose template + name / color / description →
  *                        `createTwin` writes the registry row (later steps
  *                        write against the new twinId).
- *   2. **Sources**    — embeds the existing `TwinSourceUploader`; optional.
+ *   2. **Sources**    — embeds the guided `AddSourceFlow`; optional.
  *   3. **Runtime**    — readiness check via `buildTwinWorkerConfig`; deep-links
  *                        to Settings and offers to flip the worker on.
  *   4. **Character**  — optionally create a new character or bind an existing
@@ -43,6 +43,7 @@ import { Switch } from "@/components/ui/switch"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { cn } from "@/lib/utils"
+import { COLOR_PALETTE } from "@/components/settings/presets/editor-sections/constants"
 import { createTwin, updateTwin } from "@/lib/db/twins"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import { observeTwinRuntimeSettings, saveTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
@@ -50,7 +51,7 @@ import { listCharacters, createCharacter, updateCharacter } from "@/lib/db/chara
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { enqueueDistillJob } from "@/lib/twin/distill"
 import { DEFAULT_TWIN_SETTINGS, type Twin } from "@/types/twin"
-import { TwinSourceUploader } from "./twin-source-uploader"
+import { AddSourceFlow } from "./add-source/add-source-flow"
 import { isTwinWorkerConfigComplete } from "./use-twin-worker"
 
 const TOTAL_STEPS = 5
@@ -340,18 +341,30 @@ export function TwinCreationWizard({ open, onOpenChange, onCreated }: TwinCreati
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="twin-wizard-color">{t("colorLabel")}</Label>
-              <div className="flex items-center gap-2">
-                <input
-                  id="twin-wizard-color"
-                  type="color"
-                  aria-label={t("colorLabel")}
-                  value={toHex(color)}
-                  onChange={(e) => setColor(e.target.value)}
-                  className="h-8 w-12 cursor-pointer rounded border border-input bg-transparent"
-                  disabled={creating}
-                />
-                <code className="text-muted-foreground font-mono text-xs">{color}</code>
+              <Label id="twin-wizard-color">{t("colorLabel")}</Label>
+              <div
+                className="flex flex-wrap items-center gap-2"
+                role="group"
+                aria-labelledby="twin-wizard-color"
+              >
+                {COLOR_PALETTE.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setColor(c)}
+                    disabled={creating}
+                    className="size-6 rounded-full ring-1 ring-border transition-transform hover:scale-110 disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{
+                      background: c,
+                      outline: color === c ? "2px solid var(--ring)" : undefined,
+                      outlineOffset: 2,
+                    }}
+                    aria-label={t("pickColor", { color: c })}
+                    aria-pressed={color === c}
+                    data-testid={`twin-wizard-color-${c}`}
+                  />
+                ))}
+                <code className="text-muted-foreground ml-1 font-mono text-xs">{color}</code>
               </div>
             </div>
 
@@ -378,7 +391,7 @@ export function TwinCreationWizard({ open, onOpenChange, onCreated }: TwinCreati
         {step === 2 && twin ? (
           <section className="flex flex-col gap-3">
             <p className="text-muted-foreground text-sm">{t("step2Description")}</p>
-            <TwinSourceUploader twinId={twin.id} />
+            <AddSourceFlow twinId={twin.id} />
             <p className="text-sm font-medium" data-testid="twin-wizard-sources-count">
               {t("sourcesCount", { count: sources.length })}
             </p>
@@ -669,13 +682,4 @@ export function TwinCreationWizard({ open, onOpenChange, onCreated }: TwinCreati
 
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
-}
-
-/**
- * `<input type="color">` only accepts `#rrggbb`. Twin colors may be oklch or
- * arbitrary CSS — fall back to a neutral swatch so the picker still renders
- * (the real value is preserved in state and shown as a code string).
- */
-function toHex(color: string): string {
-  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#6366f1"
 }

@@ -9,15 +9,15 @@ import "fake-indexeddb/auto"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-// The real uploader pulls in document processors + chat importers. Stub it to
-// a button that registers one pending source for the twin under test.
-jest.mock("./twin-source-uploader", () => {
+// The real add-source flow pulls in document processors + chat importers.
+// Stub it to a button that registers one pending source for the twin under test.
+jest.mock("./add-source/add-source-flow", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const React = require("react")
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { createTwinSource } = require("@/lib/db/twin-sources")
   return {
-    TwinSourceUploader: ({ twinId }: { twinId: string }) =>
+    AddSourceFlow: ({ twinId }: { twinId: string }) =>
       React.createElement(
         "button",
         {
