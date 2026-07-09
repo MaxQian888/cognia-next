@@ -579,6 +579,8 @@
         "resetSelected": "仅重置选中的 teammate",
         "title": "所有 teammate 被熔断"
       },
+      "dismissStale": "关闭",
+      "interruptedNotice": "该审批门在页面重载时被中断——运行可能已停滞。重新打开或重跑任务可再次触发。",
       "plan": {
         "body": "请审阅 lead 提出的方案。",
         "title": "等待方案审批"
@@ -13065,6 +13067,10 @@
       "ccswitchHintBody": "如果你正在用 CCSwitch 管理多家 Anthropic 兼容服务商（Kimi、DeepSeek、Qwen…），可以将它们导入 cognia-next 并一键切换。",
       "ccswitchHintTitle": "需要切换服务商？",
       "keyOptional": "下方的 API Key 为可选,仅用于覆盖订阅令牌。",
+      "localLoginAction": "一键复用",
+      "localLoginBody": "本机的 Claude Code CLI 已登录。一键即可在此复用该订阅，无需再次登录。",
+      "localLoginBodyPlan": "本机的 Claude Code CLI 已登录（{plan} 订阅）。一键即可在此复用该订阅，无需再次登录。",
+      "localLoginTitle": "检测到本机 Claude Code 登录",
       "manage": "在订阅中管理",
       "privacyBody": "密钥以明文形式保存在浏览器的 IndexedDB 中。任何能访问你用户目录磁盘的人都能读取。后续版本会迁移到系统钥匙串。",
       "privacyTitle": "隐私提示",
@@ -22010,6 +22016,10 @@
           "description": "通过 console.anthropic.com 授权。使用计费 API 额度。",
           "label": "Console（API 计费）"
         },
+        "reuse": {
+          "description": "直接复用本机 Claude Code CLI 的订阅登录。只读操作——我们不会写回其凭据文件。",
+          "label": "复用 Claude Code 登录"
+        },
         "subscription": {
           "description": "通过 claude.ai 授权。使用订阅的 5 小时 / 7 天滚动配额。",
           "label": "订阅（Pro / Max）"
@@ -22017,6 +22027,19 @@
       },
       "pasteHint": "如果页面没有自动打开，请点击下方链接。授权后把页面显示的 code 或完整 URL 复制粘贴到下面。",
       "reopenLink": "重新打开授权页",
+      "reuse": {
+        "adopt": "复用此登录",
+        "credentialsPath": "凭据路径",
+        "expiresAt": "令牌过期时间",
+        "noneFound": "本机未检测到 Claude Code 登录。请先运行 `claude` 并登录，或改用下方的 OAuth 流程。",
+        "notAdoptable": "该登录缺少令牌对——请运行 `claude login` 刷新后重新扫描。",
+        "plan": "订阅计划",
+        "rescan": "重新扫描",
+        "scanning": "正在查找本机 Claude Code 登录…",
+        "sourceFile": "~/.claude/.credentials.json",
+        "sourceKeyring": "Claude Code 系统钥匙串条目",
+        "sourceLabel": "来源"
+      },
       "title": "登录 Claude"
     },
     "migration": {

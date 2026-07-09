@@ -20,6 +20,8 @@
       "resetSelected": "仅重置选中的 teammate",
       "title": "所有 teammate 被熔断"
     },
+    "dismissStale": "关闭",
+    "interruptedNotice": "该审批门在页面重载时被中断——运行可能已停滞。重新打开或重跑任务可再次触发。",
     "plan": {
       "body": "请审阅 lead 提出的方案。",
       "title": "等待方案审批"

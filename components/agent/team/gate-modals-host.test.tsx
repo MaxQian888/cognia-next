@@ -120,3 +120,35 @@ describe("GateModalsHost", () => {
     expect(approveMock).toHaveBeenCalledWith({ scope: "agent-team-replan", id: "run-1" }, undefined)
   })
 })
+
+describe("GateModalsHost — interrupted (restored) gates", () => {
+  it("renders a Dismiss-only stale card, never Approve/Reject", () => {
+    renderHost()
+    openGate()
+    act(() => {
+      usePendingGatesStore.setState((s) => ({
+        gates: s.gates.map((g) => ({ ...g, status: "interrupted" as const })),
+      }))
+    })
+    expect(screen.getByTestId("stale-gate-card")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /approve/i })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }))
+    // Dismiss removes the store entry WITHOUT resolving the approval bus.
+    expect(usePendingGatesStore.getState().gates).toHaveLength(0)
+    expect(approveMock).not.toHaveBeenCalled()
+    expect(rejectMock).not.toHaveBeenCalled()
+  })
+
+  it("a re-fired gate replaces the stale card with a live dialog", () => {
+    renderHost()
+    openGate()
+    act(() => {
+      usePendingGatesStore.setState((s) => ({
+        gates: s.gates.map((g) => ({ ...g, status: "interrupted" as const })),
+      }))
+    })
+    expect(screen.getByTestId("stale-gate-card")).toBeInTheDocument()
+    openGate({ title: "Budget again" })
+    expect(screen.queryByTestId("stale-gate-card")).toBeNull()
+  })
+})

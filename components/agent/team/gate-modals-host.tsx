@@ -16,10 +16,20 @@
  */
 
 import { useMemo } from "react"
+import { useTranslations } from "next-intl"
 import { usePendingGatesStore, type PendingGate } from "@/stores/agent/pending-gates-store"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { ApprovalGateDialog } from "./approval-gate-dialog"
 import { useApprovalGate } from "./use-approval-gate"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 export function GateModalsHost(): React.ReactElement | null {
   const gates = usePendingGatesStore((s) => s.gates)
@@ -41,6 +51,7 @@ export function GateModalsHost(): React.ReactElement | null {
 function GateModalItem({ gate }: { gate: PendingGate }): React.ReactElement {
   const { approve, reject } = useApprovalGate(gate.key.scope, gate.key.id)
   const close = usePendingGatesStore((s) => s.close)
+  const t = useTranslations("agentTeam.approvalGate")
 
   // The deadlock gate fires when ALL teammates are unavailable, so every
   // teammate on the team is a valid reset candidate. Other gate types don't
@@ -65,6 +76,30 @@ function GateModalItem({ gate }: { gate: PendingGate }): React.ReactElement {
   const rejectAndClose = (feedback?: string): void => {
     reject(feedback)
     close(gate.key)
+  }
+
+  // Restored-from-persistence gate: the approval-bus waiter died with the
+  // previous page, so Approve/Reject would resolve into the void. Render an
+  // honest stale card whose only action is Dismiss (store removal only, no
+  // bus resolution); a re-fired gate replaces this entry via `open()` and
+  // becomes answerable again. Placed after every hook call (rules of hooks).
+  if (gate.status === "interrupted") {
+    return (
+      <Dialog open>
+        <DialogContent showCloseButton={false} data-testid="stale-gate-card">
+          <DialogHeader>
+            <DialogTitle>{gate.title}</DialogTitle>
+            <DialogDescription>{t("interruptedNotice")}</DialogDescription>
+          </DialogHeader>
+          {gate.body && <p className="text-sm text-muted-foreground">{gate.body}</p>}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => close(gate.key)}>
+              {t("dismissStale")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
   }
 
   return (

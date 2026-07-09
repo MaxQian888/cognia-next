@@ -579,6 +579,8 @@
         "resetSelected": "Reset selected teammates",
         "title": "All teammates unavailable"
       },
+      "dismissStale": "Dismiss",
+      "interruptedNotice": "This gate was interrupted by a reload — the run may be stalled. Reopen or rerun the task to trigger it again.",
       "plan": {
         "body": "Review the lead's proposed plan.",
         "title": "Plan awaiting approval"
@@ -13065,6 +13067,10 @@
       "ccswitchHintBody": "If you use CCSwitch to manage multiple Anthropic-compatible providers (Kimi, DeepSeek, Qwen, …), import them into cognia-next and hot-swap with one click.",
       "ccswitchHintTitle": "Switching providers?",
       "keyOptional": "Any API key below is optional and only overrides the subscription token.",
+      "localLoginAction": "Reuse login",
+      "localLoginBody": "This machine's Claude Code CLI is already signed in. Reuse that subscription here with one click — no need to sign in again.",
+      "localLoginBodyPlan": "This machine's Claude Code CLI is already signed in ({plan} plan). Reuse that subscription here with one click — no need to sign in again.",
+      "localLoginTitle": "Local Claude Code login detected",
       "manage": "Manage in Subscription",
       "privacyBody": "The key is stored as plaintext in your browser's IndexedDB. Anyone with disk access to your user profile can read it. A future release will move this into your OS keyring.",
       "privacyTitle": "Privacy note",
@@ -22010,6 +22016,10 @@
           "description": "Authorize via console.anthropic.com. Uses your billed API credits.",
           "label": "Console (API billing)"
         },
+        "reuse": {
+          "description": "Adopt the subscription login from this machine's Claude Code CLI. Read-only — we never write back.",
+          "label": "Reuse Claude Code login"
+        },
         "subscription": {
           "description": "Authorize via claude.ai. Uses your subscription's 5h / 7d rolling quota.",
           "label": "Subscription (Pro / Max)"
@@ -22017,6 +22027,19 @@
       },
       "pasteHint": "If the page didn't open automatically, click the link below. After authorizing, copy the code or the full callback URL into the box.",
       "reopenLink": "Re-open authorization page",
+      "reuse": {
+        "adopt": "Adopt this login",
+        "credentialsPath": "Credentials path",
+        "expiresAt": "Token expires",
+        "noneFound": "No Claude Code login found on this machine. Run `claude` and sign in, or use the OAuth flow below.",
+        "notAdoptable": "This login is missing its token pair — run `claude login` to refresh it, then re-scan.",
+        "plan": "Plan",
+        "rescan": "Re-scan",
+        "scanning": "Looking for a local Claude Code login…",
+        "sourceFile": "~/.claude/.credentials.json",
+        "sourceKeyring": "Claude Code OS keyring entry",
+        "sourceLabel": "Source"
+      },
       "title": "Sign in with Claude"
     },
     "migration": {
