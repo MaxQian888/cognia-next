@@ -23,9 +23,11 @@ interface Props {
   value: HookGroup
   onChange: (next: HookGroup) => void
   onRemove: () => void
+  /** Focus the matcher input on mount — set for a freshly added group. */
+  autoFocus?: boolean
 }
 
-export function HookGroupEditor({ value, onChange, onRemove }: Props) {
+export function HookGroupEditor({ value, onChange, onRemove, autoFocus }: Props) {
   const t = useTranslations("settings.hooks.group")
 
   const matcherError = useMemo(() => validateMatcher(value.matcher), [value.matcher])
@@ -57,6 +59,7 @@ export function HookGroupEditor({ value, onChange, onRemove }: Props) {
             placeholder={t("matcherPlaceholder")}
             className="font-mono text-xs"
             aria-invalid={Boolean(matcherError)}
+            autoFocus={autoFocus}
             data-testid="group-matcher"
           />
           <p className="text-[11px] text-muted-foreground">{t("matcherHint")}</p>

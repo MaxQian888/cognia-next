@@ -33,12 +33,18 @@ beforeEach(() => {
   mockWriteUser.mockResolvedValue({ path: "/home/.claude/settings.json" })
 })
 
+// The switch list is collapsed by default; expand it before touching switches.
+function expand() {
+  fireEvent.click(screen.getByTestId("builtin-hooks-toggle"))
+}
+
 describe("BuiltinHooksCard", () => {
   it("renders a switch for every built-in hook reflecting defaultEnabled", async () => {
     render(<BuiltinHooksCard />)
     await waitFor(() => {
       expect(screen.getByTestId("builtin-hooks-card")).toBeInTheDocument()
     })
+    expand()
     for (const def of BUILTIN_HOOKS) {
       const sw = screen.getByTestId(`builtin-hook-switch-${def.id}`)
       // Radix Switch reflects checked via data-state / aria-checked
@@ -47,9 +53,38 @@ describe("BuiltinHooksCard", () => {
     }
   })
 
+  it("keeps the switch list collapsed until the header is toggled", async () => {
+    render(<BuiltinHooksCard />)
+    await waitFor(() => expect(screen.getByTestId("builtin-hooks-card")).toBeInTheDocument())
+    expect(screen.queryByTestId("builtin-hook-switch-cost-quota-guard")).toBeNull()
+    expand()
+    expect(screen.getByTestId("builtin-hook-switch-cost-quota-guard")).toBeInTheDocument()
+  })
+
+  it("defaults to empty overrides when the user settings read returns null", async () => {
+    mockReadUser.mockResolvedValue(null)
+    render(<BuiltinHooksCard />)
+    await waitFor(() =>
+      expect(screen.getByTestId("builtin-hooks-card")).toHaveAttribute("data-loaded", "true")
+    )
+    expand()
+    for (const def of BUILTIN_HOOKS) {
+      const sw = screen.getByTestId(`builtin-hook-switch-${def.id}`)
+      expect(sw.getAttribute("aria-checked") === "true").toBe(isBuiltinHookEnabled(def, {}))
+    }
+  })
+
+  it("shows a summary badge with the enabled count", async () => {
+    render(<BuiltinHooksCard />)
+    await waitFor(() => expect(screen.getByTestId("builtin-hooks-card")).toBeInTheDocument())
+    const enabled = BUILTIN_HOOKS.filter((d) => isBuiltinHookEnabled(d, {})).length
+    expect(screen.getByText(`${enabled}/${BUILTIN_HOOKS.length}`)).toBeInTheDocument()
+  })
+
   it("reflects existing builtinHookOverrides from user settings", async () => {
     mockReadUser.mockResolvedValue({ builtinHookOverrides: { "auto-context-loader": false } })
     render(<BuiltinHooksCard />)
+    expand()
     await waitFor(() => {
       const sw = screen.getByTestId("builtin-hook-switch-auto-context-loader")
       expect(sw.getAttribute("aria-checked")).toBe("false")
@@ -63,6 +98,7 @@ describe("BuiltinHooksCard", () => {
     await waitFor(() =>
       expect(screen.getByTestId("builtin-hooks-card")).toHaveAttribute("data-loaded", "true")
     )
+    expand()
     const sw = screen.getByTestId("builtin-hook-switch-cost-quota-guard")
     fireEvent.click(sw)
     await waitFor(() => expect(mockWriteUser).toHaveBeenCalledTimes(1))
@@ -76,6 +112,7 @@ describe("BuiltinHooksCard", () => {
     mockReadUser.mockResolvedValue({})
     mockWriteUser.mockRejectedValue(new Error("disk full"))
     render(<BuiltinHooksCard />)
+    expand()
     const sw = await screen.findByTestId("builtin-hook-switch-pii-safety-guard")
     fireEvent.click(sw)
     await waitFor(() => expect(toastError).toHaveBeenCalled())

@@ -6,6 +6,30 @@ import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { HooksSection } from "./hooks-section"
 
+// The command field renders the shared CodeMirror `LightCodeEditor`, which
+// measures the DOM and crashes under jsdom. Swap it for a plain textarea with
+// the same value/onChange(string)/data-testid contract.
+jest.mock("@/components/editor/light-code-editor", () => ({
+  LightCodeEditor: ({
+    value,
+    onChange,
+    "data-testid": testId,
+    "aria-label": ariaLabel,
+  }: {
+    value: string
+    onChange: (next: string) => void
+    "data-testid"?: string
+    "aria-label"?: string
+  }) => (
+    <textarea
+      data-testid={testId}
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}))
+
 // Radix Tabs uses pointer events that jsdom doesn't fully simulate; replace
 // the primitives with plain buttons so click() flips the active tab. Mirrors
 // the pattern in `components/settings/provider/provider-settings.test.tsx`.
@@ -206,6 +230,26 @@ describe("HooksSection — editing + save", () => {
     expect(mockWriteProject.mock.calls[0][0]).toBe("/repo")
   })
 
+  it("save uses the local writer with the cwd when scope is local", async () => {
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    mockReadLocal.mockResolvedValue({ hooks: {} })
+    mockWriteLocal.mockResolvedValue({
+      path: "/repo/.claude/settings.local.json",
+      backupPath: null,
+    })
+    render(<HooksSection cwd="/repo" />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByTestId("scope-local"))
+    await waitFor(() => expect(mockReadLocal).toHaveBeenCalledWith("/repo"))
+
+    fireEvent.click(screen.getByTestId("hooks-add-group"))
+    await waitFor(() => expect(screen.getByTestId("hooks-save")).not.toBeDisabled())
+    fireEvent.click(screen.getByTestId("hooks-save"))
+    await waitFor(() => expect(mockWriteLocal).toHaveBeenCalled())
+    expect(mockWriteLocal.mock.calls[0][0]).toBe("/repo")
+  })
+
   it("save remains disabled when a group has invalid matcher regex", async () => {
     mockReadUser.mockResolvedValue({
       hooks: { PreToolUse: [{ matcher: "[bad", hooks: [] }] },
@@ -334,5 +378,87 @@ describe("HooksSection — URL-driven event tab", () => {
     await waitFor(() => expect(replaceMock).toHaveBeenCalled())
     const arg0 = replaceMock.mock.calls[replaceMock.mock.calls.length - 1][0] as string
     expect(arg0).toContain("hookTab=Stop")
+  })
+})
+
+describe("HooksSection — unsaved-changes guard + feedback", () => {
+  it("switches scope immediately when the draft is clean", async () => {
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    mockReadProject.mockResolvedValue({ hooks: {} })
+    render(<HooksSection cwd="/repo" />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByTestId("scope-project"))
+    await waitFor(() => expect(mockReadProject).toHaveBeenCalledWith("/repo"))
+    expect(screen.queryByTestId("hooks-scope-confirm")).not.toBeInTheDocument()
+  })
+
+  it("confirms before discarding unsaved edits on a scope switch", async () => {
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    mockReadProject.mockResolvedValue({ hooks: {} })
+    render(<HooksSection cwd="/repo" />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByTestId("hooks-add-group")) // dirty
+    fireEvent.click(screen.getByTestId("scope-project"))
+
+    // The confirm dialog appears and the new scope is NOT read yet.
+    expect(await screen.findByTestId("hooks-scope-confirm")).toBeInTheDocument()
+    expect(mockReadProject).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTestId("hooks-scope-discard"))
+    await waitFor(() => expect(mockReadProject).toHaveBeenCalledWith("/repo"))
+  })
+
+  it("cancelling the scope switch keeps the draft intact", async () => {
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    render(<HooksSection cwd="/repo" />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByTestId("hooks-add-group"))
+    expect(screen.getAllByTestId("hook-group-editor")).toHaveLength(1)
+
+    fireEvent.click(screen.getByTestId("scope-project"))
+    fireEvent.click(await screen.findByTestId("hooks-scope-cancel"))
+
+    expect(mockReadProject).not.toHaveBeenCalled()
+    // Draft survived — the added group is still there.
+    expect(screen.getAllByTestId("hook-group-editor")).toHaveLength(1)
+  })
+
+  it("shows the unsaved indicator only while the draft is dirty", async () => {
+    mockReadUser.mockResolvedValue({ hooks: {} })
+    render(<HooksSection />)
+    await waitFor(() => expect(mockReadUser).toHaveBeenCalled())
+
+    expect(screen.queryByTestId("hooks-unsaved")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("hooks-add-group"))
+    expect(screen.getByTestId("hooks-unsaved")).toBeInTheDocument()
+  })
+
+  it("summarises the configured group count in a badge", async () => {
+    mockReadUser.mockResolvedValue({
+      hooks: {
+        PreToolUse: [{ matcher: "Bash", hooks: [] }],
+        Stop: [{ matcher: "", hooks: [] }],
+      },
+    })
+    render(<HooksSection />)
+    await waitFor(() => expect(screen.getByTestId("hooks-summary")).toBeInTheDocument())
+    expect(screen.getByTestId("hooks-summary").textContent).toContain("2")
+  })
+
+  it("blocks save when a handler command is empty", async () => {
+    mockReadUser.mockResolvedValue({
+      hooks: {
+        PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "" }] }],
+      },
+    })
+    render(<HooksSection />)
+    await waitFor(() => expect(screen.getAllByTestId("hook-group-editor")).toHaveLength(1))
+
+    // Dirty the form so save would otherwise enable.
+    fireEvent.click(screen.getByTestId("hooks-add-group"))
+    expect(screen.getByTestId("hooks-save")).toBeDisabled()
   })
 })

@@ -28,9 +28,17 @@
     "on": "On",
     "saveError": "Couldn't update built-in hooks: {detail}",
     "saved": "Built-in hooks updated.",
+    "summaryAria": "{enabled} of {total} enabled",
     "title": "Built-in hooks"
   },
+  "confirmSwitch": {
+    "cancel": "Keep editing",
+    "description": "You have unsaved hook edits in the current scope. Switching scope will discard them.",
+    "discard": "Discard & switch",
+    "title": "Discard unsaved changes?"
+  },
   "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
+  "eventListLabel": "Events",
   "fleet": {
     "claude": {
       "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
@@ -78,6 +86,7 @@
       "stale": "Modified",
       "unavailable": "Claude Code not found"
     },
+    "summaryAria": "{count} integrations active",
     "title": "Agent fleet monitor"
   },
   "group": {
@@ -90,8 +99,10 @@
     "removeAria": "Remove this group"
   },
   "handler": {
+    "commandHint": "e.g. {example}",
     "commandLabel": "Shell command",
     "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME ran\"",
+    "commandRequired": "Command can't be empty.",
     "headerKeyPlaceholder": "X-Custom",
     "headerRemoveAria": "Remove header",
     "headerValuePlaceholder": "value",
@@ -104,10 +115,14 @@
     "typeCommand": "Command",
     "typeLabel": "Type",
     "typeWebhook": "Webhook",
+    "urlInvalid": "Enter a valid http(s) URL.",
     "urlLabel": "URL",
-    "urlPlaceholder": "https://example.com/hook"
+    "urlPlaceholder": "https://example.com/hook",
+    "urlRequired": "URL is required.",
+    "webhookUnsupported": "Webhooks aren't executed by the desktop runtime yet — this handler is saved but won't fire."
   },
   "loadError": "Could not read settings: {detail}",
+  "loading": "Loading hooks…",
   "noGroupsForEvent": "No groups configured for {event}. Click \"Add group\" to attach a matcher.",
   "noTriggerBadge": "No trigger source yet",
   "noTriggerNote": "This event is recognised and saved, but the runtime has no trigger source for it yet — hooks configured here will not fire.",
@@ -121,5 +136,7 @@
     "project": "Project",
     "user": "User"
   },
-  "title": "Lifecycle hooks"
+  "summary": "{count, plural, one {# group} other {# groups}}",
+  "title": "Lifecycle hooks",
+  "unsaved": "Unsaved changes"
 }

@@ -28,9 +28,17 @@
     "on": "开",
     "saveError": "更新内置 Hook 失败:{detail}",
     "saved": "内置 Hook 已更新。",
+    "summaryAria": "已启用 {enabled}/{total}",
     "title": "内置 Hook"
   },
+  "confirmSwitch": {
+    "cancel": "继续编辑",
+    "description": "当前作用域有未保存的 hook 编辑,切换作用域会丢弃这些改动。",
+    "discard": "放弃并切换",
+    "title": "放弃未保存的更改?"
+  },
   "description": "在生命周期事件触发时运行 shell 命令或调用 webhook。配置写入 ~/.claude/settings.json (用户作用域) 或项目下的 .claude/settings.json。整份配置原样回写,未识别的字段会被保留。",
+  "eventListLabel": "事件",
   "fleet": {
     "claude": {
       "desc": "将转发 hooks 安装到 ~/.claude/settings.json，让每个 Claude Code 会话上报到这里。失败即放行：Cognia 关闭时立即退出。",
@@ -78,6 +86,7 @@
       "stale": "已被修改",
       "unavailable": "未找到 Claude Code"
     },
+    "summaryAria": "{count} 项集成已启用",
     "title": "Agent 舰队监控"
   },
   "group": {
@@ -90,8 +99,10 @@
     "removeAria": "移除该分组"
   },
   "handler": {
+    "commandHint": "例如 {example}",
     "commandLabel": "Shell 命令",
     "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME 已运行\"",
+    "commandRequired": "命令不能为空。",
     "headerKeyPlaceholder": "X-Custom",
     "headerRemoveAria": "移除头部",
     "headerValuePlaceholder": "value",
@@ -104,10 +115,14 @@
     "typeCommand": "命令",
     "typeLabel": "类型",
     "typeWebhook": "Webhook",
+    "urlInvalid": "请输入有效的 http(s) URL。",
     "urlLabel": "URL",
-    "urlPlaceholder": "https://example.com/hook"
+    "urlPlaceholder": "https://example.com/hook",
+    "urlRequired": "URL 不能为空。",
+    "webhookUnsupported": "桌面运行时暂不执行 webhook——该处理器会被保存,但不会触发。"
   },
   "loadError": "读取设置失败：{detail}",
+  "loading": "正在加载 hooks…",
   "noGroupsForEvent": "{event} 事件下还没有任何分组,点击\"新建分组\"添加 matcher。",
   "noTriggerBadge": "暂无触发源",
   "noTriggerNote": "该事件可被识别并保存,但运行时暂无对应的触发源——在此配置的 hook 不会被触发。",
@@ -121,5 +136,7 @@
     "project": "项目",
     "user": "用户"
   },
-  "title": "生命周期钩子"
+  "summary": "{count} 个分组",
+  "title": "生命周期钩子",
+  "unsaved": "有未保存的更改"
 }
