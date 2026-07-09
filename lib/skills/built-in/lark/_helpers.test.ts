@@ -1,4 +1,31 @@
-import { argsToFlags, buildConfirmSurface, capLarkData, MAX_RESULT_DISPLAY_CHARS } from "./_helpers"
+import {
+  argsToFlags,
+  buildConfirmSurface,
+  capLarkData,
+  larkAdapterIdFromCtx,
+  MAX_RESULT_DISPLAY_CHARS,
+} from "./_helpers"
+
+describe("larkAdapterIdFromCtx", () => {
+  it("returns the bound adapter id for Lark-bound sessions", () => {
+    expect(
+      larkAdapterIdFromCtx({
+        sessionId: "s1",
+        imBinding: { adapterId: "cai_a", platform: "lark", conversationKey: "oc_1" },
+      })
+    ).toBe("cai_a")
+  })
+
+  it("returns undefined for in-app sessions and non-Lark bindings", () => {
+    expect(larkAdapterIdFromCtx({ sessionId: "s1" })).toBeUndefined()
+    expect(
+      larkAdapterIdFromCtx({
+        sessionId: "s1",
+        imBinding: { adapterId: "cai_b", platform: "slack", conversationKey: "C1" },
+      })
+    ).toBeUndefined()
+  })
+})
 
 describe("argsToFlags", () => {
   it("kebab-cases keys and stringifies scalar values", () => {

@@ -11,7 +11,19 @@
  */
 
 import type { A2UISegmentContent } from "@/types/connectors/segment"
+import type { BuiltInSkillContext } from "../types"
 import { execLarkCli, type ExecLarkCliInput, type LarkCliResult } from "./exec-lark-cli"
+
+/**
+ * Resolve the Lark adapter a skill invocation should authenticate as.
+ * Sessions bound to a Lark conversation carry the owning adapter id in
+ * `ctx.imBinding` — using it keeps multi-account setups permission-correct
+ * (the auth bridge would otherwise default to the FIRST enabled adapter).
+ * In-app (non-IM) sessions return undefined and keep the bridge default.
+ */
+export function larkAdapterIdFromCtx(ctx: BuiltInSkillContext): string | undefined {
+  return ctx.imBinding?.platform === "lark" ? ctx.imBinding.adapterId : undefined
+}
 
 /** Convert the camelCase Zod arg shape into kebab-case `--flag value`. */
 export function argsToFlags(

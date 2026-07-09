@@ -12,7 +12,7 @@ import { z } from "zod"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill, BuiltInSkillMutation } from "../types"
 import type { BuiltInSkillImAccess } from "../types"
-import { argsToFlags, buildConfirmSurface, runLarkCli } from "./_helpers"
+import { argsToFlags, buildConfirmSurface, larkAdapterIdFromCtx, runLarkCli } from "./_helpers"
 
 const FAMILY = "lark.wiki"
 const PLATFORMS = ["lark"] as const
@@ -57,6 +57,7 @@ function mk<S extends z.ZodTypeAny>(input: {
       runLarkCli({
         args: [...input.subcommand, ...argsToFlags(args as Record<string, unknown>)],
         confirmed: ctx.hitlBypass === true,
+        adapterId: larkAdapterIdFromCtx(ctx),
       }),
   }
   if (input.mutation !== "read") {

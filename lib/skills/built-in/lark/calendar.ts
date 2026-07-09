@@ -18,7 +18,7 @@ import { z } from "zod"
 
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill } from "../types"
-import { argsToFlags, buildConfirmSurface, runLarkCli } from "./_helpers"
+import { argsToFlags, buildConfirmSurface, larkAdapterIdFromCtx, runLarkCli } from "./_helpers"
 
 const FAMILY = "lark.calendar"
 const PLATFORMS = ["lark"] as const
@@ -64,6 +64,7 @@ function mkRead<S extends z.ZodTypeAny>(input: {
           ...argsToFlags(args as Record<string, unknown>, input.skipFlags),
         ],
         confirmed: ctx.hitlBypass === true,
+        adapterId: larkAdapterIdFromCtx(ctx),
       }),
   }
 }
@@ -101,6 +102,7 @@ function mkWrite<S extends z.ZodTypeAny>(input: {
           ...argsToFlags(args as Record<string, unknown>, input.skipFlags),
         ],
         confirmed: ctx.hitlBypass === true,
+        adapterId: larkAdapterIdFromCtx(ctx),
       }),
     hitlSurface: (args) => {
       const c = input.confirmSummary(args)
