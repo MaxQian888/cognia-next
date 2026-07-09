@@ -7,7 +7,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, CheckCircle2Icon, Loader2Icon, XCircleIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  CheckCircle2Icon,
+  Loader2Icon,
+  ShieldCheckIcon,
+  XCircleIcon,
+} from "lucide-react"
 
 import {
   Dialog,
@@ -156,6 +162,12 @@ export function ProviderSwitchDialog({
                   before={plan.cogniaChanges.baseUrlBefore}
                   after={plan.cogniaChanges.baseUrlAfter}
                 />
+                {plan.cogniaChanges.useSubscription && (
+                  <div className="flex items-start gap-1.5 text-[11px]">
+                    <ShieldCheckIcon className="mt-px size-3.5 shrink-0 text-green-600" />
+                    <span>{t("dialog.useSubscription")}</span>
+                  </div>
+                )}
                 <div className="text-[11px] text-muted-foreground">
                   {plan.cogniaChanges.restartSidecar
                     ? t("dialog.willRestart")
@@ -284,6 +296,24 @@ function ApplyResultPanel({ result }: { result: ApplyResult }) {
         )}
         <span>{t("dialog.cogniaApplied")}</span>
       </div>
+      {result.subscription && (
+        <div className="flex items-start gap-2 text-xs">
+          {result.subscription.activated ? (
+            <CheckCircle2Icon className="mt-px size-4 shrink-0 text-green-600" />
+          ) : (
+            <AlertTriangleIcon className="mt-px size-4 shrink-0 text-amber-600" />
+          )}
+          <span>
+            {result.subscription.activated
+              ? result.subscription.source === "adopted"
+                ? t("dialog.subscriptionAdopted")
+                : t("dialog.subscriptionActivated")
+              : result.subscription.error === "none-found"
+                ? t("dialog.subscriptionNoneFound")
+                : t("dialog.subscriptionFailed", { error: result.subscription.error ?? "" })}
+          </span>
+        </div>
+      )}
       {result.agentResults.length > 0 && (
         <ul className="space-y-1 text-xs">
           {result.agentResults.map((r) => (

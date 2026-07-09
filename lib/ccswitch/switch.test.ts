@@ -22,6 +22,19 @@ jest.mock("./client", () => ({
   writeOpencodeAuthEnv: jest.fn(),
 }))
 
+// Subscription activation path (official OAuth providers). The orchestrator
+// pulls these in via dynamic import; jest's module registry mocks those too.
+jest.mock("@/lib/subscription/core/transport", () => ({
+  listAccounts: jest.fn(),
+  getActiveAccount: jest.fn(),
+  setActiveAccount: jest.fn(),
+}))
+
+jest.mock("@/lib/subscription/anthropic/discovery", () => ({
+  discoverAnthropicAuth: jest.fn(),
+  adoptAndActivateDiscoveredAuth: jest.fn(),
+}))
+
 import { restartSidecar, setProviderEnv } from "@/lib/claude/ipc"
 import { saveSettings, getSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
@@ -32,6 +45,11 @@ import {
   writeGeminiSettingsEnv,
   writeOpencodeAuthEnv,
 } from "./client"
+import { listAccounts, getActiveAccount, setActiveAccount } from "@/lib/subscription/core/transport"
+import {
+  discoverAnthropicAuth,
+  adoptAndActivateDiscoveredAuth,
+} from "@/lib/subscription/anthropic/discovery"
 import { applySwitch, ccswitchProviderRefId, detectActive, planSwitch, _internals } from "./switch"
 import type { CcswitchProvider, SwitchScope } from "@/types/ccswitch"
 
@@ -44,6 +62,11 @@ const mWriteClaude = writeClaudeSettingsEnv as jest.Mock
 const mWriteCodex = writeCodexAuthEnv as jest.Mock
 const mWriteGemini = writeGeminiSettingsEnv as jest.Mock
 const mWriteOpencode = writeOpencodeAuthEnv as jest.Mock
+const mListAccounts = listAccounts as jest.Mock
+const mGetActive = getActiveAccount as jest.Mock
+const mSetActive = setActiveAccount as jest.Mock
+const mDiscover = discoverAnthropicAuth as jest.Mock
+const mAdoptActivate = adoptAndActivateDiscoveredAuth as jest.Mock
 
 function provider(overrides: Partial<CcswitchProvider>): CcswitchProvider {
   return {
@@ -172,6 +195,24 @@ describe("planSwitch", () => {
     )
     expect(plan.cogniaChanges.restartSidecar).toBe(false)
   })
+
+  it("flags an official claude provider (no key) as a subscription switch", () => {
+    const p = provider({ apiKey: undefined, baseUrl: undefined, kind: "claude" })
+    const plan = planSwitch(p, { cognia: true, agents: [] }, {})
+    expect(plan.cogniaChanges.useSubscription).toBe(true)
+    // The bearer is read at spawn — a subscription switch always restarts.
+    expect(plan.cogniaChanges.restartSidecar).toBe(true)
+  })
+
+  it("keyed claude providers and keyless non-claude kinds are not subscription switches", () => {
+    expect(
+      planSwitch(provider({}), { cognia: true, agents: [] }, {}).cogniaChanges.useSubscription
+    ).toBe(false)
+    expect(
+      planSwitch(provider({ apiKey: undefined, kind: "gemini" }), { cognia: true, agents: [] }, {})
+        .cogniaChanges.useSubscription
+    ).toBe(false)
+  })
 })
 
 describe("applySwitch", () => {
@@ -255,6 +296,96 @@ describe("applySwitch", () => {
     })
     expect(mWriteClaude).not.toHaveBeenCalled()
     expect(mWriteCodex).not.toHaveBeenCalled()
+  })
+
+  it("official provider: re-activates the vault's active anthropic account", async () => {
+    mListAccounts.mockResolvedValue([{ id: "acc-1" }, { id: "acc-2" }])
+    mGetActive.mockResolvedValue({ activeAccountId: "acc-2", env: [] })
+    const plan = planSwitch(
+      provider({ apiKey: undefined, baseUrl: undefined, kind: "claude" }),
+      { cognia: true, agents: [] },
+      { apiKey: "old-relay-key" }
+    )
+    const result = await applySwitch(plan)
+
+    expect(result.subscription).toEqual({ activated: true, source: "vault" })
+    expect(mSetActive).toHaveBeenCalledWith("anthropic", "acc-2")
+    expect(mAdoptActivate).not.toHaveBeenCalled()
+    // The relay key is still cleared from the sidecar env (bearer wins at spawn).
+    expect(mSetProviderEnv).toHaveBeenCalledWith(null, null, {})
+  })
+
+  it("official provider: falls back to the first vault account when none is active", async () => {
+    mListAccounts.mockResolvedValue([{ id: "acc-1" }, { id: "acc-2" }])
+    mGetActive.mockResolvedValue({ activeAccountId: undefined, env: [] })
+    const plan = planSwitch(
+      provider({ apiKey: undefined, kind: "claude" }),
+      { cognia: true, agents: [] },
+      {}
+    )
+    const result = await applySwitch(plan)
+    expect(result.subscription).toEqual({ activated: true, source: "vault" })
+    expect(mSetActive).toHaveBeenCalledWith("anthropic", "acc-1")
+  })
+
+  it("official provider: adopts the local Claude Code login when the vault is empty", async () => {
+    mListAccounts.mockResolvedValue([])
+    mDiscover.mockResolvedValue({ accessToken: "oat", refreshToken: "ort" })
+    mAdoptActivate.mockResolvedValue({ id: "acc-new" })
+    const plan = planSwitch(
+      provider({ apiKey: undefined, kind: "claude" }),
+      { cognia: true, agents: [] },
+      {}
+    )
+    const result = await applySwitch(plan)
+    expect(result.subscription).toEqual({ activated: true, source: "adopted" })
+    expect(mAdoptActivate).toHaveBeenCalledWith({ accessToken: "oat", refreshToken: "ort" })
+    expect(mSetActive).not.toHaveBeenCalled()
+  })
+
+  it("official provider: reports none-found when neither vault nor CLI has a login", async () => {
+    mListAccounts.mockResolvedValue([])
+    mDiscover.mockResolvedValue(null)
+    const plan = planSwitch(
+      provider({ apiKey: undefined, kind: "claude" }),
+      { cognia: true, agents: [] },
+      {}
+    )
+    const result = await applySwitch(plan)
+    expect(result.subscription).toEqual({ activated: false, error: "none-found" })
+    // The switch itself still commits — the user just gets the hint.
+    expect(result.cogniaApplied).toBe(true)
+  })
+
+  it("official provider: activation errors are captured, not thrown", async () => {
+    mListAccounts.mockRejectedValue(new Error("vault sealed"))
+    const plan = planSwitch(
+      provider({ apiKey: undefined, kind: "claude" }),
+      { cognia: true, agents: [] },
+      {}
+    )
+    const result = await applySwitch(plan)
+    expect(result.subscription).toEqual({ activated: false, error: "vault sealed" })
+    expect(result.cogniaApplied).toBe(true)
+  })
+
+  it("keyed provider switch never touches the subscription module", async () => {
+    const plan = planSwitch(provider({}), { cognia: true, agents: [] }, {})
+    const result = await applySwitch(plan)
+    expect(result.subscription).toBeUndefined()
+    expect(mListAccounts).not.toHaveBeenCalled()
+  })
+
+  it("official provider outside Tauri skips subscription activation", async () => {
+    mIsTauri.mockReturnValue(false)
+    const plan = planSwitch(
+      provider({ apiKey: undefined, kind: "claude" }),
+      { cognia: true, agents: [] },
+      {}
+    )
+    const result = await applySwitch(plan)
+    expect(result.subscription).toBeUndefined()
+    expect(mListAccounts).not.toHaveBeenCalled()
   })
 
   it("commits to ~/.gemini/settings.json when gemini is selected", async () => {
