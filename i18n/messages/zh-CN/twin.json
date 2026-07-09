@@ -356,7 +356,19 @@
       "urlEmpty": "请先输入 URL",
       "urlFetchFailed": "无法抓取该 URL：{reason}",
       "urlInvalid": "这不是有效的 URL",
-      "urlNoText": "该 URL 未返回可读文本"
+      "urlNoText": "该 URL 未返回可读文本",
+      "gitWalkFailed": "无法遍历该仓库：{reason}",
+      "larkInvalidUrl": "这不像一个飞书文档链接或 token。",
+      "larkNoAccount": "未选择飞书账号。请先在 设置 → 连接 中绑定。",
+      "larkNotAuthorized": "飞书账号 {account} 缺少凭证，请在 设置 → 连接 中重新授权。",
+      "larkNoPermission": "账号 {account} 无权限读取该文档。请申请访问权限，或在 设置 → 连接 中完成用户授权。",
+      "larkNotFound": "未找到该文档 — 可能已被删除，或链接有误。",
+      "larkUnsupportedType": "该链接指向 {type} 对象；目前仅支持文档和知识库页面。",
+      "larkRateLimited": "触发飞书限流 — 请稍候重试。",
+      "larkEmptyDoc": "文档 {title} 没有可读取的文本。",
+      "larkBrowserUnsupported": "飞书文档仅能在桌面端抓取（浏览器会拦截跨域请求）。",
+      "larkCliUnavailable": "当前环境不可用 lark-cli。",
+      "larkNetwork": "飞书请求失败:{reason}"
     },
     "fetching": "抓取中…",
     "filesDescription": "文本格式（Markdown / CSV / HTML / JSON / 源代码 / .eml / .mbox）按原样存储。二进制格式（PDF / DOCX / PPTX / EPUB / ODT / ODP）在浏览器解析，仅提取出的文本会落入 Dexie。聊天导出（ChatGPT / Claude / Gemini / Slack / 飞书 / 微信 / 钉钉）和 mbox 文件会按会话拆分为多个源。",
@@ -384,7 +396,22 @@
     "urlPlaceholder": "https://example.com/article",
     "urlTitle": "从 URL 导入",
     "walking": "遍历中…",
-    "webModeHint": "浏览器中跨域抓取可能被 CORS 拦截；桌面应用通过本地代理抓取，不受此限制。"
+    "webModeHint": "浏览器中跨域抓取可能被 CORS 拦截；桌面应用通过本地代理抓取，不受此限制。",
+    "lark": {
+      "sectionTitle": "飞书文档",
+      "sectionDescription": "使用已绑定的飞书账号抓取飞书文档或知识库页面。",
+      "accountLabel": "飞书账号",
+      "accountPlaceholder": "选择账号",
+      "loadingAccounts": "正在加载已绑定账号…",
+      "noAccounts": "尚未绑定飞书账号。",
+      "goBind": "前往 设置 → 连接 绑定",
+      "appOnlyHint": "该账号未完成用户授权 — 将以机器人身份读取文档，可见范围通常更小。完成用户授权可获得个人权限。",
+      "detectedDoc": "检测到飞书文档链接",
+      "detectedWiki": "检测到飞书知识库链接",
+      "urlLabel": "文档链接或 token",
+      "urlPlaceholder": "https://xxx.feishu.cn/docx/… 或 doxcn…",
+      "browserModeHint": "抓取飞书文档需要在桌面端进行。"
+    }
   },
   "sources": {
     "addSource": "添加数据源",
