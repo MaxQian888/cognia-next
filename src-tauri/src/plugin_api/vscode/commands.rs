@@ -30,7 +30,7 @@
 //! macro hides its callsites from rustc's dead-code analyser.
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
@@ -145,6 +145,91 @@ pub async fn plugin_load_vscode(
     });
 
     state.sidecars.write().insert(plugin_id, sidecar);
+    Ok(())
+}
+
+/// Fixed sidecar key for the system LSP host. MUST equal the renderer's
+/// `LSP_TAURI_CHANNEL_ID` (`lib/plugin/lsp/lsp-client-adapter-tauri.ts`) —
+/// the editor-side `TauriLspClientAdapter` addresses every `lsp:*` RPC to
+/// this key, so a mismatch silently reverts the LSP UI to `not_loaded`.
+pub const LSP_HOST_KEY: &str = "cognia.lsp-service";
+
+/// Pure join to the bundled headless host entry, factored out so it is
+/// unit-testable without an `AppHandle`.
+fn lsp_host_script_path(sidecar_dir: &Path) -> PathBuf {
+    sidecar_dir
+        .join("vscode-ext-host")
+        .join("dist")
+        .join("host.js")
+}
+
+/// Resolve the absolute path to `sidecar/vscode-ext-host/dist/host.js` in
+/// both dev and release builds. Reuses `claude::sidecar::sidecar_dir`, which
+/// already handles the resource-dir (release) vs manifest-walk (dev) split.
+fn resolve_lsp_host_script(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = crate::claude::sidecar::sidecar_dir(app)?;
+    let candidate = lsp_host_script_path(&dir);
+    if candidate.exists() {
+        return Ok(candidate);
+    }
+    Err(format!(
+        "vscode-ext-host script not found at {}",
+        candidate.display()
+    ))
+}
+
+/// Spawn (once) the headless VS Code extension host that serves the editor's
+/// `lsp:*` RPCs, registered under [`LSP_HOST_KEY`]. Idempotent: a no-op while
+/// a sidecar already exists for that key. Unlike `plugin_load_vscode` this
+/// loads NO extension — `host.ts` builds its `LspService` lazily on the first
+/// `lsp:*` frame with no activation handshake, so `extension_path` is unused
+/// at boot. Without this, `plugin_invoke_vscode_rpc(LSP_HOST_KEY, …)` returns
+/// `not_loaded` and the whole editor LSP data plane stays dormant.
+#[tauri::command]
+pub async fn ensure_system_lsp_host(
+    app_handle: AppHandle,
+    state: State<'_, VscodeExtensionState>,
+) -> Result<(), VscodeCommandError> {
+    // Fast idempotent path — the host outlives route changes for the session.
+    if state.sidecars.read().contains_key(LSP_HOST_KEY) {
+        return Ok(());
+    }
+
+    let script = resolve_lsp_host_script(&app_handle)
+        .map_err(|e| VscodeCommandError::new("lsp_host_script_missing", e))?;
+    let script_str = script.to_string_lossy().to_string();
+
+    let sidecar = Sidecar::spawn(SpawnRequest {
+        extension_id: LSP_HOST_KEY.to_string(),
+        // host.ts never reads extension_path/COGNIA_VSCODE_EXTENSION_PATH at
+        // boot; pass the script path itself so the arg is non-empty/valid.
+        extension_path: script_str.clone(),
+        node_binary: None,
+        sidecar_script: Some(script_str),
+    })
+    .await
+    .map_err(|e| VscodeCommandError::new("lsp_host_spawn_failed", e.to_string()))?;
+
+    // Wire the sidecar's inbound notification/request frames to the Tauri
+    // event the renderer's RPC dispatcher listens on for this channel
+    // (`vscode://rpc/cognia.lsp-service`) — mirrors `plugin_load_vscode`.
+    let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<InboundFrame>();
+    sidecar.set_notify_sink(notify_tx);
+    let app_for_emit = app_handle.clone();
+    let event_name = inbound_event_name(LSP_HOST_KEY);
+    tokio::spawn(async move {
+        while let Some(frame) = notify_rx.recv().await {
+            let _ = app_for_emit.emit(&event_name, frame.raw_frame);
+        }
+    });
+
+    // Re-check under the write lock: another caller may have spawned + inserted
+    // while we were `.await`ing the spawn. If so, drop our sidecar (its `Drop`
+    // start_kills the orphan child — no `.await` held under the lock).
+    let mut sidecars = state.sidecars.write();
+    if !sidecars.contains_key(LSP_HOST_KEY) {
+        sidecars.insert(LSP_HOST_KEY.to_string(), sidecar);
+    }
     Ok(())
 }
 
@@ -395,6 +480,36 @@ mod tests {
             inbound_event_name("publisher.ext"),
             "vscode://rpc/publisher.ext".to_string()
         );
+    }
+
+    #[test]
+    fn lsp_host_key_matches_renderer_channel_id() {
+        // Pins the Rust↔TS contract: `LSP_TAURI_CHANNEL_ID` in
+        // lib/plugin/lsp/lsp-client-adapter-tauri.ts. A drift here reverts the
+        // editor LSP UI to `not_loaded` with no other failure signal.
+        assert_eq!(LSP_HOST_KEY, "cognia.lsp-service");
+    }
+
+    #[test]
+    fn lsp_host_script_path_targets_bundled_host_js() {
+        let path = lsp_host_script_path(Path::new("/x/sidecar"));
+        assert!(path.ends_with("vscode-ext-host/dist/host.js"), "{path:?}");
+    }
+
+    #[test]
+    fn lsp_host_inbound_event_name_is_the_system_channel() {
+        assert_eq!(
+            inbound_event_name(LSP_HOST_KEY),
+            "vscode://rpc/cognia.lsp-service".to_string()
+        );
+    }
+
+    #[test]
+    fn fresh_state_has_no_lsp_host_so_ensure_would_spawn() {
+        // Documents the idempotent-branch precondition without a live child:
+        // a fresh state does not yet hold the system host key.
+        let state = VscodeExtensionState::new(PathBuf::from("/tmp"));
+        assert!(!state.sidecars.read().contains_key(LSP_HOST_KEY));
     }
 
     #[test]

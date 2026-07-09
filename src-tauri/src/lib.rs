@@ -880,6 +880,7 @@ pub fn run() {
             plugin_api::vscode::commands::plugin_unload_vscode,
             plugin_api::vscode::commands::plugin_invoke_vscode_rpc,
             plugin_api::vscode::commands::plugin_vscode_send_response,
+            plugin_api::vscode::commands::ensure_system_lsp_host,
             plugin_api::backup::plugin_backup_create,
             plugin_api::backup::plugin_backup_restore,
             plugin_api::backup::plugin_backup_delete,

@@ -75,6 +75,10 @@ const TerminalBridgeInitializer = dynamic(
   () => import("./terminal-bridge-initializer").then((m) => m.TerminalBridgeInitializer),
   { ssr: false }
 )
+const EditorLspRuntimeInitializer = dynamic(
+  () => import("./editor-lsp-runtime-initializer").then((m) => m.EditorLspRuntimeInitializer),
+  { ssr: false }
+)
 const LocalCharacterPackInitializer = dynamic(
   () => import("./local-character-pack-initializer").then((m) => m.LocalCharacterPackInitializer),
   { ssr: false }
@@ -136,6 +140,7 @@ export function DesktopOnlyInitializers() {
       <CliSyncInitializer />
       <ComputerUseKillSwitchInitializer />
       <TerminalBridgeInitializer />
+      <EditorLspRuntimeInitializer />
       <LocalCharacterPackInitializer />
       <PetWindowInitializer />
       <FleetHistorySinkInitializer />

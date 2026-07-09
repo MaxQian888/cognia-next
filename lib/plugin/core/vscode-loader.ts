@@ -37,7 +37,7 @@ let dispatcherConfigured = false
  * `loadVscodeDefinition` so plain `import("..vscode-loader")` doesn't
  * trigger the Tauri shim outside of the desktop runtime.
  */
-async function ensureDispatcherConfigured(): Promise<void> {
+export async function ensureDispatcherConfigured(): Promise<void> {
   if (dispatcherConfigured) return
   if (!isVscodeHostAvailable()) return
   const [{ invoke }, { listen }] = await Promise.all([

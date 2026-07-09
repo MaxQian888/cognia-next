@@ -1,5 +1,11 @@
+/** @jest-environment jsdom */
 /**
  * Tests for `vscode-loader.ts`.
+ *
+ * This suite toggles `window.__TAURI_INTERNALS__` to exercise the desktop vs
+ * browser branches, so it needs the jsdom environment — the node/jsdom
+ * test-speed split otherwise routes bare `.ts` files to the node project
+ * (no `window`), which silently fails every Tauri-mode assertion.
  *
  * Two scenarios:
  *  1. Browser stub mode (no Tauri internals) — activate() logs a warning
@@ -334,6 +340,29 @@ describe("vscode-loader — Tauri mode", () => {
     const { loadVscodeDefinition } = await import("./vscode-loader")
     await expect(loadVscodeDefinition(baseManifest, "/tmp/plugin")).resolves.toBeDefined()
     expect(configureMonacoBridge).not.toHaveBeenCalled()
+  })
+})
+
+describe("vscode-loader — ensureDispatcherConfigured export", () => {
+  beforeEach(() => {
+    removeTauriWindow()
+    jest.resetModules()
+    jest.clearAllMocks()
+  })
+
+  it("is exported so the editor LSP runtime can bootstrap it standalone", async () => {
+    // The export is the contract `ensureEditorLspRuntime` depends on to wire
+    // the dispatcher + monaco-bridge + LSP registry without a .vsix load.
+    const mod = await import("./vscode-loader")
+    expect(typeof mod.ensureDispatcherConfigured).toBe("function")
+  })
+
+  it("no-ops safely and idempotently off the Tauri host", async () => {
+    // Off-host it returns early (isVscodeHostAvailable() === false) without
+    // pulling any Tauri/monaco import — safe to call repeatedly.
+    const { ensureDispatcherConfigured } = await import("./vscode-loader")
+    await expect(ensureDispatcherConfigured()).resolves.toBeUndefined()
+    await expect(ensureDispatcherConfigured()).resolves.toBeUndefined()
   })
 })
 
