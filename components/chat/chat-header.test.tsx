@@ -54,6 +54,19 @@ jest.mock("@/components/chat/session-cost-badge-live", () => ({
   SessionCostBadgeLive: () => null,
 }))
 
+// The header now hosts the conversation-list (ChannelList) collapse toggle.
+// Mock the ui-store so the collapsed state + toggle are driven directly (the
+// header's children don't touch this store, so a minimal mock is safe). Read
+// lazily inside the selector so the module init order stays TDZ-safe.
+let sidebarCollapsed = false
+const toggleSidebar = jest.fn(() => {
+  sidebarCollapsed = !sidebarCollapsed
+})
+jest.mock("@/stores/ui", () => ({
+  useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
+    selector({ sidebarCollapsed, toggleSidebar }),
+}))
+
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { ChatHeader } from "./chat-header"
@@ -120,6 +133,44 @@ describe("ChatHeader", () => {
   beforeEach(() => {
     mockIsTauri.mockReturnValue(false)
     mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })
+    sidebarCollapsed = false
+    toggleSidebar.mockClear()
+  })
+
+  it("renders the conversation-list toggle with the hide label when expanded", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    const toggle = screen.getByTestId("chat-sidebar-toggle")
+    expect(toggle).toHaveAttribute("aria-label", "Hide conversation list")
+    expect(toggle).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("clicking the toggle drives the sidebar collapse action", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    fireEvent.click(screen.getByTestId("chat-sidebar-toggle"))
+    expect(toggleSidebar).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows the expand label + unpressed state when the sidebar is collapsed", () => {
+    sidebarCollapsed = true
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    const toggle = screen.getByTestId("chat-sidebar-toggle")
+    expect(toggle).toHaveAttribute("aria-label", "Show conversation list")
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
   })
 
   it("shows the No-API-key badge when neither api key nor subscription bearer exists", async () => {

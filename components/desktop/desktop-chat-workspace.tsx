@@ -82,7 +82,6 @@ export function DesktopChatWorkspace() {
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
-  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
 
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
@@ -484,31 +483,35 @@ export function DesktopChatWorkspace() {
         ) : null
       ) : (
         <>
-          {!sidebarCollapsed && (
-            <ChannelList
-              sessions={sessions}
-              loading={isLoadingSessions}
-              activeSessionId={activeSessionId}
-              onSelect={handleSwitchToSession}
-              onNewDirect={handleChannelNewDirect}
-              onNewTeamConversation={handleChannelNewTeam}
-              onDelete={handleChannelDelete}
-              onRename={handleChannelRename}
-              onTogglePinned={handleChannelTogglePinned}
-              onArchive={archive}
-              onUnarchive={unarchive}
-              onBulkDelete={handleChannelBulkDelete}
-              onBulkSetPinned={handleChannelBulkSetPinned}
-              onBulkArchive={handleChannelBulkArchive}
-              onBulkUnarchive={handleChannelBulkUnarchive}
-              folders={folders}
-              onCreateFolder={createFolder}
-              onRenameFolder={renameFolder}
-              onDeleteFolder={deleteFolder}
-              onAssignToFolder={assignToFolder}
-              onReorderSessions={handleReorderSessions}
-            />
-          )}
+          {/* Always mounted so the rail can animate its width to 0 when
+              collapsed (a smooth transition needs the element to stay in the
+              DOM). It self-hides to a 0-width column — no leftover strip — and
+              is restored from the chat-header toggle. State is the single
+              `sidebarCollapsed` store field shared with the title/status bars,
+              View menu, and ⌘B. */}
+          <ChannelList
+            sessions={sessions}
+            loading={isLoadingSessions}
+            activeSessionId={activeSessionId}
+            onSelect={handleSwitchToSession}
+            onNewDirect={handleChannelNewDirect}
+            onNewTeamConversation={handleChannelNewTeam}
+            onDelete={handleChannelDelete}
+            onRename={handleChannelRename}
+            onTogglePinned={handleChannelTogglePinned}
+            onArchive={archive}
+            onUnarchive={unarchive}
+            onBulkDelete={handleChannelBulkDelete}
+            onBulkSetPinned={handleChannelBulkSetPinned}
+            onBulkArchive={handleChannelBulkArchive}
+            onBulkUnarchive={handleChannelBulkUnarchive}
+            folders={folders}
+            onCreateFolder={createFolder}
+            onRenameFolder={renameFolder}
+            onDeleteFolder={deleteFolder}
+            onAssignToFolder={assignToFolder}
+            onReorderSessions={handleReorderSessions}
+          />
 
           <ArtifactWorkspaceDock>
             <main
@@ -582,8 +585,10 @@ function DesktopOnlyBanner() {
         <h2 className="text-xl font-semibold">{t("desktopOnlyTitle")}</h2>
         <p className="text-sm text-muted-foreground">
           {t("desktopOnlyBodyPrefix")}
+          {/* i18n-exempt: literal shell command */}
           <code className="rounded bg-muted px-1 py-0.5">pnpm tauri dev</code>
           {t("desktopOnlyBodyMiddle")}
+          {/* i18n-exempt: literal shell command */}
           <code className="rounded bg-muted px-1 py-0.5">pnpm dev</code>
           {t("desktopOnlyBodySuffix")}
         </p>

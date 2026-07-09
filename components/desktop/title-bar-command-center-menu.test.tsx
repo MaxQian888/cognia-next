@@ -8,7 +8,8 @@ jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
 }))
 
-// Inline dropdown mock — renders sub-content inline so every item is queryable.
+// Flat inline dropdown mock — the real component no longer uses submenus, so we
+// only need the primitives it renders directly.
 jest.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
@@ -31,11 +32,9 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
       {children}
     </div>
   ),
+  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuSeparator: () => <hr />,
   DropdownMenuShortcut: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-  DropdownMenuSub: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuSubTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
 import { TitleBarCommandCenterMenu } from "./title-bar-command-center-menu"
@@ -61,7 +60,7 @@ describe("TitleBarCommandCenterMenu", () => {
     expect(props.onCommandPalette).toHaveBeenCalled()
   })
 
-  it("lists recent sessions and opens the chosen one", () => {
+  it("lists recent sessions inline and opens the chosen one", () => {
     const { props } = setup()
     fireEvent.click(screen.getByTestId("cc-recent-s2"))
     expect(props.onOpenRecentSession).toHaveBeenCalledWith("s2")
@@ -77,8 +76,31 @@ describe("TitleBarCommandCenterMenu", () => {
     expect(screen.getByText("desktop.titleBar.commandCenter.untitled")).toBeInTheDocument()
   })
 
-  it("navigates via the Go to View targets", () => {
+  it("caps the inline recent list at six entries", () => {
+    setup({
+      recentSessions: Array.from({ length: 9 }, (_, i) => ({
+        id: `r${i}`,
+        title: `Chat ${i}`,
+      })),
+    })
+    // r0..r5 render; r6..r8 are dropped by the MAX_RECENT slice.
+    expect(screen.getByTestId("cc-recent-r5")).toBeInTheDocument()
+    expect(screen.queryByTestId("cc-recent-r6")).not.toBeInTheDocument()
+  })
+
+  it("renders every curated Go to View target", () => {
     const { props } = setup()
+    for (const id of [
+      "go-inbox",
+      "go-workflows",
+      "go-agent-teams",
+      "go-scheduler",
+      "go-discover",
+      "go-plugins",
+      "go-settings",
+    ]) {
+      expect(screen.getByTestId(`cc-go-${id}`)).toBeInTheDocument()
+    }
     fireEvent.click(screen.getByTestId("cc-go-go-scheduler"))
     expect(props.onGo).toHaveBeenCalledWith("go-scheduler")
   })

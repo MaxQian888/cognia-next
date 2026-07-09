@@ -56,10 +56,6 @@ jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: () => null,
 }))
 
-jest.mock("@/components/account/account-switcher", () => ({
-  AccountSwitcher: () => <div data-testid="account-switcher" />,
-}))
-
 jest.mock("./workspace-switcher", () => ({
   WorkspaceSwitcher: () => <div data-testid="workspace-switcher" />,
 }))
@@ -122,10 +118,14 @@ beforeEach(() => {
 
 test("renders the DM, Canvas, and Settings rail buttons", () => {
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
-  expect(screen.getByTestId("account-switcher")).toBeInTheDocument()
   expect(screen.getByLabelText("directMessages")).toBeInTheDocument()
   expect(screen.getByLabelText("canvas")).toBeInTheDocument()
   expect(screen.getByLabelText("openSettings")).toBeInTheDocument()
+})
+
+test("does not render the account switcher in the rail", () => {
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument()
 })
 
 test("renders a pinned rail button for every default-pinned feature", () => {

@@ -84,6 +84,8 @@ import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import type { ChatSession, Character, SystemPromptPreset, Skill } from "@/lib/claude/types"
+import { useProjectStore } from "@/stores/project/project-store"
+import type { Project } from "@/types"
 
 const mockCredentialStatus = useCredentialStatus as unknown as jest.Mock
 
@@ -142,6 +144,7 @@ describe("SessionSettingsSheet", () => {
     mockFork.mockResolvedValue({ id: "fork_1" })
     setActiveSessionMock.mockClear()
     mockEphemeralSkillIds = []
+    useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   })
 
   it("renders nothing interactive when closed", () => {
@@ -582,6 +585,55 @@ describe("SessionSettingsSheet", () => {
       fireEvent.click(screen.getByRole("button", { name: /fork session/i }))
     })
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("boom"))
+  })
+
+  it("shows the active workspace root as the cwd fallback hint (above the character default)", async () => {
+    const project = {
+      id: "proj-ws",
+      name: "WS",
+      roots: [{ id: "r1", path: "/ws/root", isPrimary: true }],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      isArchived: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    } as Project
+    useProjectStore.setState({ projects: [project], activeProjectId: project.id, loaded: false })
+    const adapter = makeAdapter({
+      useCharacter: () => mkCharacter({ workingDir: "/char/dir" }),
+    })
+    render(
+      <DataAdapterProvider adapter={adapter}>
+        <SessionSettingsSheet
+          session={mkSession({ characterId: "c1" })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+    // Workspace root outranks the character default, matching the send path.
+    expect(await screen.findByText(/\/ws\/root/)).toBeInTheDocument()
+    expect(screen.queryByText(/\/char\/dir/)).not.toBeInTheDocument()
+  })
+
+  it("falls back to the character default hint when no workspace is active", async () => {
+    useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
+    const adapter = makeAdapter({
+      useCharacter: () => mkCharacter({ workingDir: "/char/dir" }),
+    })
+    render(
+      <DataAdapterProvider adapter={adapter}>
+        <SessionSettingsSheet
+          session={mkSession({ characterId: "c1" })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+    expect(await screen.findByText(/\/char\/dir/)).toBeInTheDocument()
   })
 
   it("dismisses the preset conflict dialog on cancel without applying", async () => {

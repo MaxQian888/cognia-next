@@ -2,7 +2,13 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChartLineIcon, KeyRoundIcon, Settings2Icon } from "lucide-react"
+import {
+  ChartLineIcon,
+  KeyRoundIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  Settings2Icon,
+} from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -14,6 +20,7 @@ import { PlanModeTasksSheet } from "@/components/agent/workspace/plan-mode-tasks
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { SessionInsightsSheet } from "@/components/chat/session-insights/session-insights-sheet"
+import { useUIStore } from "@/stores/ui"
 import type { ChatSession } from "@/lib/claude/types"
 
 interface Props {
@@ -40,8 +47,34 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [insightsOpen, setInsightsOpen] = useState(false)
 
+  // Conversation-sidebar (ChannelList) toggle. Lives here — in the active
+  // conversation's top bar — so collapsing the list fully reclaims its column
+  // yet stays one click away from being restored, without a leftover rail.
+  // Same single `sidebarCollapsed` store field the title bar, status bar, View
+  // menu, and ⌘B drive, so every surface stays in lockstep. Desktop-only: the
+  // list is a Sheet (hamburger) below `md`, where collapse does not apply.
+  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar)
+  const sidebarToggleLabel = sidebarCollapsed ? t("showConversations") : t("hideConversations")
+
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="hidden size-8 shrink-0 md:inline-flex"
+        onClick={toggleSidebar}
+        aria-label={sidebarToggleLabel}
+        aria-pressed={!sidebarCollapsed}
+        title={sidebarToggleLabel}
+        data-testid="chat-sidebar-toggle"
+      >
+        {sidebarCollapsed ? (
+          <PanelLeftOpenIcon className="size-4" />
+        ) : (
+          <PanelLeftCloseIcon className="size-4" />
+        )}
+      </Button>
       <div className="flex flex-1 items-center gap-2 truncate">
         {character && (
           <Avatar className="size-7 shrink-0" title={character.name}>

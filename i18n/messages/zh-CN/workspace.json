@@ -62,14 +62,18 @@
   },
   "switcher": {
     "active": "当前工作区：{name}",
+    "allHeading": "全部",
+    "clearSearch": "清除搜索",
     "empty": "暂无工作区",
     "folderCount": "{count, plural, other {# 个文件夹}}",
     "heading": "工作区",
     "manage": "管理工作区",
     "newWorkspace": "新建工作区",
+    "noMatches": "未找到匹配的工作区",
     "none": "无活动工作区",
     "openFolder": "打开文件夹…",
     "recentHeading": "最近",
+    "searchPlaceholder": "搜索工作区…",
     "untrustedHint": "未受信任的工作区"
   }
 }

@@ -67,6 +67,9 @@ import { isTauri } from "@/lib/tauri"
 import { closeSession } from "@/lib/claude/ipc"
 import { forkSessionFromParent } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
+import { useProjectStore } from "@/stores/project/project-store"
+import { useSettingsStore } from "@/stores/settings"
+import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
 import { loggers } from "@/lib/logging"
 import { toast } from "sonner"
 import type { AppSettings, ChatSession, SystemPromptPreset } from "@/lib/claude/types"
@@ -142,6 +145,19 @@ export function SessionSettingsSheet({
   )
   const { plan } = useCredentialStatus()
   const planLabel = plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : null
+
+  // What the session actually falls back to when no per-session dir is set:
+  // active workspace primary root → character default → app default (the same
+  // chain resolveSendOptions applies), so the hint never contradicts a send.
+  const activeProject = useProjectStore((s) =>
+    s.activeProjectId ? (s.projects.find((p) => p.id === s.activeProjectId) ?? null) : null
+  )
+  const defaultWorkingDir = useSettingsStore((s) => s.settings?.defaultWorkingDir)
+  const fallbackCwd = resolveEffectiveCwd({
+    activeProject,
+    characterWorkingDir: character?.workingDir,
+    defaultWorkingDir,
+  })
 
   const [form, setForm] = useState<FormState>({
     model: session.model ?? "",
@@ -428,9 +444,9 @@ export function SessionSettingsSheet({
                   <FolderOpenIcon className="size-4" />
                 </Button>
               </div>
-              {!form.workingDir && character?.workingDir && (
+              {!form.workingDir && fallbackCwd && (
                 <p className="text-[11px] text-muted-foreground">
-                  {t("cwdFallbackHint", { path: character.workingDir })}
+                  {t("cwdFallbackHint", { path: fallbackCwd })}
                 </p>
               )}
             </div>

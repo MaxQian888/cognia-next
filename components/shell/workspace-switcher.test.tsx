@@ -159,22 +159,83 @@ describe("WorkspaceSwitcher", () => {
     expect(screen.getAllByText("/a").length).toBeGreaterThan(0)
   })
 
-  it("renders a Recent group ordered by lastAccessedAt", () => {
-    const older = new Date("2020-01-01")
-    const newer = new Date("2024-01-01")
+  // Seed 8+ workspaces so the switcher crosses the "large" threshold that
+  // enables the search field and the pinned Recent group.
+  function seedManyProjects() {
+    const projects = Array.from({ length: 9 }, (_, i) =>
+      makeProject(`p${i}`, {
+        name: `Workspace ${i}`,
+        rootDir: `/repos/ws-${i}`,
+        // p8 newest … p0 oldest, so the Recent group pins p8/p7/p6.
+        lastAccessedAt: new Date(2020, 0, 1 + i),
+      })
+    )
+    act(() => {
+      useProjectStore.setState({ projects, activeProjectId: "p0" })
+    })
+  }
+
+  it("pins a Recent group (newest first) once the list is large", () => {
+    seedManyProjects()
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    // The recent group renders prefixed rows; the newest workspace is pinned.
+    expect(screen.getByTestId("workspace-switch-recent-p8")).toBeInTheDocument()
+    // …and the full alphabetical list still carries the un-prefixed row.
+    expect(screen.getByTestId("workspace-switch-p8")).toBeInTheDocument()
+  })
+
+  it("hides the search field and Recent group for a small workspace count", () => {
     act(() => {
       useProjectStore.setState({
         projects: [
-          makeProject("p1", { name: "Old", rootDir: "/a", lastAccessedAt: older }),
-          makeProject("p2", { name: "New", rootDir: "/b", lastAccessedAt: newer }),
+          makeProject("p1", { name: "Alpha", rootDir: "/a" }),
+          makeProject("p2", { name: "Beta", rootDir: "/b" }),
         ],
         activeProjectId: "p1",
       })
     })
     renderSwitcher()
     fireEvent.click(screen.getByTestId("workspace-switcher"))
-    // The recent group renders prefixed rows; newest first.
-    expect(screen.getByTestId("workspace-switch-recent-p2")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-switcher-search")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-switch-recent-p1")).not.toBeInTheDocument()
+  })
+
+  it("filters the list by name via the search field", () => {
+    seedManyProjects()
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    fireEvent.change(screen.getByTestId("workspace-switcher-search"), {
+      target: { value: "Workspace 3" },
+    })
+    expect(screen.getByTestId("workspace-switch-p3")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-switch-p4")).not.toBeInTheDocument()
+    // The Recent group collapses while filtering.
+    expect(screen.queryByTestId("workspace-switch-recent-p8")).not.toBeInTheDocument()
+  })
+
+  it("filters the list by folder path", () => {
+    seedManyProjects()
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    fireEvent.change(screen.getByTestId("workspace-switcher-search"), {
+      target: { value: "/repos/ws-5" },
+    })
+    expect(screen.getByTestId("workspace-switch-p5")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-switch-p1")).not.toBeInTheDocument()
+  })
+
+  it("shows a no-matches state and clears it via the clear button", () => {
+    seedManyProjects()
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    fireEvent.change(screen.getByTestId("workspace-switcher-search"), {
+      target: { value: "zzz-nothing" },
+    })
+    expect(screen.getByText("noMatches")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("workspace-switcher-search-clear"))
+    expect(screen.queryByText("noMatches")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-switch-p1")).toBeInTheDocument()
   })
 
   it("open-folder creates + activates a workspace on desktop", async () => {

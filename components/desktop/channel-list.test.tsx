@@ -41,6 +41,7 @@ jest.mock("@/hooks/data", () => ({
 }))
 
 let selectedGuild: SelectedGuild = { kind: "dm" }
+let sidebarCollapsed = false
 jest.mock("@/stores/ui", () => ({
   useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
     selector({
@@ -51,6 +52,7 @@ jest.mock("@/stores/ui", () => ({
       setCollapsedFolders: () => {},
       sidebarWidth: 256,
       setSidebarWidth: () => {},
+      sidebarCollapsed,
     }),
   SIDEBAR_WIDTH_DEFAULT: 256,
   SIDEBAR_WIDTH_MIN: 220,
@@ -127,6 +129,7 @@ beforeEach(() => {
   callQueue.length = 0
   selectedGuild = { kind: "dm" }
   isNarrow = false
+  sidebarCollapsed = false
   conversationSidebar = null
   searchSessionsByContent.mockReset()
   searchSessionsByContent.mockResolvedValue({ ids: new Set<string>(), truncated: false })
@@ -151,6 +154,60 @@ test("DM guild renders only direct sessions, grouped into date buckets", () => {
   expect(screen.queryByText("Squad meeting")).toBeNull()
   // updatedAt: 0 (epoch) → "Older" date-bucket header (no character grouping).
   expect(screen.getByText("bucketOlder")).toBeInTheDocument()
+})
+
+describe("collapse (width animation)", () => {
+  const rail = () => (
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  test("expanded rail keeps the resize handle and is not inert", () => {
+    callQueue.push(characters, [], undefined)
+    const { container } = render(rail())
+    const aside = container.querySelector("aside")
+    expect(aside).not.toHaveAttribute("data-collapsed")
+    expect(aside).not.toHaveAttribute("inert")
+    expect(screen.getByLabelText("resizeHandle")).toBeInTheDocument()
+  })
+
+  test("collapsed rail goes inert and drops the resize handle (no leftover column)", () => {
+    sidebarCollapsed = true
+    callQueue.push(characters, [], undefined)
+    const { container } = render(rail())
+    const aside = container.querySelector("aside")
+    // Fully collapsed: marked, inert (not focusable), aria-hidden, and the
+    // resize handle is gone — the column reclaims its space, no leftover strip.
+    expect(aside).toHaveAttribute("data-collapsed")
+    expect(aside).toHaveAttribute("inert")
+    expect(aside).toHaveAttribute("aria-hidden", "true")
+    expect(screen.queryByLabelText("resizeHandle")).toBeNull()
+  })
+
+  test("toggling collapse turns on the width transition, then clears it", async () => {
+    callQueue.push(characters, [], undefined)
+    const { container, rerender } = render(rail())
+    // Idle (no collapse change yet) → no transition, so drag-resize stays snappy.
+    expect(container.querySelector("aside")).not.toHaveClass("transition-[width]")
+    // Flip collapsed + re-render: the mount-vs-now diff enables the transition
+    // for the collapse/expand animation.
+    sidebarCollapsed = true
+    callQueue.push(characters, [], undefined)
+    rerender(rail())
+    expect(container.querySelector("aside")).toHaveClass("transition-[width]")
+    // The transition is transient — it clears after the animation window so a
+    // subsequent drag-resize isn't animated.
+    await waitFor(() =>
+      expect(container.querySelector("aside")).not.toHaveClass("transition-[width]")
+    )
+  })
 })
 
 test("typing in the search box filters to a flat result list", async () => {

@@ -159,6 +159,26 @@ export function ChannelList(props: Props) {
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
   const resetWidth = useCallback(() => setSidebarWidth(SIDEBAR_WIDTH_DEFAULT), [setSidebarWidth])
 
+  // Conversation-sidebar collapse. Single source of truth in the ui-store,
+  // shared with the chat-header toggle, the title/status bars, the View menu,
+  // and ⌘B, so every surface stays in lockstep. The rail stays mounted and
+  // animates its width to 0 — collapsing is smooth and reclaims the WHOLE
+  // column (no leftover strip); the toggle control lives in the active
+  // conversation's header, not here.
+  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
+  // Enable the width transition ONLY for the brief collapse/expand animation —
+  // never while the user drag-resizes (resize mutates the same `width`, and a
+  // live transition would make the drag rubber-band). A short timer clears it.
+  const [animatingCollapse, setAnimatingCollapse] = useState(false)
+  const prevCollapsedRef = useRef(sidebarCollapsed)
+  useEffect(() => {
+    if (prevCollapsedRef.current === sidebarCollapsed) return
+    prevCollapsedRef.current = sidebarCollapsed
+    setAnimatingCollapse(true)
+    const timer = setTimeout(() => setAnimatingCollapse(false), 220)
+    return () => clearTimeout(timer)
+  }, [sidebarCollapsed])
+
   // Stable identity: passed down as `onSelect`, it feeds `handleSessionSelect`
   // (a useCallback that lists it as a dep). An inline function here changed
   // every render → busted EVERY memoized <SessionRow> on any sidebar
@@ -203,13 +223,30 @@ export function ChannelList(props: Props) {
 
   return (
     <aside
-      className="relative hidden h-full shrink-0 flex-col border-r bg-background md:flex"
-      style={{ width }}
+      className={cn(
+        "relative hidden h-full shrink-0 flex-col bg-background md:flex",
+        sidebarCollapsed ? "border-r-0" : "border-r",
+        // Clip during collapse (and while animating) so the fixed-width inner
+        // layer is hidden rather than spilling; leave it un-clipped when idle
+        // so the resize handle can protrude past the right edge.
+        (sidebarCollapsed || animatingCollapse) && "overflow-hidden",
+        animatingCollapse && "transition-[width] duration-200 ease-in-out"
+      )}
+      style={{ width: sidebarCollapsed ? 0 : width }}
       aria-label={t("conversationsTitle")}
+      aria-hidden={sidebarCollapsed || undefined}
+      inert={sidebarCollapsed || undefined}
       data-bg-target="chat"
+      data-collapsed={sidebarCollapsed || undefined}
     >
-      <ChannelListBody {...props} onSelect={handleSelect} />
-      <SidebarResizeHandle width={width} onChange={setSidebarWidth} onReset={resetWidth} />
+      {/* Fixed-width inner layer: keeps the list from reflowing as the aside's
+          width animates to 0 — the content is clipped, not squished. */}
+      <div className="flex h-full min-h-0 flex-col" style={{ width }}>
+        <ChannelListBody {...props} onSelect={handleSelect} />
+      </div>
+      {!sidebarCollapsed && (
+        <SidebarResizeHandle width={width} onChange={setSidebarWidth} onReset={resetWidth} />
+      )}
     </aside>
   )
 }

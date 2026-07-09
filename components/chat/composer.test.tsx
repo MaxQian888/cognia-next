@@ -56,8 +56,11 @@ import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
+import { useProjectStore } from "@/stores/project/project-store"
 import { usePlatform } from "@/hooks/use-platform"
+import { executeShell } from "@/lib/shell/exec"
 import type { ChatSession } from "@/lib/claude/types"
+import type { Project } from "@/types"
 
 const mockUsePlatform = usePlatform as jest.Mock
 
@@ -97,6 +100,7 @@ const mkSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 
 beforeEach(() => {
   useChatStore.getState().clear()
+  useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   mockUsePlatform.mockReturnValue("web")
 })
 
@@ -404,6 +408,84 @@ describe("Composer — large-paste folding", () => {
     fireEvent.click(screen.getByLabelText("Remove pasted text"))
     expect(ta.value).not.toContain("[Pasted")
     expect(screen.queryByTestId("composer-pasted-chips")).not.toBeInTheDocument()
+  })
+})
+
+describe("Composer — effective cwd (workspace fallback)", () => {
+  // Regression: the composer used to read `session.workingDir` directly, so a
+  // selected workspace ran model turns in its root while `!` shell commands
+  // claimed no working directory existed. Both surfaces now resolve through
+  // the shared effective-cwd chain.
+  const seedActiveWorkspace = (path: string) => {
+    const project = {
+      id: "proj-ws",
+      name: "WS",
+      roots: [{ id: "r1", path, isPrimary: true }],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      isArchived: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    } as Project
+    useProjectStore.setState({ projects: [project], activeProjectId: project.id, loaded: false })
+  }
+
+  function renderComposer() {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()} // no session.workingDir on purpose
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    return document.querySelector("textarea") as HTMLTextAreaElement
+  }
+
+  it("shows the active workspace root in the cwd chip when the session has no workingDir", () => {
+    seedActiveWorkspace("/ws/root")
+    renderComposer()
+    expect(screen.getByTitle("/ws/root")).toBeInTheDocument()
+  })
+
+  it("runs a ! shell command in the active workspace root instead of erroring", async () => {
+    seedActiveWorkspace("/ws/root")
+    const executeShellMock = executeShell as jest.Mock
+    executeShellMock.mockResolvedValue({ stdout: "ok", stderr: "", code: 0 })
+    const ta = renderComposer()
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "!echo hi" } })
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(executeShellMock).toHaveBeenCalledWith("echo hi", "/ws/root"))
+  })
+
+  it("still prefers a per-session workingDir over the workspace root", () => {
+    seedActiveWorkspace("/ws/root")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession({ workingDir: "/session/dir" })}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    expect(screen.getByTitle("/session/dir")).toBeInTheDocument()
+    expect(screen.queryByTitle("/ws/root")).not.toBeInTheDocument()
   })
 })
 
