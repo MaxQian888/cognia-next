@@ -65,6 +65,42 @@ describe("StagedSourceReview", () => {
     expect(screen.getByTestId("twin-source-preview-body")).toBeInTheDocument()
   })
 
+  it("re-includes an unticked item and collapses an expanded preview", () => {
+    render(
+      <StagedSourceReview
+        staged={[staged("One"), staged("Two")]}
+        committing={false}
+        onConfirm={() => {}}
+        onBack={() => {}}
+        renderError={renderError}
+      />
+    )
+    fireEvent.click(screen.getByTestId("twin-add-source-include-0"))
+    expect(screen.getByText(/1 of 2 selected/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("twin-add-source-include-0"))
+    expect(screen.getByText(/2 of 2 selected/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("twin-add-source-expand-0"))
+    expect(screen.getByTestId("twin-source-preview-body")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("twin-add-source-expand-0"))
+    expect(screen.queryByTestId("twin-source-preview-body")).not.toBeInTheDocument()
+  })
+
+  it("shows the committing spinner state", () => {
+    render(
+      <StagedSourceReview
+        staged={[staged("One")]}
+        committing
+        onConfirm={() => {}}
+        onBack={() => {}}
+        renderError={renderError}
+      />
+    )
+    const confirm = screen.getByTestId("twin-add-source-confirm")
+    expect(confirm).toBeDisabled()
+    expect(confirm).toHaveTextContent(/adding/i)
+  })
+
   it("shows skipped-file notices and calls back", () => {
     const onBack = jest.fn()
     render(

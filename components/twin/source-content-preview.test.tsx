@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MAX_PREVIEW_CHARS, SourceContentPreview } from "./source-content-preview"
 
 const MARKDOWN_WITH_TABLE = [
@@ -32,6 +32,26 @@ describe("SourceContentPreview", () => {
     const body = screen.getByTestId("twin-source-preview-body")
     expect(body.textContent?.length).toBe(MAX_PREVIEW_CHARS)
     expect(screen.getByText(/first .* characters/i)).toBeInTheDocument()
+  })
+
+  it("caps rendered rows and reports the hidden remainder", () => {
+    const rows = Array.from({ length: 60 }, (_, i) => `| r${i} | ${i} |`).join("\n")
+    const big = `| A | B |\n| --- | --- |\n${rows}`
+    render(<SourceContentPreview text={big} active />)
+    expect(screen.getByText(/more rows/i)).toBeInTheDocument()
+  })
+
+  it("survives a clipboard failure silently", async () => {
+    const writeText = jest.fn().mockRejectedValue(new Error("denied"))
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    })
+    render(<SourceContentPreview text={MARKDOWN_WITH_TABLE} active />)
+    fireEvent.click(screen.getByTestId("twin-source-preview-copy-0"))
+    await waitFor(() => expect(writeText).toHaveBeenCalled())
+    // No crash and no "Copied" confirmation.
+    expect(screen.queryByText(/^copied$/i)).not.toBeInTheDocument()
   })
 
   it("copies a table as markdown", async () => {

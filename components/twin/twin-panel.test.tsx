@@ -173,6 +173,24 @@ describe("TwinPanel", () => {
     expect(screen.queryByTestId("twin-wizard-name")).not.toBeInTheDocument()
   })
 
+  it("hides the toolbar controls in the empty state and shows them once a twin exists", async () => {
+    const { unmount } = render(<TwinPanel />)
+    await screen.findByTestId("twin-empty-create")
+    // Toolbar renders the title only — no selector / worker pill without a twin.
+    expect(screen.getByTestId("twin-toolbar")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Active twin/i })).not.toBeInTheDocument()
+    unmount()
+
+    await createCharacter({
+      name: "Alice",
+      systemPrompt: "you are alice",
+      twinId: "twin_alice",
+    })
+    render(<TwinPanel />)
+    await screen.findByRole("button", { name: /Active twin/i })
+    expect(screen.getByTestId("twin-toolbar")).toHaveTextContent(/worker/i)
+  })
+
   it("mounts the twin.panel.header plugin slot in the header once a twin exists", async () => {
     await createCharacter({
       name: "Alice",

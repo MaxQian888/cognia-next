@@ -240,7 +240,179 @@ describe("fetchLarkDocAsRawSource — api channel", () => {
   })
 })
 
+describe("fetchLarkDocAsRawSource — api channel edge branches", () => {
+  it("maps a non-JSON error body to larkNetwork with the HTTP status", async () => {
+    const http = makeHttp([["/", { status: 502, headers: {}, body: "<html>bad gateway</html>" }]])
+    await expectCode(
+      fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, httpImpl: http }),
+      "larkNetwork"
+    )
+  })
+
+  it("fetches legacy /docs/ documents via the doc v2 raw_content endpoint", async () => {
+    const urls: string[] = []
+    const http = jest.fn(async (req: TauriHttpRequest) => {
+      urls.push(req.url)
+      return ok({ content: "legacy body" })
+    })
+    const doc = await fetchLarkDocAsRawSource("https://acme.feishu.cn/docs/doccnLegacyToken12345", {
+      adapterId: ADAPTER,
+      httpImpl: http,
+    })
+    expect(urls[0]).toContain("/open-apis/doc/v2/doccnLegacyToken12345/raw_content")
+    expect(doc).toMatchObject({
+      objType: "doc",
+      text: "legacy body",
+      title: "doccnLegacyToken12345",
+    })
+  })
+
+  it("maps a persistent 401 on the tenant path to larkNotAuthorized", async () => {
+    getUserAccessTokenMock.mockResolvedValue(null)
+    const http = makeHttp([["/", larkFail(401, 99991663)]])
+    await expectCode(
+      fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, httpImpl: http }),
+      "larkNotAuthorized"
+    )
+  })
+
+  it("rejects wiki nodes lacking an obj_token", async () => {
+    const http = makeHttp([["/wiki/v2/spaces/get_node", ok({ node: {} })]])
+    await expect(
+      fetchLarkDocAsRawSource(WIKI_URL, { adapterId: ADAPTER, httpImpl: http })
+    ).rejects.toMatchObject({ code: "larkUnsupportedType", params: { type: "unknown" } })
+  })
+})
+
 describe("fetchLarkDocAsRawSource — cli channel", () => {
+  it("resolves the default exec via dynamic import when none is injected", async () => {
+    jest.doMock("@/lib/skills/built-in/lark/exec-lark-cli", () => ({
+      execLarkCli: jest.fn(async () => ({
+        status: "ok",
+        adapterId: ADAPTER,
+        data: "cli markdown body",
+      })),
+    }))
+    try {
+      const doc = await fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, channel: "cli" })
+      expect(doc).toMatchObject({ text: "cli markdown body", channel: "cli" })
+    } finally {
+      jest.dontMock("@/lib/skills/built-in/lark/exec-lark-cli")
+    }
+  })
+
+  it("maps a failing dynamic import to larkCliUnavailable", async () => {
+    // Purge the ok-mock cached by the previous dynamic import.
+    jest.resetModules()
+    jest.doMock("@/lib/skills/built-in/lark/exec-lark-cli", () => {
+      throw new Error("module unavailable in this bundle")
+    })
+    try {
+      await expectCode(
+        fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, channel: "cli" }),
+        "larkCliUnavailable"
+      )
+    } finally {
+      jest.dontMock("@/lib/skills/built-in/lark/exec-lark-cli")
+      jest.resetModules()
+    }
+  })
+
+  it("falls back to the doc token as title when neither node nor meta has one", async () => {
+    const http = makeHttp([
+      [
+        "/wiki/v2/spaces/get_node",
+        ok({ node: { obj_token: "doxcnResolvedToken123456", obj_type: "docx" } }),
+      ],
+      ["/raw_content", ok({ content: "body" })],
+      ["/documents/doxcn", ok({ document: {} })],
+    ])
+    const doc = await fetchLarkDocAsRawSource(WIKI_URL, { adapterId: ADAPTER, httpImpl: http })
+    expect(doc.title).toBe("doxcnResolvedToken123456")
+    expect(http).toHaveBeenCalledTimes(3)
+  })
+
+  it("uses the body snippet when the error payload is JSON without msg", async () => {
+    const http = makeHttp([
+      ["/", { status: 200, headers: {}, body: JSON.stringify({ code: 999 }) }],
+    ])
+    await expectCode(
+      fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, httpImpl: http }),
+      "larkNetwork"
+    )
+  })
+
+  it.each([
+    [404, 555001, "larkNotFound"],
+    [429, 555002, "larkRateLimited"],
+  ])("maps bare HTTP %s with unknown code to %s", async (status, code, expected) => {
+    const http = makeHttp([["/", larkFail(status as number, code as number)]])
+    await expectCode(
+      fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, httpImpl: http }),
+      expected as string
+    )
+  })
+
+  it("maps business not-found codes even on HTTP 200", async () => {
+    const http = makeHttp([["/", larkFail(200, 1254005)]])
+    await expectCode(
+      fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, httpImpl: http }),
+      "larkNotFound"
+    )
+  })
+
+  it("handles an empty error body", async () => {
+    const http = makeHttp([["/", { status: 500, headers: {}, body: "" }]])
+    await expectCode(
+      fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, httpImpl: http }),
+      "larkNetwork"
+    )
+  })
+
+  it("marks the wiki token on cli-channel wiki fetches", async () => {
+    const exec = jest.fn(async () => ({
+      status: "ok" as const,
+      adapterId: ADAPTER,
+      data: { markdown: "wiki md", document: { title: "Nested title" } },
+    }))
+    const doc = await fetchLarkDocAsRawSource(WIKI_URL, {
+      adapterId: ADAPTER,
+      channel: "cli",
+      execImpl: exec,
+    })
+    expect(doc.wikiToken).toBe("wikcnAbCdEfGh123456789")
+    expect(doc.title).toBe("Nested title")
+  })
+
+  it("maps a bare 403 with an unknown business code to larkNoPermission", async () => {
+    const http = makeHttp([["/", larkFail(403, 555555)]])
+    await expect(
+      fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, httpImpl: http })
+    ).rejects.toMatchObject({ code: "larkNoPermission", params: { account: "Acme Lark" } })
+  })
+
+  it("maps a throwing exec (stubbed child_process) to larkCliUnavailable", async () => {
+    const exec = jest.fn(async () => {
+      throw new Error("execFile is not a function")
+    })
+    await expectCode(
+      fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, channel: "cli", execImpl: exec }),
+      "larkCliUnavailable"
+    )
+  })
+
+  it("maps auth_unavailable to larkCliUnavailable", async () => {
+    const exec = jest.fn(async () => ({
+      status: "error" as const,
+      reason: "auth_unavailable",
+      message: "no adapter",
+    }))
+    await expectCode(
+      fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, channel: "cli", execImpl: exec }),
+      "larkCliUnavailable"
+    )
+  })
+
   it("passes adapterId and doc token to lark-cli and normalizes the payload", async () => {
     const exec = jest.fn(async () => ({
       status: "ok" as const,

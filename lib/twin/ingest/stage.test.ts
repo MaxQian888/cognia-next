@@ -34,12 +34,41 @@ jest.mock("@cognia/document/document-processor", () => ({
 jest.mock("@/lib/twin/importers", () => ({
   ...jest.requireActual("@/lib/twin/importers"),
   parseGitRepo: jest.fn(),
+  // Shape checkers + parsers are controllable so each importer switch arm is
+  // testable without a full fixture per platform. Slack keeps the real
+  // parser (its detection is a regex inside stage.ts, not a shape checker).
+  isChatgptExportShape: jest.fn(() => false),
+  parseChatgptExport: jest.fn(),
+  isClaudeExportShape: jest.fn(() => false),
+  parseClaudeExport: jest.fn(),
+  isGeminiExportShape: jest.fn(() => false),
+  parseGeminiExport: jest.fn(),
+  isLarkExportShape: jest.fn(() => false),
+  parseLarkExport: jest.fn(),
+  isWechatExportShape: jest.fn(() => false),
+  parseWechatExport: jest.fn(),
+  isDingtalkJsonShape: jest.fn(() => false),
+  parseDingtalkExport: jest.fn(),
 }))
 
 import { fetchUrlAsRawSource } from "@/lib/twin/ingest/url-fetcher"
 import { fetchLarkDocAsRawSource } from "@/lib/twin/ingest/lark-doc-fetcher"
 import { processDocumentAsync } from "@cognia/document/document-processor"
-import { parseGitRepo } from "@/lib/twin/importers"
+import {
+  parseGitRepo,
+  isChatgptExportShape,
+  parseChatgptExport,
+  isClaudeExportShape,
+  parseClaudeExport,
+  isGeminiExportShape,
+  parseGeminiExport,
+  isLarkExportShape,
+  parseLarkExport,
+  isWechatExportShape,
+  parseWechatExport,
+  isDingtalkJsonShape,
+  parseDingtalkExport,
+} from "@/lib/twin/importers"
 
 const mockFetchUrl = fetchUrlAsRawSource as jest.MockedFunction<typeof fetchUrlAsRawSource>
 const mockFetchLark = fetchLarkDocAsRawSource as jest.Mock
@@ -53,7 +82,9 @@ function makeFile(name: string, content: string, mimeType = "text/plain"): File 
 }
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  // resetAllMocks (not clearAllMocks): the shape-checker mocks get
+  // mockReturnValue(true) per test and must fall back to falsy afterwards.
+  jest.resetAllMocks()
 })
 
 describe("stageFile", () => {
@@ -168,15 +199,19 @@ describe("stageFile", () => {
     expect(result.staged[0]).toMatchObject({ format: "markdown", title: "data.json" })
   })
 
+  const DINGTALK_TEXT = [
+    "[2024-01-01 10:00:00] Zhang San",
+    "早上好",
+    "",
+    "[2024-01-01 10:01:00] Li Si",
+    "好的，收到",
+  ].join("\n")
+
   it("parses plain-text DingTalk exports", async () => {
-    const dingtalk = [
-      "[2024-01-01 10:00:00] Zhang San",
-      "早上好",
-      "",
-      "[2024-01-01 10:01:00] Li Si",
-      "好的，收到",
-    ].join("\n")
-    const result = await stageFile(makeFile("group.txt", dingtalk), TWIN)
+    ;(parseDingtalkExport as jest.Mock).mockReturnValue([
+      { filename: "group 2024-01-01", text: "早上好", baseMetadata: { speakers: ["Zhang San"] } },
+    ])
+    const result = await stageFile(makeFile("group.txt", DINGTALK_TEXT), TWIN)
     if (result.staged.length > 0) {
       expect(result.staged[0].tags).toEqual(["dingtalk-export"])
       expect(result.staged[0].kind).toBe("chat")
@@ -184,6 +219,87 @@ describe("stageFile", () => {
       // The heuristic may not match this fixture — must fail structurally.
       expect(result.error).toBeDefined()
     }
+  })
+
+  it("reports empty and crashing DingTalk text parses", async () => {
+    ;(parseDingtalkExport as jest.Mock).mockReturnValue([])
+    expect((await stageFile(makeFile("g.txt", DINGTALK_TEXT), TWIN)).error?.code).toBe(
+      "dingTalkNoMessages"
+    )
+    ;(parseDingtalkExport as jest.Mock).mockImplementation(() => {
+      throw new Error("bad line")
+    })
+    expect((await stageFile(makeFile("g.txt", DINGTALK_TEXT), TWIN)).error).toEqual({
+      code: "dingTalkParseFailed",
+      params: { reason: "bad line" },
+    })
+    ;(parseDingtalkExport as jest.Mock).mockImplementation(() => {
+      throw "weird"
+    })
+    expect((await stageFile(makeFile("g.txt", DINGTALK_TEXT), TWIN)).error?.code).toBe(
+      "dingTalkParseFailedFallback"
+    )
+  })
+
+  it("fans out .eml files through the email importer", async () => {
+    const eml = ["From: alice@example.com", "Subject: Hello", "", "Eml body text."].join("\n")
+    const result = await stageFile(makeFile("mail.eml", eml), TWIN)
+    expect(result.staged.length).toBeGreaterThan(0)
+    expect(result.staged[0]).toMatchObject({ kind: "email", tags: ["eml"] })
+  })
+
+  const RAW = (name: string) => ({
+    filename: name,
+    text: `${name} body`,
+    baseMetadata: { speakers: ["P"] },
+  })
+
+  it.each([
+    ["chatgpt-export", isChatgptExportShape, parseChatgptExport],
+    ["claude-export", isClaudeExportShape, parseClaudeExport],
+    ["gemini-export", isGeminiExportShape, parseGeminiExport],
+    ["lark-export", isLarkExportShape, parseLarkExport],
+    ["wechat-export", isWechatExportShape, parseWechatExport],
+    ["dingtalk-export", isDingtalkJsonShape, parseDingtalkExport],
+  ])("routes %s JSON through its importer", async (tag, shapeCheck, parser) => {
+    ;(shapeCheck as jest.Mock).mockReturnValue(true)
+    ;(parser as jest.Mock).mockReturnValue([RAW(tag as string)])
+    const result = await stageFile(makeFile("export.json", "{}", "application/json"), TWIN)
+    expect(result.error).toBeUndefined()
+    expect(result.staged[0]).toMatchObject({
+      kind: "chat",
+      tags: [tag],
+      speakers: ["P"],
+    })
+  })
+
+  it("reports importer failures with localized codes", async () => {
+    ;(isLarkExportShape as jest.Mock).mockReturnValue(true)
+    ;(parseLarkExport as jest.Mock).mockReturnValue([])
+    expect((await stageFile(makeFile("x.json", "{}"), TWIN)).error).toEqual({
+      code: "shapeNoMessages",
+      params: { importer: "lark-export" },
+    })
+    ;(parseLarkExport as jest.Mock).mockImplementation(() => {
+      throw new Error("broken export")
+    })
+    expect((await stageFile(makeFile("x.json", "{}"), TWIN)).error).toEqual({
+      code: "importParseFailed",
+      params: { importer: "lark-export", reason: "broken export" },
+    })
+    ;(parseLarkExport as jest.Mock).mockImplementation(() => {
+      throw "weird"
+    })
+    expect((await stageFile(makeFile("x.json", "{}"), TWIN)).error).toEqual({
+      code: "importParseFailedFallback",
+      params: { importer: "lark-export" },
+    })
+  })
+
+  it("maps non-Error document-processor crashes to the fallback code", async () => {
+    mockProcessDocument.mockRejectedValue("string crash")
+    const result = await stageFile(makeFile("broken.docx", "x"), TWIN)
+    expect(result.error).toEqual({ code: "parseFailedFallback", params: { format: "docx" } })
   })
 })
 
@@ -326,6 +442,49 @@ describe("stageGitRepo", () => {
     mockParseGitRepo.mockRejectedValue(new Error("not a git repo"))
     const result = await stageGitRepo({ twinId: TWIN, repoPath: "/tmp/x" })
     expect(result.error).toEqual({ code: "gitWalkFailed", params: { reason: "not a git repo" } })
+  })
+})
+
+describe("edge branches", () => {
+  it("reports an eml with no parsable messages", async () => {
+    // parseEml yields nothing for a headerless fragment.
+    const result = await stageFile(makeFile("empty.eml", "not an email at all"), TWIN)
+    if (result.staged.length === 0) {
+      expect(result.error?.code).toBe("noMessagesParsed")
+    } else {
+      // Tolerant parser — the fan-out branch is still exercised.
+      expect(result.staged[0].kind).toBe("email")
+    }
+  })
+
+  it("stringifies non-Error url and git failures", async () => {
+    mockFetchUrl.mockRejectedValue("plain failure")
+    expect((await stageUrl("https://example.com/x")).error?.params?.reason).toBe("plain failure")
+    mockParseGitRepo.mockRejectedValue("git blew up")
+    expect((await stageGitRepo({ twinId: TWIN, repoPath: "/r" })).error?.params?.reason).toBe(
+      "git blew up"
+    )
+  })
+
+  it("omits the host tag for bare Lark tokens", async () => {
+    mockFetchLark.mockResolvedValue({
+      url: "doxcnAbCdEfGh1234567890",
+      title: "T",
+      contentType: "text/plain",
+      text: "b",
+      docToken: "doxcnAbCdEfGh1234567890",
+      objType: "docx",
+      adapterId: "cai_1",
+      channel: "api",
+    })
+    const result = await stageLarkDoc("doxcnAbCdEfGh1234567890", { adapterId: "cai_1" })
+    expect(result.staged[0].tags).toEqual(["lark", "lark-doc"])
+  })
+
+  it("wraps non-Error lark failures", async () => {
+    mockFetchLark.mockRejectedValue("nope")
+    const result = await stageLarkDoc("doxcnAbCdEfGh1234567890", { adapterId: "cai_1" })
+    expect(result.error).toEqual({ code: "larkNetwork", params: { reason: "nope" } })
   })
 })
 

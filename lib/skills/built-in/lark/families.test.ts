@@ -10,7 +10,14 @@
  */
 
 import { getSharedBuiltInSkillRegistry } from "../registry"
-import { buildConfirmSurface } from "./_helpers"
+import { buildConfirmSurface, runLarkCli } from "./_helpers"
+
+// Keep everything real except runLarkCli so execute() wiring (argv shape +
+// bound-adapter threading) is assertable without spawning lark-cli.
+jest.mock("./_helpers", () => ({
+  ...jest.requireActual("./_helpers"),
+  runLarkCli: jest.fn(async () => ({ ok: true })),
+}))
 
 // Importing the barrel triggers `registerBuiltInSkill()` for every family.
 // Side-effect at module load — placed at the top of this file so the
@@ -121,5 +128,29 @@ describe("buildConfirmSurface — helper", () => {
       details: [{ label: "When", value: "tomorrow" }],
     })
     expect(s.components["detail_0"]).toBeDefined()
+  })
+})
+
+describe("bound-adapter threading (multi-account correctness)", () => {
+  const runLarkCliMock = runLarkCli as jest.Mock
+
+  it("passes the session's Lark adapterId into runLarkCli", async () => {
+    const skill = getSharedBuiltInSkillRegistry().get("lark.doc.fetch")
+    expect(skill).toBeDefined()
+    await skill!.execute(
+      { docToken: "doxcnAbCdEfGh1234567890" },
+      {
+        sessionId: "s1",
+        imBinding: { adapterId: "cai_bound", platform: "lark", conversationKey: "oc_1" },
+      }
+    )
+    expect(runLarkCliMock).toHaveBeenCalledWith(expect.objectContaining({ adapterId: "cai_bound" }))
+  })
+
+  it("leaves adapterId undefined for in-app sessions (bridge default applies)", async () => {
+    runLarkCliMock.mockClear()
+    const skill = getSharedBuiltInSkillRegistry().get("lark.doc.fetch")
+    await skill!.execute({ docToken: "doxcnAbCdEfGh1234567890" }, { sessionId: "s1" })
+    expect(runLarkCliMock).toHaveBeenCalledWith(expect.objectContaining({ adapterId: undefined }))
   })
 })

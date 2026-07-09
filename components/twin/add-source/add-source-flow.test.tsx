@@ -145,6 +145,57 @@ describe("AddSourceFlow", () => {
     expect(await screen.findByTestId("twin-add-source-review")).toBeInTheDocument()
   })
 
+  it("shows an error banner when the commit itself fails", async () => {
+    stagePasteMock.mockReturnValue({ staged: [staged("Snippet")] })
+    commitMock.mockRejectedValue(new Error("dexie down"))
+    render(<AddSourceFlow twinId="twin_a" />)
+
+    fireEvent.click(screen.getByTestId("twin-add-source-type-paste"))
+    fireEvent.change(screen.getByLabelText(/content/i), { target: { value: "note" } })
+    fireEvent.click(screen.getByTestId("twin-add-source-paste-stage"))
+    fireEvent.click(await screen.findByTestId("twin-add-source-confirm"))
+
+    expect(await screen.findByTestId("twin-add-source-error")).toBeInTheDocument()
+    expect(toast.success).not.toHaveBeenCalled()
+    // Still on review so the user can retry.
+    expect(screen.getByTestId("twin-add-source-review")).toBeInTheDocument()
+  })
+
+  it("navigates back from review to the same input type", async () => {
+    stagePasteMock.mockReturnValue({ staged: [staged("Snippet")] })
+    render(<AddSourceFlow twinId="twin_a" />)
+
+    fireEvent.click(screen.getByTestId("twin-add-source-type-paste"))
+    fireEvent.change(screen.getByLabelText(/content/i), { target: { value: "note" } })
+    fireEvent.click(screen.getByTestId("twin-add-source-paste-stage"))
+    await screen.findByTestId("twin-add-source-review")
+
+    fireEvent.click(screen.getByRole("button", { name: /back/i }))
+    expect(screen.getByTestId("twin-add-source-paste")).toBeInTheDocument()
+  })
+
+  it("renders the file and git input panels", () => {
+    render(<AddSourceFlow twinId="twin_a" />)
+    fireEvent.click(screen.getByTestId("twin-add-source-type-file"))
+    expect(screen.getByTestId("twin-add-source-file")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("twin-add-source-back-to-pick"))
+    fireEvent.click(screen.getByTestId("twin-add-source-type-git"))
+    expect(screen.getByTestId("twin-add-source-git")).toBeInTheDocument()
+  })
+
+  it("stringifies non-Error commit failures", async () => {
+    stagePasteMock.mockReturnValue({ staged: [staged("Snippet")] })
+    commitMock.mockRejectedValue("string failure")
+    render(<AddSourceFlow twinId="twin_a" />)
+
+    fireEvent.click(screen.getByTestId("twin-add-source-type-paste"))
+    fireEvent.change(screen.getByLabelText(/content/i), { target: { value: "note" } })
+    fireEvent.click(screen.getByTestId("twin-add-source-paste-stage"))
+    fireEvent.click(await screen.findByTestId("twin-add-source-confirm"))
+
+    expect(await screen.findByTestId("twin-add-source-error")).toBeInTheDocument()
+  })
+
   it("disables the git type outside Tauri", () => {
     const { isTauri } = jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }
     isTauri.mockReturnValue(false)

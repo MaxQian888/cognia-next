@@ -100,6 +100,23 @@ describe("FileSourceInput", () => {
     ])
   })
 
+  it("captures a throwing stageFile as a per-file parseFailed notice", async () => {
+    stageFileMock.mockRejectedValue(new Error("reader died"))
+    const props = makeProps()
+    render(<FileSourceInput {...props} />)
+    await userEvent.upload(
+      screen.getByLabelText(/pick text files/i),
+      [new File(["x"], "boom.md", { type: "text/plain" })],
+      { applyAccept: false }
+    )
+    await waitFor(() =>
+      expect(props.onError).toHaveBeenCalledWith({
+        code: "parseFailed",
+        params: { message: "reader died" },
+      })
+    )
+  })
+
   it("reports the first error when nothing staged", async () => {
     stageFileMock.mockResolvedValue({ staged: [], error: { code: "fileEmpty" } })
     const props = makeProps()
@@ -185,6 +202,81 @@ describe("LarkSourceInput", () => {
   })
 })
 
+describe("environment branches", () => {
+  it("fetches URLs without the proxy outside Tauri and shows the web hint", async () => {
+    const { isTauri } = jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }
+    isTauri.mockReturnValue(false)
+    stageUrlMock.mockResolvedValue({ staged: [STAGED] })
+    const props = makeProps()
+    render(<UrlSourceInput {...props} />)
+
+    expect(screen.getByText(/cross-origin/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/url/i), { target: { value: "https://example.com" } })
+    fireEvent.click(screen.getByTestId("twin-add-source-url-fetch"))
+    await waitFor(() =>
+      expect(stageUrlMock).toHaveBeenCalledWith(
+        "https://example.com",
+        expect.objectContaining({ jinaFallback: false })
+      )
+    )
+    expect(stageUrlMock.mock.calls[0][1].fetchImpl).toBeUndefined()
+    isTauri.mockReturnValue(true)
+  })
+
+  it("treats non-Error stageFile rejections as fallback parse failures", async () => {
+    stageFileMock.mockRejectedValue("string crash")
+    const props = makeProps()
+    render(<FileSourceInput {...props} />)
+    await userEvent.upload(
+      screen.getByLabelText(/pick text files/i),
+      [new File(["x"], "s.md", { type: "text/plain" })],
+      { applyAccept: false }
+    )
+    await waitFor(() =>
+      expect(props.onError).toHaveBeenCalledWith({
+        code: "parseFailed",
+        params: { message: "string crash" },
+      })
+    )
+  })
+
+  it("defaults maxCommits when the field is cleared and ignores array picks", async () => {
+    tauriOpenMock.mockResolvedValue(["multi"])
+    const props = makeProps()
+    render(<GitSourceInput {...props} />)
+    fireEvent.change(screen.getByLabelText(/max commits/i), { target: { value: "" } })
+    fireEvent.click(screen.getByTestId("twin-add-source-git-pick"))
+    await waitFor(() => expect(props.setBusy).toHaveBeenLastCalledWith(false))
+    expect(stageGitMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("busy states", () => {
+  it("shows spinners while busy", () => {
+    const props = { ...makeProps(), busy: true }
+    const { unmount } = render(<FileSourceInput {...props} />)
+    expect(screen.getByLabelText(/pick text files/i)).toBeDisabled()
+    unmount()
+    render(<GitSourceInput {...props} />)
+    expect(screen.getByTestId("twin-add-source-git-pick")).toHaveTextContent(/walking/i)
+  })
+
+  it("shows the URL fetching spinner while busy", () => {
+    render(<UrlSourceInput {...makeProps()} busy />)
+    expect(screen.getByTestId("twin-add-source-url-fetch")).toHaveTextContent(/fetching/i)
+  })
+
+  it("hides the Lark hand-off when no handler is provided", () => {
+    render(<UrlSourceInput {...makeProps()} />)
+    fireEvent.change(screen.getByLabelText(/url/i), {
+      target: { value: "https://acme.feishu.cn/docx/doxcnAbCdEfGh1234567890" },
+    })
+    expect(screen.queryByTestId("twin-add-source-url-lark-hint")).not.toBeInTheDocument()
+    // Direct fetch stays blocked regardless.
+    expect(screen.getByTestId("twin-add-source-url-fetch")).toBeDisabled()
+  })
+})
+
 describe("PasteSourceInput", () => {
   it("stages the pasted content with title and format", () => {
     stagePasteMock.mockReturnValue({ staged: [STAGED] })
@@ -224,6 +316,19 @@ describe("GitSourceInput", () => {
       })
     )
     expect(props.onStaged).toHaveBeenCalledWith([STAGED])
+  })
+
+  it("maps a crashing picker to gitWalkFailed", async () => {
+    tauriOpenMock.mockRejectedValue(new Error("dialog exploded"))
+    const props = makeProps()
+    render(<GitSourceInput {...props} />)
+    fireEvent.click(screen.getByTestId("twin-add-source-git-pick"))
+    await waitFor(() =>
+      expect(props.onError).toHaveBeenCalledWith({
+        code: "gitWalkFailed",
+        params: { reason: "dialog exploded" },
+      })
+    )
   })
 
   it("does nothing when the picker is cancelled", async () => {
