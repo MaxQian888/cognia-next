@@ -2,8 +2,9 @@
 
 /**
  * Mobile Profile route — full-screen wrapper around the shared
- * `<ProfileSection />` component used in the desktop Settings sidebar
- * (`/settings?section=profile`). Same dual-mount pattern as
+ * `<ProfileSection />` component. On desktop the same component is embedded in
+ * the Account settings section (`/settings?section=account`; the old
+ * `?section=profile` deep link redirects there). Same dual-mount pattern as
  * `/me/appearance`: the section reads/writes `AppSettings.profile` through
  * `useUserProfile()`, so both surfaces stay in lockstep.
  */

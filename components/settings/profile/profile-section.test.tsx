@@ -29,6 +29,26 @@ jest.mock("./profile-avatar-picker", () => ({
   ),
 }))
 
+// The real TimezoneSelect wraps a Radix Select (awkward to drive in jsdom);
+// stub it to a button that fires onValueChange with a known zone.
+jest.mock("@/components/scheduler/timezone-select", () => ({
+  TimezoneSelect: ({
+    value,
+    onValueChange,
+    testId,
+  }: {
+    value?: string
+    onValueChange: (v: string) => void
+    testId?: string
+  }) => (
+    <button
+      data-testid={testId}
+      data-value={value ?? ""}
+      onClick={() => onValueChange("Asia/Tokyo")}
+    />
+  ),
+}))
+
 import { useUserProfile } from "@/lib/profile/use-user-profile"
 
 import {
@@ -195,11 +215,65 @@ describe("ProfileSection", () => {
       pronouns: "",
       statusMessage: "",
       avatarDataUrl: "",
+      timezone: "",
     })
   })
 
   it("hides the reset button for an empty profile", () => {
     render(<ProfileSection />)
     expect(screen.queryByTestId("profile-reset")).not.toBeInTheDocument()
+  })
+
+  it("shows the reset button when only a timezone is set", () => {
+    mockUseUserProfile.mockReturnValue(baseResult({ profile: { timezone: "Asia/Tokyo" } }))
+    render(<ProfileSection />)
+    expect(screen.getByTestId("profile-reset")).toBeInTheDocument()
+  })
+
+  it("hides the email line when showEmail is false, even signed in", () => {
+    mockUseUserProfile.mockReturnValue(
+      baseResult({ resolvedDisplayName: "Max", email: "max@example.com" })
+    )
+    render(<ProfileSection showEmail={false} />)
+    expect(screen.queryByTestId("profile-email")).not.toBeInTheDocument()
+  })
+
+  it("renders a live preview of the composed identity", () => {
+    mockUseUserProfile.mockReturnValue(
+      baseResult({
+        profile: { pronouns: "they/them", statusMessage: "shipping" },
+        resolvedDisplayName: "Max",
+      })
+    )
+    render(<ProfileSection />)
+    expect(screen.getByTestId("profile-preview")).toBeInTheDocument()
+    expect(screen.getByTestId("profile-preview-name")).toHaveTextContent("Max")
+    expect(screen.getByTestId("profile-preview-status")).toHaveTextContent("shipping")
+    // No avatar → initials fallback, not the <img>.
+    expect(screen.queryByTestId("profile-preview-avatar")).not.toBeInTheDocument()
+  })
+
+  it("shows the avatar image in the preview when one is set", () => {
+    mockUseUserProfile.mockReturnValue(
+      baseResult({ resolvedAvatarUrl: "data:image/webp;base64,AA", resolvedDisplayName: "Max" })
+    )
+    render(<ProfileSection />)
+    expect(screen.getByTestId("profile-preview-avatar")).toBeInTheDocument()
+  })
+
+  it("updates the preview name live while typing the display name", () => {
+    render(<ProfileSection />)
+    fireEvent.change(screen.getByTestId("profile-display-name"), {
+      target: { value: "Ada" },
+    })
+    expect(screen.getByTestId("profile-preview-name")).toHaveTextContent("Ada")
+  })
+
+  it("saves the timezone when the picker changes", () => {
+    const result = baseResult()
+    mockUseUserProfile.mockReturnValue(result)
+    render(<ProfileSection />)
+    fireEvent.click(screen.getByTestId("profile-timezone"))
+    expect(result.save).toHaveBeenCalledWith({ timezone: "Asia/Tokyo" })
   })
 })

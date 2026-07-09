@@ -19,11 +19,15 @@
   "displayNamePlaceholder": "希望我们怎么称呼你？",
   "emailReadOnly": "已登录：{email}",
   "fallbackName": "未登录",
+  "previewHint": "添加一句状态，让别人知道你在忙什么。",
+  "previewTitle": "展示效果",
   "pronounsHint": "在协同设备上显示在你的名字旁。",
   "pronounsLabel": "称谓",
   "pronounsPlaceholder": "例如 she/her、they/them",
   "reset": "恢复默认",
   "statusLabel": "状态",
   "statusPlaceholder": "你正在做什么（可选）。",
+  "timezoneHint": "用于通知、问候以及新的目标与计划任务。默认使用本设备的时区。",
+  "timezoneLabel": "时区",
   "title": "个人资料"
 }

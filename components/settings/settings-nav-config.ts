@@ -45,7 +45,6 @@ import {
   CompassIcon,
   BrainIcon,
   GitBranchIcon,
-  UserRoundIcon,
   BracesIcon,
   BoxIcon,
   GitPullRequestArrowIcon,
@@ -128,11 +127,13 @@ export interface NavItem {
 
 export const SETTINGS_NAV: NavItem[] = [
   // === AI ===
-  // NOTE: the standalone "general" and "api-key" sections were merged into
-  // agent-runtime (defaults/behavior) and providers (Anthropic key + official
-  // subscription reuse). Their ids stay in `SettingsSectionId` + the keyword
-  // map for the redirect in `settings-shell.tsx`, but they no longer appear as
-  // navigable entries.
+  // NOTE: the standalone "general", "api-key", and "profile" sections were
+  // merged — general → agent-runtime (defaults/behavior), api-key → providers
+  // (Anthropic key + official subscription reuse), and profile → account (the
+  // account section already embeds the profile editor). Their ids stay in
+  // `SettingsSectionId` + the redirect map in `settings-shell.tsx` (and their
+  // keywords are folded into the target section's bucket), but they no longer
+  // appear as navigable entries.
   {
     id: "providers",
     labelKey: "providers",
@@ -153,13 +154,6 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "account",
     group: "ai",
     icon: CircleUserIcon,
-  },
-  {
-    id: "profile",
-    labelKey: "profile",
-    descriptionKey: "profile",
-    group: "ai",
-    icon: UserRoundIcon,
   },
   {
     id: "subscription",
@@ -570,12 +564,20 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "profile",
     "subscription",
     "devices",
+    // folded from the merged "profile" section (see SETTINGS_NAV note)
+    "name",
+    "avatar",
+    "bio",
+    "timezone",
     "账户",
     "账号",
     "概览",
     "身份",
+    "资料",
+    "昵称",
+    "头像",
+    "时区",
   ],
-  profile: ["profile", "name", "avatar", "bio", "identity", "资料", "昵称", "头像"],
   providers: [
     "providers",
     "openai",

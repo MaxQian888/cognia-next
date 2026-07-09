@@ -10,6 +10,8 @@
   "groupInterface": "界面",
   "groupObservability": "可观测性",
   "groupSystem": "系统",
+  "loadingSection": "正在加载设置项",
+  "loadingSettings": "正在加载设置…",
   "noSettingsFound": "没有匹配的设置。",
   "searchPlaceholder": "搜索设置…",
   "title": "设置"

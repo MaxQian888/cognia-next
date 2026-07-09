@@ -10,6 +10,8 @@
   "groupInterface": "Interface",
   "groupObservability": "Observability",
   "groupSystem": "System",
+  "loadingSection": "Loading section",
+  "loadingSettings": "Loading settings…",
   "noSettingsFound": "No settings match your search.",
   "searchPlaceholder": "Search settings…",
   "title": "Settings"

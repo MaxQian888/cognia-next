@@ -7,7 +7,8 @@
 // Lives in its own module so it can be imported from both the direct-chat
 // hook and the team-chat hook, and unit-tested in Phase 6 without React.
 
-import { primaryRootOf, additionalDirsOf, allRootPaths } from "@/lib/workspace/roots"
+import { additionalDirsOf, allRootPaths } from "@/lib/workspace/roots"
+import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
 import type { MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
@@ -203,11 +204,9 @@ async function resolveSummaryProviderForCompaction(args: {
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: args.appSettings.defaultProvider,
     providerSettings: args.appSettings.providerSettings as
-      | Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry>
-      | undefined,
+      Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry> | undefined,
     customProviders: args.appSettings.customProviders as
-      | import("@/lib/ai/provider-consumption").RichCustomProviderEntry[]
-      | undefined,
+      import("@/lib/ai/provider-consumption").RichCustomProviderEntry[] | undefined,
   })
   const r = resolveFeatureProvider(
     {
@@ -1131,11 +1130,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       const snapshot = createProviderSettingsSnapshot({
         defaultProvider: appSettings.defaultProvider,
         providerSettings: appSettings.providerSettings as
-          | Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry>
-          | undefined,
+          Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry> | undefined,
         customProviders: appSettings.customProviders as
-          | import("@/lib/ai/provider-consumption").RichCustomProviderEntry[]
-          | undefined,
+          import("@/lib/ai/provider-consumption").RichCustomProviderEntry[] | undefined,
       })
       const resolution = resolveFeatureProvider(
         {
@@ -1496,17 +1493,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   }
 
   // --- Working directory ---------------------------------------------------
-  // Priority: per-session override → active workspace root → character default
-  // → app default. The active workspace sits above the character default
-  // because it reflects "which project the user is currently working in",
-  // a stronger signal than a character's standing preference. Resolved here
+  // Shared chain (see lib/workspace/effective-cwd.ts): per-session override →
+  // active workspace root → character default → app default. Resolved here
   // (ahead of the system-prompt assembly) because project instruction discovery
-  // below keys off it.
-  const cwd =
-    session?.workingDir ??
-    (ctx.activeProject ? primaryRootOf(ctx.activeProject)?.path : undefined) ??
-    character?.workingDir ??
-    appSettings?.defaultWorkingDir
+  // below keys off it. The composer / settings UI resolve through the same
+  // helper so what the user sees always matches what the send uses.
+  const cwd = resolveEffectiveCwd({
+    sessionWorkingDir: session?.workingDir,
+    activeProject: ctx.activeProject,
+    characterWorkingDir: character?.workingDir,
+    defaultWorkingDir: appSettings?.defaultWorkingDir,
+  })
   if (cwd) opts.cwd = cwd
 
   // --- Project instruction files (CLAUDE.md / AGENTS.md / AGENT.md) --------
@@ -1828,8 +1825,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         // per-platform — no live adapter build needed. Desktop (no binding)
         // leaves this undefined; the filter no-ops there.
         let channelCapabilities:
-          | readonly import("@/types/connectors/capability").Capability[]
-          | undefined
+          readonly import("@/types/connectors/capability").Capability[] | undefined
         if (session?.platformBinding?.adapterId) {
           const { getPlatformCapabilities } = await import("@/lib/connectors/platform-capabilities")
           channelCapabilities = getPlatformCapabilities(session.platformBinding.platform)

@@ -19,11 +19,15 @@
   "displayNamePlaceholder": "How should we call you?",
   "emailReadOnly": "Signed in as {email}",
   "fallbackName": "Signed-out",
+  "previewHint": "Add a status to show what you're up to.",
+  "previewTitle": "How you appear",
   "pronounsHint": "Shown next to your name on companion devices.",
   "pronounsLabel": "Pronouns",
   "pronounsPlaceholder": "e.g. she/her, they/them",
   "reset": "Reset to default",
   "statusLabel": "Status",
   "statusPlaceholder": "What you're up to (optional).",
+  "timezoneHint": "Used for notifications, greetings, and new goals & schedules. Defaults to this device's zone.",
+  "timezoneLabel": "Timezone",
   "title": "Profile"
 }

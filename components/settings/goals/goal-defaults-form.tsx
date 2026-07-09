@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useSettingsStore } from "@/stores/settings"
+import { resolveUserTimeZone } from "@/lib/profile/timezone"
 import type { GoalDefaults, GoalQuietHours } from "@/types/goal"
 import { DEFAULT_GOAL_CONFIG } from "@/lib/goal/runtime"
 
@@ -21,10 +22,10 @@ export function GoalDefaultsForm() {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const stored = (settings as { goals?: GoalDefaults } | null | undefined)?.goals
-  const appTimezone =
-    (settings as { timezone?: string } | null | undefined)?.timezone ??
-    Intl.DateTimeFormat().resolvedOptions().timeZone ??
-    "UTC"
+  // New goals inherit the user's profile timezone (falls back to the device
+  // zone). Previously read a never-set `settings.timezone`, so it always fell
+  // through to the device zone.
+  const appTimezone = resolveUserTimeZone(settings?.profile)
   const [draft, setDraft] = useState<GoalDefaults>(stored ?? {})
   // React's "storing information from previous renders" pattern: reset the
   // draft when the persisted defaults change externally (e.g. backup restore).

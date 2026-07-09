@@ -16,14 +16,17 @@ import { resetKeysForSection } from "@/lib/settings/section-keys"
 import { useSettingFocus } from "@/hooks/settings/use-setting-focus"
 import { SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
 
-const SectionLoading = () => (
-  <div className="space-y-4" aria-busy="true" aria-label="Loading section">
-    <Skeleton className="h-7 w-1/3" />
-    <Skeleton className="h-4 w-2/3" />
-    <Skeleton className="h-32 w-full" />
-    <Skeleton className="h-24 w-full" />
-  </div>
-)
+const SectionLoading = () => {
+  const t = useTranslations("settings")
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label={t("loadingSection")}>
+      <Skeleton className="h-7 w-1/3" />
+      <Skeleton className="h-4 w-2/3" />
+      <Skeleton className="h-32 w-full" />
+      <Skeleton className="h-24 w-full" />
+    </div>
+  )
+}
 
 const ProvidersSection = dynamic(
   () => import("./provider/provider-settings").then((m) => m.ProviderSettings),
@@ -84,10 +87,6 @@ const AboutSection = dynamic(() => import("./about/about-section").then((m) => m
   ssr: false,
   loading: () => <SectionLoading />,
 })
-const ProfileSection = dynamic(
-  () => import("./profile/profile-section").then((m) => m.ProfileSection),
-  { ssr: false, loading: () => <SectionLoading /> }
-)
 const AccountOverviewSection = dynamic(
   () => import("./account/account-overview-section").then((m) => m.AccountOverviewSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -256,13 +255,15 @@ interface Props {
 
 const VALID_SECTIONS = new Set<SettingsSectionId>(SETTINGS_NAV.map((n) => n.id))
 
-// Deprecated sections folded into others (the standalone "general" and
-// "api-key" pages were merged into agent-runtime / providers). Old deep links
-// (`?section=general`, `?section=api-key`) transparently redirect to the new
-// home so bookmarks and finder anchors don't break.
+// Deprecated sections folded into others (the standalone "general", "api-key",
+// and "profile" pages were merged into agent-runtime / providers / account).
+// Old deep links (`?section=general`, `?section=api-key`, `?section=profile`)
+// transparently redirect to the new home so bookmarks and finder anchors don't
+// break. (The account section embeds the profile editor.)
 const DEPRECATED_REDIRECT: Record<string, SettingsSectionId> = {
   general: "agent-runtime",
   "api-key": "providers",
+  profile: "account",
 }
 
 /** Default landing section when the URL has no (valid) `?section=`. */
@@ -276,6 +277,8 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   "diagnostics",
   "connections",
   "skills",
+  "hooks",
+  "agents",
 ])
 
 function isSection(value: string | null): value is SettingsSectionId {
@@ -426,8 +429,6 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
   switch (section) {
     case "account":
       return <AccountOverviewSection />
-    case "profile":
-      return <ProfileSection />
     case "providers":
       return <ProvidersSection />
     case "subscription":
@@ -540,9 +541,10 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
 }
 
 function SettingsShellFallback() {
+  const t = useTranslations("settings")
   return (
     <div className="flex h-full min-h-[400px] items-center justify-center text-sm text-muted-foreground">
-      Loading settings…
+      {t("loadingSettings")}
     </div>
   )
 }

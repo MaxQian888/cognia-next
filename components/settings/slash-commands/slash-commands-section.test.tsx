@@ -13,7 +13,7 @@ jest.mock("next-intl", () => ({
 const mockLoadCustom = jest.fn()
 const mockDeleteCustom = jest.fn()
 jest.mock("@/lib/slash-commands/custom", () => ({
-  loadCustomSlashCommands: () => mockLoadCustom(),
+  loadCustomSlashCommands: (...args: unknown[]) => mockLoadCustom(...args),
   deleteCustomSlashCommand: (...args: unknown[]) => mockDeleteCustom(...args),
 }))
 
@@ -37,13 +37,35 @@ jest.mock("./command-editor-dialog", () => ({
     ) : null,
 }))
 
-jest.mock("@/stores/chat", () => ({
-  useChatStore: (selector: (s: unknown) => unknown) => selector({ activeSessionId: null }),
-}))
+jest.mock("@/stores/chat", () => {
+  const state = { activeSessionId: null as string | null }
+  return {
+    useChatStore: (selector: (s: unknown) => unknown) => selector(state),
+    __setActiveSessionId: (id: string | null) => {
+      state.activeSessionId = id
+    },
+  }
+})
+const { __setActiveSessionId } = jest.requireMock("@/stores/chat") as {
+  __setActiveSessionId: (id: string | null) => void
+}
 
 jest.mock("@/lib/db/sessions", () => ({
   getSession: jest.fn().mockResolvedValue(null),
 }))
+const getSessionMock = (jest.requireMock("@/lib/db/sessions") as { getSession: jest.Mock })
+  .getSession
+
+// The section resolves the *effective* cwd (session → workspace → character →
+// default) — stub the resolver so the test controls what it yields.
+jest.mock("@/hooks/chat/use-effective-cwd", () => ({
+  resolveEffectiveCwdForSession: jest.fn(async () => null),
+}))
+const resolveEffectiveCwdMock = (
+  jest.requireMock("@/hooks/chat/use-effective-cwd") as {
+    resolveEffectiveCwdForSession: jest.Mock
+  }
+).resolveEffectiveCwdForSession
 
 const mockListRegistry = jest.fn()
 jest.mock("@/lib/slash-commands/registry", () => ({
@@ -91,6 +113,9 @@ beforeEach(() => {
   mockListRegistry.mockReset()
   mockDeleteCustom.mockReset().mockResolvedValue(undefined)
   isTauriMock.mockReturnValue(true)
+  __setActiveSessionId(null)
+  getSessionMock.mockResolvedValue(null)
+  resolveEffectiveCwdMock.mockReset().mockResolvedValue(null)
   Object.defineProperty(navigator, "clipboard", {
     value: { writeText: jest.fn(() => Promise.resolve()) },
     configurable: true,
@@ -98,6 +123,19 @@ beforeEach(() => {
 })
 
 describe("SlashCommandsSection", () => {
+  it("scans commands with the effective cwd (workspace fallback) instead of raw session.workingDir", async () => {
+    mockLoadCustom.mockResolvedValue([])
+    mockListRegistry.mockReturnValue([])
+    __setActiveSessionId("s1")
+    const sessionRow = { id: "s1" } // no workingDir — the workspace supplies it
+    getSessionMock.mockResolvedValue(sessionRow)
+    resolveEffectiveCwdMock.mockResolvedValue("/ws/root")
+    render(<SlashCommandsSection />)
+    await waitFor(() => expect(resolveEffectiveCwdMock).toHaveBeenCalledWith(sessionRow))
+    // The cwd-keyed scan effect re-runs with the resolved workspace root.
+    await waitFor(() => expect(mockLoadCustom).toHaveBeenCalledWith("/ws/root"))
+  })
+
   it("renders all three accordion groups", async () => {
     mockLoadCustom.mockResolvedValue([])
     mockListRegistry.mockReturnValue([])

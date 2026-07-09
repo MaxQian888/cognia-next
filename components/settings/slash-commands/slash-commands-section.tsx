@@ -44,6 +44,7 @@ import { createLogger } from "@/lib/logging"
 import { CommandEditorDialog } from "./command-editor-dialog"
 import { useChatStore } from "@/stores/chat"
 import { getSession } from "@/lib/db/sessions"
+import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,
@@ -100,7 +101,11 @@ export function SlashCommandsSection() {
     void (async () => {
       try {
         const session = await getSession(activeSessionId)
-        if (!cancelled) setCwd(session?.workingDir ?? null)
+        // Effective chain (session → active workspace → character → default),
+        // matching the send path — a selected workspace enables project-scope
+        // commands even when the session has no per-session dir.
+        const resolved = await resolveEffectiveCwdForSession(session)
+        if (!cancelled) setCwd(resolved)
       } catch {
         if (!cancelled) setCwd(null)
       }

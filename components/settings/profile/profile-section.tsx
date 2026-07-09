@@ -2,26 +2,36 @@
 
 /**
  * User profile editor — the ONE component dual-mounted on the desktop
- * settings shell (`/settings?section=profile`) and the mobile sub-page
+ * settings shell (embedded in the Account section) and the mobile sub-page
  * (`/me/profile`). Edits the local-first `AppSettings.profile` blob via
  * `useUserProfile()`; identity precedence (custom > credential-derived)
  * lives in that hook, not here.
  *
  * Text fields keep a transient draft while focused and persist on blur —
- * no setState-in-effect, no per-keystroke write-queue churn.
+ * no setState-in-effect, no per-keystroke write-queue churn. A live "how you
+ * appear" preview at the top reflects drafts as you type.
+ *
+ * `showEmail` lets the embedding Account section suppress the read-only email
+ * line (it renders the email itself in its plan card); mobile keeps the
+ * default so `/me/profile` still shows who you're signed in as.
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { UserRoundIcon } from "lucide-react"
 
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
+import { TimezoneSelect } from "@/components/scheduler/timezone-select"
+import { deterministicColor, initials } from "@/lib/ui/avatar"
+import { deviceTimeZone } from "@/lib/profile/timezone"
 import { useUserProfile } from "@/lib/profile/use-user-profile"
+import { TIMEZONE_OPTIONS } from "@/types/scheduler"
 
 import { ProfileAvatarPicker } from "./profile-avatar-picker"
 
@@ -30,7 +40,12 @@ export const BIO_MAX = 280
 export const PRONOUNS_MAX = 32
 export const STATUS_MAX = 80
 
-export function ProfileSection() {
+export interface ProfileSectionProps {
+  /** Render the read-only "Signed in as {email}" line. Defaults to `true`. */
+  showEmail?: boolean
+}
+
+export function ProfileSection({ showEmail = true }: ProfileSectionProps = {}) {
   const t = useTranslations("settings.profile")
   const { profile, loaded, resolvedDisplayName, resolvedAvatarUrl, email, save } = useUserProfile()
 
@@ -47,6 +62,16 @@ export function ProfileSection() {
   const pronounsValue = pronounsDraft ?? profile.pronouns ?? ""
   const statusValue = statusDraft ?? profile.statusMessage ?? ""
   const previewName = resolvedDisplayName ?? t("fallbackName")
+  // Live preview name follows the in-progress draft, then the credential
+  // fallback — so the preview updates while typing, before blur commits.
+  const previewDisplayName = nameValue.trim() || previewName
+
+  // The picker value falls back to the device zone (only when it's one of the
+  // offered options, else UTC) so the control never renders blank.
+  const deviceTz = deviceTimeZone()
+  const timezoneValue =
+    profile.timezone ??
+    (TIMEZONE_OPTIONS.some((option) => option.value === deviceTz) ? deviceTz : "UTC")
 
   const commitName = () => {
     if (nameDraft === null) return
@@ -81,7 +106,8 @@ export function ProfileSection() {
     profile.bio ||
     profile.pronouns ||
     profile.statusMessage ||
-    profile.avatarDataUrl
+    profile.avatarDataUrl ||
+    profile.timezone
   )
 
   return (
@@ -99,13 +125,61 @@ export function ProfileSection() {
       ) : (
         <Card>
           <CardContent className="flex flex-col gap-6 pt-6">
+            <div className="flex flex-col gap-2" data-testid="profile-preview">
+              <span className="text-xs font-medium text-muted-foreground">{t("previewTitle")}</span>
+              <div className="flex items-center gap-3 rounded-lg border bg-muted/40 p-3">
+                <Avatar className="size-12">
+                  {resolvedAvatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- avatar is a small data: URL, not an optimizable remote asset
+                    <img
+                      src={resolvedAvatarUrl}
+                      alt=""
+                      className="size-full object-cover"
+                      data-testid="profile-preview-avatar"
+                    />
+                  ) : (
+                    <AvatarFallback
+                      style={{ backgroundColor: deterministicColor(previewDisplayName) }}
+                    >
+                      {initials(previewDisplayName)}
+                    </AvatarFallback>
+                  )}
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="truncate text-sm font-semibold"
+                      data-testid="profile-preview-name"
+                    >
+                      {previewDisplayName}
+                    </span>
+                    {pronounsValue ? (
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {pronounsValue}
+                      </span>
+                    ) : null}
+                  </div>
+                  {statusValue ? (
+                    <p
+                      className="truncate text-xs text-muted-foreground"
+                      data-testid="profile-preview-status"
+                    >
+                      {statusValue}
+                    </p>
+                  ) : (
+                    <p className="truncate text-xs text-muted-foreground/70">{t("previewHint")}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-col gap-1">
               <ProfileAvatarPicker
                 value={resolvedAvatarUrl}
                 fallbackName={previewName}
                 onChange={(dataUrl) => save({ avatarDataUrl: dataUrl ?? "" })}
               />
-              {email ? (
+              {showEmail && email ? (
                 <p className="text-xs text-muted-foreground" data-testid="profile-email">
                   {t("emailReadOnly", { email })}
                 </p>
@@ -154,6 +228,18 @@ export function ProfileSection() {
             </div>
 
             <div className="flex flex-col gap-2">
+              <Label>{t("timezoneLabel")}</Label>
+              <TimezoneSelect
+                value={timezoneValue}
+                onValueChange={(tz) => void save({ timezone: tz })}
+                includeOffset
+                testId="profile-timezone"
+                triggerClassName="w-full"
+              />
+              <p className="text-xs text-muted-foreground">{t("timezoneHint")}</p>
+            </div>
+
+            <div className="flex flex-col gap-2">
               <Label htmlFor="profile-bio">{t("bioLabel")}</Label>
               <Textarea
                 id="profile-bio"
@@ -186,6 +272,7 @@ export function ProfileSection() {
                       pronouns: "",
                       statusMessage: "",
                       avatarDataUrl: "",
+                      timezone: "",
                     })
                   }
                   data-testid="profile-reset"

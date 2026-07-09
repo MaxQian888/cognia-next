@@ -12,6 +12,7 @@ import {
   type NotificationSource,
 } from "@/types/notifications"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
+import { deviceTimeZone } from "@/lib/profile/timezone"
 import { resolveSourcePref } from "./preferences"
 
 const CHANNEL_ORDER: NotificationChannel[] = ["center", "toast", "os", "push", "im"]
@@ -33,11 +34,7 @@ export interface RoutingDecision {
 
 /** Resolve the local IANA timezone (injectable for deterministic tests). */
 export function localTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-  } catch {
-    return "UTC"
-  }
+  return deviceTimeZone()
 }
 
 export function resolveChannels(

@@ -102,6 +102,12 @@ describe("SettingsShell reset row", () => {
     render(<SettingsShell />)
     expect(replace).toHaveBeenCalledWith("/settings?section=providers", { scroll: false })
   })
+
+  it("redirects the merged ?section=profile deep link to account", () => {
+    mockSection = "profile"
+    render(<SettingsShell />)
+    expect(replace).toHaveBeenCalledWith("/settings?section=account", { scroll: false })
+  })
 })
 
 describe("SettingsShell fill-height layout", () => {

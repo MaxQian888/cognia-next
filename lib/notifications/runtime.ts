@@ -17,6 +17,7 @@ import { resolvePreferences } from "./preferences"
 import { dispatchNotificationCommand } from "./action-registry"
 import { useNotificationStore } from "@/stores/notifications/notification-store"
 import { useSettingsStore } from "@/stores/settings"
+import { resolveUserTimeZone } from "@/lib/profile/timezone"
 import { ensureNotificationPermission, notify as osNotify } from "@/lib/tauri/notification"
 
 const dbPort: NotifyDbPort = {
@@ -70,6 +71,10 @@ function buildDeps(): NotifyDeps {
     now: () => Date.now(),
     loadPrefs: () =>
       resolvePreferences(useSettingsStore.getState().settings?.notificationPreferences),
+    // DND quiet-hours are wall-clock in the user's own zone. Without this,
+    // resolveChannels defaults to the *device* zone — wrong on a companion
+    // phone in another timezone. Resolve from the (cross-device synced) profile.
+    tz: resolveUserTimeZone(useSettingsStore.getState().settings?.profile),
     db: dbPort,
     toast: showToast,
     osNotify,
