@@ -252,6 +252,29 @@
     "passAt1": "pass@1 {pct}%",
     "passHatK": "pass^{k} {pct}%"
   },
+  "scorerCatalog": {
+    "assertion": "Assertions",
+    "cost": "Cost",
+    "judge-instruction-following": "Instruction following (LLM judge)",
+    "judge-task-completion": "Task completion (LLM judge)",
+    "rag-answer-relevancy": "Answer relevancy",
+    "rag-context-precision": "Context precision",
+    "rag-context-recall": "Context recall",
+    "rag-faithfulness": "Faithfulness",
+    "tool-args": "Tool arguments",
+    "tool-order": "Tool order",
+    "tool-redundancy": "Tool redundancy",
+    "tool-selection": "Tool selection",
+    "trajectory-unordered": "Trajectory (unordered)"
+  },
+  "scorerPicker": {
+    "all": "All",
+    "groupCount": "{on}/{total}",
+    "llmBadge": "LLM",
+    "llmHint": "Runs an LLM judge",
+    "llmUnavailable": "Configure a judge model to enable this scorer",
+    "none": "None"
+  },
   "settings": {
     "costTitle": "Cost guard",
     "costWarnDescription": "Ask for confirmation before starting a run estimated to cost more than this.",
@@ -261,9 +284,13 @@
     "defaultScorersDescription": "Scorers pre-selected when you configure a new run.",
     "defaultScorersLabel": "Default scorers",
     "description": "Project-level defaults applied to every agent evaluation run.",
+    "deterministicActiveHint": "LLM-judged scorers are skipped — only deterministic checks run and the judge model is unused.",
     "deterministicDescription": "Skip LLM-judged scorers and run only deterministic checks.",
     "deterministicLabel": "Deterministic scorers only",
+    "gateActive": "Active",
     "gateDescription": "Thresholds stamped onto newly created datasets.",
+    "gateInactive": "Off",
+    "gateInconsistent": "Min pass^k should not exceed min pass@1 (pass^k ≤ pass@1).",
     "gateMaxCost": "Max total cost (USD)",
     "gateMinPassAt1": "Min pass@1",
     "gateMinPassHatK": "Min pass^k",
@@ -277,6 +304,9 @@
     "judgeTitle": "Judge",
     "openWorkspace": "Open workspace",
     "runTitle": "Run defaults",
+    "saved": "Saved",
+    "saving": "Saving…",
+    "scorersSelectedSummary": "{count} of {total} scorers selected",
     "title": "Eval settings"
   },
   "subtitle": "Datasets, scorers, and pass^k reliability for your built-in agents.",

@@ -252,6 +252,29 @@
     "passAt1": "pass@1 {pct}%",
     "passHatK": "pass^{k} {pct}%"
   },
+  "scorerCatalog": {
+    "assertion": "断言",
+    "cost": "成本",
+    "judge-instruction-following": "指令遵循（LLM 评委）",
+    "judge-task-completion": "任务完成度（LLM 评委）",
+    "rag-answer-relevancy": "回答相关性",
+    "rag-context-precision": "上下文精确度",
+    "rag-context-recall": "上下文召回率",
+    "rag-faithfulness": "忠实度",
+    "tool-args": "工具参数",
+    "tool-order": "工具调用顺序",
+    "tool-redundancy": "工具冗余",
+    "tool-selection": "工具选择",
+    "trajectory-unordered": "轨迹（无序）"
+  },
+  "scorerPicker": {
+    "all": "全选",
+    "groupCount": "{on}/{total}",
+    "llmBadge": "LLM",
+    "llmHint": "由 LLM 评委运行",
+    "llmUnavailable": "配置评委模型后即可启用此评分器",
+    "none": "全不选"
+  },
   "settings": {
     "costTitle": "费用保护",
     "costWarnDescription": "当预计费用超过该值时，在开始运行前请求确认。",
@@ -261,9 +284,13 @@
     "defaultScorersDescription": "配置新运行时预先选中的评分器。",
     "defaultScorersLabel": "默认评分器",
     "description": "应用于每次 Agent 评估运行的项目级默认设置。",
+    "deterministicActiveHint": "已跳过由 LLM 评判的评分器——仅运行确定性检查，评委模型不生效。",
     "deterministicDescription": "跳过由 LLM 评判的评分器，仅运行确定性检查。",
     "deterministicLabel": "仅使用确定性评分器",
+    "gateActive": "已启用",
     "gateDescription": "新建数据集时套用的阈值。",
+    "gateInactive": "未设置",
+    "gateInconsistent": "最低 pass^k 不应高于最低 pass@1（pass^k ≤ pass@1）。",
     "gateMaxCost": "最高总费用（美元）",
     "gateMinPassAt1": "最低 pass@1",
     "gateMinPassHatK": "最低 pass^k",
@@ -277,6 +304,9 @@
     "judgeTitle": "评委",
     "openWorkspace": "打开工作区",
     "runTitle": "运行默认值",
+    "saved": "已保存",
+    "saving": "保存中…",
+    "scorersSelectedSummary": "已选 {count} / {total} 个评分器",
     "title": "评估设置"
   },
   "subtitle": "为内置 Agent 提供评测集、评分器与 pass^k 可靠性。",

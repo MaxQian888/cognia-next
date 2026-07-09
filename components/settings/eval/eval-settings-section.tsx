@@ -11,7 +11,7 @@
  * run-config dialog and `createDataset` read it back through `resolveEvalSettings`.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import {
@@ -24,6 +24,9 @@ import {
   ChevronsUpDownIcon,
   CheckIcon,
   ExternalLinkIcon,
+  Loader2Icon,
+  InfoIcon,
+  AlertTriangleIcon,
 } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
@@ -45,12 +48,14 @@ import {
   SettingsRow,
   SettingsToggle,
   SettingsPageHeader,
+  SettingsAlert,
 } from "@/components/settings/common/settings-section"
 import {
   ScorerPicker,
   expandScorerSelection,
   normalizeScorerSelection,
 } from "@/components/eval/scorer-picker"
+import { ALL_SCORER_IDS } from "@/lib/ai/eval/scorers/catalog"
 import { resolveEvalSettings, EVAL_K_RANGE } from "@/lib/ai/eval/settings"
 import type { EvalSettings } from "@/types/eval/settings"
 import type { GateThresholds } from "@/types/eval/gate"
@@ -89,7 +94,7 @@ function JudgeModelPicker({
         <Button
           variant="outline"
           disabled={disabled}
-          className="w-[220px] justify-between gap-2 font-mono text-xs"
+          className="w-full justify-between gap-2 font-mono text-xs sm:w-[220px]"
           aria-label={t("judgeModelLabel")}
         >
           <span className="flex items-center gap-2 truncate">
@@ -99,7 +104,10 @@ function JudgeModelPicker({
           <ChevronsUpDownIcon className="size-3 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[320px] p-0">
+      <PopoverContent
+        align="end"
+        className="w-[var(--radix-popover-trigger-width)] p-0 sm:w-[320px]"
+      >
         <Command>
           <CommandInput placeholder={t("judgeModelSearch")} />
           <CommandList>
@@ -161,8 +169,31 @@ export function EvalSettingsSection() {
 
   const resolved = useMemo(() => resolveEvalSettings(appSettings), [appSettings])
 
+  // Auto-save is fire-and-forget from the user's point of view; surface a small
+  // transient status pill so a persisted change is visibly acknowledged.
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle")
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (savedTimer.current) clearTimeout(savedTimer.current)
+    },
+    []
+  )
+
+  const runSave = async (payload: { evalSettings: EvalSettings }) => {
+    setSaveState("saving")
+    try {
+      await save(payload)
+      setSaveState("saved")
+      if (savedTimer.current) clearTimeout(savedTimer.current)
+      savedTimer.current = setTimeout(() => setSaveState("idle"), 1500)
+    } catch {
+      setSaveState("idle")
+    }
+  }
+
   const patch = (next: Partial<EvalSettings>) => {
-    void save({ evalSettings: { ...resolved, ...next } })
+    void runSave({ evalSettings: { ...resolved, ...next } })
   }
 
   const patchGate = (next: Partial<GateThresholds>) => {
@@ -179,6 +210,18 @@ export function EvalSettingsSection() {
   const minScorerPassRate =
     typeof gate.minScorerPassRate === "number" ? gate.minScorerPassRate : undefined
 
+  // Gate feedback: whether any threshold is set, and whether pass^k > pass@1
+  // (logically impossible — pass^k can never exceed pass@1 for the same run).
+  const gateActive = Object.keys(gate).length > 0
+  const gateInconsistent =
+    typeof gate.minPassAt1 === "number" &&
+    typeof gate.minPassHatK === "number" &&
+    gate.minPassHatK > gate.minPassAt1
+
+  // Scorer summary for the Run card.
+  const selectedScorerCount = expandScorerSelection(resolved.defaultScorerIds).length
+  const totalScorerCount = ALL_SCORER_IDS.length
+
   return (
     <div className="space-y-4" data-testid="eval-settings-section">
       <SettingsPageHeader
@@ -186,10 +229,27 @@ export function EvalSettingsSection() {
         title={t("title")}
         description={t("description")}
         actions={
-          <Button variant="outline" size="sm" onClick={() => router.push("/eval")}>
-            <ExternalLinkIcon className="size-4" />
-            {t("openWorkspace")}
-          </Button>
+          <div className="flex items-center gap-2">
+            {saveState !== "idle" && (
+              <span
+                role="status"
+                aria-live="polite"
+                data-testid="eval-save-status"
+                className="text-muted-foreground flex items-center gap-1 text-xs"
+              >
+                {saveState === "saving" ? (
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                ) : (
+                  <CheckIcon className="size-3.5 text-emerald-500" />
+                )}
+                {saveState === "saving" ? t("saving") : t("saved")}
+              </span>
+            )}
+            <Button variant="outline" size="sm" onClick={() => router.push("/eval")}>
+              <ExternalLinkIcon className="size-4" />
+              {t("openWorkspace")}
+            </Button>
+          </div>
         }
       />
 
@@ -209,6 +269,11 @@ export function EvalSettingsSection() {
           checked={deterministicOnly}
           onCheckedChange={(v) => patch({ deterministicOnly: v })}
         />
+        {deterministicOnly && (
+          <SettingsAlert icon={<InfoIcon className="size-4" />}>
+            {t("deterministicActiveHint")}
+          </SettingsAlert>
+        )}
       </SettingsCard>
 
       {/* 2. Run defaults */}
@@ -231,7 +296,15 @@ export function EvalSettingsSection() {
           />
         </SettingsRow>
         <div className="space-y-2">
-          <p className="text-sm font-medium">{t("defaultScorersLabel")}</p>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
+            <p className="text-sm font-medium">{t("defaultScorersLabel")}</p>
+            <p className="text-muted-foreground text-xs tabular-nums">
+              {t("scorersSelectedSummary", {
+                count: selectedScorerCount,
+                total: totalScorerCount,
+              })}
+            </p>
+          </div>
           <p className="text-muted-foreground text-xs">{t("defaultScorersDescription")}</p>
           <ScorerPicker
             value={expandScorerSelection(resolved.defaultScorerIds)}
@@ -246,6 +319,8 @@ export function EvalSettingsSection() {
         icon={<ShieldCheckIcon className="size-4" />}
         title={t("gateTitle")}
         description={t("gateDescription")}
+        badge={gateActive ? t("gateActive") : t("gateInactive")}
+        badgeVariant={gateActive ? "default" : "outline"}
       >
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
@@ -306,6 +381,11 @@ export function EvalSettingsSection() {
             />
           </label>
         </div>
+        {gateInconsistent && (
+          <SettingsAlert variant="destructive" icon={<AlertTriangleIcon className="size-4" />}>
+            {t("gateInconsistent")}
+          </SettingsAlert>
+        )}
       </SettingsCard>
 
       {/* 4. Cost guard */}
