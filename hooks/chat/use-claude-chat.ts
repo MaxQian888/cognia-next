@@ -109,6 +109,7 @@ import {
   resolveTargetAgentId,
 } from "@/lib/claude/agents/chat-mention-targets"
 import { discoverMarkdownAgentTargets } from "@/lib/claude/agents/markdown-mention-targets"
+import { resolveMentions } from "@/lib/chat/mentions/resolve-mentions"
 import { useProjectStore } from "@/stores/project/project-store"
 import { allRootPaths } from "@/lib/workspace/roots"
 import { isWorkspaceRestricted } from "@/lib/workspace/trust-gate"
@@ -958,6 +959,35 @@ export function useClaudeChat() {
       // Base off this session's own slice — never the focused projection.
       const previousMessages = store.getState().sessions[sessionId]?.messages ?? []
       const userMsg = makeUserMessage(effectiveContent)
+      // Structured mention capture: persist the message's inline `@…` tokens
+      // as `metadata.mentions: ContextRef[]` so mentions are queryable without
+      // regex re-parsing. Known subagent handles resolve to their kind; other
+      // tokens fall back to `file` (the CLI's native reading of `@path`).
+      // Markdown-agent handles need async discovery and resolve as `file`
+      // here — a documented v1 narrowing, not a routing change (routing still
+      // uses the full union in resolveTargetAgentId below).
+      const mentionSourceText =
+        typeof effectiveContent === "string"
+          ? effectiveContent
+          : effectiveContent
+              .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
+              .map((b) => b.text)
+              .join("\n")
+      if (mentionSourceText.includes("@")) {
+        const mentionTargets = buildChatMentionTargets()
+        const mentionRefs = resolveMentions(mentionSourceText, {
+          resolveAgentHandle: (name) => {
+            const hit = mentionTargets.find((t) => t.handle === name)
+            return hit ? { kind: "subagent", id: hit.handle, label: hit.name } : null
+          },
+        })
+        if (mentionRefs.length > 0) {
+          ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+            ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+            mentions: mentionRefs,
+          }
+        }
+      }
       const next = callOptions?.skipUserAppend ? previousMessages : [...previousMessages, userMsg]
       if (!callOptions?.skipUserAppend) {
         store.getState().replaceSessionMessages(sessionId, next)

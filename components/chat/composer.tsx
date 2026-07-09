@@ -83,12 +83,14 @@ import {
   type MentionMode,
 } from "./composer-trigger"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
+import { getMentionPickHandler } from "@/lib/chat/mentions/pick-registry"
 import { useMentionableSubagents } from "@/hooks/chat/use-mentionable-subagents"
 import { useMarkdownChatAgents } from "@/hooks/chat/use-markdown-chat-agents"
 import { useMentionableSkills } from "@/hooks/chat/use-mentionable-skills"
 import { useMentionablePresets } from "@/hooks/chat/use-mentionable-presets"
 import { usePluginSlashCommands } from "@/hooks/chat/use-plugin-slash-commands"
 import { useApplyPreset } from "@/hooks/chat/use-apply-preset"
+import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { ContextChipBar } from "./composer/context-chip-bar"
 import { FolderPickerButton } from "./composer/folder-picker-button"
@@ -393,7 +395,10 @@ function ComposerInner(props: InnerProps) {
   const permissionMode = useChatStore((s) => s.permissionMode)
   const addReferencedPath = useChatStore((s) => s.addReferencedPath)
   const updateSession = useUpdateSession()
-  const cwd = props.session?.workingDir ?? null
+  // Effective cwd (session override → workspace root → character → default) —
+  // NOT the raw session.workingDir, so `@` file refs, custom slash commands
+  // and the footer chip agree with what a send actually runs in.
+  const cwd = useEffectiveCwd(props.session)
   const sessionId = props.session?.id ?? null
 
   // `@` mode resolution. Callers may set `mentionMode` explicitly (team chat →
@@ -644,15 +649,6 @@ function ComposerInner(props: InnerProps) {
         // preserved by spliceToken, which also adds the trailing space.
         insertReplacement(`/${cmd.name}`)
         noteCommandUsed(cmd.name)
-      } else if (item.kind === "file") {
-        const e = item.entry
-        addReferencedPath({
-          absolute: e.absolutePath,
-          relative: e.relPath,
-          isDir: e.isDir,
-        })
-        const replacement = `@${e.relPath}${e.isDir ? "/" : ""}`
-        insertReplacement(replacement)
       } else if (item.kind === "memory") {
         const text = trigger.query.trim()
         if (!text) {
@@ -662,39 +658,28 @@ function ComposerInner(props: InnerProps) {
         const ok = await props.onSubmitMemory(item.scope, text)
         if (ok) controller.textInput.clear()
         dismissPopover()
-      } else if (item.kind === "agent") {
-        const replacement = `@${item.target.name}`
-        insertReplacement(replacement)
-      } else if (item.kind === "subagent") {
-        // Insert the unique, no-whitespace handle so the send-time resolver can
-        // match it back to the agent id 1:1.
-        insertReplacement(`@${item.target.handle}`)
-      } else if (item.kind === "skill") {
-        // Picking a skill ENABLES it for the session (renders as a chip); no
-        // text is inserted. Drop the `@skill:…` token cleanly and close.
-        useChatStore.getState().toggleEphemeralSkill(item.skill.id)
-        removeTriggerToken()
-        toast.success(tSkill("enabled", { name: item.skill.name }))
-      } else if (item.kind === "preset") {
-        // Picking a preset APPLIES it to the session (system prompt + model + …)
-        // and removes the `@preset:…` token; no text inserted. `applyPreset`
-        // toasts its own success / "start a chat first" guard.
-        removeTriggerToken()
-        await applyPreset(item.preset, props.session)
-      } else if (item.kind === "wfElement") {
-        // Picking a workflow element STAGES it as a reference chip (like a
-        // skill/preset pick): no text is inserted. It is expanded to
-        // `@node:<id>` / `@edge:<id>` and cited to the agent at send time. Drop
-        // the `@` / `@node:` token cleanly, clear any picker highlight, close.
-        const el = item.element
-        useChatStore.getState().addReferencedWorkflowElement({
-          type: el.type,
-          id: el.id,
-          label: el.label,
-          kind: el.kind,
-        })
-        removeTriggerToken()
-        props.workflowMention?.onHighlight?.([])
+      } else {
+        // Mention-style picks (file / agent / subagent / skill / preset /
+        // wfElement) dispatch through the registry — adding a new mentionable
+        // kind is a `registerMentionPickHandler` call, not a composer edit.
+        const handler = getMentionPickHandler(item.kind)
+        if (handler) {
+          await handler.onPick(item, {
+            insertReplacement,
+            removeTriggerToken,
+            addReferencedPath,
+            toggleEphemeralSkill: (skillId) =>
+              useChatStore.getState().toggleEphemeralSkill(skillId),
+            addReferencedWorkflowElement: (el) =>
+              useChatStore.getState().addReferencedWorkflowElement(el),
+            applyPreset: (preset, session) => applyPreset(preset, session),
+            session: props.session,
+            clearWorkflowHighlight: () => props.workflowMention?.onHighlight?.([]),
+            strings: {
+              skillEnabled: (name) => tSkill("enabled", { name }),
+            },
+          })
+        }
       }
     },
     [
@@ -1786,7 +1771,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const clearReferencedPaths = useChatStore((s) => s.clearReferencedPaths)
   const clearArtifactSelections = useChatStore((s) => s.clearArtifactSelections)
 
-  const cwd = session?.workingDir ?? null
+  // Same effective-cwd chain the send path uses — a selected workspace must
+  // let `!` shell commands and memory appends run without a per-session dir.
+  const cwd = useEffectiveCwd(session)
 
   // ── Platform connector mode ─────────────────────────────────────────────
   const resolvedMode = useResolvedConnectorMode(session)
