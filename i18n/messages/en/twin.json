@@ -139,7 +139,12 @@
     "title": "Digital twin",
     "twinDeleted": "Deleted \"{name}\" and all its data.",
     "workerActive": "worker ● active",
-    "workerIdle": "worker ○ idle"
+    "workerIdle": "worker ○ idle",
+    "workerStatus": {
+      "disabled": "Background worker is disabled in settings",
+      "incompleteConfig": "Worker configuration is incomplete",
+      "noTwinSelected": "No twin selected"
+    }
   },
   "persona": {
     "actions": {
@@ -494,6 +499,7 @@
     "notReadyHint": "Set the embedding provider, vector store, and distill LLM in Settings before sources can be ingested.",
     "notReadyTitle": "Runtime not configured yet",
     "openSettings": "Open twin settings",
+    "pickColor": "Pick accent color {color}",
     "queueDistill": "Distill after ingest",
     "queueDistillHint": "Extract style, playbooks, and entities into the persona.",
     "queueError": "Could not queue jobs: {reason}",

@@ -139,7 +139,12 @@
     "title": "数字孪生",
     "twinDeleted": "已删除「{name}」及其全部数据。",
     "workerActive": "工作器 ● 运行中",
-    "workerIdle": "工作器 ○ 空闲"
+    "workerIdle": "工作器 ○ 空闲",
+    "workerStatus": {
+      "disabled": "后台工作器已在设置中禁用",
+      "incompleteConfig": "工作器配置不完整",
+      "noTwinSelected": "未选择数字分身"
+    }
   },
   "persona": {
     "actions": {
@@ -494,6 +499,7 @@
     "notReadyHint": "在「设置」中配置嵌入提供商、向量库和蒸馏 LLM 后，才能摄取数据源。",
     "notReadyTitle": "运行时尚未配置",
     "openSettings": "打开孪生设置",
+    "pickColor": "选择强调色 {color}",
     "queueDistill": "摄取后进行蒸馏",
     "queueDistillHint": "将写作风格、行动手册和实体提炼进人格画像。",
     "queueError": "排队任务失败：{reason}",
