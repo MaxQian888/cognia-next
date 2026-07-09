@@ -436,7 +436,9 @@
       "approval": {
         "heading": "审批",
         "requireDelegationApproval": "向外部智能体委派前需要审批",
-        "requirePlanApproval": "运行前需要计划审批"
+        "requirePlanApproval": "运行前需要计划审批",
+        "requireResultReview": "结果需人工验收",
+        "requireResultReviewHint": "自动运行成功的任务将进入「评审」列等待人工验收；运行本身不受阻塞。"
       },
       "budget": {
         "criticalThreshold": "严重阈值（0–1）",

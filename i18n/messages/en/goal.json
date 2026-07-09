@@ -1,5 +1,14 @@
 {
+  "acceptance": {
+    "title": "Awaiting your acceptance",
+    "description": "The judge considers the objective met. Accept to complete the goal, or request changes to keep it running.",
+    "accept": "Accept",
+    "requestChanges": "Request changes"
+  },
   "activity": {
+    "acceptance_accepted": "Result accepted — goal completed",
+    "acceptance_changes_requested": "Changes requested — goal resumed",
+    "acceptance_requested": "Acceptance requested (turn {n})",
     "config_updated": "Config updated",
     "empty": "No activity yet.",
     "exit_triggered": "{exit} — {reason}",
@@ -68,6 +77,8 @@
     "maxTokensHint": "Hard cap on cumulative tokens billed against this goal.",
     "maxTurns": "Max turns",
     "maxTurnsHint": "Hard cap on continuation turns. 1–100.",
+    "requireAcceptance": "Require acceptance",
+    "requireAcceptanceHint": "A judged completion pauses for your accept / request-changes instead of finishing on its own.",
     "save": "Save changes",
     "saving": "Saving…",
     "timeout": "Timeout (minutes)",

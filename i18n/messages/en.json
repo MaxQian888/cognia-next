@@ -1120,7 +1120,9 @@
         "approval": {
           "heading": "Approvals",
           "requireDelegationApproval": "Require approval before delegating to an external agent",
-          "requirePlanApproval": "Require plan approval before run starts"
+          "requirePlanApproval": "Require plan approval before run starts",
+          "requireResultReview": "Require result review",
+          "requireResultReviewHint": "Successful auto-runs land in the Review column for human acceptance; the run itself keeps progressing."
         },
         "budget": {
           "criticalThreshold": "Critical threshold (0–1)",
@@ -5436,7 +5438,16 @@
     }
   },
   "goal": {
+    "acceptance": {
+      "accept": "Accept",
+      "description": "The judge considers the objective met. Accept to complete the goal, or request changes to keep it running.",
+      "requestChanges": "Request changes",
+      "title": "Awaiting your acceptance"
+    },
     "activity": {
+      "acceptance_accepted": "Result accepted — goal completed",
+      "acceptance_changes_requested": "Changes requested — goal resumed",
+      "acceptance_requested": "Acceptance requested (turn {n})",
       "config_updated": "Config updated",
       "empty": "No activity yet.",
       "exit_triggered": "{exit} — {reason}",
@@ -5505,6 +5516,8 @@
       "maxTokensHint": "Hard cap on cumulative tokens billed against this goal.",
       "maxTurns": "Max turns",
       "maxTurnsHint": "Hard cap on continuation turns. 1–100.",
+      "requireAcceptance": "Require acceptance",
+      "requireAcceptanceHint": "A judged completion pauses for your accept / request-changes instead of finishing on its own.",
       "save": "Save changes",
       "saving": "Saving…",
       "timeout": "Timeout (minutes)",

@@ -30,6 +30,8 @@ const KIND_ICON: Record<GoalEvent["kind"], string> = {
   promise_confirmed: "✅",
   promise_denied: "🙅",
   pacing_decided: "⏲️",
+  acceptance_requested: "🔍",
+  acceptance_resolved: "🏁",
 }
 
 export function GoalActivityTab({ goal }: Props) {
@@ -117,5 +119,11 @@ function summarisePayload(ev: GoalEvent, t: GoalT): string {
         time: new Date(p.untilMs).toLocaleTimeString(),
         source: t(`pill.pacingReason.${p.source}`),
       })
+    case "acceptance_requested":
+      return t("activity.acceptance_requested", { n: p.turnNumber })
+    case "acceptance_resolved":
+      return p.accepted
+        ? t("activity.acceptance_accepted")
+        : t("activity.acceptance_changes_requested")
   }
 }

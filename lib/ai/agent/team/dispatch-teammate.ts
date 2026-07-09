@@ -671,7 +671,13 @@ export async function dispatchTeammate(
       content: text.length > 1200 ? `${text.slice(0, 1199)}…` : text,
       taskId: args.taskId,
     })
-    teamCtx.storeWriter.setTaskStatus(args.taskId, "completed", text)
+    // Acceptance gate (opt-in): route auto-success through the board's
+    // human-owned `review` column instead of jumping straight to `completed`.
+    // Board acceptance only — the wave runner's in-memory doneIds still
+    // unblocks dependents, so this never stalls the run itself.
+    const requireReview =
+      teamCtx.team?.config?.governancePolicy?.approval?.requireResultReview === true
+    teamCtx.storeWriter.setTaskStatus(args.taskId, requireReview ? "review" : "completed", text)
   }
   // Workspace isolation: capture the agent's work on its branch (worktrees are
   // GC'd; reconcile merge/select operate on commits). Best-effort — the turn

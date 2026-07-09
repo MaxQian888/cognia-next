@@ -6,6 +6,7 @@
  */
 
 import { transport } from "@/lib/tauri"
+import { rethrowInvokeError } from "@/lib/tauri/command-error"
 import type {
   CreateSystemTaskInput,
   SchedulerCapabilities,
@@ -18,30 +19,36 @@ import type {
 } from "@/types/scheduler/system-scheduler"
 
 export async function getSchedulerCapabilities(): Promise<SchedulerCapabilities> {
-  return transport.call<SchedulerCapabilities>("scheduler_get_capabilities")
+  return transport
+    .call<SchedulerCapabilities>("scheduler_get_capabilities")
+    .catch(rethrowInvokeError)
 }
 
 export async function isSchedulerAvailable(): Promise<boolean> {
-  return transport.call<boolean>("scheduler_is_available")
+  return transport.call<boolean>("scheduler_is_available").catch(rethrowInvokeError)
 }
 
 export async function isSchedulerElevated(): Promise<boolean> {
-  return transport.call<boolean>("scheduler_is_elevated")
+  return transport.call<boolean>("scheduler_is_elevated").catch(rethrowInvokeError)
 }
 
 export async function listSystemTasks(): Promise<SystemTask[]> {
-  return transport.call<SystemTask[]>("scheduler_list_tasks")
+  return transport.call<SystemTask[]>("scheduler_list_tasks").catch(rethrowInvokeError)
 }
 
 export async function getSystemTask(taskId: SystemTaskId): Promise<SystemTask | null> {
-  return transport.call<SystemTask | null>("scheduler_get_task", { taskId })
+  return transport
+    .call<SystemTask | null>("scheduler_get_task", { taskId })
+    .catch(rethrowInvokeError)
 }
 
 export async function createSystemTask(
   input: CreateSystemTaskInput,
   confirmed = false
 ): Promise<TaskOperationResponse> {
-  return transport.call<TaskOperationResponse>("scheduler_create_task", { input, confirmed })
+  return transport
+    .call<TaskOperationResponse>("scheduler_create_task", { input, confirmed })
+    .catch(rethrowInvokeError)
 }
 
 export async function updateSystemTask(
@@ -49,39 +56,49 @@ export async function updateSystemTask(
   input: CreateSystemTaskInput,
   confirmed = false
 ): Promise<TaskOperationResponse> {
-  return transport.call<TaskOperationResponse>("scheduler_update_task", {
-    taskId,
-    input,
-    confirmed,
-  })
+  return transport
+    .call<TaskOperationResponse>("scheduler_update_task", {
+      taskId,
+      input,
+      confirmed,
+    })
+    .catch(rethrowInvokeError)
 }
 
 export async function deleteSystemTask(taskId: SystemTaskId): Promise<boolean> {
-  return transport.call<boolean>("scheduler_delete_task", { taskId })
+  return transport.call<boolean>("scheduler_delete_task", { taskId }).catch(rethrowInvokeError)
 }
 
 export async function enableSystemTask(taskId: SystemTaskId): Promise<boolean> {
-  return transport.call<boolean>("scheduler_enable_task", { taskId })
+  return transport.call<boolean>("scheduler_enable_task", { taskId }).catch(rethrowInvokeError)
 }
 
 export async function disableSystemTask(taskId: SystemTaskId): Promise<boolean> {
-  return transport.call<boolean>("scheduler_disable_task", { taskId })
+  return transport.call<boolean>("scheduler_disable_task", { taskId }).catch(rethrowInvokeError)
 }
 
 export async function runSystemTaskNow(taskId: SystemTaskId): Promise<TaskRunResult> {
-  return transport.call<TaskRunResult>("scheduler_run_task_now", { taskId })
+  return transport
+    .call<TaskRunResult>("scheduler_run_task_now", { taskId })
+    .catch(rethrowInvokeError)
 }
 
 export async function validateSystemTask(input: CreateSystemTaskInput): Promise<ValidationResult> {
-  return transport.call<ValidationResult>("scheduler_validate_task", { input })
+  return transport
+    .call<ValidationResult>("scheduler_validate_task", { input })
+    .catch(rethrowInvokeError)
 }
 
 export async function confirmSystemTask(confirmationId: string): Promise<SystemTask> {
-  return transport.call<SystemTask>("scheduler_confirm_task", { confirmationId })
+  return transport
+    .call<SystemTask>("scheduler_confirm_task", { confirmationId })
+    .catch(rethrowInvokeError)
 }
 
 export async function cancelConfirmation(confirmationId: string): Promise<boolean> {
-  return transport.call<boolean>("scheduler_cancel_confirmation", { confirmationId })
+  return transport
+    .call<boolean>("scheduler_cancel_confirmation", { confirmationId })
+    .catch(rethrowInvokeError)
 }
 
 // Alias used by the hook copied from Cognia (kept to avoid editing the
@@ -89,9 +106,11 @@ export async function cancelConfirmation(confirmationId: string): Promise<boolea
 export const cancelTaskConfirmation = cancelConfirmation
 
 export async function requestSchedulerElevation(): Promise<boolean> {
-  return transport.call<boolean>("scheduler_request_elevation")
+  return transport.call<boolean>("scheduler_request_elevation").catch(rethrowInvokeError)
 }
 
 export async function getPendingConfirmations(): Promise<TaskConfirmationRequest[]> {
-  return transport.call<TaskConfirmationRequest[]>("scheduler_get_pending_confirmations")
+  return transport
+    .call<TaskConfirmationRequest[]>("scheduler_get_pending_confirmations")
+    .catch(rethrowInvokeError)
 }

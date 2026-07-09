@@ -436,7 +436,9 @@
       "approval": {
         "heading": "Approvals",
         "requireDelegationApproval": "Require approval before delegating to an external agent",
-        "requirePlanApproval": "Require plan approval before run starts"
+        "requirePlanApproval": "Require plan approval before run starts",
+        "requireResultReview": "Require result review",
+        "requireResultReviewHint": "Successful auto-runs land in the Review column for human acceptance; the run itself keeps progressing."
       },
       "budget": {
         "criticalThreshold": "Critical threshold (0–1)",

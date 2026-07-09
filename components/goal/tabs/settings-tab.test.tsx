@@ -122,3 +122,14 @@ describe("GoalSettingsTab", () => {
     expect(Number(turns.value)).toBe(g.config.maxTurns)
   })
 })
+
+it("toggles requireAcceptance and persists it through the runtime", async () => {
+  const g = await createTestGoal()
+  render(<GoalSettingsTab goal={g} />)
+  fireEvent.click(screen.getByTestId("goal-config-require-acceptance"))
+  fireEvent.click(screen.getByTestId("goal-config-save"))
+  await waitFor(async () => {
+    const fresh = await getGoalRuntime().listGoalsBySession("ses_a")
+    expect(fresh[0]?.config.requireAcceptance).toBe(true)
+  })
+})

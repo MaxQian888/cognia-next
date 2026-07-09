@@ -1,5 +1,14 @@
 {
+  "acceptance": {
+    "title": "等待你的验收",
+    "description": "评审判定目标已达成。点击「验收通过」完成目标，或「要求修改」让其继续运行。",
+    "accept": "验收通过",
+    "requestChanges": "要求修改"
+  },
   "activity": {
+    "acceptance_accepted": "验收通过——目标已完成",
+    "acceptance_changes_requested": "已要求修改——目标恢复运行",
+    "acceptance_requested": "已请求验收（第 {n} 轮）",
     "config_updated": "配置已更新",
     "empty": "暂无活动。",
     "exit_triggered": "{exit} — {reason}",
@@ -68,6 +77,8 @@
     "maxTokensHint": "记到该目标账上的累计 token 硬上限。",
     "maxTurns": "最大回合数",
     "maxTurnsHint": "续跑回合硬上限。1–100。",
+    "requireAcceptance": "完成需验收",
+    "requireAcceptanceHint": "评审判定完成后将暂停等待你验收或要求修改，而不是自动结束。",
     "save": "保存修改",
     "saving": "保存中…",
     "timeout": "超时（分钟）",

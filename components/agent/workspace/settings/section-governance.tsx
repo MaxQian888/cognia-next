@@ -144,6 +144,19 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
             }
           />
         </div>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("approval.requireResultReview")}</Label>
+          <Switch
+            checked={policy.approval.requireResultReview === true}
+            onCheckedChange={(v) =>
+              patchPolicy({
+                ...policy,
+                approval: { ...policy.approval, requireResultReview: v },
+              })
+            }
+          />
+        </div>
+        <p className="text-[11px] text-muted-foreground">{t("approval.requireResultReviewHint")}</p>
       </div>
 
       {/* Budget */}

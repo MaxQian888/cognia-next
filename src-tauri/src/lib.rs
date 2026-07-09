@@ -9,6 +9,7 @@ mod capture;
 mod ccswitch;
 mod claude;
 mod cli_bridge;
+mod command_error;
 mod commands;
 pub mod companion_api;
 mod connectors;
@@ -444,6 +445,7 @@ pub fn run() {
             sandbox::sandbox_health_check,
             sandbox::sandbox_exec,
             subscription::anthropic::commands::anthropic_oauth_save_pkce_result,
+            subscription::anthropic::commands::anthropic_oauth_discover,
             subscription::codex::commands::codex_oauth_discover,
             subscription::codex::commands::codex_oauth_request_device_code,
             subscription::codex::commands::codex_oauth_poll_device_code,

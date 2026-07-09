@@ -112,14 +112,14 @@ describe("GovernanceSection", () => {
   it("renders all governance switches incl. adaptive re-planning + progress ledger + refusal detect", () => {
     render(<GovernanceSection team={makeTeam()} />)
     const switches = screen.getAllByRole("switch")
-    // 10 switches: 2 approval + 2 escalation + 2 adaptiveReplan + 3 progressLedger + 1 refusal detect
-    expect(switches.length).toBe(10)
+    // 11 switches: 3 approval + 2 escalation + 2 adaptiveReplan + 3 progressLedger + 1 refusal detect
+    expect(switches.length).toBe(11)
   })
 
   it("toggles progressLedger.enabled and patches the config", () => {
     render(<GovernanceSection team={makeTeam()} />)
     const switches = screen.getAllByRole("switch")
-    fireEvent.click(switches[6]!) // progressLedger.enabled
+    fireEvent.click(switches[7]!) // progressLedger.enabled
     expect(updateTeamConfigMock).toHaveBeenCalledWith(
       "t1",
       expect.objectContaining({ progressLedger: expect.objectContaining({ enabled: true }) })
@@ -129,15 +129,15 @@ describe("GovernanceSection", () => {
   it("disables the autonomous consensus/delegation switches until the ledger is enabled", () => {
     render(<GovernanceSection team={makeTeam()} />)
     const switches = screen.getAllByRole("switch")
-    expect(switches[7]!).toBeDisabled() // allowAutonomousConsensus
-    expect(switches[8]!).toBeDisabled() // allowAutonomousDelegation
+    expect(switches[8]!).toBeDisabled() // allowAutonomousConsensus
+    expect(switches[9]!).toBeDisabled() // allowAutonomousDelegation
   })
 
   it("toggles allowAutonomousConsensus once the ledger is enabled", () => {
     render(<GovernanceSection team={makeTeam(undefined, { progressLedger: { enabled: true } })} />)
     const switches = screen.getAllByRole("switch")
-    expect(switches[7]!).not.toBeDisabled()
-    fireEvent.click(switches[7]!)
+    expect(switches[8]!).not.toBeDisabled()
+    fireEvent.click(switches[8]!)
     expect(updateTeamConfigMock).toHaveBeenCalledWith(
       "t1",
       expect.objectContaining({
@@ -149,8 +149,8 @@ describe("GovernanceSection", () => {
   it("toggles allowAutonomousDelegation once the ledger is enabled", () => {
     render(<GovernanceSection team={makeTeam(undefined, { progressLedger: { enabled: true } })} />)
     const switches = screen.getAllByRole("switch")
-    expect(switches[8]!).not.toBeDisabled()
-    fireEvent.click(switches[8]!)
+    expect(switches[9]!).not.toBeDisabled()
+    fireEvent.click(switches[9]!)
     expect(updateTeamConfigMock).toHaveBeenCalledWith(
       "t1",
       expect.objectContaining({
@@ -159,10 +159,24 @@ describe("GovernanceSection", () => {
     )
   })
 
+  it("toggles requireResultReview and patches the governance policy", () => {
+    render(<GovernanceSection team={makeTeam()} />)
+    const switches = screen.getAllByRole("switch")
+    fireEvent.click(switches[2]!) // approval.requireResultReview
+    expect(updateTeamConfigMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        governancePolicy: expect.objectContaining({
+          approval: expect.objectContaining({ requireResultReview: true }),
+        }),
+      })
+    )
+  })
+
   it("toggles adaptiveReplan.enabled and patches the config", () => {
     render(<GovernanceSection team={makeTeam()} />)
     const switches = screen.getAllByRole("switch")
-    fireEvent.click(switches[4]!) // adaptiveReplan.enabled
+    fireEvent.click(switches[5]!) // adaptiveReplan.enabled
     expect(updateTeamConfigMock).toHaveBeenCalledWith(
       "t1",
       expect.objectContaining({ adaptiveReplan: expect.objectContaining({ enabled: true }) })
@@ -172,7 +186,7 @@ describe("GovernanceSection", () => {
   it("toggles adaptiveReplan.requireApproval and patches the config", () => {
     render(<GovernanceSection team={makeTeam()} />)
     const switches = screen.getAllByRole("switch")
-    fireEvent.click(switches[5]!) // adaptiveReplan.requireApproval
+    fireEvent.click(switches[6]!) // adaptiveReplan.requireApproval
     expect(updateTeamConfigMock).toHaveBeenCalledWith(
       "t1",
       expect.objectContaining({
@@ -412,7 +426,7 @@ describe("GovernanceSection", () => {
     )
     const switches = screen.getAllByRole("switch")
     // Index 2 = allowOperatorPatternOverride (after requirePlan, requireDelegation)
-    const allowOverride = switches[2]
+    const allowOverride = switches[3]
     expect(allowOverride).toBeChecked()
     fireEvent.click(allowOverride)
     expect(updateTeamConfigMock).toHaveBeenCalledWith(
@@ -434,7 +448,7 @@ describe("GovernanceSection", () => {
       />
     )
     const switches = screen.getAllByRole("switch")
-    const pauseOnHighRisk = switches[3]
+    const pauseOnHighRisk = switches[4]
     expect(pauseOnHighRisk).not.toBeChecked()
     fireEvent.click(pauseOnHighRisk)
     expect(updateTeamConfigMock).toHaveBeenCalledWith(
@@ -450,7 +464,7 @@ describe("GovernanceSection", () => {
   it("toggles detectRefusal", () => {
     render(<GovernanceSection team={makeTeam()} />)
     const switches = screen.getAllByRole("switch")
-    const detectRefusal = switches[9]
+    const detectRefusal = switches[10]
     expect(detectRefusal).not.toBeChecked()
     fireEvent.click(detectRefusal)
     expect(updateTeamConfigMock).toHaveBeenCalledWith(
@@ -488,7 +502,7 @@ describe("GovernanceSection", () => {
   it("detectRefusal is checked when set to true", () => {
     render(<GovernanceSection team={makeTeam(undefined, { detectRefusal: true })} />)
     const switches = screen.getAllByRole("switch")
-    expect(switches[9]).toBeChecked()
+    expect(switches[10]).toBeChecked()
   })
 
   it("applyOnCritical via confirm dialog covers patchPolicy with the pending action", () => {

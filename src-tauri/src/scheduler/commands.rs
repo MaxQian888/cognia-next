@@ -5,6 +5,7 @@
 use log::{debug, error, info};
 use tauri::State;
 
+use crate::command_error::CommandError;
 use crate::scheduler::{
     ArmTaskInput, CreateSystemTaskInput, SchedulerCapabilities, SchedulerState, SystemTask,
     SystemTaskId, TaskConfirmationRequest, TaskRunResult,
@@ -27,10 +28,10 @@ pub enum TaskOperationResponse {
 fn resolve_confirmation_target_id(
     confirmation_id: Option<SystemTaskId>,
     task_id: Option<SystemTaskId>,
-) -> Result<SystemTaskId, String> {
+) -> Result<SystemTaskId, CommandError> {
     confirmation_id
         .or(task_id)
-        .ok_or_else(|| "confirmation_id is required".to_string())
+        .ok_or_else(|| CommandError::new("invalid_config", "confirmation_id is required"))
 }
 
 fn scheduler_validate_task_impl(
@@ -164,7 +165,7 @@ pub async fn scheduler_create_task(
     state: State<'_, SchedulerState>,
     input: CreateSystemTaskInput,
     confirmed: bool,
-) -> Result<TaskOperationResponse, String> {
+) -> Result<TaskOperationResponse, CommandError> {
     debug!(
         "Creating system task: name={}, confirmed={}",
         input.name, confirmed
@@ -199,7 +200,7 @@ pub async fn scheduler_update_task(
     task_id: SystemTaskId,
     input: CreateSystemTaskInput,
     confirmed: bool,
-) -> Result<TaskOperationResponse, String> {
+) -> Result<TaskOperationResponse, CommandError> {
     debug!(
         "Updating system task: id={}, confirmed={}",
         task_id, confirmed
@@ -232,7 +233,7 @@ pub async fn scheduler_update_task(
 pub async fn scheduler_delete_task(
     state: State<'_, SchedulerState>,
     task_id: SystemTaskId,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     debug!("Deleting system task: {}", task_id);
 
     match state.delete_task(&task_id).await {
@@ -244,7 +245,7 @@ pub async fn scheduler_delete_task(
         }
         Err(e) => {
             error!("Failed to delete system task: {}", e);
-            Err(e.to_string())
+            Err(CommandError::from(e))
         }
     }
 }
@@ -254,12 +255,12 @@ pub async fn scheduler_delete_task(
 pub async fn scheduler_get_task(
     state: State<'_, SchedulerState>,
     task_id: SystemTaskId,
-) -> Result<Option<SystemTask>, String> {
+) -> Result<Option<SystemTask>, CommandError> {
     match state.get_task(&task_id).await {
         Ok(task) => Ok(task),
         Err(e) => {
             error!("Failed to get system task: {}", e);
-            Err(e.to_string())
+            Err(CommandError::from(e))
         }
     }
 }
@@ -268,7 +269,7 @@ pub async fn scheduler_get_task(
 #[tauri::command]
 pub async fn scheduler_list_tasks(
     state: State<'_, SchedulerState>,
-) -> Result<Vec<SystemTask>, String> {
+) -> Result<Vec<SystemTask>, CommandError> {
     match state.list_tasks().await {
         Ok(tasks) => {
             debug!("Listed {} system tasks", tasks.len());
@@ -276,7 +277,7 @@ pub async fn scheduler_list_tasks(
         }
         Err(e) => {
             error!("Failed to list system tasks: {}", e);
-            Err(e.to_string())
+            Err(CommandError::from(e))
         }
     }
 }
@@ -286,7 +287,7 @@ pub async fn scheduler_list_tasks(
 pub async fn scheduler_enable_task(
     state: State<'_, SchedulerState>,
     task_id: SystemTaskId,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     debug!("Enabling system task: {}", task_id);
 
     match state.enable_task(&task_id).await {
@@ -298,7 +299,7 @@ pub async fn scheduler_enable_task(
         }
         Err(e) => {
             error!("Failed to enable system task: {}", e);
-            Err(e.to_string())
+            Err(CommandError::from(e))
         }
     }
 }
@@ -308,7 +309,7 @@ pub async fn scheduler_enable_task(
 pub async fn scheduler_disable_task(
     state: State<'_, SchedulerState>,
     task_id: SystemTaskId,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     debug!("Disabling system task: {}", task_id);
 
     match state.disable_task(&task_id).await {
@@ -320,7 +321,7 @@ pub async fn scheduler_disable_task(
         }
         Err(e) => {
             error!("Failed to disable system task: {}", e);
-            Err(e.to_string())
+            Err(CommandError::from(e))
         }
     }
 }
@@ -330,7 +331,7 @@ pub async fn scheduler_disable_task(
 pub async fn scheduler_run_task_now(
     state: State<'_, SchedulerState>,
     task_id: SystemTaskId,
-) -> Result<TaskRunResult, String> {
+) -> Result<TaskRunResult, CommandError> {
     debug!("Running system task now: {}", task_id);
 
     match state.run_task_now(&task_id).await {
@@ -343,7 +344,7 @@ pub async fn scheduler_run_task_now(
         }
         Err(e) => {
             error!("Failed to run system task: {}", e);
-            Err(e.to_string())
+            Err(CommandError::from(e))
         }
     }
 }
@@ -354,7 +355,7 @@ pub async fn scheduler_cancel_confirmation(
     state: State<'_, SchedulerState>,
     confirmation_id: Option<SystemTaskId>,
     task_id: Option<SystemTaskId>,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     let id = resolve_confirmation_target_id(confirmation_id, task_id)?;
     Ok(state.cancel_confirmation(&id).await)
 }
@@ -363,16 +364,16 @@ pub async fn scheduler_cancel_confirmation(
 #[tauri::command]
 pub async fn scheduler_get_pending_confirmations(
     state: State<'_, SchedulerState>,
-) -> Result<Vec<TaskConfirmationRequest>, String> {
+) -> Result<Vec<TaskConfirmationRequest>, CommandError> {
     Ok(state.get_pending_confirmations().await)
 }
 
 /// Request admin elevation
 #[tauri::command]
-pub async fn scheduler_request_elevation(state: State<'_, SchedulerState>) -> Result<bool, String> {
+pub async fn scheduler_request_elevation(state: State<'_, SchedulerState>) -> Result<bool, CommandError> {
     match state.request_elevation().await {
         Ok(elevated) => Ok(elevated),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(CommandError::from(e)),
     }
 }
 
@@ -382,7 +383,7 @@ pub async fn scheduler_confirm_task(
     state: State<'_, SchedulerState>,
     confirmation_id: Option<SystemTaskId>,
     task_id: Option<SystemTaskId>,
-) -> Result<Option<SystemTask>, String> {
+) -> Result<Option<SystemTask>, CommandError> {
     let id = resolve_confirmation_target_id(confirmation_id, task_id)?;
     debug!("Confirming pending task operation: {}", id);
 
@@ -395,7 +396,7 @@ pub async fn scheduler_confirm_task(
         }
         Err(e) => {
             error!("Failed to confirm task: {}", e);
-            Err(e.to_string())
+            Err(CommandError::from(e))
         }
     }
 }
@@ -405,7 +406,7 @@ pub async fn scheduler_confirm_task(
 pub fn scheduler_validate_task(
     state: State<'_, SchedulerState>,
     input: CreateSystemTaskInput,
-) -> Result<ValidationResult, String> {
+) -> Result<ValidationResult, CommandError> {
     Ok(scheduler_validate_task_impl(&state, input))
 }
 
@@ -431,7 +432,7 @@ fn scheduler_disarm_task_impl(state: &SchedulerState, task_id: &str) {
 pub fn scheduler_arm_task(
     state: State<'_, SchedulerState>,
     input: ArmTaskInput,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     scheduler_arm_task_impl(&state, input);
     Ok(())
 }
@@ -442,7 +443,7 @@ pub fn scheduler_arm_task(
 pub fn scheduler_disarm_task(
     state: State<'_, SchedulerState>,
     task_id: String,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     scheduler_disarm_task_impl(&state, &task_id);
     Ok(())
 }
@@ -544,7 +545,8 @@ mod tests {
     #[test]
     fn resolve_confirmation_target_id_requires_any_identifier() {
         let error = resolve_confirmation_target_id(None, None).expect_err("missing id should fail");
-        assert_eq!(error, "confirmation_id is required");
+        assert_eq!(error.code, "invalid_config");
+        assert_eq!(error.message, "confirmation_id is required");
     }
 
     #[test]

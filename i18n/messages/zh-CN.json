@@ -1120,7 +1120,9 @@
         "approval": {
           "heading": "审批",
           "requireDelegationApproval": "向外部智能体委派前需要审批",
-          "requirePlanApproval": "运行前需要计划审批"
+          "requirePlanApproval": "运行前需要计划审批",
+          "requireResultReview": "结果需人工验收",
+          "requireResultReviewHint": "自动运行成功的任务将进入「评审」列等待人工验收；运行本身不受阻塞。"
         },
         "budget": {
           "criticalThreshold": "严重阈值（0–1）",
@@ -5436,7 +5438,16 @@
     }
   },
   "goal": {
+    "acceptance": {
+      "accept": "验收通过",
+      "description": "评审判定目标已达成。点击「验收通过」完成目标，或「要求修改」让其继续运行。",
+      "requestChanges": "要求修改",
+      "title": "等待你的验收"
+    },
     "activity": {
+      "acceptance_accepted": "验收通过——目标已完成",
+      "acceptance_changes_requested": "已要求修改——目标恢复运行",
+      "acceptance_requested": "已请求验收（第 {n} 轮）",
       "config_updated": "配置已更新",
       "empty": "暂无活动。",
       "exit_triggered": "{exit} — {reason}",
@@ -5505,6 +5516,8 @@
       "maxTokensHint": "记到该目标账上的累计 token 硬上限。",
       "maxTurns": "最大回合数",
       "maxTurnsHint": "续跑回合硬上限。1–100。",
+      "requireAcceptance": "完成需验收",
+      "requireAcceptanceHint": "评审判定完成后将暂停等待你验收或要求修改，而不是自动结束。",
       "save": "保存修改",
       "saving": "保存中…",
       "timeout": "超时（分钟）",

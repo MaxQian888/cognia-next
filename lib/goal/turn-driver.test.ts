@@ -249,6 +249,49 @@ describe("handleTurnComplete — exit paths", () => {
     expect(out.reason).toBe("haiku produced")
     expect((await getGoal("g1"))?.status).toBe("completed")
   })
+
+  it("requireAcceptance parks a judge_done completion as paused + awaitingAcceptance", async () => {
+    await createGoal(buildGoal({ id: "g1", config: { ...SAMPLE_CONFIG, requireAcceptance: true } }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "done work",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "objective met"}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.resultingStatus).toBe("paused")
+    expect(out.reason).toContain("awaiting acceptance")
+    const goal = await getGoal("g1")
+    expect(goal?.status).toBe("paused")
+    expect(goal?.awaitingAcceptance).toBe(true)
+    // Not terminal yet — completion linkage must NOT fire.
+    expect(onGoalTerminalMock).not.toHaveBeenCalled()
+    const events = await listGoalEvents("g1", 50)
+    expect(events.some((e) => e.kind === "acceptance_requested")).toBe(true)
+  })
+
+  it("requireAcceptance does NOT gate non-completed exits (user stop limits etc.)", async () => {
+    await createGoal(
+      buildGoal({
+        id: "g1",
+        turnsUsed: 19,
+        config: { ...SAMPLE_CONFIG, maxTurns: 20, requireAcceptance: true },
+      })
+    )
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "another turn",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": false, "reason": "keep going"}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.resultingStatus).toBe("turn_limited")
+    expect((await getGoal("g1"))?.awaitingAcceptance).not.toBe(true)
+  })
 })
 
 describe("handleTurnComplete — continue path", () => {

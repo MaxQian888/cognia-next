@@ -670,6 +670,36 @@ describe("dispatchTeammate — store recording", () => {
     expect(storeWriter.setTaskStatus).toHaveBeenCalledWith("t1", "completed", "deliverable")
   })
 
+  it("routes auto-success to review when requireResultReview is on", async () => {
+    executeAgentMock.mockResolvedValue({ text: "deliverable" })
+    const { ctx, storeWriter } = makeCtx(makeTeammate(), {
+      governancePolicy: {
+        approval: {
+          requirePlanApproval: false,
+          requireDelegationApproval: false,
+          requireResultReview: true,
+        },
+      },
+    } as never)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "x", recordToStore: true })
+
+    expect(storeWriter.setTaskStatus).toHaveBeenCalledWith("t1", "review", "deliverable")
+  })
+
+  it("keeps the direct completed path when requireResultReview is off/absent", async () => {
+    executeAgentMock.mockResolvedValue({ text: "deliverable" })
+    const { ctx, storeWriter } = makeCtx(makeTeammate(), {
+      governancePolicy: {
+        approval: { requirePlanApproval: false, requireDelegationApproval: false },
+      },
+    } as never)
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "x", recordToStore: true })
+
+    expect(storeWriter.setTaskStatus).toHaveBeenCalledWith("t1", "completed", "deliverable")
+  })
+
   it("does not touch the store when recordToStore is omitted", async () => {
     executeAgentMock.mockResolvedValue({ text: "x" })
     const { ctx, storeWriter } = makeCtx(makeTeammate())

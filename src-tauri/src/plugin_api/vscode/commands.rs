@@ -63,6 +63,10 @@ fn inbound_event_name(extension_id: &str) -> String {
 pub struct VscodeCommandError {
     pub code: String,
     pub message: String,
+    /// Whether retrying the same call may succeed. Additive on the wire —
+    /// aligns this envelope with `crate::command_error::CommandError` so
+    /// `lib/tauri/command-error.ts` `parseInvokeError` decodes both.
+    pub retryable: bool,
 }
 
 impl VscodeCommandError {
@@ -70,6 +74,7 @@ impl VscodeCommandError {
         Self {
             code: code.to_string(),
             message: message.into(),
+            retryable: false,
         }
     }
 }

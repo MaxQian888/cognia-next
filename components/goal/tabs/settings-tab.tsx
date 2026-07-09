@@ -47,6 +47,7 @@ export function GoalSettingsTab({ goal }: Props) {
     (draft.completionPromise ?? "") !== (goal.config.completionPromise ?? "") ||
     (draft.maxPromiseDenials ?? 3) !== (goal.config.maxPromiseDenials ?? 3) ||
     (draft.adaptivePacing ?? false) !== (goal.config.adaptivePacing ?? false) ||
+    (draft.requireAcceptance ?? false) !== (goal.config.requireAcceptance ?? false) ||
     (draft.maxBudgetUsd ?? 0) !== (goal.config.maxBudgetUsd ?? 0)
 
   async function handleSave() {
@@ -62,6 +63,7 @@ export function GoalSettingsTab({ goal }: Props) {
         completionPromise: draft.completionPromise?.trim() || undefined,
         maxPromiseDenials: Math.max(1, draft.maxPromiseDenials ?? 3),
         adaptivePacing: draft.adaptivePacing || undefined,
+        requireAcceptance: draft.requireAcceptance || undefined,
         maxBudgetUsd: draft.maxBudgetUsd && draft.maxBudgetUsd > 0 ? draft.maxBudgetUsd : undefined,
       })
     } finally {
@@ -182,6 +184,17 @@ export function GoalSettingsTab({ goal }: Props) {
             onCheckedChange={(checked) => setDraft({ ...draft, adaptivePacing: checked })}
             aria-label={t("config.adaptivePacing")}
             data-testid="goal-config-adaptive-pacing"
+          />
+        </div>
+      </Field>
+      <Field label={t("config.requireAcceptance")} hint={t("config.requireAcceptanceHint")}>
+        <div className="pt-1">
+          <Switch
+            checked={draft.requireAcceptance ?? false}
+            disabled={disabled}
+            onCheckedChange={(checked) => setDraft({ ...draft, requireAcceptance: checked })}
+            aria-label={t("config.requireAcceptance")}
+            data-testid="goal-config-require-acceptance"
           />
         </div>
       </Field>

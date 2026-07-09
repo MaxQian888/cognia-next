@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react"
 
 import { isTauri } from "@/lib/tauri"
 import * as systemScheduler from "@/lib/native/system-scheduler"
+import { parseInvokeError } from "@/lib/tauri/command-error"
 import type {
   CreateSystemTaskInput,
   SchedulerCapabilities,
@@ -134,7 +135,7 @@ export function useSystemScheduler(): UseSystemSchedulerReturn {
       setTasks(taskList)
       syncPendingQueue(pendingQueue)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(parseInvokeError(err).message)
     } finally {
       setLoading(false)
     }
@@ -167,7 +168,7 @@ export function useSystemScheduler(): UseSystemSchedulerReturn {
 
         return response
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = parseInvokeError(err).message
         setError(message)
         return { status: "error", message }
       } finally {
@@ -200,7 +201,7 @@ export function useSystemScheduler(): UseSystemSchedulerReturn {
 
         return response
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = parseInvokeError(err).message
         setError(message)
         return { status: "error", message }
       } finally {
@@ -222,7 +223,7 @@ export function useSystemScheduler(): UseSystemSchedulerReturn {
         }
         return result
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(parseInvokeError(err).message)
         return false
       } finally {
         setLoading(false)
@@ -243,7 +244,7 @@ export function useSystemScheduler(): UseSystemSchedulerReturn {
         }
         return result
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(parseInvokeError(err).message)
         return false
       } finally {
         setLoading(false)
@@ -264,7 +265,7 @@ export function useSystemScheduler(): UseSystemSchedulerReturn {
         }
         return result
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(parseInvokeError(err).message)
         return false
       } finally {
         setLoading(false)
@@ -283,7 +284,7 @@ export function useSystemScheduler(): UseSystemSchedulerReturn {
         await refresh()
         return result
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = parseInvokeError(err).message
         setError(message)
         return {
           success: false,
@@ -352,7 +353,7 @@ export function useSystemScheduler(): UseSystemSchedulerReturn {
         await refresh()
         return result
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(parseInvokeError(err).message)
         return null
       } finally {
         setLoading(false)
@@ -378,7 +379,7 @@ export function useSystemScheduler(): UseSystemSchedulerReturn {
         await refreshPendingQueue()
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(parseInvokeError(err).message)
       })
   }, [pendingConfirmation, refreshPendingQueue])
 
@@ -393,7 +394,7 @@ export function useSystemScheduler(): UseSystemSchedulerReturn {
     try {
       return await systemScheduler.requestSchedulerElevation()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(parseInvokeError(err).message)
       return false
     }
   }, [])

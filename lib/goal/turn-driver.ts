@@ -351,6 +351,24 @@ async function commitExit(
   if (!fresh || fresh.generationId !== capturedGenerationId) {
     return { kind: "stale", reason: "generationId rotated before exit commit" }
   }
+  // Acceptance gate (opt-in): a judge-verdict "completed" parks as `paused` +
+  // `awaitingAcceptance` instead of going terminal; `resolveGoalAcceptance`
+  // (lib/goal/acceptance.ts) later commits completed or resumes active. Only
+  // the completed exit is gated — stops/limits/timeouts land directly.
+  if (decision.resultingStatus === "completed" && fresh.config.requireAcceptance === true) {
+    await updateGoal(goalId, { status: "paused", awaitingAcceptance: true })
+    await appendGoalEvent({
+      goalId,
+      kind: "acceptance_requested",
+      payload: { kind: "acceptance_requested", turnNumber: fresh.turnsUsed },
+    })
+    return {
+      kind: "exit",
+      exit: decision.exit,
+      resultingStatus: "paused",
+      reason: `${decision.reason} (awaiting acceptance)`,
+    }
+  }
   await updateGoal(goalId, { status: decision.resultingStatus })
   await appendGoalEvent({
     goalId,

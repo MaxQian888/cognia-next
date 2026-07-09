@@ -120,6 +120,14 @@ export interface GoalConfig {
    * judgment of "done" feels unreliable for the task.
    */
   inlineStopCondition?: string
+  /**
+   * Optional acceptance gate: when true, a judge-verdict "completed" pauses
+   * the goal with `Goal.awaitingAcceptance` instead of going terminal, and a
+   * human resolves it via `lib/goal/acceptance.ts` (accept → completed /
+   * request changes → active). Only the completed exit is gated — stops,
+   * limits, and timeouts always land directly. Off by default.
+   */
+  requireAcceptance?: boolean
 
   // ── Judge customization (ADR-0019 Phase 2) ──────────────────────────────
   /**
@@ -227,6 +235,13 @@ export interface Goal {
   /** Set when status becomes terminal. Drives History sorting + reset countdown. */
   endedAt?: number
   /**
+   * Acceptance gate marker (`GoalConfig.requireAcceptance`): true while a
+   * judge-verdict "completed" is parked as `paused` waiting for human
+   * accept/request-changes (`lib/goal/acceptance.ts`). Non-indexed — Dexie
+   * persists it without a schema-version bump (same as `subgoals`).
+   */
+  awaitingAcceptance?: boolean
+  /**
    * Decomposed checklist of the objective (subgoal decomposition). Absent
    * until the user generates it from the Subgoals tab. Stored inline as JSON
    * — no Dexie index, so adding it needs no schema migration.
@@ -283,6 +298,8 @@ export type GoalEventKind =
   | "promise_confirmed"
   | "promise_denied"
   | "pacing_decided"
+  | "acceptance_requested"
+  | "acceptance_resolved"
 
 /**
  * Per-kind payloads. Keep these structurally typed (TypeScript discriminated
@@ -328,6 +345,8 @@ export type GoalEventPayload =
       /** The model-suggested delay (clamped, ms) when adaptive pacing fed the decision. */
       suggestedMs?: number
     }
+  | { kind: "acceptance_requested"; turnNumber: number }
+  | { kind: "acceptance_resolved"; accepted: boolean }
 
 export interface GoalEvent {
   /** UUIDv4 primary key. */

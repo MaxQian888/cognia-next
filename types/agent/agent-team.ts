@@ -243,6 +243,15 @@ export interface TeamGovernancePolicy {
   approval: {
     requirePlanApproval: boolean
     requireDelegationApproval: boolean
+    /**
+     * When true, a teammate's successful auto-run routes the board task to
+     * `review` instead of `completed`; a human then makes the existing
+     * `review → completed | failed` move (`task-move-guard.ts`). Governs
+     * FINAL BOARD ACCEPTANCE only — the wave runner's dependency progression
+     * uses its in-memory doneIds, so downstream tasks still consume the
+     * output while the card sits in review. Optional/off by default.
+     */
+    requireResultReview?: boolean
   }
   budget: {
     tokenBudget: number
@@ -647,6 +656,7 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
     approval: {
       requirePlanApproval: false,
       requireDelegationApproval: false,
+      requireResultReview: false,
     },
     budget: {
       tokenBudget: 0,

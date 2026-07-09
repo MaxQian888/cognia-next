@@ -13,10 +13,13 @@
  * 4-column grid from `md` up.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { resolveGoalAcceptance } from "@/lib/goal/acceptance"
 import type { Goal } from "@/types/goal"
 import { GoalOverviewTab } from "./tabs/overview-tab"
 import { GoalSubgoalsTab } from "./tabs/subgoals-tab"
@@ -34,6 +37,17 @@ const TAB_TRIGGER_CLASS = "min-h-11 shrink-0 md:min-h-0"
 export function GoalDetailSheet({ goal, open, onOpenChange }: Props) {
   const t = useTranslations("goal")
   const title = t("detailSheet.title", { status: t(`status.${goal.status}`) })
+  const [resolvingAcceptance, setResolvingAcceptance] = useState(false)
+
+  const resolveAcceptance = async (accepted: boolean) => {
+    if (resolvingAcceptance) return
+    setResolvingAcceptance(true)
+    try {
+      await resolveGoalAcceptance(goal.id, accepted)
+    } finally {
+      setResolvingAcceptance(false)
+    }
+  }
 
   // Plugin contribution row — e.g. "Copy summary", "Export". Conversation-
   // scoped context so contributions don't re-derive the goal identity.
@@ -53,6 +67,36 @@ export function GoalDetailSheet({ goal, open, onOpenChange }: Props) {
       description={goal.safeObjective}
       headerExtra={pluginActions}
     >
+      {goal.status === "paused" && goal.awaitingAcceptance === true && (
+        // Acceptance gate banner: the judge declared the objective met, but
+        // `requireAcceptance` parked the goal for a human verdict.
+        <div
+          data-testid="goal-acceptance-banner"
+          className="mx-4 mt-3 space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+        >
+          <p className="text-sm font-medium">{t("acceptance.title")}</p>
+          <p className="text-xs text-muted-foreground">{t("acceptance.description")}</p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              disabled={resolvingAcceptance}
+              onClick={() => void resolveAcceptance(true)}
+              data-testid="goal-acceptance-accept"
+            >
+              {t("acceptance.accept")}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={resolvingAcceptance}
+              onClick={() => void resolveAcceptance(false)}
+              data-testid="goal-acceptance-request-changes"
+            >
+              {t("acceptance.requestChanges")}
+            </Button>
+          </div>
+        </div>
+      )}
       <Tabs defaultValue="overview" className="mt-4 flex-1 overflow-y-auto px-4 pb-4">
         <TabsList className="flex w-full justify-start overflow-x-auto md:grid md:grid-cols-4">
           <TabsTrigger

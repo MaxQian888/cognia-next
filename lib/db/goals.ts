@@ -108,6 +108,7 @@ export interface GoalUpdatePatch {
   subgoals?: Goal["subgoals"]
   subgoalsGeneratedAt?: number
   awaitingPromise?: boolean
+  awaitingAcceptance?: boolean
   promiseDenialCount?: number
   nextContinuationAt?: number
   nextContinuationSource?: Goal["nextContinuationSource"]
