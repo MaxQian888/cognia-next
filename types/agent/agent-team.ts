@@ -15,6 +15,7 @@
 import type { ProviderName } from "@cognia/provider-types/provider"
 import type { SubAgentTokenUsage, SubAgentPriority } from "./sub-agent"
 import type { TwinSettings } from "@/types/twin"
+import type { ExternalAgentPresetId } from "@/lib/ai/agent/external/presets"
 
 // ============================================================================
 // Team Core Types
@@ -29,13 +30,7 @@ export type TeamMemberRole = "lead" | "teammate"
  * Team status
  */
 export type TeamStatus =
-  | "idle"
-  | "planning"
-  | "executing"
-  | "paused"
-  | "completed"
-  | "failed"
-  | "cancelled"
+  "idle" | "planning" | "executing" | "paused" | "completed" | "failed" | "cancelled"
 
 /**
  * Teammate status
@@ -90,14 +85,7 @@ export type TeamExecutionPattern =
  * which falls back to "overview" for unknown tabs.
  */
 export type AgentTeamWorkspaceTab =
-  | "overview"
-  | "tasks"
-  | "chat"
-  | "activity"
-  | "worktrees"
-  | "editor"
-  | "members"
-  | "settings"
+  "overview" | "tasks" | "chat" | "activity" | "worktrees" | "editor" | "members" | "settings"
 
 /**
  * Persisted per-team state of the project Editor tab. Restores the open file
@@ -168,13 +156,7 @@ export type TeamExecutorKind =
  * through `lib/ai/agent/team/gate-policy.ts` instead of blocking.
  */
 export type TeamRunOrigin =
-  | "interactive"
-  | "scheduler"
-  | "remote"
-  | "external"
-  | "plugin"
-  | "im"
-  | "delegation"
+  "interactive" | "scheduler" | "remote" | "external" | "plugin" | "im" | "delegation"
 
 /** Executor decision stamped on a team at materialization (provenance). */
 export interface TeamDispatchDecision {
@@ -231,10 +213,7 @@ export interface TeamExternalPickup {
  * Budget escalation behavior when usage crosses thresholds
  */
 export type TeamBudgetEscalationAction =
-  | "notify"
-  | "pause_for_review"
-  | "reduce_concurrency"
-  | "handoff_to_background"
+  "notify" | "pause_for_review" | "reduce_concurrency" | "handoff_to_background"
 
 /**
  * Governance policy for approvals and budget escalation
@@ -694,10 +673,13 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
 
 /**
  * Runtime that executes a teammate's tasks. `claude` goes through the Tauri
- * Anthropic sidecar; the other values dispatch to an external ACP agent
- * matched by preset id (see `lib/ai/agent/external/presets.ts`).
+ * Anthropic sidecar; every other value is an external-agent preset id and
+ * dispatches to that external ACP/CLI agent (see
+ * `lib/ai/agent/external/presets.ts`; `resolveTeammatePresetId` treats the
+ * runtime string as the preset id directly). Covers the full executable preset
+ * catalog — `custom` is excluded because it has no fixed backend.
  */
-export type TeammateRuntime = "claude" | "codex" | "claude-code" | "gemini-cli" | "cursor-cli"
+export type TeammateRuntime = "claude" | Exclude<ExternalAgentPresetId, "custom">
 
 /** Default runtime when a teammate has no explicit runtime configured. */
 export const DEFAULT_TEAMMATE_RUNTIME: TeammateRuntime = "claude"
@@ -1179,13 +1161,7 @@ export type AgentSystemType = "sub_agent" | "team" | "background" | "twin"
  * Lifecycle status for a task handoff / delegation
  */
 export type TeamDelegationStatus =
-  | "pending"
-  | "awaiting_approval"
-  | "active"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "timeout"
+  "pending" | "awaiting_approval" | "active" | "completed" | "failed" | "cancelled" | "timeout"
 
 /**
  * First-class delegation record attached to an originating task

@@ -59,4 +59,25 @@ describe("RuntimeBadge", () => {
     expect(badge).toHaveAttribute("title", "Codex")
     expect(badge.querySelector("span")).toBeNull()
   })
+
+  it("renders a badge for every executable runtime (RUNTIME_META is exhaustive)", () => {
+    const runtimes: TeammateRuntime[] = [
+      "codex-app-server",
+      "copilot-cli",
+      "kiro",
+      "qwen-code",
+      "pi",
+      "droid",
+      "opencode-server",
+      "opencode-remote",
+    ]
+    for (const runtime of runtimes) {
+      const { unmount } = renderBadge(runtime)
+      // Missing i18n keys fall back to the runtime literal, but the badge (and
+      // its per-runtime icon/color meta) must resolve — a missing RUNTIME_META
+      // entry would throw here.
+      expect(screen.getByTestId(`runtime-badge-${runtime}`)).toBeInTheDocument()
+      unmount()
+    }
+  })
 })

@@ -53,31 +53,38 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { TEAMMATE_STATUS_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
+import { BUILTIN_EXECUTABLE_PRESET_IDS } from "@/lib/ai/agent/external/presets"
 import { DEFAULT_TEAMMATE_RUNTIME } from "@/types/agent/agent-team"
 import { RuntimeBadge } from "./runtime-badge"
 import { TeammateConfigDialog } from "./teammate-config-dialog"
 
-const RUNTIME_OPTIONS: TeammateRuntime[] = [
-  "claude",
-  "codex",
-  "claude-code",
-  "gemini-cli",
-  "cursor-cli",
-]
+// The `claude` sidecar plus every executable external preset. Derived from
+// `BUILTIN_EXECUTABLE_PRESET_IDS` so the dropdown can never drift from the
+// preset catalog (`resolveTeammatePresetId` maps the runtime string straight to
+// a preset id).
+const RUNTIME_OPTIONS: TeammateRuntime[] = ["claude", ...BUILTIN_EXECUTABLE_PRESET_IDS]
+
+// i18n key (under `agentTeamsWorkspace.chat.runtime.*`) for each runtime. Typed
+// as an exhaustive Record so a new preset id fails the build until it is
+// labelled here and in the message bundles.
+const RUNTIME_LABEL_KEYS: Record<TeammateRuntime, string> = {
+  claude: "claude",
+  codex: "codex",
+  "codex-app-server": "codexAppServer",
+  "claude-code": "claudeCode",
+  "gemini-cli": "geminiCli",
+  "cursor-cli": "cursorCli",
+  "copilot-cli": "copilotCli",
+  kiro: "kiro",
+  "qwen-code": "qwenCode",
+  pi: "pi",
+  droid: "droid",
+  "opencode-server": "opencodeServer",
+  "opencode-remote": "opencodeRemote",
+}
 
 function runtimeLabelKey(runtime: TeammateRuntime): string {
-  switch (runtime) {
-    case "claude":
-      return "claude"
-    case "codex":
-      return "codex"
-    case "claude-code":
-      return "claudeCode"
-    case "gemini-cli":
-      return "geminiCli"
-    case "cursor-cli":
-      return "cursorCli"
-  }
+  return RUNTIME_LABEL_KEYS[runtime]
 }
 
 export interface AgentTeamMembersProps {

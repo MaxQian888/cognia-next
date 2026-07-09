@@ -202,8 +202,16 @@
       "claude": "Claude",
       "claudeCode": "Claude Code",
       "codex": "Codex",
+      "codexAppServer": "Codex（应用服务）",
+      "copilotCli": "GitHub Copilot",
       "cursorCli": "Cursor",
-      "geminiCli": "Gemini"
+      "droid": "Droid",
+      "geminiCli": "Gemini",
+      "kiro": "Kiro",
+      "opencodeRemote": "OpenCode（远程）",
+      "opencodeServer": "OpenCode",
+      "pi": "Pi",
+      "qwenCode": "Qwen Code"
     },
     "runtimeStatus": {
       "disconnected": "{runtime} 已配置但未连接。请到「设置 → 外部 Agent」连接。",

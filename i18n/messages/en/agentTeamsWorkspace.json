@@ -202,8 +202,16 @@
       "claude": "Claude",
       "claudeCode": "Claude Code",
       "codex": "Codex",
+      "codexAppServer": "Codex (App Server)",
+      "copilotCli": "GitHub Copilot",
       "cursorCli": "Cursor",
-      "geminiCli": "Gemini"
+      "droid": "Droid",
+      "geminiCli": "Gemini",
+      "kiro": "Kiro",
+      "opencodeRemote": "OpenCode (Remote)",
+      "opencodeServer": "OpenCode",
+      "pi": "Pi",
+      "qwenCode": "Qwen Code"
     },
     "runtimeStatus": {
       "disconnected": "{runtime} is configured but not connected. Open Settings → External Agents to connect.",

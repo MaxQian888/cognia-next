@@ -54,6 +54,46 @@ const RUNTIME_META: Record<TeammateRuntime, RuntimeMeta> = {
     classes: "bg-slate-700/20 text-slate-100 ring-slate-500/30",
     labelKey: "cursorCli",
   },
+  "codex-app-server": {
+    Icon: TerminalIcon,
+    classes: "bg-neutral-500/15 text-neutral-700 dark:text-neutral-200 ring-neutral-500/30",
+    labelKey: "codexAppServer",
+  },
+  "copilot-cli": {
+    Icon: BotIcon,
+    classes: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-emerald-500/30",
+    labelKey: "copilotCli",
+  },
+  kiro: {
+    Icon: HexagonIcon,
+    classes: "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30",
+    labelKey: "kiro",
+  },
+  "qwen-code": {
+    Icon: CommandIcon,
+    classes: "bg-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30",
+    labelKey: "qwenCode",
+  },
+  pi: {
+    Icon: GanttChartIcon,
+    classes: "bg-teal-500/15 text-teal-700 dark:text-teal-300 ring-teal-500/30",
+    labelKey: "pi",
+  },
+  droid: {
+    Icon: BotIcon,
+    classes: "bg-green-500/15 text-green-700 dark:text-green-300 ring-green-500/30",
+    labelKey: "droid",
+  },
+  "opencode-server": {
+    Icon: TerminalIcon,
+    classes: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 ring-cyan-500/30",
+    labelKey: "opencodeServer",
+  },
+  "opencode-remote": {
+    Icon: TerminalIcon,
+    classes: "bg-sky-500/15 text-sky-700 dark:text-sky-300 ring-sky-500/30",
+    labelKey: "opencodeRemote",
+  },
 }
 
 export interface RuntimeBadgeProps {
