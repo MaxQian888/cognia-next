@@ -1,4 +1,4 @@
-import { codexSessionSource, parseCodexRollout } from "./codex"
+import { codexSessionSource, parseCodexRollout, summarizeCodexFile } from "./codex"
 import type { SessionScanInput } from "../types"
 
 const LINES = [
@@ -218,5 +218,23 @@ describe("codexSessionSource", () => {
     const conv = await codexSessionSource.parseSession(list[0].ref, input)
     expect(conv.session.id).toBe("import:codex:cx-1")
     expect(conv.messages).toHaveLength(4)
+  })
+})
+
+describe("summarizeCodexFile (lightweight scan)", () => {
+  it("pulls title/cwd/session id and counts message-emitting items", () => {
+    const s = summarizeCodexFile(CONTENT, "/p/rollout.jsonl")
+    expect(s).not.toBeNull()
+    expect(s!.cwd).toBe("/work")
+    expect(s!.ref.originalSessionId).toBe("cx-1")
+    expect(s!.title).toBe("fix the bug") // first user message text
+    // message(user) + reasoning + function_call + message(assistant) = 4;
+    // ghost_snapshot and function_call_output add none.
+    expect(s!.messageCount).toBe(4)
+  })
+
+  it("returns null when the rollout carries no importable turns", () => {
+    const meta = JSON.stringify({ type: "session_meta", payload: { id: "x", cwd: "/w" } })
+    expect(summarizeCodexFile(meta, "/p/empty.jsonl")).toBeNull()
   })
 })

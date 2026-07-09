@@ -158,4 +158,61 @@ describe("session-import runner", () => {
     expect(parsed[1].session.projectId).toBe("proj-Z")
     expect(parsed[1].messages[0].projectId).toBe("proj-Z")
   })
+
+  const manyRefs = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      sourceId: "p:plug",
+      originalSessionId: `x${i}`,
+      locator: `x${i}`,
+    }))
+
+  it("flushes in chunks instead of one giant transaction", async () => {
+    registerSessionSource(source("plug", 0), { pluginId: "p" })
+    const counts = await importSessions(manyRefs(5), input, undefined, { chunkSize: 2 })
+    // 5 refs @ chunk 2 → flushes at 2, 4, and final 5 = 3 writes.
+    expect(applyImportedMock).toHaveBeenCalledTimes(3)
+    expect(counts).toEqual({ sessions: 3, messages: 9 }) // 3 × mock {1,3}
+  })
+
+  it("reports parsing then writing progress", async () => {
+    registerSessionSource(source("plug", 0), { pluginId: "p" })
+    const ticks: Array<{ phase: string; done: number; total: number }> = []
+    await importSessions(manyRefs(3), input, undefined, {
+      chunkSize: 2,
+      onProgress: (p) => ticks.push({ ...p }),
+    })
+    expect(ticks.filter((t) => t.phase === "parsing").map((t) => t.done)).toEqual([1, 2, 3])
+    expect(ticks.at(-1)).toEqual({ phase: "writing", done: 3, total: 3 })
+  })
+
+  it("stops on abort but keeps work already parsed", async () => {
+    registerSessionSource(source("plug", 0), { pluginId: "p" })
+    const controller = new AbortController()
+    let seen = 0
+    const counts = await importSessions(manyRefs(10), input, undefined, {
+      chunkSize: 100, // no mid-loop flush; only the final flush persists the buffer
+      signal: controller.signal,
+      onProgress: (p) => {
+        if (p.phase === "parsing") {
+          seen = p.done
+          if (p.done === 3) controller.abort()
+        }
+      },
+    })
+    expect(seen).toBe(3) // parsing halted after the 3rd ref
+    // The 3 buffered conversations are still flushed once on the way out.
+    expect(applyImportedMock).toHaveBeenCalledTimes(1)
+    expect(counts).toEqual({ sessions: 1, messages: 3 })
+  })
+
+  it("persists nothing when aborted before the first ref", async () => {
+    registerSessionSource(source("plug", 0), { pluginId: "p" })
+    const controller = new AbortController()
+    controller.abort()
+    const counts = await importSessions(manyRefs(4), input, undefined, {
+      signal: controller.signal,
+    })
+    expect(applyImportedMock).not.toHaveBeenCalled()
+    expect(counts).toEqual({ sessions: 0, messages: 0 })
+  })
 })

@@ -1,4 +1,4 @@
-import { claudeCodeSessionSource, parseClaudeTranscript } from "./claude-code"
+import { claudeCodeSessionSource, parseClaudeTranscript, summarizeClaudeFile } from "./claude-code"
 import type { SessionScanInput } from "../types"
 
 const LINES = [
@@ -440,5 +440,59 @@ describe("claudeCodeSessionSource", () => {
     expect(conv.session.id).toBe("import:claude-code:sess-1")
     expect(conv.session.workingDir).toBe("/proj")
     expect(conv.messages).toHaveLength(2)
+  })
+})
+
+describe("summarizeClaudeFile (lightweight scan)", () => {
+  it("pulls title/cwd/count/timestamps without a full parse", () => {
+    const s = summarizeClaudeFile(CONTENT, "/p/sess-1.jsonl")
+    expect(s).not.toBeNull()
+    expect(s!.title).toBe("Hello world") // first user text
+    expect(s!.cwd).toBe("/proj")
+    expect(s!.ref.originalSessionId).toBe("sess-1")
+    expect(s!.ref.locator).toBe("/p/sess-1.jsonl")
+    // 3 user/assistant records in the fixture (approximate count).
+    expect(s!.messageCount).toBe(3)
+    expect(s!.updatedAt).toBe(Date.parse("2025-01-01T00:00:02Z"))
+  })
+
+  it("returns null for a transcript with no user/assistant records", () => {
+    const only = JSON.stringify({ type: "summary", summary: "recap" })
+    expect(summarizeClaudeFile(only, "/p/x.jsonl")).toBeNull()
+  })
+
+  it("falls back past a text-less first user turn when deriving the title", () => {
+    const lines = [
+      { type: "summary", summary: "Investigate flake" },
+      // First user turn carries only a tool_result (no text) — firstText yields "".
+      {
+        type: "user",
+        sessionId: "s9",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "t", content: "" }],
+        },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const s = summarizeClaudeFile(lines, "/p/s9.jsonl")
+    expect(s!.title).toBe("Investigate flake") // summary used since no user text
+    expect(s!.messageCount).toBe(1)
+  })
+
+  it("falls back to the summary record for the title, then the locator id", () => {
+    const lines = [
+      { type: "summary", summary: "Refactor the parser" },
+      {
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n")
+    const s = summarizeClaudeFile(lines, "/p/no-session.jsonl")
+    expect(s!.title).toBe("Refactor the parser")
+    expect(s!.ref.originalSessionId).toBe("/p/no-session.jsonl") // no sessionId on records
   })
 })

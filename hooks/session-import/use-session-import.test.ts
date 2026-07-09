@@ -51,12 +51,90 @@ describe("useSessionImport", () => {
     expect(d.importSessions).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ originalSessionId: "a" })]),
       input,
-      "proj-1"
+      "proj-1",
+      expect.objectContaining({ signal: expect.anything(), onProgress: expect.any(Function) })
     )
     expect(result.current.state).toMatchObject({
       status: "done",
       sessionsAdded: 2,
       messagesAdded: 6,
+    })
+  })
+
+  it("surfaces live progress and cancels an in-flight import, keeping partial work", async () => {
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    let captured: AbortSignal | undefined
+    const d = deps({
+      importSessions: jest.fn(async (_refs, _in, _pid, opts) => {
+        captured = opts?.signal
+        opts?.onProgress?.({ phase: "parsing", done: 1, total: 2 })
+        await gate
+        return { sessions: 1, messages: 3 }
+      }),
+    })
+    const { result } = renderHook(() => useSessionImport(d))
+    await act(async () => {
+      await result.current.scan()
+    })
+
+    let importDone: Promise<void> | undefined
+    await act(async () => {
+      importDone = result.current.importSelected()
+      await Promise.resolve()
+    })
+    // Progress made it into the importing state.
+    expect(result.current.state).toMatchObject({
+      status: "importing",
+      phase: "parsing",
+      done: 1,
+      total: 2,
+    })
+
+    act(() => result.current.cancelImport())
+    expect(captured?.aborted).toBe(true)
+
+    await act(async () => {
+      release?.()
+      await importDone
+    })
+    expect(result.current.state).toMatchObject({
+      status: "done",
+      sessionsAdded: 1,
+      cancelled: true,
+    })
+  })
+
+  it("aborts an in-flight import when reset (dialog closed mid-run)", async () => {
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    let captured: AbortSignal | undefined
+    const d = deps({
+      importSessions: jest.fn(async (_refs, _in, _pid, opts) => {
+        captured = opts?.signal
+        await gate
+        return { sessions: 0, messages: 0 }
+      }),
+    })
+    const { result } = renderHook(() => useSessionImport(d))
+    await act(async () => {
+      await result.current.scan()
+    })
+    let importDone: Promise<void> | undefined
+    await act(async () => {
+      importDone = result.current.importSelected()
+      await Promise.resolve()
+    })
+    act(() => result.current.reset())
+    expect(captured?.aborted).toBe(true)
+    expect(result.current.state.status).toBe("idle")
+    await act(async () => {
+      release?.()
+      await importDone
     })
   })
 

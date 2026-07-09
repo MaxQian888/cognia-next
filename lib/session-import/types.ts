@@ -107,6 +107,44 @@ export interface AgentSessionSourceAdapter {
   listSessions(input: SessionScanInput): Promise<SessionSummary[]>
   /** Parse ONE listed session into the canonical conversation shape. */
   parseSession(ref: SessionRef, input: SessionScanInput): Promise<ImportedConversation>
+  /**
+   * OPTIONAL cheap summary of one file's raw content — a single pass that pulls
+   * only title / count / timestamps / cwd WITHOUT building any `StoredMessage`,
+   * resolving the DAG, or reconstructing subagents (all of which `parseSession`
+   * does and the scan throws away). When a per-file source implements this, the
+   * desktop scan uses it instead of a full parse, so listing a large history
+   * costs O(bytes) parse instead of O(bytes) parse + O(messages) allocation.
+   *
+   * Returns `null` for a file that yields no importable session (empty/corrupt).
+   * Sources whose history isn't a set of standalone files (e.g. OpenCode's
+   * single SQLite DB) leave this undefined and keep their own `listSessions`.
+   */
+  summarizeFile?(content: string, locator: string): SessionSummary | null
+}
+
+/** Phase of an in-flight import, for progress reporting. */
+export type ImportPhase = "parsing" | "writing"
+
+/** Progress tick emitted while importing a batch of sessions. */
+export interface ImportProgress {
+  phase: ImportPhase
+  /** Sessions parsed (parsing phase) or persisted (writing phase) so far. */
+  done: number
+  /** Total sessions selected for this import. */
+  total: number
+}
+
+/** Optional controls for a (potentially large) import run. */
+export interface ImportOptions {
+  /** Abort the run between sessions / write chunks. Partial progress is kept. */
+  signal?: AbortSignal
+  /** Called on each parse step and after each persisted chunk. */
+  onProgress?: (progress: ImportProgress) => void
+  /**
+   * Parsed conversations are flushed to Dexie every `chunkSize` sessions
+   * instead of buffering the whole selection into one giant transaction.
+   */
+  chunkSize?: number
 }
 
 export type { ImportedConversation } from "@/lib/data/importers/types"

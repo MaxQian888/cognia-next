@@ -16,7 +16,7 @@
 import { joinPath } from "@/lib/claude/instructions/paths"
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@/lib/claude/types"
-import { walkFiles } from "../fs"
+import { scanFileSummaries } from "../scan"
 import { importedUsageMetadata } from "../usage"
 import {
   extractSidechains,
@@ -460,14 +460,62 @@ function plainTextOf(parts: Part[]): string {
     .join(" ")
 }
 
-function summarize(parsed: ParsedSession, locator: string): SessionSummary {
+/** First non-empty text block of a Claude content field (string or block array). */
+function firstText(content: unknown): string {
+  for (const b of normalizeContent(content)) {
+    if (b.type === "text" && typeof b.text === "string" && b.text.trim()) return b.text
+  }
+  return ""
+}
+
+/**
+ * Cheap single-pass summary of a Claude Code transcript — pulls title, count,
+ * timestamps and cwd WITHOUT resolving the DAG, building any `StoredMessage`, or
+ * reconstructing subagents (all of which `parseClaudeTranscript` does and the
+ * scan throws away). `messageCount` is the raw user/assistant record count, so
+ * it's approximate: it doesn't drop abandoned edit/re-run branches or split out
+ * sidechains — that precision is only worth paying at import time.
+ */
+export function summarizeClaudeFile(content: string, locator: string): SessionSummary | null {
+  let sessionId = ""
+  let cwd: string | undefined
+  let summary = ""
+  let firstUserText = ""
+  let createdAt = 0
+  let updatedAt = 0
+  let count = 0
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    let rec: ClaudeLine
+    try {
+      rec = JSON.parse(trimmed) as ClaudeLine
+    } catch {
+      continue
+    }
+    if (rec.sessionId && !sessionId) sessionId = rec.sessionId
+    if (rec.cwd && !cwd) cwd = rec.cwd
+    if (rec.type === "summary" && typeof rec.summary === "string" && !summary) summary = rec.summary
+    if (rec.timestamp) {
+      const ms = Date.parse(rec.timestamp)
+      if (!Number.isNaN(ms)) {
+        if (!createdAt) createdAt = ms
+        if (ms > updatedAt) updatedAt = ms
+      }
+    }
+    if (rec.type === "user" || rec.type === "assistant") {
+      count += 1
+      if (rec.type === "user" && !firstUserText) firstUserText = firstText(rec.message?.content)
+    }
+  }
+  if (count === 0) return null
   return {
-    ref: { sourceId: "claude-code", originalSessionId: parsed.originalSessionId, locator },
-    title: parsed.title,
+    ref: { sourceId: "claude-code", originalSessionId: sessionId || locator, locator },
+    title: deriveTitle(firstUserText || summary, "Claude Code session"),
     sourceId: "claude-code",
-    messageCount: parsed.messages.length,
-    updatedAt: parsed.updatedAt,
-    cwd: parsed.cwd,
+    messageCount: count,
+    updatedAt: updatedAt || createdAt || Date.now(),
+    cwd,
   }
 }
 
@@ -518,27 +566,15 @@ export const claudeCodeSessionSource: AgentSessionSourceAdapter = {
     return looksClaude ? "maybe" : "no"
   },
 
+  summarizeFile: summarizeClaudeFile,
+
   async listSessions(input: SessionScanInput) {
-    if (input.pickedFiles?.length) {
-      return input.pickedFiles
-        .filter((f) => f.name.toLowerCase().endsWith(".jsonl"))
-        .map((f) => summarize(parseClaudeTranscript(f.content, f.name), f.path))
-    }
-    const roots = this.scanRoots(input.home)
-    const summaries: SessionSummary[] = []
-    for (const root of roots) {
-      const files = await walkFiles(input.fs, root, (n) => n.toLowerCase().endsWith(".jsonl"))
-      for (const file of files) {
-        try {
-          const content = await input.fs.readTextFile(file)
-          const parsed = parseClaudeTranscript(content, file)
-          if (parsed.messages.length > 0) summaries.push(summarize(parsed, file))
-        } catch {
-          // Skip unreadable transcript.
-        }
-      }
-    }
-    return summaries.sort((a, b) => b.updatedAt - a.updatedAt)
+    return scanFileSummaries(
+      input,
+      this.scanRoots(input.home),
+      (n) => n.toLowerCase().endsWith(".jsonl"),
+      summarizeClaudeFile
+    )
   },
 
   async parseSession(ref: SessionRef, input: SessionScanInput) {

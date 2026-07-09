@@ -1,6 +1,7 @@
 import {
   __resetDynamicSessionSourcesForTesting,
   detectSourceForFiles,
+  detectSourceForPath,
   getSessionSource,
   getSessionSources,
   registerSessionSource,
@@ -10,14 +11,15 @@ import type { AgentSessionSourceAdapter } from "./types"
 
 function fakeSource(
   id: string,
-  detect: AgentSessionSourceAdapter["detect"]
+  detect: AgentSessionSourceAdapter["detect"],
+  scanRoots: AgentSessionSourceAdapter["scanRoots"] = () => []
 ): AgentSessionSourceAdapter {
   return {
     id,
     displayName: id,
     labelKey: id,
     acceptedExtensions: [".jsonl"],
-    scanRoots: () => [],
+    scanRoots,
     detect,
     listSessions: async () => [],
     parseSession: async () => ({
@@ -75,5 +77,36 @@ describe("session-source registry", () => {
   it("returns null when no source claims the files", () => {
     __resetDynamicSessionSourcesForTesting()
     expect(detectSourceForFiles([{ name: "z.txt", path: "/z.txt", content: "nope" }])).toBeNull()
+  })
+
+  describe("detectSourceForPath", () => {
+    it("maps a changed file to the source whose root contains it", () => {
+      expect(detectSourceForPath("/home/u/.claude/projects/enc/a.jsonl", "/home/u")?.id).toBe(
+        "claude-code"
+      )
+      expect(detectSourceForPath("/home/u/.codex/sessions/2025/r.jsonl", "/home/u")?.id).toBe(
+        "codex"
+      )
+    })
+
+    it("returns undefined for a path under no scan root", () => {
+      expect(detectSourceForPath("/tmp/random.jsonl", "/home/u")).toBeUndefined()
+      // A sibling that merely shares a prefix segment must NOT match.
+      expect(detectSourceForPath("/home/u/.claude-backup/x.jsonl", "/home/u")).toBeUndefined()
+    })
+
+    it("normalizes separators so Windows paths match", () => {
+      registerSessionSource(
+        fakeSource(
+          "win",
+          () => "no",
+          () => ["C:/Users/x/.win/sessions"]
+        ),
+        {
+          pluginId: "p",
+        }
+      )
+      expect(detectSourceForPath("C:\\Users\\x\\.win\\sessions\\a.jsonl", "")?.id).toBe("p:win")
+    })
   })
 })

@@ -6,7 +6,14 @@ import type { ImportedConversation } from "@/lib/data/importers/types"
 import { resolveHome } from "@/lib/memory/external/home"
 import { realSessionFs } from "./fs"
 import { getSessionSource, getSessionSources } from "./registry"
-import type { SessionRef, SessionScanInput, SessionSummary } from "./types"
+import type { ImportOptions, SessionRef, SessionScanInput, SessionSummary } from "./types"
+
+/**
+ * Default number of sessions parsed+persisted per transaction. Bounds peak
+ * memory and transaction size for a large "import everything" run, instead of
+ * buffering the whole selection and writing it in one giant `rw` transaction.
+ */
+export const DEFAULT_IMPORT_CHUNK = 25
 
 export {
   registerSessionSource,
@@ -14,6 +21,7 @@ export {
   getSessionSources,
   getSessionSource,
   detectSourceForFiles,
+  detectSourceForPath,
   __resetDynamicSessionSourcesForTesting,
 } from "./registry"
 export { realSessionFs, walkFiles } from "./fs"
@@ -25,6 +33,9 @@ export type {
   SessionScanInput,
   SessionSummary,
   ImportedConversation,
+  ImportOptions,
+  ImportPhase,
+  ImportProgress,
 } from "./types"
 
 /** Build the scan input, resolving the real fs + home unless overridden. */
@@ -82,6 +93,37 @@ export async function listAllSessions(input: SessionScanInput): Promise<SessionS
 }
 
 /**
+ * Parse ONE ref to its top-level conversations: the main thread plus any nested
+ * subagent transcripts (ADR-0062), each stamped with `projectId`. Returns [] for
+ * an unknown source, a parse failure, or an empty transcript.
+ */
+async function parseRefConversations(
+  ref: SessionRef,
+  input: SessionScanInput,
+  projectId?: string
+): Promise<ImportedConversation[]> {
+  const source = getSessionSource(ref.sourceId)
+  if (!source) return []
+  try {
+    const conv = await source.parseSession(ref, input)
+    const nested = conv.nested ?? []
+    if (projectId) {
+      conv.session.projectId = projectId
+      for (const m of conv.messages) m.projectId = projectId
+      for (const n of nested) {
+        n.session.projectId = projectId
+        for (const m of n.messages) m.projectId = projectId
+      }
+    }
+    if (conv.messages.length === 0) return []
+    return [{ session: conv.session, messages: conv.messages }, ...nested]
+  } catch {
+    // Skip a session that fails to parse.
+    return []
+  }
+}
+
+/**
  * Parse the given session refs to conversations. `projectId` stamps the active
  * workspace onto every imported session/message. Failing refs are skipped.
  */
@@ -92,37 +134,55 @@ export async function parseSessions(
 ): Promise<ImportedConversation[]> {
   const conversations: ImportedConversation[] = []
   for (const ref of refs) {
-    const source = getSessionSource(ref.sourceId)
-    if (!source) continue
-    try {
-      const conv = await source.parseSession(ref, input)
-      const nested = conv.nested ?? []
-      if (projectId) {
-        conv.session.projectId = projectId
-        for (const m of conv.messages) m.projectId = projectId
-        for (const n of nested) {
-          n.session.projectId = projectId
-          for (const m of n.messages) m.projectId = projectId
-        }
-      }
-      if (conv.messages.length > 0) {
-        // Persist the main conversation plus any nested subagent transcripts
-        // (ADR-0062) as top-level rows in one pass.
-        conversations.push({ session: conv.session, messages: conv.messages }, ...nested)
-      }
-    } catch {
-      // Skip a session that fails to parse.
-    }
+    conversations.push(...(await parseRefConversations(ref, input, projectId)))
   }
   return conversations
 }
 
-/** Parse + persist. Returns counts written to Dexie. */
+/**
+ * Parse + persist, streamed. Parses one ref at a time and flushes to Dexie every
+ * `chunkSize` sessions (default {@link DEFAULT_IMPORT_CHUNK}) so a large "import
+ * everything" run never buffers the whole selection nor writes it in one giant
+ * transaction. Reports `parsing`/`writing` progress and honors an `AbortSignal`
+ * between refs and before each flush — aborting keeps the work already persisted
+ * (ids are idempotent + merge-guarded). Returns the total counts written.
+ */
 export async function importSessions(
   refs: SessionRef[],
   input: SessionScanInput,
-  projectId?: string
+  projectId?: string,
+  opts: ImportOptions = {}
 ): Promise<{ sessions: number; messages: number }> {
-  const conversations = await parseSessions(refs, input, projectId)
-  return applyImported(conversations)
+  const { signal, onProgress, chunkSize = DEFAULT_IMPORT_CHUNK } = opts
+  const total = refs.length
+  const size = Math.max(1, chunkSize)
+
+  let sessions = 0
+  let messages = 0
+  let buffer: ImportedConversation[] = []
+  let parsed = 0
+  let flushed = 0
+
+  const flush = async () => {
+    if (buffer.length === 0) return
+    const counts = await applyImported(buffer)
+    sessions += counts.sessions
+    messages += counts.messages
+    buffer = []
+    flushed = parsed
+    onProgress?.({ phase: "writing", done: flushed, total })
+  }
+
+  for (const ref of refs) {
+    if (signal?.aborted) break
+    buffer.push(...(await parseRefConversations(ref, input, projectId)))
+    parsed += 1
+    onProgress?.({ phase: "parsing", done: parsed, total })
+    // Chunk by refs (not conversations) so a session with many nested subagents
+    // still flushes on schedule rather than ballooning one transaction.
+    if (parsed - flushed >= size) await flush()
+  }
+  // Persist whatever is buffered — including partial work when aborted.
+  await flush()
+  return { sessions, messages }
 }

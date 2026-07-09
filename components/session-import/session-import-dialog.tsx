@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
 import {
   Dialog,
   DialogContent,
@@ -28,6 +29,10 @@ import { useSessionImport, summaryKey } from "@/hooks/session-import/use-session
 import { useSessionImportWatch } from "@/hooks/session-import/use-session-import-watch"
 import type { SessionSummary } from "@/lib/session-import"
 
+/** Rows shown before the first "show more", and each page-step increment. */
+const INITIAL_VISIBLE = 50
+const PAGE_STEP = 50
+
 export interface SessionImportDialogProps {
   trigger: React.ReactNode
 }
@@ -37,8 +42,18 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
   const [open, setOpen] = useState(false)
   const desktop = isTauri()
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
-  const { state, selected, selectedCount, scan, pickFiles, toggle, setAll, importSelected, reset } =
-    useSessionImport()
+  const {
+    state,
+    selected,
+    selectedCount,
+    scan,
+    pickFiles,
+    toggle,
+    setAll,
+    importSelected,
+    cancelImport,
+    reset,
+  } = useSessionImport()
   const { enabled: watching, toggle: toggleWatch } = useSessionImportWatch({
     projectId: activeProjectId ?? undefined,
   })
@@ -102,10 +117,23 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
           </div>
         )}
 
-        {(state.status === "scanning" || state.status === "importing") && (
+        {state.status === "scanning" && (
           <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
             <Loader2Icon className="size-4 animate-spin" />
-            {t(state.status === "scanning" ? "scanning" : "importing")}
+            {t("scanning")}
+          </div>
+        )}
+
+        {state.status === "importing" && (
+          <div className="space-y-3 py-6">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2Icon className="size-4 animate-spin" />
+              {t(state.phase === "writing" ? "writingProgress" : "parsingProgress", {
+                done: state.done,
+                total: state.total,
+              })}
+            </div>
+            <Progress value={state.total > 0 ? (state.done / state.total) * 100 : 0} />
           </div>
         )}
 
@@ -131,7 +159,9 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
         {state.status === "done" && (
           <div className="flex flex-col items-center gap-2 py-8 text-center">
             <CheckCircle2Icon className="size-8 text-primary" />
-            <p className="text-sm font-medium">{t("doneTitle")}</p>
+            <p className="text-sm font-medium">
+              {t(state.cancelled ? "cancelledTitle" : "doneTitle")}
+            </p>
             <p className="text-xs text-muted-foreground">
               {t("doneBody", { sessions: state.sessionsAdded, messages: state.messagesAdded })}
             </p>
@@ -148,6 +178,11 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
         )}
 
         <DialogFooter className="gap-2 sm:gap-2">
+          {state.status === "importing" && (
+            <Button variant="outline" size="sm" onClick={cancelImport}>
+              {t("cancel")}
+            </Button>
+          )}
           {state.status === "list" && (
             <>
               <Button variant="ghost" size="sm" onClick={() => setAll(selectedCount === 0)}>
@@ -191,13 +226,19 @@ function SessionList({
   messagesLabel: (n: number) => string
 }) {
   const t = useTranslations("sessionImport")
+  // Page the list so a history of hundreds of sessions doesn't render hundreds
+  // of DOM rows at once. Selection is by key, independent of what's rendered, so
+  // "select all" still covers the whole list.
+  const [visible, setVisible] = useState(INITIAL_VISIBLE)
   if (summaries.length === 0) {
     return <p className="py-8 text-center text-sm text-muted-foreground">{t("empty")}</p>
   }
+  const shown = summaries.slice(0, visible)
+  const remaining = summaries.length - shown.length
   return (
     <ScrollArea className="max-h-72">
       <ul className="space-y-1 pr-2">
-        {summaries.map((s) => {
+        {shown.map((s) => {
           const key = summaryKey(s.ref)
           return (
             <li key={key}>
@@ -224,6 +265,16 @@ function SessionList({
           )
         })}
       </ul>
+      {remaining > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-1 w-full text-xs"
+          onClick={() => setVisible((v) => v + PAGE_STEP)}
+        >
+          {t("loadMore", { count: Math.min(remaining, PAGE_STEP) })}
+        </Button>
+      )}
     </ScrollArea>
   )
 }

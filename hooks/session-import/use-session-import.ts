@@ -18,6 +18,7 @@ import {
   scanAllSources as scanAllSourcesDefault,
   listSessionsForSource as listSessionsForSourceDefault,
   resolveScanInput as resolveScanInputDefault,
+  type ImportPhase,
   type PickedSessionFile,
   type SessionRef,
   type SessionScanError,
@@ -31,8 +32,8 @@ export type SessionImportState =
   | { status: "idle" }
   | { status: "scanning" }
   | { status: "list"; summaries: SessionSummary[]; warnings?: SessionScanError[] }
-  | { status: "importing" }
-  | { status: "done"; sessionsAdded: number; messagesAdded: number }
+  | { status: "importing"; phase: ImportPhase; done: number; total: number }
+  | { status: "done"; sessionsAdded: number; messagesAdded: number; cancelled?: boolean }
   | { status: "error"; message: string }
 
 /** Stable key for a summary (source + on-disk locator). */
@@ -60,8 +61,12 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
   const [state, setState] = useState<SessionImportState>({ status: "idle" })
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const inputRef = useRef<SessionScanInput | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const reset = useCallback(() => {
+    // Abort an in-flight import (e.g. the dialog is closing mid-run).
+    abortRef.current?.abort()
+    abortRef.current = null
     setState({ status: "idle" })
     setSelected(new Set())
     inputRef.current = null
@@ -149,19 +154,47 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
       if (!input || state.status !== "list") return
       const refs = state.summaries.filter((s) => selected.has(summaryKey(s.ref))).map((s) => s.ref)
       if (refs.length === 0) return
-      setState({ status: "importing" })
+      const controller = new AbortController()
+      abortRef.current = controller
+      setState({ status: "importing", phase: "parsing", done: 0, total: refs.length })
       try {
-        const counts = await importSessions(refs, input, projectId)
-        setState({ status: "done", sessionsAdded: counts.sessions, messagesAdded: counts.messages })
+        const counts = await importSessions(refs, input, projectId, {
+          signal: controller.signal,
+          onProgress: (p) => setState({ status: "importing", ...p }),
+        })
+        setState({
+          status: "done",
+          sessionsAdded: counts.sessions,
+          messagesAdded: counts.messages,
+          ...(controller.signal.aborted ? { cancelled: true } : {}),
+        })
       } catch (err) {
         log.error("session-import-apply-failed", { error: err })
         setState({ status: "error", message: err instanceof Error ? err.message : String(err) })
+      } finally {
+        abortRef.current = null
       }
     },
     [state, selected, importSessions]
   )
 
+  /** Abort an in-flight import; already-persisted sessions are kept. */
+  const cancelImport = useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
+
   const selectedCount = useMemo(() => selected.size, [selected])
 
-  return { state, selected, selectedCount, scan, pickFiles, toggle, setAll, importSelected, reset }
+  return {
+    state,
+    selected,
+    selectedCount,
+    scan,
+    pickFiles,
+    toggle,
+    setAll,
+    importSelected,
+    cancelImport,
+    reset,
+  }
 }

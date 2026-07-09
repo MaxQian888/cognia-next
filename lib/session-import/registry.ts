@@ -83,6 +83,31 @@ export function getSessionSource(id: string): AgentSessionSourceAdapter | undefi
   return getSessionSources().find((s) => s.id === id)
 }
 
+/** Normalize separators + drop trailing slashes for a prefix comparison. */
+function normalizeSep(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "")
+}
+
+/**
+ * The source whose desktop scan roots contain `path`, or undefined. Lets the
+ * live-sync watcher re-import only the changed agent's history on an fs event
+ * instead of re-scanning every source. Static sources are checked first, so a
+ * plugin whose root nests under a built-in's can never shadow it.
+ */
+export function detectSourceForPath(
+  path: string,
+  home: string
+): AgentSessionSourceAdapter | undefined {
+  const norm = normalizeSep(path)
+  for (const source of getSessionSources()) {
+    for (const root of source.scanRoots(home)) {
+      const r = normalizeSep(root)
+      if (r && (norm === r || norm.startsWith(`${r}/`))) return source
+    }
+  }
+  return undefined
+}
+
 /**
  * Best-effort source detection for a batch of hand-picked files. First "match"
  * wins, else the first "maybe". Returns null when every source says "no".

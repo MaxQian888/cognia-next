@@ -27,6 +27,7 @@ function setHook(over: Record<string, unknown>) {
     toggle: jest.fn(),
     setAll: jest.fn(),
     importSelected: jest.fn(async () => {}),
+    cancelImport: jest.fn(),
     reset: jest.fn(),
     ...over,
   }
@@ -75,11 +76,50 @@ describe("SessionImportDialog", () => {
     expect(importSelected).toHaveBeenCalledWith("proj-1")
   })
 
+  it("shows import progress with a cancel button, and cancels", () => {
+    const cancelImport = jest.fn()
+    setHook({
+      state: { status: "importing", phase: "parsing", done: 1, total: 3 },
+      cancelImport,
+    })
+    render(<SessionImportDialog trigger={<button>open</button>} />)
+    fireEvent.click(screen.getByText("open"))
+    expect(screen.getByText(/parsingProgress/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText("cancel"))
+    expect(cancelImport).toHaveBeenCalled()
+  })
+
   it("shows the done summary", () => {
     setHook({ state: { status: "done", sessionsAdded: 2, messagesAdded: 6 } })
     render(<SessionImportDialog trigger={<button>open</button>} />)
     fireEvent.click(screen.getByText("open"))
     expect(screen.getByText("doneTitle")).toBeInTheDocument()
+  })
+
+  it("labels a cancelled import distinctly from a completed one", () => {
+    setHook({ state: { status: "done", sessionsAdded: 1, messagesAdded: 2, cancelled: true } })
+    render(<SessionImportDialog trigger={<button>open</button>} />)
+    fireEvent.click(screen.getByText("open"))
+    expect(screen.getByText("cancelledTitle")).toBeInTheDocument()
+    expect(screen.queryByText("doneTitle")).not.toBeInTheDocument()
+  })
+
+  it("pages a long session list behind a show-more control", () => {
+    const summaries = Array.from({ length: 60 }, (_, i) => ({
+      ref: { sourceId: "codex", originalSessionId: `s${i}`, locator: `/p/s${i}.jsonl` },
+      title: `Session ${i}`,
+      sourceId: "codex",
+      messageCount: 1,
+      updatedAt: i,
+    }))
+    setHook({ state: { status: "list", summaries }, selected: new Set(), selectedCount: 0 })
+    render(<SessionImportDialog trigger={<button>open</button>} />)
+    fireEvent.click(screen.getByText("open"))
+    // First page renders the initial window only.
+    expect(screen.getByText("Session 0")).toBeInTheDocument()
+    expect(screen.queryByText("Session 55")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText(/loadMore/))
+    expect(screen.getByText("Session 55")).toBeInTheDocument()
   })
 
   it("maps the unrecognized error to a friendly message", () => {

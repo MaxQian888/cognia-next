@@ -18,7 +18,7 @@ import { joinPath } from "@/lib/claude/instructions/paths"
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@/lib/claude/types"
 import type { UsageInfo } from "@/lib/claude/adapter"
-import { walkFiles } from "../fs"
+import { scanFileSummaries } from "../scan"
 import { importedUsageMetadata } from "../usage"
 import {
   buildMessage,
@@ -378,14 +378,69 @@ function isCodexToolError(output: unknown): boolean {
   return false
 }
 
-function summarize(parsed: ParsedSession, locator: string): SessionSummary {
+/**
+ * Cheap single-pass summary of a Codex rollout — pulls title, count, timestamps
+ * and cwd WITHOUT building any `StoredMessage`. `messageCount` counts the
+ * response items that would each emit a turn (message / reasoning / tool call /
+ * compaction marker), mirroring the full parse closely enough for the row
+ * subtitle while skipping all the allocation `parseCodexRollout` does.
+ */
+export function summarizeCodexFile(content: string, locator: string): SessionSummary | null {
+  let sessionId = ""
+  let cwd: string | undefined
+  let firstUserText = ""
+  let createdAt = 0
+  let updatedAt = 0
+  let count = 0
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    let rec: RolloutLine
+    try {
+      rec = JSON.parse(trimmed) as RolloutLine
+    } catch {
+      continue
+    }
+    if (rec.timestamp) {
+      const ms = Date.parse(rec.timestamp)
+      if (!Number.isNaN(ms)) {
+        if (!createdAt) createdAt = ms
+        if (ms > updatedAt) updatedAt = ms
+      }
+    }
+    const payload = rec.payload ?? {}
+    if (rec.type === "session_meta") {
+      sessionId = asString(payload.id) || asString(payload.session_id) || sessionId
+      cwd = asString(payload.cwd) || cwd
+      continue
+    }
+    if (rec.type === "compacted") {
+      count += 1
+      continue
+    }
+    if (rec.type !== "response_item") continue
+    const itemType = asString(payload.type)
+    if (itemType === "message") {
+      const text = messageText(payload)
+      if (!text) continue
+      count += 1
+      if (asString(payload.role) !== "assistant" && !firstUserText) firstUserText = text
+    } else if (
+      itemType === "reasoning" ||
+      itemType === "function_call" ||
+      itemType === "custom_tool_call"
+    ) {
+      count += 1
+    }
+  }
+  if (count === 0) return null
   return {
-    ref: { sourceId: "codex", originalSessionId: parsed.originalSessionId, locator },
-    title: parsed.title,
+    ref: { sourceId: "codex", originalSessionId: sessionId || locator, locator },
+    title: deriveTitle(firstUserText, "Codex session"),
     sourceId: "codex",
-    messageCount: parsed.messages.length,
-    updatedAt: parsed.updatedAt,
-    cwd: parsed.cwd,
+    messageCount: count,
+    updatedAt: updatedAt || createdAt || Date.now(),
+    cwd,
   }
 }
 
@@ -434,27 +489,15 @@ export const codexSessionSource: AgentSessionSourceAdapter = {
     return looksCodex ? "maybe" : "no"
   },
 
+  summarizeFile: summarizeCodexFile,
+
   async listSessions(input: SessionScanInput) {
-    if (input.pickedFiles?.length) {
-      return input.pickedFiles
-        .filter((f) => f.name.toLowerCase().endsWith(".jsonl"))
-        .map((f) => summarize(parseCodexRollout(f.content, f.name), f.path))
-    }
-    const roots = this.scanRoots(input.home)
-    const summaries: SessionSummary[] = []
-    for (const root of roots) {
-      const files = await walkFiles(input.fs, root, (n) => n.toLowerCase().endsWith(".jsonl"))
-      for (const file of files) {
-        try {
-          const content = await input.fs.readTextFile(file)
-          const parsed = parseCodexRollout(content, file)
-          if (parsed.messages.length > 0) summaries.push(summarize(parsed, file))
-        } catch {
-          // Skip unreadable rollout.
-        }
-      }
-    }
-    return summaries.sort((a, b) => b.updatedAt - a.updatedAt)
+    return scanFileSummaries(
+      input,
+      this.scanRoots(input.home),
+      (n) => n.toLowerCase().endsWith(".jsonl"),
+      summarizeCodexFile
+    )
   },
 
   async parseSession(ref: SessionRef, input: SessionScanInput) {
