@@ -33,6 +33,7 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { StatusBarBranch } from "@/components/source-control/status-bar-branch"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { JobCenterPanel } from "@/components/desktop/job-center-panel"
+import { AttentionPanel } from "@/components/attention/attention-panel"
 import { StatusBarConnectivity } from "@/components/desktop/status-bar-connectivity"
 import { StatusBarSync } from "@/components/desktop/status-bar-sync"
 import { StatusBarPerf } from "@/components/desktop/status-bar-perf"
@@ -223,6 +224,8 @@ export function StatusBar() {
       />
 
       <NotificationBell />
+
+      <AttentionPanel />
 
       <JobCenterPanel />
 

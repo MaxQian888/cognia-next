@@ -53,6 +53,12 @@ jest.mock("@/components/desktop/job-center-panel", () => ({
   JobCenterPanel: () => <button data-testid="status-job-center">Jobs</button>,
 }))
 
+// Covered by components/attention/attention-panel.test.tsx; stubbed here so
+// the status-bar test does not attach the real aggregation store.
+jest.mock("@/components/attention/attention-panel", () => ({
+  AttentionPanel: () => <button data-testid="status-attention">Attention</button>,
+}))
+
 // New optional segments — covered by their own suites; stub them so the
 // status-bar test focuses on layout + gating.
 jest.mock("@/components/desktop/status-bar-connectivity", () => ({

@@ -1620,6 +1620,27 @@
     "versionRestored": "版本已恢复",
     "words": "字"
   },
+  "attention": {
+    "badgeAria": "待处理事项：{count}",
+    "description": "汇总各处待审批、审批门与等待中的智能体。",
+    "dismiss": "关闭",
+    "emptyDescription": "当前没有待审批、审批门或等待中的智能体。",
+    "emptyTitle": "暂无待办",
+    "interrupted": "已中断——该请求已被拒绝。",
+    "kind": {
+      "fleet-permission": "智能体等待权限确认",
+      "fleet-waiting": "智能体等待输入",
+      "hitl-gate": "团队审批门待决策",
+      "tool-approval": "工具调用待审批"
+    },
+    "openOwner": "打开",
+    "source": {
+      "chat": "聊天",
+      "fleet": "舰队",
+      "team": "团队"
+    },
+    "title": "注意力中心"
+  },
   "automation": {
     "audit": {
       "clear": "清除日志",
@@ -2328,7 +2349,12 @@
       "confirm": "执行切换",
       "noChange": "cognia-next 的 API 密钥与 base URL 已与该服务商一致 — 无需重启 sidecar。",
       "notYetSupported": "尚未支持",
+      "subscriptionActivated": "已从已登录账号激活 Anthropic 订阅。",
+      "subscriptionAdopted": "已复用本机 Claude Code 登录并激活为 Anthropic 订阅。",
+      "subscriptionFailed": "无法激活 Anthropic 订阅：{error}",
+      "subscriptionNoneFound": "未找到 Anthropic 订阅——请在 设置 → 订阅 中登录，或运行 `claude login` 后重新切换。",
       "title": "切换服务商",
+      "useSubscription": "官方 provider——cognia 将复用你的 Anthropic 订阅（已登录的订阅账号，或本机 Claude Code 登录），而不是 API key。",
       "willRestart": "将重启自带 SDK sidecar 以让新环境变量生效。",
       "willWrite": "将写入 {count, plural, =1 {1 个代理文件} other {# 个代理文件}}。"
     },
