@@ -168,8 +168,21 @@ export async function restorePluginTables(
     const metas = await getAllPluginDexiaMeta()
     if (metas.length === 0) return []
 
+    // `db.tables` is Dexie's CODE-declared schema — on a fresh process it holds
+    // only the static core, never the plugin stores, even though those stores
+    // still exist physically in IndexedDB. `objectStoreNames` is the physical
+    // ground truth: a store listed here already exists and only needs Dexie to
+    // be TOLD about it (an adopt), not a native-version upgrade to create it.
+    if (!db.isOpen()) await db.open()
     const liveTables = new Set(db.tables.map((t) => t.name))
+    const physicalStores = new Set(Array.from(db.backendDB().objectStoreNames))
     const patch: Record<string, string> = {}
+    // Whether any store to declare must actually be CREATED (absent physically).
+    // If every declared store already exists physically we adopt them at the
+    // current native version instead of bumping past it — otherwise every boot
+    // re-upgrades stores that were never gone, drifting the native version up by
+    // one per launch (WKWebView never commits those perpetual upgrades → wedge).
+    let requiresCreate = false
 
     for (const meta of metas) {
       const dexieBlock = manifestDexie.get(meta.pluginId)
@@ -178,15 +191,23 @@ export async function restorePluginTables(
         const nsName = toNamespacedTableName(meta.pluginId, t.name)
         if (liveTables.has(nsName)) continue // already declared this session
         patch[nsName] = t.schema
+        if (!physicalStores.has(nsName)) requiresCreate = true
       }
     }
 
     const restored = Object.keys(patch)
     if (restored.length === 0) return []
 
-    const nextVersion = await nextSchemaVersion(db)
+    // Adopt-in-place when nothing must be created: declare at the max of the
+    // code ceiling and the persisted native version WITHOUT the +1, so Dexie
+    // records the existing stores in its schema snapshot but runs no upgrade
+    // transaction. A genuinely-missing store still forces a clean explicit bump.
+    const nativeVerno = Math.round(db.backendDB().version / 10)
+    const targetVersion = requiresCreate
+      ? await nextSchemaVersion(db)
+      : Math.max(db.verno, nativeVerno)
     await db.close()
-    db.version(nextVersion).stores(patch)
+    db.version(targetVersion).stores(patch)
     await db.open()
     return restored
   })

@@ -134,6 +134,7 @@ import type {
 } from "@/types/pet"
 import { accountDatabaseName } from "@/lib/accounts/account-db"
 import { rootsFromLegacy } from "@/lib/workspace/roots"
+import { isTauri } from "@/lib/platform/detect"
 import { backfillProjectScopeV86 } from "./project-scope-backfill"
 import { backfillTriggeredBySourceV91 } from "./triggered-by-source-backfill"
 
@@ -2400,29 +2401,53 @@ let _db: CogniaDB | null = null
 let _seedPromise: Promise<void> | null = null
 let _activeDatabaseName: string | null = null
 let _yieldChannel: BroadcastChannel | null = null
+let _tauriYieldListening = false
+let _tauriYieldUnlisten: (() => void) | null = null
+let _yieldOrigin: string | null = null
 
 /**
  * Cross-context yield coordination for schema upgrades.
  *
  * Native IndexedDB fires `versionchange` on connections that block an
  * upgrade, and our handler below closes the cached db in response — but
- * delivery across WKWebView windows (main window + pet window share this
- * origin) and background-throttled tabs is unreliable. A holder that never
- * receives `versionchange` blocks the upgrade indefinitely ("Upgrade '…'
- * blocked by other connection holding version N").
+ * delivery across WKWebView windows and background-throttled tabs is
+ * unreliable. A holder that never receives `versionchange` blocks the upgrade
+ * indefinitely ("Upgrade '…' blocked by other connection holding version N").
  *
- * So the blocked side also nudges every other context over a
- * BroadcastChannel; each context listening closes its cached connection for
- * that db name and lazily re-opens (at the new version) on its next getDb().
- * Posting and listening share one channel instance, and BroadcastChannel
- * never delivers a message back to the instance that posted it — the
- * upgrading context cannot yank its own connection.
+ * This is not hypothetical on desktop: the main window runs the plugin manager,
+ * which bumps the schema past the static ceiling to register plugin Dexie
+ * tables, while the pet-overlay / pet-popup / fleet-island webviews render the
+ * minimal shell (no plugin manager) and so hold the *base* version open. They
+ * share this origin's IndexedDB, so the overlay's stale connection blocks the
+ * main window's upgrade and boot hangs on the loading spinner.
+ *
+ * So the blocked side nudges every other context to yield over TWO channels,
+ * because each covers a gap the other leaves:
+ *   - a `BroadcastChannel`, which reaches same-process tabs; and
+ *   - a Tauri event, which is the ONLY reliable signal across separate
+ *     WKWebView windows (BroadcastChannel does not cross Tauri webviews).
+ * Each listening context closes its cached connection for that db name and
+ * lazily re-opens (at the new version) on its next getDb(). A per-realm
+ * `origin` tag lets a window ignore the events it emitted itself — needed for
+ * the Tauri path, whose global `emit` echoes back to the sender (unlike
+ * BroadcastChannel), so the upgrading context can't yank its own connection.
  */
 const DB_YIELD_CHANNEL_NAME = "cognia-db-yield"
+const TAURI_DB_YIELD_EVENT = "cognia://db-yield"
 
 interface DbYieldMessage {
   type: "dexie-yield"
   dbName: string
+  /** Emitting realm's id, so a window skips the yield events it broadcast. */
+  origin: string
+}
+
+/** Stable per-realm identity for {@link DbYieldMessage.origin}. */
+function yieldOrigin(): string {
+  if (_yieldOrigin === null) {
+    _yieldOrigin = Math.random().toString(36).slice(2)
+  }
+  return _yieldOrigin
 }
 
 function ensureYieldChannel(): BroadcastChannel | null {
@@ -2443,13 +2468,60 @@ function ensureYieldChannel(): BroadcastChannel | null {
   return _yieldChannel
 }
 
+/**
+ * Register the Tauri-event half of the yield handshake. `versionchange` and
+ * `BroadcastChannel` both fail to cross separate WKWebView windows, so an
+ * overlay window (pet / fleet-island) holding the base schema version never
+ * learns the main window needs to upgrade past it — deadlocking the upgrade and
+ * hanging boot. Tauri events DO cross windows, so on a yield request from
+ * another window we close our cached connection and lazily re-open at the new
+ * version on the next getDb(). Idempotent; no-op off Tauri.
+ */
+function ensureTauriYieldListener(): void {
+  if (_tauriYieldListening || !isTauri()) return
+  _tauriYieldListening = true
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) =>
+      listen<DbYieldMessage>(TAURI_DB_YIELD_EVENT, (event) => {
+        const msg = event.payload
+        if (msg?.type !== "dexie-yield") return
+        if (msg.origin === yieldOrigin()) return // our own broadcast — ignore
+        if (_db && _db.name === msg.dbName) {
+          closeCachedDb()
+        }
+      })
+    )
+    .then((unlisten) => {
+      _tauriYieldUnlisten = unlisten
+    })
+    .catch(() => {
+      // Tauri event API unavailable / mid-teardown — reset so a later getDb()
+      // retries. The BroadcastChannel path stays as the best-effort fallback.
+      _tauriYieldListening = false
+    })
+}
+
+/** Mirror a yield request onto the Tauri event bus. No-op off Tauri. */
+function emitTauriYield(message: DbYieldMessage): void {
+  if (!isTauri()) return
+  void import("@tauri-apps/api/event")
+    .then(({ emit }) => emit(TAURI_DB_YIELD_EVENT, message))
+    .catch(() => {
+      // Never let the cross-window nudge throw into the db-open path.
+    })
+}
+
 function requestOtherConnectionsToYield(dbName: string): void {
+  const message: DbYieldMessage = { type: "dexie-yield", dbName, origin: yieldOrigin() }
   try {
-    ensureYieldChannel()?.postMessage({ type: "dexie-yield", dbName } satisfies DbYieldMessage)
+    ensureYieldChannel()?.postMessage(message)
   } catch {
     // Channel closed or structured-clone failure — the native versionchange
     // path remains the fallback; never let the nudge itself throw.
   }
+  // BroadcastChannel does not reliably cross separate WKWebView windows; the
+  // Tauri event does, so the overlay webviews actually release the connection.
+  emitTauriYield(message)
 }
 
 export function activateAccountDatabase(accountId: string): void {
@@ -2474,6 +2546,7 @@ export function getDb(): CogniaDB {
   if (!_db) {
     _db = new CogniaDB(_activeDatabaseName ?? LEGACY_COGNIA_DB_NAME)
     ensureYieldChannel()
+    ensureTauriYieldListener()
     // Yield to another connection that needs to upgrade the schema. Plugin
     // Dexie tables and second tabs open the same DB name at a higher version;
     // without this handler our connection keeps holding the old version and
@@ -2543,6 +2616,14 @@ export function __resetDbForTesting(): void {
     // already closed
   }
   _yieldChannel = null
+  try {
+    _tauriYieldUnlisten?.()
+  } catch {
+    // already detached
+  }
+  _tauriYieldUnlisten = null
+  _tauriYieldListening = false
+  _yieldOrigin = null
 }
 
 function closeCachedDb(): void {

@@ -16,6 +16,21 @@ import {
   whenSeeded,
 } from "./schema"
 import type { OutboundJobRow } from "./connector-types"
+import { emit, listen } from "@tauri-apps/api/event"
+import { isTauri } from "@/lib/platform/detect"
+
+// The cross-window yield handshake lazily imports the Tauri event API and gates
+// on isTauri(); stub both so the Tauri path is exercisable under jsdom. isTauri
+// defaults to the real (false) detection so every non-Tauri suite is unchanged.
+jest.mock("@tauri-apps/api/event", () => ({
+  __esModule: true,
+  emit: jest.fn(() => Promise.resolve()),
+  listen: jest.fn(() => Promise.resolve(() => {})),
+}))
+jest.mock("@/lib/platform/detect", () => {
+  const actual = jest.requireActual("@/lib/platform/detect")
+  return { __esModule: true, ...actual, isTauri: jest.fn(actual.isTauri) }
+})
 
 /** Minimal valid `outboundQueue` row for index-behaviour tests. */
 function makeOutboundRow(
@@ -1608,6 +1623,8 @@ describe("cross-context upgrade yield channel", () => {
   beforeEach(() => {
     FakeBroadcastChannel.instances = []
     ;(globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = FakeBroadcastChannel
+    ;(emit as jest.Mock).mockClear()
+    ;(listen as jest.Mock).mockClear()
     __resetDbForTesting()
     // Dexie's constructor-registered blocked subscriber console.warns; ours
     // console.infos. Silence both to keep test output clean.
@@ -1618,9 +1635,15 @@ describe("cross-context upgrade yield channel", () => {
   afterEach(() => {
     __resetDbForTesting()
     delete (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel
+    // Restore the default (web) detection so later suites aren't left in Tauri
+    // mode by a test that opted in.
+    ;(isTauri as jest.Mock).mockReturnValue(false)
     infoSpy.mockRestore()
     warnSpy.mockRestore()
   })
+
+  /** Flush the microtask + macrotask queue so lazy `import()`s settle. */
+  const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0))
 
   function activeChannel(): FakeBroadcastChannel {
     const open = FakeBroadcastChannel.instances.filter((c) => !c.closed)
@@ -1637,7 +1660,9 @@ describe("cross-context upgrade yield channel", () => {
   it("broadcasts a yield request when our upgrade is blocked", () => {
     const db = getDb()
     db.on("blocked").fire({ oldVersion: 1220, newVersion: 1230 })
-    expect(activeChannel().posted).toEqual([{ type: "dexie-yield", dbName: db.name }])
+    expect(activeChannel().posted).toEqual([
+      { type: "dexie-yield", dbName: db.name, origin: expect.any(String) },
+    ])
     expect(infoSpy).toHaveBeenCalled()
   })
 
@@ -1670,6 +1695,65 @@ describe("cross-context upgrade yield channel", () => {
     // Firing blocked must not throw even though no channel could be created.
     expect(() => db.on("blocked").fire({ oldVersion: 1220, newVersion: 1230 })).not.toThrow()
     expect(FakeBroadcastChannel.instances).toHaveLength(0)
+  })
+
+  // BroadcastChannel does not cross separate WKWebView windows, so on Tauri the
+  // handshake also rides the Tauri event bus — the only channel that reaches the
+  // pet / fleet-island overlay webviews holding the base schema version.
+  it("does not touch the Tauri event bus off Tauri", () => {
+    const db = getDb()
+    db.on("blocked").fire({ oldVersion: 1220, newVersion: 1230 })
+    expect(emit).not.toHaveBeenCalled()
+    expect(listen).not.toHaveBeenCalled()
+  })
+
+  it("mirrors the yield request onto the Tauri event bus when blocked in Tauri", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const db = getDb()
+    db.on("blocked").fire({ oldVersion: 1220, newVersion: 1230 })
+    await flushAsync()
+    expect(emit).toHaveBeenCalledWith("cognia://db-yield", {
+      type: "dexie-yield",
+      dbName: db.name,
+      origin: expect.any(String),
+    })
+  })
+
+  it("closes the cached connection on a foreign-origin Tauri yield event", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const before = getDb()
+    await flushAsync() // let the lazy listen() registration settle
+    const handler = (listen as jest.Mock).mock.calls.at(-1)?.[1] as (ev: {
+      payload: { type: string; dbName: string; origin: string }
+    }) => void
+    handler({ payload: { type: "dexie-yield", dbName: before.name, origin: "other-window" } })
+    expect(getDb()).not.toBe(before)
+  })
+
+  it("ignores a Tauri yield event it emitted itself", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const before = getDb()
+    before.on("blocked").fire({ oldVersion: 1, newVersion: 2 })
+    await flushAsync()
+    const ownOrigin = (emit as jest.Mock).mock.calls.at(-1)?.[1]?.origin as string
+    const handler = (listen as jest.Mock).mock.calls.at(-1)?.[1] as (ev: {
+      payload: { type: string; dbName: string; origin: string }
+    }) => void
+    handler({ payload: { type: "dexie-yield", dbName: before.name, origin: ownOrigin } })
+    // Same instance — the upgrading window must never yank its own connection.
+    expect(getDb()).toBe(before)
+  })
+
+  it("ignores a Tauri yield event for a different database name", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const before = getDb()
+    await flushAsync()
+    const handler = (listen as jest.Mock).mock.calls.at(-1)?.[1] as (ev: {
+      payload: { type: string; dbName: string; origin: string }
+    }) => void
+    handler({ payload: { type: "dexie-yield", dbName: "cognia-account-other", origin: "x" } })
+    handler({ payload: { type: "not-a-yield", dbName: before.name, origin: "x" } })
+    expect(getDb()).toBe(before)
   })
 })
 
@@ -2080,8 +2164,7 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
       customThemes?: Array<Record<string, unknown>>
     }
     const t = row?.customThemes?.find((theme) => theme.id === "legacy-1") as
-      | Record<string, unknown>
-      | undefined
+      Record<string, unknown> | undefined
     expect(t).toBeDefined()
     expect(t?.baseVariant).toBe("dark")
     expect(t?.derivedVariant).toBe("light")
@@ -2101,15 +2184,13 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     expect(t?.isDark).toBe(true)
 
     const light = row?.customThemes?.find((theme) => theme.id === "legacy-light") as
-      | Record<string, unknown>
-      | undefined
+      Record<string, unknown> | undefined
     expect(light?.baseVariant).toBe("light")
     expect(light?.derivedVariant).toBe("dark")
     expect((light?.tokens as { light?: Record<string, string> })?.light?.primary).toBe("#0055cc")
 
     const noColors = row?.customThemes?.find((theme) => theme.id === "legacy-no-colors") as
-      | Record<string, unknown>
-      | undefined
+      Record<string, unknown> | undefined
     expect(noColors?.tokens).toBeUndefined()
   })
 

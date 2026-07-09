@@ -331,6 +331,48 @@ describe("restorePluginTables", () => {
     expect(db.verno).toBe(vernoBefore)
   })
 
+  it("adopts an already-physical store without a native-version bump (drift fix)", async () => {
+    // Reproduces the WKWebView v163 drift: a store physically created by a prior
+    // session, then re-opened by a fresh Dexie instance that declares only the
+    // core schema. Restore must ADOPT it in place, not re-upgrade every boot.
+    const dbName = `drift-${Math.random().toString(36).slice(2)}`
+
+    // Session 1: actually create the physical namespaced store.
+    const first = new Dexie(dbName)
+    first.version(1).stores({ pluginDexieMeta: "&pluginId, appliedAt" })
+    __setTestDb(first)
+    await applyPluginTables(first, "github-delivery", {
+      tables: [{ name: "repos", schema: "&fullName" }],
+    })
+    const nativeAfterApply = first.backendDB().version
+    await first.close()
+
+    // Session 2: fresh instance over the SAME physical DB, core schema only —
+    // the store exists physically but is absent from `db.tables`.
+    const second = new Dexie(dbName)
+    second.version(1).stores({ pluginDexieMeta: "&pluginId, appliedAt" })
+    __setTestDb(second)
+    await second.open()
+    expect(second.tables.map((t) => t.name)).not.toContain("github-delivery:repos")
+
+    const manifest = new Map([
+      ["github-delivery", { tables: [{ name: "repos", schema: "&fullName" }] }],
+    ])
+    const restored = await restorePluginTables(second, manifest)
+
+    expect(restored).toEqual(["github-delivery:repos"])
+    expect(second.tables.map((t) => t.name)).toContain("github-delivery:repos")
+    // Adopted at the current native version — NOT re-upgraded. No +1/boot drift.
+    expect(second.backendDB().version).toBe(nativeAfterApply)
+
+    // A subsequent restore is a pure no-op — stable across every future boot.
+    const again = await restorePluginTables(second, manifest)
+    expect(again).toEqual([])
+    expect(second.backendDB().version).toBe(nativeAfterApply)
+
+    await second.delete()
+  })
+
   it("skips a lingering meta whose plugin is gone (no manifest)", async () => {
     await seedMeta(db, {
       pluginId: "uninstalled",
