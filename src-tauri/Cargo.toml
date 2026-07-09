@@ -410,6 +410,15 @@ core-foundation = "0.10"
 # never steals foreground focus. macOS-only; pulls objc2* transitively. Cargo.lock
 # pins the resolved v2.1 commit for reproducibility.
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+# NSScreen.safeAreaInsets for the fleet island placement
+# (fleet/island_window.rs): the island anchors to the FULL monitor frame (the
+# work area / visibleFrame shrinks and grows with menu-bar visibility, so a
+# fullscreen Space would strand the strip below a phantom menu bar) and needs
+# the notch height to pad content below the camera housing. Both crates are
+# already in the lock transitively (wry / tauri-nspanel); naming them adds no
+# new versions.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSScreen"] }
 # macOS Accessibility (AX) element tree — backs the bounded `read_tree` / `find`
 # Computer Use surface (ADR-0020 cross-platform subset, ax/mod.rs + ax/raw.rs).
 # The high-level `accessibility` crate covers reading role/title/children; the
