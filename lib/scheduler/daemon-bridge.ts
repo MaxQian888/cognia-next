@@ -11,6 +11,7 @@
  */
 
 import { isTauri } from "@/lib/platform/detect"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 import type { DaemonTaskDueEvent } from "@/types/scheduler"
 
@@ -51,7 +52,10 @@ export async function listenTaskDue(
     const stop = await mod.listen<DaemonTaskDueEvent>("scheduler:task-due", (e) =>
       handler(e.payload)
     )
-    return stop
+    // Tauri's unlisten can reject with `listeners[eventId].handlerId` when the
+    // registration eval lost the StrictMode mount/unmount race — route through
+    // safeUnlisten so the rejection never escapes as an unhandled error.
+    return () => safeUnlisten(stop)
   } catch {
     return () => undefined
   }
