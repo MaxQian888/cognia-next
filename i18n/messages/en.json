@@ -853,8 +853,16 @@
         "claude": "Claude",
         "claudeCode": "Claude Code",
         "codex": "Codex",
+        "codexAppServer": "Codex (App Server)",
+        "copilotCli": "GitHub Copilot",
         "cursorCli": "Cursor",
-        "geminiCli": "Gemini"
+        "droid": "Droid",
+        "geminiCli": "Gemini",
+        "kiro": "Kiro",
+        "opencodeRemote": "OpenCode (Remote)",
+        "opencodeServer": "OpenCode",
+        "pi": "Pi",
+        "qwenCode": "Qwen Code"
       },
       "runtimeStatus": {
         "disconnected": "{runtime} is configured but not connected. Open Settings → External Agents to connect.",
@@ -12088,6 +12096,7 @@
         "label": "Request Timeout"
       }
     },
+    "connectionSection": "Connection",
     "deepseek": {
       "enableReasoning": {
         "description": "Enable deep thinking for complex tasks.",
@@ -14355,6 +14364,8 @@
   },
   "sessionImport": {
     "back": "Back",
+    "cancel": "Cancel",
+    "cancelledTitle": "Import stopped",
     "cardBody": "Import past sessions from Claude Code, Codex, or OpenCode.",
     "cardTitle": "Coding-agent sessions",
     "close": "Close",
@@ -14369,7 +14380,9 @@
     "importing": "Importing…",
     "liveSync": "Live sync",
     "liveSyncHint": "Keep watching these agents and import new sessions automatically. A session you continue in Cognia is frozen and never overwritten.",
+    "loadMore": "Show {count} more",
     "messagesLabel": "{count, plural, one {# message} other {# messages}}",
+    "parsingProgress": "Parsing {done}/{total}…",
     "pickButton": "Choose files…",
     "retry": "Try again",
     "scanButton": "Scan installed agents",
@@ -14386,7 +14399,8 @@
     },
     "title": "Import agent sessions",
     "unrecognized": "These files weren't recognized as a supported agent session.",
-    "webHint": "Auto-scan needs the desktop app. On the web, choose session files manually."
+    "webHint": "Auto-scan and live sync are desktop-only. On iOS and the web, choose exported session files manually.",
+    "writingProgress": "Saving {done}/{total}…"
   },
   "sessionInsights": {
     "assessments": {
@@ -14724,8 +14738,13 @@
       "securityAutoLockOn": "Auto-locks after {minutes} min idle",
       "securityManage": "Manage",
       "securityTitle": "Security & auto-lock",
+      "sessionActionFailed": "Couldn't complete that — try again.",
+      "sessionRefreshed": "Session refreshed",
+      "signedOut": "Signed out",
       "subscriptionManage": "Manage",
       "subscriptionTitle": "Subscription",
+      "switchAccountAria": "Switch local account",
+      "switchAccountRequiresUnlock": "This account is locked — unlock it from Manage.",
       "title": "Account",
       "usageFiveHour": "5-hour usage",
       "usageReset": "{remaining} left",
@@ -18132,7 +18151,7 @@
       "sourceControl": "AI commit-message generation and other Git panel preferences.",
       "speech": "Voice input (STT) language and microphone, plus read-aloud (TTS) provider, voice and auto-play.",
       "subagents": "Sub-agent templates and live runtime — spawn focused workers from a parent agent for research, code review, content, or analysis sub-tasks.",
-      "subscription": "Sign in with your Claude Pro/Max subscription, monitor 5h/7d rate-limit windows, and manage OAuth credentials in your OS keychain.",
+      "subscription": "Sign in with your Claude, Codex (ChatGPT), or OpenCode subscription, monitor rate-limit windows and balances, and manage OAuth credentials in your OS keychain.",
       "teams": "Multi-character coordination — round-robin, supervisor, manual.",
       "terminal": "Integrated terminal dock — default shell, font, scrollback, and per-project overrides.",
       "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",
@@ -18838,6 +18857,7 @@
         "removeAria": "Remove this group"
       },
       "handler": {
+        "commandHint": "e.g. {example}",
         "commandLabel": "Shell command",
         "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME ran\"",
         "commandRequired": "Command can't be empty.",
@@ -18901,6 +18921,8 @@
       "saved": "Instruction settings saved.",
       "title": "Project instructions"
     },
+    "loadingSection": "Loading section",
+    "loadingSettings": "Loading settings…",
     "logs": {
       "linkCardDescription": "List, dashboard, trace views — search, filter, group, export and bookmark logs in real time.",
       "linkCardFooter": "Closes the settings dialog and navigates to /logs.",
@@ -19519,12 +19541,16 @@
       "displayNamePlaceholder": "How should we call you?",
       "emailReadOnly": "Signed in as {email}",
       "fallbackName": "Signed-out",
+      "previewHint": "Add a status to show what you're up to.",
+      "previewTitle": "How you appear",
       "pronounsHint": "Shown next to your name on companion devices.",
       "pronounsLabel": "Pronouns",
       "pronounsPlaceholder": "e.g. she/her, they/them",
       "reset": "Reset to default",
       "statusLabel": "Status",
       "statusPlaceholder": "What you're up to (optional).",
+      "timezoneHint": "Used for notifications, greetings, and new goals & schedules. Defaults to this device's zone.",
+      "timezoneLabel": "Timezone",
       "title": "Profile"
     },
     "relatedSections": {
@@ -20384,7 +20410,7 @@
       "sourceControl": "Source Control",
       "speech": "Speech",
       "subagents": "Sub-agents",
-      "subscription": "Claude Subscription",
+      "subscription": "Subscription",
       "teams": "Teams",
       "terminal": "Terminal",
       "tools": "Tools",
@@ -22008,7 +22034,7 @@
       "title": "Custom sources",
       "webModeHint": "Custom sources require the desktop build — queries run through the native HTTP bridge."
     },
-    "description": "Sign in with your Claude Pro/Max subscription or Anthropic Console account to use OAuth authentication and monitor your 5-hour and 7-day rate-limit windows in real time.",
+    "description": "Sign in with your Claude Pro/Max, Codex (ChatGPT), or OpenCode subscription to use OAuth authentication and monitor rate-limit windows and balances in real time.",
     "limits": {
       "amountLeft": "{amount} left",
       "description": "Subscription limits and usage for this account.",
@@ -22098,7 +22124,8 @@
         "rescan": "Re-scan",
         "scanning": "Scanning auth.json…",
         "subProviderLabel": "Provider",
-        "title": "Discovered in OpenCode"
+        "title": "Discovered in OpenCode",
+        "whitelistLabel": "Whitelist"
       },
       "title": "OpenCode",
       "webModeBanner": "OpenCode credentials are stored in your OS keychain — only available in the desktop app.",
@@ -22123,23 +22150,21 @@
       }
     },
     "overview": {
-      "approachingLimit": "Approaching limit",
-      "authoritative": "authoritative",
-      "fiveHourTitle": "5-hour window",
-      "noSampleBody": "Send a chat message to populate usage, or run a probe from Settings.",
-      "noSampleTitle": "Waiting for first sample",
-      "sevenDayTitle": "7-day window",
+      "noDataBody": "Fetch your quota straight from Anthropic's free usage endpoint — no token cost, no chat message needed.",
+      "noDataTitle": "No usage data yet",
+      "refresh": "Refresh",
       "signInCta": "Sign in",
       "signedOutBody": "Sign in with your Claude account to monitor 5h/7d rate-limit windows.",
       "signedOutTitle": "Not signed in",
+      "sourceEndpoint": "Live usage API",
+      "sourceHeaders": "From chat response headers",
       "status": {
         "allowed": "All clear",
         "allowed_warning": "Warning",
         "rate_limited": "Rate limited",
         "unknown": "Status unknown"
       },
-      "statusFetched": "Last sample {when}",
-      "windowMissing": "No data for this window yet."
+      "updated": "Updated {when}"
     },
     "providers": {
       "anthropic": "Claude",
@@ -22174,7 +22199,7 @@
       "settings": "Settings",
       "usage": "Usage"
     },
-    "title": "Claude Subscription",
+    "title": "Subscription",
     "usage": {
       "col": {
         "fetchedAt": "Fetched at",
@@ -22283,12 +22308,15 @@
         "noData": "not reported",
         "noSnapshot": "No quota snapshot yet. Send a chat message or enable the active probe.",
         "overageDisabled": "Overage disabled: {reason}.",
+        "refresh": "Refresh",
         "representative": "Representative",
         "resetExpired": "Resetting now",
         "resetUnknown": "Reset time unknown",
         "resetsInHm": "Resets in {hours}h {minutes}m",
         "resetsInM": "Resets in {minutes}m",
         "sevenDay": "7-day window",
+        "sourceEndpoint": "Live usage API",
+        "sourceHeaders": "From chat response headers",
         "title": "Current quota windows"
       }
     },

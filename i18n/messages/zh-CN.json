@@ -853,8 +853,16 @@
         "claude": "Claude",
         "claudeCode": "Claude Code",
         "codex": "Codex",
+        "codexAppServer": "Codex（应用服务）",
+        "copilotCli": "GitHub Copilot",
         "cursorCli": "Cursor",
-        "geminiCli": "Gemini"
+        "droid": "Droid",
+        "geminiCli": "Gemini",
+        "kiro": "Kiro",
+        "opencodeRemote": "OpenCode（远程）",
+        "opencodeServer": "OpenCode",
+        "pi": "Pi",
+        "qwenCode": "Qwen Code"
       },
       "runtimeStatus": {
         "disconnected": "{runtime} 已配置但未连接。请到「设置 → 外部 Agent」连接。",
@@ -12088,6 +12096,7 @@
         "label": "请求超时"
       }
     },
+    "connectionSection": "连接",
     "deepseek": {
       "enableReasoning": {
         "description": "为复杂任务启用深度思考。",
@@ -14355,6 +14364,8 @@
   },
   "sessionImport": {
     "back": "返回",
+    "cancel": "取消",
+    "cancelledTitle": "已停止导入",
     "cardBody": "从 Claude Code、Codex 或 OpenCode 导入历史会话。",
     "cardTitle": "编程 Agent 会话",
     "close": "关闭",
@@ -14369,7 +14380,9 @@
     "importing": "正在导入…",
     "liveSync": "实时同步",
     "liveSyncHint": "持续监视这些 Agent 并自动导入新会话。已在 Cognia 中续聊的会话会被冻结，永不被覆盖。",
+    "loadMore": "再显示 {count} 个",
     "messagesLabel": "{count, plural, one {# 条消息} other {# 条消息}}",
+    "parsingProgress": "正在解析 {done}/{total}…",
     "pickButton": "选择文件…",
     "retry": "重试",
     "scanButton": "扫描已安装的 Agent",
@@ -14386,7 +14399,8 @@
     },
     "title": "导入 Agent 会话",
     "unrecognized": "这些文件未被识别为受支持的 Agent 会话。",
-    "webHint": "自动扫描需要桌面应用。在网页端请手动选择会话文件。"
+    "webHint": "自动扫描和实时同步仅支持桌面端。在 iOS 和网页端，请手动选择导出的会话文件。",
+    "writingProgress": "正在写入 {done}/{total}…"
   },
   "sessionInsights": {
     "assessments": {
@@ -14724,8 +14738,13 @@
       "securityAutoLockOn": "闲置 {minutes} 分钟后自动锁定",
       "securityManage": "管理",
       "securityTitle": "安全与自动锁定",
+      "sessionActionFailed": "操作失败，请重试。",
+      "sessionRefreshed": "会话已刷新",
+      "signedOut": "已登出",
       "subscriptionManage": "管理",
       "subscriptionTitle": "订阅",
+      "switchAccountAria": "切换本地账号",
+      "switchAccountRequiresUnlock": "该账号已锁定 — 请在“管理”中解锁。",
       "title": "账户",
       "usageFiveHour": "5 小时用量",
       "usageReset": "剩余 {remaining}",
@@ -18132,7 +18151,7 @@
       "sourceControl": "AI 提交信息生成及其他 Git 面板偏好。",
       "speech": "语音输入（STT）的语言与麦克风，朗读（TTS）的提供商、音色与自动播放。",
       "subagents": "子代理模板与实时运行状态 — 由父代理派生专注子任务（搜索、代码评审、内容生成、数据分析等）。",
-      "subscription": "用 Claude Pro/Max 订阅登录，监控 5 小时 / 7 天速率限制窗口，OAuth 凭据保存在系统钥匙串。",
+      "subscription": "登录 Claude、Codex（ChatGPT）或 OpenCode 订阅，实时查看速率限制窗口与余额，并在系统钥匙串中管理 OAuth 凭据。",
       "teams": "多角色协作 — 轮询 / 主管 / 手动。",
       "terminal": "集成终端面板 — 默认 shell、字体、回滚行数，以及按项目覆盖。",
       "tools": "内置 shell、文件系统、git、进程与环境工具 — 全局开关、风险等级与「始终允许」管理。",
@@ -18838,6 +18857,7 @@
         "removeAria": "移除该分组"
       },
       "handler": {
+        "commandHint": "例如 {example}",
         "commandLabel": "Shell 命令",
         "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME 已运行\"",
         "commandRequired": "命令不能为空。",
@@ -18901,6 +18921,8 @@
       "saved": "指令设置已保存。",
       "title": "项目指令"
     },
+    "loadingSection": "正在加载设置项",
+    "loadingSettings": "正在加载设置…",
     "logs": {
       "linkCardDescription": "列表 / 仪表盘 / 追踪 三种视图，实时搜索、过滤、分组、导出与收藏日志。",
       "linkCardFooter": "关闭设置弹窗，跳转到 /logs。",
@@ -19519,12 +19541,16 @@
       "displayNamePlaceholder": "希望我们怎么称呼你？",
       "emailReadOnly": "已登录：{email}",
       "fallbackName": "未登录",
+      "previewHint": "添加一句状态，让别人知道你在忙什么。",
+      "previewTitle": "展示效果",
       "pronounsHint": "在协同设备上显示在你的名字旁。",
       "pronounsLabel": "称谓",
       "pronounsPlaceholder": "例如 she/her、they/them",
       "reset": "恢复默认",
       "statusLabel": "状态",
       "statusPlaceholder": "你正在做什么（可选）。",
+      "timezoneHint": "用于通知、问候以及新的目标与计划任务。默认使用本设备的时区。",
+      "timezoneLabel": "时区",
       "title": "个人资料"
     },
     "relatedSections": {
@@ -20384,7 +20410,7 @@
       "sourceControl": "源代码管理",
       "speech": "语音",
       "subagents": "子代理",
-      "subscription": "Claude 订阅",
+      "subscription": "订阅",
       "teams": "团队",
       "terminal": "终端",
       "tools": "内置工具",
@@ -22008,7 +22034,7 @@
       "title": "自定义源",
       "webModeHint": "自定义源需要桌面版——查询通过原生 HTTP 桥执行。"
     },
-    "description": "用你的 Claude Pro/Max 订阅或 Anthropic Console 账号登录，启用 OAuth 认证并实时查看 5 小时和 7 天的速率限制窗口用量。",
+    "description": "用 Claude Pro/Max、Codex（ChatGPT）或 OpenCode 订阅登录，启用 OAuth 认证并实时查看速率限制窗口与余额。",
     "limits": {
       "amountLeft": "剩余 {amount}",
       "description": "该账号的订阅限额与使用情况。",
@@ -22098,7 +22124,8 @@
         "rescan": "重新扫描",
         "scanning": "正在扫描 auth.json…",
         "subProviderLabel": "服务商",
-        "title": "OpenCode 中已配置的服务商"
+        "title": "OpenCode 中已配置的服务商",
+        "whitelistLabel": "白名单"
       },
       "title": "OpenCode",
       "webModeBanner": "OpenCode 凭证存放在 OS 钥匙串中——仅在桌面版可用。",
@@ -22123,23 +22150,21 @@
       }
     },
     "overview": {
-      "approachingLimit": "接近上限",
-      "authoritative": "权威窗口",
-      "fiveHourTitle": "5 小时窗口",
-      "noSampleBody": "发一条对话即可看到用量，或在「设置」里手动触发一次探测。",
-      "noSampleTitle": "等待首个样本",
-      "sevenDayTitle": "7 天窗口",
+      "noDataBody": "点击刷新可直接从 Anthropic 免费用量接口获取额度——不消耗 token，也无需先发消息。",
+      "noDataTitle": "暂无用量数据",
+      "refresh": "刷新",
       "signInCta": "登录",
       "signedOutBody": "登录 Claude 账号即可监控 5 小时 / 7 天速率限制窗口。",
       "signedOutTitle": "未登录",
+      "sourceEndpoint": "用量接口实时数据",
+      "sourceHeaders": "来自对话响应头",
       "status": {
         "allowed": "正常",
         "allowed_warning": "警告",
         "rate_limited": "已限流",
         "unknown": "状态未知"
       },
-      "statusFetched": "最近一次样本 {when}",
-      "windowMissing": "此窗口暂无数据。"
+      "updated": "更新于{when}"
     },
     "providers": {
       "anthropic": "Claude",
@@ -22174,7 +22199,7 @@
       "settings": "设置",
       "usage": "用量"
     },
-    "title": "Claude 订阅",
+    "title": "订阅",
     "usage": {
       "col": {
         "fetchedAt": "采集时间",
@@ -22283,12 +22308,15 @@
         "noData": "未上报",
         "noSnapshot": "尚无配额快照。发一条对话或启用主动探测。",
         "overageDisabled": "超额已禁用：{reason}。",
+        "refresh": "刷新",
         "representative": "代表窗口",
         "resetExpired": "正在重置",
         "resetUnknown": "重置时间未知",
         "resetsInHm": "{hours} 小时 {minutes} 分后重置",
         "resetsInM": "{minutes} 分后重置",
         "sevenDay": "7 天窗口",
+        "sourceEndpoint": "用量接口实时数据",
+        "sourceHeaders": "来自对话响应头",
         "title": "当前配额窗口"
       }
     },
