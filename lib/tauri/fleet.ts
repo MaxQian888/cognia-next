@@ -225,15 +225,22 @@ export async function isIslandWindowOpen(): Promise<boolean> {
   }
 }
 
-/** Resize the island to its measured content size (logical px). */
-export async function islandResize(width: number, height: number): Promise<boolean> {
-  if (!isTauri()) return false
+/**
+ * Resize the island to its measured content size (logical px). Returns the
+ * display's top safe-area inset (logical px — the notch height) that Rust
+ * grew the window by; the shell pads its card below it so the content clears
+ * the camera housing while the window still spans the notch strip (keeping
+ * slam-to-top hover on target). `0` off Tauri, on failure, and on
+ * non-notched displays.
+ */
+export async function islandResize(width: number, height: number): Promise<number> {
+  if (!isTauri()) return 0
   try {
-    await invoke("island_resize", { width, height })
-    return true
+    const inset = await invoke<number>("island_resize", { width, height })
+    return typeof inset === "number" && Number.isFinite(inset) && inset > 0 ? inset : 0
   } catch (err) {
     console.warn("islandResize failed", err)
-    return false
+    return 0
   }
 }
 

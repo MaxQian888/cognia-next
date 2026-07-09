@@ -9,15 +9,46 @@
 //! denylisted from `tauri-plugin-window-state` in `lib.rs` (position is
 //! always recomputed, never persisted).
 //!
+//! ## Placement anchor (macOS)
+//!
+//! The strip anchors to the **full monitor frame**, NOT the work area. On
+//! macOS `Monitor::work_area` is `NSScreen.visibleFrame`, which shrinks and
+//! grows with menu-bar visibility: a position computed on a normal Space put
+//! the island ~25–38 px below the top, so on a fullscreen-app Space (menu bar
+//! hidden) it floated with a visible gap and the tucked sliver hung mid-air —
+//! and a position computed during fullscreen hid the strip behind the menu
+//! bar once back on the desktop. The full frame is Space-independent, so the
+//! island hugs the true top edge everywhere; the panel level sits above the
+//! menu bar (`pet_window::island_panel_level`) so it draws over it instead of
+//! behind it, and the notch / camera housing is handled separately: the
+//! window spans the notch strip (so slamming the cursor to the top still
+//! lands hover on it) while the renderer pads its card below
+//! `NSScreen.safeAreaInsets.top`, pushed to it via the `island_resize` return
+//! value and the `fleet://island-geometry` event. On Windows/Linux the work
+//! area is the correct taskbar-aware anchor and the inset is always 0.
+//!
 //! Live window ops can't run under `tauri::test::mock_app()` on this
 //! project's toolchains (same constraint documented in `pet_window/mod.rs`),
 //! so only the pure placement math is unit-tested; the runtime behavior is
 //! covered by `tauri-smoke`.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, PhysicalPosition, Runtime};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime};
 
 pub const ISLAND_LABEL: &str = "island";
+
+/// Renderer-facing geometry push. Emitted to the island window whenever a
+/// placement path runs against a possibly different monitor (re-show,
+/// set-monitor), so the shell can re-pad below the notch without polling.
+pub const ISLAND_GEOMETRY_EVENT: &str = "fleet://island-geometry";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IslandGeometry {
+    /// Top safe-area inset (logical px) of the island's current display —
+    /// the notch height on built-in notched displays, 0 everywhere else.
+    pub top_inset: f64,
+}
 
 /// Persisted island preferences (`<cognia-home>/island-window.json`). Written
 /// by `island_set_monitor`, read on every placement so the tray-toggle path
@@ -54,12 +85,6 @@ fn save_island_config(cfg: &IslandConfig) -> Result<(), String> {
 const DEFAULT_ISLAND_WIDTH: f64 = 420.0;
 const DEFAULT_ISLAND_HEIGHT: f64 = 44.0;
 
-/// Gap between the work-area top edge and the island. Zero: the strip hugs
-/// the top edge so the renderer's Dock-style auto-tuck (a translateY inside
-/// the window) reads as "hidden into the top of the screen" — any margin here
-/// would leave the tucked sliver floating with a visible gap above it.
-const TOP_MARGIN: f64 = 0.0;
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IslandWindowOpts {
@@ -85,24 +110,57 @@ impl Default for IslandWindowOpts {
     }
 }
 
-/// Top-center placement inside the work area. `work_area` and `win` are both
-/// physical pixels (caller scales the logical size — same Retina rule as
-/// `pet_window::physical_overlay_size`). Pure for unit tests.
-fn resolve_island_position(
-    work_area: (f64, f64, f64, f64),
-    win: (f64, f64),
+/// The rectangle the island anchors to plus that display's top safe-area
+/// inset. All fields are physical pixels except `scale`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct IslandAnchor {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
     scale: f64,
-) -> (f64, f64) {
-    let (area_x, area_y, area_w, _area_h) = work_area;
-    let (win_w, _win_h) = win;
-    let x = (area_x + (area_w - win_w) / 2.0).max(area_x);
-    let y = area_y + TOP_MARGIN * scale;
-    (x, y)
+    /// Notch / camera-housing height (physical px); 0 off macOS and on
+    /// non-notched displays.
+    top_inset: f64,
 }
 
-/// Clamp the renderer-requested logical size to the monitor's logical work
-/// area so an expanded island can never spill past the screen (which would
-/// otherwise clip rows and paint scrollbars). Pure for unit tests.
+impl IslandAnchor {
+    fn fallback() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            w: 1920.0,
+            h: 1080.0,
+            scale: 1.0,
+            top_inset: 0.0,
+        }
+    }
+
+    fn top_inset_logical(&self) -> f64 {
+        self.top_inset / self.scale
+    }
+
+    /// Max content size (logical px) the renderer card may occupy: the full
+    /// frame minus the notch strip the card is padded below.
+    fn content_max_logical(&self) -> (f64, f64) {
+        (self.w / self.scale, self.h / self.scale - self.top_inset_logical())
+    }
+}
+
+/// Top-center placement against the anchor rect. `anchor` is `(x, y, w)` and
+/// `win_w` the window width, all physical pixels. The window's y always hugs
+/// the anchor top — on macOS the notch offset lives INSIDE the window (the
+/// renderer pads the card below it) so the transparent strip above the card
+/// still catches slam-to-top hover. Pure for unit tests.
+fn resolve_island_position(anchor: (f64, f64, f64), win_w: f64) -> (f64, f64) {
+    let (anchor_x, anchor_y, anchor_w) = anchor;
+    let x = (anchor_x + (anchor_w - win_w) / 2.0).max(anchor_x);
+    (x, anchor_y)
+}
+
+/// Clamp the renderer-requested logical content size to the monitor's usable
+/// logical area so an expanded island can never spill past the screen (which
+/// would otherwise clip rows and paint scrollbars). Pure for unit tests.
 fn clamp_island_size(width: f64, height: f64, area_logical: (f64, f64)) -> (f64, f64) {
     let (area_w, area_h) = area_logical;
     (width.min(area_w).max(1.0), height.min(area_h).max(1.0))
@@ -124,39 +182,124 @@ fn resolve_target_monitor<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Monit
     app.primary_monitor().ok().flatten()
 }
 
-fn island_work_area<R: Runtime>(app: &AppHandle<R>) -> (f64, f64, f64, f64, f64) {
-    if let Some(monitor) = resolve_target_monitor(app) {
+/// `NSScreen.safeAreaInsets.top` (physical px) for the screen backing
+/// `monitor`, matched by comparing the Cocoa frame (flipped to top-left
+/// global coordinates via the primary screen height — the same conversion
+/// `tao` uses) against the monitor's logical rect. NSScreen is
+/// main-thread-only; when called from an async command (tokio worker) the
+/// query is bridged through `run_on_main_thread` with a fail-open timeout —
+/// never a deadlock risk because off-main implies the main loop is free.
+#[cfg(target_os = "macos")]
+fn monitor_top_safe_inset<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) -> f64 {
+    use objc2::MainThreadMarker;
+
+    let scale = monitor.scale_factor();
+    if scale <= 0.0 {
+        return 0.0;
+    }
+    let logical_x = monitor.position().x as f64 / scale;
+    let logical_y = monitor.position().y as f64 / scale;
+    let logical_w = monitor.size().width as f64 / scale;
+    let logical_h = monitor.size().height as f64 / scale;
+
+    let compute = move || -> f64 {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return 0.0;
+        };
+        let screens = objc2_app_kit::NSScreen::screens(mtm);
+        let Some(primary) = screens.iter().next() else {
+            return 0.0;
+        };
+        let primary_frame = primary.frame();
+        let primary_top = primary_frame.origin.y + primary_frame.size.height;
+        for screen in &screens {
+            let frame = screen.frame();
+            let top_left_y = primary_top - (frame.origin.y + frame.size.height);
+            if (frame.origin.x - logical_x).abs() < 1.0
+                && (top_left_y - logical_y).abs() < 1.0
+                && (frame.size.width - logical_w).abs() < 1.0
+                && (frame.size.height - logical_h).abs() < 1.0
+            {
+                return screen.safeAreaInsets().top.max(0.0) * scale;
+            }
+        }
+        0.0
+    };
+
+    if MainThreadMarker::new().is_some() {
+        return compute();
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    if app
+        .run_on_main_thread(move || {
+            let _ = tx.send(compute());
+        })
+        .is_err()
+    {
+        return 0.0;
+    }
+    rx.recv_timeout(std::time::Duration::from_millis(500))
+        .unwrap_or(0.0)
+}
+
+fn island_anchor<R: Runtime>(app: &AppHandle<R>) -> IslandAnchor {
+    let Some(monitor) = resolve_target_monitor(app) else {
+        return IslandAnchor::fallback();
+    };
+    #[cfg(target_os = "macos")]
+    {
+        IslandAnchor {
+            x: monitor.position().x as f64,
+            y: monitor.position().y as f64,
+            w: monitor.size().width as f64,
+            h: monitor.size().height as f64,
+            scale: monitor.scale_factor(),
+            top_inset: monitor_top_safe_inset(app, &monitor),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
         let rect = monitor.work_area();
-        (
-            rect.position.x as f64,
-            rect.position.y as f64,
-            rect.size.width as f64,
-            rect.size.height as f64,
-            monitor.scale_factor(),
-        )
-    } else {
-        (0.0, 0.0, 1920.0, 1080.0, 1.0)
+        IslandAnchor {
+            x: rect.position.x as f64,
+            y: rect.position.y as f64,
+            w: rect.size.width as f64,
+            h: rect.size.height as f64,
+            scale: monitor.scale_factor(),
+            top_inset: 0.0,
+        }
     }
 }
 
+/// Push the current display geometry to a live island renderer so it can
+/// re-pad below the notch after a monitor change. Best-effort.
+fn emit_island_geometry<R: Runtime>(app: &AppHandle<R>, anchor: &IslandAnchor) {
+    let _ = app.emit_to(
+        ISLAND_LABEL,
+        ISLAND_GEOMETRY_EVENT,
+        IslandGeometry {
+            top_inset: anchor.top_inset_logical(),
+        },
+    );
+}
+
 /// Recompute the top-center placement from the CURRENT preferred monitor and
-/// the window's actual physical size, and apply it. Shared by re-show, the
-/// renderer resize and the set-monitor command, so every path lands the strip
-/// in the same spot.
+/// the window's actual physical size, and apply it. Shared by re-show and the
+/// set-monitor command, so every path lands the strip in the same spot; both
+/// also notify the renderer (the notch inset may have changed with the
+/// monitor, and the renderer answers with a fresh `island_resize`).
 fn reposition_island<R: Runtime>(
     app: &AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
 ) -> Result<(), String> {
-    let (area_x, area_y, area_w, area_h, scale) = island_work_area(app);
+    let anchor = island_anchor(app);
     let size = window.inner_size().map_err(|e| e.to_string())?;
-    let (x, y) = resolve_island_position(
-        (area_x, area_y, area_w, area_h),
-        (size.width as f64, size.height as f64),
-        scale,
-    );
+    let (x, y) = resolve_island_position((anchor.x, anchor.y, anchor.w), size.width as f64);
     window
         .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    emit_island_geometry(app, &anchor);
+    Ok(())
 }
 
 /// Open (or re-show) the island. Shared by the Tauri command and the tray
@@ -167,20 +310,16 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(ISLAND_LABEL) {
         // Recompute the top-center placement before re-showing: the monitor
-        // layout / work area / preferred monitor may have changed since the
-        // window was created, and `show()` alone would bring the strip back
-        // at its stale position.
+        // layout / preferred monitor may have changed since the window was
+        // created, and `show()` alone would bring the strip back at its stale
+        // position.
         let _ = reposition_island(app, &window);
         window.show().map_err(|e| e.to_string())?;
         return Ok(());
     }
 
-    let (area_x, area_y, area_w, area_h, scale) = island_work_area(app);
-    let (x, y) = resolve_island_position(
-        (area_x, area_y, area_w, area_h),
-        (opts.width * scale, opts.height * scale),
-        scale,
-    );
+    let anchor = island_anchor(app);
+    let (x, y) = resolve_island_position((anchor.x, anchor.y, anchor.w), opts.width * anchor.scale);
 
     let window = tauri::WebviewWindowBuilder::new(
         app,
@@ -197,7 +336,9 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
     .resizable(false)
     .shadow(false)
     .visible(false)
-    .inner_size(opts.width, opts.height)
+    // The window includes the notch strip; the renderer pads its card below
+    // the inset (it learns the value from `island_resize`'s return).
+    .inner_size(opts.width, opts.height + anchor.top_inset_logical())
     .build()
     .map_err(|e| e.to_string())?;
 
@@ -209,8 +350,10 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
         .map_err(|e| e.to_string())?;
 
     // Non-activating NSPanel: float over all Spaces + full-screen apps, never
-    // steal focus. `Popup` role — the island has clickable Approve/Deny
-    // buttons and `becomes_key_only_if_needed` keeps plain clicks non-key.
+    // steal focus. `Island` role — key-capable like the popup (the inline
+    // reply input must accept typing; `becomes_key_only_if_needed` keeps
+    // plain clicks non-key) but at a window level ABOVE the menu bar, since
+    // the strip hugs the true top edge of the screen.
     //
     // MUST run on the main thread: `to_panel` reclasses the NSWindow with raw
     // AppKit calls (`-[NSPanel setFloatingPanel:]`), and AppKit traps
@@ -225,7 +368,7 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
         app.run_on_main_thread(move || {
             if let Err(e) = crate::pet_window::apply_overlay_panel_behavior(
                 &win,
-                crate::pet_window::OverlayPanelRole::Popup,
+                crate::pet_window::OverlayPanelRole::Island,
             ) {
                 log::warn!("island: applying overlay panel behavior failed: {e}");
             }
@@ -283,27 +426,27 @@ pub async fn is_island_window_open(app: AppHandle) -> bool {
 }
 
 /// Resize on expand/collapse, keeping the strip centered under the notch.
-/// `width`/`height` are logical px (renderer-measured content size), clamped
-/// to the monitor's work area so the strip never spills off-screen.
+/// `width`/`height` are the renderer-measured logical CONTENT size, clamped
+/// so the strip never spills off-screen; the window grows by the display's
+/// top safe-area inset, which is returned so the renderer pads its card
+/// below the notch.
 #[tauri::command]
-pub async fn island_resize(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+pub async fn island_resize(app: AppHandle, width: f64, height: f64) -> Result<f64, String> {
+    let anchor = island_anchor(&app);
+    let inset_logical = anchor.top_inset_logical();
     let Some(window) = app.get_webview_window(ISLAND_LABEL) else {
-        return Ok(());
+        return Ok(inset_logical);
     };
-    let (area_x, area_y, area_w, area_h, scale) = island_work_area(&app);
-    let (width, height) = clamp_island_size(width, height, (area_w / scale, area_h / scale));
+    let (width, height) = clamp_island_size(width, height, anchor.content_max_logical());
     window
-        .set_size(tauri::LogicalSize::new(width, height))
+        .set_size(tauri::LogicalSize::new(width, height + inset_logical))
         .map_err(|e| e.to_string())?;
 
-    let (x, y) = resolve_island_position(
-        (area_x, area_y, area_w, area_h),
-        (width * scale, height * scale),
-        scale,
-    );
+    let (x, y) = resolve_island_position((anchor.x, anchor.y, anchor.w), width * anchor.scale);
     window
         .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(inset_logical)
 }
 
 /// One entry per connected monitor, for the settings display picker.
@@ -369,39 +512,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn centers_horizontally_with_top_margin() {
-        // 1x display 1920 wide, 420px strip → x = (1920-420)/2.
-        let (x, y) = resolve_island_position((0.0, 0.0, 1920.0, 1080.0), (420.0, 44.0), 1.0);
+    fn centers_horizontally_and_hugs_the_anchor_top() {
+        // 1x display 1920 wide, 420px strip → x = (1920-420)/2, y = frame top.
+        let (x, y) = resolve_island_position((0.0, 0.0, 1920.0), 420.0);
         assert_eq!(x, 750.0);
-        assert_eq!(y, TOP_MARGIN);
+        assert_eq!(y, 0.0);
     }
 
     #[test]
-    fn respects_work_area_origin_and_retina_scale() {
-        // Secondary-monitor offset + 2x Retina: margins scale physically.
-        let (x, y) = resolve_island_position(
-            (100.0, 50.0, 3456.0, 2234.0),
-            (420.0 * 2.0, 44.0 * 2.0),
-            2.0,
-        );
+    fn respects_anchor_origin_and_retina_scale() {
+        // Secondary-monitor offset + 2x Retina (physical window width).
+        let (x, y) = resolve_island_position((100.0, 50.0, 3456.0), 420.0 * 2.0);
         assert_eq!(x, 100.0 + (3456.0 - 840.0) / 2.0);
-        assert_eq!(y, 50.0 + TOP_MARGIN * 2.0);
+        assert_eq!(y, 50.0);
     }
 
     #[test]
-    fn oversized_strip_pins_to_area_left() {
-        let (x, _) = resolve_island_position((0.0, 0.0, 400.0, 300.0), (800.0, 44.0), 1.0);
+    fn oversized_strip_pins_to_anchor_left() {
+        let (x, _) = resolve_island_position((0.0, 0.0, 400.0), 800.0);
         assert_eq!(x, 0.0);
     }
 
     #[test]
-    fn clamp_keeps_content_inside_the_work_area() {
+    fn clamp_keeps_content_inside_the_area() {
         // Fits → untouched.
         assert_eq!(clamp_island_size(560.0, 300.0, (1512.0, 950.0)), (560.0, 300.0));
-        // Overflows → clamped to the logical work area.
+        // Overflows → clamped to the logical area.
         assert_eq!(clamp_island_size(2000.0, 1200.0, (1512.0, 950.0)), (1512.0, 950.0));
         // Degenerate input can't produce a zero/negative window.
         assert_eq!(clamp_island_size(0.0, -5.0, (1512.0, 950.0)), (1.0, 1.0));
+    }
+
+    #[test]
+    fn anchor_inset_conversions_are_logical() {
+        // 2x Retina notch of 74 physical px → 37 logical; content max loses
+        // exactly the inset strip.
+        let anchor = IslandAnchor {
+            x: 0.0,
+            y: 0.0,
+            w: 3024.0,
+            h: 1964.0,
+            scale: 2.0,
+            top_inset: 74.0,
+        };
+        assert_eq!(anchor.top_inset_logical(), 37.0);
+        assert_eq!(anchor.content_max_logical(), (1512.0, 982.0 - 37.0));
+    }
+
+    #[test]
+    fn geometry_event_payload_is_camel_case() {
+        let json = serde_json::to_string(&IslandGeometry { top_inset: 37.0 }).unwrap();
+        assert_eq!(json, r#"{"topInset":37.0}"#);
     }
 
     #[test]

@@ -143,6 +143,8 @@ async function renderLoaded() {
   await waitFor(() => {
     expect(screen.getByTestId("fleet-monitor-card").getAttribute("data-loaded")).toBe("true")
   })
+  // The switches live in a collapsed body — expand it before interacting.
+  fireEvent.click(screen.getByTestId("fleet-monitor-toggle"))
 }
 
 describe("FleetMonitorCard", () => {
@@ -244,8 +246,29 @@ describe("FleetMonitorCard", () => {
     await waitFor(() =>
       expect(screen.getByTestId("fleet-monitor-card").getAttribute("data-loaded")).toBe("true")
     )
+    fireEvent.click(screen.getByTestId("fleet-monitor-toggle"))
     // Fell back to defaults, no crash.
     expect(screen.getByTestId("fleet-monitor-switch").getAttribute("aria-checked")).toBe("false")
+  })
+
+  it("keeps the controls collapsed until the header is toggled", async () => {
+    render(<FleetMonitorCard />)
+    await waitFor(() =>
+      expect(screen.getByTestId("fleet-monitor-card").getAttribute("data-loaded")).toBe("true")
+    )
+    expect(screen.queryByTestId("fleet-monitor-switch")).toBeNull()
+    fireEvent.click(screen.getByTestId("fleet-monitor-toggle"))
+    expect(screen.getByTestId("fleet-monitor-switch")).toBeInTheDocument()
+  })
+
+  it("summarises active integrations in the header badge", async () => {
+    mockFleet.fleetMonitorStatus.mockResolvedValue({ enabled: true, port: 7890, configPath: "/x" })
+    render(<FleetMonitorCard />)
+    await waitFor(() =>
+      expect(screen.getByTestId("fleet-monitor-card").getAttribute("data-loaded")).toBe("true")
+    )
+    // Monitor enabled → one active integration; the badge (aria-labelled) shows it.
+    expect(screen.getByLabelText('summaryAria:{"count":1}')).toBeInTheDocument()
   })
 
   it("surfaces a Claude hook install failure as an error toast", async () => {

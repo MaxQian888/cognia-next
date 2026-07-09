@@ -7,12 +7,7 @@
 export type FleetAgent = "claude-code" | "codex" | "opencode"
 
 export type FleetStatus =
-  | "idle"
-  | "working"
-  | "waiting-input"
-  | "waiting-permission"
-  | "plan-pending"
-  | "ended"
+  "idle" | "working" | "waiting-input" | "waiting-permission" | "plan-pending" | "ended"
 
 export type TerminalAppId =
   | "iterm"
@@ -89,6 +84,19 @@ export type PermissionBehavior = "allow" | "deny"
 
 /** Event topic (must match `src-tauri/src/fleet/mod.rs`). */
 export const FLEET_UPDATE_EVENT = "fleet://update"
+
+/**
+ * Island-window geometry push (must match `src-tauri/src/fleet/island_window.rs`).
+ * Emitted to the island webview when a placement path runs against a possibly
+ * different monitor (re-show, set-monitor), so the shell re-pads below the notch.
+ */
+export const FLEET_ISLAND_GEOMETRY_EVENT = "fleet://island-geometry"
+
+/** Payload of `FLEET_ISLAND_GEOMETRY_EVENT` (mirrors Rust `IslandGeometry`). */
+export interface IslandGeometry {
+  /** Top safe-area inset (logical px): notch height, 0 on non-notched displays. */
+  topInset: number
+}
 
 /** The island's answer window (ms) — mirrors Rust `PERMISSION_WAIT_MS`. */
 export const FLEET_PERMISSION_WAIT_MS = 20_000

@@ -183,6 +183,24 @@ impl FleetRegistry {
         };
 
         let key = (ev.agent, session_id.clone());
+
+        // One Claude Code / Codex process runs one interactive session at a
+        // time, but `/clear` (and `--resume`) mint a NEW session id inside the
+        // same pid — and the old session's `SessionEnd` hook is fail-open
+        // (0.4 s curl), so it can simply be lost. Without eviction the stale
+        // row survives forever: the reaper keeps any row whose agent pid is
+        // alive, and the pid IS alive — it's now running the new session. So
+        // when a new session id shows up for a pid we already track, drop that
+        // pid's other rows. OpenCode is exempt: one server process can
+        // legitimately host several concurrent sessions.
+        if !self.sessions.contains_key(&key) && ev.agent != FleetAgent::Opencode {
+            if let Some(ppid) = ev.ppid {
+                self.sessions.retain(|(agent, sid), s| {
+                    *agent != ev.agent || sid == &session_id || s.agent_pid != Some(ppid)
+                });
+            }
+        }
+
         let entry = self.sessions.entry(key).or_insert_with(|| {
             new_session(ev.agent, session_id.clone(), ev, now_ms)
         });
@@ -269,10 +287,35 @@ impl FleetRegistry {
                 entry.capabilities.approve_permission = true;
                 return RegistryEffect::PermissionRequested { request_id };
             }
-            "Stop" => {
+            // A clean turn end and an API-error turn end both return the row to
+            // idle and clear any in-flight activity / parked permission.
+            "Stop" | "StopFailure" => {
                 entry.status = FleetStatus::Idle;
                 entry.activity = None;
                 entry.pending_permission = None;
+            }
+            // Context compaction: show a brief "compacting" beat (kept Working so
+            // the row doesn't flash idle mid-turn). `trigger` is `manual`/`auto`.
+            "PreCompact" => {
+                entry.status = FleetStatus::Working;
+                entry.activity = Some(FleetActivity {
+                    tool_name: "Compacting".to_string(),
+                    detail: payload_str(&ev.payload, "trigger"),
+                });
+            }
+            // Compaction done — drop the transient activity; the next tool call
+            // or Stop drives the row from here.
+            "PostCompact" => {
+                entry.status = FleetStatus::Working;
+                entry.activity = None;
+            }
+            // A denied permission (auto-mode or an out-of-band "no") releases the
+            // parked request so the row leaves the waiting state.
+            "PermissionDenied" => {
+                entry.pending_permission = None;
+                if entry.status == FleetStatus::WaitingPermission {
+                    entry.status = FleetStatus::Working;
+                }
             }
             "agent-turn-complete" => {
                 // Codex's `notify` program fires once per completed turn with
@@ -660,6 +703,54 @@ mod tests {
     }
 
     #[test]
+    fn stop_failure_also_returns_to_idle() {
+        // An API-error turn end must clear "working" like a clean Stop, else the
+        // row is stranded working forever.
+        let mut reg = FleetRegistry::new();
+        let mut payload = base_payload();
+        payload["tool_name"] = serde_json::json!("Bash");
+        payload["tool_input"] = serde_json::json!({"command": "ls"});
+        reg.apply(&claude_ev("PreToolUse", payload), 0);
+        reg.apply(&claude_ev("StopFailure", base_payload()), 1);
+        let s = only_session(&reg);
+        assert_eq!(s.status, FleetStatus::Idle);
+        assert!(s.activity.is_none());
+    }
+
+    #[test]
+    fn pre_compact_shows_compacting_activity_then_post_compact_clears_it() {
+        let mut reg = FleetRegistry::new();
+        let mut payload = base_payload();
+        payload["trigger"] = serde_json::json!("auto");
+        reg.apply(&claude_ev("PreCompact", payload), 0);
+        let s = only_session(&reg);
+        assert_eq!(s.status, FleetStatus::Working);
+        let activity = s.activity.expect("compacting activity");
+        assert_eq!(activity.tool_name, "Compacting");
+        assert_eq!(activity.detail.as_deref(), Some("auto"));
+
+        reg.apply(&claude_ev("PostCompact", base_payload()), 1);
+        let s = only_session(&reg);
+        assert_eq!(s.status, FleetStatus::Working);
+        assert!(s.activity.is_none());
+    }
+
+    #[test]
+    fn permission_denied_releases_the_parked_request() {
+        let mut reg = FleetRegistry::new();
+        let mut payload = base_payload();
+        payload["tool_name"] = serde_json::json!("Bash");
+        reg.apply(&claude_ev("PermissionRequest", payload), 0);
+        assert_eq!(only_session(&reg).status, FleetStatus::WaitingPermission);
+
+        let effect = reg.apply(&claude_ev("PermissionDenied", base_payload()), 1);
+        assert_eq!(effect, RegistryEffect::Updated);
+        let s = only_session(&reg);
+        assert_eq!(s.status, FleetStatus::Working);
+        assert!(s.pending_permission.is_none());
+    }
+
+    #[test]
     fn session_end_lingers_then_reaps() {
         let mut reg = FleetRegistry::new();
         reg.apply(&claude_ev("SessionStart", base_payload()), 0);
@@ -692,6 +783,73 @@ mod tests {
         reg.apply(&claude_ev("SessionStart", base_payload()), 0);
         assert!(!reg.reap(1000, |_| false));
         assert_eq!(reg.snapshot(0).sessions.len(), 1);
+    }
+
+    #[test]
+    fn new_session_from_same_pid_evicts_the_old_row() {
+        // `/clear`: same claude process, new session id, SessionEnd lost.
+        let mut reg = FleetRegistry::new();
+        reg.apply(&claude_ev("SessionStart", base_payload()), 0);
+        reg.apply(
+            &claude_ev("UserPromptSubmit", {
+                let mut p = base_payload();
+                p["prompt"] = serde_json::json!("old work");
+                p
+            }),
+            1,
+        );
+
+        let mut fresh = base_payload();
+        fresh["session_id"] = serde_json::json!("def-456");
+        reg.apply(&claude_ev("SessionStart", fresh), 2);
+
+        let snap = reg.snapshot(3);
+        assert_eq!(snap.sessions.len(), 1, "old same-pid row evicted");
+        assert_eq!(snap.sessions[0].session_id, "def-456");
+    }
+
+    #[test]
+    fn sessions_from_different_pids_coexist() {
+        let mut reg = FleetRegistry::new();
+        reg.apply(&claude_ev("SessionStart", base_payload()), 0);
+
+        let mut other = claude_ev("SessionStart", {
+            let mut p = base_payload();
+            p["session_id"] = serde_json::json!("other-terminal");
+            p
+        });
+        other.ppid = Some(9999);
+        reg.apply(&other, 1);
+
+        assert_eq!(reg.snapshot(2).sessions.len(), 2);
+    }
+
+    #[test]
+    fn opencode_sessions_share_one_pid_without_eviction() {
+        // One OpenCode server process can host several sessions.
+        let mut reg = FleetRegistry::new();
+        for sid in ["oc-a", "oc-b"] {
+            let mut p = base_payload();
+            p["session_id"] = serde_json::json!(sid);
+            reg.apply(&ev(FleetAgent::Opencode, "session-active", p), 0);
+        }
+        assert_eq!(reg.snapshot(1).sessions.len(), 2);
+    }
+
+    #[test]
+    fn eviction_ignores_rows_without_matching_pid() {
+        let mut reg = FleetRegistry::new();
+        let mut unknown_pid = claude_ev("SessionStart", base_payload());
+        unknown_pid.ppid = None;
+        reg.apply(&unknown_pid, 0);
+
+        let mut fresh = base_payload();
+        fresh["session_id"] = serde_json::json!("new-sid");
+        reg.apply(&claude_ev("SessionStart", fresh), 1);
+
+        // The pid-less row can't be attributed to this process → kept (the
+        // stale reaper handles it later).
+        assert_eq!(reg.snapshot(2).sessions.len(), 2);
     }
 
     #[test]
@@ -761,12 +919,17 @@ mod tests {
     #[test]
     fn snapshot_sorts_most_recent_first() {
         let mut reg = FleetRegistry::new();
+        // Distinct pids: two terminals (same-pid rows would evict each other).
         let mut p1 = base_payload();
         p1["session_id"] = serde_json::json!("s-old");
-        reg.apply(&claude_ev("SessionStart", p1), 100);
+        let mut e1 = claude_ev("SessionStart", p1);
+        e1.ppid = Some(1111);
+        reg.apply(&e1, 100);
         let mut p2 = base_payload();
         p2["session_id"] = serde_json::json!("s-new");
-        reg.apply(&claude_ev("SessionStart", p2), 200);
+        let mut e2 = claude_ev("SessionStart", p2);
+        e2.ppid = Some(2222);
+        reg.apply(&e2, 200);
         let snap = reg.snapshot(300);
         assert_eq!(snap.sessions[0].session_id, "s-new");
         assert_eq!(snap.sessions[1].session_id, "s-old");

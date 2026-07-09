@@ -25,6 +25,17 @@ jest.mock("@/lib/tauri/fleet", () => ({
   fleetPermissionRespond: jest.fn(),
 }))
 
+// Off-Tauri by default (jsdom); the geometry-event test flips it on.
+const tauriState = { on: false }
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => tauriState.on,
+}))
+
+const listenMock = jest.fn()
+jest.mock("@tauri-apps/api/event", () => ({
+  listen: (...args: unknown[]) => listenMock(...args),
+}))
+
 const streamState: {
   snapshot: { sessions: FleetSession[]; generatedAt: number }
   available: boolean
@@ -66,6 +77,7 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
 beforeEach(() => {
   jest.clearAllMocks()
   streamState.snapshot = { sessions: [], generatedAt: 0 }
+  tauriState.on = false
 })
 
 describe("IslandShell", () => {
@@ -266,6 +278,60 @@ describe("IslandShell", () => {
       for (const call of resizeMock.mock.calls) {
         expect(call[1]).toBeGreaterThanOrEqual(ISLAND_PILL_HEIGHT)
       }
+    })
+  })
+
+  describe("notch inset (top safe area)", () => {
+    it("pads the card below the notch when island_resize returns an inset", async () => {
+      resizeMock.mockReturnValue(Promise.resolve(37))
+      streamState.snapshot = { generatedAt: 1, sessions: [session()] }
+      render(<IslandShell />)
+      // Flush the resize promise the layout effect chained applyInset onto.
+      await act(async () => {})
+      expect(screen.getByTestId("island-clip").style.marginTop).toBe("37px")
+      expect(screen.getByTestId("island-hover-zone").style.minHeight).toBe(
+        `${ISLAND_PILL_HEIGHT + 37}px`
+      )
+    })
+
+    it("keeps a zero margin on displays without a notch", async () => {
+      resizeMock.mockReturnValue(Promise.resolve(0))
+      render(<IslandShell />)
+      await act(async () => {})
+      expect(screen.getByTestId("island-clip").style.marginTop).toBe("0px")
+      expect(screen.getByTestId("island-hover-zone").style.minHeight).toBe(
+        `${ISLAND_PILL_HEIGHT}px`
+      )
+    })
+
+    it("normalizes a non-numeric resize answer (older backend / web) to zero", async () => {
+      resizeMock.mockReturnValue(Promise.resolve(undefined))
+      render(<IslandShell />)
+      await act(async () => {})
+      expect(screen.getByTestId("island-clip").style.marginTop).toBe("0px")
+    })
+
+    it("re-pads when Rust pushes fleet://island-geometry (monitor change)", async () => {
+      tauriState.on = true
+      let handler: ((e: { payload?: { topInset?: number } }) => void) | undefined
+      const unlisten = jest.fn()
+      listenMock.mockImplementation(async (_event: string, cb: typeof handler) => {
+        handler = cb
+        return unlisten
+      })
+      const { unmount } = render(<IslandShell />)
+      await act(async () => {})
+      expect(listenMock).toHaveBeenCalledWith("fleet://island-geometry", expect.any(Function))
+
+      act(() => handler?.({ payload: { topInset: 21 } }))
+      expect(screen.getByTestId("island-clip").style.marginTop).toBe("21px")
+
+      // Monitor without a notch → back to zero.
+      act(() => handler?.({ payload: { topInset: 0 } }))
+      expect(screen.getByTestId("island-clip").style.marginTop).toBe("0px")
+
+      unmount()
+      expect(unlisten).toHaveBeenCalled()
     })
   })
 })

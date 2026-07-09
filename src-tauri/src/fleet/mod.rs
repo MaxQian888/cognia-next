@@ -42,8 +42,12 @@ pub const UPDATE_EVENT: &str = "fleet://update";
 /// settings.json hook `timeout` (30 s) so the terminal prompt always returns.
 pub const PERMISSION_WAIT_MS: u64 = 20_000;
 
-/// Reaper cadence for ended/stale rows.
-const REAP_INTERVAL_MS: u64 = 30_000;
+/// Reaper cadence for ended/stale rows. Must stay well under
+/// [`registry::ENDED_LINGER_MS`]: the linger window is the UX contract for how
+/// long a finished row stays visible, and the reaper tick is the only thing
+/// that actually removes it — a coarse tick (the old 30 s) left ended rows
+/// miscounting the island for up to tick+linger.
+const REAP_INTERVAL_MS: u64 = 5_000;
 
 /// Test seam: overrides [`PERMISSION_WAIT_MS`] so route tests don't sleep 20 s.
 /// `0` means "no override".

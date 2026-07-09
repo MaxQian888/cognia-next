@@ -41,9 +41,17 @@ export interface FleetHookDef {
 }
 
 /**
- * Events the fleet monitor observes. Deliberately excludes high-frequency
- * no-signal events (PostToolBatch, FileChanged) — every entry costs a process
- * spawn per event in the user's session.
+ * Events the fleet monitor observes. Chosen to mirror every meaningful Claude
+ * Code lifecycle hook while deliberately excluding high-frequency, no-signal
+ * events (`PostToolBatch`, `PostToolUseFailure`, `FileChanged`,
+ * `MessageDisplay`, `CwdChanged`, …) — each entry costs a process spawn per
+ * event in the user's own session, so only low-frequency state transitions the
+ * island can act on are installed.
+ *
+ * The registry (`src-tauri/src/fleet/registry.rs`) folds each of these into a
+ * session-row state change; the generated hook script forwards the event name
+ * verbatim, so this list and the registry's `match` are the only two places
+ * coverage is declared.
  */
 export const FLEET_HOOKS: readonly FleetHookDef[] = [
   { event: "SessionStart", mode: "fire" },
@@ -51,10 +59,19 @@ export const FLEET_HOOKS: readonly FleetHookDef[] = [
   { event: "PreToolUse", mode: "fire" },
   { event: "PostToolUse", mode: "fire" },
   { event: "Notification", mode: "fire" },
+  // Turn end — both the clean `Stop` and the API-error `StopFailure`, so a
+  // failed turn returns the row to idle instead of stranding it "working".
   { event: "Stop", mode: "fire" },
+  { event: "StopFailure", mode: "fire" },
   { event: "SubagentStop", mode: "fire" },
+  // Context compaction — a visible "compacting" beat, cleared by PostCompact.
+  { event: "PreCompact", mode: "fire" },
+  { event: "PostCompact", mode: "fire" },
   { event: "SessionEnd", mode: "fire" },
   { event: "PermissionRequest", mode: "wait", timeout: 30 },
+  // Denial (auto-mode / user "no") releases a parked permission so the row
+  // doesn't stay stuck waiting when the answer never comes back through Cognia.
+  { event: "PermissionDenied", mode: "fire" },
 ] as const
 
 /** Mirror of the Rust `FleetScriptsStatus` DTO (`fleet/install.rs`). */

@@ -22,13 +22,23 @@
  * is never hidden behind the collapsed pill — derived straight from the
  * snapshot (the Rust registry sets `pendingPermission` and emits the update in
  * the same step a permission arrives), so no event/effect plumbing is needed.
+ *
+ * Notch handling: the window is anchored to the TRUE top edge of the display
+ * (Space-independent — see `island_window.rs`) and spans the camera-housing
+ * strip so slam-to-top hover always lands on it; the card itself is padded
+ * below the display's top safe-area inset (returned by `island_resize`,
+ * pushed via `fleet://island-geometry` on monitor changes) and its tuck slide
+ * is clipped at the notch line.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useFleetStream } from "@/hooks/fleet/use-fleet-stream"
 import { attentionCount, sortForIsland } from "@/lib/fleet/format"
+import { FLEET_ISLAND_GEOMETRY_EVENT, type IslandGeometry } from "@/lib/fleet/types"
+import { isTauri } from "@/lib/tauri"
 import { islandResize } from "@/lib/tauri/fleet"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { IslandRow } from "./island-row"
 import { cn } from "@/lib/utils"
 
@@ -50,7 +60,46 @@ export function IslandShell() {
   const [hovering, setHovering] = useState(false)
   const [pinnedOpen, setPinnedOpen] = useState(false)
   const [tucked, setTucked] = useState(false)
+  const [topInset, setTopInset] = useState(0)
   const cardRef = useRef<HTMLDivElement | null>(null)
+  const insetRef = useRef(0)
+
+  // Top safe-area inset (notch height, logical px) of the island's display.
+  // The window spans the notch strip (so slam-to-top hover still lands on the
+  // window); the card is padded below the inset so its content clears the
+  // camera housing. The value comes back from every `island_resize`, and Rust
+  // pushes `fleet://island-geometry` when a monitor change may have altered it.
+  // Ref-guarded so an unchanged inset never schedules a state update (the
+  // resize promise resolves outside React's act/event scope).
+  const applyInset = useCallback((raw: unknown) => {
+    const next = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0
+    if (insetRef.current === next) return
+    insetRef.current = next
+    setTopInset(next)
+  }, [])
+
+  useEffect(() => {
+    if (!isTauri()) return undefined
+    let alive = true
+    let unlisten: (() => void) | undefined
+    void (async () => {
+      // Dynamic import keeps the Tauri event module out of web bundles.
+      const { listen } = await import("@tauri-apps/api/event")
+      if (!alive) return
+      const un = await listen<IslandGeometry>(FLEET_ISLAND_GEOMETRY_EVENT, (e) => {
+        if (alive) applyInset(e.payload?.topInset)
+      })
+      if (!alive) {
+        safeUnlisten(un)
+        return
+      }
+      unlisten = un
+    })()
+    return () => {
+      alive = false
+      safeUnlisten(unlisten)
+    }
+  }, [applyInset])
 
   const sessions = sortForIsland(snapshot.sessions)
   const waiting = attentionCount(snapshot.sessions)
@@ -95,24 +144,34 @@ export function IslandShell() {
   // the CSS transition has settled.
   const width = expanded ? ISLAND_EXPANDED_WIDTH : ISLAND_COLLAPSED_WIDTH
   const lastSizeRef = useRef({ w: 0, h: 0 })
+  const lastInsetRef = useRef(0)
   useLayoutEffect(() => {
     const el = cardRef.current
     if (!el) return
+    // Rust grows the window by the display's top inset and returns that inset;
+    // `Promise.resolve` tolerates sloppy test doubles that return undefined.
+    const report = (w: number, h: number) => {
+      void Promise.resolve(islandResize(w, h)).then(applyInset)
+    }
     const height = Math.max(ISLAND_PILL_HEIGHT, Math.ceil(el.getBoundingClientRect().height))
     const prev = lastSizeRef.current
     const growW = Math.max(width, prev.w)
     const growH = Math.max(height, prev.h)
-    if (growW !== prev.w || growH !== prev.h) {
+    // An inset change (monitor switch) must re-issue the same content size:
+    // the window height is content + inset, so it changed even if we didn't.
+    const insetChanged = lastInsetRef.current !== topInset
+    if (growW !== prev.w || growH !== prev.h || insetChanged) {
       lastSizeRef.current = { w: growW, h: growH }
-      void islandResize(growW, growH)
+      lastInsetRef.current = topInset
+      report(growW, growH)
     }
     if (width >= growW && height >= growH) return
     const timer = setTimeout(() => {
       lastSizeRef.current = { w: width, h: height }
-      void islandResize(width, height)
+      report(width, height)
     }, ISLAND_SHRINK_SETTLE_MS)
     return () => clearTimeout(timer)
-  }, [width, expanded, sessions.length])
+  }, [width, expanded, sessions.length, topInset, applyInset])
 
   const toggle = useCallback(() => setPinnedOpen((v) => !v), [])
 
@@ -120,64 +179,74 @@ export function IslandShell() {
     <div
       data-testid="island-hover-zone"
       className="w-full"
-      style={{ minHeight: ISLAND_PILL_HEIGHT }}
+      style={{ minHeight: ISLAND_PILL_HEIGHT + topInset }}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
     >
-      <div
-        ref={cardRef}
-        data-testid="island-shell"
-        data-expanded={expanded ? "true" : "false"}
-        data-tucked={tucked ? "true" : "false"}
-        className="mx-auto select-none overflow-hidden rounded-2xl border border-white/10 bg-black/85 text-white shadow-2xl backdrop-blur-xl transition-[transform,width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none"
-        style={{
-          width,
-          transform: tucked
-            ? `translateY(${ISLAND_PEEK_HEIGHT - ISLAND_PILL_HEIGHT}px)`
-            : "translateY(0px)",
-        }}
-      >
-        <button
-          type="button"
-          data-testid="island-pill"
-          onClick={toggle}
-          aria-expanded={expanded}
-          aria-label={t("toggle")}
-          className={cn(
-            "flex h-11 w-full items-center justify-center gap-2 px-4 text-xs text-white/80 transition-opacity duration-200",
-            tucked && "opacity-0"
-          )}
+      {/*
+       * Clip container: starts at the notch line (marginTop = inset; the
+       * window itself spans the notch strip so slam-to-top hover works) and
+       * clips the tucked card's upward slide — without it the tucked card
+       * would paint over the menu-bar strip beside the camera housing. On
+       * inset-0 displays the clip edge coincides with the window edge, which
+       * is what already clipped the slide before.
+       */}
+      <div data-testid="island-clip" className="overflow-hidden" style={{ marginTop: topInset }}>
+        <div
+          ref={cardRef}
+          data-testid="island-shell"
+          data-expanded={expanded ? "true" : "false"}
+          data-tucked={tucked ? "true" : "false"}
+          className="mx-auto select-none overflow-hidden rounded-2xl border border-white/10 bg-black/85 text-white shadow-2xl backdrop-blur-xl transition-[transform,width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none"
+          style={{
+            width,
+            transform: tucked
+              ? `translateY(${ISLAND_PEEK_HEIGHT - ISLAND_PILL_HEIGHT}px)`
+              : "translateY(0px)",
+          }}
         >
-          <span
-            aria-hidden
+          <button
+            type="button"
+            data-testid="island-pill"
+            onClick={toggle}
+            aria-expanded={expanded}
+            aria-label={t("toggle")}
             className={cn(
-              "size-1.5 rounded-full",
-              waiting > 0
-                ? "animate-pulse bg-amber-400"
-                : sessions.length > 0
-                  ? "bg-emerald-400"
-                  : "bg-white/30"
+              "flex h-11 w-full items-center justify-center gap-2 px-4 text-xs text-white/80 transition-opacity duration-200",
+              tucked && "opacity-0"
             )}
-          />
-          <span data-testid="island-summary">
-            {sessions.length === 0
-              ? t("empty")
-              : waiting > 0
-                ? t("summaryWaiting", { count: sessions.length, waiting })
-                : t("summary", { count: sessions.length })}
-          </span>
-        </button>
-
-        {expanded && sessions.length > 0 ? (
-          <div
-            className="flex max-h-[420px] flex-col gap-0.5 overflow-y-auto px-1 pb-2"
-            data-testid="island-list"
           >
-            {sessions.map((s) => (
-              <IslandRow key={`${s.agent}:${s.sessionId}`} session={s} />
-            ))}
-          </div>
-        ) : null}
+            <span
+              aria-hidden
+              className={cn(
+                "size-1.5 rounded-full",
+                waiting > 0
+                  ? "animate-pulse bg-amber-400"
+                  : sessions.length > 0
+                    ? "bg-emerald-400"
+                    : "bg-white/30"
+              )}
+            />
+            <span data-testid="island-summary">
+              {sessions.length === 0
+                ? t("empty")
+                : waiting > 0
+                  ? t("summaryWaiting", { count: sessions.length, waiting })
+                  : t("summary", { count: sessions.length })}
+            </span>
+          </button>
+
+          {expanded && sessions.length > 0 ? (
+            <div
+              className="flex max-h-[420px] flex-col gap-0.5 overflow-y-auto px-1 pb-2"
+              data-testid="island-list"
+            >
+              {sessions.map((s) => (
+                <IslandRow key={`${s.agent}:${s.sessionId}`} session={s} />
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   )

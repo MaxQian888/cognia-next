@@ -21,28 +21,49 @@
 // calls `window.app_handle()` (a `Manager` method) when it reclasses the window.
 use tauri::{Manager, Runtime, WebviewWindow};
 
-/// Which pet window is being converted — decides the key-window policy.
+/// Which overlay window is being converted — decides the key-window policy
+/// and the window level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PetPanelRole {
     /// The transparent sprite: never becomes key (fully non-activating).
     Sprite,
     /// The click popup: may become key so its text input accepts typing.
     Popup,
+    /// The fleet island strip: key-capable like the popup (inline reply
+    /// input), but floats ABOVE the menu bar — the strip hugs the true top
+    /// edge of the screen, and at the pet's floating level (3) the menu bar
+    /// (level 24) would draw over it on every non-fullscreen Space.
+    Island,
 }
 
 impl PetPanelRole {
     /// Whether this panel may become the key window. The sprite never does (it
-    /// only displays); the popup must, or its talk composer can't be typed into.
+    /// only displays); the popup and island must, or their text inputs can't
+    /// be typed into.
     pub(crate) fn can_become_key(self) -> bool {
-        matches!(self, PetPanelRole::Popup)
+        matches!(self, PetPanelRole::Popup | PetPanelRole::Island)
+    }
+
+    /// NSWindow level for this role. Pure so the constants are pinned by
+    /// cross-platform unit tests; the AppKit apply path is smoke-tested on a
+    /// packaged `.app`. `i64` to match `Panel::set_level`.
+    pub(crate) fn window_level(self) -> i64 {
+        match self {
+            // `NSFloatingWindowLevel` — above normal windows, below the menu bar.
+            PetPanelRole::Sprite | PetPanelRole::Popup => 3,
+            // `NSStatusWindowLevel` (25) — one above `NSMainMenuWindowLevel`
+            // (24) so the top-hugging island draws over the menu bar instead
+            // of hiding behind it.
+            PetPanelRole::Island => 25,
+        }
     }
 }
 
-/// NSWindow level a desktop pet floats at (`NSFloatingWindowLevel` == 3). Pure so
-/// the constant is pinned by a cross-platform unit test; the AppKit apply path is
-/// smoke-tested on a packaged `.app`. `i64` to match `Panel::set_level`.
+/// NSWindow level a desktop pet floats at (`NSFloatingWindowLevel` == 3).
+/// Kept as a named seam for the pet call sites; the role method above is the
+/// single source of truth.
 pub(crate) fn pet_panel_floating_level() -> i64 {
-    3
+    PetPanelRole::Sprite.window_level()
 }
 
 /// The collection-behavior bitmask a desktop pet needs, for documentation +
@@ -96,16 +117,18 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
             let panel = window
                 .to_panel::<PetSpritePanel<R>>()
                 .map_err(|e| format!("pet sprite to_panel failed: {e:?}"))?;
-            panel.set_level(pet_panel_floating_level());
+            panel.set_level(role.window_level());
             panel.set_collection_behavior(behavior.into());
             panel.set_style_mask(style.into());
         }
-        PetPanelRole::Popup => {
+        // The island shares the popup's panel class (key-capable,
+        // non-activating); only its window level differs.
+        PetPanelRole::Popup | PetPanelRole::Island => {
             debug_assert!(role.can_become_key());
             let panel = window
                 .to_panel::<PetPopupPanel<R>>()
-                .map_err(|e| format!("pet popup to_panel failed: {e:?}"))?;
-            panel.set_level(pet_panel_floating_level());
+                .map_err(|e| format!("overlay panel to_panel failed: {e:?}"))?;
+            panel.set_level(role.window_level());
             panel.set_collection_behavior(behavior.into());
             // Buttons don't pull key; only the <input> does — non-activating throughout.
             panel.set_becomes_key_only_if_needed(true);
@@ -132,6 +155,15 @@ mod tests {
     #[test]
     fn floating_level_is_ns_floating_window_level() {
         assert_eq!(pet_panel_floating_level(), 3);
+        assert_eq!(PetPanelRole::Sprite.window_level(), 3);
+        assert_eq!(PetPanelRole::Popup.window_level(), 3);
+    }
+
+    #[test]
+    fn island_floats_above_the_menu_bar() {
+        // NSStatusWindowLevel (25) > NSMainMenuWindowLevel (24): a strip at
+        // the true top edge must draw over the menu bar, not behind it.
+        assert_eq!(PetPanelRole::Island.window_level(), 25);
     }
 
     #[test]
@@ -141,8 +173,9 @@ mod tests {
     }
 
     #[test]
-    fn only_the_popup_becomes_key() {
+    fn only_text_input_roles_become_key() {
         assert!(!PetPanelRole::Sprite.can_become_key());
         assert!(PetPanelRole::Popup.can_become_key());
+        assert!(PetPanelRole::Island.can_become_key());
     }
 }
