@@ -5,8 +5,10 @@
  * of fixing them one `pnpm run …` at a time.
  *
  * Gates (all read-only — none mutate the working tree):
- *   typecheck · lint · lint:i18n · audit:slots · audit:silent-flags
+ *   typecheck · lint · lint:i18n · i18n:build:check · audit:slots
+ *   audit:silent-flags · audit:command-parity · lint:static-export
  *   lint:plugin-sdk-wit · release:sync-keys:check · version:sync:check
+ *   config:sync:check
  *
  * Note: `i18n:sort:check` is intentionally NOT here — the message files are
  * not yet key-sorted, so it would always fail. Run `pnpm i18n:sort` once and
@@ -29,12 +31,16 @@ export const GATES = [
   "typecheck",
   "lint",
   "lint:i18n",
+  "i18n:build:check",
   "skills:check",
   "audit:slots",
   "audit:silent-flags",
+  "audit:command-parity",
+  "lint:static-export",
   "lint:plugin-sdk-wit",
   "release:sync-keys:check",
   "version:sync:check",
+  "config:sync:check",
 ]
 
 /**

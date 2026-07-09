@@ -334,6 +334,7 @@ export class PluginDevServer {
     const startTime = Date.now()
 
     try {
+      // invoke-parity-exempt: plugin build backend not yet shipped in Rust; caught and returned as build failure
       const result = await invoke<{
         success: boolean
         outputPath?: string

@@ -59,8 +59,8 @@ describe("diffKeys", () => {
 })
 
 describe("parseArgs", () => {
-  it("defaults both flags to false", () => {
-    expect(parseArgs([])).toEqual({ writeBaseline: false, json: false })
+  it("defaults all flags to false", () => {
+    expect(parseArgs([])).toEqual({ writeBaseline: false, json: false, staged: false })
   })
 
   it("recognises --write-baseline", () => {
@@ -71,10 +71,15 @@ describe("parseArgs", () => {
     expect(parseArgs(["--json"])).toMatchObject({ json: true })
   })
 
-  it("recognises both flags in either order", () => {
+  it("recognises --staged", () => {
+    expect(parseArgs(["--staged"])).toMatchObject({ staged: true })
+  })
+
+  it("recognises flags in either order", () => {
     expect(parseArgs(["--json", "--write-baseline"])).toEqual({
       writeBaseline: true,
       json: true,
+      staged: false,
     })
   })
 
@@ -82,6 +87,7 @@ describe("parseArgs", () => {
     expect(parseArgs(["--bogus", "--json", "extra"])).toEqual({
       writeBaseline: false,
       json: true,
+      staged: false,
     })
   })
 })
@@ -266,6 +272,148 @@ describe("__internal.scanFile", () => {
       expect(findings[0].line).toBe(1)
       expect(findings[0].column).toBeGreaterThan(0)
     })
+  })
+})
+
+describe("inline i18n-exempt escape", () => {
+  it("suppresses a finding when the line above carries a reasoned marker", () => {
+    const src = `
+      export function Comp() {
+        return (
+          <div>
+            {/* i18n-exempt: brand name, never translated */}
+            <span>Cognia Desktop</span>
+          </div>
+        )
+      }
+    `
+    withTempTsx(src, (file) => {
+      expect(__internal.scanFile(file)).toHaveLength(0)
+    })
+  })
+
+  it("suppresses via a same-line // comment on attributes", () => {
+    const src = `
+      export function Comp() {
+        return <input placeholder="Type your name" /> // i18n-exempt: fixture only
+      }
+    `
+    withTempTsx(src, (file) => {
+      expect(__internal.scanFile(file)).toHaveLength(0)
+    })
+  })
+
+  it("does NOT suppress on a bare marker without a reason", () => {
+    const src = `
+      export function Comp() {
+        return (
+          <div>
+            {/* i18n-exempt: */}
+            <span>Hello world</span>
+          </div>
+        )
+      }
+    `
+    withTempTsx(src, (file) => {
+      expect(__internal.scanFile(file)).toHaveLength(1)
+    })
+  })
+
+  it("isLineExempt checks only the finding line and the line above", () => {
+    const lines = ["// i18n-exempt: reason", "code()", "more()"]
+    expect(__internal.isLineExempt(lines, 2)).toBe(true) // line 2, marker on line 1
+    expect(__internal.isLineExempt(lines, 3)).toBe(false) // marker two lines up
+  })
+})
+
+describe("__internal.extractKeyRefs", () => {
+  const parse = (code: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ts = require("typescript") as typeof import("typescript")
+    const source = ts.createSourceFile(
+      "x.tsx",
+      code,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX
+    )
+    return __internal.extractKeyRefs(source, "x.tsx")
+  }
+
+  it("resolves namespaced t() calls to full dot-paths", () => {
+    const { refs } = parse(`
+      const t = useTranslations("chat")
+      t("send")
+      t("composer.hint")
+    `)
+    expect(refs.map((r) => r.key)).toEqual(["chat.send", "chat.composer.hint"])
+  })
+
+  it("handles the no-namespace hook form", () => {
+    const { refs } = parse(`
+      const t = useTranslations()
+      t("common.cancel")
+    `)
+    expect(refs.map((r) => r.key)).toEqual(["common.cancel"])
+  })
+
+  it("resolves getTranslations with await and object namespace form", () => {
+    const { refs } = parse(`
+      async function f() {
+        const t = await getTranslations({ locale: "en", namespace: "goal" })
+        t("title")
+      }
+    `)
+    expect(refs.map((r) => r.key)).toEqual(["goal.title"])
+  })
+
+  it("tracks t.rich / t.raw / t.markup / t.has property calls", () => {
+    const { refs } = parse(`
+      const t = useTranslations("chat")
+      t.rich("richKey", {})
+      t.raw("rawKey")
+      t.has("maybeKey")
+    `)
+    expect(refs.map((r) => r.key)).toEqual(["chat.richKey", "chat.rawKey", "chat.maybeKey"])
+  })
+
+  it("counts non-literal keys as dynamic without failing", () => {
+    const { refs, dynamicCount } = parse(`
+      const t = useTranslations("chat")
+      const k = "send"
+      t(k)
+      t(\`status.\${k}\`)
+    `)
+    expect(refs).toHaveLength(0)
+    expect(dynamicCount).toBe(2)
+  })
+
+  it("drops a binding re-declared with a different namespace", () => {
+    const { refs } = parse(`
+      function A() { const t = useTranslations("chat"); t("a") }
+      function B() { const t = useTranslations("goal"); t("b") }
+    `)
+    expect(refs).toHaveLength(0)
+  })
+
+  it("ignores unrelated identifiers that happen to be called t", () => {
+    const { refs, dynamicCount } = parse(`
+      const t = (x: string) => x
+      t("not.a.key")
+    `)
+    expect(refs).toHaveLength(0)
+    expect(dynamicCount).toBe(0)
+  })
+})
+
+describe("__internal.buildKeyPrefixSet", () => {
+  it("contains every key and every dot-path prefix", () => {
+    const set = __internal.buildKeyPrefixSet(["chat.errors.network", "goal.title"])
+    expect(set.has("chat.errors.network")).toBe(true)
+    expect(set.has("chat.errors")).toBe(true)
+    expect(set.has("chat")).toBe(true)
+    expect(set.has("goal.title")).toBe(true)
+    expect(set.has("goal.missing")).toBe(false)
   })
 })
 

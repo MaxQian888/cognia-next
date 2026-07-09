@@ -709,6 +709,7 @@ function ensurePathSource(source: string | Blob | File): string {
 }
 
 async function getNativeVideoInfo(sourcePath: string): Promise<NativeVideoInfo> {
+  // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
   return invoke<NativeVideoInfo>("video_get_info", { filePath: sourcePath })
 }
 
@@ -1226,6 +1227,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
       },
 
       getFrame: async (clipId: string, time: number): Promise<ImageData> => {
+        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
         const frame = await invoke<{ data: number[] | Uint8Array; width: number; height: number }>(
           "plugin_media_get_video_frame",
           {
@@ -1256,6 +1258,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         const safeStart = Math.max(0, startTime)
         const safeEnd = Math.max(safeStart, endTime)
         const outputPath = `${entry.sourcePath}.trim.${Date.now()}.mp4`
+        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
         const result = await invoke<{ outputPath?: string }>("video_trim", {
           options: {
             inputPath: entry.sourcePath,
@@ -1274,6 +1277,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         if (clipIds.length === 0) {
           throw new Error("No clips provided for concatenation")
         }
+        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
         const merged = await invoke<VideoClip>("plugin_media_concatenate_videos", {
           pluginId,
           clipIds,
@@ -1286,6 +1290,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         effectId: string,
         params?: Record<string, unknown>
       ): Promise<void> => {
+        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
         await invoke<void>("plugin_media_apply_video_effect", {
           pluginId,
           clipId,
@@ -1311,6 +1316,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         toClipId: string,
         transition: VideoTransition
       ): Promise<void> => {
+        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
         await invoke<void>("plugin_media_add_transition", {
           pluginId,
           fromClipId,
@@ -1333,6 +1339,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         }
 
         const bytes = await withTimelineProgress(options.onProgress, async () =>
+          // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
           invoke<number[] | Uint8Array>("plugin_media_export_video", {
             pluginId,
             clipIds,

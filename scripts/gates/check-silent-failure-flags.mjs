@@ -39,6 +39,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs"
 import { resolve, relative, dirname, join, normalize } from "node:path"
 import { fileURLToPath } from "node:url"
 import { execSync } from "node:child_process"
+import { parseRegisteredCommands } from "./lib/generate-handler.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, "../..")
@@ -138,70 +139,17 @@ function declaredHandlers() {
 
 function registeredHandlers() {
   const src = readFileSync(LIB_RS, "utf8")
-  // Locate the generate_handler! block by name and find the matching closing
-  // bracket via bracket-counting. The lazy-regex approach is brittle because
-  // commented `(ADR-0022)` etc. inside the macro look like closing parens.
-  const markerRe = /generate_handler!\s*(\[|\()/g
-  const marker = markerRe.exec(src)
-  if (!marker) {
-    throw new Error(
-      `Could not locate generate_handler!(...) in ${relative(REPO_ROOT, LIB_RS)}; ` +
-        `the script's source assumptions are stale.`
-    )
+  // Block extraction + entry parsing live in the shared lib so the parity gate
+  // (check-command-parity.mjs) sees exactly the same registered set.
+  let all
+  try {
+    all = parseRegisteredCommands(src)
+  } catch (err) {
+    throw new Error(`${relative(REPO_ROOT, LIB_RS)}: ${err.message}`)
   }
-  const open = marker[1]
-  const close = open === "[" ? "]" : ")"
-  let depth = 1
-  let cursor = marker.index + marker[0].length
-  // Track quotes/line-comments/block-comments so bracket-counting isn't fooled
-  // by a `)` or `]` inside a string or comment.
-  let inStr = false
-  let strQuote = ""
-  let inLine = false
-  let inBlock = false
-  while (cursor < src.length && depth > 0) {
-    const ch = src[cursor]
-    const next = src[cursor + 1]
-    if (inLine) {
-      if (ch === "\n") inLine = false
-    } else if (inBlock) {
-      if (ch === "*" && next === "/") {
-        inBlock = false
-        cursor += 1
-      }
-    } else if (inStr) {
-      if (ch === "\\") {
-        cursor += 1
-      } else if (ch === strQuote) {
-        inStr = false
-      }
-    } else if (ch === "/" && next === "/") {
-      inLine = true
-      cursor += 1
-    } else if (ch === "/" && next === "*") {
-      inBlock = true
-      cursor += 1
-    } else if (ch === '"' || ch === "'") {
-      inStr = true
-      strQuote = ch
-    } else if (ch === open) {
-      depth += 1
-    } else if (ch === close) {
-      depth -= 1
-      if (depth === 0) break
-    }
-    cursor += 1
-  }
-  if (depth !== 0) {
-    throw new Error(`Unbalanced ${open}…${close} in generate_handler! starting at ${marker.index}`)
-  }
-  const entries = src.slice(marker.index + marker[0].length, cursor)
   const handlers = new Set()
-  // Every registered plugin_* handler is path-qualified (at least one `::`
-  // module prefix). Scan for any path-prefixed plugin_<name> followed by a
-  // comma or whitespace.
-  for (const m of entries.matchAll(/(?:[A-Za-z_]\w*::)+(plugin_[A-Za-z0-9_]+)\s*[,)]/g)) {
-    handlers.add(m[1])
+  for (const name of all) {
+    if (name.startsWith("plugin_")) handlers.add(name)
   }
   return handlers
 }

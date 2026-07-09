@@ -18,18 +18,37 @@
  *      blocking unrelated work. Any new finding above the baseline count
  *      fails the lint.
  *
+ *   3. **Referenced-key existence** — every literal `t("key")` (and `t.rich`,
+ *      `t.raw`, `t.markup`, `t.has`) reachable through a
+ *      `const t = useTranslations("ns")` / `getTranslations("ns")` binding is
+ *      resolved to its full dot-path and must exist in BOTH locale files (a
+ *      proper prefix of an existing key also counts, covering `t.raw` subtree
+ *      roots). Non-literal keys are reported informationally, never failed.
+ *      Pre-existing gaps live in the baseline's `knownMissingKeyRefs`.
+ *
+ * Inline escape (both modes): a finding whose line — or the line directly
+ * above it — carries `// i18n-exempt: <reason>` (or the `{/* … *\/}` JSX
+ * comment form) is suppressed. A bare marker without a reason exempts nothing.
+ *
  * Flags:
  *   --write-baseline   Refresh the baseline from current findings.
  *                      Use sparingly — running this defeats the gate for
  *                      anything it captures.
  *   --json             Emit a structured report to stdout (one JSON object).
+ *   --staged           Scan ONLY staged .tsx files (git diff --cached) with
+ *                      zero tolerance for hardcoded strings — no baseline
+ *                      count, no parity/key-existence pass. Fast pre-commit
+ *                      mode; exits 0 immediately when nothing relevant is
+ *                      staged.
  *
- * Exit codes: 0 = green, 1 = key drift, 2 = JSX hardcoded strings above
- * baseline, 3 = both.
+ * Exit codes (bitmask): 0 = green, 1 = key drift, 2 = JSX hardcoded strings
+ * above baseline (or any staged finding in --staged mode), 4 = referenced
+ * keys missing from a locale file.
  */
 
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { execSync } from "node:child_process"
 import * as ts from "typescript"
 
 interface JsxFinding {
@@ -52,6 +71,10 @@ interface BaselineFile {
     onlyInEn: string[]
     onlyInZh: string[]
   }
+  /** Pre-existing referenced-key gaps (`t("…")` whose resolved key is absent
+   * from a locale file). New gaps fail; listed keys are tolerated until the
+   * missing translations land. Refreshed by --write-baseline. */
+  knownMissingKeyRefs?: string[]
 }
 
 const REPO_ROOT = path.resolve(__dirname, "../..")
@@ -192,6 +215,22 @@ function recordPos(source: ts.SourceFile, pos: number): { line: number; column: 
   return { line: line + 1, column: character + 1 }
 }
 
+/** Inline escape: `// i18n-exempt: <reason>` or `{/* i18n-exempt: <reason> *\/}`
+ * on the finding's line or the line directly above. A bare marker (no reason)
+ * exempts nothing. */
+const I18N_EXEMPT_RE = /i18n-exempt:([^*\n]*)/
+
+function isLineExempt(lines: string[], line: number): boolean {
+  for (const idx of [line - 1, line - 2]) {
+    if (idx < 0 || idx >= lines.length) continue
+    const m = lines[idx].match(I18N_EXEMPT_RE)
+    // The captured reason stops before a `*` so a bare `{/* i18n-exempt: */}`
+    // cannot pass its own comment terminator off as a reason.
+    if (m && m[1].trim() !== "") return true
+  }
+  return false
+}
+
 function scanFile(absPath: string): JsxFinding[] {
   const rel = path.relative(REPO_ROOT, absPath).replace(/\\/g, "/")
   const sourceText = fs.readFileSync(absPath, "utf8")
@@ -254,7 +293,158 @@ function scanFile(absPath: string): JsxFinding[] {
   }
 
   visit(source)
-  return findings
+  const lines = sourceText.split("\n")
+  return findings.filter((f) => !isLineExempt(lines, f.line))
+}
+
+// ---------------------------------------------------------------------------
+// Referenced-key existence
+// ---------------------------------------------------------------------------
+
+export interface KeyRef {
+  file: string
+  line: number
+  key: string
+}
+
+interface KeyRefScan {
+  refs: KeyRef[]
+  dynamicCount: number
+}
+
+const T_METHODS = new Set(["rich", "raw", "markup", "has"])
+
+/**
+ * Resolve literal translation-key references in one source file.
+ *
+ * Handles the binding convention `const t = useTranslations("ns")` /
+ * `const t = await getTranslations("ns")` (also the
+ * `getTranslations({ namespace: "ns" })` object form). Calls through the
+ * binding — `t("key")`, `t.rich("key", …)` etc. — with a literal first
+ * argument resolve to `ns.key`. Non-literal first arguments count as dynamic
+ * (reported, never failed). A binding name re-declared with a DIFFERENT
+ * namespace in the same file is dropped entirely (its calls are unresolvable
+ * without scope analysis — honest v1 limitation).
+ */
+export function extractKeyRefs(source: ts.SourceFile, rel: string): KeyRefScan {
+  const nsByBinding = new Map<string, string>()
+  const ambiguous = new Set<string>()
+
+  const namespaceFromCall = (call: ts.CallExpression): string | null => {
+    const arg = call.arguments[0]
+    if (!arg) return ""
+    if (ts.isStringLiteralLike(arg)) return arg.text
+    if (ts.isObjectLiteralExpression(arg)) {
+      for (const prop of arg.properties) {
+        if (
+          ts.isPropertyAssignment(prop) &&
+          ts.isIdentifier(prop.name) &&
+          prop.name.text === "namespace" &&
+          ts.isStringLiteralLike(prop.initializer)
+        ) {
+          return prop.initializer.text
+        }
+      }
+      return ""
+    }
+    return null // non-literal namespace — binding unusable
+  }
+
+  const collectBindings = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.name)) {
+      let init: ts.Expression = node.initializer
+      if (ts.isAwaitExpression(init)) init = init.expression
+      if (
+        ts.isCallExpression(init) &&
+        ts.isIdentifier(init.expression) &&
+        (init.expression.text === "useTranslations" || init.expression.text === "getTranslations")
+      ) {
+        const ns = namespaceFromCall(init)
+        const name = node.name.text
+        if (ns === null) {
+          ambiguous.add(name)
+        } else if (nsByBinding.has(name) && nsByBinding.get(name) !== ns) {
+          ambiguous.add(name)
+        } else {
+          nsByBinding.set(name, ns)
+        }
+      }
+    }
+    ts.forEachChild(node, collectBindings)
+  }
+  collectBindings(source)
+  for (const name of ambiguous) nsByBinding.delete(name)
+
+  const refs: KeyRef[] = []
+  let dynamicCount = 0
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      let bindingName: string | null = null
+      const callee = node.expression
+      if (ts.isIdentifier(callee)) {
+        bindingName = callee.text
+      } else if (
+        ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        T_METHODS.has(callee.name.text)
+      ) {
+        bindingName = callee.expression.text
+      }
+      if (bindingName && nsByBinding.has(bindingName)) {
+        const ns = nsByBinding.get(bindingName) as string
+        const arg = node.arguments[0]
+        if (arg && ts.isStringLiteralLike(arg)) {
+          const { line } = source.getLineAndCharacterOfPosition(arg.getStart(source))
+          refs.push({ file: rel, line: line + 1, key: ns ? `${ns}.${arg.text}` : arg.text })
+        } else if (arg) {
+          dynamicCount += 1
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  return { refs, dynamicCount }
+}
+
+/** Every flattened key plus every dot-path prefix of it, for membership tests
+ * that must accept subtree roots (`t.raw("chat.errors")`). */
+export function buildKeyPrefixSet(flat: string[]): Set<string> {
+  const out = new Set<string>()
+  for (const key of flat) {
+    const parts = key.split(".")
+    let acc = ""
+    for (const part of parts) {
+      acc = acc ? `${acc}.${part}` : part
+      out.add(acc)
+    }
+  }
+  return out
+}
+
+export function scanKeyRefs(
+  files: string[],
+  ignoreGlobs: string[]
+): { refs: KeyRef[]; dynamicCount: number } {
+  const refs: KeyRef[] = []
+  let dynamicCount = 0
+  for (const f of files) {
+    const rel = path.relative(REPO_ROOT, f).replace(/\\/g, "/")
+    if (shouldIgnoreFile(rel, ignoreGlobs)) continue
+    const sourceText = fs.readFileSync(f, "utf8")
+    const source = ts.createSourceFile(
+      rel,
+      sourceText,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX
+    )
+    const result = extractKeyRefs(source, rel)
+    refs.push(...result.refs)
+    dynamicCount += result.dynamicCount
+  }
+  return { refs, dynamicCount }
 }
 
 export function scanAllFiles(files: string[], ignoreGlobs: string[]): JsxFinding[] {
@@ -276,7 +466,7 @@ function loadBaseline(): BaselineFile | null {
   return JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8")) as BaselineFile
 }
 
-function writeBaseline(findings: JsxFinding[], parity: ParityDiff): void {
+function writeBaseline(findings: JsxFinding[], parity: ParityDiff, missingKeyRefs: string[]): void {
   const samples = findings.slice(0, 50).map(({ file, context, text }) => ({ file, context, text }))
   const payload: BaselineFile = {
     count: findings.length,
@@ -285,6 +475,7 @@ function writeBaseline(findings: JsxFinding[], parity: ParityDiff): void {
       onlyInEn: parity.onlyInEn,
       onlyInZh: parity.onlyInZh,
     },
+    knownMissingKeyRefs: [...new Set(missingKeyRefs)].sort(),
   }
   fs.writeFileSync(BASELINE_PATH, JSON.stringify(payload, null, 2) + "\n")
 }
@@ -320,17 +511,63 @@ function loadIgnoreGlobs(): string[] {
 export interface CliArgs {
   writeBaseline: boolean
   json: boolean
+  staged: boolean
 }
 
 export function parseArgs(argv: string[]): CliArgs {
   return {
     writeBaseline: argv.includes("--write-baseline"),
     json: argv.includes("--json"),
+    staged: argv.includes("--staged"),
   }
+}
+
+/** Staged .tsx files (added/copied/modified/renamed) under SCAN_DIRS. */
+function listStagedFiles(): string[] {
+  const out = execSync("git diff --cached --name-only --diff-filter=ACMR", {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  })
+  return out
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .filter((p) => p.endsWith(".tsx") && !p.endsWith(".test.tsx") && !p.endsWith(".stories.tsx"))
+    .filter((p) => SCAN_DIRS.some((d) => p.startsWith(`${d}/`)))
+    .map((p) => path.join(REPO_ROOT, p))
+    .filter((p) => fs.existsSync(p))
+}
+
+/** Zero-tolerance scan of staged .tsx files only. Returns the exit code. */
+function runStaged(): number {
+  const staged = listStagedFiles()
+  if (staged.length === 0) {
+    console.log("[lint:i18n --staged] OK — no staged .tsx files to scan")
+    return 0
+  }
+  const ignoreGlobs = loadIgnoreGlobs()
+  const findings = scanAllFiles(staged, ignoreGlobs)
+  if (findings.length === 0) {
+    console.log(
+      `[lint:i18n --staged] OK — ${staged.length} staged .tsx file(s), no hardcoded strings`
+    )
+    return 0
+  }
+  console.error(
+    `[lint:i18n --staged] FAIL — ${findings.length} hardcoded string(s) in staged files ` +
+      `(zero tolerance; use next-intl or \`// i18n-exempt: <reason>\`):`
+  )
+  for (const f of findings) {
+    console.error(`  ${f.file}:${f.line}:${f.column} [${f.context}] ${JSON.stringify(f.text)}`)
+  }
+  return 2
 }
 
 async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv)
+
+  // Fast pre-commit path: staged files only, zero tolerance, nothing else.
+  if (args.staged) return runStaged()
 
   // 1. Key parity (raw — before baseline filtering).
   const en = JSON.parse(fs.readFileSync(I18N_EN, "utf8")) as Record<string, unknown>
@@ -342,11 +579,23 @@ async function main(argv: string[]): Promise<number> {
   const files = listSourceFiles()
   const findings = scanAllFiles(files, ignoreGlobs)
 
+  // 3. Referenced-key existence: every literal t("…") key must exist in BOTH
+  // locale files (or be a prefix of an existing key).
+  const enKeys = buildKeyPrefixSet(flattenKeys(en))
+  const zhKeys = buildKeyPrefixSet(flattenKeys(zh))
+  const keyRefScan = scanKeyRefs(files, ignoreGlobs)
+  const rawMissingRefs = keyRefScan.refs.filter((r) => !enKeys.has(r.key) || !zhKeys.has(r.key))
+
   if (args.writeBaseline) {
-    writeBaseline(findings, rawParity)
+    writeBaseline(
+      findings,
+      rawParity,
+      rawMissingRefs.map((r) => r.key)
+    )
     console.log(
       `[lint:i18n] baseline written: ${findings.length} JSX findings, ` +
-        `${rawParity.onlyInEn.length}/${rawParity.onlyInZh.length} known parity drift`
+        `${rawParity.onlyInEn.length}/${rawParity.onlyInZh.length} known parity drift, ` +
+        `${new Set(rawMissingRefs.map((r) => r.key)).size} known missing key refs`
     )
     return 0
   }
@@ -359,6 +608,10 @@ async function main(argv: string[]): Promise<number> {
   const baselineCount = baseline?.count ?? 0
   const jsxFailed = findings.length > baselineCount
 
+  const toleratedRefs = new Set(baseline?.knownMissingKeyRefs ?? [])
+  const missingRefs = rawMissingRefs.filter((r) => !toleratedRefs.has(r.key))
+  const keyRefsFailed = missingRefs.length > 0
+
   if (args.json) {
     process.stdout.write(
       JSON.stringify(
@@ -370,6 +623,9 @@ async function main(argv: string[]): Promise<number> {
           baselineCount,
           jsxFailed,
           allFindings: findings,
+          missingKeyRefs: missingRefs,
+          dynamicKeyRefCount: keyRefScan.dynamicCount,
+          keyRefsFailed,
         },
         null,
         2
@@ -408,11 +664,28 @@ async function main(argv: string[]): Promise<number> {
         `[lint:i18n] OK — JSX hardcoded strings: ${findings.length} (≤ baseline ${baselineCount})`
       )
     }
+
+    if (keyRefsFailed) {
+      console.error(
+        `[lint:i18n] FAIL — ${missingRefs.length} referenced key(s) missing from a locale file:`
+      )
+      for (const r of missingRefs.slice(0, 20)) {
+        console.error(`  ${r.file}:${r.line}  t("${r.key}") — not in en.json and/or zh-CN.json`)
+      }
+      if (missingRefs.length > 20) console.error(`  … ${missingRefs.length - 20} more`)
+    } else {
+      console.log(
+        `[lint:i18n] OK — referenced keys exist in both locales ` +
+          `(${keyRefScan.refs.length} literal refs, ${keyRefScan.dynamicCount} dynamic skipped, ` +
+          `${toleratedRefs.size} tolerated)`
+      )
+    }
   }
 
   let code = 0
   if (parityFailed) code |= 1
   if (jsxFailed) code |= 2
+  if (keyRefsFailed) code |= 4
   return code
 }
 
@@ -430,4 +703,7 @@ export const __internal = {
   shouldIgnoreFile,
   isProseLiteral,
   listSourceFiles,
+  extractKeyRefs,
+  buildKeyPrefixSet,
+  isLineExempt,
 }

@@ -1,2 +1,3 @@
 #!/usr/bin/env sh
 pnpm exec lint-staged
+pnpm run --silent lint:i18n:staged

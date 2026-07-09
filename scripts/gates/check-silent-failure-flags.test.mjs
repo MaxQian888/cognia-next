@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = resolve(__dirname, "check-silent-failure-flags.mjs")
+const SHARED_LIB = resolve(__dirname, "lib", "generate-handler.mjs")
 
 function makeFixture({ libRs, tsFiles = [], rustSources = [], pluginsRust = [] }) {
   const root = mkdtempSync(join(tmpdir(), "silent-flag-audit-"))
@@ -54,10 +55,15 @@ function runScript(root) {
   // (`__dirname/../..`), so we copy it into the fixture's scripts/gates/ subdir
   // to mirror its real two-level depth.
   const scriptDest = join(root, "scripts", "gates", "check-silent-failure-flags.mjs")
-  mkdirSync(join(root, "scripts", "gates"), { recursive: true })
+  const libDest = join(root, "scripts", "gates", "lib", "generate-handler.mjs")
+  mkdirSync(join(root, "scripts", "gates", "lib"), { recursive: true })
   spawnSync(
     "node",
-    ["-e", `require('fs').copyFileSync(${JSON.stringify(SCRIPT)}, ${JSON.stringify(scriptDest)})`],
+    [
+      "-e",
+      `require('fs').copyFileSync(${JSON.stringify(SCRIPT)}, ${JSON.stringify(scriptDest)});` +
+        `require('fs').copyFileSync(${JSON.stringify(SHARED_LIB)}, ${JSON.stringify(libDest)})`,
+    ],
     {
       cwd: root,
     }

@@ -317,6 +317,7 @@ export class PluginLoader {
         // Load the Python plugin via Tauri's Python runtime
         const { invoke } = await import("@tauri-apps/api/core")
 
+        // invoke-parity-exempt: Python plugin runtime not yet shipped in Rust; caught and surfaced as load failure
         await invoke("plugin_load_python", {
           pluginId: manifest.id,
           manifestJson: JSON.stringify(manifest),
@@ -348,6 +349,7 @@ export class PluginLoader {
           },
           deactivate: async () => {
             try {
+              // invoke-parity-exempt: Python plugin runtime not yet shipped in Rust; caught and logged
               await invoke("plugin_deactivate_python", {
                 pluginId: manifest.id,
               })
@@ -437,6 +439,7 @@ export class PluginLoader {
     for (const hookName of hookNames) {
       hooks[hookName] = async (...args: unknown[]) => {
         try {
+          // invoke-parity-exempt: Python plugin runtime not yet shipped in Rust; caught and logged
           await invoke("plugin_dispatch_python_hook", {
             pluginId,
             hookName,
