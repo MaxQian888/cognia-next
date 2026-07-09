@@ -6,6 +6,7 @@ import {
   normalizeCliPayload,
 } from "./lark-doc-fetcher"
 import { LarkApiError } from "@/lib/connectors/adapters/lark/auth-retry"
+import type { TauriHttpRequest } from "@/lib/connectors/tauri/commands"
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 jest.mock("@/lib/db/adapter-instances", () => ({ getAdapterInstance: jest.fn() }))
@@ -41,16 +42,20 @@ const WIKI_URL = "https://acme.feishu.cn/wiki/wikcnAbCdEfGh123456789"
 const ADAPTER = "cai_test1"
 
 function ok(data: unknown) {
-  return { status: 200, headers: {}, body: JSON.stringify({ code: 0, data }) }
+  return {
+    status: 200,
+    headers: {} as Record<string, string>,
+    body: JSON.stringify({ code: 0, data }),
+  }
 }
 
 function larkFail(status: number, code: number, msg = "boom") {
-  return { status, headers: {}, body: JSON.stringify({ code, msg }) }
+  return { status, headers: {} as Record<string, string>, body: JSON.stringify({ code, msg }) }
 }
 
 /** httpImpl stub routing by URL substring. */
 function makeHttp(routes: Array<[match: string, resp: unknown]>) {
-  return jest.fn(async (req: { url: string; headers: Record<string, string> }) => {
+  return jest.fn(async (req: TauriHttpRequest) => {
     const hit = routes.find(([m]) => req.url.includes(m))
     if (!hit) throw new Error(`unexpected url ${req.url}`)
     return hit[1] as { status: number; headers: Record<string, string>; body: string }
@@ -100,7 +105,7 @@ describe("fetchLarkDocAsRawSource — api channel", () => {
       channel: "api",
     })
     for (const call of http.mock.calls) {
-      expect(call[0].headers.Authorization).toBe("Bearer user-token")
+      expect(call[0].headers?.Authorization).toBe("Bearer user-token")
     }
   })
 
@@ -136,7 +141,7 @@ describe("fetchLarkDocAsRawSource — api channel", () => {
 
   it("refreshes the user token once on invalidation and retries", async () => {
     let calls = 0
-    const http = jest.fn(async (req: { url: string }) => {
+    const http = jest.fn(async (req: TauriHttpRequest) => {
       if (req.url.includes("/raw_content")) {
         calls++
         if (calls === 1) return larkFail(401, 99991677)
@@ -161,7 +166,7 @@ describe("fetchLarkDocAsRawSource — api channel", () => {
       ["/documents/doxcn", ok({ document: { title: "T" } })],
     ])
     await fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, httpImpl: http })
-    expect(http.mock.calls[0][0].headers.Authorization).toBe("Bearer tenant-token")
+    expect(http.mock.calls[0][0].headers?.Authorization).toBe("Bearer tenant-token")
   })
 
   it("falls back to the tenant token when refresh cannot revive the user", async () => {
@@ -169,8 +174,8 @@ describe("fetchLarkDocAsRawSource — api channel", () => {
       new Error("Lark user token refresh: no refresh token stored")
     )
     let sawTenant = false
-    const http = jest.fn(async (req: { url: string; headers: Record<string, string> }) => {
-      if (req.headers.Authorization === "Bearer user-token") return larkFail(401, 99991677)
+    const http = jest.fn(async (req: TauriHttpRequest) => {
+      if (req.headers?.Authorization === "Bearer user-token") return larkFail(401, 99991677)
       sawTenant = true
       if (req.url.includes("/raw_content")) return ok({ content: "bot body" })
       return ok({ document: { title: "T" } })
