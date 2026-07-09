@@ -368,7 +368,7 @@
       "larkEmptyDoc": "文档 {title} 没有可读取的文本。",
       "larkBrowserUnsupported": "飞书文档仅能在桌面端抓取（浏览器会拦截跨域请求）。",
       "larkCliUnavailable": "当前环境不可用 lark-cli。",
-      "larkNetwork": "飞书请求失败:{reason}"
+      "larkNetwork": "飞书请求失败：{reason}"
     },
     "fetching": "抓取中…",
     "filesDescription": "文本格式（Markdown / CSV / HTML / JSON / 源代码 / .eml / .mbox）按原样存储。二进制格式（PDF / DOCX / PPTX / EPUB / ODT / ODP）在浏览器解析，仅提取出的文本会落入 Dexie。聊天导出（ChatGPT / Claude / Gemini / Slack / 飞书 / 微信 / 钉钉）和 mbox 文件会按会话拆分为多个源。",
@@ -398,7 +398,6 @@
     "walking": "遍历中…",
     "webModeHint": "浏览器中跨域抓取可能被 CORS 拦截；桌面应用通过本地代理抓取，不受此限制。",
     "lark": {
-      "sectionTitle": "飞书文档",
       "sectionDescription": "使用已绑定的飞书账号抓取飞书文档或知识库页面。",
       "accountLabel": "飞书账号",
       "accountPlaceholder": "选择账号",

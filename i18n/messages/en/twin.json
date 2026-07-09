@@ -398,7 +398,6 @@
     "walking": "Walking…",
     "webModeHint": "In the browser, cross-origin fetches may be blocked by CORS. The desktop app fetches through a local proxy without this limit.",
     "lark": {
-      "sectionTitle": "Feishu / Lark doc",
       "sectionDescription": "Fetch a Feishu doc or wiki page with one of your bound Feishu accounts.",
       "accountLabel": "Feishu account",
       "accountPlaceholder": "Choose an account",
