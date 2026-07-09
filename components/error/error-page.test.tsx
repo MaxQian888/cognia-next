@@ -227,6 +227,14 @@ describe("ErrorPage — variant: global-error with staticLocale='en'", () => {
     expect(screen.getByTestId("error-page-export")).toBeInTheDocument()
   })
 
+  it("renders the intl global-error copy on the non-static provider path", () => {
+    render(
+      <ErrorPage variant="global-error" error={new Error("layout crashed")} reset={() => {}} />
+    )
+    expect(screen.getByTestId("error-page")).toHaveAttribute("data-variant", "global-error")
+    expect(screen.getByText("Cognia stopped working")).toBeInTheDocument()
+  })
+
   it("logs at fatal level via loggers.app", () => {
     render(
       <ErrorPage
@@ -387,5 +395,51 @@ describe("ErrorPage — auxiliary modules", () => {
     )
     expect(screen.getByText("Something went wrong")).toBeInTheDocument()
     expect(screen.getByTestId("error-diagnostics-card")).toBeInTheDocument()
+  })
+})
+
+describe("ErrorPage — layout & feedback", () => {
+  it("labels the error variant with a classification badge", () => {
+    render(<ErrorPage variant="error" error={new Error("boom")} reset={() => {}} />)
+    expect(screen.getByTestId("error-page-category")).toHaveTextContent("Application error")
+  })
+
+  it("renders the scrollable detail band when there is error info to show", () => {
+    render(<ErrorPage variant="error" error={new Error("boom")} reset={() => {}} />)
+    expect(screen.getByTestId("error-page-body")).toBeInTheDocument()
+  })
+
+  it("drops the badge and detail band on the compact not-found variant", () => {
+    render(<ErrorPage variant="not-found" />)
+    expect(screen.queryByTestId("error-page-category")).toBeNull()
+    expect(screen.queryByTestId("error-page-body")).toBeNull()
+  })
+
+  it("shows an inline 'Copied' confirmation after copying the error id", async () => {
+    const error = Object.assign(new Error("boom"), { digest: "cafebabe" })
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: jest.fn().mockResolvedValue(undefined) },
+    })
+    render(<ErrorPage variant="error" error={error} reset={() => {}} />)
+    const button = screen.getByTestId("error-page-copy-id")
+    expect(button).toHaveTextContent("Copy ID")
+    await userEvent.click(button)
+    expect(button).toHaveTextContent("Copied")
+  })
+
+  it("shows an inline 'Exported' confirmation after a successful crash export", async () => {
+    const stub = jest.fn().mockResolvedValue(undefined)
+    render(
+      <ErrorPage
+        variant="error"
+        error={new Error("boom")}
+        reset={() => {}}
+        exportCrashLogImpl={stub}
+      />
+    )
+    const button = screen.getByTestId("error-page-export")
+    await userEvent.click(button)
+    await waitFor(() => expect(button).toHaveTextContent("Exported"))
   })
 })

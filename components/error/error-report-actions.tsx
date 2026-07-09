@@ -15,8 +15,8 @@
  * (`buildIssueUrl`) are pure and exported so they're independently testable.
  */
 
-import { useCallback, useState } from "react"
-import { Copy, ExternalLink } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Check, Copy, ExternalLink } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -139,6 +139,15 @@ export function ErrorReportActions({
   openUrl = defaultOpenUrl,
 }: ErrorReportActionsProps) {
   const [copying, setCopying] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+    },
+    []
+  )
 
   const buildReport = useCallback(async (): Promise<string> => {
     const recent = getRecentErrors()
@@ -158,6 +167,9 @@ export function ErrorReportActions({
     try {
       const report = await buildReport()
       await writeClipboard(report)
+      setCopied(true)
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+      copiedTimer.current = setTimeout(() => setCopied(false), 1600)
       if (toastsEnabled) toast.success(copy.copyReportSuccess)
     } catch {
       if (toastsEnabled) toast.error(copy.copyReportFailed)
@@ -186,17 +198,23 @@ export function ErrorReportActions({
     <>
       <Button
         variant="ghost"
+        size="sm"
         onClick={handleCopy}
         disabled={copying}
         className="gap-2"
         data-testid="error-page-copy-report"
       >
-        <Copy className="size-4" aria-hidden="true" />
+        {copied ? (
+          <Check className="size-4 text-success" aria-hidden="true" />
+        ) : (
+          <Copy className="size-4" aria-hidden="true" />
+        )}
         {copy.copyReport}
       </Button>
       {issueReportUrl && (
         <Button
           variant="ghost"
+          size="sm"
           onClick={handleReportIssue}
           className="gap-2"
           data-testid="error-page-report-issue"

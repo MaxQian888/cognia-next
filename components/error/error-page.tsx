@@ -3,14 +3,20 @@
 /**
  * Route-level error / not-found / global-error renderer.
  *
- * Composes the shadcn `Empty` layout primitive with `ErrorTraceDetails` (Alert
- * + Collapsible stack from ai-elements) and the recent-errors / crash-log
- * pipeline so every App Router boundary surfaces the same affordances:
+ * Renders a bounded card whose header (icon, title, category badge, error id)
+ * and footer (recovery + utility actions) are pinned `shrink-0`, with the only
+ * scrollable region being the middle detail band — so a stack-heavy error
+ * never pushes the title or the recovery buttons out of the clipped shell
+ * viewport. The band lays `ErrorTraceDetails` (Alert + collapsible stack) beside
+ * the diagnostics / recent-errors panels in two columns on wide screens and
+ * stacks them on narrow ones. Every App Router boundary gets the same
+ * affordances:
  *   - error classification with a tailored primary recovery action
  *     (reload for stale chunks, reconnect-and-retry for network failures,
  *     boundary reset otherwise)
  *   - an inline system-diagnostics card and recent-errors context panel
- *   - copy full report / report issue / export crash log
+ *   - copy full report / report issue / export crash log (with inline
+ *     "Copied" / "Exported" ticks that work without a Toaster)
  *   - retry, back to home, jump to /logs
  *
  * Lives outside `components/ui/` so the project-wide ≥90% coverage gate applies.
@@ -23,12 +29,14 @@
  * in that path too.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useLocale, useTranslations } from "next-intl"
 import {
   AlertTriangle,
+  Check,
+  Copy,
   DownloadCloud,
   Download,
   FileQuestion,
@@ -42,15 +50,9 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
 import { ErrorDiagnosticsCard, type ErrorDiagnosticsCopy } from "./error-diagnostics-card"
 import { RecentErrorsPanel, type RecentErrorsCopy } from "./recent-errors-panel"
@@ -109,6 +111,8 @@ interface ResolvedCopy {
   errorIdLabel: string
   copyErrorId: string
   copyErrorIdSuccess: string
+  copied: string
+  exportedCrashLog: string
   reloadApp: string
   tryAgainWhenOnline: string
   cancelAutoRetry: string
@@ -176,6 +180,8 @@ const STATIC_EN_BASE: Omit<
   errorIdLabel: "Error ID",
   copyErrorId: "Copy ID",
   copyErrorIdSuccess: "Error ID copied",
+  copied: "Copied",
+  exportedCrashLog: "Exported",
   reloadApp: "Reload app",
   tryAgainWhenOnline: "Try again",
   cancelAutoRetry: "Cancel",
@@ -218,6 +224,29 @@ function staticCopyFor(variant: ErrorPageVariant): ResolvedCopy {
 function defaultSubsystem(variant: ErrorPageVariant): keyof typeof loggers {
   if (variant === "not-found") return "ui"
   return "app"
+}
+
+/**
+ * A boolean that flips to `true` on `trigger()` and auto-resets after
+ * `durationMs`. Powers the inline "Copied" / "Exported" confirmation ticks so
+ * feedback survives even in the static global-error path where no Toaster is
+ * mounted. The pending timer is cleared on unmount to avoid a late setState.
+ */
+function useTransientFlag(durationMs = 1600): [boolean, () => void] {
+  const [flag, setFlag] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const trigger = useCallback(() => {
+    setFlag(true)
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => setFlag(false), durationMs)
+  }, [durationMs])
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    []
+  )
+  return [flag, trigger]
 }
 
 function HeadlineIcon({
@@ -296,6 +325,8 @@ function ErrorPageIntl(props: ErrorPageProps) {
     errorIdLabel: t("errorIdLabel"),
     copyErrorId: t("copyErrorId"),
     copyErrorIdSuccess: t("copyErrorIdSuccess"),
+    copied: t("copied"),
+    exportedCrashLog: t("exportedCrashLog"),
     reloadApp: t("reloadApp"),
     tryAgainWhenOnline: t("tryAgainWhenOnline"),
     cancelAutoRetry: t("cancelAutoRetry"),
@@ -371,6 +402,8 @@ function ErrorPageShell({
   description: descriptionProp,
 }: ErrorPageShellProps) {
   const [exporting, setExporting] = useState(false)
+  const [copiedId, flashCopiedId] = useTransientFlag()
+  const [exported, flashExported] = useTransientFlag()
   const { status } = useNetworkStatus()
   const online = status.connected
 
@@ -403,6 +436,10 @@ function ErrorPageShell({
   const showTrace = !isNotFound && !!error
   const showAuxiliary = !isNotFound
   const showHome = !disableHome
+  // Detail sections live in the scrollable middle band; when there are none
+  // (e.g. not-found) the card collapses to a compact header + action footer.
+  const hasBody = showTrace || showAuxiliary
+  const showCategoryBadge = !isNotFound
 
   // Auto-retry on reconnect for connectivity errors (hook is inert otherwise).
   const autoRetry = useAutoRetryOnReconnect({
@@ -427,6 +464,7 @@ function ErrorPageShell({
         triggerError: error,
         subsystem: (subsystem as string | undefined) ?? defaultSubsystem(variant),
       })
+      flashExported()
       if (toastsEnabled) {
         toast.success(copy.exportCrashLogSuccess)
       }
@@ -445,6 +483,7 @@ function ErrorPageShell({
     error,
     exportCrashLogImpl,
     exporting,
+    flashExported,
     subsystem,
     toastsEnabled,
     variant,
@@ -454,13 +493,14 @@ function ErrorPageShell({
     if (!error?.digest) return
     try {
       await navigator.clipboard.writeText(error.digest)
+      flashCopiedId()
       if (toastsEnabled) {
         toast.success(copy.copyErrorIdSuccess)
       }
     } catch {
       /* clipboard denied — silent */
     }
-  }, [copy.copyErrorIdSuccess, error, toastsEnabled])
+  }, [copy.copyErrorIdSuccess, error, flashCopiedId, toastsEnabled])
 
   const handleReload = useCallback(() => {
     window.location.reload()
@@ -478,20 +518,36 @@ function ErrorPageShell({
       data-testid="error-page"
       data-variant={variant}
       data-category={category}
-      className={cn(
-        "flex h-full min-h-[60vh] w-full items-center justify-center px-4 py-8",
-        className
-      )}
+      className={cn("flex h-full w-full items-center justify-center p-4 sm:p-6", className)}
     >
-      <Empty className="mx-auto w-full max-w-2xl border-0">
-        <EmptyHeader>
+      {/*
+        Bounded card: `max-h-full` keeps it inside the (overflow-hidden) shell
+        viewport, the header/footer are `shrink-0` so recovery actions and the
+        title never scroll away, and only the middle detail band scrolls when an
+        error carries a lot of information.
+      */}
+      <div
+        className={cn(
+          "flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm",
+          hasBody && "lg:max-w-4xl"
+        )}
+      >
+        {/* Header — always visible */}
+        <div className="flex shrink-0 flex-col items-center gap-3 px-6 pt-8 pb-5 text-center">
           <EmptyMedia variant="icon" className={cn("bg-destructive/10", isNotFound && "bg-muted")}>
             <HeadlineIcon variant={variant} category={category} />
           </EmptyMedia>
-          <EmptyTitle>{copy.title}</EmptyTitle>
-          <EmptyDescription>{resolvedDescription}</EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent className="max-w-xl">
+          <div className="flex flex-col items-center gap-2">
+            <EmptyTitle className="text-xl">{copy.title}</EmptyTitle>
+            {showCategoryBadge && (
+              <Badge variant="secondary" className="font-normal" data-testid="error-page-category">
+                {copy.categoryLabels[category]}
+              </Badge>
+            )}
+            <EmptyDescription className="mx-auto max-w-xl text-balance">
+              {resolvedDescription}
+            </EmptyDescription>
+          </div>
           {error?.digest && (
             <div
               className="flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground"
@@ -504,37 +560,65 @@ function ErrorPageShell({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 px-2 text-[11px]"
+                className="h-6 gap-1 px-2 text-[11px]"
                 onClick={handleCopyErrorId}
                 data-testid="error-page-copy-id"
               >
-                {copy.copyErrorId}
+                {copiedId ? (
+                  <Check className="size-3 text-success" aria-hidden="true" />
+                ) : (
+                  <Copy className="size-3" aria-hidden="true" />
+                )}
+                {copiedId ? copy.copied : copy.copyErrorId}
               </Button>
             </div>
           )}
-          {showTrace && (
-            <ErrorTraceDetails
-              error={error!}
-              title={copy.traceTitle}
-              className="w-full text-left"
-            />
-          )}
-          {showAuxiliary && (
-            <div className="flex w-full flex-col gap-2">
-              <ErrorDiagnosticsCard
-                copy={copy.diagnostics}
-                categoryLabel={copy.categoryLabels[category]}
-                locale={locale}
-                pathname={pathname}
-              />
-              <RecentErrorsPanel copy={copy.recentErrors} currentErrorId={error?.digest} />
+        </div>
+
+        {/* Detail band — the only scrollable region; two columns on wide screens */}
+        {hasBody && (
+          <div
+            className="min-h-0 flex-1 overflow-y-auto border-t px-6 py-4"
+            data-testid="error-page-body"
+          >
+            <div className="grid gap-3 lg:grid-cols-5 lg:items-start">
+              {showTrace && (
+                <div className={cn("min-w-0", showAuxiliary ? "lg:col-span-3" : "lg:col-span-5")}>
+                  <ErrorTraceDetails
+                    error={error!}
+                    title={copy.traceTitle}
+                    className="w-full text-left"
+                  />
+                </div>
+              )}
+              {showAuxiliary && (
+                <div
+                  className={cn(
+                    "flex min-w-0 flex-col gap-3",
+                    showTrace ? "lg:col-span-2" : "lg:col-span-5"
+                  )}
+                >
+                  <ErrorDiagnosticsCard
+                    copy={copy.diagnostics}
+                    categoryLabel={copy.categoryLabels[category]}
+                    locale={locale}
+                    pathname={pathname}
+                  />
+                  <RecentErrorsPanel copy={copy.recentErrors} currentErrorId={error?.digest} />
+                </div>
+              )}
             </div>
-          )}
+          </div>
+        )}
+
+        {/* Footer — always visible: recovery actions + secondary utilities */}
+        <div className="flex shrink-0 flex-col gap-3 border-t bg-card px-6 py-4">
           {autoRetry.pending && (
             <div
               className="flex items-center justify-center gap-2 text-sm text-muted-foreground"
               data-testid="error-page-auto-retry"
             >
+              <RotateCw className="size-3.5 animate-spin" aria-hidden="true" />
               <span>{copy.autoRetryIn(autoRetry.secondsLeft)}</span>
               <Button
                 variant="ghost"
@@ -548,6 +632,8 @@ function ErrorPageShell({
               </Button>
             </div>
           )}
+
+          {/* Primary recovery actions */}
           <div className="flex flex-wrap items-center justify-center gap-2">
             {showRetry && (
               <Button
@@ -571,6 +657,11 @@ function ErrorPageShell({
                 </Link>
               </Button>
             )}
+            {additionalActions}
+          </div>
+
+          {/* Secondary utilities — lower emphasis, wrap freely */}
+          <div className="flex flex-wrap items-center justify-center gap-1 text-muted-foreground">
             {showAuxiliary && (
               <ErrorReportActions
                 error={error}
@@ -582,25 +673,39 @@ function ErrorPageShell({
             {showCrashExport && (
               <Button
                 variant="ghost"
+                size="sm"
                 onClick={handleExport}
                 disabled={exporting}
                 className="gap-2"
                 data-testid="error-page-export"
               >
-                <Download className="size-4" aria-hidden="true" />
-                {exporting ? copy.exportingCrashLog : copy.exportCrashLog}
+                {exported ? (
+                  <Check className="size-4 text-success" aria-hidden="true" />
+                ) : (
+                  <Download className="size-4" aria-hidden="true" />
+                )}
+                {exporting
+                  ? copy.exportingCrashLog
+                  : exported
+                    ? copy.exportedCrashLog
+                    : copy.exportCrashLog}
               </Button>
             )}
-            <Button variant="ghost" asChild className="gap-2" data-testid="error-page-open-logs">
+            <Button
+              variant="ghost"
+              size="sm"
+              asChild
+              className="gap-2"
+              data-testid="error-page-open-logs"
+            >
               <Link href="/logs">
                 <ScrollText className="size-4" aria-hidden="true" />
                 {copy.openLogs}
               </Link>
             </Button>
-            {additionalActions}
           </div>
-        </EmptyContent>
-      </Empty>
+        </div>
+      </div>
     </div>
   )
 }

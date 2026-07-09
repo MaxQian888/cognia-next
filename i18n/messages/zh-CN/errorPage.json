@@ -13,6 +13,7 @@
     "network": "无法连接网络。请检查你的网络连接后重试。",
     "offline": "你似乎处于离线状态。恢复网络后我们会自动重试。"
   },
+  "copied": "已复制",
   "copyErrorId": "复制 ID",
   "copyErrorIdSuccess": "错误 ID 已复制",
   "description": "发生了意外错误。下方的技术细节可以帮助诊断问题。",
@@ -34,6 +35,7 @@
   "exportCrashLog": "导出崩溃日志",
   "exportCrashLogFailed": "导出崩溃日志失败",
   "exportCrashLogSuccess": "崩溃日志已导出",
+  "exportedCrashLog": "已导出",
   "exportingCrashLog": "导出中…",
   "globalDescription": "应用程序的主布局加载失败。可以尝试恢复，或通过标题栏关闭窗口。",
   "globalTitle": "Cognia 已停止工作",

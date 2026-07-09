@@ -62,6 +62,15 @@ describe("ErrorReportActions component", () => {
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
   })
 
+  it("flips the copy button to an inline confirmation tick after a successful copy", async () => {
+    const { writeClipboard } = setup()
+    const button = screen.getByTestId("error-page-copy-report")
+    expect(button.querySelector(".lucide-check")).toBeNull()
+    await userEvent.click(button)
+    await waitFor(() => expect(writeClipboard).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(button.querySelector(".lucide-check")).not.toBeNull())
+  })
+
   it("toasts failure when the clipboard write rejects", async () => {
     setup({ writeClipboard: jest.fn().mockRejectedValue(new Error("denied")) })
     await userEvent.click(screen.getByTestId("error-page-copy-report"))
@@ -102,6 +111,14 @@ describe("ErrorReportActions component", () => {
     await userEvent.click(screen.getByTestId("error-page-report-issue"))
     await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(1))
     openSpy.mockRestore()
+  })
+
+  it("builds a generic issue title when no error object is present", async () => {
+    const { openUrl } = setup({ error: null, issueReportUrl: "https://github.com/acme/app" })
+    await userEvent.click(screen.getByTestId("error-page-report-issue"))
+    await waitFor(() => expect(openUrl).toHaveBeenCalledTimes(1))
+    const url = openUrl.mock.calls[0][0] as string
+    expect(new URL(url).searchParams.get("title")).toBe("[render] Error report")
   })
 
   it("shows the report-issue button and opens a prefilled URL when configured", async () => {
