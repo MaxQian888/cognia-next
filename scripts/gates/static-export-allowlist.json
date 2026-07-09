@@ -103,5 +103,15 @@
     "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
     "module": "node:os",
     "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
+  },
+  {
+    "file": "lib/plugin/utils/templates.ts",
+    "module": "node:fs",
+    "reason": "Not an import: template-string content of the emitted scaffold test stub (runs in the plugin author's env)."
+  },
+  {
+    "file": "lib/plugin/utils/templates.ts",
+    "module": "node:path",
+    "reason": "Not an import: template-string content of the emitted scaffold test stub (runs in the plugin author's env)."
   }
 ]
