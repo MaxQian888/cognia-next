@@ -874,7 +874,11 @@
     "signedInBodyPlan": "已登录:{account} · {plan}。无需 API Key。",
     "signedInTitle": "已通过官方订阅认证",
     "signedOutBody": "用你的 Claude Pro/Max 订阅登录即可在此使用,无需单独的 API Key。",
-    "signedOutTitle": "复用官方订阅"
+    "signedOutTitle": "复用官方订阅",
+    "localLoginTitle": "检测到本机 Claude Code 登录",
+    "localLoginBody": "本机的 Claude Code CLI 已登录。一键即可在此复用该订阅，无需再次登录。",
+    "localLoginBodyPlan": "本机的 Claude Code CLI 已登录（{plan} 订阅）。一键即可在此复用该订阅，无需再次登录。",
+    "localLoginAction": "一键复用"
   },
   "supported": "支持",
   "tabHealth": "健康",

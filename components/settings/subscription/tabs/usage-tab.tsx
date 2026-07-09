@@ -49,6 +49,7 @@ import {
   DownloadIcon,
   FoldVerticalIcon,
   HashIcon,
+  RefreshCwIcon,
   RepeatIcon,
   UnfoldVerticalIcon,
 } from "lucide-react"
@@ -85,27 +86,17 @@ import { downloadBlob } from "@/lib/files/download"
 import { formatCostInCurrency, formatTokens } from "@/types/system/usage"
 import { useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
 import { useAccounts } from "@/lib/subscription/core/hooks"
-import { BalanceCard } from "@/components/settings/subscription/balance-card"
-import { LimitsMetersCard } from "@/components/settings/subscription/limits-meters-card"
+import { ProviderQuotaPanel } from "@/components/settings/subscription/provider-quota-panel"
+import { WindowGaugeCard } from "@/components/settings/subscription/window-gauge-card"
 import { UsageDisplayToggle } from "@/components/settings/subscription/usage-display-toggle"
 import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
 import { useCountUp } from "@/hooks/usage/use-count-up"
-import {
-  MotionCollapse,
-  MotionReveal,
-  MotionStatusSwap,
-  useFlowMotion,
-} from "@/components/chat/motion/motion-reveal"
+import { MotionCollapse, MotionReveal, useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import type { UsageDisplayMode } from "@/types/appearance"
-import type { ProviderId } from "@/types/subscription"
-import {
-  buildUtilizationSeries,
-  splitCountdown,
-  summarizeCurrentWindow,
-  type CurrentWindowSummary,
-  type UsageLevel,
-  type WindowStatus,
-} from "@/lib/subscription/anthropic/usage-analytics"
+import type { LimitsMeter, ProviderId } from "@/types/subscription"
+import { buildUtilizationSeries } from "@/lib/subscription/anthropic/usage-analytics"
+import { resolveUsageWindows } from "@/lib/subscription/anthropic/overview-windows"
+import { useProviderLimits } from "@/lib/subscription/limits/hooks"
 import {
   aggregateByDay,
   aggregateByModel,
@@ -143,18 +134,6 @@ function filterBySurface(
 ): SessionUsageRow[] {
   if (surface === "all") return [...rows]
   return rows.filter((r) => (r.surface ?? "chat") === (surface as UsageSurface))
-}
-
-const LEVEL_BAR: Record<UsageLevel, string> = {
-  ok: "bg-emerald-500",
-  warn: "bg-amber-500",
-  crit: "bg-destructive",
-}
-
-const LEVEL_TEXT: Record<UsageLevel, string> = {
-  ok: "text-emerald-500",
-  warn: "text-amber-500",
-  crit: "text-destructive",
 }
 
 /* ── Section folding ────────────────────────────────────────────────────── */
@@ -527,36 +506,9 @@ function BalancesSection({ now }: { now: number }) {
   return (
     <div className="space-y-3" data-testid="balances-section">
       {BALANCE_PROVIDERS.map((provider) => (
-        <ProviderBalances key={provider} provider={provider} now={now} />
+        <ProviderQuotaPanel key={provider} provider={provider} now={now} />
       ))}
     </div>
-  )
-}
-
-/**
- * Render the active account of one non-anthropic provider in two complementary
- * cards: the credit/quota balance (`BalanceCard`, also the source `/billing`
- * reads), and the unified rate-limit *windows* (`LimitsMetersCard` in
- * windows-only mode — the desktop sibling of the TUI `/limits` bars, shown only
- * when the provider actually reports utilization windows, e.g. a real ChatGPT
- * subscription). No active account → nothing renders.
- */
-function ProviderBalances({ provider, now }: { provider: ProviderId; now: number }) {
-  const { accounts, activeAccountId } = useAccounts(provider)
-  if (!activeAccountId) return null
-  const active = accounts.find((a) => a.id === activeAccountId)
-  const label = active?.label ?? active?.email ?? activeAccountId
-  return (
-    <>
-      <LimitsMetersCard
-        provider={provider}
-        accountId={activeAccountId}
-        label={label}
-        now={now}
-        windowsOnly
-      />
-      <BalanceCard provider={provider} accountId={activeAccountId} label={label} />
-    </>
   )
 }
 
@@ -668,6 +620,14 @@ function UsageStatGrid({ models }: { models: ModelUsageRow[] }) {
 
 /* ── Current window gauges ─────────────────────────────────────────────── */
 
+/** Map a meter id onto the section's stable gauge testid slots. */
+const WINDOW_TESTID: Record<string, string> = {
+  session: "usage-window-5h",
+  weekly: "usage-window-7d",
+  weekly_opus: "usage-window-7d-opus",
+  weekly_sonnet: "usage-window-7d-sonnet",
+}
+
 function CurrentWindowCard({
   latest,
   now,
@@ -680,9 +640,29 @@ function CurrentWindowCard({
   onToggle: () => void
 }) {
   const t = useTranslations("subscription.usage.window")
-  const summary: CurrentWindowSummary | null = useMemo(
-    () => summarizeCurrentWindow(latest, { now }),
-    [latest, now]
+  // Fuse the free OAuth-endpoint snapshot with the header sample — newest
+  // wins (see resolveUsageWindows). This keeps the gauges live even when the
+  // user hasn't sent a chat message, and adds the opus/sonnet weekly windows
+  // the header path can't see.
+  const { activeAccountId } = useAccounts("anthropic")
+  const { snapshot, refreshing, refresh } = useProviderLimits("anthropic", activeAccountId ?? "")
+  const resolved = useMemo(() => resolveUsageWindows(snapshot, latest), [snapshot, latest])
+
+  const bySlot = new Map(resolved.windows.map((m) => [m.id, m]))
+  const extraWindows = resolved.windows.filter((m) => !(m.id === "session" || m.id === "weekly"))
+
+  const refreshButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => void refresh()}
+      disabled={refreshing || !activeAccountId}
+      data-testid="usage-window-refresh"
+      aria-label={t("refresh")}
+    >
+      <RefreshCwIcon className={cn("size-3.5", refreshing && "animate-spin")} aria-hidden />
+      {t("refresh")}
+    </Button>
   )
 
   return (
@@ -693,34 +673,53 @@ function CurrentWindowCard({
       onToggle={onToggle}
       testid="usage-window-section"
     >
-      {!summary ? (
-        <p className="text-xs text-muted-foreground" data-testid="usage-window-empty">
-          {t("noSnapshot")}
-        </p>
+      {resolved.windows.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground" data-testid="usage-window-empty">
+            {t("noSnapshot")}
+          </p>
+          {refreshButton}
+        </div>
       ) : (
         <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground" data-testid="usage-window-source">
+              {resolved.source === "endpoint" ? t("sourceEndpoint") : t("sourceHeaders")}
+            </p>
+            {refreshButton}
+          </div>
           <div className="grid gap-4 sm:grid-cols-2" data-testid="usage-current-window">
-            <WindowGauge
+            <WindowSlot
+              meter={bySlot.get("session") ?? null}
               label={t("fiveHour")}
-              window={summary.fiveHour}
-              representative={summary.representativeClaim === "five_hour"}
+              now={now}
+              representative={resolved.representativeClaim === "five_hour"}
               testid="usage-window-5h"
             />
-            <WindowGauge
+            <WindowSlot
+              meter={bySlot.get("weekly") ?? null}
               label={t("sevenDay")}
-              window={summary.sevenDay}
-              representative={summary.representativeClaim === "seven_day"}
+              now={now}
+              representative={resolved.representativeClaim === "seven_day"}
               testid="usage-window-7d"
             />
+            {extraWindows.map((meter) => (
+              <WindowGaugeCard
+                key={meter.id}
+                meter={meter}
+                now={now}
+                testid={WINDOW_TESTID[meter.id] ?? `usage-window-${meter.id}`}
+              />
+            ))}
           </div>
-          {summary.fallbackPercentage != null && (
+          {resolved.fallbackPercentage != null && (
             <SettingsAlert>
-              {t("fallback", { pct: Math.round(summary.fallbackPercentage) })}
+              {t("fallback", { pct: Math.round(resolved.fallbackPercentage) })}
             </SettingsAlert>
           )}
-          {summary.overageDisabledReason && (
+          {resolved.overageDisabledReason && (
             <SettingsAlert variant="destructive">
-              {t("overageDisabled", { reason: summary.overageDisabledReason })}
+              {t("overageDisabled", { reason: resolved.overageDisabledReason })}
             </SettingsAlert>
           )}
         </>
@@ -729,73 +728,29 @@ function CurrentWindowCard({
   )
 }
 
-function WindowGauge({
+/** A gauge slot that renders a placeholder when its window wasn't reported. */
+function WindowSlot({
+  meter,
   label,
-  window,
+  now,
   representative,
   testid,
 }: {
+  meter: LimitsMeter | null
   label: string
-  window: WindowStatus | null
+  now: number
   representative: boolean
   testid: string
 }) {
   const t = useTranslations("subscription.usage.window")
-
-  if (!window) {
+  if (!meter) {
     return (
       <div className="rounded-lg border p-4 text-xs text-muted-foreground" data-testid={testid}>
         <span className="font-medium text-foreground">{label}</span> — {t("noData")}
       </div>
     )
   }
-
-  const pct = Math.max(0, Math.min(100, Math.round(window.utilization)))
-  const countdown =
-    window.msUntilReset == null
-      ? t("resetUnknown")
-      : (() => {
-          const parts = splitCountdown(window.msUntilReset)
-          if (parts.expired) return t("resetExpired")
-          return parts.hours > 0
-            ? t("resetsInHm", { hours: parts.hours, minutes: parts.minutes })
-            : t("resetsInM", { minutes: parts.minutes })
-        })()
-
-  return (
-    <div className="space-y-2 rounded-lg border p-4" data-testid={testid}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">{label}</span>
-        {representative && (
-          <Badge variant="outline" className="text-[10px]">
-            {t("representative")}
-          </Badge>
-        )}
-      </div>
-      <div className="flex items-baseline gap-2">
-        <MotionStatusSwap swapKey={window.level}>
-          <span className={cn("text-2xl font-bold tabular-nums", LEVEL_TEXT[window.level])}>
-            {Math.round(window.utilization)}%
-          </span>
-        </MotionStatusSwap>
-        <span className="text-xs text-muted-foreground">{t(`level.${window.level}`)}</span>
-      </div>
-      <div
-        className="h-2 w-full overflow-hidden rounded-full bg-muted"
-        role="progressbar"
-        aria-valuenow={pct}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={label}
-      >
-        <div
-          className={cn("h-full rounded-full transition-all duration-500", LEVEL_BAR[window.level])}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <p className="text-xs text-muted-foreground">{countdown}</p>
-    </div>
-  )
+  return <WindowGaugeCard meter={meter} now={now} representative={representative} testid={testid} />
 }
 
 /* ── Utilization trend ─────────────────────────────────────────────────── */

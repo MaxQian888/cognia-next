@@ -5,8 +5,9 @@
  * store (active account + `lock`) and delegates the full switch/manage flow to
  * the shared `AccountManageDialog` — so both bars expose account switching and a
  * one-click lock without duplicating the account list UI (that lives in the
- * dialog and in the guild-rail `AccountSwitcher`). Renders `null` when no local
- * accounts exist, matching `AccountSwitcher`.
+ * dialog). This bar button is the primary account entry point on desktop (the
+ * guild rail no longer carries one). Renders `null` when no local accounts
+ * exist.
  */
 
 import { useState } from "react"

@@ -9,6 +9,7 @@
 
 pub mod commands;
 pub mod credential;
+pub mod discovery;
 
 use crate::subscription::preset::ProviderPreset;
 use crate::subscription::provider::{ProviderId, SubscriptionProvider};

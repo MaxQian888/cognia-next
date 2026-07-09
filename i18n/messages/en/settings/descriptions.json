@@ -50,7 +50,7 @@
   "sourceControl": "AI commit-message generation and other Git panel preferences.",
   "speech": "Voice input (STT) language and microphone, plus read-aloud (TTS) provider, voice and auto-play.",
   "subagents": "Sub-agent templates and live runtime — spawn focused workers from a parent agent for research, code review, content, or analysis sub-tasks.",
-  "subscription": "Sign in with your Claude Pro/Max subscription, monitor 5h/7d rate-limit windows, and manage OAuth credentials in your OS keychain.",
+  "subscription": "Sign in with your Claude, Codex (ChatGPT), or OpenCode subscription, monitor rate-limit windows and balances, and manage OAuth credentials in your OS keychain.",
   "teams": "Multi-character coordination — round-robin, supervisor, manual.",
   "terminal": "Integrated terminal dock — default shell, font, scrollback, and per-project overrides.",
   "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",

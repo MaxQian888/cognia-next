@@ -153,6 +153,7 @@
     "description": "通过惩罚已出现的令牌来鼓励新话题。",
     "label": "存在惩罚"
   },
+  "connectionSection": "连接",
   "providerSpecific": "提供商特有",
   "resetAll": "重置为默认值",
   "resetConfirm": "将所有参数重置为默认值？",

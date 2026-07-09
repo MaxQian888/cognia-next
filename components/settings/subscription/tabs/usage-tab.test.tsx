@@ -37,6 +37,12 @@ jest.mock("@/stores/chat", () => ({
     selector({ setActiveSession: setActiveSessionMock }),
 }))
 
+const refreshLimitsMock = jest.fn()
+const useProviderLimitsMock = jest.fn()
+jest.mock("@/lib/subscription/limits/hooks", () => ({
+  useProviderLimits: (...args: unknown[]) => useProviderLimitsMock(...args),
+}))
+
 const useAccountsMock = jest.fn()
 jest.mock("@/lib/subscription/core/hooks", () => ({
   useAccounts: (provider: string) => useAccountsMock(provider),
@@ -123,6 +129,12 @@ beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
   useAccountsMock.mockReturnValue({ accounts: [], activeAccountId: null })
+  useProviderLimitsMock.mockReturnValue({
+    snapshot: null,
+    refreshing: false,
+    unavailable: false,
+    refresh: refreshLimitsMock,
+  })
   currentMode = "standard"
 })
 
@@ -359,6 +371,78 @@ describe("SubscriptionUsageTab", () => {
     setup({ rows: [], sessionRows: [usageRow()] })
     render(<SubscriptionUsageTab />)
     expect(screen.getByTestId("usage-raw-empty")).toBeInTheDocument()
+  })
+
+  it("prefers a newer endpoint snapshot: opus/sonnet gauges + live-source line", () => {
+    useProviderLimitsMock.mockReturnValue({
+      snapshot: {
+        provider: "anthropic",
+        accountId: "acc-1",
+        fetchedAt: NOW + 1000,
+        meters: [
+          {
+            id: "session",
+            labelKey: "subscription.limits.meter.session",
+            kind: "window",
+            usedPct: 42,
+            resetAt: NOW + 3_600_000,
+            status: "ok",
+          },
+          {
+            id: "weekly",
+            labelKey: "subscription.limits.meter.weekly",
+            kind: "window",
+            usedPct: 12,
+            resetAt: NOW + 86_400_000,
+            status: "ok",
+          },
+          {
+            id: "weekly_opus",
+            labelKey: "subscription.limits.meter.weekly_opus",
+            kind: "window",
+            usedPct: 7,
+            resetAt: NOW + 86_400_000,
+            status: "ok",
+          },
+          {
+            id: "weekly_sonnet",
+            labelKey: "subscription.limits.meter.weekly_sonnet",
+            kind: "window",
+            usedPct: 3,
+            resetAt: NOW + 86_400_000,
+            status: "ok",
+          },
+        ],
+      },
+      refreshing: false,
+      unavailable: false,
+      refresh: refreshLimitsMock,
+    })
+    useAccountsMock.mockReturnValue({ accounts: [], activeAccountId: "acc-1" })
+    setup()
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-window-5h")).toHaveTextContent("42%")
+    expect(screen.getByTestId("usage-window-7d")).toHaveTextContent("12%")
+    expect(screen.getByTestId("usage-window-7d-opus")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-window-7d-sonnet")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-window-source")).toHaveTextContent("Live usage API")
+  })
+
+  it("window refresh button triggers a limits refetch for the active account", async () => {
+    useAccountsMock.mockReturnValue({ accounts: [], activeAccountId: "acc-1" })
+    setup()
+    render(<SubscriptionUsageTab />)
+    // The codex/opencode quota panels may auto-fetch on mount with the same
+    // shared mock — assert the click adds exactly one more call.
+    const before = refreshLimitsMock.mock.calls.length
+    await userEvent.click(screen.getByTestId("usage-window-refresh"))
+    expect(refreshLimitsMock).toHaveBeenCalledTimes(before + 1)
+  })
+
+  it("window refresh button is disabled without an active anthropic account", () => {
+    setup()
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-window-refresh")).toBeDisabled()
   })
 
   it("renders a no-data gauge and expired countdown for a missing/elapsed window", () => {

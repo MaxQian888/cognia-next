@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label"
 import { AccountList } from "./account-list"
 import { OpencodeAddAccountDialog } from "./add-account-dialog/opencode"
 import { PresetPicker } from "./preset-picker"
+import { ProviderQuotaPanel } from "./provider-quota-panel"
 
 import { useOpencodeDiscovery } from "@/lib/subscription/opencode/discovery"
 import { OPENCODE_WHITELIST } from "@/types/subscription"
@@ -46,6 +47,8 @@ export function ProviderTabOpencode() {
           </Button>
         }
       />
+
+      <ProviderQuotaPanel provider="opencode" />
 
       <PresetPicker provider="opencode" />
 
@@ -91,7 +94,8 @@ export function ProviderTabOpencode() {
                 ))}
               </ul>
               <p className="text-[11px] text-muted-foreground">
-                Whitelist: <code className="font-mono">{OPENCODE_WHITELIST.join(", ")}</code>
+                {tDiscovery("whitelistLabel")}:{" "}
+                <code className="font-mono">{OPENCODE_WHITELIST.join(", ")}</code>
               </p>
             </div>
           )}

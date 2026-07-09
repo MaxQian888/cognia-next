@@ -1,11 +1,10 @@
 "use client"
 
-// Codex provider tab — flat (no inner tabs). Account list + preset picker +
-// connection-settings card + add-account dialog. Codex doesn't surface
-// usage metrics, so we don't force the Anthropic inner-tab structure here
-// (that would ship placeholder panes); instead we polish the standalone
-// settings card with `SettingsCard` + `SettingsToggle` chrome for visual
-// parity with the rest of the settings UI.
+// Codex provider tab — flat (no inner tabs). Account list + quota panel
+// (5h/weekly windows + credit balance for the active account) + preset picker
+// + connection-settings card + add-account dialog. The quota panel reuses the
+// unified limits surface, so a real ChatGPT subscription shows the same
+// gauges as the TUI `/limits` bars.
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
@@ -20,6 +19,7 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import { AccountList } from "./account-list"
 import { CodexAddAccountDialog } from "./add-account-dialog/codex"
 import { PresetPicker } from "./preset-picker"
+import { ProviderQuotaPanel } from "./provider-quota-panel"
 
 import {
   DEFAULT_CODEX_SUBSCRIPTION_SETTINGS,
@@ -87,6 +87,7 @@ export function ProviderTabCodex() {
       </div>
 
       <AccountList provider="codex" onAdd={() => setAddOpen(true)} />
+      <ProviderQuotaPanel provider="codex" />
       <PresetPicker provider="codex" />
 
       <SettingsCard

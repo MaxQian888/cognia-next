@@ -241,6 +241,34 @@ export async function anthropicOauthSavePkceResult(
 }
 
 // ---------------------------------------------------------------------------
+// Anthropic (discovery of an existing Claude Code CLI login)
+// ---------------------------------------------------------------------------
+
+/**
+ * Outcome of probing for an existing Claude Code CLI subscription login
+ * (`~/.claude/.credentials.json` or the `"Claude Code-credentials"` OS
+ * keyring entry). Mirrors `subscription::anthropic::discovery::
+ * DiscoveredAnthropicAuth` field-for-field.
+ */
+export interface DiscoveredAnthropicAuth {
+  source: "file" | "keyring"
+  credentialsPath: string
+  accessToken: string
+  refreshToken: string
+  /** Absolute expiry of the access token, ms epoch. 0 when absent. */
+  expiresAtMs: number
+  scopes: string[]
+  /** "max" | "pro" | "team" | … as Claude Code serialises it. */
+  subscriptionType?: string
+  rateLimitTier?: string
+}
+
+export async function anthropicOauthDiscover(): Promise<DiscoveredAnthropicAuth | null> {
+  const got = await transport.call<DiscoveredAnthropicAuth | null>("anthropic_oauth_discover")
+  return got ?? null
+}
+
+// ---------------------------------------------------------------------------
 // Codex (device-code OAuth + discovery)
 // ---------------------------------------------------------------------------
 

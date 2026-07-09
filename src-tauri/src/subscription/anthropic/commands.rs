@@ -6,11 +6,21 @@
 // new account into the v2 vault. Generic CRUD (list/get/delete/rename) flows
 // through `subscription::commands::subscription_*` instead.
 
+use super::discovery::{self, DiscoveredAnthropicAuth};
 use super::AnthropicProvider;
 use crate::subscription::provider::{ProviderId, SubscriptionProvider};
 use crate::subscription::vault::{
     self, Account, AnthropicCredentialData, ProviderCredential, ProviderVault,
 };
+
+/// Read-only probe for an existing Claude Code CLI subscription login
+/// (`~/.claude/.credentials.json` or the `"Claude Code-credentials"` keyring
+/// entry). Used by the "Reuse" mode of the Anthropic login dialog and the
+/// providers-tab one-click reuse card.
+#[tauri::command]
+pub async fn anthropic_oauth_discover() -> Result<Option<DiscoveredAnthropicAuth>, String> {
+    discovery::discover_anthropic_auth()
+}
 
 /// Persist the result of a successful TS-side PKCE exchange.
 ///
@@ -67,6 +77,15 @@ mod tests {
     use super::*;
 
     const LOCAL_ACCOUNT_ID: &str = "local-test";
+
+    #[tokio::test]
+    async fn discover_returns_none_when_config_dir_empty() {
+        // Shared hermetic seam: isolated CLAUDE_CONFIG_DIR + forced-empty
+        // keyring, so this never reads the developer's real login.
+        let _env = super::discovery::test_support::TestEnv::new();
+        let got = anthropic_oauth_discover().await.unwrap();
+        assert!(got.is_none());
+    }
 
     fn sample() -> AnthropicCredentialData {
         AnthropicCredentialData {

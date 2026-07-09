@@ -18,10 +18,27 @@ let tauri = true
 jest.mock("@/lib/tauri", () => ({ isTauri: () => tauri }))
 
 type Cred = { email?: string; mode: string; plan?: string } | null
+const reload = jest.fn()
 let hookResult: { credential: Cred; loading: boolean } = { credential: null, loading: false }
+type Discovered = { accessToken: string; refreshToken: string; subscriptionType?: string } | null
+let discoveredResult: Discovered = null
 jest.mock("@/lib/subscription/anthropic/hooks", () => ({
-  useActiveAnthropicCredential: () => hookResult,
+  useActiveAnthropicCredential: () => ({ ...hookResult, reload }),
+  useAnthropicDiscovery: () => ({
+    discovered: discoveredResult,
+    loading: false,
+    error: null,
+    reload: jest.fn(),
+  }),
 }))
+
+jest.mock("@/lib/subscription/anthropic/discovery", () => ({
+  adoptAndActivateDiscoveredAuth: jest.fn(),
+  discoveredToCredential: (d: { accessToken: string; refreshToken: string }) =>
+    d.accessToken.trim() && d.refreshToken.trim() ? { mode: "subscription" } : null,
+}))
+import { adoptAndActivateDiscoveredAuth } from "@/lib/subscription/anthropic/discovery"
+const adoptMock = adoptAndActivateDiscoveredAuth as jest.Mock
 
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: ({ point }: { point: string }) => (
@@ -33,8 +50,11 @@ import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-c
 
 beforeEach(() => {
   replace.mockClear()
+  reload.mockClear()
+  adoptMock.mockReset()
   tauri = true
   hookResult = { credential: null, loading: false }
+  discoveredResult = null
 })
 
 describe("AnthropicSubscriptionReuseCard", () => {
@@ -85,6 +105,49 @@ describe("AnthropicSubscriptionReuseCard", () => {
     render(<AnthropicSubscriptionReuseCard />)
     await user.click(screen.getByRole("button", { name: "ccswitchHintAction" }))
     expect(replace).toHaveBeenCalledWith("/settings?section=ccswitch", { scroll: false })
+  })
+
+  it("desktop + local CLI login detected shows the one-click reuse alert instead of sign-in", () => {
+    discoveredResult = { accessToken: "oat", refreshToken: "ort", subscriptionType: "max" }
+    render(<AnthropicSubscriptionReuseCard />)
+    expect(screen.getByText("localLoginTitle")).toBeInTheDocument()
+    expect(screen.getByText("localLoginBodyPlan")).toBeInTheDocument()
+    expect(screen.queryByText("signedOutTitle")).not.toBeInTheDocument()
+  })
+
+  it("one-click reuse adopts + activates then reloads the credential", async () => {
+    discoveredResult = { accessToken: "oat", refreshToken: "ort" }
+    adoptMock.mockResolvedValue({ id: "acct-1" })
+    const user = userEvent.setup()
+    render(<AnthropicSubscriptionReuseCard />)
+    await user.click(screen.getByRole("button", { name: "localLoginAction" }))
+    expect(adoptMock).toHaveBeenCalledWith(discoveredResult)
+    expect(reload).toHaveBeenCalled()
+  })
+
+  it("surfaces an adopt failure inline", async () => {
+    discoveredResult = { accessToken: "oat", refreshToken: "ort" }
+    adoptMock.mockRejectedValue(new Error("vault sealed"))
+    const user = userEvent.setup()
+    render(<AnthropicSubscriptionReuseCard />)
+    await user.click(screen.getByRole("button", { name: "localLoginAction" }))
+    expect(await screen.findByText("vault sealed")).toBeInTheDocument()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it("unusable discovered credential falls back to the sign-in prompt", () => {
+    discoveredResult = { accessToken: "", refreshToken: "" }
+    render(<AnthropicSubscriptionReuseCard />)
+    expect(screen.getByText("signedOutTitle")).toBeInTheDocument()
+    expect(screen.queryByText("localLoginTitle")).not.toBeInTheDocument()
+  })
+
+  it("active account wins over a detected local login", () => {
+    hookResult = { credential: { mode: "subscription", plan: "max" }, loading: false }
+    discoveredResult = { accessToken: "oat", refreshToken: "ort" }
+    render(<AnthropicSubscriptionReuseCard />)
+    expect(screen.getByText("signedInTitle")).toBeInTheDocument()
+    expect(screen.queryByText("localLoginTitle")).not.toBeInTheDocument()
   })
 
   it("hides subscription alerts while the credential is still loading", () => {

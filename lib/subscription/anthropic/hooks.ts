@@ -13,6 +13,7 @@ import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 
 import { anthropicOauthSavePkceResult, getAccount, setActiveAccount } from "../core/transport"
+import { discoverAnthropicAuth, type DiscoveredAnthropicAuth } from "./discovery"
 import { refreshAccessToken } from "./oauth"
 import type {
   AnthropicCredentialData,
@@ -157,6 +158,69 @@ export function useActiveAnthropicCredential(): UseActiveAnthropicCredentialResu
   }, [])
 
   return { activeAccountId, credential, loading, reload, refresh, signOut }
+}
+
+export interface UseAnthropicDiscoveryResult {
+  discovered: DiscoveredAnthropicAuth | null
+  loading: boolean
+  error: string | null
+  /** Force a re-probe (e.g. after the user runs `claude login` in a terminal). */
+  reload: () => Promise<void>
+}
+
+/**
+ * Probe for an existing local Claude Code CLI subscription login. Mirrors
+ * `useCodexDiscovery` — desktop-only (returns `null` on web), read-only.
+ */
+export function useAnthropicDiscovery(): UseAnthropicDiscoveryResult {
+  const [discovered, setDiscovered] = useState<DiscoveredAnthropicAuth | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const reload = useCallback(async () => {
+    if (!isTauri()) {
+      setDiscovered(null)
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const got = await discoverAnthropicAuth()
+      setDiscovered(got)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setDiscovered(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      if (!isTauri()) {
+        if (alive) {
+          setDiscovered(null)
+          setLoading(false)
+        }
+        return
+      }
+      try {
+        const got = await discoverAnthropicAuth()
+        if (alive) setDiscovered(got)
+      } catch (err) {
+        if (alive) setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  return { discovered, loading, error, reload }
 }
 
 function isAnthropicCredential(

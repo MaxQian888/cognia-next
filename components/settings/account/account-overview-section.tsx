@@ -2,12 +2,21 @@
 
 /**
  * Desktop account overview — the unified identity surface desktop users get
- * in place of the mobile `/me` hub (the desktop `/me` route redirects here).
- * Aggregates the platform-neutral identity, the shared profile editor, and
- * jump-offs to the subscription, security, and companion-devices sections.
+ * in place of the mobile `/me` hub (the desktop `/me` route redirects here,
+ * and `?section=profile` now redirects here too).
+ *
+ * This is the aggregation surface: a credential-only "plan & session" card
+ * (plan, email, usage, session lifecycle), the embedded profile EDITOR
+ * (`<ProfileSection />` — the single owner of avatar/name/pronouns/status/bio/
+ * timezone, so those fields render exactly once), local-account management +
+ * quick-switch, and jump-offs to the subscription, security, and
+ * companion-devices sections.
  *
  * Reuses the same neutral hooks the mobile AccountCard sits on — but NOT the
  * mobile-coupled AccountCard component itself (it hard-links into `/me/*`).
+ * Sign-out / refresh reuse the SAME `useActiveAnthropicCredential()` the
+ * subscription Account tab drives (one implementation), and reuse its
+ * `subscription.account.*` labels rather than minting parallel keys.
  *
  * `now` is sourced from a ticking state (never `Date.now()` in render) so the
  * usage reset countdown stays accurate without a purity violation, and the
@@ -18,18 +27,22 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { CopyIcon, LockIcon, PlugZapIcon } from "lucide-react"
+import { CopyIcon, LockIcon, LogOutIcon, PlugZapIcon, RefreshCwIcon } from "lucide-react"
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { AccountManageDialog } from "@/components/account/account-manage-dialog"
-import { deterministicColor, initials } from "@/lib/ui/avatar"
 import { isTauri } from "@/lib/tauri"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
-import { useUserProfile } from "@/lib/profile/use-user-profile"
 import { useActiveAnthropicCredential, useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
@@ -80,17 +93,19 @@ function UsageRow({
 
 export function AccountOverviewSection() {
   const t = useTranslations("settings.account")
+  const tSub = useTranslations("subscription")
   const router = useRouter()
-  const { profile, resolvedDisplayName, resolvedAvatarUrl } = useUserProfile()
-  const { credential } = useActiveAnthropicCredential()
+  const { credential, refresh, signOut } = useActiveAnthropicCredential()
   const { latest } = useAnthropicUsage(1)
   const { paired, shortDeviceId } = useCompanionConfig()
-  const accountCount = useAccountStore((state) => state.accounts.length)
+  const accounts = useAccountStore((state) => state.accounts)
   const activeAccount = useAccountStore(selectActiveAccount)
   const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
   const lockAccounts = useAccountStore((state) => state.lock)
+  const switchAccount = useAccountStore((state) => state.switchAccount)
   const autoLockMinutes = useSettingsStore((state) => state.settings?.accountAutoLockMinutes ?? 0)
   const [manageOpen, setManageOpen] = useState(false)
+  const [busy, setBusy] = useState<"refresh" | "signOut" | null>(null)
   // Local accounts are a Tauri-only concept; resolve post-hydration to keep the
   // server + first client render in agreement (mirrors settings-sidebar.tsx).
   const [desktopReady, setDesktopReady] = useState(false)
@@ -113,9 +128,10 @@ export function AccountOverviewSection() {
     }
   }, [])
 
-  const displayName = resolvedDisplayName ?? t("fallbackName")
+  const accountCount = accounts.length
   const email = credential?.email ?? ""
   const planLabel = credential?.plan ? credential.plan.toUpperCase() : t("fallbackPlan")
+  const expiry = credential ? new Date(credential.expiresAtMs).toLocaleString() : null
   const fiveHour = latest?.fiveHour ?? null
   const sevenDay = latest?.sevenDay ?? null
 
@@ -129,9 +145,45 @@ export function AccountOverviewSection() {
     }
   }
 
+  const onRefresh = async () => {
+    setBusy("refresh")
+    try {
+      await refresh()
+      toast.success(t("sessionRefreshed"))
+    } catch {
+      toast.error(t("sessionActionFailed"))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const onSignOut = async () => {
+    setBusy("signOut")
+    try {
+      await signOut()
+      toast.success(t("signedOut"))
+    } catch {
+      toast.error(t("sessionActionFailed"))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const lockNow = () => {
     lockAccounts()
     toast.success(t("lockedNow"))
+  }
+
+  // Switching to a password-protected account can't happen inline — route the
+  // user to the manage dialog's unlock flow instead of building a new one.
+  const handleSwitch = async (accountId: string) => {
+    if (accountId === activeAccount?.id) return
+    try {
+      await switchAccount(accountId)
+    } catch {
+      toast.error(t("switchAccountRequiresUnlock"))
+      setManageOpen(true)
+    }
   }
 
   return (
@@ -143,36 +195,24 @@ export function AccountOverviewSection() {
 
       <Card>
         <CardContent className="flex flex-col gap-4 pt-6">
-          <div className="flex items-center gap-3">
-            <Avatar className="size-14">
-              {resolvedAvatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- avatar is a small data: URL, not an optimizable remote asset
-                <img
-                  src={resolvedAvatarUrl}
-                  alt=""
-                  className="size-full object-cover"
-                  data-testid="account-overview-avatar-img"
-                />
-              ) : (
-                <AvatarFallback style={{ backgroundColor: deterministicColor(displayName) }}>
-                  {initials(displayName)}
-                </AvatarFallback>
-              )}
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span
-                  className="truncate text-sm font-semibold"
-                  data-testid="account-overview-name"
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className="text-[10px]"
+                  data-testid="account-overview-plan"
                 >
-                  {displayName}
-                </span>
-                {profile.pronouns ? (
-                  <span className="text-xs text-muted-foreground">{profile.pronouns}</span>
-                ) : null}
-                <Badge variant="outline" className="text-[10px]">
                   {planLabel}
                 </Badge>
+                {credential && expiry ? (
+                  <span
+                    className="text-[11px] text-muted-foreground"
+                    data-testid="account-overview-expiry"
+                  >
+                    {tSub("account.expiresLabel")}: {expiry}
+                  </span>
+                ) : null}
               </div>
               {email ? (
                 <div className="flex items-center gap-1">
@@ -210,15 +250,37 @@ export function AccountOverviewSection() {
                   </Button>
                 </div>
               )}
-              {profile.statusMessage ? (
-                <p
-                  className="truncate text-xs text-muted-foreground"
-                  data-testid="account-overview-status"
-                >
-                  {profile.statusMessage}
-                </p>
-              ) : null}
             </div>
+            {credential ? (
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => void onRefresh()}
+                  disabled={busy !== null}
+                  data-testid="account-overview-refresh"
+                >
+                  <RefreshCwIcon
+                    className={`size-3.5 ${busy === "refresh" ? "animate-spin" : ""}`}
+                  />
+                  {tSub("account.refresh")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => void onSignOut()}
+                  disabled={busy !== null}
+                  data-testid="account-overview-signout"
+                >
+                  <LogOutIcon className="size-3.5" />
+                  {tSub("account.signOut")}
+                </Button>
+              </div>
+            ) : null}
           </div>
           {fiveHour || sevenDay ? (
             <div className="flex flex-col gap-2 border-t pt-3">
@@ -243,48 +305,68 @@ export function AccountOverviewSection() {
 
       {desktopReady ? (
         <Card>
-          <CardContent className="flex items-center justify-between gap-3 pt-6">
-            <div className="min-w-0">
-              <p className="text-sm font-medium">{t("localAccountsTitle")}</p>
-              <p
-                className="truncate text-xs text-muted-foreground"
-                data-testid="account-overview-local-summary"
-              >
-                {t("localAccountsSummary", {
-                  name: activeAccount?.displayName ?? t("fallbackName"),
-                  count: accountCount,
-                })}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {unlockedAccountId ? (
+          <CardContent className="flex flex-col gap-3 pt-6">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{t("localAccountsTitle")}</p>
+                <p
+                  className="truncate text-xs text-muted-foreground"
+                  data-testid="account-overview-local-summary"
+                >
+                  {t("localAccountsSummary", {
+                    name: activeAccount?.displayName ?? t("fallbackName"),
+                    count: accountCount,
+                  })}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {unlockedAccountId ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={lockNow}
+                    data-testid="account-overview-lock-now"
+                  >
+                    <LockIcon className="size-3.5" />
+                    {t("lockNow")}
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  className="gap-1.5"
-                  onClick={lockNow}
-                  data-testid="account-overview-lock-now"
+                  onClick={() => setManageOpen(true)}
+                  data-testid="account-overview-manage-local"
                 >
-                  <LockIcon className="size-3.5" />
-                  {t("lockNow")}
+                  {t("localAccountsManage")}
                 </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setManageOpen(true)}
-                data-testid="account-overview-manage-local"
-              >
-                {t("localAccountsManage")}
-              </Button>
+              </div>
             </div>
+            {accounts.length > 1 ? (
+              <Select value={activeAccount?.id ?? undefined} onValueChange={handleSwitch}>
+                <SelectTrigger
+                  className="w-full"
+                  aria-label={t("switchAccountAria")}
+                  data-testid="account-overview-switch"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
 
-      <ProfileSection />
+      <ProfileSection showEmail={false} />
 
       <Card>
         <CardContent className="flex items-center justify-between gap-3 pt-6">

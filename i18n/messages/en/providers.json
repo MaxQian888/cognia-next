@@ -874,7 +874,11 @@
     "signedInBodyPlan": "Signed in as {account} · {plan}. No API key needed.",
     "signedInTitle": "Authenticated via official subscription",
     "signedOutBody": "Sign in with your Claude Pro/Max subscription to use it here — no separate API key required.",
-    "signedOutTitle": "Reuse your official subscription"
+    "signedOutTitle": "Reuse your official subscription",
+    "localLoginTitle": "Local Claude Code login detected",
+    "localLoginBody": "This machine's Claude Code CLI is already signed in. Reuse that subscription here with one click — no need to sign in again.",
+    "localLoginBodyPlan": "This machine's Claude Code CLI is already signed in ({plan} plan). Reuse that subscription here with one click — no need to sign in again.",
+    "localLoginAction": "Reuse login"
   },
   "supported": "Supported",
   "tabHealth": "Health",

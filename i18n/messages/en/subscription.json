@@ -310,7 +310,7 @@
     "title": "Custom sources",
     "webModeHint": "Custom sources require the desktop build — queries run through the native HTTP bridge."
   },
-  "description": "Sign in with your Claude Pro/Max subscription or Anthropic Console account to use OAuth authentication and monitor your 5-hour and 7-day rate-limit windows in real time.",
+  "description": "Sign in with your Claude Pro/Max, Codex (ChatGPT), or OpenCode subscription to use OAuth authentication and monitor rate-limit windows and balances in real time.",
   "limits": {
     "amountLeft": "{amount} left",
     "description": "Subscription limits and usage for this account.",
@@ -360,11 +360,28 @@
       "subscription": {
         "description": "Authorize via claude.ai. Uses your subscription's 5h / 7d rolling quota.",
         "label": "Subscription (Pro / Max)"
+      },
+      "reuse": {
+        "description": "Adopt the subscription login from this machine's Claude Code CLI. Read-only — we never write back.",
+        "label": "Reuse Claude Code login"
       }
     },
     "pasteHint": "If the page didn't open automatically, click the link below. After authorizing, copy the code or the full callback URL into the box.",
     "reopenLink": "Re-open authorization page",
-    "title": "Sign in with Claude"
+    "title": "Sign in with Claude",
+    "reuse": {
+      "adopt": "Adopt this login",
+      "credentialsPath": "Credentials path",
+      "expiresAt": "Token expires",
+      "noneFound": "No Claude Code login found on this machine. Run `claude` and sign in, or use the OAuth flow below.",
+      "notAdoptable": "This login is missing its token pair — run `claude login` to refresh it, then re-scan.",
+      "plan": "Plan",
+      "rescan": "Re-scan",
+      "scanning": "Looking for a local Claude Code login…",
+      "sourceFile": "~/.claude/.credentials.json",
+      "sourceKeyring": "Claude Code OS keyring entry",
+      "sourceLabel": "Source"
+    }
   },
   "migration": {
     "toastBody": "Migrated {count, plural, =1 {1 legacy account} other {# legacy accounts}} into the new vault.",
@@ -383,7 +400,8 @@
       "rescan": "Re-scan",
       "scanning": "Scanning auth.json…",
       "subProviderLabel": "Provider",
-      "title": "Discovered in OpenCode"
+      "title": "Discovered in OpenCode",
+      "whitelistLabel": "Whitelist"
     },
     "title": "OpenCode",
     "webModeBanner": "OpenCode credentials are stored in your OS keychain — only available in the desktop app.",
@@ -408,12 +426,6 @@
     }
   },
   "overview": {
-    "approachingLimit": "Approaching limit",
-    "authoritative": "authoritative",
-    "fiveHourTitle": "5-hour window",
-    "noSampleBody": "Send a chat message to populate usage, or run a probe from Settings.",
-    "noSampleTitle": "Waiting for first sample",
-    "sevenDayTitle": "7-day window",
     "signInCta": "Sign in",
     "signedOutBody": "Sign in with your Claude account to monitor 5h/7d rate-limit windows.",
     "signedOutTitle": "Not signed in",
@@ -423,8 +435,12 @@
       "rate_limited": "Rate limited",
       "unknown": "Status unknown"
     },
-    "statusFetched": "Last sample {when}",
-    "windowMissing": "No data for this window yet."
+    "refresh": "Refresh",
+    "updated": "Updated {when}",
+    "sourceEndpoint": "Live usage API",
+    "sourceHeaders": "From chat response headers",
+    "noDataTitle": "No usage data yet",
+    "noDataBody": "Fetch your quota straight from Anthropic's free usage endpoint — no token cost, no chat message needed."
   },
   "providers": {
     "anthropic": "Claude",
@@ -459,7 +475,7 @@
     "settings": "Settings",
     "usage": "Usage"
   },
-  "title": "Claude Subscription",
+  "title": "Subscription",
   "usage": {
     "col": {
       "fetchedAt": "Fetched at",
@@ -574,7 +590,10 @@
       "resetsInHm": "Resets in {hours}h {minutes}m",
       "resetsInM": "Resets in {minutes}m",
       "sevenDay": "7-day window",
-      "title": "Current quota windows"
+      "title": "Current quota windows",
+      "refresh": "Refresh",
+      "sourceEndpoint": "Live usage API",
+      "sourceHeaders": "From chat response headers"
     }
   },
   "webModeBanner": "Subscription credentials are stored in your OS keychain — only available in the desktop app."

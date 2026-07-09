@@ -310,7 +310,7 @@
     "title": "自定义源",
     "webModeHint": "自定义源需要桌面版——查询通过原生 HTTP 桥执行。"
   },
-  "description": "用你的 Claude Pro/Max 订阅或 Anthropic Console 账号登录，启用 OAuth 认证并实时查看 5 小时和 7 天的速率限制窗口用量。",
+  "description": "用 Claude Pro/Max、Codex（ChatGPT）或 OpenCode 订阅登录，启用 OAuth 认证并实时查看速率限制窗口与余额。",
   "limits": {
     "amountLeft": "剩余 {amount}",
     "description": "该账号的订阅限额与使用情况。",
@@ -360,11 +360,28 @@
       "subscription": {
         "description": "通过 claude.ai 授权。使用订阅的 5 小时 / 7 天滚动配额。",
         "label": "订阅（Pro / Max）"
+      },
+      "reuse": {
+        "description": "直接复用本机 Claude Code CLI 的订阅登录。只读操作——我们不会写回其凭据文件。",
+        "label": "复用 Claude Code 登录"
       }
     },
     "pasteHint": "如果页面没有自动打开，请点击下方链接。授权后把页面显示的 code 或完整 URL 复制粘贴到下面。",
     "reopenLink": "重新打开授权页",
-    "title": "登录 Claude"
+    "title": "登录 Claude",
+    "reuse": {
+      "adopt": "复用此登录",
+      "credentialsPath": "凭据路径",
+      "expiresAt": "令牌过期时间",
+      "noneFound": "本机未检测到 Claude Code 登录。请先运行 `claude` 并登录，或改用下方的 OAuth 流程。",
+      "notAdoptable": "该登录缺少令牌对——请运行 `claude login` 刷新后重新扫描。",
+      "plan": "订阅计划",
+      "rescan": "重新扫描",
+      "scanning": "正在查找本机 Claude Code 登录…",
+      "sourceFile": "~/.claude/.credentials.json",
+      "sourceKeyring": "Claude Code 系统钥匙串条目",
+      "sourceLabel": "来源"
+    }
   },
   "migration": {
     "toastBody": "已将 {count, plural, =1 {1 个旧账号} other {# 个旧账号}} 迁移到新版凭证仓。",
@@ -383,7 +400,8 @@
       "rescan": "重新扫描",
       "scanning": "正在扫描 auth.json…",
       "subProviderLabel": "服务商",
-      "title": "OpenCode 中已配置的服务商"
+      "title": "OpenCode 中已配置的服务商",
+      "whitelistLabel": "白名单"
     },
     "title": "OpenCode",
     "webModeBanner": "OpenCode 凭证存放在 OS 钥匙串中——仅在桌面版可用。",
@@ -408,12 +426,6 @@
     }
   },
   "overview": {
-    "approachingLimit": "接近上限",
-    "authoritative": "权威窗口",
-    "fiveHourTitle": "5 小时窗口",
-    "noSampleBody": "发一条对话即可看到用量，或在「设置」里手动触发一次探测。",
-    "noSampleTitle": "等待首个样本",
-    "sevenDayTitle": "7 天窗口",
     "signInCta": "登录",
     "signedOutBody": "登录 Claude 账号即可监控 5 小时 / 7 天速率限制窗口。",
     "signedOutTitle": "未登录",
@@ -423,8 +435,12 @@
       "rate_limited": "已限流",
       "unknown": "状态未知"
     },
-    "statusFetched": "最近一次样本 {when}",
-    "windowMissing": "此窗口暂无数据。"
+    "refresh": "刷新",
+    "updated": "更新于{when}",
+    "sourceEndpoint": "用量接口实时数据",
+    "sourceHeaders": "来自对话响应头",
+    "noDataTitle": "暂无用量数据",
+    "noDataBody": "点击刷新可直接从 Anthropic 免费用量接口获取额度——不消耗 token，也无需先发消息。"
   },
   "providers": {
     "anthropic": "Claude",
@@ -459,7 +475,7 @@
     "settings": "设置",
     "usage": "用量"
   },
-  "title": "Claude 订阅",
+  "title": "订阅",
   "usage": {
     "col": {
       "fetchedAt": "采集时间",
@@ -574,7 +590,10 @@
       "resetsInHm": "{hours} 小时 {minutes} 分后重置",
       "resetsInM": "{minutes} 分后重置",
       "sevenDay": "7 天窗口",
-      "title": "当前配额窗口"
+      "title": "当前配额窗口",
+      "refresh": "刷新",
+      "sourceEndpoint": "用量接口实时数据",
+      "sourceHeaders": "来自对话响应头"
     }
   },
   "webModeBanner": "订阅凭据保存在系统钥匙串中——仅桌面应用支持。"

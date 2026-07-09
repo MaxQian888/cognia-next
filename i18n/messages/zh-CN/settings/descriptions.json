@@ -50,7 +50,7 @@
   "sourceControl": "AI 提交信息生成及其他 Git 面板偏好。",
   "speech": "语音输入（STT）的语言与麦克风，朗读（TTS）的提供商、音色与自动播放。",
   "subagents": "子代理模板与实时运行状态 — 由父代理派生专注子任务（搜索、代码评审、内容生成、数据分析等）。",
-  "subscription": "用 Claude Pro/Max 订阅登录，监控 5 小时 / 7 天速率限制窗口，OAuth 凭据保存在系统钥匙串。",
+  "subscription": "登录 Claude、Codex（ChatGPT）或 OpenCode 订阅，实时查看速率限制窗口与余额，并在系统钥匙串中管理 OAuth 凭据。",
   "teams": "多角色协作 — 轮询 / 主管 / 手动。",
   "terminal": "集成终端面板 — 默认 shell、字体、回滚行数，以及按项目覆盖。",
   "tools": "内置 shell、文件系统、git、进程与环境工具 — 全局开关、风险等级与「始终允许」管理。",
