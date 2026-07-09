@@ -17,22 +17,25 @@ jest.mock("@/lib/tauri/fleet", () => ({
 type Handler = (e: { payload: unknown }) => void
 const handlers = new Map<string, Handler>()
 const unlistenSpies = new Map<string, jest.Mock>()
+let listenCallCount = 0
 // When set, `listen` parks its resolve here so a test can unmount mid-subscribe.
-let deferListen: ((un: () => void) => void) | null = null
+let deferListen: ((resume: () => void) => void) | null = null
 jest.mock("@tauri-apps/api/event", () => ({
   listen: (topic: string, handler: Handler) => {
+    listenCallCount += 1
     handlers.set(topic, handler)
     const un = jest.fn(() => handlers.delete(topic))
     unlistenSpies.set(topic, un)
     if (deferListen) {
-      const resolveWith = deferListen
-      return new Promise<() => void>((resolve) => resolveWith(() => resolve(un)))
+      const park = deferListen
+      return new Promise<() => void>((resolve) => park(() => resolve(un)))
     }
     return Promise.resolve(un)
   },
 }))
 
 import { useFleetStream } from "./use-fleet-stream"
+import { fleetStreamStore } from "@/lib/fleet/fleet-stream-store"
 import { FLEET_UPDATE_EVENT } from "@/lib/fleet/types"
 
 function snap(generatedAt: number, ids: string[] = []) {
@@ -46,9 +49,12 @@ beforeEach(() => {
   jest.clearAllMocks()
   handlers.clear()
   unlistenSpies.clear()
+  listenCallCount = 0
   deferListen = null
   isTauriMock.mockReturnValue(true)
   snapshotMock.mockResolvedValue(snap(0))
+  // The store is module-level — drop cross-test listener/snapshot state.
+  fleetStreamStore.resetForTests()
 })
 
 describe("useFleetStream", () => {
@@ -96,9 +102,24 @@ describe("useFleetStream", () => {
     expect(unlistenSpies.get(FLEET_UPDATE_EVENT)).toHaveBeenCalled()
   })
 
+  it("shares ONE Tauri listener across two concurrent consumers", async () => {
+    const a = renderHook(() => useFleetStream())
+    const b = renderHook(() => useFleetStream())
+    await waitFor(() => expect(handlers.has(FLEET_UPDATE_EVENT)).toBe(true))
+    expect(listenCallCount).toBe(1)
+    act(() => handlers.get(FLEET_UPDATE_EVENT)!({ payload: snap(50, ["s"]) }))
+    expect(a.result.current.snapshot.generatedAt).toBe(50)
+    expect(b.result.current.snapshot.generatedAt).toBe(50)
+    a.unmount()
+    // Listener stays while one consumer remains.
+    expect(unlistenSpies.get(FLEET_UPDATE_EVENT)).not.toHaveBeenCalled()
+    b.unmount()
+    expect(unlistenSpies.get(FLEET_UPDATE_EVENT)).toHaveBeenCalled()
+  })
+
   it("cleans up immediately when unmounted mid-subscribe", async () => {
     // Park listen resolution so we can unmount while the async subscribe is
-    // still pending — the effect must then unlisten and skip the backfill.
+    // still pending — the store must then unlisten and skip the backfill.
     let resolveListen: (() => void) | undefined
     deferListen = (resolve) => {
       resolveListen = resolve
@@ -106,7 +127,7 @@ describe("useFleetStream", () => {
     const { unmount } = renderHook(() => useFleetStream())
     await waitFor(() => expect(resolveListen).toBeDefined())
     unmount()
-    // Now let the listen promise resolve — aliveRef is already false.
+    // Now let the listen promise resolve — the attach generation is stale.
     await act(async () => {
       resolveListen!()
     })
