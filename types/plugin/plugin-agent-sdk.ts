@@ -211,14 +211,77 @@ export interface PluginDispatchSubagentOptions {
    * progresses (lights up `SubagentPart`'s live progress + logs).
    */
   _onEvent?: (event: import("@/lib/claude/run-and-capture").CaptureStreamEvent) => void
+  /**
+   * Permission-ask routing for the child run, populated by the host's
+   * `dispatch_agent` tool. Registered under the child's ephemeral session id so
+   * a `permission_request` from the child surfaces in the PARENT chat session
+   * instead of being auto-denied against the unopened ephemeral session.
+   */
+  _approvalRoute?: PluginDispatchApprovalRoute
 }
 
 /** Why a nested dispatch was refused. */
 export interface PluginSubagentDispatchRejection {
-  reason: "max-depth" | "cycle"
+  reason: "max-depth" | "cycle" | "policy"
   message: string
   /** The level the rejected child would have run at (max-depth case). */
   attemptedDepth?: number
+}
+
+/**
+ * Structured failure envelope for a dispatched subagent run. Never thrown —
+ * it rides on {@link PluginSubagentDispatchResult.errorEnvelope} so callers
+ * (retry loop, journal, chat card, the parent model) can distinguish transient
+ * from permanent failures instead of parsing collapsed error text.
+ *
+ * `code` is the shared provider taxonomy (`ProviderErrorClass` from
+ * `@cognia/provider-types/error-class`) plus dispatch-local codes; string-typed
+ * here so `types/` stays a leaf layer.
+ */
+export interface PluginDispatchErrorEnvelope {
+  code:
+    | "rate-limit"
+    | "timeout"
+    | "network"
+    | "server-error" // transient (retryable)
+    | "auth"
+    | "invalid-request"
+    | "context-window-exceeded"
+    | "content-policy"
+    | "unknown" // permanent
+    | "sidecar-exited" // retryable (the sidecar respawns)
+    | "aborted" // never retried
+    | "rejection-cycle"
+    | "rejection-max-depth"
+    | "rejection-policy"
+    | "budget-exhausted" // guard refusals, never retried
+    | "deadline-exceeded"
+    | "interrupted" // never retried
+  retryable: boolean
+  message: string
+  /** Text the child streamed before dying (fed from the dispatch run tracker). */
+  partialText?: string
+  /** Provider Retry-After hint (ms) when the classifier extracted one. */
+  retryAfterMs?: number
+  /** 1-based attempt count that produced this envelope (set by the retry loop). */
+  attempts?: number
+}
+
+/**
+ * Where a dispatched subagent's permission asks should surface. Registered by
+ * the dispatch handler under the child's ephemeral session id so the renderer's
+ * `permission_request` listener can re-bucket the ask into the PARENT chat
+ * session (instead of auto-denying against the unopened ephemeral session).
+ */
+export interface PluginDispatchApprovalRoute {
+  /** The chat session the user is actually looking at. */
+  parentSessionId: string
+  /** Subagent runtime-store run id (cancel handle + card focus). */
+  runId: string
+  /** Display label for "Asked by <subagent>". */
+  subagentId: string
+  /** Whether the run was detached (`background: true`). */
+  backgrounded: boolean
 }
 
 /** Result of dispatching a subagent (a single agent turn). */
@@ -236,6 +299,13 @@ export interface PluginSubagentDispatchResult {
   rejection?: PluginSubagentDispatchRejection
   /** Convenience flag mirroring `rejection?.reason === "max-depth"`. */
   depthExhausted?: boolean
+  /**
+   * Structured failure detail when `finishReason === "error"` (and for guard
+   * rejections). Lets the retry loop / journal / parent model distinguish
+   * transient from permanent failures; `text` stays the collapsed message for
+   * back-compat.
+   */
+  errorEnvelope?: PluginDispatchErrorEnvelope
 }
 
 /** Options for {@link PluginAgentAPI.runTeam}. */

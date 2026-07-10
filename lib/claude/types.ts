@@ -1808,6 +1808,45 @@ export interface AppSettings {
     tokenBudget?: number
     /** Per-subtree wall-clock timeout in ms; 0 = none. */
     timeoutMs?: number
+    /**
+     * Bounded retries for TRANSIENT dispatch failures (rate-limit / timeout /
+     * network / server-error / sidecar-exited). Default 1; 0 disables. Each
+     * retry re-checks abort, the subtree deadline, and the token budget.
+     */
+    dispatchMaxRetries?: number
+  }
+  /**
+   * Background subagent-run lifecycle. Merged forward by `getSettings()` so
+   * older installs pick up the defaults without a migration.
+   */
+  backgroundTasks?: {
+    /**
+     * Opt-in (default false): on boot, automatically re-dispatch background
+     * runs that were interrupted by the crash/quit (this boot's interruptions
+     * only, capped by `maxAutoResumeAttempts` per lineage).
+     */
+    autoResumeInterrupted?: boolean
+    /** Cap on chained auto-resume attempts per run lineage. Default 2. */
+    maxAutoResumeAttempts?: number
+  }
+  /**
+   * Dispatched-subagent permissioning. Merged forward by `getSettings()`.
+   */
+  agentPermissions?: {
+    /**
+     * Where a dispatched subagent's permission asks go. `"surface"` (default)
+     * re-buckets them into the parent chat session (Claude Code parity);
+     * `"auto-deny"` restores the legacy fail-closed silent deny.
+     */
+    subagentAsks?: "surface" | "auto-deny"
+    /**
+     * Dispatch allowlist/denylist over PROJECTED subagent ids (`Explore`,
+     * `myplugin:reviewer`, `template:*`). Glob→verdict, last-match-wins via the
+     * shared ruleset machinery; denied ids never enter the `dispatch_agent`
+     * enum and are refused fail-closed at dispatch time. `ask` is reserved and
+     * treated as `allow` in v1. Default allow when unset.
+     */
+    subagentRules?: import("@/lib/claude/permissions/ruleset").ToolRules
   }
   /**
    * First-class web tools (web_search + web_fetch). Promoted out of the

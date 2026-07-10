@@ -1,5 +1,6 @@
 import type {
   BackgroundTaskJournal,
+  BackgroundTaskJournalPatch,
   BackgroundTaskJournalRecord,
   BackgroundTaskStatus,
 } from "@/lib/background-tasks/registry-core"
@@ -19,18 +20,14 @@ export async function recordBackgroundTaskStart(row: BackgroundTaskJournalRow): 
 
 export async function recordBackgroundTaskSettle(
   runId: string,
-  patch: Partial<
-    Pick<BackgroundTaskJournalRow, "status" | "settledAt" | "resultText" | "error" | "usage">
-  >
+  patch: BackgroundTaskJournalPatch
 ): Promise<void> {
   await updateBackgroundTaskRecord(runId, patch)
 }
 
 export async function updateBackgroundTaskRecord(
   runId: string,
-  patch: Partial<
-    Pick<BackgroundTaskJournalRow, "status" | "settledAt" | "resultText" | "error" | "usage">
-  >
+  patch: BackgroundTaskJournalPatch
 ): Promise<void> {
   await getDb().backgroundTasks.update(runId, patch)
 }
@@ -81,8 +78,56 @@ export function createDexieBackgroundTaskJournal(): BackgroundTaskJournal {
   }
 }
 
+/**
+ * Boot reconciliation: flip orphaned `running` rows to `interrupted`. Returns
+ * the freshly transitioned rows so opt-in auto-resume can act on THIS boot's
+ * interruptions only (stale interrupted history is never re-dispatched).
+ */
 export async function interruptBackgroundTasksOnBoot(
   options: { now?: () => number } = {}
-): Promise<void> {
-  await interruptRunningTasks(createDexieBackgroundTaskJournal(), options)
+): Promise<BackgroundTaskJournalRow[]> {
+  return interruptRunningTasks(createDexieBackgroundTaskJournal(), options)
+}
+
+/** Default retention for settled journal rows (age + cap; running rows never pruned). */
+export const BACKGROUND_TASK_PRUNE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
+export const BACKGROUND_TASK_PRUNE_MAX_ITEMS = 200
+
+/**
+ * Prune settled journal rows, modeled on `pruneNotifications`: drop rows whose
+ * settle (or start, for settle-less rows) is older than `maxAgeMs`, then trim
+ * to the newest `maxItems`. `running` rows are never pruned. Returns the
+ * number of rows removed.
+ */
+export async function pruneBackgroundTaskRecords(opts: {
+  now: number
+  maxAgeMs?: number
+  maxItems?: number
+  host?: BackgroundTaskJournalRow["host"]
+}): Promise<number> {
+  const maxAgeMs = opts.maxAgeMs ?? BACKGROUND_TASK_PRUNE_MAX_AGE_MS
+  const maxItems = opts.maxItems ?? BACKGROUND_TASK_PRUNE_MAX_ITEMS
+  const db = getDb()
+  let removed = 0
+  await db.transaction("rw", db.backgroundTasks, async () => {
+    const rows = await listBackgroundTaskRecords(opts.host ? { host: opts.host } : {})
+    const settled = rows.filter((row) => row.status !== "running")
+    const doomed = new Set<string>()
+    if (maxAgeMs > 0) {
+      const cutoff = opts.now - maxAgeMs
+      for (const row of settled) {
+        if ((row.settledAt ?? row.startedAt) < cutoff) doomed.add(row.runId)
+      }
+    }
+    if (maxItems > 0) {
+      // listBackgroundTaskRecords sorts newest-first by startedAt.
+      const survivors = settled.filter((row) => !doomed.has(row.runId))
+      for (const row of survivors.slice(maxItems)) doomed.add(row.runId)
+    }
+    if (doomed.size > 0) {
+      await db.backgroundTasks.bulkDelete([...doomed])
+      removed = doomed.size
+    }
+  })
+  return removed
 }

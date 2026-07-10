@@ -231,6 +231,152 @@ describe("BackgroundTaskRegistry", () => {
 
     await expect(registry.collect("missing")).resolves.toBeUndefined()
   })
+
+  it("settles an error-shaped projection (resolved promise) as status error", async () => {
+    const { journal, records } = createJournal()
+    const registry = new BackgroundTaskRegistry<ParkedValue & { failed?: boolean }>({
+      journal,
+      projectForJournal: (value) => ({
+        text: value.text,
+        ...(value.failed ? { error: value.text } : {}),
+      }),
+    })
+
+    registry.start("r1", meta(), Promise.resolve({ text: "it broke", failed: true }))
+    await Promise.resolve()
+
+    expect(records.get("r1")).toMatchObject({
+      status: "error",
+      error: "it broke",
+      resultText: "it broke",
+    })
+    expect(registry.list()[0]).toMatchObject({ status: "error", error: "it broke" })
+  })
+
+  it("round-trips the optional meta extensions into journal starts and list()", async () => {
+    const { journal, starts } = createJournal()
+    const registry = new BackgroundTaskRegistry<ParkedValue>({
+      journal,
+      projectForJournal: (value) => ({ text: value.text }),
+    })
+    const d = deferred<ParkedValue>()
+
+    registry.start(
+      "r1",
+      meta({
+        kind: "plugin-agent",
+        mode: "background",
+        toolsEnabled: true,
+        pluginId: "my-plugin",
+        label: "sweeper",
+        resumeOfRunId: "r0",
+        resumeAttempt: 1,
+      }),
+      d.promise
+    )
+
+    const expected = {
+      kind: "plugin-agent",
+      mode: "background",
+      toolsEnabled: true,
+      pluginId: "my-plugin",
+      label: "sweeper",
+      resumeOfRunId: "r0",
+      resumeAttempt: 1,
+    }
+    expect(starts[0]).toMatchObject(expected)
+    expect(registry.list()[0]).toMatchObject(expected)
+
+    d.resolve({ text: "ok" })
+    await d.promise
+  })
+
+  describe("onSettle", () => {
+    it("fires with the done payload after a resolve", async () => {
+      const onSettle = jest.fn()
+      const registry = new BackgroundTaskRegistry<ParkedValue>({
+        projectForJournal: (value) => ({ text: value.text, usage: value.usage }),
+        now: () => 2000,
+        onSettle,
+      })
+
+      registry.start("r1", meta(), Promise.resolve({ text: "done", usage: { inputTokens: 3 } }))
+      await Promise.resolve()
+
+      expect(onSettle).toHaveBeenCalledWith(
+        "r1",
+        expect.objectContaining({ subagentId: "reviewer", sessionId: "ses_1" }),
+        { status: "done", settledAt: 2000, resultText: "done", usage: { inputTokens: 3 } }
+      )
+    })
+
+    it("fires with the error payload after a reject", async () => {
+      const onSettle = jest.fn()
+      const registry = new BackgroundTaskRegistry<ParkedValue>({
+        projectForJournal: (value) => ({ text: value.text }),
+        now: () => 2000,
+        onSettle,
+      })
+
+      registry.start("r1", meta(), Promise.reject(new Error("boom")))
+      await Promise.resolve().then(() => Promise.resolve())
+
+      expect(onSettle).toHaveBeenCalledWith("r1", expect.objectContaining({ sessionId: "ses_1" }), {
+        status: "error",
+        settledAt: 2000,
+        error: "boom",
+      })
+      // Swallow the parked rejection so jest doesn't flag an unhandled promise.
+      await registry.collect("r1").catch(() => undefined)
+    })
+
+    it("a throwing listener never breaks the lifecycle or journal", async () => {
+      const { journal, records } = createJournal()
+      const registry = new BackgroundTaskRegistry<ParkedValue>({
+        journal,
+        projectForJournal: (value) => ({ text: value.text }),
+        onSettle: () => {
+          throw new Error("listener exploded")
+        },
+      })
+
+      registry.start("r1", meta(), Promise.resolve({ text: "done" }))
+
+      await expect(registry.collect("r1")).resolves.toEqual({ text: "done" })
+      expect(records.get("r1")).toMatchObject({ status: "done" })
+    })
+  })
+
+  describe("cancelWhere", () => {
+    it("cancels only running entries matching the predicate", async () => {
+      const cancelA = jest.fn()
+      const cancelB = jest.fn()
+      const cancelC = jest.fn()
+      const registry = new BackgroundTaskRegistry<ParkedValue>({
+        projectForJournal: (value) => ({ text: value.text }),
+      })
+      const dA = deferred<ParkedValue>()
+      const dB = deferred<ParkedValue>()
+
+      registry.start("a", meta({ pluginId: "p1" }), dA.promise, { cancel: cancelA })
+      registry.start("b", meta({ pluginId: "p2" }), dB.promise, { cancel: cancelB })
+      registry.start("c", meta({ pluginId: "p1" }), Promise.resolve({ text: "done" }), {
+        cancel: cancelC,
+      })
+      await Promise.resolve() // let "c" settle
+
+      const cancelled = registry.cancelWhere((entry) => entry.pluginId === "p1")
+
+      expect(cancelled).toBe(1)
+      expect(cancelA).toHaveBeenCalledTimes(1)
+      expect(cancelB).not.toHaveBeenCalled()
+      expect(cancelC).not.toHaveBeenCalled()
+
+      dA.resolve({ text: "x" })
+      dB.resolve({ text: "y" })
+      await Promise.all([dA.promise, dB.promise])
+    })
+  })
 })
 
 describe("interruptRunningTasks", () => {
@@ -260,7 +406,7 @@ describe("interruptRunningTasks", () => {
       },
     ])
 
-    await interruptRunningTasks(journal, { now: () => 3000 })
+    const flipped = await interruptRunningTasks(journal, { now: () => 3000 })
 
     expect(records.get("running")).toMatchObject({
       status: "interrupted",
@@ -268,5 +414,27 @@ describe("interruptRunningTasks", () => {
       error: "Background task interrupted because its host process stopped.",
     })
     expect(records.get("done")).toMatchObject({ status: "done", resultText: "ok" })
+    // Returns ONLY the freshly transitioned rows, with the patch applied.
+    expect(flipped).toEqual([
+      expect.objectContaining({ runId: "running", status: "interrupted", settledAt: 3000 }),
+    ])
+  })
+
+  it("returns an empty array when nothing was running", async () => {
+    const { journal } = createJournal([
+      {
+        runId: "old",
+        kind: "subagent",
+        subagentId: "reviewer",
+        prompt: "p",
+        sessionId: "ses_1",
+        host: "renderer",
+        status: "interrupted",
+        startedAt: 1000,
+        settledAt: 1500,
+      },
+    ])
+
+    await expect(interruptRunningTasks(journal, { now: () => 3000 })).resolves.toEqual([])
   })
 })
