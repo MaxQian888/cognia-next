@@ -12,6 +12,7 @@ import {
   expandManifestPermission,
 } from "./permission-api"
 import type { PluginAPIPermission } from "@/types/plugin/plugin"
+import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { requestPluginPermission } from "@/lib/plugin/security/permission-requests"
 
 jest.mock("@/lib/plugin/security/permission-requests", () => ({
@@ -428,6 +429,40 @@ describe("Permission API", () => {
       expect(api.hasPermission("twin:read")).toBe(true)
       expect(api.hasPermission("canvas:run")).toBe(true)
       expect(api.hasPermission("canvas:collaborate")).toBe(true)
+    })
+  })
+
+  describe("guard-enforcement unification", () => {
+    const guardPluginId = "guard-unified"
+
+    afterEach(() => {
+      getPermissionGuard().unregisterPlugin(guardPluginId)
+      revokePluginPermissions(guardPluginId)
+    })
+
+    it("reports guard-enforced manifest permissions via hasPermission", () => {
+      getPermissionGuard().registerPlugin(guardPluginId, ["git:write"])
+      const api = createPermissionAPI(guardPluginId, [])
+      expect(api.hasPermission("git:write")).toBe(true)
+      expect(api.hasPermission("git:read")).toBe(false)
+    })
+
+    it("includes guard-enforced permissions in getGrantedPermissions", () => {
+      getPermissionGuard().registerPlugin(guardPluginId, ["git:write", "terminal:read"])
+      const api = createPermissionAPI(guardPluginId, ["ai:chat"])
+      const granted = api.getGrantedPermissions()
+      expect(granted).toEqual(expect.arrayContaining(["git:write", "terminal:read", "ai:chat"]))
+      // No duplicates when a permission lives in both stores
+      expect(new Set(granted).size).toBe(granted.length)
+    })
+
+    it("mixes API and guard permissions in hasAllPermissions / hasAnyPermission", () => {
+      getPermissionGuard().registerPlugin(guardPluginId, ["git:write"])
+      const api = createPermissionAPI(guardPluginId, ["ai:chat"])
+      expect(api.hasAllPermissions(["ai:chat", "git:write"])).toBe(true)
+      expect(api.hasAllPermissions(["ai:chat", "git:read"])).toBe(false)
+      expect(api.hasAnyPermission(["git:read", "git:write"])).toBe(true)
+      expect(api.hasAnyPermission(["git:read", "terminal:execute"])).toBe(false)
     })
   })
 

@@ -250,14 +250,7 @@ export type PluginInstallRootKind = "builtin" | "installed" | "dev"
  * Actions supported by a normalized extension record.
  */
 export type ExtensionOperation =
-  | "install"
-  | "update"
-  | "enable"
-  | "disable"
-  | "reload"
-  | "rollback"
-  | "uninstall"
-  | "configure"
+  "install" | "update" | "enable" | "disable" | "reload" | "rollback" | "uninstall" | "configure"
 
 export interface ExtensionCompatibilityDiagnostic {
   code: string
@@ -3523,14 +3516,7 @@ export type ThemeMode = "light" | "dark" | "system"
  * Color theme preset
  */
 export type ColorThemePreset =
-  | "default"
-  | "ocean"
-  | "forest"
-  | "sunset"
-  | "lavender"
-  | "rose"
-  | "slate"
-  | "amber"
+  "default" | "ocean" | "forest" | "sunset" | "lavender" | "rose" | "slate" | "amber"
 
 /**
  * Theme colors structure
@@ -3683,14 +3669,7 @@ export interface PluginThemeAPI {
  * Export format types
  */
 export type ExportFormat =
-  | "markdown"
-  | "json"
-  | "html"
-  | "animated-html"
-  | "pdf"
-  | "text"
-  | "docx"
-  | "csv"
+  "markdown" | "json" | "html" | "animated-html" | "pdf" | "text" | "docx" | "csv"
 
 /**
  * Export options
@@ -4453,21 +4432,29 @@ export type PluginAPIPermission =
 /**
  * Permission API for plugins
  */
+/**
+ * Any permission introspectable through `ctx.permissions`: an API permission
+ * (granted via `permissionMapping`) or a manifest-level permission enforced
+ * by the `PermissionGuard` (e.g. `git:write`, `terminal:execute`).
+ * Introspection consults both stores so it agrees with enforcement.
+ */
+export type IntrospectablePluginPermission = PluginAPIPermission | PluginPermission
+
 export interface PluginPermissionAPI {
-  /** Check if plugin has a permission */
-  hasPermission: (permission: PluginAPIPermission) => boolean
+  /** Check if plugin has a permission (API or guard-enforced) */
+  hasPermission: (permission: IntrospectablePluginPermission) => boolean
 
   /** Request a permission from user */
   requestPermission: (permission: PluginAPIPermission, reason?: string) => Promise<boolean>
 
-  /** Get all granted permissions */
-  getGrantedPermissions: () => PluginAPIPermission[]
+  /** Get all granted permissions (API and guard-enforced) */
+  getGrantedPermissions: () => IntrospectablePluginPermission[]
 
   /** Check multiple permissions */
-  hasAllPermissions: (permissions: PluginAPIPermission[]) => boolean
+  hasAllPermissions: (permissions: IntrospectablePluginPermission[]) => boolean
 
   /** Check if any permission is granted */
-  hasAnyPermission: (permissions: PluginAPIPermission[]) => boolean
+  hasAnyPermission: (permissions: IntrospectablePluginPermission[]) => boolean
 }
 
 // =============================================================================

@@ -4,8 +4,14 @@
  * Provides permission management capabilities to plugins.
  */
 
-import type { PluginPermissionAPI, PluginAPIPermission } from "@/types/plugin/plugin"
+import type {
+  PluginPermissionAPI,
+  PluginAPIPermission,
+  IntrospectablePluginPermission,
+} from "@/types/plugin/plugin"
+import type { PluginPermission } from "@/types/plugin"
 import { createPluginSystemLogger } from "@/lib/plugin/core/logger"
+import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { requestPluginPermission } from "@/lib/plugin/security/permission-requests"
 import {
   grantPluginPermission as grantHostPermission,
@@ -161,9 +167,16 @@ export function createPermissionAPI(
 
   const getPermissions = () => grantedPermissions.get(pluginId) || new Set()
 
+  // Introspection must agree with enforcement: `ctx.git.commit()` is gated by
+  // the PermissionGuard (manifest-level perms like `git:write`), which the
+  // API-permission set knows nothing about. Consult both stores.
+  const checkEither = (permission: IntrospectablePluginPermission): boolean =>
+    getPermissions().has(permission as PluginAPIPermission) ||
+    getPermissionGuard().check(pluginId, permission as PluginPermission, "permission-api")
+
   return {
-    hasPermission: (permission: PluginAPIPermission): boolean => {
-      return getPermissions().has(permission)
+    hasPermission: (permission: IntrospectablePluginPermission): boolean => {
+      return checkEither(permission)
     },
 
     requestPermission: async (
@@ -202,18 +215,21 @@ export function createPermissionAPI(
       return granted
     },
 
-    getGrantedPermissions: (): PluginAPIPermission[] => {
-      return Array.from(getPermissions())
+    getGrantedPermissions: (): IntrospectablePluginPermission[] => {
+      return Array.from(
+        new Set<IntrospectablePluginPermission>([
+          ...getPermissions(),
+          ...getPermissionGuard().getPluginPermissions(pluginId),
+        ])
+      )
     },
 
-    hasAllPermissions: (permissions: PluginAPIPermission[]): boolean => {
-      const granted = getPermissions()
-      return permissions.every((p) => granted.has(p))
+    hasAllPermissions: (permissions: IntrospectablePluginPermission[]): boolean => {
+      return permissions.every(checkEither)
     },
 
-    hasAnyPermission: (permissions: PluginAPIPermission[]): boolean => {
-      const granted = getPermissions()
-      return permissions.some((p) => granted.has(p))
+    hasAnyPermission: (permissions: IntrospectablePluginPermission[]): boolean => {
+      return permissions.some(checkEither)
     },
   }
 }
