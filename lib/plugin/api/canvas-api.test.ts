@@ -1039,6 +1039,6 @@ describe("permission gate", () => {
   it("throws PermissionError when canvas permissions are not granted", () => {
     const api = createCanvasAPI("no-perms-plugin")
     expect(() => api.getContent()).toThrow(/canvas:read/)
-    expect(() => api.executeAction("improve", { content: "x" })).toThrow(/canvas:run/)
+    expect(() => api.executeAction("improve", "x", {})).toThrow(/canvas:run/)
   })
 })

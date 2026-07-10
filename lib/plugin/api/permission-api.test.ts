@@ -448,10 +448,10 @@ describe("Permission API", () => {
     })
 
     it("includes guard-enforced permissions in getGrantedPermissions", () => {
-      getPermissionGuard().registerPlugin(guardPluginId, ["git:write", "terminal:read"])
+      getPermissionGuard().registerPlugin(guardPluginId, ["git:write", "terminal:spawn"])
       const api = createPermissionAPI(guardPluginId, ["ai:chat"])
       const granted = api.getGrantedPermissions()
-      expect(granted).toEqual(expect.arrayContaining(["git:write", "terminal:read", "ai:chat"]))
+      expect(granted).toEqual(expect.arrayContaining(["git:write", "terminal:spawn", "ai:chat"]))
       // No duplicates when a permission lives in both stores
       expect(new Set(granted).size).toBe(granted.length)
     })
@@ -462,7 +462,7 @@ describe("Permission API", () => {
       expect(api.hasAllPermissions(["ai:chat", "git:write"])).toBe(true)
       expect(api.hasAllPermissions(["ai:chat", "git:read"])).toBe(false)
       expect(api.hasAnyPermission(["git:read", "git:write"])).toBe(true)
-      expect(api.hasAnyPermission(["git:read", "terminal:execute"])).toBe(false)
+      expect(api.hasAnyPermission(["git:read", "terminal:kill"])).toBe(false)
     })
   })
 

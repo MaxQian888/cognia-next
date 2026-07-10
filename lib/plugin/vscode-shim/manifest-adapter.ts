@@ -128,7 +128,7 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
   // entries survive; paths stay relative (the bridges enforce traversal
   // safety again at read time).
   const rawGrammars = Array.isArray(pkgJson.contributes?.grammars)
-    ? (pkgJson.contributes.grammars as Array<Record<string, unknown>>)
+    ? (pkgJson.contributes.grammars as unknown as Array<Record<string, unknown>>)
     : []
   const vscodeGrammars = rawGrammars
     .filter((g) => g && typeof g.scopeName === "string" && typeof g.path === "string")
@@ -139,7 +139,7 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
     }))
 
   const rawIconThemes = Array.isArray(pkgJson.contributes?.iconThemes)
-    ? (pkgJson.contributes.iconThemes as Array<Record<string, unknown>>)
+    ? (pkgJson.contributes.iconThemes as unknown as Array<Record<string, unknown>>)
     : []
   const vscodeIconThemes = rawIconThemes
     .filter((t) => t && typeof t.id === "string" && typeof t.path === "string")
@@ -150,7 +150,7 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
     }))
 
   const rawSnippets = Array.isArray(pkgJson.contributes?.snippets)
-    ? (pkgJson.contributes.snippets as Array<Record<string, unknown>>)
+    ? (pkgJson.contributes.snippets as unknown as Array<Record<string, unknown>>)
     : []
   const vscodeSnippets = rawSnippets
     .filter((sn) => sn && typeof sn.language === "string" && typeof sn.path === "string")
