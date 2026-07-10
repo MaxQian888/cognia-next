@@ -101,6 +101,20 @@ describe("processPromptTemplateVariables", () => {
     expect(out).toContain("Custom Mode")
     expect(out).toContain("No specific tools configured")
   })
+
+  it("uses the 'en' language fallback when navigator is unavailable (node/sidecar path)", () => {
+    const orig = Object.getOwnPropertyDescriptor(globalThis, "navigator")
+    // The sidecar builds agent-mode prompts in Node, where `navigator` is not
+    // a declared global — an unguarded `navigator?.language` would throw a
+    // ReferenceError (optional chaining does not guard an undeclared binding).
+    Object.defineProperty(globalThis, "navigator", { value: undefined, configurable: true })
+    try {
+      expect(processPromptTemplateVariables("lang={{language}}", {})).toBe("lang=en")
+    } finally {
+      if (orig) Object.defineProperty(globalThis, "navigator", orig)
+      else delete (globalThis as { navigator?: unknown }).navigator
+    }
+  })
 })
 
 describe("getTemplateVariablePreview", () => {

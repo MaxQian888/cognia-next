@@ -215,6 +215,10 @@ function makeProject(roots: { id?: string; path: string; isPrimary?: boolean }[]
   } as Project
 }
 
+/** Names of the plugin/self-invocation tools resolveSendOptions surfaces. */
+const toolNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string[] =>
+  (opts.pluginTools ?? []).map((t) => t.name)
+
 beforeEach(() => {
   jest.clearAllMocks()
   __resetSandboxConfineStateForTesting()
@@ -3761,9 +3765,6 @@ describe("native Anthropic web tools (Tier C opt-in)", () => {
 })
 
 describe("agent self-invocation tools (Skill / SlashCommand)", () => {
-  const toolNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string[] =>
-    (opts.pluginTools ?? []).map((t) => t.name)
-
   it("does not surface Skill / SlashCommand by default (opt-in)", async () => {
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
     expect(toolNames(opts)).not.toContain("Skill")
