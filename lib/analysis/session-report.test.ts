@@ -58,6 +58,16 @@ describe("analyzeSession", () => {
     expect(r.modelSwitches).toEqual([{ from: "claude-sonnet-4-5", to: "gpt-4o" }])
   })
 
+  it("sums active generation time and reasoning tokens across turns", () => {
+    const rows = [
+      row({ messageId: "a", at: 1000, durationMs: 4000, reasoningTokens: 120 }),
+      row({ messageId: "b", at: 2000, durationMs: 6000, reasoningTokens: undefined }),
+    ]
+    const r = analyzeSession({ messages: [], usageRows: rows }, { resolve })
+    expect(r.totalDurationMs).toBe(10_000)
+    expect(r.totalReasoningTokens).toBe(120) // undefined reasoning counts as 0
+  })
+
   it("counts tool calls, errors, denials, thinking, friction, commits, tests", () => {
     const messages = [
       user("u1", "actually undo that"),

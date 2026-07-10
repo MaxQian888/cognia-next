@@ -91,6 +91,10 @@ export interface SessionReport {
   totalCacheReadTokens: number
   totalCacheCreationTokens: number
   totalCostUsd: number
+  /** Sum of SDK-reported active generation time across billed turns (ms). */
+  totalDurationMs: number
+  /** Sum of reasoning / "thinking" tokens across billed turns (subset of output). */
+  totalReasoningTokens: number
   models: ModelUsageRow[]
   /** Tool name → call count. */
   toolCounts: Record<string, number>
@@ -268,6 +272,8 @@ export function analyzeSession(input: AnalyzeInput, opts: AnalyzeOpts = {}): Ses
   let totalCacheReadTokens = 0
   let totalCacheCreationTokens = 0
   let totalCostUsd = 0
+  let totalDurationMs = 0
+  let totalReasoningTokens = 0
   let maxContextFraction = 0
   const idleGaps: IdleGap[] = []
   const modelSwitches: ModelSwitch[] = []
@@ -280,6 +286,8 @@ export function analyzeSession(input: AnalyzeInput, opts: AnalyzeOpts = {}): Ses
     totalCacheReadTokens += row.cacheReadTokens
     totalCacheCreationTokens += row.cacheCreationTokens
     totalCostUsd += effectiveCostUsd(row, resolve)
+    totalDurationMs += row.durationMs
+    totalReasoningTokens += row.reasoningTokens ?? 0
 
     const prompt = row.inputTokens + row.cacheReadTokens + row.cacheCreationTokens
     const window = getModelContextWindow(row.model)
@@ -324,6 +332,8 @@ export function analyzeSession(input: AnalyzeInput, opts: AnalyzeOpts = {}): Ses
     totalCacheReadTokens,
     totalCacheCreationTokens,
     totalCostUsd,
+    totalDurationMs,
+    totalReasoningTokens,
     models,
     toolCounts: toRecord(toolCounts),
     toolCallTotal,

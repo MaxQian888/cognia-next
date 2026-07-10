@@ -8,11 +8,24 @@
     "turns": "Turns",
     "tokens": "Tokens",
     "cost": "Cost",
+    "speed": "Speed",
+    "duration": "Gen time",
+    "reasoning": "Reasoning",
+    "cacheHit": "Cache hit",
     "tools": "Tool calls",
     "errors": "Errors",
     "denials": "Denials",
     "modelSwitches": "Model switches",
     "idleGaps": "Idle gaps"
+  },
+  "units": {
+    "tokPerSec": "{value} tok/s"
+  },
+  "averages": {
+    "title": "Per-turn averages",
+    "tokens": "Tokens",
+    "cost": "Cost",
+    "duration": "Gen time"
   },
   "models": {
     "title": "Per-model usage",

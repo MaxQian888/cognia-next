@@ -16,6 +16,40 @@
   },
   "model": "模型",
   "provider": "服务商",
+  "runStatusBar": {
+    "title": "运行状态条",
+    "description": "选择输入框上方的运行状态条在回合运行时显示哪些指标。",
+    "elapsed": {
+      "heading": "耗时",
+      "description": "活跃工作计时（审批等待时暂停）。",
+      "label": "显示耗时"
+    },
+    "outputTokens": {
+      "heading": "输出 token",
+      "description": "本会话生成的输出 token 总数。",
+      "label": "显示输出 token"
+    },
+    "speed": {
+      "heading": "模型速度",
+      "description": "生成吞吐（每秒 token）。",
+      "label": "显示模型速度"
+    },
+    "cost": {
+      "heading": "成本",
+      "description": "本会话的估算成本。",
+      "label": "显示成本"
+    },
+    "contextPct": {
+      "heading": "上下文占用",
+      "description": "最新回合后模型上下文窗口的占用比例。",
+      "label": "显示上下文占用"
+    },
+    "tools": {
+      "heading": "工具数",
+      "description": "运行回合中的工具调用次数。",
+      "label": "显示工具数"
+    }
+  },
   "sidebar": {
     "contentSearch": {
       "description": "不仅匹配会话标题，也匹配消息正文内容（速度较慢）。",

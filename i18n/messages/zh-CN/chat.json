@@ -893,6 +893,9 @@
     }
   },
   "runStatus": {
+    "metricTokens": "{value} tok",
+    "metricSpeed": "{value} tok/s",
+    "metricContext": "上下文 {pct}%",
     "working": "运行中",
     "waitingApproval": "等待审批",
     "interruptHint": "按 Esc 中断",
@@ -927,14 +930,19 @@
   "sessionCost": {
     "byModelTitle": "按模型拆分",
     "cache": "缓存",
+    "cacheHit": "缓存命中",
     "cacheReadShort": "读",
     "cacheWriteShort": "写",
     "cost": "成本",
     "description": "来自 SDK result 事件的每轮持久化合计；按模型拆分来自 sessionUsage 表。",
+    "duration": "生成耗时",
     "input": "输入",
     "noModelData": "尚无持久化用量记录——上面的汇总来自内存中已加载的轮次。",
     "output": "输出",
+    "reasoning": "推理",
+    "speed": "速度",
     "title": "会话成本",
+    "tokPerSec": "{value} tok/s",
     "tokensTitle": "输入：{input} · 输出：{output}",
     "trigger": "会话成本",
     "turns": "轮次"

@@ -1,14 +1,23 @@
 "use client"
 
 /**
- * Presentational layout for a {@link SessionReport}: KPI tiles, per-model usage,
- * the seven health assessments, and a friction/thinking signals panel. Pure
- * props in — the data + memoized analysis come from `useSessionReport`.
+ * Presentational layout for a {@link SessionReport}: KPI tiles, per-turn
+ * averages, per-model usage (incl. throughput), the seven health assessments,
+ * and a friction/thinking signals panel. Pure props in — the data + memoized
+ * analysis come from `useSessionReport`.
  */
 
 import { useTranslations } from "next-intl"
 
-import { formatCostInCurrency, formatTokens } from "@/types/system/usage"
+import {
+  cacheHitRate,
+  formatCostInCurrency,
+  formatDuration,
+  formatPercent,
+  formatTokens,
+  formatTokensPerSec,
+  tokensPerSecond,
+} from "@/types/system/usage"
 import type { SessionReport } from "@/lib/analysis/session-report"
 import { AssessmentCard } from "@/components/chat/session-insights/assessment-card"
 
@@ -29,6 +38,25 @@ export function SessionReportView({ report }: { report: SessionReport }) {
     report.totalCacheReadTokens +
     report.totalCacheCreationTokens
 
+  // Throughput = summed output tokens ÷ summed active generation time. `null`
+  // when no turn reported a duration (non-SDK paths) → "—" placeholder.
+  const speed = tokensPerSecond(report.totalOutputTokens, report.totalDurationMs)
+  const speedLabel =
+    speed != null ? t("units.tokPerSec", { value: formatTokensPerSec(speed) }) : "—"
+  const durationLabel = report.totalDurationMs > 0 ? formatDuration(report.totalDurationMs) : "—"
+  const reasoningLabel =
+    report.totalReasoningTokens > 0 ? formatTokens(report.totalReasoningTokens) : "—"
+  const hasCache = report.totalCacheReadTokens + report.totalCacheCreationTokens > 0
+  const cacheHitLabel = hasCache
+    ? formatPercent(cacheHitRate(report.totalCacheReadTokens, report.totalCacheCreationTokens))
+    : "—"
+
+  const turns = report.turns
+  const avgTokens = turns > 0 ? formatTokens(Math.round(totalTokens / turns)) : "—"
+  const avgCost = turns > 0 ? formatCostInCurrency(report.totalCostUsd / turns) : "—"
+  const avgDuration =
+    turns > 0 && report.totalDurationMs > 0 ? formatDuration(report.totalDurationMs / turns) : "—"
+
   return (
     <div className="space-y-4" data-testid="session-report-view">
       {/* KPI tiles */}
@@ -36,6 +64,10 @@ export function SessionReportView({ report }: { report: SessionReport }) {
         <Kpi label={t("kpi.turns")} value={report.turns} />
         <Kpi label={t("kpi.tokens")} value={formatTokens(totalTokens)} />
         <Kpi label={t("kpi.cost")} value={formatCostInCurrency(report.totalCostUsd)} />
+        <Kpi label={t("kpi.speed")} value={speedLabel} />
+        <Kpi label={t("kpi.duration")} value={durationLabel} />
+        <Kpi label={t("kpi.reasoning")} value={reasoningLabel} />
+        <Kpi label={t("kpi.cacheHit")} value={cacheHitLabel} />
         <Kpi label={t("kpi.tools")} value={report.toolCallTotal} />
         <Kpi label={t("kpi.errors")} value={report.errorCount} />
         <Kpi label={t("kpi.denials")} value={report.denialCount} />
@@ -43,23 +75,41 @@ export function SessionReportView({ report }: { report: SessionReport }) {
         <Kpi label={t("kpi.idleGaps")} value={report.idleGaps.length} />
       </div>
 
+      {/* Per-turn averages */}
+      {turns > 0 && (
+        <section className="space-y-1.5" data-testid="averages-panel">
+          <p className="text-[10px] uppercase text-muted-foreground">{t("averages.title")}</p>
+          <div className="grid grid-cols-3 gap-2">
+            <Kpi label={t("averages.tokens")} value={avgTokens} />
+            <Kpi label={t("averages.cost")} value={avgCost} />
+            <Kpi label={t("averages.duration")} value={avgDuration} />
+          </div>
+        </section>
+      )}
+
       {/* Per-model usage */}
       {report.models.length > 0 && (
         <section className="space-y-1.5">
           <p className="text-[10px] uppercase text-muted-foreground">{t("models.title")}</p>
-          {report.models.map((m) => (
-            <div
-              key={m.model}
-              className="flex items-center justify-between gap-3 text-xs"
-              data-testid="model-row"
-            >
-              <span className="truncate">{m.model}</span>
-              <span className="shrink-0 font-mono text-muted-foreground">
-                {formatTokens(m.inputTokens + m.outputTokens + m.cacheReadTokens)} ·{" "}
-                {formatCostInCurrency(m.costUsd)}
-              </span>
-            </div>
-          ))}
+          {report.models.map((m) => {
+            const modelSpeed = tokensPerSecond(m.outputTokens, m.durationMs)
+            return (
+              <div
+                key={m.model}
+                className="flex items-center justify-between gap-3 text-xs"
+                data-testid="model-row"
+              >
+                <span className="truncate">{m.model}</span>
+                <span className="shrink-0 font-mono text-muted-foreground">
+                  {formatTokens(m.inputTokens + m.outputTokens + m.cacheReadTokens)} ·{" "}
+                  {formatCostInCurrency(m.costUsd)}
+                  {modelSpeed != null && (
+                    <> · {t("units.tokPerSec", { value: formatTokensPerSec(modelSpeed) })}</>
+                  )}
+                </span>
+              </div>
+            )
+          })}
         </section>
       )}
 

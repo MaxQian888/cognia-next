@@ -7,7 +7,8 @@
  * `sessionUsage` Dexie table (Stage 2 of the ClaudeCode 完整化 plan). The
  * collapsed badge keeps showing the in-memory totals from the active
  * messages so the indicator updates as soon as a turn streams in — the
- * popover then enriches it with the persistent per-model split.
+ * popover then enriches it with the persistent per-model split (tokens, cost,
+ * throughput, generation time, reasoning tokens, and cache-hit rate).
  */
 
 import { useMemo } from "react"
@@ -19,6 +20,13 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { listUsageForSession, type SessionUsageRow } from "@/lib/db/session-usage"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import {
+  cacheHitRate,
+  formatDuration,
+  formatPercent,
+  formatTokensPerSec,
+  tokensPerSecond,
+} from "@/types/system/usage"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -38,6 +46,9 @@ export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel }: Prop
   const rows = useLiveQuery(() => listUsageForSession(sessionId), [sessionId])
 
   const breakdown = useMemo(() => buildBreakdown(rows ?? []), [rows])
+  // Session throughput: summed output tokens ÷ summed generation time. `null`
+  // when no persisted turn reported a duration → "—".
+  const speed = tokensPerSecond(breakdown.outputTokens, breakdown.durationMs)
 
   const inputs = inMemoryUsage.inputTokens ?? 0
   const outputs = inMemoryUsage.outputTokens ?? 0
@@ -85,6 +96,26 @@ export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel }: Prop
                 {t("cacheWriteShort")} {formatTokens(breakdown.cacheCreationTokens)} /{" "}
                 {t("cacheReadShort")} {formatTokens(breakdown.cacheReadTokens)}
               </dd>
+              <dt className="text-muted-foreground">{t("cacheHit")}</dt>
+              <dd className="text-right font-mono" data-testid="cost-popover-cache-hit">
+                {formatPercent(
+                  cacheHitRate(breakdown.cacheReadTokens, breakdown.cacheCreationTokens)
+                )}
+              </dd>
+            </>
+          )}
+          <dt className="text-muted-foreground">{t("speed")}</dt>
+          <dd className="text-right font-mono" data-testid="cost-popover-speed">
+            {speed != null ? t("tokPerSec", { value: formatTokensPerSec(speed) }) : "—"}
+          </dd>
+          <dt className="text-muted-foreground">{t("duration")}</dt>
+          <dd className="text-right font-mono">
+            {breakdown.durationMs > 0 ? formatDuration(breakdown.durationMs) : "—"}
+          </dd>
+          {breakdown.reasoningTokens > 0 && (
+            <>
+              <dt className="text-muted-foreground">{t("reasoning")}</dt>
+              <dd className="text-right font-mono">{formatTokens(breakdown.reasoningTokens)}</dd>
             </>
           )}
           <dt className="text-muted-foreground">{t("cost")}</dt>
@@ -101,16 +132,22 @@ export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel }: Prop
           <div className="space-y-1">
             <p className="text-muted-foreground">{t("byModelTitle")}</p>
             <ul className="space-y-1" data-testid="cost-popover-by-model">
-              {breakdown.byModel.map((m) => (
-                <li key={m.model} className="flex items-center justify-between">
-                  <span className="truncate font-mono text-[11px]" title={m.model}>
-                    {m.model}
-                  </span>
-                  <span className="ml-2 shrink-0 font-mono">
-                    {formatTokens(m.tokens)} · ${m.costUsd.toFixed(4)}
-                  </span>
-                </li>
-              ))}
+              {breakdown.byModel.map((m) => {
+                const modelSpeed = tokensPerSecond(m.outputTokens, m.durationMs)
+                return (
+                  <li key={m.model} className="flex items-center justify-between">
+                    <span className="truncate font-mono text-[11px]" title={m.model}>
+                      {m.model}
+                    </span>
+                    <span className="ml-2 shrink-0 font-mono">
+                      {formatTokens(m.tokens)} · ${m.costUsd.toFixed(4)}
+                      {modelSpeed != null && (
+                        <> · {t("tokPerSec", { value: formatTokensPerSec(modelSpeed) })}</>
+                      )}
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         )}
@@ -126,7 +163,18 @@ interface Breakdown {
   cacheReadTokens: number
   cacheCreationTokens: number
   costUsd: number
-  byModel: Array<{ model: string; tokens: number; costUsd: number; turns: number }>
+  /** Summed active generation time (ms) — pairs with output for throughput. */
+  durationMs: number
+  /** Summed reasoning / "thinking" tokens (subset of output). */
+  reasoningTokens: number
+  byModel: Array<{
+    model: string
+    tokens: number
+    outputTokens: number
+    durationMs: number
+    costUsd: number
+    turns: number
+  }>
 }
 
 const EMPTY: Breakdown = {
@@ -136,6 +184,8 @@ const EMPTY: Breakdown = {
   cacheReadTokens: 0,
   cacheCreationTokens: 0,
   costUsd: 0,
+  durationMs: 0,
+  reasoningTokens: 0,
   byModel: [],
 }
 
@@ -148,18 +198,33 @@ function buildBreakdown(rows: SessionUsageRow[]): Breakdown {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     costUsd: 0,
+    durationMs: 0,
+    reasoningTokens: 0,
     byModel: [],
   }
-  const byModel = new Map<string, { tokens: number; costUsd: number; turns: number }>()
+  const byModel = new Map<
+    string,
+    { tokens: number; outputTokens: number; durationMs: number; costUsd: number; turns: number }
+  >()
   for (const r of rows) {
     out.inputTokens += r.inputTokens
     out.outputTokens += r.outputTokens
     out.cacheReadTokens += r.cacheReadTokens
     out.cacheCreationTokens += r.cacheCreationTokens
     out.costUsd += r.costUsd
+    out.durationMs += r.durationMs
+    out.reasoningTokens += r.reasoningTokens ?? 0
     const model = r.model && r.model.trim() ? r.model : "(unknown)"
-    const slot = byModel.get(model) ?? { tokens: 0, costUsd: 0, turns: 0 }
+    const slot = byModel.get(model) ?? {
+      tokens: 0,
+      outputTokens: 0,
+      durationMs: 0,
+      costUsd: 0,
+      turns: 0,
+    }
     slot.tokens += r.inputTokens + r.outputTokens + r.cacheReadTokens
+    slot.outputTokens += r.outputTokens
+    slot.durationMs += r.durationMs
     slot.costUsd += r.costUsd
     slot.turns += 1
     byModel.set(model, slot)

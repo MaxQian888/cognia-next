@@ -9,6 +9,7 @@ import { ModelOverrideFields, useUtilityProviderOptions } from "../common/model-
 import { CompactionSettings } from "./compaction-settings"
 import { ComposerBehaviorCard } from "./composer-behavior-card"
 import { ConversationSidebarCard } from "./conversation-sidebar-card"
+import { RunStatusBarCard } from "./run-status-bar-card"
 import { ComposerAssistanceCard } from "../chat/composer-assistance-card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -149,6 +150,8 @@ export function ConversationSection() {
       </SettingsCard>
 
       <ConversationSidebarCard />
+
+      <RunStatusBarCard />
 
       <CompactionSettings />
 

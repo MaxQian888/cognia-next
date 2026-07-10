@@ -105,6 +105,17 @@ export interface ModelUsageRow {
   /** Cache-write (creation) tokens — surfaced as a detailed-mode column. */
   cacheCreationTokens: number
   costUsd: number
+  /**
+   * Sum of SDK-reported active generation time (ms) across this model's turns.
+   * 0 when no turn reported a duration (non-SDK paths). Pairs with
+   * `outputTokens` to derive throughput via {@link tokensPerSecond}.
+   */
+  durationMs: number
+  /**
+   * Sum of reasoning / "thinking" tokens (a subset of `outputTokens`) across
+   * this model's turns. 0 when the model / provider never broke them out.
+   */
+  reasoningTokens: number
 }
 
 /** Bucket rows by model, descending by cost (ties: total tokens, then name). */
@@ -125,6 +136,8 @@ export function aggregateByModel(
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
         costUsd: 0,
+        durationMs: 0,
+        reasoningTokens: 0,
       } satisfies ModelUsageRow)
     slot.turns += 1
     slot.inputTokens += r.inputTokens
@@ -132,6 +145,8 @@ export function aggregateByModel(
     slot.cacheReadTokens += r.cacheReadTokens
     slot.cacheCreationTokens += r.cacheCreationTokens
     slot.costUsd += effectiveCostUsd(r, resolve)
+    slot.durationMs += r.durationMs
+    slot.reasoningTokens += r.reasoningTokens ?? 0
     map.set(model, slot)
   }
   return [...map.values()].sort(

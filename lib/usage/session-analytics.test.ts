@@ -151,6 +151,17 @@ describe("aggregateByModel", () => {
     expect(out[0]!.cacheCreationTokens).toBe(150)
   })
 
+  it("sums generation duration and reasoning tokens per model", () => {
+    const rows = [
+      row({ model: "test-model", costUsd: 1, durationMs: 2000, reasoningTokens: 40 }),
+      row({ model: "test-model", costUsd: 1, durationMs: 3000, reasoningTokens: undefined }),
+    ]
+    const out = aggregateByModel(rows, priceFor)
+    expect(out[0]!.durationMs).toBe(5000)
+    // reasoningTokens is optional per row — undefined counts as 0.
+    expect(out[0]!.reasoningTokens).toBe(40)
+  })
+
   it("labels rows without a model as (unknown)", () => {
     const out = aggregateByModel([row({ model: undefined, costUsd: 1 })], priceFor)
     expect(out[0]!.model).toBe("(unknown)")

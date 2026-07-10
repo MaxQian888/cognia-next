@@ -140,6 +140,53 @@ describe("RunPanel — idle replay", () => {
   })
 })
 
+describe("RunPanel — metric strip", () => {
+  function assistantWithUsage(usage: Record<string, number>): UIMessage {
+    return {
+      id: "a1",
+      role: "assistant",
+      parts: [toolPart("t1", "Bash", "output-available")],
+      metadata: { usage },
+    } as unknown as UIMessage
+  }
+
+  it("renders output-token + speed chips from live usage under the default config", () => {
+    // No settings mock → runStatusBar undefined → defaults (tokens + speed on,
+    // cost + context off). 500 output tok over 10s → 50 tok/s.
+    seed({
+      status: "streaming",
+      messages: [
+        assistantWithUsage({
+          inputTokens: 100,
+          outputTokens: 500,
+          durationMs: 10_000,
+          totalCostUsd: 0.03,
+        }),
+      ],
+    })
+    render(<RunPanel sessionId={SID} />)
+    const strip = screen.getByTestId("run-bar-metrics")
+    expect(strip).toHaveTextContent("metricTokens") // "{value} tok"
+    expect(strip).toHaveTextContent("metricSpeed") // "{value} tok/s"
+    // Cost + context are opt-in; the currency symbol / context key stay hidden.
+    expect(strip).not.toHaveTextContent("metricContext")
+  })
+
+  it("hides usage-derived chips when no turn carries usage", () => {
+    seed({
+      status: "streaming",
+      messages: [assistant([toolPart("t1", "Bash", "input-available")])],
+    })
+    render(<RunPanel sessionId={SID} />)
+    // Only the tools chip may show (busy + default showTools); no tokens/speed.
+    const strip = screen.queryByTestId("run-bar-metrics")
+    if (strip) {
+      expect(strip).not.toHaveTextContent("metricTokens")
+      expect(strip).not.toHaveTextContent("metricSpeed")
+    }
+  })
+})
+
 describe("RunPanel — accessibility", () => {
   it("sets aria-atomic false and labels the interrupt + toggle controls", () => {
     seed({

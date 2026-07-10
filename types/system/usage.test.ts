@@ -1,8 +1,13 @@
 import {
+  cacheHitRate,
   calculateCost,
   calculateCostFromTokens,
+  formatDuration,
   formatModelPricing,
+  formatPercent,
+  formatTokensPerSec,
   getModelPricingUSD,
+  tokensPerSecond,
 } from "./usage"
 
 describe("getModelPricingUSD", () => {
@@ -71,5 +76,61 @@ describe("formatModelPricing", () => {
     expect(formatted).not.toBeNull()
     expect(formatted!.input).toContain("0.95")
     expect(formatted!.output).toContain("4.00")
+  })
+})
+
+describe("tokensPerSecond", () => {
+  it("divides output tokens by the duration in seconds", () => {
+    expect(tokensPerSecond(450, 10_000)).toBe(45) // 450 tok / 10s
+    expect(tokensPerSecond(1000, 2000)).toBe(500)
+  })
+
+  it("returns null when there is no timed generation to divide by", () => {
+    expect(tokensPerSecond(500, 0)).toBeNull() // non-SDK turn, durationMs 0
+    expect(tokensPerSecond(0, 5000)).toBeNull() // no output
+    expect(tokensPerSecond(500, -1)).toBeNull()
+    expect(tokensPerSecond(Number.NaN, 5000)).toBeNull()
+  })
+})
+
+describe("formatTokensPerSec", () => {
+  it("formats compactly with unit left to the caller", () => {
+    expect(formatTokensPerSec(45.4)).toBe("45")
+    expect(formatTokensPerSec(9.24)).toBe("9.2")
+    expect(formatTokensPerSec(1250)).toBe("1.3K")
+    expect(formatTokensPerSec(0)).toBe("0")
+    expect(formatTokensPerSec(Number.NaN)).toBe("0")
+  })
+})
+
+describe("cacheHitRate", () => {
+  it("is read / (read + write)", () => {
+    expect(cacheHitRate(750, 250)).toBe(0.75)
+    expect(cacheHitRate(0, 100)).toBe(0)
+  })
+
+  it("returns 0 when there is no cache activity", () => {
+    expect(cacheHitRate(0, 0)).toBe(0)
+    expect(cacheHitRate(Number.NaN, Number.NaN)).toBe(0)
+  })
+})
+
+describe("formatPercent", () => {
+  it("rounds a [0,1] fraction to an integer percent, clamped", () => {
+    expect(formatPercent(0.383)).toBe("38%")
+    expect(formatPercent(1.4)).toBe("100%")
+    expect(formatPercent(-0.2)).toBe("0%")
+    expect(formatPercent(Number.NaN)).toBe("0%")
+  })
+})
+
+describe("formatDuration", () => {
+  it("renders sub-second, seconds, minutes and hours", () => {
+    expect(formatDuration(0)).toBe("0s")
+    expect(formatDuration(820)).toBe("820ms")
+    expect(formatDuration(3140)).toBe("3.1s")
+    expect(formatDuration(42_000)).toBe("42s")
+    expect(formatDuration(63_000)).toBe("1m 03s")
+    expect(formatDuration(3_720_000)).toBe("1h 02m")
   })
 })

@@ -51,6 +51,21 @@ import {
   selectRunningSubagentChip,
 } from "@/lib/claude/run-status"
 import { deriveRunRecord, toRunStatus } from "@/lib/claude/run-record"
+import { useSettingsStore } from "@/stores/settings"
+import {
+  aggregateRunBarUsage,
+  EMPTY_RUN_BAR_USAGE,
+  needsLiveUsage,
+  resolveRunStatusBarSettings,
+  type RunBarUsageTotals,
+} from "@/lib/chat/run-bar-metrics"
+import type { RunStatusBarSettings } from "@/lib/claude/types"
+import {
+  formatCostInCurrency,
+  formatTokens,
+  formatTokensPerSec,
+  tokensPerSecond,
+} from "@/types/system/usage"
 import { TodoList } from "./todo-list"
 import { ToolCallRow } from "./message-parts/tool-call-row"
 import { SubagentTree } from "./message-parts/subagent-tree"
@@ -175,6 +190,63 @@ function SteerQueueRow({
   )
 }
 
+/**
+ * The configurable metric strip on the run bar's collapsed face. Renders only
+ * the metrics the user enabled in Settings → Conversation → Run status bar.
+ * Usage-derived chips (tokens, speed, cost, context%) stay hidden until the
+ * bound session has at least one turn carrying usage; the tools chip shows only
+ * while busy (the idle "Last run" line already carries a tool count).
+ */
+function RunBarMetrics({
+  totals,
+  cfg,
+  toolsCount,
+  busy,
+}: {
+  totals: RunBarUsageTotals
+  cfg: Required<RunStatusBarSettings>
+  toolsCount: number
+  busy: boolean
+}) {
+  const t = useTranslations("chat.runStatus")
+  const tp = useTranslations("chat.runPanel")
+  const usageReady = totals.turns > 0
+  const chips: React.ReactNode[] = []
+
+  if (cfg.showOutputTokens && usageReady) {
+    chips.push(
+      <span key="tokens">{t("metricTokens", { value: formatTokens(totals.outputTokens) })}</span>
+    )
+  }
+  if (cfg.showSpeed && usageReady) {
+    const speed = tokensPerSecond(totals.outputTokens, totals.durationMs)
+    if (speed != null) {
+      chips.push(<span key="speed">{t("metricSpeed", { value: formatTokensPerSec(speed) })}</span>)
+    }
+  }
+  if (cfg.showCost && usageReady && totals.costUsd > 0) {
+    chips.push(<span key="cost">{formatCostInCurrency(totals.costUsd)}</span>)
+  }
+  if (cfg.showContextPct && usageReady) {
+    chips.push(
+      <span key="ctx">{t("metricContext", { pct: Math.round(totals.contextFraction * 100) })}</span>
+    )
+  }
+  if (cfg.showTools && busy && toolsCount > 0) {
+    chips.push(<span key="tools">{tp("summaryTools", { count: toolsCount })}</span>)
+  }
+
+  if (chips.length === 0) return null
+  return (
+    <div
+      data-testid="run-bar-metrics"
+      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-5 text-[11px] tabular-nums text-muted-foreground"
+    >
+      {chips}
+    </div>
+  )
+}
+
 function RunPanelImpl({
   sessionId,
   onStop,
@@ -193,6 +265,8 @@ function RunPanelImpl({
   const runId = useSessionRunId(sessionId)
   const toolTimestamps = useSessionToolTimestamps(sessionId)
   const subAgents = useSubagentRuntimeStore((s) => s.subAgents)
+  const runBarCfg = useSettingsStore((s) => s.settings?.runStatusBar)
+  const resolvedBar = useMemo(() => resolveRunStatusBarSettings(runBarCfg), [runBarCfg])
 
   const busy = status === "streaming" || status === "awaiting_approval"
 
@@ -218,6 +292,13 @@ function RunPanelImpl({
         toolTimestamps,
       }),
     [sessionId, runId, messages, timing, status, toolTimestamps]
+  )
+
+  // Live usage aggregate for the metric strip — only computed when at least one
+  // usage-derived chip (tokens / speed / cost / context%) is enabled.
+  const usageTotals = useMemo(
+    () => (needsLiveUsage(resolvedBar) ? aggregateRunBarUsage(messages) : EMPTY_RUN_BAR_USAGE),
+    [messages, resolvedBar]
   )
 
   const hasWork =
@@ -268,7 +349,7 @@ function RunPanelImpl({
           <div className="flex flex-1 items-center gap-2 text-foreground/80">
             <Loader2 className="size-3.5 shrink-0 animate-spin text-amber-500" aria-hidden />
             <span className="font-medium">{verb}</span>
-            {elapsed && (
+            {resolvedBar.showElapsed && elapsed && (
               <span className="tabular-nums text-muted-foreground" data-testid="run-status-elapsed">
                 · {elapsed}
               </span>
@@ -334,6 +415,13 @@ function RunPanelImpl({
           )
         )}
       </div>
+
+      <RunBarMetrics
+        totals={usageTotals}
+        cfg={resolvedBar}
+        toolsCount={record.counts.tools}
+        busy={busy}
+      />
 
       {toolLines.map((line) => (
         <div

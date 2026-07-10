@@ -899,7 +899,10 @@
     "interruptHintTouch": "Tap to interrupt",
     "queued": "{count} queued",
     "steerNow": "Send now",
-    "ariaSteerNow": "Interrupt the current turn and send queued messages now"
+    "ariaSteerNow": "Interrupt the current turn and send queued messages now",
+    "metricTokens": "{value} tok",
+    "metricSpeed": "{value} tok/s",
+    "metricContext": "context {pct}%"
   },
   "runPanel": {
     "expand": "Show run details",
@@ -927,14 +930,19 @@
   "sessionCost": {
     "byModelTitle": "By model",
     "cache": "Cache",
+    "cacheHit": "Cache hit",
     "cacheReadShort": "Read",
     "cacheWriteShort": "Write",
     "cost": "Cost",
     "description": "Persisted per-turn totals from the SDK's result events. Per-model split is sourced from the sessionUsage Dexie table.",
+    "duration": "Gen time",
     "input": "Input",
     "noModelData": "No persisted usage rows yet — totals above come from in-memory turns.",
     "output": "Output",
+    "reasoning": "Reasoning",
+    "speed": "Speed",
     "title": "Session cost",
+    "tokPerSec": "{value} tok/s",
     "tokensTitle": "Input: {input} · Output: {output}",
     "trigger": "Session cost",
     "turns": "Turns"

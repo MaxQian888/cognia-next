@@ -8,11 +8,24 @@
     "turns": "轮次",
     "tokens": "Token",
     "cost": "成本",
+    "speed": "速度",
+    "duration": "生成耗时",
+    "reasoning": "推理",
+    "cacheHit": "缓存命中",
     "tools": "工具调用",
     "errors": "错误",
     "denials": "拒绝",
     "modelSwitches": "模型切换",
     "idleGaps": "空闲间隙"
+  },
+  "units": {
+    "tokPerSec": "{value} tok/s"
+  },
+  "averages": {
+    "title": "每轮平均",
+    "tokens": "Token",
+    "cost": "成本",
+    "duration": "生成耗时"
   },
   "models": {
     "title": "各模型用量",

@@ -173,6 +173,22 @@ describe("SubscriptionUsageTab", () => {
     expect(screen.getByText("Representative")).toBeInTheDocument()
   })
 
+  it("surfaces model throughput as a headline stat tile", () => {
+    // Fixture row: 500 output tokens over 1200ms → ~417 tok/s.
+    setup()
+    render(<SubscriptionUsageTab />)
+    const speed = screen.getByTestId("usage-model-stat-speed")
+    expect(speed).toHaveTextContent("tok/s")
+  })
+
+  it("renders an em-dash speed tile when no turn reported a duration", () => {
+    setup({ sessionRows: [usageRow({ durationMs: 0 })] })
+    render(<SubscriptionUsageTab />)
+    const speed = screen.getByTestId("usage-model-stat-speed")
+    expect(speed).toHaveTextContent("—")
+    expect(speed).not.toHaveTextContent("tok/s")
+  })
+
   it("surfaces contributing-factor insights derived from the session rows", () => {
     setup({
       sessionRows: [

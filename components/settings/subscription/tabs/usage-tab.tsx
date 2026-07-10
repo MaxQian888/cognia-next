@@ -49,6 +49,7 @@ import {
   DownloadIcon,
   FoldVerticalIcon,
   HashIcon,
+  GaugeIcon,
   RefreshCwIcon,
   RepeatIcon,
   UnfoldVerticalIcon,
@@ -83,7 +84,12 @@ import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import { listSessions } from "@/lib/db/sessions"
 import { downloadBlob } from "@/lib/files/download"
-import { formatCostInCurrency, formatTokens } from "@/types/system/usage"
+import {
+  formatCostInCurrency,
+  formatTokens,
+  formatTokensPerSec,
+  tokensPerSecond,
+} from "@/types/system/usage"
 import { useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
 import { useAccounts } from "@/lib/subscription/core/hooks"
 import { ProviderQuotaPanel } from "@/components/settings/subscription/provider-quota-panel"
@@ -561,9 +567,11 @@ function UsageStatGrid({ models }: { models: ModelUsageRow[] }) {
           acc.turns += m.turns
           acc.input += m.inputTokens
           acc.cacheRead += m.cacheReadTokens
+          acc.output += m.outputTokens
+          acc.duration += m.durationMs
           return acc
         },
-        { tokens: 0, cost: 0, turns: 0, input: 0, cacheRead: 0 }
+        { tokens: 0, cost: 0, turns: 0, input: 0, cacheRead: 0, output: 0, duration: 0 }
       ),
     [models]
   )
@@ -571,9 +579,14 @@ function UsageStatGrid({ models }: { models: ModelUsageRow[] }) {
   // cacheRead / (input + cacheRead), 0 when no input recorded.
   const cacheHitRate =
     totals.input + totals.cacheRead > 0 ? totals.cacheRead / (totals.input + totals.cacheRead) : 0
+  // Aggregate output-token throughput; null when no turn reported a duration.
+  const speed = tokensPerSecond(totals.output, totals.duration)
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="usage-stat-grid">
+    <div
+      className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+      data-testid="usage-stat-grid"
+    >
       <UsageStatCard
         label={t("totalTokens")}
         value={totals.tokens}
@@ -613,6 +626,16 @@ function UsageStatGrid({ models }: { models: ModelUsageRow[] }) {
         accentGradient="from-amber-500 to-yellow-400"
         iconBgClassName="bg-amber-500/10"
         testid="usage-model-stat-cache-hit-rate"
+      />
+      <UsageStatCard
+        label={t("speed")}
+        value={speed ?? 0}
+        format={(n) => (speed == null ? "—" : t("speedUnit", { value: formatTokensPerSec(n) }))}
+        icon={<GaugeIcon className="h-5 w-5 text-cyan-500" aria-hidden />}
+        valueClassName="text-cyan-500"
+        accentGradient="from-cyan-500 to-sky-400"
+        iconBgClassName="bg-cyan-500/10"
+        testid="usage-model-stat-speed"
       />
     </div>
   )
@@ -948,6 +971,7 @@ function ModelBreakdownCard({
                     {t("colCacheWrite")}
                   </TableHead>
                 )}
+                <TableHead className="hidden text-right sm:table-cell">{t("colSpeed")}</TableHead>
                 <TableHead className="text-right">{t("colCost")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -972,6 +996,12 @@ function ModelBreakdownCard({
                       {formatTokens(m.cacheCreationTokens)}
                     </TableCell>
                   )}
+                  <TableCell className="hidden text-right text-xs tabular-nums sm:table-cell">
+                    {(() => {
+                      const s = tokensPerSecond(m.outputTokens, m.durationMs)
+                      return s == null ? "—" : t("speedUnit", { value: formatTokensPerSec(s) })
+                    })()}
+                  </TableCell>
                   <TableCell className="text-right font-mono text-xs">
                     {formatCostInCurrency(m.costUsd, "USD")}
                   </TableCell>
