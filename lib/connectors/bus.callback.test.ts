@@ -14,6 +14,17 @@ import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
 import type { PlatformIdentity } from "@/types/connectors/event"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 
+// The wf_approve path drives a REAL `startWorkflowFromIM`, which fires
+// `void runWorkflow(...)` in the background (fire-and-forget by design). In a
+// suite that `beforeEach`-deletes the DB, that background run writes to a
+// deleted DB on a later tick — an unhandled rejection jest attributes to the
+// FOLLOWING test (the wf_cancel case failed with an empty body for exactly
+// this reason). Stub the start so bus-routing assertions stay deterministic;
+// the orchestrator itself is covered by its own tests.
+jest.mock("@/lib/workflow/runtime/start-from-im", () => ({
+  startWorkflowFromIM: jest.fn(async () => ({ ok: true, runId: "run_test" })),
+}))
+
 const sender: PlatformIdentity = {
   id: "id-1",
   platform: "telegram",

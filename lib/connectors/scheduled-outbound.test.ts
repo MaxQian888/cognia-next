@@ -74,7 +74,10 @@ let resolveSendOptionsImpl: jest.Mock = jest.fn(async () => ({
 let getAdapterImpl: jest.Mock = jest.fn(async () => undefined)
 let readOverrideImpl: jest.Mock = jest.fn(async () => undefined)
 let getCharacterImpl: jest.Mock = jest.fn(async () => undefined)
-let getSettingsImpl: jest.Mock = jest.fn(async () => undefined)
+// Real getSettings() returns AppSettings (never undefined; falls back to
+// DEFAULTS). A stubbed active project id lets resolveScopeProjectId — used by
+// enqueueOutbound — short-circuit without hitting the (unmocked) saveSettings.
+let getSettingsImpl: jest.Mock = jest.fn(async () => ({ activeProjectId: "proj_test" }))
 let tryBuildTwinDepsImpl: jest.Mock = jest.fn(async () => undefined)
 
 jest.mock("./runtime", () => ({
@@ -103,6 +106,10 @@ jest.mock("@/lib/db/conversation-overrides", () => ({
 }))
 jest.mock("@/lib/db/characters", () => ({
   getCharacter: (id: string) => getCharacterImpl(id),
+  // The real schema seed calls seedBuiltInCharacters during getDb() open; an
+  // undefined export throws inside the populate hook and aborts the version
+  // transaction, breaking every subsequent write (empty outboundQueue).
+  seedBuiltInCharacters: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("@/lib/db/settings", () => ({
   getSettings: () => getSettingsImpl(),
@@ -145,7 +152,7 @@ beforeEach(async () => {
   getAdapterImpl = jest.fn(async () => undefined)
   readOverrideImpl = jest.fn(async () => undefined)
   getCharacterImpl = jest.fn(async () => undefined)
-  getSettingsImpl = jest.fn(async () => undefined)
+  getSettingsImpl = jest.fn(async () => ({ activeProjectId: "proj_test" }))
   tryBuildTwinDepsImpl = jest.fn(async () => undefined)
   tryBuildMemoryDepsImpl = jest.fn(async () => undefined)
   __setDigestSendPromptForTesting(null)
