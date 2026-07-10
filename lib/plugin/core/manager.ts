@@ -3682,6 +3682,17 @@ export class PluginManager {
     for (const cap of MODULE_BRIDGE_CAPABILITY_KEYS) {
       await MODULE_BRIDGE_CAPABILITIES[cap].unregister(pluginId)
     }
+    // Drop runtime-registered AI providers (ctx.ai.registerProvider). The
+    // module-bridge teardown above only covers the DECLARATIVE
+    // ai-providers path; the imperative registrations were previously
+    // reachable after disable (W4.3).
+    try {
+      const { clearCustomAIProvidersByPlugin } = await import("@/lib/plugin/api/ai-provider-api")
+      clearCustomAIProvidersByPlugin(pluginId)
+    } catch {
+      // best effort — early-teardown import failures must not abort cleanup
+    }
+
     // Drop the cached `manifest.configComponent` module so a re-enable (or a
     // hot-reload during dev) re-imports the component instead of serving a
     // stale closure. The settings host falls back to the schema form until

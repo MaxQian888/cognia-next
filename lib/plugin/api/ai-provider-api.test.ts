@@ -12,6 +12,7 @@ import {
   createAIProviderAPI,
   getCustomAIProviders,
   clearCustomAIProviders,
+  clearCustomAIProvidersByPlugin,
 } from "./ai-provider-api"
 import { initializePluginPermissions } from "./permission-api"
 import {
@@ -658,5 +659,40 @@ describe("PII gate (W2.4)", () => {
   it("blocks embed when a text leaks PII", async () => {
     const api = createAIProviderAPI("test-plugin")
     await expect(api.embed(["sk-ant-api03-abcdefghijklmnopqrstuvwx"])).rejects.toThrow(/PII/)
+  })
+})
+
+describe("clearCustomAIProvidersByPlugin (W4.3)", () => {
+  it("removes only the plugin's providers and their adapter registrations", () => {
+    const api = createAIProviderAPI("owner")
+    api.registerProvider({
+      id: "prov",
+      name: "Owner Provider",
+      models: [{ id: "m1", name: "M1", capabilities: ["chat"] }],
+      chat: async function* () {
+        yield { content: "x" }
+      },
+    } as never)
+    const otherApi = createAIProviderAPI("other")
+    otherApi.registerProvider({
+      id: "prov",
+      name: "Other Provider",
+      models: [{ id: "m2", name: "M2", capabilities: ["chat"] }],
+      chat: async function* () {
+        yield { content: "y" }
+      },
+    } as never)
+
+    expect(getCustomAIProviders().map((p) => p.id)).toEqual(
+      expect.arrayContaining(["owner:prov", "other:prov"])
+    )
+
+    expect(clearCustomAIProvidersByPlugin("owner")).toBe(1)
+    const remaining = getCustomAIProviders().map((p) => p.id)
+    expect(remaining).not.toContain("owner:prov")
+    expect(remaining).toContain("other:prov")
+    expect(getProtocolAdapter("owner:prov")).toBeUndefined()
+
+    clearCustomAIProvidersByPlugin("other")
   })
 })

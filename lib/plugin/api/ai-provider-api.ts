@@ -439,3 +439,28 @@ export function getCustomAIProviders(): AIProviderDefinition[] {
 export function clearCustomAIProviders(): void {
   customProviders.clear()
 }
+
+/**
+ * Tear down every runtime-registered AI provider owned by `pluginId` (W4.3).
+ * Mirrors the disposer returned by `registerProvider` — without this, a
+ * disabled plugin's `chat()` stayed reachable through the provider loader and
+ * protocol-adapter registry because only the plugin itself held the disposer.
+ * Called by the manager's `unregisterPluginContributions`.
+ */
+export function clearCustomAIProvidersByPlugin(pluginId: string): number {
+  const prefix = `${pluginId}:`
+  let removed = 0
+  for (const providerId of Array.from(customProviders.keys())) {
+    if (!providerId.startsWith(prefix)) continue
+    customProviders.delete(providerId)
+    try {
+      unregisterProvider(providerId)
+    } catch {
+      // best effort — the loader may not know the id
+    }
+    unregisterProtocolAdapter(providerId)
+    unregisterCodeAdapterExecutor(providerId)
+    removed += 1
+  }
+  return removed
+}
