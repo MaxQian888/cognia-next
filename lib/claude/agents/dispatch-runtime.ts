@@ -1,18 +1,22 @@
 /**
  * Producer that feeds nested-dispatch runs into the subagent runtime store
- * (A5). This is the "producer not yet wired" hook the store documents: when the
- * `dispatch_agent` host tool runs a subagent, it records start / completion /
- * rejection here, and the store's subscribers (the chat `SubagentPart` tree via
- * `subagent-bridge`, and the Settings runtime tab) render the live tree.
+ * (A5). When the `dispatch_agent` host tool runs a subagent, it records start /
+ * retry / completion / rejection here, and the store's subscribers (the chat
+ * `SubagentPart` tree via `subagent-bridge`, and the Settings runtime tab)
+ * render the live tree. `createDispatchRunTracker` is the per-run event sink:
+ * it folds live tool activity, streamed text, and cumulative token usage into
+ * the store, and retains the streamed text so the error path can salvage
+ * partial output.
  *
  * Pure-ish: it only touches the Zustand store's vanilla `getState()` API, so it
  * is callable from the renderer IPC handler (non-React) and unit-testable.
  */
 
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
-import type { SubAgent } from "@/types/agent/sub-agent"
+import type { SubAgent, SubAgentTokenUsage } from "@/types/agent/sub-agent"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
-import { createSubAgentNode, indeterminateSubagentProgress } from "@/lib/claude/subagent-projection"
+import type { PluginDispatchErrorEnvelope } from "@/types/plugin/plugin-agent-sdk"
+import { createSubAgentNode } from "@/lib/claude/subagent-projection"
 
 export interface DispatchRunStartParams {
   /** Unique id for this run (also the tree node id). */
@@ -105,8 +109,8 @@ export function recordDispatchCancelled(id: string): void {
   })
 }
 
-/** Record a subagent run that failed (error text). */
-export function recordDispatchFailed(id: string, error: string): void {
+/** Record a subagent run that failed, with its structured envelope. */
+export function recordDispatchFailed(id: string, envelope: PluginDispatchErrorEnvelope): void {
   const store = useSubagentRuntimeStore.getState()
   const sa = store.subAgents[id]
   if (!sa) return
@@ -114,35 +118,92 @@ export function recordDispatchFailed(id: string, error: string): void {
     ...sa,
     status: "failed",
     backgrounded: false,
-    error,
+    error: envelope.message,
+    errorEnvelope: {
+      code: envelope.code,
+      retryable: envelope.retryable,
+      ...(envelope.partialText ? { partialText: envelope.partialText } : {}),
+    },
     completedAt: new Date(),
     lastActivityAt: new Date(),
+    // Salvage streamed output so the failed chat card still shows the last
+    // text the run produced before dying (Claude Code parity).
+    ...(envelope.partialText
+      ? {
+          result: {
+            success: false,
+            finalResponse: envelope.partialText,
+            steps: [],
+            totalSteps: 0,
+            duration: sa.startedAt ? Date.now() - sa.startedAt.getTime() : 0,
+          },
+        }
+      : {}),
   })
 }
 
 /**
- * Indeterminate progress from the tool-call count.
- *
- * @deprecated gap9 — no surface renders a subagent completion bar anymore; the
- * honest tool-use count replaced it. Kept only as a named export for legacy
- * callers/tests and is no longer used to drive the runtime store.
+ * Record a transient-failure retry: bumps the honest `retryCount`, keeps the
+ * run `running`, and logs a warn line so the card's activity log shows why the
+ * run restarted.
  */
-export const dispatchProgressForToolCount = indeterminateSubagentProgress
+export function recordDispatchRetry(
+  id: string,
+  attempt: number,
+  envelope: PluginDispatchErrorEnvelope,
+  maxRetries?: number
+): void {
+  useSubagentRuntimeStore.getState().applyRunEvent(id, {
+    retry: { attempt },
+    log: {
+      timestamp: new Date(),
+      level: "warn",
+      message: `Retrying after ${envelope.code} (attempt ${attempt}${
+        maxRetries !== undefined ? `/${maxRetries}` : ""
+      }): ${envelope.message}`,
+    },
+  })
+}
+
+/** Cap on retained streamed text (tail-kept) for partial-output salvage. */
+const PARTIAL_TEXT_CAP = 32 * 1024
+/** Minimum growth between stream-text store writes (avoids per-token churn). */
+const STREAM_TEXT_FLUSH_STEP = 64
+
+export interface DispatchRunTracker {
+  /** The `_onEvent` sink threaded into `dispatchSubagent`. */
+  sink: (event: CaptureStreamEvent) => void
+  /** Text the run streamed so far (tail-capped) — the error path's salvage. */
+  partialText: () => string
+  /** Cumulative live token usage, when any usage event arrived. */
+  liveUsage: () => SubAgentTokenUsage | undefined
+}
 
 /**
- * Build a {@link CaptureStreamEvent} sink for a single dispatched run. It folds
- * the child's live tool activity into the runtime store: each `tool-call` logs
- * the tool and bumps the honest tool-use count; each `tool-result` logs
- * completion (a warning on error). Other event types (text/thinking/usage) are
- * ignored. Best-effort — a store error never propagates back into capture.
+ * Build the per-run tracker for a single dispatched run. Its `sink` folds the
+ * child's live activity into the runtime store — each `tool-call` logs the
+ * tool and bumps the honest tool-use count, each `tool-result` logs completion,
+ * `text-delta` coalesces into the streamed-text log line, and `usage` updates
+ * the live cumulative token figure (mid-run `partial` snapshots SUM; the final
+ * authoritative end-of-turn usage REPLACES the sum). The tracker additionally
+ * retains the streamed text so the dispatch error path can salvage partial
+ * output. Best-effort — a store error never propagates back into capture.
  */
-export function createDispatchEventSink(id: string): (event: CaptureStreamEvent) => void {
+export function createDispatchRunTracker(id: string): DispatchRunTracker {
   let toolCalls = 0
   // When the SDK omits a tool_use id, synthesize one and pair the next
   // result by tool name (best-effort) so the inline tool list still resolves.
   let synthSeq = 0
   const lastIdByName = new Map<string, string>()
-  return (event) => {
+  let textBuffer = ""
+  let lastFlushedLength = 0
+  // Partial usage snapshots accumulate; a final non-partial usage replaces.
+  let summed: SubAgentTokenUsage | undefined
+  let authoritative: SubAgentTokenUsage | undefined
+
+  const currentUsage = () => authoritative ?? summed
+
+  const sink = (event: CaptureStreamEvent) => {
     const store = useSubagentRuntimeStore.getState()
     if (event.type === "tool-call") {
       toolCalls += 1
@@ -168,14 +229,59 @@ export function createDispatchEventSink(id: string): (event: CaptureStreamEvent)
           ? { toolEnd: { id: callId, output: event.result, isError: event.isError } }
           : {}),
       })
+    } else if (event.type === "text-delta") {
+      textBuffer = (textBuffer + event.delta).slice(-PARTIAL_TEXT_CAP)
+      // Coalesced streamed-text log line (the store replaces a trailing
+      // stream-text entry), throttled so per-token deltas don't churn the store.
+      if (textBuffer.length - lastFlushedLength >= STREAM_TEXT_FLUSH_STEP) {
+        lastFlushedLength = textBuffer.length
+        store.pushStreamText(id, textBuffer)
+      }
+    } else if (event.type === "usage") {
+      const partial = (event as { partial?: boolean }).partial === true
+      const snapshot = toSubAgentUsage(event.usage)
+      if (partial) {
+        summed = summed ? addUsage(summed, snapshot) : snapshot
+      } else {
+        authoritative = snapshot
+      }
+      const usage = currentUsage()
+      if (usage) store.applyRunEvent(id, { usage })
     }
+  }
+
+  return {
+    sink,
+    partialText: () => textBuffer,
+    liveUsage: currentUsage,
   }
 }
 
-/** Record a dispatch refused by a nesting guard (max-depth / cycle). */
+function toSubAgentUsage(usage: {
+  inputTokens?: number
+  outputTokens?: number
+}): SubAgentTokenUsage {
+  const promptTokens = usage.inputTokens ?? 0
+  const completionTokens = usage.outputTokens ?? 0
+  return { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens }
+}
+
+function addUsage(a: SubAgentTokenUsage, b: SubAgentTokenUsage): SubAgentTokenUsage {
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+  }
+}
+
+/** Record a dispatch refused by a nesting guard (max-depth / cycle / policy). */
 export function recordDispatchRejected(
   params: DispatchRunStartParams & {
-    rejection: { reason: "max-depth" | "cycle"; message: string; attemptedDepth?: number }
+    rejection: {
+      reason: "max-depth" | "cycle" | "policy"
+      message: string
+      attemptedDepth?: number
+    }
   }
 ): void {
   const sa = baseSubAgent(params)

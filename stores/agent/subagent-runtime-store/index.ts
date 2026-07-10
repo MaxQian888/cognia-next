@@ -27,6 +27,7 @@ import {
   type SubAgentLog,
   type SubAgentStatus,
   type SubAgentTemplate,
+  type SubAgentTokenUsage,
   type SubAgentToolCall,
 } from "@/types/agent/sub-agent"
 
@@ -62,6 +63,10 @@ interface RuntimeSlice {
       toolStart?: { id: string; name: string; input?: Record<string, unknown> }
       /** Resolve a previously-started tool call by id (output / error). */
       toolEnd?: { id: string; output?: unknown; isError?: boolean }
+      /** Replace the live cumulative token usage (dispatch run tracker). */
+      usage?: SubAgentTokenUsage
+      /** Record a transient-failure retry (bumps `retryCount`). */
+      retry?: { attempt: number }
     }
   ) => void
   pushStreamText: (id: string, text: string) => void
@@ -171,6 +176,15 @@ export const useSubagentRuntimeStore = create<SubagentRuntimeState>()(
               ...(patch.toolStart.input ? { input: patch.toolStart.input } : {}),
             }
             next.toolCalls = [...(sa.toolCalls ?? []), call].slice(-MAX_SUBAGENT_TOOL_CALLS)
+            changed = true
+          }
+          if (patch.usage) {
+            next.tokenUsage = patch.usage
+            next.lastActivityAt = new Date()
+            changed = true
+          }
+          if (patch.retry) {
+            next.retryCount = Math.max(0, Math.floor(patch.retry.attempt))
             changed = true
           }
           if (patch.toolEnd) {

@@ -8,146 +8,27 @@
  * plugin-tool wire.
  *
  * Responsibilities:
- *  - resolve the CALLER's nesting context (registered by session id, or
- *    derived from app settings for the top-level chat),
- *  - thread depth / parent chain / budget / deadline into `dispatchSubagent`,
- *  - drive single, parallel-fan-out, background, and collect call modes,
- *  - record every run into the subagent runtime store for the chat tree.
+ *  - parse the call (single / parallel / background / collect / resume),
+ *  - resolve the CALLER's nesting context (via `dispatch-run`),
+ *  - drive the fan-out policy over `startDispatchRun` (which owns the per-run
+ *    lifecycle: records, retries, journaling, cancellation).
  *
  * Returns the plain-text tool result the model reads (never throws).
  */
 
-import { parseDispatchAgentArgs, type NormalizedDispatch } from "./dispatch-agent-tool"
+import { parseDispatchAgentArgs } from "./dispatch-agent-tool"
 import { runDispatchFanout } from "./dispatch-core"
-import {
-  getDispatchContext,
-  getResolvedPermissionCeiling,
-  clearResolvedPermissionCeiling,
-} from "./dispatch-context-registry"
-import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
-import {
-  getOrCreateDispatchBudget,
-  releaseDispatchBudget,
-  isDispatchBudgetFinite,
-} from "./dispatch-budget"
-import {
-  startRendererBackgroundRun,
-  collectRendererBackgroundResult,
-} from "@/lib/background-tasks/renderer-subagent-registry"
-import {
-  recordDispatchStart,
-  recordDispatchComplete,
-  recordDispatchFailed,
-  recordDispatchCancelled,
-  recordDispatchRejected,
-  createDispatchEventSink,
-} from "./dispatch-runtime"
-import { registerSubagentRun, unregisterSubagentRun } from "./subagent-cancel-registry"
-import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
+import { clearResolvedPermissionCeiling } from "./dispatch-context-registry"
+import { releaseDispatchBudget, isDispatchBudgetFinite } from "./dispatch-budget"
+import { collectRendererBackgroundResult } from "@/lib/background-tasks/renderer-subagent-registry"
+import { renderDispatchOutcomeForModel } from "./dispatch-error"
+import { resolveCaller, startDispatchRun, DEFAULT_NESTING_MAX_DEPTH } from "./dispatch-run"
 
-/** Fallback cap when nesting settings can't be read. */
-export const DEFAULT_NESTING_MAX_DEPTH = 2
+export { DEFAULT_NESTING_MAX_DEPTH }
 
 export interface DispatchAgentToolRequest {
   sessionId: string
   args: Record<string, unknown>
-}
-
-function newRunId(): string {
-  try {
-    return crypto.randomUUID()
-  } catch {
-    return `run-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
-  }
-}
-
-function formatResult(label: string, r: PluginSubagentDispatchResult): string {
-  if (r.rejection) return `[${label}] ${r.text}`
-  return `[${label}]\n${r.text}`
-}
-
-interface ResolvedCaller {
-  parentDepth: number
-  maxDepth: number
-  parentChain: string[]
-  parentSubagentId?: string
-  deadlineMs?: number
-  budgetRoot: string
-  /** The caller's resolved permission ceiling, clamping every child it dispatches. */
-  parentCeiling?: ExternalSessionPermissionSpec
-}
-
-async function loadNesting(): Promise<{
-  maxDepth: number
-  tokenBudget: number
-  timeoutMs: number
-}> {
-  try {
-    const { getSettings } = await import("@/lib/db/settings")
-    const s = await getSettings()
-    const n = s?.subagentNesting
-    return {
-      maxDepth: n?.maxDepth ?? DEFAULT_NESTING_MAX_DEPTH,
-      tokenBudget: n?.tokenBudget ?? 0,
-      timeoutMs: n?.timeoutMs ?? 0,
-    }
-  } catch {
-    return { maxDepth: DEFAULT_NESTING_MAX_DEPTH, tokenBudget: 0, timeoutMs: 0 }
-  }
-}
-
-/**
- * Belt-and-braces ceiling when `resolveSendOptions` never deposited one for
- * this session (e.g. an early-returned send, or a caller that didn't pass
- * `session.id`). The session row's own `permissionMode` is the FIRST link of
- * the resolution chain, so a plan-mode parent still clamps its children even
- * without a recorded ceiling. Only consulted when no recorded ceiling exists —
- * a recorded ceiling is post-clamp and authoritative, never overridden.
- * `auto` has no ACP equivalent (same convention as the ceiling recorder).
- */
-async function fallbackCeilingFromSession(
-  sessionId: string
-): Promise<ExternalSessionPermissionSpec | undefined> {
-  try {
-    const { getSession } = await import("@/lib/db/sessions")
-    const mode = (await getSession(sessionId))?.permissionMode
-    if (mode && mode !== "auto") return { permissionMode: mode }
-  } catch {
-    // best-effort fallback — absence of a ceiling is the pre-existing behavior
-  }
-  return undefined
-}
-
-async function resolveCaller(sessionId: string): Promise<ResolvedCaller> {
-  // The caller's resolved ceiling is deposited by `resolveSendOptions` under the
-  // caller's own session id — whether the caller is the top-level chat or a
-  // running subagent. Read it once and clamp every child it dispatches.
-  const parentCeiling =
-    getResolvedPermissionCeiling(sessionId) ?? (await fallbackCeilingFromSession(sessionId))
-  const ctx = getDispatchContext(sessionId)
-  if (ctx) {
-    return {
-      parentDepth: ctx.depth,
-      maxDepth: ctx.maxDepth,
-      parentChain: ctx.parentChain,
-      parentSubagentId: ctx.selfRunId,
-      deadlineMs: ctx.deadlineMs,
-      budgetRoot: ctx.budgetRootRunId ?? `dispatch:${sessionId}`,
-      ...(parentCeiling ? { parentCeiling } : {}),
-    }
-  }
-  // Top-level chat: derive from settings and seed the subtree budget once.
-  const settings = await loadNesting()
-  const budgetRoot = `dispatch:${sessionId}`
-  getOrCreateDispatchBudget(budgetRoot, settings.tokenBudget)
-  return {
-    parentDepth: 0,
-    maxDepth: settings.maxDepth,
-    parentChain: [],
-    budgetRoot,
-    ...(settings.timeoutMs > 0 ? { deadlineMs: Date.now() + settings.timeoutMs } : {}),
-    ...(parentCeiling ? { parentCeiling } : {}),
-  }
 }
 
 export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promise<string> {
@@ -157,104 +38,10 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
   if (parsed.mode === "collect") {
     const r = await collectRendererBackgroundResult(parsed.runId)
     if (!r) return `No background run "${parsed.runId}" found (already collected or unknown).`
-    return formatResult(parsed.runId, r)
+    return renderDispatchOutcomeForModel(parsed.runId, r)
   }
 
   const caller = await resolveCaller(req.sessionId)
-
-  const runOne = async (d: NormalizedDispatch, label: string): Promise<string> => {
-    const childRunId = newRunId()
-    // Every run (foreground OR background) gets a controller so the chat card's
-    // Abort button can stop it via the cancel registry.
-    const abort = new AbortController()
-    const childDepth = caller.parentDepth + 1
-    recordDispatchStart({
-      id: childRunId,
-      name: d.subagentId,
-      task: d.prompt,
-      depth: childDepth,
-      ...(caller.parentSubagentId ? { parentSubagentId: caller.parentSubagentId } : {}),
-      parentSessionId: req.sessionId,
-      backgrounded: d.background,
-    })
-    registerSubagentRun(childRunId, abort)
-
-    const [{ dispatchSubagent }, { getDispatchableSubagentDef }] = await Promise.all([
-      import("@/lib/plugin/agent-sdk/dispatch"),
-      import("@/lib/claude/agents/subagents"),
-    ])
-    // Prefer the inline def (projected ids like `template:x` / `pluginId:y` are
-    // not resolvable by the registry's `getSubagent`); fall back to the raw id.
-    const target = getDispatchableSubagentDef(d.subagentId) ?? d.subagentId
-    const promise = dispatchSubagent(target, d.prompt, {
-      toolsEnabled: d.toolsEnabled,
-      _runId: childRunId,
-      _depth: caller.parentDepth,
-      _maxDepth: caller.maxDepth,
-      _parentChain: caller.parentChain,
-      _budgetRootRunId: caller.budgetRoot,
-      _onEvent: createDispatchEventSink(childRunId),
-      abortSignal: abort.signal,
-      ...(caller.deadlineMs ? { _deadlineMs: caller.deadlineMs } : {}),
-      ...(caller.parentCeiling ? { _permissionCeiling: caller.parentCeiling } : {}),
-    })
-      .then((r) => {
-        if (r.rejection) {
-          recordDispatchRejected({
-            id: childRunId,
-            name: d.subagentId,
-            task: d.prompt,
-            depth: childDepth,
-            ...(caller.parentSubagentId ? { parentSubagentId: caller.parentSubagentId } : {}),
-            parentSessionId: req.sessionId,
-            rejection: r.rejection,
-          })
-        } else {
-          recordDispatchComplete(childRunId, {
-            text: r.text,
-            ...(r.usage ? { usage: r.usage } : {}),
-          })
-        }
-        unregisterSubagentRun(childRunId)
-        return r
-      })
-      .catch((err): PluginSubagentDispatchResult => {
-        const msg = err instanceof Error ? err.message : String(err)
-        // An aborted run is a user cancellation, not a failure.
-        if (abort.signal.aborted) {
-          recordDispatchCancelled(childRunId)
-        } else {
-          recordDispatchFailed(childRunId, msg)
-        }
-        unregisterSubagentRun(childRunId)
-        return {
-          text: msg,
-          channel: "text",
-          toolsAvailable: false,
-          runId: childRunId,
-          finishReason: abort.signal.aborted ? "cancelled" : "error",
-        }
-      })
-
-    if (d.background) {
-      startRendererBackgroundRun(
-        childRunId,
-        {
-          kind: "subagent",
-          subagentId: d.subagentId,
-          prompt: d.prompt,
-          sessionId: req.sessionId,
-          host: "renderer",
-          startedAt: Date.now(),
-        },
-        promise,
-        { cancel: () => abort.abort() }
-      )
-      return `[${d.subagentId}] started in background (runId: ${childRunId}). Collect later with dispatch_agent({collect:"${childRunId}"}).`
-    }
-    const r = await promise
-    return formatResult(label, r)
-  }
 
   // Fan-out policy via the shared core (unified with the CLI handler so the two
   // can't drift). The guard is a post-hoc accumulator (`add` runs AFTER each
@@ -267,9 +54,20 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
   const outcomes = await runDispatchFanout({
     dispatches: parsed.dispatches,
     width,
-    // The renderer collapses per-run errors into the result text itself (see
-    // `runOne`'s `.catch`), so every outcome is surfaced as `ok` text.
-    runOne: async (d, label) => ({ text: await runOne(d, label), ok: true }),
+    // `startDispatchRun` collapses per-run errors into the result text itself,
+    // so every outcome is surfaced as `ok` text.
+    runOne: async (d, label) => {
+      const { text } = await startDispatchRun({
+        subagentId: d.subagentId,
+        prompt: d.prompt,
+        toolsEnabled: d.toolsEnabled,
+        background: d.background,
+        parentSessionId: req.sessionId,
+        caller,
+        label,
+      })
+      return { text, ok: true }
+    },
   })
   return outcomes.map((o) => o.text).join("\n\n---\n\n")
 }

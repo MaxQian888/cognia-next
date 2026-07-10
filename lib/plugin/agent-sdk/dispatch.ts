@@ -25,6 +25,10 @@ import type {
   PluginSubagentDispatchRejection,
 } from "@/types/plugin/plugin-agent-sdk"
 import { getDispatchBudget, isDispatchBudgetExhausted } from "@/lib/claude/agents/dispatch-budget"
+import {
+  envelopeForBudgetExhausted,
+  envelopeForRejection,
+} from "@/lib/claude/agents/dispatch-error"
 
 /** Generate a run id (app code — Date.now/randomUUID are allowed here). */
 function newRunId(): string {
@@ -47,6 +51,7 @@ function rejectionResult(
     finishReason: "rejected",
     runId,
     rejection,
+    errorEnvelope: envelopeForRejection(rejection),
     ...(rejection.reason === "max-depth" ? { depthExhausted: true } : {}),
   }
 }
@@ -103,13 +108,15 @@ export async function dispatchSubagent(
   }
   // Budget: refuse a deeper/sibling dispatch when the subtree pool is critical.
   if (isDispatchBudgetExhausted(options._budgetRootRunId)) {
+    const message = "Dispatch refused — the token budget for this dispatch subtree is exhausted."
     return {
-      text: "Dispatch refused — the token budget for this dispatch subtree is exhausted.",
+      text: message,
       channel: "text",
       toolsAvailable: false,
       finishReason: "error",
       runId,
       depthExhausted: true,
+      errorEnvelope: envelopeForBudgetExhausted(message),
     }
   }
 

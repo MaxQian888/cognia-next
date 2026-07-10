@@ -4,8 +4,8 @@ import {
   recordDispatchFailed,
   recordDispatchCancelled,
   recordDispatchRejected,
-  dispatchProgressForToolCount,
-  createDispatchEventSink,
+  recordDispatchRetry,
+  createDispatchRunTracker,
 } from "./dispatch-runtime"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 
@@ -68,16 +68,32 @@ describe("dispatch-runtime producer", () => {
     expect(read("ghost")).toBeUndefined()
   })
 
-  it("marks a run failed with an error", () => {
+  it("marks a run failed with the envelope message + structured detail", () => {
     recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
-    recordDispatchFailed("n1", "boom")
+    recordDispatchFailed("n1", { code: "server-error", retryable: true, message: "boom" })
     const sa = read("n1")
     expect(sa.status).toBe("failed")
     expect(sa.error).toBe("boom")
+    expect(sa.errorEnvelope).toEqual({ code: "server-error", retryable: true })
+    expect(sa.result).toBeUndefined()
+  })
+
+  it("salvages partial output onto the failed run's result", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    recordDispatchFailed("n1", {
+      code: "rate-limit",
+      retryable: true,
+      message: "429",
+      partialText: "half the answer",
+    })
+    const sa = read("n1")
+    expect(sa.status).toBe("failed")
+    expect(sa.errorEnvelope?.partialText).toBe("half the answer")
+    expect(sa.result).toMatchObject({ success: false, finalResponse: "half the answer" })
   })
 
   it("ignores failure for an unknown run", () => {
-    recordDispatchFailed("ghost", "boom")
+    recordDispatchFailed("ghost", { code: "unknown", retryable: false, message: "boom" })
     expect(read("ghost")).toBeUndefined()
   })
 
@@ -103,22 +119,39 @@ describe("dispatch-runtime producer", () => {
   })
 })
 
-describe("dispatchProgressForToolCount", () => {
-  it("is 0 for no tools and rises monotonically, capped below 100", () => {
-    expect(dispatchProgressForToolCount(0)).toBe(0)
-    expect(dispatchProgressForToolCount(1)).toBe(10)
-    expect(dispatchProgressForToolCount(5)).toBe(50)
-    expect(dispatchProgressForToolCount(99)).toBeLessThan(100)
-    expect(dispatchProgressForToolCount(99)).toBeGreaterThanOrEqual(dispatchProgressForToolCount(5))
+describe("recordDispatchRetry", () => {
+  beforeEach(() => useSubagentRuntimeStore.getState().clearRuntime())
+
+  it("bumps retryCount, keeps the run running, and logs a warn line", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    recordDispatchRetry("n1", 1, { code: "rate-limit", retryable: true, message: "429" }, 2)
+    const sa = read("n1")
+    expect(sa.status).toBe("running")
+    expect(sa.retryCount).toBe(1)
+    expect(sa.logs.at(-1)).toMatchObject({
+      level: "warn",
+      message: "Retrying after rate-limit (attempt 1/2): 429",
+    })
+  })
+
+  it("omits the /max suffix when maxRetries is not given", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    recordDispatchRetry("n1", 2, { code: "network", retryable: true, message: "ECONNRESET" })
+    expect(read("n1").logs.at(-1)?.message).toBe("Retrying after network (attempt 2): ECONNRESET")
+  })
+
+  it("ignores retries for an unknown run", () => {
+    recordDispatchRetry("ghost", 1, { code: "network", retryable: true, message: "x" })
+    expect(read("ghost")).toBeUndefined()
   })
 })
 
-describe("createDispatchEventSink", () => {
+describe("createDispatchRunTracker", () => {
   beforeEach(() => useSubagentRuntimeStore.getState().clearRuntime())
 
   it("logs and bumps the honest tool-use count on each tool-call (gap9: no progress bar)", () => {
     recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
-    const sink = createDispatchEventSink("n1")
+    const { sink } = createDispatchRunTracker("n1")
     sink({ type: "tool-call", toolName: "Bash", input: {} })
     sink({ type: "tool-call", toolName: "Read", input: {} })
     const sa = read("n1")
@@ -129,7 +162,7 @@ describe("createDispatchEventSink", () => {
 
   it("logs tool results, warning on errors", () => {
     recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
-    const sink = createDispatchEventSink("n1")
+    const { sink } = createDispatchRunTracker("n1")
     sink({ type: "tool-result", toolName: "Bash", result: "ok" })
     sink({ type: "tool-result", toolName: "Read", result: "no", isError: true })
     const logs = read("n1").logs
@@ -137,17 +170,9 @@ describe("createDispatchEventSink", () => {
     expect(logs[1]).toMatchObject({ level: "warn" })
   })
 
-  it("ignores non-tool events", () => {
-    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
-    const sink = createDispatchEventSink("n1")
-    sink({ type: "text-delta", delta: "hello" })
-    sink({ type: "usage", usage: {} as never })
-    expect(read("n1").logs).toHaveLength(0)
-  })
-
   it("populates the inline tool list (toolStart/toolEnd) keyed by id", () => {
     recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
-    const sink = createDispatchEventSink("n1")
+    const { sink } = createDispatchRunTracker("n1")
     sink({ type: "tool-call", toolName: "Read", input: { p: 1 }, id: "tc-a" })
     sink({ type: "tool-result", toolName: "Read", result: "ok", id: "tc-a" })
     const calls = read("n1").toolCalls!
@@ -157,12 +182,87 @@ describe("createDispatchEventSink", () => {
 
   it("pairs result to call by name when the SDK omits ids", () => {
     recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
-    const sink = createDispatchEventSink("n1")
+    const { sink } = createDispatchRunTracker("n1")
     sink({ type: "tool-call", toolName: "Grep", input: {} })
     sink({ type: "tool-result", toolName: "Grep", result: "5", isError: false })
     const calls = read("n1").toolCalls!
     expect(calls).toHaveLength(1)
     expect(calls[0].state).toBe("done")
+  })
+
+  it("retains streamed text for partial-output salvage (tail-capped)", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const tracker = createDispatchRunTracker("n1")
+    tracker.sink({ type: "text-delta", delta: "hello " })
+    tracker.sink({ type: "text-delta", delta: "world" })
+    expect(tracker.partialText()).toBe("hello world")
+  })
+
+  it("caps the retained text buffer to the tail", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const tracker = createDispatchRunTracker("n1")
+    tracker.sink({ type: "text-delta", delta: "x".repeat(40_000) })
+    tracker.sink({ type: "text-delta", delta: "END" })
+    const text = tracker.partialText()
+    expect(text.length).toBeLessThanOrEqual(32 * 1024)
+    expect(text.endsWith("END")).toBe(true)
+  })
+
+  it("flushes coalesced stream text into the run's log line (throttled)", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const { sink } = createDispatchRunTracker("n1")
+    sink({ type: "text-delta", delta: "tiny" }) // below the flush step — no write
+    expect(read("n1").logs).toHaveLength(0)
+    sink({ type: "text-delta", delta: "y".repeat(100) }) // crosses the step
+    const logs = read("n1").logs
+    expect(logs).toHaveLength(1)
+    expect(logs[0].data).toMatchObject({ stream: "text" })
+    expect(logs[0].message).toBe(`tiny${"y".repeat(100)}`)
+  })
+
+  it("folds a final usage event into the live store figure", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const tracker = createDispatchRunTracker("n1")
+    tracker.sink({ type: "usage", usage: { inputTokens: 100, outputTokens: 20 } })
+    expect(tracker.liveUsage()).toEqual({
+      promptTokens: 100,
+      completionTokens: 20,
+      totalTokens: 120,
+    })
+    expect(read("n1").tokenUsage).toEqual({
+      promptTokens: 100,
+      completionTokens: 20,
+      totalTokens: 120,
+    })
+  })
+
+  it("SUMS partial usage snapshots and lets the final authoritative usage REPLACE the sum", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const tracker = createDispatchRunTracker("n1")
+    const partial = (inputTokens: number, outputTokens: number) =>
+      ({ type: "usage", usage: { inputTokens, outputTokens }, partial: true }) as never
+    tracker.sink(partial(100, 10))
+    tracker.sink(partial(150, 20))
+    expect(tracker.liveUsage()).toEqual({
+      promptTokens: 250,
+      completionTokens: 30,
+      totalTokens: 280,
+    })
+    tracker.sink({ type: "usage", usage: { inputTokens: 260, outputTokens: 35 } })
+    expect(tracker.liveUsage()).toEqual({
+      promptTokens: 260,
+      completionTokens: 35,
+      totalTokens: 295,
+    })
+    expect(read("n1").tokenUsage?.totalTokens).toBe(295)
+  })
+
+  it("ignores thinking deltas", () => {
+    recordDispatchStart({ id: "n1", name: "coder", task: "do", depth: 1 })
+    const tracker = createDispatchRunTracker("n1")
+    tracker.sink({ type: "thinking-delta", delta: "hmm" })
+    expect(read("n1").logs).toHaveLength(0)
+    expect(tracker.partialText()).toBe("")
   })
 })
 

@@ -358,9 +358,23 @@ export interface SubAgent {
    */
   parentSubagentId?: string
   /** Set when this dispatch was refused by a nesting guard. */
-  rejection?: { reason: "max-depth" | "cycle"; message: string; attemptedDepth?: number }
+  rejection?: {
+    reason: "max-depth" | "cycle" | "policy"
+    message: string
+    attemptedDepth?: number
+  }
   /** True while the run is detached (backgrounded) and awaiting a later result. */
   backgrounded?: boolean
+  /**
+   * Live cumulative token usage while the run streams (fed by the dispatch run
+   * tracker). The final authoritative figure lives in `result.tokenUsage`.
+   */
+  tokenUsage?: SubAgentTokenUsage
+  /**
+   * Structured failure detail mirroring the dispatch result envelope. String
+   * `code` keeps `types/` a leaf layer.
+   */
+  errorEnvelope?: { code: string; retryable: boolean; partialText?: string }
 }
 
 /**

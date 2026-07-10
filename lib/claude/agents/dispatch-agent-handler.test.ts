@@ -299,7 +299,9 @@ describe("runDispatchAgentTool — call modes", () => {
 
     expect(requestCancelSubagentRun(running.id)).toBe(true)
     const out = await pending
-    expect(out).toMatch(/aborted by user/i)
+    // Cancellation renders as a terse model-facing note (v2.1.199 semantics),
+    // not the raw abort error text.
+    expect(out).toMatch(/\[coder\] cancelled\./)
 
     // Aborted → cancelled, NOT failed; and the registry entry is cleaned up.
     const runs = Object.values(useSubagentRuntimeStore.getState().subAgents)

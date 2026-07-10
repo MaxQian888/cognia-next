@@ -15,6 +15,7 @@ import {
   countRunningRendererBackgroundRuns,
   hasRendererBackgroundRun,
   interruptRendererBackgroundTasksOnBoot,
+  journalRendererForegroundRun,
   listRendererBackgroundRuns,
   startRendererBackgroundRun,
 } from "./renderer-subagent-registry"
@@ -84,6 +85,7 @@ describe("renderer subagent background registry", () => {
       toolsAvailable: false,
       runId: "r1",
       finishReason: "error",
+      errorEnvelope: { code: "unknown", retryable: false, message: "boom" },
     })
   })
 
@@ -96,6 +98,7 @@ describe("renderer subagent background registry", () => {
       toolsAvailable: false,
       runId: "r1",
       finishReason: "error",
+      errorEnvelope: { code: "unknown", retryable: false, message: "plain boom" },
     })
   })
 
@@ -188,14 +191,65 @@ describe("renderer subagent background registry", () => {
     await expect(collectRendererBackgroundResult("with-error")).resolves.toMatchObject({
       text: "journal boom",
       finishReason: "error",
+      errorEnvelope: { code: "unknown", retryable: false, message: "journal boom" },
     })
     await expect(collectRendererBackgroundResult("with-result-text")).resolves.toMatchObject({
       text: "fallback boom",
       finishReason: "error",
+      // Salvaged partial output rides along on the rebuilt envelope.
+      errorEnvelope: expect.objectContaining({ partialText: "fallback boom" }),
     })
     await expect(collectRendererBackgroundResult("without-message")).resolves.toMatchObject({
       text: "Background run failed.",
       finishReason: "error",
+    })
+  })
+
+  it("rebuilds an interrupted-coded envelope for interrupted journal rows", async () => {
+    await getDb().backgroundTasks.put({
+      runId: "r1",
+      kind: "subagent",
+      subagentId: "reviewer",
+      prompt: "check this",
+      sessionId: "ses_1",
+      host: "renderer",
+      status: "interrupted",
+      startedAt: 1000,
+      settledAt: 2000,
+      resultText: "partial before crash",
+    })
+
+    await expect(collectRendererBackgroundResult("r1")).resolves.toMatchObject({
+      finishReason: "error",
+      errorEnvelope: expect.objectContaining({
+        code: "interrupted",
+        partialText: "partial before crash",
+      }),
+    })
+  })
+
+  it("journals a background failure with its envelope message + partial output", async () => {
+    const failed: PluginSubagentDispatchResult = {
+      text: "429 too many requests",
+      channel: "text",
+      toolsAvailable: false,
+      runId: "r1",
+      finishReason: "error",
+      errorEnvelope: {
+        code: "rate-limit",
+        retryable: true,
+        message: "429 too many requests",
+        partialText: "got halfway",
+      },
+    }
+    startRendererBackgroundRun("r1", meta(), Promise.resolve(failed))
+    await new Promise((r) => setTimeout(r, 0))
+
+    await expect(getDb().backgroundTasks.get("r1")).resolves.toMatchObject({
+      status: "error",
+      error: "429 too many requests",
+      resultText: "got halfway",
+      mode: "background",
     })
   })
 
@@ -298,11 +352,91 @@ describe("renderer subagent background registry", () => {
       startedAt: 1000,
     })
 
-    await interruptRendererBackgroundTasksOnBoot({ now: () => 3000 })
+    const flipped = await interruptRendererBackgroundTasksOnBoot({ now: () => 3000 })
 
     await expect(getDb().backgroundTasks.get("stale")).resolves.toMatchObject({
       status: "interrupted",
       settledAt: 3000,
     })
+    expect(flipped).toEqual([expect.objectContaining({ runId: "stale", status: "interrupted" })])
+  })
+})
+
+describe("journalRendererForegroundRun", () => {
+  const settle = () => new Promise((r) => setTimeout(r, 0))
+
+  it("journals a foreground run as mode foreground and settles done, never collectable", async () => {
+    journalRendererForegroundRun("fg1", meta(), Promise.resolve(ok("fg done", "fg1")))
+    await settle()
+
+    await expect(getDb().backgroundTasks.get("fg1")).resolves.toMatchObject({
+      mode: "foreground",
+      status: "done",
+      resultText: "fg done",
+      usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+    })
+    // Foreground rows never enter the collectable registry…
+    expect(hasRendererBackgroundRun("fg1")).toBe(false)
+    expect(listRendererBackgroundRuns()).toEqual([])
+    // …but the journal fallback would still answer a collect for the DONE row;
+    // that is acceptable (result reuse), the live path is what must stay clean.
+  })
+
+  it("settles a foreground failure with error + salvaged partial output", async () => {
+    const failed: PluginSubagentDispatchResult = {
+      text: "boom",
+      channel: "text",
+      toolsAvailable: false,
+      runId: "fg1",
+      finishReason: "error",
+      errorEnvelope: { code: "network", retryable: true, message: "boom", partialText: "half" },
+    }
+    journalRendererForegroundRun("fg1", meta(), Promise.resolve(failed))
+    await settle()
+
+    await expect(getDb().backgroundTasks.get("fg1")).resolves.toMatchObject({
+      status: "error",
+      error: "boom",
+      resultText: "half",
+      mode: "foreground",
+    })
+  })
+
+  it("marks cancelled foreground runs as error rows so boot reconciliation skips them", async () => {
+    const cancelled: PluginSubagentDispatchResult = {
+      text: "cancelled",
+      channel: "text",
+      toolsAvailable: false,
+      runId: "fg1",
+      finishReason: "cancelled",
+    }
+    journalRendererForegroundRun("fg1", meta(), Promise.resolve(cancelled))
+    await settle()
+
+    await expect(getDb().backgroundTasks.get("fg1")).resolves.toMatchObject({
+      status: "error",
+      error: "cancelled",
+    })
+  })
+
+  it("settles an unexpected rejection as an error row (belt-and-braces)", async () => {
+    journalRendererForegroundRun("fg1", meta(), Promise.reject(new Error("unexpected")))
+    await settle()
+
+    await expect(getDb().backgroundTasks.get("fg1")).resolves.toMatchObject({
+      status: "error",
+      error: "unexpected",
+    })
+  })
+
+  it("a foreground run interrupted by reload reconciles to interrupted on boot", async () => {
+    journalRendererForegroundRun("fg1", meta(), new Promise(() => {}))
+    await settle()
+
+    const flipped = await interruptRendererBackgroundTasksOnBoot({ now: () => 9000 })
+
+    expect(flipped).toEqual([
+      expect.objectContaining({ runId: "fg1", status: "interrupted", mode: "foreground" }),
+    ])
   })
 })
