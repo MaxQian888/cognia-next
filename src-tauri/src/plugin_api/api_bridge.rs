@@ -745,8 +745,9 @@ async fn handle_window(
 }
 
 /// Per-plugin egress allowlist gate for the network domain. A plugin that
-/// declared no allowlist is unrestricted; a declared one is enforced (see
-/// `state.network_host_allowed`). Fail-closed on an unparseable URL / host.
+/// declared no allowlist is denied by default; a declared allowlist is
+/// enforced (see `state.network_host_allowed`). Fail-closed on an
+/// unparseable URL / host.
 fn guard_network_host(
     state: &PluginRuntimeState,
     plugin_id: &str,
@@ -1350,8 +1351,9 @@ pub async fn plugin_set_shell_allowlist(
 
 /// Push a plugin's declared `manifest.networkAccess.allowedDomains` into the
 /// host so the `network:*` egress gate enforces it. Called by the renderer at
-/// plugin load. A plugin that never calls this (declares no allowlist) keeps
-/// unrestricted egress — declaring an allowlist is the opt-in clamp.
+/// plugin load. A plugin that never calls this (declares no allowlist) is
+/// denied all egress by default — declaring an allowlist (or `["*"]` to opt
+/// into unrestricted egress) is required to reach any host.
 #[tauri::command]
 pub async fn plugin_set_network_allowlist(
     state: State<'_, PluginRuntimeState>,
@@ -1572,9 +1574,9 @@ mod tests {
     async fn download_rejects_a_dest_path_escaping_the_sandbox() {
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
-        // Host allowlist is empty (unrestricted), so the egress gate passes and
-        // the sandbox-scope check is what must reject the traversal — before any
-        // network call is attempted.
+        // No allowlist declared, so the egress gate itself denies the host —
+        // either that or the sandbox-scope check would reject the traversal;
+        // both fail closed with the same PERMISSION_DENIED error code.
         let err = handle_network(
             &state,
             "demo",
@@ -1606,8 +1608,9 @@ mod tests {
     async fn upload_reports_a_missing_sandbox_file() {
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
-        // Empty allowlist passes the egress gate; the read of a nonexistent
-        // sandbox file fails before any network call.
+        // A declared allowlist passes the egress gate; the read of a
+        // nonexistent sandbox file fails before any network call.
+        state.set_network_allowlist("demo", vec!["files.test".into()]);
         let err = handle_network(
             &state,
             "demo",
@@ -1634,9 +1637,8 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, "PERMISSION_DENIED");
-        // A different plugin that declared nothing stays unrestricted (the
-        // download would proceed past the gate to the real fetch, which fails
-        // on the unresolvable host — not a PERMISSION_DENIED).
+        // A different plugin that declared nothing is denied by default too
+        // (fail-closed) — an undeclared allowlist is no longer unrestricted.
         let other = handle_network(
             &state,
             "undeclared",
@@ -1645,7 +1647,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_ne!(other.code, "PERMISSION_DENIED");
+        assert_eq!(other.code, "PERMISSION_DENIED");
     }
 
     #[test]

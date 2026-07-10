@@ -6,10 +6,12 @@
 // to the SAME allowlist `ctx.network` uses — so an in-frame fetch/XHR/WS can
 // never reach a host the plugin couldn't reach itself.
 //
-// Egress semantics mirror `lib/plugin/security/network-allowlist.ts`
-// (`evaluateEgress`): a plugin with no `allowedDomains` declaration is
-// unrestricted (`connect-src *`); `["*"]` is likewise unrestricted; an
-// explicit list is clamped to those origins over https/wss.
+// Egress semantics mirror the Rust host gate
+// (`src-tauri/src/plugin_api/mod.rs::network_host_allowed`): a plugin with no
+// `allowedDomains` declaration is DENIED by default (`connect-src 'none'`,
+// fail-closed) — declaring `network:fetch` alone no longer implies
+// unrestricted egress; `["*"]` is an explicit opt-in to unrestricted egress;
+// an explicit list is clamped to those origins over https/wss.
 
 export interface WebviewCspInput {
   /** `manifest.networkAccess.allowedDomains` for the owning plugin. */
@@ -17,7 +19,9 @@ export interface WebviewCspInput {
 }
 
 function connectSrc(allowedDomains: string[] | undefined): string {
-  if (!allowedDomains || allowedDomains.length === 0) return "*"
+  // No declaration at all → deny by default (fail-closed); an empty array is
+  // treated the same as "no declaration" for this purpose.
+  if (!allowedDomains || allowedDomains.length === 0) return "'none'"
   if (allowedDomains.includes("*")) return "*"
   // Expand each declared host into https + wss origins. A leading-dot or
   // bare host is treated as the host itself; wildcards pass through.

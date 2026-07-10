@@ -234,11 +234,12 @@ impl PluginRuntimeState {
     }
 
     /// True when `host` is permitted for `plugin_id`. A plugin that DECLARED no
-    /// allowlist (no map entry) is unrestricted — backward-compatible with the
-    /// prior global-empty-means-unrestricted behaviour. A plugin that declared
-    /// an allowlist is clamped: `["*"]` allows any host; `["none"]` or an empty
-    /// list denies all; otherwise `host` must equal, or be a subdomain of, an
-    /// entry. An empty host is always denied (fail-closed).
+    /// allowlist (no map entry) is DENIED by default (fail-closed) — a
+    /// `network:fetch` grant with no `networkAccess.allowedDomains` no longer
+    /// implies unrestricted egress. A plugin that declared an allowlist is
+    /// clamped: `["*"]` allows any host; `["none"]` or an empty list denies
+    /// all; otherwise `host` must equal, or be a subdomain of, an entry. An
+    /// empty host is always denied (fail-closed).
     pub fn network_host_allowed(&self, plugin_id: &str, host: &str) -> bool {
         let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
         if host.is_empty() {
@@ -246,7 +247,7 @@ impl PluginRuntimeState {
         }
         let map = self.network_allowlist.read();
         let Some(list) = map.get(plugin_id) else {
-            return true; // no declaration → unrestricted
+            return false; // no declaration → deny (fail-closed)
         };
         if list.iter().any(|e| e.trim() == "*") {
             return true;
@@ -313,13 +314,14 @@ mod tests {
     }
 
     #[test]
-    fn network_host_allowed_undeclared_plugin_is_unrestricted() {
+    fn network_host_allowed_undeclared_plugin_is_denied() {
         let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
-        // A plugin that declared no allowlist may reach any host (the fetch
-        // grant + consent is the boundary).
-        assert!(state.network_host_allowed("demo", "example.com"));
-        assert!(state.network_host_allowed("demo", "anything.test"));
-        // An empty host is never allowed (fail-closed).
+        // A plugin that declared no allowlist cannot reach any host — a
+        // `network:fetch` grant alone no longer implies unrestricted egress
+        // (fail-closed by default).
+        assert!(!state.network_host_allowed("demo", "example.com"));
+        assert!(!state.network_host_allowed("demo", "anything.test"));
+        // An empty host is never allowed either.
         assert!(!state.network_host_allowed("demo", ""));
     }
 
@@ -333,8 +335,9 @@ mod tests {
         assert!(!state.network_host_allowed("demo", "evil.com"));
         // Must not match a host that merely ends with the string but isn't a subdomain.
         assert!(!state.network_host_allowed("demo", "notexample.com"));
-        // The allowlist is per-plugin: another plugin is unaffected (unrestricted).
-        assert!(state.network_host_allowed("other", "evil.com"));
+        // The allowlist is per-plugin: another plugin with no declaration is
+        // denied by default, not "unaffected".
+        assert!(!state.network_host_allowed("other", "evil.com"));
     }
 
     #[test]

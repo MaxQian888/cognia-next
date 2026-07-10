@@ -1,9 +1,11 @@
 import { buildWebviewCsp, wrapWebviewHtml, acquireCogniaWebviewApiSource } from "./webview-csp"
 
 describe("buildWebviewCsp", () => {
-  it("uses connect-src * when no domains are declared (egress-consistent)", () => {
-    expect(buildWebviewCsp({})).toContain("connect-src *")
-    expect(buildWebviewCsp({ allowedDomains: [] })).toContain("connect-src *")
+  it("denies connect-src when no domains are declared (fail-closed, egress-consistent)", () => {
+    expect(buildWebviewCsp({})).toContain("connect-src 'none'")
+    expect(buildWebviewCsp({})).not.toContain("connect-src *")
+    expect(buildWebviewCsp({ allowedDomains: [] })).toContain("connect-src 'none'")
+    expect(buildWebviewCsp({ allowedDomains: [] })).not.toContain("connect-src *")
   })
 
   it("uses connect-src * when '*' is declared", () => {

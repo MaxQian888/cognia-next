@@ -73,9 +73,10 @@ describe("plugin-webview-bridge", () => {
     expect(result.errors[0].message).toMatch(/HTML string/)
   })
 
-  it("uses connect-src * when no networkAccess is declared", async () => {
+  it("denies connect-src when no networkAccess is declared (fail-closed)", async () => {
     await registerWebviewsForPlugin(manifest([{ id: "d", containerId: "c", html: "x" }]), "/root")
-    expect(getWebviewSnapshot()[0].srcDoc).toContain("connect-src *")
+    expect(getWebviewSnapshot()[0].srcDoc).toContain("connect-src 'none'")
+    expect(getWebviewSnapshot()[0].srcDoc).not.toContain("connect-src *")
   })
 
   it("no-ops without webviews", async () => {
