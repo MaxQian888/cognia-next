@@ -136,6 +136,20 @@ export async function dispatchOnAssistantMessage(message: PluginMessage): Promis
   }
 }
 
+/**
+ * Fired when a user message is about to be dispatched to the SDK. Pipeline
+ * semantics: each plugin's `onMessageSend` may return a rewritten message;
+ * the final message is what actually leaves. Fail-open on dispatcher errors.
+ */
+export async function dispatchOnMessageSend(message: PluginMessage): Promise<PluginMessage> {
+  if (!hasListeners("onMessageSend")) return message
+  try {
+    return await getPluginLifecycleHooks().dispatchOnMessageSend(message)
+  } catch {
+    return message
+  }
+}
+
 /** Fired when an SDK stream begins. */
 export function dispatchStreamStart(sessionId: string): void {
   if (!hasEventListeners("onStreamStart")) return

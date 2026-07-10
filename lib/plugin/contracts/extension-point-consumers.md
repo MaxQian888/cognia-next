@@ -124,7 +124,7 @@ For payload schemas, see `types/plugin/plugin.ts:PluginHooks`.
 | ------------------------- | ------------------------------------------------------------------------------ |
 | `onAgentStart`            | `lib/claude/sync.ts` (or SDK pump in `hooks/use-claude-chat.ts`) — wired in M3 |
 | `onAgentStep`             | same as above                                                                  |
-| `onAgentToolCall`         | same as above                                                                  |
+| `onAgentToolCall`         | **deprecated** (`DEPRECATED_HOOK_POINTS`) — use `onPreToolUse`/`onPostToolUse` |
 | `onAgentComplete`         | same as above                                                                  |
 | `onAgentError`            | same as above                                                                  |
 | `onAgentPlanCreate`       | **deprecated** (ADR 0016 P1-5, 2026-05-17) — moved to `DEPRECATED_HOOK_POINTS` |
@@ -132,13 +132,13 @@ For payload schemas, see `types/plugin/plugin.ts:PluginHooks`.
 
 ### Messages (5)
 
-| Hook               | Dispatched by                                                                                                                                                                                             |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onMessageSend`    | **registered, not dispatched** — the streaming chat path has no pre-send full-message transform seam. Use `onUserPromptSubmit` (wired, `hooks/chat/use-claude-chat.ts`) to gate/modify outgoing messages. |
-| `onMessageReceive` | **registered, not dispatched** — the streaming path commits the assistant message incrementally, so a pre-display transform can't run. Use `onPostChatReceive` (wired) for post-turn observation.         |
-| `onMessageRender`  | `components/chat/message.tsx`                                                                                                                                                                             |
-| `onMessageDelete`  | session ops                                                                                                                                                                                               |
-| `onMessageEdit`    | session ops                                                                                                                                                                                               |
+| Hook               | Dispatched by                                                                                                                                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onMessageSend`    | `hooks/chat/use-claude-chat.ts` `send()` via `lib/claude/adapter-hooks.ts:dispatchOnMessageSend` — pipeline rewrite of the outgoing user message's text (runs after `onUserPromptSubmit`; text blocks only, attachments untouched).   |
+| `onMessageReceive` | `hooks/chat/use-claude-chat.ts` turn-seal via `lib/claude/adapter-hooks.ts:dispatchOnAssistantMessage` — pipeline rewrite of the sealed assistant message (applied post-seal to store + Dexie; streaming deltas are not intercepted). |
+| `onMessageRender`  | **deprecated** (`DEPRECATED_HOOK_POINTS`, plugin-points.ts) — never dispatched; use `ctx.messagePart` renderers instead.                                                                                                              |
+| `onMessageDelete`  | session ops                                                                                                                                                                                                                           |
+| `onMessageEdit`    | session ops                                                                                                                                                                                                                           |
 
 ### Sessions (5)
 

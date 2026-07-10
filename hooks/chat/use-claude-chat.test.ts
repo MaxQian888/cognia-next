@@ -157,6 +157,8 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
   // chat-main-flow.integration.test.tsx).
   dispatchPreToolUse: jest.fn(async () => ({ action: "allow" as const })),
   dispatchPostToolUse: jest.fn(async () => ({})),
+  dispatchOnMessageSend: jest.fn(async (m: unknown) => m),
+  dispatchOnAssistantMessage: jest.fn(async (m: unknown) => m),
   hasPostToolUseListeners: jest.fn(() => false),
 }))
 

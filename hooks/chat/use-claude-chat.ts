@@ -126,6 +126,8 @@ import {
   dispatchPostChatReceive as dispatchPluginPostChatReceive,
   dispatchPreToolUse as dispatchPluginPreToolUse,
   dispatchPostToolUse as dispatchPluginPostToolUse,
+  dispatchOnMessageSend as dispatchPluginMessageSend,
+  dispatchOnAssistantMessage as dispatchPluginAssistantMessage,
   hasPostToolUseListeners,
 } from "@/lib/claude/adapter-hooks"
 
@@ -984,6 +986,32 @@ export function useClaudeChat() {
             appendSystemPrompt: existing
               ? `${existing}\n\n${additionalContext}`
               : additionalContext,
+          }
+        }
+      }
+
+      // Pipeline hook (W3.3): `onMessageSend` — plugins may rewrite the
+      // outgoing user message. Same text-only constraint as `modifiedPrompt`;
+      // attachments and non-text blocks are untouched. Runs AFTER
+      // onUserPromptSubmit so a block decision wins over a rewrite.
+      {
+        const outboundText =
+          typeof effectiveContent === "string"
+            ? effectiveContent
+            : ((effectiveContent.find((b) => b.type === "text") as { text?: string } | undefined)
+                ?.text ?? "")
+        const piped = await dispatchPluginMessageSend({
+          id: `${sessionId}:outbound`,
+          role: "user",
+          content: outboundText,
+        })
+        if (typeof piped?.content === "string" && piped.content !== outboundText) {
+          if (typeof effectiveContent === "string") {
+            effectiveContent = piped.content
+          } else {
+            effectiveContent = effectiveContent.map((block) =>
+              block.type === "text" ? ({ ...block, text: piped.content } as typeof block) : block
+            )
           }
         }
       }
@@ -2480,6 +2508,34 @@ async function handleEvent(
                   model: useChatStore.getState().lastSendBySession[sessionId]?.options.model,
                 },
               })
+              // Pipeline hook (W3.3): `onMessageReceive` — plugins may rewrite
+              // the sealed assistant message. Applied asynchronously after the
+              // seal (store + Dexie) so a slow plugin never blocks the turn.
+              void (async () => {
+                try {
+                  const piped = await dispatchPluginAssistantMessage({
+                    id: sealedAssistant.id,
+                    role: "assistant",
+                    content,
+                  })
+                  if (typeof piped?.content !== "string" || piped.content === content) return
+                  const base = useChatStore.getState().sessions[sessionId]?.messages ?? []
+                  const rewritten = base.map((m) =>
+                    m.id === sealedAssistant.id
+                      ? {
+                          ...m,
+                          parts: m.parts.map((p) =>
+                            p.type === "text" ? { ...p, text: piped.content } : p
+                          ),
+                        }
+                      : m
+                  )
+                  useChatStore.getState().setSessionMessages(sessionId, rewritten)
+                  await persistMessages(sessionId, rewritten)
+                } catch {
+                  // Pipeline rewrite is best-effort — never break the seal.
+                }
+              })()
             }
           } catch {
             // onPostChatReceive is best-effort observability — never block the seal.

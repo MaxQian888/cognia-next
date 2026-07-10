@@ -647,3 +647,77 @@ describe("plugin tool hooks (W3.1 integration)", () => {
     )
   })
 })
+
+// ── W3.3: message pipeline hooks (onMessageSend / onMessageReceive) ──────────
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { getPluginLifecycleHooks } = require("@/lib/plugin/messaging/hooks-system") as {
+  getPluginLifecycleHooks: () => {
+    registerHooks: (id: string, hooks: Record<string, unknown>) => void
+    unregisterHooks: (id: string) => void
+  }
+}
+
+describe("plugin message pipeline (W3.3 integration)", () => {
+  afterEach(() => {
+    getPluginLifecycleHooks().unregisterHooks("pipeline-plugin")
+  })
+
+  it("onMessageSend rewrites the outgoing user message before the sidecar", async () => {
+    getPluginLifecycleHooks().registerHooks("pipeline-plugin", {
+      onMessageSend: async (m: { content: string }) => ({ ...m, content: `${m.content} [signed]` }),
+    })
+    const user = userEvent.setup()
+    render(<ChatHarness />)
+    await waitFor(() => expect(messageCallback).not.toBeNull())
+    await user.type(screen.getByLabelText("message"), "hello there")
+    await clickSend(user)
+
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      SID,
+      "hello there [signed]",
+      expect.objectContaining({ model: "sonnet" })
+    )
+  })
+
+  it("onMessageReceive rewrites the sealed assistant message in the transcript", async () => {
+    getPluginLifecycleHooks().registerHooks("pipeline-plugin", {
+      onMessageReceive: async (m: { content: string }) => ({ ...m, content: "REWRITTEN" }),
+    })
+    const user = userEvent.setup()
+    render(<ChatHarness />)
+    await waitFor(() => expect(messageCallback).not.toBeNull())
+    await user.type(screen.getByLabelText("message"), "say hi")
+    await clickSend(user)
+
+    await dispatchSidecar({
+      type: "event",
+      sessionId: SID,
+      event: {
+        type: "assistant",
+        uuid: "a-pipe-1",
+        session_id: SID,
+        parent_tool_use_id: null,
+        message: {
+          id: "m-pipe-1",
+          role: "assistant",
+          content: [{ type: "text", text: "original answer" }],
+        },
+      },
+    })
+    await dispatchSidecar({
+      type: "event",
+      sessionId: SID,
+      event: {
+        type: "result",
+        subtype: "success",
+        uuid: "res-pipe-1",
+        session_id: SID,
+        parent_tool_use_id: null,
+      },
+    })
+
+    await waitFor(() =>
+      expect(screen.getByTestId("bubble-assistant")).toHaveTextContent("REWRITTEN")
+    )
+  })
+})
