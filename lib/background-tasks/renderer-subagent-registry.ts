@@ -146,7 +146,9 @@ export async function collectRendererBackgroundResult(
   } catch {
     return undefined
   }
-  if (!record || record.host !== "renderer") return undefined
+  // Only subagent rows are collectable through dispatch_agent — plugin-agent /
+  // team-delegation journal rows share the table but are never model-facing.
+  if (!record || record.host !== "renderer" || record.kind !== "subagent") return undefined
   if (record.status === "done") {
     markCollected(runId)
     const usage = pluginUsage(record.usage)

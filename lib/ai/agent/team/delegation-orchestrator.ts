@@ -97,19 +97,21 @@ function runBackgroundDelegation(
   const hooks = getPluginLifecycleHooks()
   const signal = getBackgroundAgentManager().registerAgent(agentId, {
     label: `team-delegation:${delegationId}`,
+    kind: "team-delegation",
+    prompt,
   })
   return (async (): Promise<TeamDelegationRecord | undefined> => {
     try {
       const result = await executeAgent(prompt, { systemPrompt, abortSignal: signal })
       const finalStatus: TeamDelegationStatus = signal.aborted ? "cancelled" : "completed"
       store.updateDelegationStatus(delegationId, finalStatus, result.text)
-      getBackgroundAgentManager().finishAgent(agentId)
+      getBackgroundAgentManager().finishAgent(agentId, { text: result.text })
       hooks.dispatchOnTeamDelegationComplete({ delegationId, status: finalStatus })
     } catch (err) {
       const status: TeamDelegationStatus = signal.aborted ? "cancelled" : "failed"
       const message = err instanceof Error ? err.message : String(err)
       store.updateDelegationStatus(delegationId, status, message)
-      getBackgroundAgentManager().finishAgent(agentId)
+      getBackgroundAgentManager().finishAgent(agentId, { error: message })
       hooks.dispatchOnTeamDelegationComplete({ delegationId, status })
     } finally {
       pendingRuns.delete(delegationId)

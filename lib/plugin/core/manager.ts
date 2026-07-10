@@ -228,11 +228,7 @@ interface RuntimePluginSnapshotEntry {
 }
 
 type PluginActivationRuntimeEvent =
-  | "startup"
-  | `onCommand:${string}`
-  | `onTool:${string}`
-  | `onView:${string}`
-  | `onUri:${string}`
+  "startup" | `onCommand:${string}` | `onTool:${string}` | `onView:${string}` | `onUri:${string}`
 
 interface PluginDiscoveryProjection {
   source: PluginSource
@@ -3435,8 +3431,7 @@ export class PluginManager {
     for (const cap of OVERLAY_REGISTRY_CAPABILITY_KEYS) {
       const descriptor = OVERLAY_REGISTRY_CAPABILITIES[cap]
       const entries = plugin.manifest[descriptor.manifestField] as
-        | ReadonlyArray<{ id: string }>
-        | undefined
+        ReadonlyArray<{ id: string }> | undefined
       if (!entries?.length) continue
       for (const entry of entries) {
         try {
@@ -3464,8 +3459,7 @@ export class PluginManager {
     for (const cap of MODULE_BRIDGE_CAPABILITY_KEYS) {
       const descriptor = MODULE_BRIDGE_CAPABILITIES[cap]
       const entries = plugin.manifest[descriptor.manifestField] as
-        | ReadonlyArray<unknown>
-        | undefined
+        ReadonlyArray<unknown> | undefined
       if (!entries?.length) continue
       try {
         await descriptor.register(moduleBridgeCtx)
@@ -3739,6 +3733,16 @@ export class PluginManager {
     // editor + runtime. Previously this was never called from the disable flow,
     // leaking executors (a disabled plugin's code kept running on its kinds).
     await teardownPluginWorkflowRegistrations(pluginId)
+    // Abort any in-flight background agents the plugin fired-and-forgot
+    // (ctx.agent.run/runStreamed). Matches the "bulk cleanup is automatic"
+    // contract in context.ts; previously cancelByPlugin had no caller and a
+    // disabled plugin's agents kept running.
+    try {
+      const { getBackgroundAgentManager } = await import("@/lib/ai/agent/background-agent-manager")
+      getBackgroundAgentManager().cancelByPlugin(pluginId)
+    } catch {
+      // Best-effort — disable must never fail on background-agent cleanup.
+    }
     // Tear down any LSP servers this plugin contributed. The registry's
     // adapter handles the actual sidecar stop; failures are logged but
     // never block the disable flow.

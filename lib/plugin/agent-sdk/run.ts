@@ -205,6 +205,8 @@ export async function runPluginAgent(
   const manager = getBackgroundAgentManager()
   const agentId = newAgentId(meta)
   const managedSignal = manager.registerAgent(agentId, {
+    kind: "plugin-agent",
+    prompt,
     ...(meta.pluginId ? { pluginId: meta.pluginId } : {}),
     ...(meta.label ? { label: meta.label } : {}),
   })
@@ -226,8 +228,17 @@ export async function runPluginAgent(
     const withId = { ...result, agentId }
     await runOutputGuardrails(prompt, result.text, options.guardrails, signal)
     fireStopHook(options, withId, signal)
+    // Settle with the real outcome so the journal row carries text/usage.
+    manager.finishAgent(agentId, {
+      text: result.text,
+      ...(result.usage ? { usage: result.usage } : {}),
+    })
     return withId
+  } catch (err) {
+    manager.finishAgent(agentId, { error: err instanceof Error ? err.message : String(err) })
+    throw err
   } finally {
+    // Settle-once backstop for any path that slipped past the two above.
     manager.finishAgent(agentId)
   }
 }
@@ -244,6 +255,8 @@ export function runPluginAgentStreamed(
   const manager = getBackgroundAgentManager()
   const agentId = newAgentId(meta)
   const managedSignal = manager.registerAgent(agentId, {
+    kind: "plugin-agent",
+    prompt,
     ...(meta.pluginId ? { pluginId: meta.pluginId } : {}),
     ...(meta.label ? { label: meta.label } : {}),
   })
@@ -279,8 +292,13 @@ export function runPluginAgentStreamed(
       const withId = { ...result, agentId }
       await runOutputGuardrails(prompt, result.text, options.guardrails, signal)
       fireStopHook(options, withId, signal)
+      manager.finishAgent(agentId, {
+        text: result.text,
+        ...(result.usage ? { usage: result.usage } : {}),
+      })
       controller.close(withId)
     } catch (err) {
+      manager.finishAgent(agentId, { error: err instanceof Error ? err.message : String(err) })
       controller.fail(err)
     } finally {
       manager.finishAgent(agentId)
