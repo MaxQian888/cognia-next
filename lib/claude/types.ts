@@ -203,6 +203,13 @@ export interface SendOptions {
   cwd?: string
   model?: string
   fallbackModel?: string
+  /**
+   * Engage the sidecar's `tool_result_review` round-trip (ai-sdk channel):
+   * before each tool result reaches the model, the renderer gets to review /
+   * rewrite it (plugin `onPostToolUse`). Set by the chat send path and the
+   * agent executor only when a plugin actually listens.
+   */
+  toolResultReviewEnabled?: boolean
   /** Replaces the SDK's default system prompt entirely. Mutually exclusive with `appendSystemPrompt`. */
   systemPrompt?: string
   /** Appended to the SDK's default system prompt. Mutually exclusive with `systemPrompt`. */
@@ -1611,6 +1618,29 @@ export interface ConversationSidebarSettings {
   searchScope?: ConversationSearchScope
 }
 
+/**
+ * Which metrics the chat run-status bar (`components/chat/run-panel.tsx` — the
+ * "second clock" pinned above the composer) surfaces on its collapsed face. All
+ * fields optional; read sites resolve defaults via
+ * `lib/chat/run-bar-metrics.ts:resolveRunStatusBarSettings`, so an absent object
+ * (legacy settings) keeps the sensible defaults there. Speed/tokens/cost derive
+ * from the bound session's live `metadata.usage`; context% from the latest turn.
+ */
+export interface RunStatusBarSettings {
+  /** Active-work elapsed clock (e.g. "12.3s"). Defaults to on. */
+  showElapsed?: boolean
+  /** Session output-token count (e.g. "1.2k tok"). Defaults to on. */
+  showOutputTokens?: boolean
+  /** Model throughput in tokens/second (e.g. "45 tok/s"). Defaults to on. */
+  showSpeed?: boolean
+  /** Session cost so far (e.g. "$0.03"). Defaults to off. */
+  showCost?: boolean
+  /** Latest-turn context-window fill (e.g. "context 38%"). Defaults to off. */
+  showContextPct?: boolean
+  /** Tool-call count of the turn (e.g. "3 tools"). Defaults to on. */
+  showTools?: boolean
+}
+
 export type AppTheme = "light" | "dark" | "system"
 export type AppFontScale = "xs" | "sm" | "md" | "lg" | "xl"
 export type AppLanguage = "en" | "zh-CN"
@@ -2127,6 +2157,8 @@ export interface AppSettings {
   conversationTimeline?: ConversationTimelineSettings
   /** Conversation sidebar (ChannelList) behavior preferences. */
   conversationSidebar?: ConversationSidebarSettings
+  /** Which metrics the chat run-status bar surfaces (speed, tokens, cost, …). */
+  runStatusBar?: RunStatusBarSettings
   // Tools the user has chosen to always allow for this app (per-tool name).
   alwaysAllowTools: string[]
   /**

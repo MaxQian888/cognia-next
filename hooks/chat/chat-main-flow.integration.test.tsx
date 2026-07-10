@@ -60,13 +60,16 @@ const onClaudeMessageMock = jest.fn(async (cb: (evt: unknown) => void) => {
   return onClaudeUnsub
 })
 const sendPromptMock = jest.fn().mockResolvedValue(undefined)
+const approveToolMock = jest.fn().mockResolvedValue(undefined)
+const toolResultDecisionMock = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/claude/ipc", () => ({
-  approveTool: jest.fn().mockResolvedValue(undefined),
+  approveTool: (...a: unknown[]) => approveToolMock(...a),
   closeSession: jest.fn().mockResolvedValue(undefined),
   interruptSession: jest.fn().mockResolvedValue(undefined),
   onClaudeMessage: (cb: (evt: unknown) => void) => onClaudeMessageMock(cb),
   sendPrompt: (...a: unknown[]) => sendPromptMock(...a),
+  toolResultDecision: (...a: unknown[]) => toolResultDecisionMock(...a),
 }))
 
 // ---- side channels that would otherwise hit Dexie / an LLM ----------------
@@ -125,12 +128,19 @@ jest.mock("@/lib/db/session-usage", () => ({
 jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: jest.fn(async () => ({ model: "sonnet", systemPrompt: "sys" })),
 }))
-jest.mock("@/lib/claude/adapter-hooks", () => ({
-  dispatchUserPromptSubmit: jest.fn(async () => ({ action: "proceed" as const })),
-  dispatchChatError: jest.fn(),
-  dispatchTokenUsage: jest.fn(),
-  dispatchPostChatReceive: jest.fn(async () => ({})),
-}))
+jest.mock("@/lib/claude/adapter-hooks", () => {
+  // Keep the REAL tool-hook dispatchers (dispatchPreToolUse/dispatchPostToolUse/
+  // hasPostToolUseListeners) — the W3.1 tests below drive them through the real
+  // hooks-system. Only the prompt/error/usage side channels stay stubbed.
+  const actual = jest.requireActual("@/lib/claude/adapter-hooks")
+  return {
+    ...actual,
+    dispatchUserPromptSubmit: jest.fn(async () => ({ action: "proceed" as const })),
+    dispatchChatError: jest.fn(),
+    dispatchTokenUsage: jest.fn(),
+    dispatchPostChatReceive: jest.fn(async () => ({})),
+  }
+})
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   executeOnExternalAgent: jest.fn(),
   getExternalAgentManager: () => ({
@@ -520,5 +530,120 @@ describe("chat main flow (integration)", () => {
     expect(screen.getByTestId("transcript")).toHaveAttribute("data-status", "idle")
     expect(screen.getByTestId("bubble-user")).toHaveTextContent("say hi")
     expect(screen.getByTestId("bubble-assistant")).toHaveTextContent("Hello, world!")
+  })
+})
+
+// ── W3.1: plugin tool hooks over the real chat pump ──────────────────────────
+// A plugin's `onPreToolUse` deny must resolve the sidecar's canUseTool
+// round-trip (claude_approve deny) before any user-facing approval flow, and
+// `onPostToolUse` must answer `tool_result_review` with the rewritten output.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { usePluginStore } = require("@/stores/plugin-runtime") as {
+  usePluginStore: {
+    getState: () => Record<string, unknown>
+    setState: (s: Record<string, unknown>) => void
+  }
+}
+
+function seedHookPlugin(hooks: Record<string, unknown>) {
+  usePluginStore.setState({
+    plugins: {
+      "tool-firewall": {
+        manifest: { id: "tool-firewall", name: "Tool Firewall", version: "1.0.0" },
+        status: "enabled",
+        source: "builtin",
+        path: "builtin://tool-firewall",
+        config: {},
+        hooks,
+      },
+    },
+  })
+}
+
+describe("plugin tool hooks (W3.1 integration)", () => {
+  afterEach(() => {
+    usePluginStore.setState({ plugins: {} })
+  })
+
+  it("onPreToolUse deny blocks the tool before any approval flow", async () => {
+    const onPreToolUse = jest.fn().mockResolvedValue({ action: "deny", reason: "firewalled" })
+    seedHookPlugin({ onPreToolUse })
+    render(<ChatHarness />)
+    await waitFor(() => expect(messageCallback).not.toBeNull())
+
+    await dispatchSidecar({
+      type: "permission_request",
+      sessionId: SID,
+      requestId: "req-1",
+      toolUseID: "tu-1",
+      toolName: "Bash",
+      input: { command: "rm -rf /" },
+    })
+
+    await waitFor(() =>
+      expect(approveToolMock).toHaveBeenCalledWith(SID, "req-1", "deny", "firewalled")
+    )
+    expect(onPreToolUse).toHaveBeenCalledWith("Bash", { command: "rm -rf /" }, SID)
+  })
+
+  it("onPreToolUse modify approves with the rewritten args", async () => {
+    const onPreToolUse = jest
+      .fn()
+      .mockResolvedValue({ action: "modify", modifiedArgs: { command: "ls" } })
+    seedHookPlugin({ onPreToolUse })
+    render(<ChatHarness />)
+    await waitFor(() => expect(messageCallback).not.toBeNull())
+
+    await dispatchSidecar({
+      type: "permission_request",
+      sessionId: SID,
+      requestId: "req-2",
+      toolUseID: "tu-2",
+      toolName: "Bash",
+      input: { command: "rm -rf /" },
+    })
+
+    await waitFor(() =>
+      expect(approveToolMock).toHaveBeenCalledWith(SID, "req-2", "allow", undefined, {
+        command: "ls",
+      })
+    )
+  })
+
+  it("onPostToolUse rewrite reaches the tool_result_review decision", async () => {
+    const onPostToolUse = jest.fn().mockResolvedValue({ modifiedResult: "REDACTED" })
+    seedHookPlugin({ onPostToolUse })
+    render(<ChatHarness />)
+    await waitFor(() => expect(messageCallback).not.toBeNull())
+
+    // Seed the call correlation the same way the pump does (permission ask).
+    await dispatchSidecar({
+      type: "permission_request",
+      sessionId: SID,
+      requestId: "req-3",
+      toolUseID: "tu-3",
+      toolName: "Read",
+      input: { file_path: "/etc/passwd" },
+    })
+
+    await dispatchSidecar({
+      type: "tool_result_review",
+      sessionId: SID,
+      reviewId: "rev-1",
+      toolUseId: "tu-3",
+      toolName: "Read",
+      result: "root:x:0:0",
+      isError: false,
+    })
+
+    await waitFor(() =>
+      expect(toolResultDecisionMock).toHaveBeenCalledWith(SID, "rev-1", "REDACTED")
+    )
+    expect(onPostToolUse).toHaveBeenCalledWith(
+      "Read",
+      { file_path: "/etc/passwd" },
+      "root:x:0:0",
+      SID
+    )
   })
 })

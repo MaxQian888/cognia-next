@@ -249,13 +249,13 @@ under the synthetic owner `__host:canvas__` (cap 30/sec, refill 30/sec).
 
 ### Tool use (3)
 
-| Hook                 | Dispatched by                                                                                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onUserPromptSubmit` | composer send path — wired in M4                                                                                                                                                      |
-| `onPreToolUse`       | SDK tool-use intercept — wired in M3                                                                                                                                                  |
-| `onPostToolUse`      | SDK tool-result intercept — wired in M3                                                                                                                                               |
-| `onPreCompact`       | compaction step (if any)                                                                                                                                                              |
-| `onPostChatReceive`  | `hooks/chat/use-claude-chat.ts` — fired once the assistant turn seals (no pending approvals); carries the sealed assistant `PluginMessage`. The canonical post-turn observation seam. |
+| Hook                 | Dispatched by                                                                                                                                                                                                                                                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onUserPromptSubmit` | composer send path — wired in M4                                                                                                                                                                                                                                                                                             |
+| `onPreToolUse`       | `hooks/chat/use-claude-chat.ts` `permission_request` case (chat) via `lib/claude/adapter-hooks.ts:dispatchPreToolUse`; a plugin deny/modify resolves the sidecar's `canUseTool` round-trip before any user-facing approval flow. Also `lib/ai/agent/agent-executor.ts` for plugin-dispatched agent turns.                    |
+| `onPostToolUse`      | `hooks/chat/use-claude-chat.ts` `tool_result_review` case (chat; engaged via `sendOptions.toolResultReviewEnabled` when listeners exist) via `lib/claude/adapter-hooks.ts:dispatchPostToolUse`; a returned `modifiedResult` is the model-visible output. Also `lib/ai/agent/agent-executor.ts:toolResultReviewResponderFor`. |
+| `onPreCompact`       | compaction step (if any)                                                                                                                                                                                                                                                                                                     |
+| `onPostChatReceive`  | `hooks/chat/use-claude-chat.ts` — fired once the assistant turn seals (no pending approvals); carries the sealed assistant `PluginMessage`. The canonical post-turn observation seam.                                                                                                                                        |
 
 ### RAG (3)
 

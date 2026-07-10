@@ -153,6 +153,11 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
   dispatchChatError: (...a: unknown[]) => dispatchChatErrorMock(...(a as [])),
   dispatchTokenUsage: (...a: unknown[]) => dispatchTokenUsageMock(...(a as [])),
   dispatchPostChatReceive: (...a: unknown[]) => dispatchPostChatReceiveMock(...(a as [])),
+  // W3.1 tool hooks — inert in this unit suite (integration coverage lives in
+  // chat-main-flow.integration.test.tsx).
+  dispatchPreToolUse: jest.fn(async () => ({ action: "allow" as const })),
+  dispatchPostToolUse: jest.fn(async () => ({})),
+  hasPostToolUseListeners: jest.fn(() => false),
 }))
 
 // External-agent branch (D1): dynamically imported by `send` when the agent

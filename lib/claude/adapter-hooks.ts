@@ -35,6 +35,15 @@ function hasEventListeners(hookName: keyof PluginHooksAll): boolean {
   return getPluginEventHooks().hasAnyHook(hookName)
 }
 
+/**
+ * Whether any plugin registered `onPostToolUse`. The chat send path uses this
+ * to decide if the sidecar's `tool_result_review` round-trip is worth paying
+ * for the turn (`sendOptions.toolResultReviewEnabled`).
+ */
+export function hasPostToolUseListeners(): boolean {
+  return hasEventListeners("onPostToolUse")
+}
+
 export interface PromptSubmitContextLike {
   characterId?: string
   modelHint?: string

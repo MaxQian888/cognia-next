@@ -53,6 +53,7 @@ import {
   interruptSession,
   onClaudeMessage,
   sendPrompt,
+  toolResultDecision,
 } from "@/lib/claude/ipc"
 import { detectPlatform } from "@/hooks/use-platform"
 
@@ -123,11 +124,44 @@ import {
   dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
   dispatchTokenUsage as dispatchPluginTokenUsage,
   dispatchPostChatReceive as dispatchPluginPostChatReceive,
+  dispatchPreToolUse as dispatchPluginPreToolUse,
+  dispatchPostToolUse as dispatchPluginPostToolUse,
+  hasPostToolUseListeners,
 } from "@/lib/claude/adapter-hooks"
 
 setToolSpanEventPublisher((eventType, payload) => {
   emitSystemBusEvent(eventType, payload)
 })
+
+// ── Plugin tool hooks (W3.1) ─────────────────────────────────────────────────
+// Correlates `tool_result_review` events back to the tool call's name + input
+// so `dispatchPostToolUse` receives real args. Fed from streamed assistant
+// `tool_use` blocks and from `permission_request` events; bounded so a long
+// session can't grow it unboundedly.
+const chatToolCallsById = new Map<string, { name: string; input: Record<string, unknown> }>()
+const CHAT_TOOL_CALLS_CAP = 500
+
+function rememberChatToolCall(id: string, name: string, input: Record<string, unknown>): void {
+  if (!id) return
+  if (chatToolCallsById.size >= CHAT_TOOL_CALLS_CAP) {
+    const oldest = chatToolCallsById.keys().next().value
+    if (oldest !== undefined) chatToolCallsById.delete(oldest)
+  }
+  chatToolCallsById.set(id, { name, input })
+}
+
+/** Pull assistant `tool_use` blocks out of a streamed SDK event envelope. */
+function rememberToolCallsFromSdkEvent(event: unknown): void {
+  const message = (event as { message?: { content?: unknown } } | undefined)?.message
+  const content = message?.content
+  if (!Array.isArray(content)) return
+  for (const block of content) {
+    const b = block as { type?: string; id?: string; name?: string; input?: unknown }
+    if (b?.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
+      rememberChatToolCall(b.id, b.name, (b.input as Record<string, unknown>) ?? {})
+    }
+  }
+}
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { generateEmbedding } from "@cognia/provider-embedding/embedding"
@@ -876,6 +910,14 @@ export function useClaudeChat() {
             : sendOptions.additionalDirectories,
         }
         useChatStore.getState().setPendingCommandOverrides(null)
+      }
+
+      // Plugin PostToolUse (W3.1): only pay for the sidecar's
+      // tool_result_review round-trip when a plugin actually listens. The
+      // review events are answered in the `tool_result_review` case of the
+      // message pump below.
+      if (hasPostToolUseListeners()) {
+        sendOptions = { ...sendOptions, toolResultReviewEnabled: true }
       }
 
       // Advisory daily-budget overage — the routing engine selected a provider
@@ -1975,6 +2017,41 @@ async function handleEvent(
       return
     }
     case "permission_request": {
+      // Remember the call for the post-tool (`tool_result_review`) hook.
+      rememberChatToolCall(
+        evt.toolUseID ?? "",
+        evt.toolName,
+        (evt.input as Record<string, unknown>) ?? {}
+      )
+      // Plugin tool firewall (`onPreToolUse`, W3.1): a deny short-circuits
+      // before every user-facing approval flow (allowlist, auto-mode, modal);
+      // a modify approves with the plugin's rewritten args (same semantics as
+      // the agent-executor responder). Fail-open — adapter-hooks swallows
+      // dispatcher errors and returns `allow`.
+      {
+        const pre = await dispatchPluginPreToolUse(evt.toolName, evt.input, evt.sessionId)
+        if (pre.action === "deny") {
+          try {
+            await approveTool(
+              evt.sessionId,
+              evt.requestId,
+              "deny",
+              pre.reason ?? "denied by plugin onPreToolUse"
+            )
+          } catch (err) {
+            console.error("plugin pre-tool deny failed", err)
+          }
+          return
+        }
+        if (pre.action === "modify" && pre.modifiedArgs) {
+          try {
+            await approveTool(evt.sessionId, evt.requestId, "allow", undefined, pre.modifiedArgs)
+          } catch (err) {
+            console.error("plugin pre-tool modify failed", err)
+          }
+          return
+        }
+      }
       // Auto-approve if the user has previously allowed this tool.
       if (allowListRef.current.includes(evt.toolName)) {
         try {
@@ -2081,6 +2158,31 @@ async function handleEvent(
       useChatStore.getState().pushApproval(approval)
       return
     }
+    case "tool_result_review": {
+      // Plugin PostToolUse rewrite (W3.1): the sidecar paused before feeding
+      // this tool result to the model. Dispatch to plugins; a returned
+      // `modifiedResult` becomes the model-visible output. Always answer —
+      // the sidecar is blocked on `claude_tool_result_decision`.
+      const call = evt.toolUseId ? chatToolCallsById.get(evt.toolUseId) : undefined
+      let updatedToolOutput: unknown
+      try {
+        const post = await dispatchPluginPostToolUse(
+          evt.toolName || call?.name || "",
+          call?.input ?? {},
+          evt.result,
+          evt.sessionId
+        )
+        updatedToolOutput = post.modifiedResult
+      } catch {
+        updatedToolOutput = undefined
+      }
+      try {
+        await toolResultDecision(evt.sessionId, evt.reviewId, updatedToolOutput)
+      } catch (err) {
+        console.error("tool result decision failed", err)
+      }
+      return
+    }
     case "event": {
       const env = evt as SDKEventEnvelope
       const sessionId = env.sessionId
@@ -2102,6 +2204,10 @@ async function handleEvent(
       const current = isOpen
         ? (messagesMirrorRef.current.get(sessionId) ?? sliceMessages(sessionId))
         : await listMessages(sessionId)
+
+      // Track assistant tool_use blocks so the post-tool hook can correlate
+      // `tool_result_review` events with the call's name + input.
+      rememberToolCallsFromSdkEvent(env.event)
 
       const {
         messages: appliedMessages,
