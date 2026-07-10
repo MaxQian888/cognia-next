@@ -17562,6 +17562,7 @@
         "tokenHelp": "The Token you set under Server Config (used for signature checks).",
         "tokenLabel": "Token",
         "webhookUrlAfterSave": "(generated after save)",
+        "webhookUrlCopied": "Webhook URL copied.",
         "webhookUrlHelp": "Prefix this path with your public base URL and paste it into Server Config → URL.",
         "webhookUrlLabel": "Webhook URL",
         "windowNote": "Replies use the 客服 message API and are only allowed within 48h of the user's last message."

@@ -1192,6 +1192,7 @@
     "tokenHelp": "在服务器配置中设置的 Token（用于签名校验）。",
     "tokenLabel": "Token",
     "webhookUrlAfterSave": "（保存后生成）",
+    "webhookUrlCopied": "Webhook 地址已复制。",
     "webhookUrlHelp": "在此路径前加上你的公网基础地址，填入 服务器配置 → URL。",
     "webhookUrlLabel": "Webhook 地址",
     "windowNote": "回复使用客服消息接口，仅允许在用户最后一条消息后的 48 小时内发送。",
