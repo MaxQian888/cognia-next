@@ -196,6 +196,13 @@ export interface ExecuteAgentConfig {
    * top-level / unconstrained run (no parent ⇒ no ceiling).
    */
   permissionCeiling?: ExternalSessionPermissionSpec
+  /**
+   * Permission-ask routing for a dispatched run: registered under the child's
+   * ephemeral session id so the renderer's `permission_request` listener can
+   * re-bucket asks into the PARENT chat session instead of auto-denying against
+   * the unopened ephemeral session. Set by the `dispatch_agent` host tool.
+   */
+  approvalRoute?: import("@/types/plugin/plugin-agent-sdk").PluginDispatchApprovalRoute
 }
 
 export type ExecuteAgentChannel = "sidecar" | "text"
@@ -368,6 +375,13 @@ async function runToolEnabledStandalone(
   if (config.dispatchContext) {
     registerDispatchContext(session.id, config.dispatchContext)
   }
+  // Register the approval route BEFORE the send so even the run's first
+  // permission ask re-buckets into the parent session (no race window).
+  if (config.approvalRoute) {
+    const { registerSubagentApprovalRoute } =
+      await import("@/lib/claude/agents/subagent-approval-routes")
+    registerSubagentApprovalRoute(session.id, config.approvalRoute)
+  }
   try {
     const appSettings = await settingsDb.getSettings().catch(() => undefined)
     const baseSessionRow = (await sessionsDb.getSession(session.id)) ?? session
@@ -438,6 +452,14 @@ async function runToolEnabledStandalone(
     return { text: result.text ?? "", ...(usage ? { usage } : {}) }
   } finally {
     if (config.dispatchContext) clearDispatchContext(session.id)
+    if (config.approvalRoute) {
+      // Clear AFTER the run settles; the drain's `permission_interrupted` for
+      // orphaned asks re-buckets via the store's requestId fallback scan, so a
+      // cleared route never strands the interrupt marker.
+      void import("@/lib/claude/agents/subagent-approval-routes")
+        .then(({ clearSubagentApprovalRoute }) => clearSubagentApprovalRoute(session.id))
+        .catch(() => undefined)
+    }
     // Drop the ceiling resolveSendOptions deposited for this run's session id so
     // a re-used ephemeral id never inherits a stale ceiling.
     clearResolvedPermissionCeiling(session.id)

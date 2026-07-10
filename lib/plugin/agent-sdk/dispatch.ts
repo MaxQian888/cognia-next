@@ -85,6 +85,22 @@ export async function dispatchSubagent(
     thisId = idOrDef.id
   }
 
+  // ── Policy guards (fail-closed; the enum can drift within a session) ──────
+  // `disabled` defs and settings-level dispatch-rule denials are refused even
+  // when a stale tool schema still advertises the id.
+  if (def.disabled) {
+    return rejectionResult(runId, {
+      reason: "policy",
+      message: `Dispatch refused — subagent "${thisId}" is disabled.`,
+    })
+  }
+  if (!(await isDispatchAllowedByPolicy(thisId))) {
+    return rejectionResult(runId, {
+      reason: "policy",
+      message: `Dispatch refused — subagent "${thisId}" is denied by the dispatch policy.`,
+    })
+  }
+
   // ── Nesting guards ─────────────────────────────────────────────────────────
   // Cycle: this subagent is already an ancestor on the dispatch chain (A→B→A).
   const parentChain = options._parentChain ?? []
@@ -164,6 +180,10 @@ export async function dispatchSubagent(
     // Live progress: stream the child's tool-call/result events into the
     // subagent runtime store so its card updates while the run is in flight.
     ...(options._onEvent ? { onEvent: options._onEvent } : {}),
+    // Permission-ask routing: surface the child's asks in the PARENT chat
+    // session (instead of the legacy silent auto-deny against the unopened
+    // ephemeral session).
+    ...(options._approvalRoute ? { approvalRoute: options._approvalRoute } : {}),
     // Only thread a dispatch context when this child is allowed to nest — that
     // is what re-exposes `dispatch_agent` to it (gated by depth in build-options).
     ...(def.allowNesting && typeof effectiveMaxDepth === "number"
@@ -197,6 +217,24 @@ export async function dispatchSubagent(
     runId,
     ...(result.finishReason ? { finishReason: result.finishReason } : {}),
     ...(result.usage ? { usage: result.usage } : {}),
+  }
+}
+
+/**
+ * Settings-level dispatch policy over the projected subagent id. Best-effort
+ * read (unreadable settings ⇒ allow — the pre-existing behavior); the verdict
+ * itself is fail-closed for explicit denials.
+ */
+async function isDispatchAllowedByPolicy(subagentId: string): Promise<boolean> {
+  try {
+    const [{ getSettings }, { isSubagentDispatchAllowed }] = await Promise.all([
+      import("@/lib/db/settings"),
+      import("@/lib/claude/agents/subagent-dispatch-policy"),
+    ])
+    const settings = await getSettings()
+    return isSubagentDispatchAllowed(settings?.agentPermissions?.subagentRules, subagentId)
+  } catch {
+    return true
   }
 }
 

@@ -56,4 +56,11 @@ export interface AgentDefinition {
   allowNesting?: boolean
   /** Per-subagent override of the max nesting level (combined via `min`). */
   maxDepth?: number
+  /**
+   * Hide from UI pickers / @-mention autocomplete while staying dispatchable
+   * (OpenCode `hidden` semantics). Model-facing discovery is unaffected.
+   */
+  hidden?: boolean
+  /** Fully off: excluded from dispatch, discovery, and every picker. */
+  disabled?: boolean
 }

@@ -1640,6 +1640,7 @@
     "emptyDescription": "当前没有待审批、审批门或等待中的智能体。",
     "emptyTitle": "暂无待办",
     "interrupted": "已中断——该请求已被拒绝。",
+    "interruptedOnBoot": "{count, plural, other {有 # 个审批请求被中断}}",
     "kind": {
       "fleet-permission": "智能体等待权限确认",
       "fleet-waiting": "智能体等待输入",
@@ -3520,6 +3521,8 @@
     "toolApproval": {
       "allowAlways": "始终允许",
       "allowOnce": "仅本次允许",
+      "askedBySubagent": "由子代理 {subagent} 请求（运行 {runId}）",
+      "cancelRun": "取消运行",
       "deny": "拒绝",
       "dismiss": "关闭",
       "inputLabel": "输入",
@@ -5243,6 +5246,9 @@
       "backoffFixed": "固定",
       "backoffFixedDelay": "固定间隔",
       "backoffStrategy": "退避策略",
+      "boundAccount": "账号",
+      "boundAccountActive": "使用当前账号",
+      "boundAccountDesc": "让该实例使用某个指定账号运行，而不是该提供商的当前账号，从而保持实例之间相互隔离。",
       "chatFailurePolicy": "对话失败策略",
       "chatFailurePolicyDesc": "外部代理在对话模式下失败时的处理策略",
       "chatFailurePolicyFallback": "回退到内置代理",
@@ -11088,6 +11094,12 @@
       "emptyCapabilities": "此插件未声明任何能力。",
       "emptyDescription": "从列表中选择插件即可查看、配置并治理它。",
       "emptyTitle": "选择一个插件",
+      "frontendTrust": {
+        "blockedHint": "在你信任它之前，此插件不会加载。请只信任你了解的作者的插件。",
+        "description": "此插件的代码会直接在应用内运行且不受沙箱限制——它能访问你的数据以及应用能做的一切。它来自不受信任的来源，因此需要你信任后才会运行。",
+        "switchAria": "信任此插件的前端代码",
+        "title": "信任前端代码"
+      },
       "logs": {
         "aria": "Python 宿主日志条目",
         "clear": "清空",

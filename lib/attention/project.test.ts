@@ -76,6 +76,59 @@ describe("projectAttention", () => {
     })
   })
 
+  it("labels a subagent-origin approval with the asking subagent", () => {
+    const items = projectAttention({
+      chatSessions: {
+        chat: {
+          pendingApprovals: [approval({ origin: "subagent", subagentId: "explore" })],
+        },
+      },
+      gates: [],
+      fleet: emptyFleet,
+    })
+    expect(items[0].title).toBe("explore · Bash")
+  })
+
+  it("surfaces journal-only entries as stale items, skipping live/settled ones", () => {
+    const items = projectAttention({
+      chatSessions: { chat: { pendingApprovals: [approval({ requestId: "live" })] } },
+      gates: [],
+      fleet: emptyFleet,
+      approvalJournal: [
+        {
+          requestId: "live", // present in a live slice → skipped
+          sessionId: "eph",
+          bucketSessionId: "chat",
+          toolName: "Bash",
+          requestedAt: 1,
+          status: "interrupted",
+        },
+        {
+          requestId: "ghost", // not live → surfaced stale
+          sessionId: "eph2",
+          bucketSessionId: "chat",
+          toolName: "Read",
+          origin: "subagent",
+          subagentId: "explore",
+          requestedAt: 2,
+          status: "interrupted",
+        },
+        {
+          requestId: "done", // settled → skipped
+          sessionId: "eph3",
+          bucketSessionId: "chat",
+          toolName: "Grep",
+          requestedAt: 3,
+          status: "settled",
+        },
+      ],
+    })
+    const journalItem = items.find((i) => i.id === "chat:ghost")
+    expect(journalItem).toMatchObject({ stale: true, title: "explore · Read", sessionId: "chat" })
+    expect(items.filter((i) => i.id === "chat:live")).toHaveLength(1) // only the live one
+    expect(items.find((i) => i.id === "chat:done")).toBeUndefined()
+  })
+
   it("marks interrupted approvals and gates stale", () => {
     const items = projectAttention({
       chatSessions: { s1: { pendingApprovals: [approval({ status: "interrupted" })] } },

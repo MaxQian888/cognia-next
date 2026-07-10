@@ -5,6 +5,7 @@
   "emptyDescription": "No approvals, gates, or waiting agents right now.",
   "emptyTitle": "Nothing needs you",
   "interrupted": "Interrupted — the request was already denied.",
+  "interruptedOnBoot": "{count, plural, one {# approval was interrupted} other {# approvals were interrupted}}",
   "kind": {
     "fleet-permission": "Agent waiting for permission",
     "fleet-waiting": "Agent waiting for input",

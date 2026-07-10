@@ -70,6 +70,7 @@ function projectPluginSubagent(entry: {
   if (entry.entry.effort) def.effort = entry.entry.effort
   if (entry.entry.externalPresetId) def.externalPresetId = entry.entry.externalPresetId
   if (entry.entry.mcpServerIds?.length) def.mcpServerIds = entry.entry.mcpServerIds
+  if (entry.entry.hidden) def.hidden = true
   // Anonymous plugins (no pluginId tag) are still legal — emit the bare id
   // so the dispatcher can address them, but flag the empty namespace
   // segment so a malicious plugin cannot masquerade as another's id.
@@ -133,11 +134,12 @@ export function resolveAllSubagents(opts: {
   if (opts.context === "direct") {
     const result: Record<string, Record<string, unknown>> = {}
     for (const entry of listSubagentEntries()) {
+      if (entry.entry.disabled) continue
       const { id, def } = projectPluginSubagent(entry)
       result[id] = def
     }
     for (const tpl of Object.values(useSubagentRuntimeStore.getState().templates)) {
-      if (tpl.isBuiltIn) continue
+      if (tpl.isBuiltIn || tpl.disabled) continue
       const { id, def } = projectSubagentTemplate(tpl)
       result[id] = def
     }
@@ -150,6 +152,7 @@ export function resolveAllSubagents(opts: {
   // Team context — union with plugin entries.
   const result: Record<string, Record<string, unknown>> = { ...builtIn }
   for (const entry of listSubagentEntries()) {
+    if (entry.entry.disabled) continue
     const { id, def } = projectPluginSubagent(entry)
     result[id] = def
   }
@@ -204,6 +207,8 @@ function builtInDispatchableSubagents(): Array<{ id: string; def: PluginSubagent
       ...(a.model ? { model: a.model } : {}),
       ...(a.maxTurns !== undefined ? { maxTurns: a.maxTurns } : {}),
       ...(a.effort ? { effort: a.effort } : {}),
+      ...(a.hidden ? { hidden: true } : {}),
+      ...(a.disabled ? { disabled: true } : {}),
     },
   }))
 }
@@ -222,13 +227,18 @@ function builtInDispatchableSubagents(): Array<{ id: string; def: PluginSubagent
  * may itself nest.
  */
 export function resolveDispatchableSubagents(): Array<{ id: string; def: PluginSubagentDef }> {
-  const out: Array<{ id: string; def: PluginSubagentDef }> = [...builtInDispatchableSubagents()]
+  // `disabled` defs are excluded everywhere; `hidden` defs stay dispatchable
+  // (UI pickers filter them out on their side — OpenCode semantics).
+  const out: Array<{ id: string; def: PluginSubagentDef }> = builtInDispatchableSubagents().filter(
+    (x) => !x.def.disabled
+  )
   for (const entry of listSubagentEntries()) {
+    if (entry.entry.disabled) continue
     const id = entry.pluginId ? `${entry.pluginId}:${entry.id}` : entry.id
     out.push({ id, def: { ...entry.entry, id } })
   }
   for (const tpl of Object.values(useSubagentRuntimeStore.getState().templates)) {
-    if (tpl.isBuiltIn) continue
+    if (tpl.isBuiltIn || tpl.disabled) continue
     const id = `template:${slugifySubagentName(tpl.name)}`
     out.push({
       id,
@@ -250,6 +260,7 @@ export function resolveDispatchableSubagents(): Array<{ id: string; def: PluginS
         ...(tpl.config.maxNestingDepth !== undefined
           ? { maxDepth: tpl.config.maxNestingDepth }
           : {}),
+        ...(tpl.hidden ? { hidden: true } : {}),
       },
     })
   }

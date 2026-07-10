@@ -749,11 +749,23 @@ const NEVER_PRUNE_TOOLS: ReadonlySet<string> = new Set([
   TASK_TOOL_NAME,
 ])
 
-/** The dispatchable-subagent list seeding the `dispatch_agent` enum + discovery. */
-async function listDispatchAgentAvailable(): Promise<Array<{ id: string; description: string }>> {
+/**
+ * The dispatchable-subagent list seeding the `dispatch_agent` enum + discovery.
+ * `disabled` defs are already excluded by the resolver; `hidden` defs stay in
+ * the enum (they hide from UI pickers only); policy-denied ids are dropped so
+ * the model never sees them (OpenCode `permission.task` semantics).
+ */
+async function listDispatchAgentAvailable(
+  rules?: import("@/lib/claude/permissions/ruleset").ToolRules
+): Promise<Array<{ id: string; description: string }>> {
   try {
-    const { resolveDispatchableSubagents } = await import("@/lib/claude/agents/subagents")
-    return resolveDispatchableSubagents().map((x) => ({ id: x.id, description: x.def.description }))
+    const [{ resolveDispatchableSubagents }, { isSubagentDispatchAllowed }] = await Promise.all([
+      import("@/lib/claude/agents/subagents"),
+      import("@/lib/claude/agents/subagent-dispatch-policy"),
+    ])
+    return resolveDispatchableSubagents()
+      .filter((x) => isSubagentDispatchAllowed(rules, x.id))
+      .map((x) => ({ id: x.id, description: x.def.description }))
   } catch {
     return []
   }
@@ -783,10 +795,11 @@ async function resolveDispatchAgentGate(
   | undefined
 > {
   const { session, appSettings, dispatchContext } = ctx
+  const subagentRules = appSettings?.agentPermissions?.subagentRules
   // Nested subagent run: the manifest builder withholds the entry once
   // `depth >= maxDepth`, so expose with the run's own depth here.
   if (dispatchContext) {
-    const available = await listDispatchAgentAvailable()
+    const available = await listDispatchAgentAvailable(subagentRules)
     if (available.length === 0) return undefined
     return {
       enabled: true,
@@ -808,7 +821,7 @@ async function resolveDispatchAgentGate(
   const isNestingSurface = session?.kind !== "workflow-editor" && session?.kind !== "team"
   const planMode = permissionMode === "plan"
   if (isNestingSurface && (nesting?.enabled === true || planMode)) {
-    const available = await listDispatchAgentAvailable()
+    const available = await listDispatchAgentAvailable(subagentRules)
     if (available.length === 0) return undefined
     return { enabled: true, depth: 0, maxDepth: nesting?.maxDepth ?? 2, available }
   }

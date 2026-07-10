@@ -44,6 +44,7 @@ import {
   maybeDrainBackgroundResults,
   registerBackgroundReplaySend,
 } from "./background-result-runtime"
+import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-routes"
 import { tagBranchSiblings } from "@/lib/chat/branch-regen"
 import { mirrorTruncateToDesktop } from "@/lib/chat/mirror-truncate"
 import {
@@ -1780,6 +1781,63 @@ function drainSteerVia(sessionId: string, sendRef: React.MutableRefObject<SendFn
   maybeDrainSteer(sessionId, (payload) => void sendRef.current?.(payload, undefined, { sessionId }))
 }
 
+/**
+ * Run Auto-mode command-safety evaluation for a permission request and resolve
+ * it when the decision is definitive. Returns `true` when the ask was answered
+ * (allow/deny), `false` when it should fall through to the manual approval
+ * modal. Fail-open: any error is treated as undecided (`false`). Shared by the
+ * subagent-ask routing branch and the normal open-pane branch.
+ */
+async function tryAutoModeDecision(evt: {
+  sessionId: string
+  requestId: string
+  toolName: string
+  input: unknown
+}): Promise<boolean> {
+  try {
+    const settings = useSettingsStore.getState().settings
+    const judgeClient = buildUtilityLlmClient({
+      session: null,
+      appSettings: settings,
+      override: settings?.agentPermissions?.autoApprove?.judgeModel,
+      featureId: "command-safety",
+    })
+    // The model judge tier (`rules+model`) has no internal timeout, so a wedged
+    // utility-LLM fetch would otherwise hang this handler forever with NO
+    // approval dialog shown. Bound it: on timeout fall through to the manual
+    // modal (treat as undecided) instead of swallowing the request.
+    const decision = await Promise.race([
+      runAutoModeForTool({
+        toolName: evt.toolName,
+        input: evt.input,
+        settings,
+        client: judgeClient,
+        locale: settings?.language,
+        pluginRules: getPluginCommandRulesets(),
+      }),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), AUTO_MODE_DECISION_TIMEOUT_MS)
+      }),
+    ])
+    if (decision && decision.decision === "allow") {
+      await approveTool(evt.sessionId, evt.requestId, "allow")
+      return true
+    }
+    if (decision && decision.decision === "deny") {
+      await approveTool(
+        evt.sessionId,
+        evt.requestId,
+        "deny",
+        `auto-denied (${decision.source}): ${decision.reason}`
+      )
+      return true
+    }
+  } catch (err) {
+    console.error("auto-mode evaluation failed", err)
+  }
+  return false
+}
+
 async function handleEvent(
   evt: ClaudeEvent,
   activeRef: React.MutableRefObject<string | null>,
@@ -1926,6 +1984,46 @@ async function handleEvent(
         }
         return
       }
+      // Dispatched-subagent ask: the run is on an ephemeral (never-open)
+      // session, so the legacy `!isOpen` branch below would silently
+      // auto-deny it. Route it to the PARENT chat session instead (Claude Code
+      // v2.1.186 parity) — unless the user opted back into auto-deny. The ask
+      // still runs through the auto-mode command-safety evaluation.
+      const subagentRoute = getSubagentApprovalRoute(evt.sessionId)
+      if (subagentRoute) {
+        const mode = useSettingsStore.getState().settings?.agentPermissions?.subagentAsks
+        if (mode === "auto-deny") {
+          try {
+            await approveTool(
+              evt.sessionId,
+              evt.requestId,
+              "deny",
+              "auto-denied: subagent asks disabled"
+            )
+          } catch (err) {
+            console.error("subagent auto-deny failed", err)
+          }
+          return
+        }
+        const decided = await tryAutoModeDecision(evt)
+        if (decided) return
+        useChatStore.getState().pushApproval({
+          sessionId: evt.sessionId,
+          requestId: evt.requestId,
+          toolUseID: evt.toolUseID,
+          toolName: evt.toolName,
+          input: evt.input,
+          title: evt.title,
+          displayName: evt.displayName,
+          description: evt.description,
+          blockedPath: evt.blockedPath,
+          decisionReason: evt.decisionReason,
+          origin: "subagent",
+          subagentId: subagentRoute.subagentId,
+          subagentRunId: subagentRoute.runId,
+        })
+        return
+      }
       // An open pane (focused OR background tab/split) surfaces the approval
       // inline in *its* pane — `pushApproval` routes by `approval.sessionId`,
       // so a gate in session B never blocks or is confused with session A's.
@@ -1967,51 +2065,7 @@ async function handleEvent(
       // Auto mode: auto-decide shell-command safety (deterministic rules +
       // optional small-model judge). A non-"ask" decision short-circuits the
       // approval modal; anything uncertain falls through to the manual prompt.
-      // Fail-open: any error here just shows the normal approval.
-      try {
-        const settings = useSettingsStore.getState().settings
-        const judgeClient = buildUtilityLlmClient({
-          session: null,
-          appSettings: settings,
-          override: settings?.agentPermissions?.autoApprove?.judgeModel,
-          featureId: "command-safety",
-        })
-        // The model judge tier (`rules+model`) has no internal timeout, so a
-        // wedged utility-LLM fetch would otherwise hang this handler forever —
-        // and because the handler sits before `pushApproval`, the result is a
-        // frozen turn with NO approval dialog ever shown (most visible on the
-        // Claude Agent SDK path, which forces a `canUseTool` round-trip for every
-        // tool). Bound it: on timeout fall through to the manual approval modal
-        // (treat as undecided) instead of swallowing the request.
-        const decision = await Promise.race([
-          runAutoModeForTool({
-            toolName: evt.toolName,
-            input: evt.input,
-            settings,
-            client: judgeClient,
-            locale: settings?.language,
-            pluginRules: getPluginCommandRulesets(),
-          }),
-          new Promise<null>((resolve) => {
-            setTimeout(() => resolve(null), AUTO_MODE_DECISION_TIMEOUT_MS)
-          }),
-        ])
-        if (decision && decision.decision === "allow") {
-          await approveTool(evt.sessionId, evt.requestId, "allow")
-          return
-        }
-        if (decision && decision.decision === "deny") {
-          await approveTool(
-            evt.sessionId,
-            evt.requestId,
-            "deny",
-            `auto-denied (${decision.source}): ${decision.reason}`
-          )
-          return
-        }
-      } catch (err) {
-        console.error("auto-mode evaluation failed", err)
-      }
+      if (await tryAutoModeDecision(evt)) return
       const approval: PendingApproval = {
         sessionId: evt.sessionId,
         requestId: evt.requestId,

@@ -53,7 +53,9 @@ export interface SubagentMentionTarget {
  * to re-render on store changes; the send path calls it directly per turn.
  */
 export function buildChatMentionTargets(): SubagentMentionTarget[] {
-  const entries = resolveDispatchableSubagents()
+  // `hidden` subagents stay dispatchable but never enter the @-mention picker
+  // (OpenCode semantics); `disabled` ones are already dropped by the resolver.
+  const entries = resolveDispatchableSubagents().filter(({ def }) => !def.hidden)
 
   // First pass: derive the preferred handle (slugified name) per target and
   // count collisions so the second pass can fall back to the full id.

@@ -197,4 +197,35 @@ describe("ToolApprovalDialog — interrupted state", () => {
     expect(screen.queryByTestId("approval-interrupted-notice")).toBeNull()
     expect(screen.getByRole("button", { name: "allowOnce" })).toBeInTheDocument()
   })
+
+  it("labels a subagent-origin ask and offers Cancel run (deny-one leaves the run)", () => {
+    const onRespond = jest.fn()
+    const onCancelRun = jest.fn()
+    render(
+      <ToolApprovalDialog
+        approval={approval({
+          toolName: "bash",
+          origin: "subagent",
+          subagentId: "explore",
+          subagentRunId: "run-abcdef01",
+        })}
+        onRespond={onRespond}
+        onCancelRun={onCancelRun}
+      />
+    )
+    const origin = screen.getByTestId("approval-subagent-origin")
+    expect(origin).toHaveTextContent("explore")
+    expect(origin).toHaveTextContent("run-abcd") // sliced to 8 chars
+    fireEvent.click(screen.getByRole("button", { name: "cancelRun" }))
+    expect(onCancelRun).toHaveBeenCalledWith("run-abcdef01")
+    // deny-one still available and independent of Cancel run.
+    fireEvent.click(screen.getByRole("button", { name: "deny" }))
+    expect(onRespond).toHaveBeenCalledWith("deny")
+  })
+
+  it("omits the subagent origin + Cancel run for a normal ask", () => {
+    render(<ToolApprovalDialog approval={approval({ toolName: "bash" })} onRespond={jest.fn()} />)
+    expect(screen.queryByTestId("approval-subagent-origin")).toBeNull()
+    expect(screen.queryByRole("button", { name: "cancelRun" })).toBeNull()
+  })
 })

@@ -1016,6 +1016,8 @@
   "toolApproval": {
     "allowAlways": "始终允许",
     "allowOnce": "仅本次允许",
+    "askedBySubagent": "由子代理 {subagent} 请求（运行 {runId}）",
+    "cancelRun": "取消运行",
     "deny": "拒绝",
     "dismiss": "关闭",
     "inputLabel": "输入",

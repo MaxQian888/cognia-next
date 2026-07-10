@@ -23,6 +23,7 @@ import { SubscriptionInitializer } from "@/components/providers/initializers/sub
 import { PluginRuntimeInitializer } from "@/components/providers/initializers/plugin-runtime-initializer"
 import { ChatMiddlewareFlagInitializer } from "@/components/providers/initializers/chat-middleware-flag-initializer"
 import { BackgroundTaskInitializer } from "@/components/providers/initializers/background-task-initializer"
+import { ApprovalJournalInitializer } from "@/components/providers/initializers/approval-journal-initializer"
 import { AutomationPolicyInitializer } from "@/components/providers/initializers/automation-policy-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { StorageRetentionInitializer } from "@/components/providers/initializers/storage-retention-initializer"
@@ -178,6 +179,7 @@ export default async function RootLayout({
                         <PluginRuntimeInitializer />
                         <ChatMiddlewareFlagInitializer />
                         <BackgroundTaskInitializer />
+                        <ApprovalJournalInitializer />
                         <SubscriptionInitializer />
                         {/* Desktop-only boot initializers (Tauri). Consolidated +
                          * runtime-gated + dynamically imported so the browser dev

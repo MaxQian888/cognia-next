@@ -5,6 +5,7 @@
   "emptyDescription": "当前没有待审批、审批门或等待中的智能体。",
   "emptyTitle": "暂无待办",
   "interrupted": "已中断——该请求已被拒绝。",
+  "interruptedOnBoot": "{count, plural, other {有 # 个审批请求被中断}}",
   "kind": {
     "fleet-permission": "智能体等待权限确认",
     "fleet-waiting": "智能体等待输入",

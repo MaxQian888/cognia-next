@@ -230,6 +230,39 @@ describe("useChatStore", () => {
       expect(typeof result.current.pendingApprovals[0].requestedAt).toBe("number")
     })
 
+    it("re-buckets a dispatched-subagent ask into its parent chat session", async () => {
+      const { registerSubagentApprovalRoute, __clearAllSubagentApprovalRoutesForTesting } =
+        await import("@/lib/claude/agents/subagent-approval-routes")
+      __clearAllSubagentApprovalRoutesForTesting()
+      registerSubagentApprovalRoute("eph-1", {
+        parentSessionId: "s1",
+        runId: "run-1",
+        subagentId: "explore",
+        backgrounded: false,
+      })
+      const { result } = renderHook(() => useChatStore())
+      act(() =>
+        result.current.pushApproval({
+          requestId: "sub-req",
+          sessionId: "eph-1",
+          toolUseID: "tu",
+          toolName: "Bash",
+          input: {},
+          origin: "subagent",
+          subagentId: "explore",
+          subagentRunId: "run-1",
+        } as unknown as PendingApproval)
+      )
+      // The ask surfaces in the PARENT session slice (s1), not the ephemeral id.
+      expect(result.current.pendingApprovals.map((a) => a.requestId)).toContain("sub-req")
+      // markApprovalInterrupted on the ephemeral id still finds the parent entry.
+      act(() => result.current.markApprovalInterrupted("sub-req", "eph-1", "aborted"))
+      expect(result.current.pendingApprovals.find((a) => a.requestId === "sub-req")?.status).toBe(
+        "interrupted"
+      )
+      __clearAllSubagentApprovalRoutesForTesting()
+    })
+
     it("markApprovalInterrupted flags the entry, keeps it, and restores streaming", () => {
       const { result } = renderHook(() => useChatStore())
       act(() => result.current.pushApproval(approval("r1")))

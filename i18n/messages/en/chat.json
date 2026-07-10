@@ -1016,6 +1016,8 @@
   "toolApproval": {
     "allowAlways": "Allow always",
     "allowOnce": "Allow once",
+    "askedBySubagent": "Asked by {subagent} (run {runId})",
+    "cancelRun": "Cancel run",
     "deny": "Deny",
     "dismiss": "Dismiss",
     "inputLabel": "Input",

@@ -37,6 +37,7 @@ import { AttentionPanel } from "./attention-panel"
 import { resetAttentionForTests } from "@/lib/attention/attention-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
+import { useApprovalJournalStore } from "@/stores/agent/approval-journal-store"
 import { fleetStreamStore } from "@/lib/fleet/fleet-stream-store"
 import { FLEET_UPDATE_EVENT } from "@/lib/fleet/types"
 import type { PendingApproval } from "@/lib/claude/types"
@@ -66,6 +67,7 @@ beforeEach(() => {
   isTauriMock.mockReturnValue(true)
   useChatStore.getState().clear()
   usePendingGatesStore.setState({ gates: [] })
+  useApprovalJournalStore.setState({ entries: [] })
   fleetStreamStore.resetForTests()
   resetAttentionForTests()
 })

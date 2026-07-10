@@ -1832,22 +1832,6 @@ export interface AppSettings {
   /**
    * Dispatched-subagent permissioning. Merged forward by `getSettings()`.
    */
-  agentPermissions?: {
-    /**
-     * Where a dispatched subagent's permission asks go. `"surface"` (default)
-     * re-buckets them into the parent chat session (Claude Code parity);
-     * `"auto-deny"` restores the legacy fail-closed silent deny.
-     */
-    subagentAsks?: "surface" | "auto-deny"
-    /**
-     * Dispatch allowlist/denylist over PROJECTED subagent ids (`Explore`,
-     * `myplugin:reviewer`, `template:*`). Glob→verdict, last-match-wins via the
-     * shared ruleset machinery; denied ids never enter the `dispatch_agent`
-     * enum and are refused fail-closed at dispatch time. `ask` is reserved and
-     * treated as `allow` in v1. Default allow when unset.
-     */
-    subagentRules?: import("@/lib/claude/permissions/ruleset").ToolRules
-  }
   /**
    * First-class web tools (web_search + web_fetch). Promoted out of the
    * optional `web-tools` plugin: always available to the agent (renderer +
@@ -2124,6 +2108,20 @@ export interface AppSettings {
      * globs (`mcp__github__*`).
      */
     toolRules?: import("@/lib/claude/permissions/ruleset").Ruleset
+    /**
+     * Where a dispatched subagent's permission asks go. `"surface"` (default)
+     * re-buckets them into the parent chat session (Claude Code parity);
+     * `"auto-deny"` restores the legacy fail-closed silent deny.
+     */
+    subagentAsks?: "surface" | "auto-deny"
+    /**
+     * Dispatch allowlist/denylist over PROJECTED subagent ids (`Explore`,
+     * `myplugin:reviewer`, `template:*`). Glob→verdict, last-match-wins via the
+     * shared ruleset machinery; denied ids never enter the `dispatch_agent`
+     * enum and are refused fail-closed at dispatch time. `ask` is reserved and
+     * treated as `allow` in v1. Default allow when unset.
+     */
+    subagentRules?: import("@/lib/claude/permissions/ruleset").ToolRules
   }
   /** Right-edge conversation-timeline minimap preferences. */
   conversationTimeline?: ConversationTimelineSettings
@@ -3570,6 +3568,17 @@ export interface PendingApproval {
   interruptReason?: string
   /** Stamped by the store when the request arrives (feeds attention sorting). */
   requestedAt?: number
+  /**
+   * Where this ask originated. `"subagent"` = a dispatched subagent whose
+   * ephemeral session was re-bucketed into the parent chat; drives the
+   * "Asked by <subagent>" header + the Cancel-run affordance in the dialog.
+   * `sessionId` stays the ephemeral id (what `approveTool` needs).
+   */
+  origin?: "subagent"
+  /** Display id of the asking subagent (origin "subagent"). */
+  subagentId?: string
+  /** Runtime-store run id of the asking subagent (Cancel-run target). */
+  subagentRunId?: string
 }
 
 // ---- Characters / Skills / Teams -----------------------------------------

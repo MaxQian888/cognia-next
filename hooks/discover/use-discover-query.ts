@@ -175,7 +175,8 @@ function buildExternalAgentPresets(): DiscoverExternalAgentPreset[] {
 
 /** The dispatchable subagents (host built-ins + plugin overlay + user templates). */
 function buildSubagents(): Array<{ id: string; def: PluginSubagentDef }> {
-  return resolveDispatchableSubagents()
+  // `hidden` subagents stay dispatchable but out of the Discover browser.
+  return resolveDispatchableSubagents().filter(({ def }) => !def.hidden)
 }
 
 export function useDiscoverQuery(
@@ -265,6 +266,10 @@ export function useDiscoverQuery(
   )
 
   const items = useMemo<DiscoverItem[]>(() => {
+    // Not dead code: `listSlashCommands()` below reads a mutable registry, so
+    // this version counter must participate in the memo to force
+    // re-derivation when the registry bumps.
+    void slashVersion
     const build = (): DiscoverItem[] => {
       switch (category) {
         case "characters": {

@@ -75,6 +75,12 @@ function PaneApprovalGate({
       onDismiss={() =>
         approval && useChatStore.getState().clearApproval(approval.requestId, sessionId)
       }
+      onCancelRun={(runId) => {
+        // Abort the whole dispatched subagent run (distinct from deny-one).
+        void import("@/lib/claude/agents/cancel-subagent").then(({ cancelSubagentRun }) =>
+          cancelSubagentRun(runId)
+        )
+      }}
     />
   )
 }

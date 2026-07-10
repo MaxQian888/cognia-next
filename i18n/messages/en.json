@@ -1640,6 +1640,7 @@
     "emptyDescription": "No approvals, gates, or waiting agents right now.",
     "emptyTitle": "Nothing needs you",
     "interrupted": "Interrupted — the request was already denied.",
+    "interruptedOnBoot": "{count, plural, one {# approval was interrupted} other {# approvals were interrupted}}",
     "kind": {
       "fleet-permission": "Agent waiting for permission",
       "fleet-waiting": "Agent waiting for input",
@@ -3520,6 +3521,8 @@
     "toolApproval": {
       "allowAlways": "Allow always",
       "allowOnce": "Allow once",
+      "askedBySubagent": "Asked by {subagent} (run {runId})",
+      "cancelRun": "Cancel run",
       "deny": "Deny",
       "dismiss": "Dismiss",
       "inputLabel": "Input",
@@ -5243,6 +5246,9 @@
       "backoffFixed": "Fixed",
       "backoffFixedDelay": "Fixed Delay",
       "backoffStrategy": "Backoff Strategy",
+      "boundAccount": "Account",
+      "boundAccountActive": "Use active account",
+      "boundAccountDesc": "Run this instance with a specific account instead of the provider's active account, so instances stay isolated.",
       "chatFailurePolicy": "Chat Failure Policy",
       "chatFailurePolicyDesc": "Behavior when external agent execution fails in chat mode",
       "chatFailurePolicyFallback": "Fallback to built-in agent",
@@ -11088,6 +11094,12 @@
       "emptyCapabilities": "This plugin declares no capabilities.",
       "emptyDescription": "Pick a plugin from the list to inspect, configure, and govern it.",
       "emptyTitle": "Select a plugin",
+      "frontendTrust": {
+        "blockedHint": "Until trusted, this plugin will not load. Only trust plugins from authors you know.",
+        "description": "This plugin runs its code directly in the app, unsandboxed — it can access your data and everything the app can. It came from an untrusted source, so it only runs after you trust it.",
+        "switchAria": "Trust this plugin's frontend code",
+        "title": "Trust frontend code"
+      },
       "logs": {
         "aria": "Python host log entries",
         "clear": "Clear",

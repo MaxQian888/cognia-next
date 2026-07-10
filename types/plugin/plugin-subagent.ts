@@ -80,4 +80,11 @@ export interface PluginSubagentDef {
    * `min(appSettings.subagentNesting.maxDepth, this)`.
    */
   maxDepth?: number
+  /**
+   * Hide from UI pickers / @-mention autocomplete while staying dispatchable
+   * (OpenCode `hidden` semantics). Model-facing discovery is unaffected.
+   */
+  hidden?: boolean
+  /** Fully off: excluded from dispatch, discovery, and every picker. */
+  disabled?: boolean
 }

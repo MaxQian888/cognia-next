@@ -15,6 +15,7 @@
 
 import { useChatStore } from "@/stores/chat/chat-store"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
+import { useApprovalJournalStore } from "@/stores/agent/approval-journal-store"
 import { fleetStreamStore } from "@/lib/fleet/fleet-stream-store"
 import { projectAttention } from "./project"
 import type { AttentionItem } from "./types"
@@ -29,6 +30,7 @@ let unsubscribers: Array<() => void> = []
 let lastApprovalRefs = new Map<string, readonly unknown[]>()
 let lastGatesRef: readonly unknown[] | null = null
 let lastFleetRef: unknown = null
+let lastJournalRef: readonly unknown[] | null = null
 
 function collectApprovalRefs(): Map<string, readonly unknown[]> {
   const refs = new Map<string, readonly unknown[]>()
@@ -51,20 +53,26 @@ function recompute(force = false): void {
   const approvalRefs = collectApprovalRefs()
   const gates = usePendingGatesStore.getState().gates
   const fleet = fleetStreamStore.getSnapshot()
+  const approvalJournal = useApprovalJournalStore.getState().entries
 
   const changed =
-    force || approvalRefsChanged(approvalRefs) || gates !== lastGatesRef || fleet !== lastFleetRef
+    force ||
+    approvalRefsChanged(approvalRefs) ||
+    gates !== lastGatesRef ||
+    fleet !== lastFleetRef ||
+    approvalJournal !== lastJournalRef
   if (!changed) return
 
   lastApprovalRefs = approvalRefs
   lastGatesRef = gates
   lastFleetRef = fleet
+  lastJournalRef = approvalJournal
 
   const chatSessions: Record<string, { pendingApprovals: readonly never[] }> = {}
   for (const [id, approvals] of approvalRefs) {
     chatSessions[id] = { pendingApprovals: approvals as readonly never[] }
   }
-  const next = projectAttention({ chatSessions, gates, fleet })
+  const next = projectAttention({ chatSessions, gates, fleet, approvalJournal })
   snapshot = next.length === 0 && snapshot.length === 0 ? snapshot : next
   for (const fn of listeners) fn()
 }
@@ -73,6 +81,7 @@ function attach(): void {
   unsubscribers = [
     useChatStore.subscribe(() => recompute()),
     usePendingGatesStore.subscribe(() => recompute()),
+    useApprovalJournalStore.subscribe(() => recompute()),
     fleetStreamStore.subscribe(() => recompute()),
   ]
   recompute(true)
@@ -111,4 +120,5 @@ export function resetAttentionForTests(): void {
   lastApprovalRefs = new Map()
   lastGatesRef = null
   lastFleetRef = null
+  lastJournalRef = null
 }

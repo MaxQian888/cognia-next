@@ -114,20 +114,27 @@ export function applySubagentModelOverrides(
 /** Parse discovered files into `{ id, name, description, def }` rows. */
 export function buildAgents(files: MarkdownAgentFile[]): AgentSummary[] {
   const { agents } = buildMarkdownAgents(files)
-  return Object.entries(agents).map(([name, def]) => ({
-    id: name,
-    name,
-    description: def.description ?? "",
-    def: {
-      id: name,
-      name,
-      description: def.description ?? "",
-      prompt: def.prompt ?? "",
-      ...(def.tools ? { tools: def.tools } : {}),
-      ...(def.model ? { model: def.model } : {}),
-      ...(def.provider ? { provider: def.provider } : {}),
-    },
-  }))
+  return (
+    Object.entries(agents)
+      // `disabled: true` (alias `disable`) frontmatter turns the agent fully off
+      // — same semantics as the desktop resolver. `hidden` only affects pickers.
+      .filter(([, def]) => !def.disabled)
+      .map(([name, def]) => ({
+        id: name,
+        name,
+        description: def.description ?? "",
+        def: {
+          id: name,
+          name,
+          description: def.description ?? "",
+          prompt: def.prompt ?? "",
+          ...(def.tools ? { tools: def.tools } : {}),
+          ...(def.model ? { model: def.model } : {}),
+          ...(def.provider ? { provider: def.provider } : {}),
+          ...(def.hidden ? { hidden: true } : {}),
+        },
+      }))
+  )
 }
 
 /** A draft's `providerHint` is the upstream tool's family (`anthropic` for

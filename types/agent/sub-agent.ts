@@ -547,6 +547,13 @@ export interface SubAgentTemplate {
   icon?: string
   /** Whether this is a built-in template */
   isBuiltIn?: boolean
+  /**
+   * Hide from UI pickers / @-mention autocomplete while staying dispatchable
+   * (OpenCode `hidden` semantics).
+   */
+  hidden?: boolean
+  /** Fully off: excluded from dispatch, discovery, and every picker. */
+  disabled?: boolean
   /** Creation timestamp */
   createdAt?: Date
 }

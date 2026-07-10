@@ -11,6 +11,8 @@ import type {
 import type { ArtifactSelectionRef } from "@/types/artifact/artifact"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
+import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-routes"
+import { useApprovalJournalStore, toPersistedApproval } from "@/stores/agent/approval-journal-store"
 import { IDLE_TIMING, nextRunTiming, type RunTiming } from "@/lib/claude/run-status"
 import { nextToolTimestamps } from "@/lib/claude/run-record"
 import { useSyncExternalStore } from "react"
@@ -200,6 +202,32 @@ const EMPTY_PROJECTION = projectSlice(makeSessionSlice())
 
 /** Read the slice for `id`, seeding from the active projection when the id is
  * the active session but its slice has not been materialised yet. */
+/**
+ * Resolve the UI bucket a permission ask belongs to. An ask arrives on the
+ * session that produced it: a team sub-session id (`…::char::…`), a dispatched
+ * subagent's ephemeral id, or a plain chat session. Team + subagent asks
+ * re-bucket under the session the user is looking at (parent team / parent
+ * chat); everything else buckets under its own id.
+ */
+/** Write-through to the durable approval journal — best-effort, never throws. */
+function writeApprovalJournal(
+  fn: (journal: ReturnType<typeof useApprovalJournalStore.getState>) => void
+): void {
+  try {
+    fn(useApprovalJournalStore.getState())
+  } catch {
+    // The durable mirror is best-effort; the in-memory store is authoritative.
+  }
+}
+
+function resolveApprovalBucket(sessionId: string): string {
+  const team = decodeSubSession(sessionId)?.teamSessionId
+  if (team) return team
+  const route = getSubagentApprovalRoute(sessionId)
+  if (route) return route.parentSessionId
+  return sessionId
+}
+
 function sliceForId(state: ChatState, id: string): SessionChatSlice {
   const existing = state.sessions[id]
   if (existing) return existing
@@ -640,12 +668,17 @@ export const useChatStore = create<ChatState>((set) => ({
   pushApproval: (approval) =>
     set((s) => {
       // Team tool approvals arrive tagged with the *sub-session* id
-      // (`…::char::…`). Bucket them under the parent team session so the
-      // active-session projection and per-pane inline gates can see them;
-      // `approval.sessionId` keeps the sub-session id for approveTool routing.
-      const bucketId = decodeSubSession(approval.sessionId)?.teamSessionId ?? approval.sessionId
+      // (`…::char::…`); dispatched-subagent approvals arrive on an ephemeral
+      // session id. Bucket both under the session the user is looking at (the
+      // parent team session / parent chat) so the active-session projection and
+      // per-pane inline gates can see them; `approval.sessionId` keeps the
+      // sub-session/ephemeral id for approveTool routing.
+      const bucketId = resolveApprovalBucket(approval.sessionId)
       const slice = sliceForId(s, bucketId)
       const stamped: PendingApproval = { requestedAt: Date.now(), ...approval }
+      // Durable mirror: persist the ask so a crash/restart surfaces it as
+      // interrupted instead of dropping it silently.
+      writeApprovalJournal((j) => j.record(toPersistedApproval(stamped, bucketId)))
       return patchSliceState(s, bucketId, {
         pendingApprovals: [...slice.pendingApprovals, stamped],
         ...statusPatch(s, bucketId, "awaiting_approval"),
@@ -654,7 +687,7 @@ export const useChatStore = create<ChatState>((set) => ({
   clearApproval: (requestId, sessionId) =>
     set((s) => {
       const targetId =
-        sessionId ??
+        (sessionId ? resolveApprovalBucket(sessionId) : undefined) ??
         Object.keys(s.sessions).find((k) =>
           s.sessions[k].pendingApprovals.some((a) => a.requestId === requestId)
         ) ??
@@ -665,6 +698,7 @@ export const useChatStore = create<ChatState>((set) => ({
       const slice = sliceForId(s, targetId)
       const next = slice.pendingApprovals.filter((a) => a.requestId !== requestId)
       if (next.length === slice.pendingApprovals.length) return s
+      writeApprovalJournal((j) => j.settle(requestId))
       const nextStatus: ChatStatus =
         next.length === 0 && slice.status === "awaiting_approval" ? "streaming" : slice.status
       return patchSliceState(s, targetId, {
@@ -675,17 +709,28 @@ export const useChatStore = create<ChatState>((set) => ({
   markApprovalInterrupted: (requestId, sessionId, reason) =>
     set((s) => {
       // Same routing rules as pushApproval/clearApproval: team sub-session ids
-      // bucket under the parent; omitted sessionId is located by scan.
+      // and subagent ephemeral ids bucket under the parent. When the executor
+      // already cleared the route (its `finally` may run before the drain's
+      // `permission_interrupted`), the requestId scan below still finds the
+      // parent-bucketed entry — so a cleared route never strands the marker.
       const bucketId = sessionId
-        ? (decodeSubSession(sessionId)?.teamSessionId ?? sessionId)
+        ? resolveApprovalBucket(sessionId)
         : (Object.keys(s.sessions).find((k) =>
             s.sessions[k].pendingApprovals.some((a) => a.requestId === requestId)
           ) ??
           (s.pendingApprovals.some((a) => a.requestId === requestId)
             ? s.activeSessionId
             : undefined))
-      if (bucketId == null) return s
-      const slice = sliceForId(s, bucketId)
+      // If the route resolved to a bucket with no matching entry (route cleared
+      // + entry lives elsewhere), fall back to the requestId scan.
+      const resolvedBucket =
+        bucketId && sliceForId(s, bucketId).pendingApprovals.some((a) => a.requestId === requestId)
+          ? bucketId
+          : (Object.keys(s.sessions).find((k) =>
+              s.sessions[k].pendingApprovals.some((a) => a.requestId === requestId)
+            ) ?? bucketId)
+      if (resolvedBucket == null) return s
+      const slice = sliceForId(s, resolvedBucket)
       let changed = false
       const next = slice.pendingApprovals.map((a) => {
         if (a.requestId !== requestId || a.status === "interrupted") return a
@@ -693,12 +738,13 @@ export const useChatStore = create<ChatState>((set) => ({
         return { ...a, status: "interrupted" as const, interruptReason: reason ?? "interrupted" }
       })
       if (!changed) return s
+      writeApprovalJournal((j) => j.interrupt(requestId, reason))
       const liveRemain = next.some((a) => a.status !== "interrupted")
       const nextStatus: ChatStatus =
         !liveRemain && slice.status === "awaiting_approval" ? "streaming" : slice.status
-      return patchSliceState(s, bucketId, {
+      return patchSliceState(s, resolvedBucket, {
         pendingApprovals: next,
-        ...statusPatch(s, bucketId, nextStatus),
+        ...statusPatch(s, resolvedBucket, nextStatus),
       })
     }),
   setPermissionMode: (mode) => set({ permissionMode: mode }),

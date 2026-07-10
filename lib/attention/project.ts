@@ -6,6 +6,7 @@
 
 import type { PendingApproval } from "@/lib/claude/types"
 import type { PendingGate } from "@/stores/agent/pending-gates-store"
+import type { PersistedApproval } from "@/stores/agent/approval-journal-store"
 import type { FleetSnapshot } from "@/lib/fleet/types"
 import type { AttentionItem, AttentionKind } from "./types"
 
@@ -14,6 +15,20 @@ export interface AttentionInputs {
   chatSessions: Record<string, { pendingApprovals: readonly PendingApproval[] }>
   gates: readonly PendingGate[]
   fleet: FleetSnapshot
+  /**
+   * Durable approval-journal entries. Entries whose requestId is NOT present in
+   * any live chat slice are surfaced as stale info items (e.g. interrupted
+   * asks restored after a relaunch). Optional — omitted in older callers.
+   */
+  approvalJournal?: readonly PersistedApproval[]
+}
+
+/** Label for a chat approval — subagent asks name the asking subagent. */
+function approvalTitle(approval: PendingApproval): string {
+  const tool = approval.displayName ?? approval.toolName
+  return approval.origin === "subagent" && approval.subagentId
+    ? `${approval.subagentId} · ${tool}`
+    : tool
 }
 
 /** Ascending priority rank — live permission-blocking items first, stale last. */
@@ -27,13 +42,15 @@ const KIND_RANK: Record<AttentionKind, number> = {
 export function projectAttention(inputs: AttentionInputs): AttentionItem[] {
   const items: AttentionItem[] = []
 
+  const liveRequestIds = new Set<string>()
   for (const [bucketId, slice] of Object.entries(inputs.chatSessions)) {
     for (const approval of slice.pendingApprovals) {
+      liveRequestIds.add(approval.requestId)
       items.push({
         id: `chat:${approval.requestId}`,
         source: "chat",
         kind: "tool-approval",
-        title: approval.displayName ?? approval.toolName,
+        title: approvalTitle(approval),
         detail: approval.title,
         openedAt: approval.requestedAt ?? 0,
         stale: approval.status === "interrupted",
@@ -41,6 +58,25 @@ export function projectAttention(inputs: AttentionInputs): AttentionItem[] {
         approval,
       })
     }
+  }
+
+  // Journal-only entries (not in any live slice) — e.g. asks restored as
+  // interrupted after a relaunch. Surfaced as stale info items so the user
+  // sees "N approvals were interrupted" rather than silent loss.
+  for (const entry of inputs.approvalJournal ?? []) {
+    if (liveRequestIds.has(entry.requestId) || entry.status === "settled") continue
+    items.push({
+      id: `chat:${entry.requestId}`,
+      source: "chat",
+      kind: "tool-approval",
+      title:
+        entry.origin === "subagent" && entry.subagentId
+          ? `${entry.subagentId} · ${entry.toolName}`
+          : entry.toolName,
+      openedAt: entry.requestedAt,
+      stale: true,
+      sessionId: entry.bucketSessionId,
+    })
   }
 
   for (const gate of inputs.gates) {

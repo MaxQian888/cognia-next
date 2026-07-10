@@ -21,6 +21,9 @@ interface Props {
   /** Dismiss an `interrupted` approval (the waiter is gone — there is nothing
    * to answer). Required to clear the honest-notice card. */
   onDismiss?: () => void
+  /** Cancel the whole subagent run behind a subagent-origin approval (deny-one
+   * denies a single tool call; this aborts the run). Optional. */
+  onCancelRun?: (runId: string) => void
 }
 
 /** Bare tool name with the cognia-tools MCP prefix stripped. */
@@ -96,10 +99,11 @@ function ApprovalInputPreview({ approval }: { approval: PendingApproval }) {
   return <CodeBlock code={JSON.stringify(approval.input, null, 2)} language="json" />
 }
 
-export function ToolApprovalDialog({ approval, onRespond, onDismiss }: Props) {
+export function ToolApprovalDialog({ approval, onRespond, onDismiss, onCancelRun }: Props) {
   const t = useTranslations("chat.toolApproval")
   const open = !!approval
   const interrupted = approval?.status === "interrupted"
+  const isSubagent = approval?.origin === "subagent"
   return (
     <Dialog open={open}>
       <DialogContent
@@ -113,6 +117,14 @@ export function ToolApprovalDialog({ approval, onRespond, onDismiss }: Props) {
             <ShieldAlertIcon className="size-4 text-amber-500" />
             {approval?.title ?? t("titleFallback", { tool: approval?.toolName ?? "" })}
           </DialogTitle>
+          {isSubagent && approval && (
+            <DialogDescription data-testid="approval-subagent-origin">
+              {t("askedBySubagent", {
+                subagent: approval.subagentId ?? "",
+                runId: (approval.subagentRunId ?? "").slice(0, 8),
+              })}
+            </DialogDescription>
+          )}
           {approval?.description && <DialogDescription>{approval.description}</DialogDescription>}
         </DialogHeader>
 
@@ -159,6 +171,17 @@ export function ToolApprovalDialog({ approval, onRespond, onDismiss }: Props) {
             </Button>
           ) : (
             <>
+              {isSubagent && approval?.subagentRunId && onCancelRun && (
+                <Button
+                  variant="ghost"
+                  className="mr-auto text-destructive"
+                  onClick={() => onCancelRun(approval.subagentRunId!)}
+                >
+                  {t("cancelRun")}
+                </Button>
+              )}
+              {/* deny-one-without-killing: denies this tool call; the subagent
+                  run continues (its idle watchdog re-arms after the ask). */}
               <Button variant="ghost" onClick={() => void onRespond("deny")}>
                 {t("deny")}
               </Button>

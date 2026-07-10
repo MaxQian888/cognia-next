@@ -118,6 +118,13 @@ export function parseMarkdownAgent(
     def.maxDepth = Number(maxDepth)
   }
 
+  // Visibility flags (OpenCode parity): `hidden` keeps the agent dispatchable
+  // but out of pickers; `disabled` (alias `disable`) turns it fully off.
+  const hidden = data.hidden
+  if (hidden === true || hidden === "true") def.hidden = true
+  const disabled = data.disabled ?? data.disable
+  if (disabled === true || disabled === "true") def.disabled = true
+
   return { id, def }
 }
 
