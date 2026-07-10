@@ -159,7 +159,7 @@ import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createTrayAPI } from "@/lib/plugin/api/tray-api"
 import { createQuickActionsAPI } from "@/lib/plugin/api/quick-actions-api"
 import { prefixPluginKind } from "../bridge/kind-prefix"
-import { dispatchPluginTrigger } from "../bridge/trigger-bridge"
+import { dispatchPluginTrigger } from "../bridge/plugin-trigger-dispatch"
 import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
 import {
   runPluginAgent,

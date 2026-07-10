@@ -1,5 +1,9 @@
 /**
- * Plugin trigger bridge — Phase 2 of ADR-0016 / ADR-0006.
+ * Plugin trigger dispatch — Phase 2 of ADR-0016 / ADR-0006.
+ *
+ * (Renamed from `trigger-bridge.ts` in W4.4: two same-named `trigger-bridge`
+ * modules — this one and `lib/workflow/runtime/trigger-bridge.ts` — invited
+ * wrong-import bugs.)
  *
  * Replaces the Phase-1 stub at `lib/plugin/core/context.ts:1966` that only
  * logged. Now plugin-emitted trigger events resolve to the prefixed kind,
@@ -21,7 +25,11 @@
  */
 
 import { recordSilentFailure } from "../contracts/diagnostics-store"
-import { getPluginTrigger, isTriggerMuted } from "@/lib/workflow/triggers/registry"
+import {
+  getPluginTrigger,
+  isTriggerMuted,
+  listPluginTriggers,
+} from "@/lib/workflow/triggers/registry"
 import { prefixPluginKind } from "./kind-prefix"
 
 export interface DispatchPluginTriggerInput {
@@ -120,16 +128,15 @@ export async function dispatchPluginTrigger(
 }
 
 /**
- * Walk the registry to find any version of `kind`. The plugin trigger
- * registry currently keys by `${kind}@${typeVersion}` so we iterate; the
- * registry isn't expected to grow beyond a few dozen entries per app
- * session, so a linear scan is fine.
+ * Find the highest-versioned registration of `kind` by scanning the actual
+ * registrations (W4.4). The previous implementation brute-forced typeVersion
+ * 1..50, so a trigger registered above 50 was silently unfindable.
  */
 function findAnyTriggerVersion(prefixedKind: string): ReturnType<typeof getPluginTrigger> {
-  // Common case: workflow uses typeVersion === 1.
-  for (let v = 1; v <= 50; v++) {
-    const reg = getPluginTrigger(prefixedKind, v)
-    if (reg) return reg
+  let best: ReturnType<typeof getPluginTrigger>
+  for (const reg of listPluginTriggers()) {
+    if (reg.kind !== prefixedKind) continue
+    if (!best || reg.typeVersion > best.typeVersion) best = reg
   }
-  return undefined
+  return best
 }

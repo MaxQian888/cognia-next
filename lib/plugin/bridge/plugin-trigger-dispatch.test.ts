@@ -1,4 +1,4 @@
-import { dispatchPluginTrigger } from "./trigger-bridge"
+import { dispatchPluginTrigger } from "./plugin-trigger-dispatch"
 import type { TriggerRegistration } from "@/lib/workflow/triggers/registry"
 
 jest.mock("@/lib/tauri", () => ({
@@ -10,6 +10,7 @@ jest.mock("../contracts/diagnostics-store", () => ({
 jest.mock("@/lib/workflow/triggers/registry", () => ({
   getPluginTrigger: jest.fn(),
   isTriggerMuted: jest.fn(() => false),
+  listPluginTriggers: jest.fn(() => []),
 }))
 jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
   dispatchTrigger: jest.fn().mockResolvedValue(undefined),
@@ -21,6 +22,7 @@ const diag = require("../contracts/diagnostics-store") as { recordSilentFailure:
 const registry = require("@/lib/workflow/triggers/registry") as {
   getPluginTrigger: jest.Mock
   isTriggerMuted: jest.Mock
+  listPluginTriggers: jest.Mock
 }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const orchestrator = require("@/lib/workflow/runtime/trigger-bridge") as {
@@ -44,15 +46,14 @@ const FAKE_REG: TriggerRegistration = {
 beforeEach(() => {
   diag.recordSilentFailure.mockReset()
   registry.getPluginTrigger.mockReset()
+  registry.listPluginTriggers.mockReset().mockReturnValue([])
   registry.isTriggerMuted.mockReset().mockReturnValue(false)
   orchestrator.dispatchTrigger.mockReset().mockResolvedValue(undefined)
 })
 
 describe("dispatchPluginTrigger", () => {
   it("prefixes the kind, looks up the registration, and dispatches", async () => {
-    registry.getPluginTrigger.mockImplementation((kind: string, version: number) =>
-      kind === "trigger.foo.bar" && version === 1 ? FAKE_REG : undefined
-    )
+    registry.listPluginTriggers.mockReturnValue([FAKE_REG])
     const result = await dispatchPluginTrigger({
       pluginId: "foo",
       workflowId: "wf-1",
@@ -111,7 +112,7 @@ describe("dispatchPluginTrigger", () => {
   })
 
   it("routes orchestrator failures through recordSilentFailure", async () => {
-    registry.getPluginTrigger.mockReturnValue(FAKE_REG)
+    registry.listPluginTriggers.mockReturnValue([FAKE_REG])
     orchestrator.dispatchTrigger.mockRejectedValueOnce(new Error("orchestrator boom"))
     const result = await dispatchPluginTrigger({
       pluginId: "foo",
@@ -129,5 +130,23 @@ describe("dispatchPluginTrigger", () => {
       }),
       expect.any(Error)
     )
+  })
+})
+
+// ── W4.4: version lookup scans real registrations (no 1..50 cap) ─────────────
+describe("findAnyTriggerVersion via registry scan (W4.4)", () => {
+  it("finds a trigger registered with typeVersion above 50 and picks the highest", async () => {
+    registry.listPluginTriggers.mockReturnValue([
+      { ...FAKE_REG, typeVersion: 99 },
+      { ...FAKE_REG, typeVersion: 51 },
+    ])
+    const result = await dispatchPluginTrigger({
+      pluginId: "foo",
+      workflowId: "wf-1",
+      kind: "trigger.bar",
+      payload: {},
+    })
+    expect(result.ok).toBe(true)
+    expect(orchestrator.dispatchTrigger).toHaveBeenCalledTimes(1)
   })
 })

@@ -7,7 +7,7 @@
  *   2. Per-(plugin, kind, workflow) mute flags, including localStorage
  *      hydration / persistence and listener notification.
  *
- * The bridge layer (`lib/plugin/bridge/trigger-bridge.ts`) covers integration
+ * The bridge layer (`lib/plugin/bridge/plugin-trigger-dispatch.ts`) covers integration
  * paths; this file is intentionally narrow so a behaviour regression in the
  * registry itself surfaces here, not in the bridge spec.
  */
