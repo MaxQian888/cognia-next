@@ -53,6 +53,9 @@ import { clearPluginSecrets } from "@/lib/plugin/api/secrets-api"
 
 /** How often the idle sweep runs (only active when a plugin opts into idleSuspend). */
 const IDLE_SWEEP_INTERVAL_MS = 5 * 60 * 1000
+
+/** Upper bound for a plugin's `activate()` (W6.1). */
+const ACTIVATE_TIMEOUT_MS = 30_000
 import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
@@ -95,6 +98,7 @@ import {
   type CompatibilityDiagnostic,
   type CompatibilityRuntime,
 } from "@/lib/plugin/core/compatibility"
+import { withTimeout } from "@cognia/primitives"
 import { loggers } from "@/lib/plugin/core/logger"
 import { createPluginVerificationSnapshot } from "@/lib/plugin/core/verification"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
@@ -445,6 +449,18 @@ export function __resetPluginManagerForTesting(): void {
   if (process.env.NODE_ENV !== "test") {
     throw new Error("__resetPluginManagerForTesting is only callable in NODE_ENV=test")
   }
+  pluginManagerInstance?.stopIdleSweep()
+  pluginManagerInstance = null
+}
+
+/**
+ * Tear down the module-level manager (W6.5): stops the periodic idle sweep
+ * (previously never wired into any dispose path, leaking the interval across
+ * app teardown / HMR) and drops the instance so the next
+ * `initializePluginManager()` starts fresh.
+ */
+export function disposePluginManager(): void {
+  pluginManagerInstance?.stopIdleSweep()
   pluginManagerInstance = null
 }
 
@@ -489,6 +505,31 @@ export class PluginManager {
    * "enabled"` early-return races the late `store.enablePlugin` flip.
    */
   private enableInFlight: Map<string, Promise<void>> = new Map()
+
+  /**
+   * Per-plugin lifecycle serialization (W6.4). Enable/disable/unload/
+   * uninstall for the SAME plugin chain onto one queue so transitions can't
+   * interleave (e.g. an enable racing a disable and re-registering half the
+   * contributions the disable just tore down). Different plugins stay fully
+   * concurrent.
+   */
+  private lifecycleQueues: Map<string, Promise<unknown>> = new Map()
+
+  private withLifecycleLock<T>(pluginId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.lifecycleQueues.get(pluginId) ?? Promise.resolve()
+    const run = prev.then(fn, fn)
+    const tail = run.then(
+      () => undefined,
+      () => undefined
+    )
+    this.lifecycleQueues.set(pluginId, tail)
+    void tail.then(() => {
+      if (this.lifecycleQueues.get(pluginId) === tail) {
+        this.lifecycleQueues.delete(pluginId)
+      }
+    })
+    return run
+  }
   private warnedActivationEvents: Set<string> = new Set()
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null
   private initialized = false
@@ -1921,10 +1962,17 @@ export class PluginManager {
       const context = createFullPluginContext(plugin, this, { enableDebug })
       this.contexts.set(pluginId, context)
 
-      // Activate the plugin
+      // Activate the plugin. Bounded (W6.1): a hanging activate() would
+      // otherwise wedge this plugin's lifecycle queue and any dependent
+      // lazy activation forever.
       let hooks: PluginHooks | undefined
       if (typeof definition.activate === "function") {
-        hooks = (await definition.activate(context)) || undefined
+        hooks =
+          (await withTimeout(
+            Promise.resolve(definition.activate(context)),
+            ACTIVATE_TIMEOUT_MS,
+            `plugin.activate:${pluginId}`
+          )) || undefined
       }
 
       // Register hooks
@@ -1999,7 +2047,8 @@ export class PluginManager {
     // Dedupe concurrent enables of the same plugin onto one in-flight promise.
     const inflight = this.enableInFlight.get(pluginId)
     if (inflight) return inflight
-    const run = this.enablePluginInner(pluginId, reason)
+    // W6.4: the enable also serializes against disable/unload/uninstall.
+    const run = this.withLifecycleLock(pluginId, () => this.enablePluginInner(pluginId, reason))
     this.enableInFlight.set(pluginId, run)
     try {
       await run
@@ -2216,6 +2265,10 @@ export class PluginManager {
   }
 
   async disablePlugin(pluginId: string, reason: string = "manual"): Promise<void> {
+    return this.withLifecycleLock(pluginId, () => this.disablePluginInner(pluginId, reason))
+  }
+
+  private async disablePluginInner(pluginId: string, reason: string = "manual"): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -2296,6 +2349,10 @@ export class PluginManager {
   }
 
   async unloadPlugin(pluginId: string): Promise<void> {
+    return this.withLifecycleLock(pluginId, () => this.unloadPluginInner(pluginId))
+  }
+
+  private async unloadPluginInner(pluginId: string): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -2314,7 +2371,8 @@ export class PluginManager {
 
       // Disable first if enabled
       if (plugin.status === "enabled") {
-        await this.disablePlugin(pluginId, "unload")
+        // Inner variant — we already hold this plugin's lifecycle lock (W6.4).
+        await this.disablePluginInner(pluginId, "unload")
       } else {
         await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
         await this.unregisterPluginContributions(pluginId)
@@ -2377,6 +2435,13 @@ export class PluginManager {
   }
 
   async uninstallPlugin(pluginId: string, options?: { purgeData?: boolean }): Promise<void> {
+    return this.withLifecycleLock(pluginId, () => this.uninstallPluginInner(pluginId, options))
+  }
+
+  private async uninstallPluginInner(
+    pluginId: string,
+    options?: { purgeData?: boolean }
+  ): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -2395,7 +2460,8 @@ export class PluginManager {
 
       // Unload first
       if (["loaded", "enabled", "disabled"].includes(plugin.status)) {
-        await this.unloadPlugin(pluginId)
+        // Inner variant — we already hold this plugin's lifecycle lock (W6.4).
+        await this.unloadPluginInner(pluginId)
       }
 
       // Drop plugin-provided i18n bundles in case disable didn't run (e.g.,
@@ -3209,7 +3275,21 @@ export class PluginManager {
 
     const definition = this.loader.getDefinition(pluginId)
     if (definition?.deactivate) {
-      await Promise.resolve(definition.deactivate())
+      // Swallow-and-record (W6.2): a throwing deactivate() must not abort the
+      // teardown below, or the plugin leaks permissions/IPC/WASM grants.
+      try {
+        await Promise.resolve(definition.deactivate())
+      } catch (error) {
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "manager.deactivatePluginRuntime.deactivate",
+            message: "Plugin deactivate() threw; continuing teardown.",
+            expected: false,
+          },
+          error
+        )
+      }
     }
 
     if (plugin && (plugin.manifest.type === "python" || plugin.manifest.type === "hybrid")) {

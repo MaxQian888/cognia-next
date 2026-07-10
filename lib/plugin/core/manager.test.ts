@@ -2104,7 +2104,7 @@ describe("PluginManager", () => {
       expect(getMessageBus().getSubscriptionsBySource("msg-leak")).toHaveLength(0)
     })
 
-    it("records a failure snapshot and preserves last known good verification when disable fails", async () => {
+    it("continues teardown when deactivate() throws (swallow-and-record, W6.2)", async () => {
       const manifest = createManifest("disable-failure")
       const store = {
         plugins: {
@@ -2161,18 +2161,20 @@ describe("PluginManager", () => {
         definition: { deactivate },
       })
 
-      await expect(manager.disablePlugin("disable-failure")).rejects.toThrow(/deactivate failed/i)
+      // W6.2: a throwing deactivate() is swallowed-and-recorded — the
+      // teardown continues and the disable SUCCEEDS, so the plugin can't
+      // leak permissions/IPC/WASM grants by throwing on the way out.
+      await expect(manager.disablePlugin("disable-failure")).resolves.toBeUndefined()
 
-      expect(store.setPluginError).toHaveBeenCalledWith("disable-failure", "deactivate failed")
-      expect(store.setPluginVerificationSnapshot).toHaveBeenCalledWith(
+      expect(deactivate).toHaveBeenCalledTimes(1)
+      expect(store.disablePlugin).toHaveBeenCalledWith("disable-failure", { viaManager: false })
+      // The failure is not surfaced as a plugin ERROR state — the success
+      // path clears the error field (null); it lands in the silent-failure
+      // diagnostics instead.
+      expect(store.setPluginError).toHaveBeenCalledWith("disable-failure", null)
+      expect(store.setPluginError).not.toHaveBeenCalledWith(
         "disable-failure",
-        expect.objectContaining({
-          status: "error",
-          verificationStage: "cleanup",
-          lastVerifiedAction: "disable",
-          lastFailureAt: expect.any(String),
-          lastSuccessfulAt: "2026-03-16T00:00:00.000Z",
-        })
+        expect.stringMatching(/deactivate failed/)
       )
     })
 
@@ -3348,6 +3350,9 @@ describe("PluginManager", () => {
 
     it("loadPythonPlugin registers declared @hook handlers as call_hook RPCs", async () => {
       const plugin = createTypedPlugin("py-plugin", "python")
+      // onMessageSend is a chat-interception hook — the W3.2 gate requires
+      // the permission in the manifest.
+      plugin.manifest.permissions = [...(plugin.manifest.permissions ?? []), "hooks:chat-intercept"]
       const store = createLoadStore(plugin)
       mockGetState.mockReturnValue(store)
       mockInvoke.mockImplementation(async (cmd: string) => {
@@ -4139,5 +4144,63 @@ describe("chat-intercept hook permission gate", () => {
   it("leaves non-intercept hooks ungated", () => {
     seed([])
     expect(() => validate({ onLoad: jest.fn(), onEnable: jest.fn() })).not.toThrow()
+  })
+})
+
+// ── W6.4: per-plugin lifecycle serialization ─────────────────────────────────
+describe("lifecycle serialization (W6.4)", () => {
+  type WithLock = {
+    withLifecycleLock: <T>(pluginId: string, fn: () => Promise<T>) => Promise<T>
+  }
+  const lockOf = (m: PluginManager) =>
+    (m as unknown as WithLock).withLifecycleLock.bind(m as unknown as WithLock)
+
+  it("serializes overlapping transitions for the same plugin", async () => {
+    const withLock = lockOf(new PluginManager({ pluginDirectory: "/plugins" }))
+    const order: string[] = []
+    const a = withLock("p", async () => {
+      order.push("a-start")
+      // Microtask deferral (not a real timer): keeps the interleaving window
+      // open without letting unrelated detached rejections land in this test.
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+      order.push("a-end")
+    })
+    const b = withLock("p", async () => {
+      order.push("b-start")
+      order.push("b-end")
+    })
+    await Promise.all([a, b])
+    expect(order).toEqual(["a-start", "a-end", "b-start", "b-end"])
+  })
+
+  it("keeps different plugins concurrent", async () => {
+    const withLock = lockOf(new PluginManager({ pluginDirectory: "/plugins" }))
+    const order: string[] = []
+    let releaseA!: () => void
+    const gate = new Promise<void>((r) => {
+      releaseA = r
+    })
+    const a = withLock("p1", async () => {
+      order.push("p1-start")
+      await gate
+      order.push("p1-end")
+    })
+    const b = withLock("p2", async () => {
+      order.push("p2-done")
+    })
+    await b
+    expect(order).toEqual(["p1-start", "p2-done"])
+    releaseA()
+    await a
+  })
+
+  it("a rejected transition does not wedge the queue", async () => {
+    const withLock = lockOf(new PluginManager({ pluginDirectory: "/plugins" }))
+    await expect(
+      withLock("p", async () => {
+        throw new Error("boom")
+      })
+    ).rejects.toThrow("boom")
+    await expect(withLock("p", async () => "next")).resolves.toBe("next")
   })
 })
