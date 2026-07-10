@@ -1027,7 +1027,14 @@ describe("createPluginContext", () => {
       mockIsTauri.mockReturnValue(true)
       const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
       mockInvoke.mockResolvedValue(okEnvelope({ ok: true, status: 200, data: {} }))
-      const context = createPluginContext(createMockPlugin(), mockManager)
+      // Declare an allowlist covering the target host — undeclared egress is
+      // now denied fail-closed before the consent path could even fire.
+      const context = createPluginContext(
+        createMockPlugin({
+          manifest: { ...mockManifest, networkAccess: { allowedDomains: ["example.com"] } },
+        }),
+        mockManager
+      )
 
       await context.network.get("https://api.example.com/data")
 
@@ -1417,8 +1424,16 @@ describe("agent imperative API", () => {
       expect(fetchMock).not.toHaveBeenCalled()
     })
 
-    it("leaves egress unrestricted when no allowlist is declared (balanced)", async () => {
+    it("denies egress when no allowlist is declared (balanced, fail-closed)", async () => {
       const ctx = createPluginContext(pluginWithEgress(undefined), mockManager)
+      await expect(ctx.network.get("https://anywhere.dev")).rejects.toThrow(
+        /not in plugin test-plugin's allowedDomains/
+      )
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it("keeps the explicit '*' wildcard opt-in unrestricted", async () => {
+      const ctx = createPluginContext(pluginWithEgress(["*"]), mockManager)
       await expect(ctx.network.get("https://anywhere.dev")).resolves.toMatchObject({
         ok: true,
       })

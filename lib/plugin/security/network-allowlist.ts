@@ -10,8 +10,9 @@
  *
  * Keep the matching semantics in lockstep with the Rust implementation:
  *   - host is trimmed, trailing dots stripped, lowercased; empty host → deny
- *   - a plugin with no `allowedDomains` declaration is unrestricted (back-compat)
- *     UNLESS the host posture is "strict", which denies the undeclared case
+ *   - a plugin with no `allowedDomains` declaration is DENIED (fail-closed)
+ *     under every posture — a `network:fetch` grant alone no longer implies
+ *     unrestricted egress; `["*"]` is the explicit opt-in
  *   - `["*"]` allows any host
  *   - `["none"]`, `[]`, or only-blank entries deny all
  *   - otherwise the host must equal, or be a subdomain of, an entry
@@ -27,12 +28,7 @@ export interface NetworkAllowlist {
 }
 
 export type EgressReason =
-  | "no-declaration"
-  | "strict-no-declaration"
-  | "wildcard"
-  | "host-match"
-  | "host-denied"
-  | "bad-url"
+  "no-declaration" | "strict-no-declaration" | "wildcard" | "host-match" | "host-denied" | "bad-url"
 
 export interface EgressDecision {
   allowed: boolean
@@ -76,11 +72,12 @@ export function evaluateEgress(
 
   const domains = networkAccess?.allowedDomains
   if (!domains) {
-    // No declaration: balanced keeps the historical unrestricted behaviour
-    // (the network:fetch grant + consent is the boundary); strict denies.
+    // No declaration: deny under every posture (fail-closed) — matches the
+    // Rust host gate and the webview CSP. `["*"]` is the explicit opt-in to
+    // unrestricted egress.
     return posture === "strict"
       ? { allowed: false, reason: "strict-no-declaration" }
-      : { allowed: true, reason: "no-declaration" }
+      : { allowed: false, reason: "no-declaration" }
   }
 
   if (domains.some((entry) => entry.trim() === "*")) {

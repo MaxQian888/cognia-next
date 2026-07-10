@@ -62,13 +62,13 @@ describe("evaluateEgress", () => {
   })
 
   describe("no declaration", () => {
-    it("is unrestricted under balanced posture", () => {
+    it("is denied under balanced posture (fail-closed)", () => {
       expect(evaluateEgress("https://x.com", undefined, "balanced")).toEqual({
-        allowed: true,
+        allowed: false,
         reason: "no-declaration",
       })
       expect(evaluateEgress("https://x.com", {}, "balanced")).toEqual({
-        allowed: true,
+        allowed: false,
         reason: "no-declaration",
       })
     })
@@ -80,8 +80,8 @@ describe("evaluateEgress", () => {
       })
     })
 
-    it("defaults to balanced when posture omitted", () => {
-      expect(evaluateEgress("https://x.com", undefined).allowed).toBe(true)
+    it("is denied when posture omitted (defaults to balanced, fail-closed)", () => {
+      expect(evaluateEgress("https://x.com", undefined).allowed).toBe(false)
     })
   })
 
@@ -108,6 +108,7 @@ describe("evaluateEgress", () => {
 
   it("denies all when the allowlist is empty or ['none']", () => {
     expect(evaluateEgress("https://x.com", { allowedDomains: [] }).allowed).toBe(false)
+    expect(evaluateEgress("https://x.com", { allowedDomains: [] }, "balanced").allowed).toBe(false)
     expect(evaluateEgress("https://x.com", { allowedDomains: ["none"] }).allowed).toBe(false)
   })
 })
@@ -133,6 +134,16 @@ describe("assertEgressAllowed", () => {
       expect(err.reason).toBe("host-denied")
       expect(err.message).toContain("evil.com")
       expect(err.message).toContain("my-plugin")
+    }
+  })
+
+  it("throws for an undeclared allowlist under balanced (fail-closed)", () => {
+    try {
+      assertEgressAllowed("p", "https://anything.dev/x", undefined, "balanced")
+      throw new Error("expected to throw")
+    } catch (e) {
+      expect(e).toBeInstanceOf(PluginEgressError)
+      expect((e as PluginEgressError).reason).toBe("no-declaration")
     }
   })
 
