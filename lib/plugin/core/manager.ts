@@ -2657,8 +2657,10 @@ export class PluginManager {
       const verifier = getPluginSignatureVerifier()
       const config = verifier.getConfig()
 
-      // Skip verification entirely if signatures are not required and untrusted plugins are allowed
-      // This is the default configuration - signature backend commands may not be available
+      // Skip verification entirely when the policy neither requires signatures
+      // nor forbids untrusted plugins. NOTE: the default policy is
+      // requireSignatures:true (ADR 0016 P0-3), so this short-circuit only
+      // applies once the user has explicitly relaxed the policy in Settings.
       if (!config.requireSignatures && config.allowUntrusted) {
         return true
       }

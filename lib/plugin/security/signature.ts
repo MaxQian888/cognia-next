@@ -59,6 +59,20 @@ export interface SignatureConfig {
   cacheVerifications: boolean
 }
 
+/**
+ * Host-written attestation of HOW a plugin's install bytes were validated,
+ * persisted by `install_archive_into_plugin_dir` and read back via the
+ * `plugin_read_verification` Tauri command. `signature` means an Ed25519
+ * provenance signature was verified against the archive; `checksum` means only
+ * SHA-256 integrity was confirmed. Absent → the install never cleared an
+ * integrity check (e.g. a local/dev install).
+ */
+export interface PluginVerificationReceipt {
+  verifiedVia: "signature" | "checksum"
+  version: string
+  verifiedAt: string
+}
+
 const USER_PUBLISHERS_STORAGE_KEY = "plugin:security:user-publishers"
 
 /**
@@ -163,21 +177,55 @@ export class PluginSignatureVerifier {
 
     const warnings: string[] = []
 
-    // File-based (`signature.json`) cryptographic verification was removed: no
-    // install path ever wrote that file, so the branch was unreachable, and the
-    // `plugin_verify_signature` invoke it relied on had a mismatched argument
-    // shape that always rejected. The AUTHORITATIVE integrity + signature check
-    // for marketplace bundles runs host-side over the raw archive bytes
+    // The AUTHORITATIVE integrity + signature check for marketplace/github
+    // bundles runs host-side over the raw archive bytes
     // (`verify_download_integrity` in src-tauri) BEFORE anything is written to
-    // disk, and WASM bundles use the detached-signature path
-    // (`verifyDetachedBundleSignature`). What remains here is purely the policy
-    // gate: an unsigned plugin is rejected only when the user requires
-    // signatures, otherwise it loads with a warning.
+    // disk, and its outcome is persisted as a per-plugin verification receipt.
+    // When the policy requires signatures, consult that receipt (via
+    // `plugin_read_verification`): an install passes only if the host verified
+    // a real Ed25519 provenance signature. A checksum-only or absent receipt
+    // (e.g. a local/dev install) is rejected. WASM bundles use the separate
+    // detached-signature path (`verifyDetachedBundleSignature`).
     if (this.config.requireSignatures) {
-      return this.createResult(pluginPath, false, "Signature required but not found", warnings)
+      const receipt = await this.readVerificationReceipt(pluginPath)
+      if (receipt?.verifiedVia === "signature") {
+        return this.createResult(pluginPath, true, undefined, warnings)
+      }
+      const reason = receipt
+        ? `Signature required but the install was only verified via ${receipt.verifiedVia}`
+        : "Signature required but not found"
+      return this.createResult(pluginPath, false, reason, warnings)
     }
     warnings.push("Plugin is not signed")
     return this.createResult(pluginPath, true, undefined, warnings)
+  }
+
+  /**
+   * Read the host-written verification receipt for the plugin at `pluginPath`
+   * (keyed by its derived id). Returns `null` off-Tauri (no host) or when no
+   * receipt exists / the command fails — the caller treats that as unverified.
+   */
+  private async readVerificationReceipt(
+    pluginPath: string
+  ): Promise<PluginVerificationReceipt | null> {
+    if (!isTauri()) return null
+    try {
+      const receipt = await invoke<PluginVerificationReceipt | null>("plugin_read_verification", {
+        pluginId: this.extractPluginId(pluginPath),
+      })
+      return receipt ?? null
+    } catch (error) {
+      recordSilentFailure(
+        "<signature>",
+        {
+          site: "signature.readVerificationReceipt",
+          message: "Could not read host verification receipt.",
+          expected: !isTauri(),
+        },
+        error
+      )
+      return null
+    }
   }
 
   private createResult(

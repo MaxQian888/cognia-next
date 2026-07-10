@@ -36,6 +36,26 @@ pub struct DownloadPayload {
     pub size_bytes: u64,
 }
 
+/// Filename of the per-plugin verification receipt written host-side after a
+/// successful integrity/signature check at install time. The TS load gate
+/// (`PluginSignatureVerifier.verify`) consults it via `plugin_read_verification`
+/// to decide whether an install satisfies a signature-required policy.
+pub(crate) const VERIFICATION_RECEIPT_FILE: &str = ".cognia-verification.json";
+
+/// Durable record of HOW a plugin's install bytes were validated. `signature`
+/// means an Ed25519 provenance signature was verified (strongest); `checksum`
+/// means only integrity was confirmed against the registry's SHA-256. Written
+/// only when at least one claim was present and passed — an install with no
+/// integrity material leaves no receipt (and thus fails a require-signature
+/// policy on load).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationReceipt {
+    pub verified_via: String,
+    pub version: String,
+    pub verified_at: String,
+}
+
 fn cache_dir(state: &PluginRuntimeState) -> PathBuf {
     state.plugin_install_dir.join("_marketplace_cache")
 }
@@ -106,6 +126,27 @@ pub async fn plugin_get_directory(state: State<'_, PluginRuntimeState>) -> Resul
     Ok(state.plugin_install_dir.to_string_lossy().into_owned())
 }
 
+/// Read the verification receipt written at install time for `plugin_id`, if
+/// any. Returns `None` when no receipt exists (never validated, or a local /
+/// dev install that skipped the integrity path) or when the file is
+/// unparseable — the caller treats both as "unverified".
+pub(crate) fn read_verification_receipt(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+) -> Option<VerificationReceipt> {
+    let path = state.plugin_dir(plugin_id).join(VERIFICATION_RECEIPT_FILE);
+    let raw = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+#[tauri::command]
+pub async fn plugin_read_verification(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+) -> Result<Option<VerificationReceipt>> {
+    Ok(read_verification_receipt(state.inner(), &plugin_id))
+}
+
 /// Extract a `.tar.gz` into `dest` WITHOUT stripping a top-level directory
 /// (marketplace archives may pack the plugin at the root or one level deep —
 /// `find_plugin_manifest` probes both). Traversal/absolute segments are dropped.
@@ -171,6 +212,20 @@ impl DownloadIntegrity {
     #[cfg(test)]
     pub(crate) fn none() -> Self {
         Self::default()
+    }
+
+    /// Which verification tier this integrity material represents, iff a claim
+    /// was actually supplied. A complete signature (sig + key) always wins over
+    /// a bare checksum; with neither, there is nothing to attest and no receipt
+    /// is written.
+    pub(crate) fn verified_via(&self) -> Option<&'static str> {
+        if self.signature_hex.is_some() && self.public_key_hex.is_some() {
+            Some("signature")
+        } else if self.checksum.is_some() {
+            Some("checksum")
+        } else {
+            None
+        }
     }
 }
 
@@ -276,6 +331,20 @@ pub(crate) fn install_archive_into_plugin_dir(
     fs::create_dir_all(&plugin_dir)
         .map_err(|e| PluginError::Internal(format!("mkdir {plugin_dir:?}: {e}")))?;
     copy_plugin_tree(&plugin_root, &plugin_dir).map_err(PluginError::Internal)?;
+
+    // Persist a verification receipt so the TS load gate can confirm this
+    // install cleared an integrity/signature check. Only written when a claim
+    // was actually validated above; an install with no integrity material
+    // leaves none (and thus fails a require-signature policy on load).
+    if let Some(verified_via) = integrity.verified_via() {
+        let receipt = VerificationReceipt {
+            verified_via: verified_via.to_string(),
+            version: version.to_string(),
+            verified_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let json = serde_json::to_string(&receipt)?;
+        fs::write(plugin_dir.join(VERIFICATION_RECEIPT_FILE), json)?;
+    }
 
     Ok(DownloadPayload {
         plugin_id: parsed.id,
@@ -575,6 +644,116 @@ mod tests {
         assert!(matches!(err, PluginError::Crypto(_)));
         // Nothing was written to the canonical dir.
         assert!(!state.plugin_dir("demo.market").join("plugin.json").exists());
+    }
+
+    fn demo_archive() -> Vec<u8> {
+        let manifest = br#"{"id":"demo.market","name":"Demo","version":"1.0.0","type":"frontend","main":"index.js"}"#;
+        make_tar_gz(&[
+            ("demo.market/plugin.json", manifest),
+            ("demo.market/index.js", b"export default {}"),
+        ])
+    }
+
+    #[test]
+    fn verified_via_prefers_signature_then_checksum_then_none() {
+        assert_eq!(DownloadIntegrity::none().verified_via(), None);
+        assert_eq!(
+            DownloadIntegrity {
+                checksum: Some("ab".into()),
+                ..Default::default()
+            }
+            .verified_via(),
+            Some("checksum")
+        );
+        assert_eq!(
+            DownloadIntegrity {
+                checksum: Some("ab".into()),
+                signature_hex: Some("cd".into()),
+                public_key_hex: Some("ef".into()),
+                ..Default::default()
+            }
+            .verified_via(),
+            Some("signature")
+        );
+    }
+
+    #[test]
+    fn install_writes_a_checksum_receipt_and_reads_it_back() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let archive = demo_archive();
+        let integrity = DownloadIntegrity {
+            checksum: Some(sha256_hex(&archive)),
+            ..Default::default()
+        };
+        install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive, &integrity)
+            .unwrap();
+
+        let receipt = read_verification_receipt(&state, "demo.market").unwrap();
+        assert_eq!(receipt.verified_via, "checksum");
+        assert_eq!(receipt.version, "1.0.0");
+        assert!(!receipt.verified_at.is_empty());
+    }
+
+    #[test]
+    fn install_writes_a_signature_receipt_for_a_signed_archive() {
+        use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+        use sha2::{Digest, Sha256};
+
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let archive = demo_archive();
+
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let verifying_key: VerifyingKey = (&signing_key).into();
+        let mut hasher = Sha256::new();
+        hasher.update(b"demo.market");
+        hasher.update(b":");
+        hasher.update(b"1.0.0");
+        hasher.update(b":");
+        hasher.update(&archive);
+        let digest: [u8; 32] = hasher.finalize().into();
+        let sig = signing_key.sign(&digest);
+
+        let integrity = DownloadIntegrity {
+            signature_hex: Some(hex::encode(sig.to_bytes())),
+            public_key_hex: Some(hex::encode(verifying_key.to_bytes())),
+            ..Default::default()
+        };
+        install_archive_into_plugin_dir(&state, "demo.market", "1.0.0", &archive, &integrity)
+            .unwrap();
+
+        let receipt = read_verification_receipt(&state, "demo.market").unwrap();
+        assert_eq!(receipt.verified_via, "signature");
+        assert_eq!(receipt.version, "1.0.0");
+    }
+
+    #[test]
+    fn install_without_integrity_writes_no_receipt() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let archive = demo_archive();
+        install_archive_into_plugin_dir(
+            &state,
+            "demo.market",
+            "1.0.0",
+            &archive,
+            &DownloadIntegrity::none(),
+        )
+        .unwrap();
+
+        assert!(read_verification_receipt(&state, "demo.market").is_none());
+        assert!(!state
+            .plugin_dir("demo.market")
+            .join(VERIFICATION_RECEIPT_FILE)
+            .exists());
+    }
+
+    #[test]
+    fn read_verification_receipt_is_none_for_an_unknown_plugin() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        assert!(read_verification_receipt(&state, "never.installed").is_none());
     }
 
     #[test]

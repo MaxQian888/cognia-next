@@ -886,6 +886,7 @@ pub fn run() {
             plugin_api::backup::plugin_backup_delete,
             plugin_api::marketplace::plugin_marketplace_versions,
             plugin_api::marketplace::plugin_get_directory,
+            plugin_api::marketplace::plugin_read_verification,
             plugin_api::marketplace::plugin_download_version,
             plugin_api::marketplace::plugin_invalidate_cache,
             plugin_api::devtools::plugin_dev_server_start,
