@@ -6,7 +6,7 @@
  */
 
 import { createPluginSystemLogger } from "../core/logger"
-import { deriveKey, encrypt, decrypt } from "./crypto-helpers"
+import { deriveKey, deriveInstallKey, encrypt, decrypt } from "./crypto-helpers"
 
 export interface PluginStorageAPI {
   /** Get a value by key */
@@ -150,7 +150,9 @@ export function createStorageAPI(pluginId: string): PluginStorageAPI {
 
     async setSecure<T = unknown>(key: string, value: T): Promise<void> {
       try {
-        const cryptoKey = await deriveKey(pluginId)
+        // Per-install master key (W2.5): confidentiality no longer rests on
+        // the public plugin id.
+        const cryptoKey = await deriveInstallKey(pluginId)
         const serialized = JSON.stringify(value)
         const encrypted = await encrypt(serialized, cryptoKey)
         await this.set(key, `${ENCRYPTED_PREFIX}${encrypted}`)
@@ -169,10 +171,21 @@ export function createStorageAPI(pluginId: string): PluginStorageAPI {
           return undefined
         }
 
-        const cryptoKey = await deriveKey(pluginId)
         const encryptedData = raw.slice(ENCRYPTED_PREFIX.length)
-        const decrypted = await decrypt(encryptedData, cryptoKey)
-        return JSON.parse(decrypted) as T
+        try {
+          const cryptoKey = await deriveInstallKey(pluginId)
+          const decrypted = await decrypt(encryptedData, cryptoKey)
+          return JSON.parse(decrypted) as T
+        } catch {
+          // Pre-W2.5 value encrypted with the legacy public-id key: decrypt
+          // with it once and transparently re-encrypt under the install key.
+          const legacyKey = await deriveKey(pluginId)
+          const decrypted = await decrypt(encryptedData, legacyKey)
+          const value = JSON.parse(decrypted) as T
+          await this.setSecure(key, value)
+          logger.info(`Migrated secure storage key '${key}' to the per-install encryption key`)
+          return value
+        }
       } catch (err) {
         logger.error(`Failed to read secure storage key: ${key}`, err)
         return undefined

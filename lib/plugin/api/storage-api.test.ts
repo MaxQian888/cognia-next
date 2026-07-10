@@ -13,6 +13,11 @@ jest.mock("./crypto-helpers", () => {
       keys.set(key, pluginId)
       return key
     }),
+    deriveInstallKey: jest.fn(async (pluginId: string) => {
+      const key = `mock-install-key-${pluginId}`
+      keys.set(key, pluginId)
+      return key
+    }),
     encrypt: jest.fn(async (data: string, _key: string) => {
       return Buffer.from(data).toString("base64")
     }),

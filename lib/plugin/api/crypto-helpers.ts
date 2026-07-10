@@ -5,31 +5,27 @@
  * Used by the Storage API to support encrypted key-value storage.
  */
 
+import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
+
 const ALGORITHM = "AES-GCM"
 const KEY_LENGTH = 256
 const IV_LENGTH = 12 // 96 bits recommended for AES-GCM
 const SALT_PREFIX = "cognia:plugin:encryption:"
 
-/**
- * Derive an AES-GCM encryption key from a plugin ID.
- * Uses PBKDF2 with a deterministic salt derived from the plugin ID.
- */
-export async function deriveKey(pluginId: string, salt?: string): Promise<CryptoKey> {
+async function deriveKeyFromMaterial(material: string, salt: string): Promise<CryptoKey> {
   const encoder = new TextEncoder()
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(pluginId),
+    encoder.encode(material),
     "PBKDF2",
     false,
     ["deriveKey"]
   )
 
-  const saltBytes = encoder.encode(salt ?? `${SALT_PREFIX}${pluginId}`)
-
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: saltBytes,
+      salt: encoder.encode(salt),
       iterations: 100_000,
       hash: "SHA-256",
     },
@@ -38,6 +34,33 @@ export async function deriveKey(pluginId: string, salt?: string): Promise<Crypto
     false,
     ["encrypt", "decrypt"]
   )
+}
+
+/**
+ * LEGACY key derivation: keyed solely on the PUBLIC plugin id, so anyone
+ * holding the localStorage blob (or a backup export) plus the plugin id can
+ * decrypt. Kept only so `getSecure` can read — and transparently migrate —
+ * values written before the per-install key existed. Never use for writes.
+ */
+export async function deriveKey(pluginId: string, salt?: string): Promise<CryptoKey> {
+  return deriveKeyFromMaterial(pluginId, salt ?? `${SALT_PREFIX}${pluginId}`)
+}
+
+/**
+ * Derive the AES-GCM key for `setSecure` from the per-install master key
+ * (the device-stored backup auto-key — the same root `ctx.secrets` uses on
+ * web) combined with the plugin id. Confidentiality now rests on a secret
+ * that never leaves the device rather than on the public plugin id.
+ *
+ * Throws when no master key is available (SSR) — callers must not silently
+ * fall back to the legacy public-id key.
+ */
+export async function deriveInstallKey(pluginId: string): Promise<CryptoKey> {
+  const master = await getDefaultBackupPassphrase()
+  if (!master) {
+    throw new Error("Secure plugin storage unavailable: no per-install master key (SSR context)")
+  }
+  return deriveKeyFromMaterial(`${master}:${pluginId}`, `${SALT_PREFIX}v2:${pluginId}`)
 }
 
 /**
