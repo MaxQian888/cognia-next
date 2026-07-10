@@ -7,6 +7,7 @@
  */
 
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 import { registerSessionSource } from "@/lib/session-import/registry"
 import type { AgentSessionSourceAdapter } from "@/lib/session-import/types"
 import type {
@@ -22,7 +23,7 @@ const customImporters = new Map<string, CustomImporter>()
 /** Create the Import API for a plugin. */
 export function createImportAPI(pluginId: string): PluginImportAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginImportAPI = {
     registerImporter: <T = unknown>(importer: CustomImporter<T>) => {
       const importerId = `${pluginId}:${importer.id}`
       customImporters.set(importerId, { ...importer, id: importerId } as CustomImporter)
@@ -60,6 +61,23 @@ export function createImportAPI(pluginId: string): PluginImportAPI {
       }
     },
   }
+
+  // Every current method only operates on the plugin's OWN registered
+  // importers/adapters (no user-data access) — the wrap exists so any future
+  // method added without a mapping fails closed instead of shipping ungated.
+  return createApiGuardedAPI(
+    pluginId,
+    api,
+    {},
+    {
+      unguarded: [
+        "registerImporter",
+        "getCustomImporters",
+        "registerSessionSource",
+        "importContent",
+      ],
+    }
+  )
 }
 
 /** Clear all custom importers (test isolation). */

@@ -38,6 +38,7 @@ import {
   type VideoEffectDefinition,
   type VideoTransitionDefinition,
 } from "./media-api"
+import { initializePluginPermissions } from "./permission-api"
 import { invoke } from "@tauri-apps/api/core"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import {
@@ -727,5 +728,24 @@ describe("Media Registry", () => {
       expect(diagnostics).toHaveLength(1)
       expect(diagnostics[0]).toMatchObject({ pointId: "ai.inpaint" })
     })
+  })
+})
+
+// W2.3: the media video/ai namespaces are permission-gated; grant the
+// suite's plugin.
+beforeAll(() => {
+  initializePluginPermissions("test-plugin", [
+    "media:video:read",
+    "media:video:write",
+    "media:video:export",
+    "ai:chat",
+  ])
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError on video/ai namespaces without grants", () => {
+    const api = createMediaAPI("no-perms-plugin", {} as never)
+    expect(() => api.video.getMetadata("x")).toThrow(/media:video:read/)
+    expect(() => api.ai.removeBackground({} as ImageData)).toThrow(/ai:chat/)
   })
 })

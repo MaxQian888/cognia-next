@@ -5,6 +5,7 @@
 
 import "fake-indexeddb/auto"
 import { createCanvasAPI } from "./canvas-api"
+import { initializePluginPermissions } from "./permission-api"
 
 type MockCanvasEditorSelection = {
   startLineNumber: number
@@ -1021,3 +1022,23 @@ describe("PluginCanvasAPI — new surface (commit 4)", () => {
 // Suppress unused warning when canvasCommentsDb import becomes unused in
 // future refactors. It's kept here for parity with the canvas-api module.
 void canvasCommentsDb
+
+// W2.3: the canvas API is permission-gated; grant the suite's plugins.
+beforeAll(() => {
+  for (const id of ["test-plugin", "plugin-x"]) {
+    initializePluginPermissions(id, [
+      "canvas:read",
+      "canvas:write",
+      "canvas:run",
+      "canvas:collaborate",
+    ])
+  }
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError when canvas permissions are not granted", () => {
+    const api = createCanvasAPI("no-perms-plugin")
+    expect(() => api.getContent()).toThrow(/canvas:read/)
+    expect(() => api.executeAction("improve", { content: "x" })).toThrow(/canvas:run/)
+  })
+})

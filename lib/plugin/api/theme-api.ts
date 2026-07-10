@@ -11,6 +11,7 @@
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { resolveActiveThemeColors } from "@/lib/themes"
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 import type {
   PluginThemeAPI,
   ThemeMode,
@@ -83,7 +84,7 @@ function createThemeChangeKey(): string {
  */
 export function createThemeAPI(pluginId: string): PluginThemeAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginThemeAPI = {
     getTheme: (): ThemeState => getThemeState(),
 
     getMode: () => {
@@ -236,6 +237,26 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
       }
     },
   }
+
+  // theme:read is a default grant (initializePluginPermissions), so read
+  // methods keep working for undeclared plugins; mutations need theme:write.
+  return createApiGuardedAPI(pluginId, api, {
+    getTheme: "theme:read",
+    getMode: "theme:read",
+    getResolvedMode: "theme:read",
+    setMode: "theme:write",
+    getColorPreset: "theme:read",
+    setColorPreset: "theme:write",
+    getAvailablePresets: "theme:read",
+    getColors: "theme:read",
+    registerCustomTheme: "theme:write",
+    updateCustomTheme: "theme:write",
+    deleteCustomTheme: "theme:write",
+    getCustomThemes: "theme:read",
+    activateCustomTheme: "theme:write",
+    onThemeChange: "theme:read",
+    applyScopedColors: "theme:write",
+  })
 }
 
 /**

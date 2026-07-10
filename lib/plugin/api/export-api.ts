@@ -13,6 +13,7 @@ import {
   generateFilename as generateExportFilename,
 } from "@/lib/export"
 import { createPluginSystemLogger, loggers } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 import type {
   PluginExportAPI,
   ExportFormat,
@@ -78,7 +79,7 @@ const customExporters = new Map<string, CustomExporter>()
  */
 export function createExportAPI(pluginId: string): PluginExportAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginExportAPI = {
     exportSession: async (sessionId: string, options: ExportOptions): Promise<ExportResult> => {
       const { getPluginEventHooks } = await import("../messaging/hooks-system")
       const { useSessionStore } = await import("@/stores/chat/session-store")
@@ -209,6 +210,28 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
       return generateExportFilename(title, extension)
     },
   }
+
+  // `download` writes plugin-supplied bytes to the user's disk on the back of
+  // an export flow — gate it with the session-export permission too.
+  return createApiGuardedAPI(
+    pluginId,
+    api,
+    {
+      exportSession: "export:session",
+      exportMessages: "export:session",
+      exportProject: "export:project",
+      download: "export:session",
+    },
+    {
+      // Pure helpers / contribution registration — no user data access.
+      unguarded: [
+        "registerExporter",
+        "getAvailableFormats",
+        "getCustomExporters",
+        "generateFilename",
+      ],
+    }
+  )
 }
 
 /**

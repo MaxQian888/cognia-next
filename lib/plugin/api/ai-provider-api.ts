@@ -21,6 +21,7 @@ import type {
   AIChatChunk,
 } from "@/types/plugin/plugin"
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 import {
   registerProviderDefinition,
   unregisterProvider,
@@ -183,7 +184,7 @@ function resolveBuiltInProviderFallback() {
  */
 export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginAIProviderAPI = {
     registerProvider: (provider: AIProviderDefinition) => {
       const providerId = `${pluginId}:${provider.id}`
       const scopedProvider = { ...provider, id: providerId }
@@ -319,8 +320,7 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
       // the AI-SDK field naming (`inputTokens`/`outputTokens`) and the legacy
       // `promptTokens`/`completionTokens` shape.
       const usage = (await Promise.resolve(result.usage).catch(() => undefined)) as
-        | Record<string, number | undefined>
-        | undefined
+        Record<string, number | undefined> | undefined
       const promptTokens = usage?.inputTokens ?? usage?.promptTokens
       const completionTokens = usage?.outputTokens ?? usage?.completionTokens
       if (typeof promptTokens === "number" || typeof completionTokens === "number") {
@@ -394,6 +394,27 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
       return useSettingsStore.getState().defaultProvider
     },
   }
+
+  // `chat`/`embed` spend the user's model quota — they require the declared
+  // ai:* permissions. Registration and model introspection stay ungated:
+  // they expose the plugin's OWN providers, not user resources.
+  return createApiGuardedAPI(
+    pluginId,
+    api,
+    {
+      chat: "ai:chat",
+      embed: "ai:embed",
+    },
+    {
+      unguarded: [
+        "registerProvider",
+        "getAvailableModels",
+        "getProviderModels",
+        "getDefaultModel",
+        "getDefaultProvider",
+      ],
+    }
+  )
 }
 
 /**

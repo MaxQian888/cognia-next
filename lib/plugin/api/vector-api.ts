@@ -19,6 +19,7 @@ import {
   type EmbeddingProvider,
 } from "@cognia/vector/embedding"
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 import type {
   PluginVectorAPI,
   VectorDocument,
@@ -120,7 +121,7 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
       })(),
     }))
 
-  return {
+  const api: PluginVectorAPI = {
     createCollection: async (name: string, _options?: CollectionOptions) => {
       const vs = await getStore()
       const prefixedName = prefixCollection(name)
@@ -293,4 +294,22 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
       logger.info(`Cleared collection: ${collection}`)
     },
   }
+
+  // Store mutations need vector:write, queries vector:read; `embed`/`embedBatch`
+  // spend the user's embedding quota and require ai:embed.
+  return createApiGuardedAPI(pluginId, api, {
+    createCollection: "vector:write",
+    deleteCollection: "vector:write",
+    listCollections: "vector:read",
+    getCollectionInfo: "vector:read",
+    addDocuments: "vector:write",
+    updateDocuments: "vector:write",
+    deleteDocuments: "vector:write",
+    search: "vector:read",
+    searchByEmbedding: "vector:read",
+    embed: "ai:embed",
+    embedBatch: "ai:embed",
+    getDocumentCount: "vector:read",
+    clearCollection: "vector:write",
+  })
 }

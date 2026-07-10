@@ -3,6 +3,7 @@
  */
 
 import { createProjectAPI } from "./project-api"
+import { initializePluginPermissions } from "./permission-api"
 import type { Project, KnowledgeFile } from "@/types"
 
 // Mock project store
@@ -640,5 +641,18 @@ describe("Project API", () => {
       unsubscribe()
       expect(mockSubscribers.length).toBe(0)
     })
+  })
+})
+
+// W2.3: the project API is permission-gated; grant the suite's plugin.
+beforeAll(() => {
+  initializePluginPermissions("test-plugin", ["project:read", "project:write", "project:delete"])
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError when project permissions are not granted", () => {
+    const api = createProjectAPI("no-perms-plugin")
+    expect(() => api.listProjects()).toThrow(/project:read/)
+    expect(() => api.deleteProject("x")).toThrow(/project:delete/)
   })
 })

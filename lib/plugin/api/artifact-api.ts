@@ -20,6 +20,7 @@ import type {
 } from "@/types/plugin/plugin"
 import type { Artifact } from "@/types/artifact"
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 import {
   MermaidRenderer,
   ChartRenderer,
@@ -35,7 +36,7 @@ import { ArtifactPreview } from "@/components/artifacts/artifact-preview"
  */
 export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginArtifactAPI = {
     getActiveArtifact: (): Artifact | null => {
       const store = useArtifactStore.getState()
       if (!store.activeArtifactId) return null
@@ -173,6 +174,27 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
       }
     },
   }
+
+  return createApiGuardedAPI(
+    pluginId,
+    api,
+    {
+      getActiveArtifact: "artifact:read",
+      getArtifact: "artifact:read",
+      createArtifact: "artifact:write",
+      updateArtifact: "artifact:write",
+      deleteArtifact: "artifact:write",
+      listArtifacts: "artifact:read",
+      openArtifact: "artifact:write",
+      closeArtifact: "artifact:write",
+      onArtifactChange: "artifact:read",
+    },
+    {
+      // Contribution registration: exposes the plugin's own renderer, reads no
+      // user artifact data.
+      unguarded: ["registerRenderer"],
+    }
+  )
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   clearCustomThemesForPluginContext,
   __resetThemeApiOwnershipForTesting,
 } from "./theme-api"
+import { initializePluginPermissions } from "./permission-api"
 import type { CustomTheme } from "@/types/plugin/plugin"
 
 // Mock settings store
@@ -623,5 +624,22 @@ describe("Theme API", () => {
         "original-value"
       )
     })
+  })
+})
+
+// W2.3: theme mutations are permission-gated (reads ride the default
+// theme:read grant); grant the suite's plugins theme:write.
+beforeAll(() => {
+  for (const id of ["test-plugin", "plugin-a", "plugin-b"]) {
+    initializePluginPermissions(id, ["theme:read", "theme:write"])
+  }
+})
+
+describe("permission gate", () => {
+  it("allows reads via the default grant but blocks writes", () => {
+    const api = createThemeAPI("no-perms-plugin")
+    initializePluginPermissions("no-perms-plugin", [])
+    expect(() => api.getMode()).not.toThrow()
+    expect(() => api.setMode("dark")).toThrow(/theme:write/)
   })
 })

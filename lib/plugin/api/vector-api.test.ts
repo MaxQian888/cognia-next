@@ -3,6 +3,7 @@
  */
 
 import { createVectorAPI } from "./vector-api"
+import { initializePluginPermissions } from "./permission-api"
 
 // Mock stores and vector utilities
 const mockCollections = new Map<string, { name: string; documents: Map<string, unknown> }>()
@@ -361,5 +362,19 @@ describe("Vector API", () => {
       expect(mockCollections.has("plugin_plugin-a_shared-name")).toBe(true)
       expect(mockCollections.has("plugin_plugin-b_shared-name")).toBe(true)
     })
+  })
+})
+
+// W2.3: the vector API is permission-gated; grant the suite's plugins.
+beforeAll(() => {
+  for (const id of ["test-plugin", "plugin-1", "plugin-2", "plugin-a", "plugin-b"]) {
+    initializePluginPermissions(id, ["vector:read", "vector:write", "ai:embed"])
+  }
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError when vector:read is not granted", () => {
+    const api = createVectorAPI("no-perms-plugin")
+    expect(() => api.search("c", "q")).toThrow(/vector:read/)
   })
 })

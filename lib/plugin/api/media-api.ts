@@ -28,6 +28,7 @@ import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { useSettingsStore } from "@/stores"
 import { isTauri } from "@/lib/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
+import { createApiGuardedAPI } from "./api-permission-gate"
 import type { PluginManager } from "../core/manager"
 
 // =============================================================================
@@ -1145,7 +1146,7 @@ async function withTimelineProgress<T>(
 // =============================================================================
 
 export function createMediaAPI(pluginId: string, _manager: PluginManager): PluginMediaAPI {
-  return {
+  const api: PluginMediaAPI = {
     image: {
       load: loadImage,
 
@@ -1476,8 +1477,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
 
       getImageDataFromCanvas: (canvas: OffscreenCanvas | HTMLCanvasElement): ImageData => {
         const ctx = canvas.getContext("2d") as
-          | CanvasRenderingContext2D
-          | OffscreenCanvasRenderingContext2D
+          CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
         if (!ctx) throw new Error("Failed to get canvas context")
         return ctx.getImageData(0, 0, canvas.width, canvas.height)
       },
@@ -1487,8 +1487,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         canvas: OffscreenCanvas | HTMLCanvasElement
       ): void => {
         const ctx = canvas.getContext("2d") as
-          | CanvasRenderingContext2D
-          | OffscreenCanvasRenderingContext2D
+          CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
         if (!ctx) throw new Error("Failed to get canvas context")
         ctx.putImageData(imageData, 0, 0)
       },
@@ -1533,5 +1532,31 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         })
       },
     },
+  }
+
+  // `image`/`filters`/`effects`/`transitions`/`utils` are pure in-memory
+  // transforms over caller-supplied data — no host resource to protect. The
+  // `video` pipeline touches decoded media state and disk-weight exports, and
+  // `ai.*` spends the user's provider quota (executeProviderImageEdit), so
+  // both namespaces are permission-gated.
+  return {
+    ...api,
+    video: createApiGuardedAPI(pluginId, api.video, {
+      loadClip: "media:video:read",
+      getFrame: "media:video:read",
+      getMetadata: "media:video:read",
+      trim: "media:video:write",
+      concatenate: "media:video:write",
+      applyEffect: "media:video:write",
+      addTransition: "media:video:write",
+      export: "media:video:export",
+    }),
+    ai: createApiGuardedAPI(pluginId, api.ai, {
+      upscale: "ai:chat",
+      removeBackground: "ai:chat",
+      enhanceImage: "ai:chat",
+      generateVariation: "ai:chat",
+      inpaint: "ai:chat",
+    }),
   }
 }

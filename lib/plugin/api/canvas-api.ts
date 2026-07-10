@@ -35,6 +35,7 @@ import type {
 import type { CanvasComment, CollaborativeSession } from "@/types/canvas/collaboration"
 import type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 
 type LineColumn = {
   lineNumber: number
@@ -251,7 +252,7 @@ function selectionToCanvasSelection(
  */
 export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginCanvasAPI = {
     getCurrentDocument: (): PluginCanvasDocument | null => {
       const { doc } = getActiveCanvasDocumentState()
       if (!doc) return null
@@ -315,9 +316,7 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
 
       const editor = getActiveCanvasEditor()
       const editorSelection = editor?.getSelection?.() as
-        | CanvasEditorSelectionLike
-        | null
-        | undefined
+        CanvasEditorSelectionLike | null | undefined
       if (editorSelection) {
         return selectionToCanvasSelection(doc.content, editorSelection)
       }
@@ -400,9 +399,7 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
 
       const editor = getActiveCanvasEditor()
       const editorSelection = editor?.getSelection?.() as
-        | CanvasEditorSelectionLike
-        | null
-        | undefined
+        CanvasEditorSelectionLike | null | undefined
       const selection =
         editorSelection && !isSelectionEmpty(editorSelection)
           ? normalizeSelection(editorSelection)
@@ -426,9 +423,7 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
         const model = editor.getModel?.()
         nextContent = model?.getValue?.() || nextContent
         const resultingSelection = editor.getSelection?.() as
-          | CanvasEditorSelectionLike
-          | null
-          | undefined
+          CanvasEditorSelectionLike | null | undefined
         nextSelection = resultingSelection ? normalizeSelection(resultingSelection) : null
       } else {
         const start = lineColumnToOffset(doc.content, getSelectionStart(selection))
@@ -625,4 +620,41 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
       crdtStore.closeSession(sessionId)
     },
   }
+
+  // Reads → canvas:read, mutations → canvas:write, code/action execution →
+  // canvas:run, collaboration session lifecycle → canvas:collaborate.
+  return createApiGuardedAPI(pluginId, api, {
+    getCurrentDocument: "canvas:read",
+    getDocument: "canvas:read",
+    createDocument: "canvas:write",
+    updateDocument: "canvas:write",
+    deleteDocument: "canvas:write",
+    openDocument: "canvas:write",
+    closeCanvas: "canvas:write",
+    getSelection: "canvas:read",
+    setSelection: "canvas:write",
+    insertText: "canvas:write",
+    replaceSelection: "canvas:write",
+    getContent: "canvas:read",
+    setContent: "canvas:write",
+    saveVersion: "canvas:write",
+    restoreVersion: "canvas:write",
+    getVersions: "canvas:read",
+    onCanvasChange: "canvas:read",
+    onContentChange: "canvas:read",
+    executePython: "canvas:run",
+    executeAction: "canvas:run",
+    executeActionStreaming: "canvas:run",
+    getComments: "canvas:read",
+    addComment: "canvas:write",
+    updateComment: "canvas:write",
+    resolveComment: "canvas:write",
+    replyToComment: "canvas:write",
+    deleteComment: "canvas:write",
+    createCollaborationSession: "canvas:collaborate",
+    getCollaborationSession: "canvas:read",
+    getActiveCollaborationSession: "canvas:read",
+    listRecentCollaborationSessions: "canvas:read",
+    closeCollaborationSession: "canvas:collaborate",
+  })
 }

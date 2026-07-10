@@ -3,6 +3,7 @@
  */
 
 import { createArtifactAPI, getArtifactRenderers, clearArtifactRenderers } from "./artifact-api"
+import { initializePluginPermissions } from "./permission-api"
 import type { ArtifactRenderer } from "@/types/plugin/plugin"
 
 // Mock artifact renderers to prevent heavy dependency chain (react-vega etc.)
@@ -494,5 +495,17 @@ describe("Artifact API", () => {
       const renderers = getArtifactRenderers()
       expect(renderers.length).toBe(2)
     })
+  })
+})
+
+// W2.3: the artifact API is permission-gated; grant the suite's plugin.
+beforeAll(() => {
+  initializePluginPermissions("test-plugin", ["artifact:read", "artifact:write"])
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError when artifact permissions are not granted", () => {
+    const api = createArtifactAPI("no-perms-plugin")
+    expect(() => api.listArtifacts()).toThrow(/artifact:read/)
   })
 })

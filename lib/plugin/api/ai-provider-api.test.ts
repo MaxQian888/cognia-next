@@ -13,6 +13,7 @@ import {
   getCustomAIProviders,
   clearCustomAIProviders,
 } from "./ai-provider-api"
+import { initializePluginPermissions } from "./permission-api"
 import {
   getProtocolAdapter,
   getCodeAdapterExecutor,
@@ -630,5 +631,17 @@ describe("AI Provider API", () => {
       const providers = getCustomAIProviders()
       expect(providers.length).toBe(2)
     })
+  })
+})
+
+// W2.3: the AI API is permission-gated; grant the suite's plugin its perms.
+beforeAll(() => {
+  initializePluginPermissions("test-plugin", ["ai:chat", "ai:embed"])
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError when ai:chat is not granted", () => {
+    const api = createAIProviderAPI("no-perms-plugin")
+    expect(() => api.chat([], {})).toThrow(/ai:chat/)
   })
 })
