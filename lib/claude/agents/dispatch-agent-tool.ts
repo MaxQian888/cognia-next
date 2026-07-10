@@ -6,10 +6,12 @@
 // `dispatch_agent` name to the renderer's `dispatchSubagent` (which lives in the
 // renderer — exactly where this tool must execute).
 //
-// Three call modes (one flat schema; the model fills the relevant fields):
+// Four call modes (one flat schema; the model fills the relevant fields):
 //   • single   — `{ subagentId, prompt, toolsEnabled?, background? }`
 //   • parallel — `{ dispatches: [ {subagentId, prompt, ...}, ... ] }`
 //   • collect  — `{ collect: "<runId>" }` to await a backgrounded run's result
+//   • resume   — `{ resume: "<runId>", prompt }` to continue a FINISHED run
+//     with a follow-up (the prior prompt + outcome are re-framed as context)
 //
 // The manifest entry is only injected when nesting is enabled AND the calling
 // agent's depth is below the cap (`lib/plugin/bridge/sidecar-tools-bridge.ts`);
@@ -49,6 +51,13 @@ export interface NormalizedDispatch {
 export type ParsedDispatchAgentCall =
   | { mode: "dispatch"; dispatches: NormalizedDispatch[] }
   | { mode: "collect"; runId: string }
+  | {
+      mode: "resume"
+      runId: string
+      prompt: string
+      toolsEnabled?: boolean
+      background: boolean
+    }
   | { mode: "error"; message: string }
 
 const DISPATCH_ITEM_SCHEMA = {
@@ -109,6 +118,12 @@ export function buildDispatchAgentSchema(available: DispatchAgentAvailableSubage
         type: "string",
         description: "Await a previously backgrounded run by its runId.",
       },
+      resume: {
+        type: "string",
+        description:
+          "runId of a FINISHED run to continue: re-dispatches the same subagent with its prior " +
+          "prompt + outcome as context. Requires `prompt` (the follow-up).",
+      },
     },
   }
 }
@@ -121,8 +136,10 @@ function buildDescription(available: DispatchAgentAvailableSubagent[]): string {
     "(`{dispatches:[{subagentId, prompt}, ...]}`) — that single call fans them out in parallel and " +
     "returns once all finish. Do NOT emit several separate dispatch_agent calls to parallelize: each " +
     "call blocks until its subagent returns, so they run one after another. Use the single form " +
-    '`{subagentId, prompt}` for a lone subagent, or `{collect:"<runId>"}` to await a run started with ' +
-    "`background:true`. Subagents run in isolated context; only their final output returns to you."
+    '`{subagentId, prompt}` for a lone subagent, `{collect:"<runId>"}` to await a run started with ' +
+    '`background:true`, or `{resume:"<runId>", prompt:"<follow-up>"}` to continue a finished run ' +
+    "with its prior prompt + outcome as context. Subagents run in isolated context; only their " +
+    "final output returns to you."
   if (available.length === 0) return base
   const list = available.map((a) => `- ${a.id}: ${a.description}`).join("\n")
   return `${base}\n\nAvailable subagents:\n${list}`
@@ -164,15 +181,32 @@ function normalizeOne(raw: unknown): NormalizedDispatch | null {
 }
 
 /**
- * Normalize raw model args into a discriminated call. `collect` wins over a
- * dispatch payload; the parallel `dispatches` array wins over the single form.
- * Returns an `error` mode (never throws) so the handler can surface a clean
- * tool-result string to the model.
+ * Normalize raw model args into a discriminated call. Precedence:
+ * `collect` > `resume` > `dispatches` > single form. Returns an `error` mode
+ * (never throws) so the handler can surface a clean tool-result string.
  */
 export function parseDispatchAgentArgs(args: Record<string, unknown>): ParsedDispatchAgentCall {
   const collect = args.collect
   if (typeof collect === "string" && collect.trim()) {
     return { mode: "collect", runId: collect.trim() }
+  }
+
+  const resume = args.resume
+  if (typeof resume === "string" && resume.trim()) {
+    const prompt = args.prompt
+    if (typeof prompt !== "string" || !prompt.trim()) {
+      return {
+        mode: "error",
+        message: "dispatch_agent: `resume` requires a non-empty `prompt` (the follow-up task).",
+      }
+    }
+    return {
+      mode: "resume",
+      runId: resume.trim(),
+      prompt,
+      ...(typeof args.toolsEnabled === "boolean" ? { toolsEnabled: args.toolsEnabled } : {}),
+      background: args.background === true,
+    }
   }
 
   if (Array.isArray(args.dispatches)) {

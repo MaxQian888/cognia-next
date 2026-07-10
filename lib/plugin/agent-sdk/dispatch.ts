@@ -273,6 +273,9 @@ async function runExternalSubagent(
 
   const result = await manager.execute(agentId, prompt, {
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
+    // Honor the subagent's declared model on the external CLI too (the sidecar
+    // path already threads `def.model`). Best-effort per the manager.
+    ...(def.model ? { model: def.model } : {}),
     ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
     ...(merged.allowedTools ? { allowedTools: merged.allowedTools } : {}),
     ...(mcpServers.length > 0 ? { context: { custom: { mcpServers } } } : {}),

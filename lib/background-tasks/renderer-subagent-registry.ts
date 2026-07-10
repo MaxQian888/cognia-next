@@ -3,6 +3,7 @@ import {
   backgroundTaskInterruptedMessage,
   type BackgroundTaskControls,
   type BackgroundTaskJournalProjection,
+  type BackgroundTaskSettleInfo,
   type BackgroundTaskUsage,
   type BackgroundTaskStartMeta,
 } from "@/lib/background-tasks/registry-core"
@@ -17,6 +18,26 @@ import type {
 } from "@/types/plugin/plugin-agent-sdk"
 
 const journal = createDexieBackgroundTaskJournal()
+
+/**
+ * Settle listener seam (inversion so this lib module never imports stores or
+ * hooks — same pattern as the steer runtime). The chat-side background-result
+ * runtime registers itself here to drive completion re-injection +
+ * notifications when a background run settles.
+ */
+export type RendererBackgroundSettleListener = (
+  runId: string,
+  meta: BackgroundTaskStartMeta,
+  settle: BackgroundTaskSettleInfo
+) => void
+
+let settleListener: RendererBackgroundSettleListener | undefined
+
+export function setRendererBackgroundSettleListener(
+  listener: RendererBackgroundSettleListener | undefined
+): void {
+  settleListener = listener
+}
 
 /**
  * Journal projection shared by background (registry) and foreground (journal-
@@ -42,8 +63,8 @@ function projectDispatchResult(
 const registry = new BackgroundTaskRegistry<PluginSubagentDispatchResult>({
   journal,
   projectForJournal: projectDispatchResult,
+  onSettle: (runId, meta, settle) => settleListener?.(runId, meta, settle),
 })
-const collectedRunIds = new Set<string>()
 
 export type RendererBackgroundTaskMeta = BackgroundTaskStartMeta & { host: "renderer" }
 
@@ -99,18 +120,23 @@ export function hasRendererBackgroundRun(runId: string): boolean {
   return registry.has(runId)
 }
 
+/**
+ * Collect a background run's result. IDEMPOTENT: after the live entry is
+ * consumed, every later collect answers from the journal (results stay
+ * collectable until pruned) — a model that re-collects, or collects after a
+ * completion notice, always gets the result instead of "not found".
+ */
 export async function collectRendererBackgroundResult(
   runId: string
 ): Promise<PluginSubagentDispatchResult | undefined> {
-  if (collectedRunIds.has(runId)) return undefined
   try {
     const live = await registry.collect(runId)
     if (live) {
-      collectedRunIds.add(runId)
+      markCollected(runId)
       return live
     }
   } catch (err) {
-    collectedRunIds.add(runId)
+    markCollected(runId)
     return errorResult(runId, errorMessage(err), { code: "unknown", retryable: false })
   }
 
@@ -122,6 +148,7 @@ export async function collectRendererBackgroundResult(
   }
   if (!record || record.host !== "renderer") return undefined
   if (record.status === "done") {
+    markCollected(runId)
     const usage = pluginUsage(record.usage)
     return {
       text: record.resultText ?? "",
@@ -132,6 +159,7 @@ export async function collectRendererBackgroundResult(
     }
   }
   if (record.status === "error") {
+    markCollected(runId)
     return errorResult(runId, record.error ?? record.resultText ?? "Background run failed.", {
       code: "unknown",
       retryable: false,
@@ -139,6 +167,7 @@ export async function collectRendererBackgroundResult(
     })
   }
   if (record.status === "interrupted") {
+    markCollected(runId)
     return errorResult(runId, backgroundTaskInterruptedMessage(runId), {
       code: "interrupted",
       retryable: false,
@@ -146,6 +175,11 @@ export async function collectRendererBackgroundResult(
     })
   }
   return undefined
+}
+
+/** Best-effort bookkeeping: stamp the latest successful collect. */
+function markCollected(runId: string): void {
+  swallow(() => journal.update(runId, { collectedAt: Date.now() }))
 }
 
 export function listRendererBackgroundRuns() {
@@ -166,7 +200,7 @@ export async function interruptRendererBackgroundTasksOnBoot(options: { now?: ()
 
 export function __clearRendererBackgroundRunsForTesting(): void {
   registry.__clearForTesting()
-  collectedRunIds.clear()
+  settleListener = undefined
 }
 
 /** Reconstruct an error-shaped result (journal fallback / thrown collect). */

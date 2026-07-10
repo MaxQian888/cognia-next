@@ -37,7 +37,12 @@ import { type AgentSummary } from "./discover-agents"
 import { type PermissionResponder } from "./permission-gate"
 import { runCliSubagent, type CliSubagentResult, type RunCliSubagentDeps } from "./subagent-runner"
 import { LOAD_SKILL_TOOL_NAME, handleCliLoadSkill } from "./skill-load-tool"
-import { startCliBackgroundRun, collectCliBackgroundResult } from "./subagent-background-tasks"
+import {
+  startCliBackgroundRun,
+  collectCliBackgroundResult,
+  getCliBackgroundRecord,
+} from "./subagent-background-tasks"
+import { frameResumePrompt } from "@/lib/background-tasks/completion-delivery"
 import {
   startLiveSubagent,
   applyLiveSubagentEvent,
@@ -182,7 +187,7 @@ export async function handleCliDispatchAgent(
     if (collected === undefined) {
       return {
         ...base,
-        result: `dispatch_agent: no background run "${parsed.runId}" (already collected or unknown).`,
+        result: `dispatch_agent: no background run "${parsed.runId}".`,
       }
     }
     return { ...base, result: collected }
@@ -334,6 +339,8 @@ export async function handleCliDispatchAgent(
         sessionId: rootSessionId,
         host: "cli",
         startedAt: Date.now(),
+        mode: "background",
+        toolsEnabled: d.toolsEnabled,
         home: ctx.home,
       },
       // Share the background `runId` as the live-output id so the panel never
@@ -344,6 +351,39 @@ export async function handleCliDispatchAgent(
       text: `[${d.subagentId}] started in background (runId: ${runId}). Collect later with dispatch_agent({collect:"${runId}"}).`,
       ok: true,
     }
+  }
+
+  if (parsed.mode === "resume") {
+    // Continue a FINISHED run: re-frame its prompt + outcome as context and
+    // re-dispatch the same subagent (owner-scoped like collect).
+    const record = await getCliBackgroundRecord(parsed.runId, {
+      home: ctx.home,
+      owner: rootSessionId,
+    })
+    if (!record) {
+      return { ...base, result: `dispatch_agent: no background run "${parsed.runId}".` }
+    }
+    if (record.status === "running") {
+      return {
+        ...base,
+        result: `dispatch_agent: run "${parsed.runId}" is still running — collect it or wait for it to finish.`,
+      }
+    }
+    const framed = frameResumePrompt(
+      {
+        prompt: record.prompt,
+        outcome: record.resultText ?? record.error ?? "(no output recorded)",
+      },
+      parsed.prompt
+    )
+    const resumeDispatch: NormalizedDispatch = {
+      subagentId: record.subagentId,
+      prompt: framed,
+      toolsEnabled: parsed.toolsEnabled ?? record.toolsEnabled ?? true,
+      background: parsed.background,
+    }
+    const outcome = await runOne(resumeDispatch, `${record.subagentId} (resumed)`)
+    return outcome.ok ? { ...base, result: outcome.text } : { ...base, error: outcome.text }
   }
 
   // Fan-out via the shared core (unified with the renderer handler). The CLI has

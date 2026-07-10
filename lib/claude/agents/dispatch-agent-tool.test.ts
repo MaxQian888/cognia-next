@@ -113,4 +113,46 @@ describe("dispatch-agent-tool — parseDispatchAgentArgs", () => {
     expect(parseDispatchAgentArgs({ subagentId: "  ", prompt: "x" }).mode).toBe("error")
     expect(parseDispatchAgentArgs({ subagentId: "a", prompt: "   " }).mode).toBe("error")
   })
+
+  it("parses the resume form (trimmed runId, follow-up prompt, background flag)", () => {
+    const r = parseDispatchAgentArgs({
+      resume: "  run-9  ",
+      prompt: "fix issue 2",
+      background: true,
+    })
+    expect(r).toEqual({ mode: "resume", runId: "run-9", prompt: "fix issue 2", background: true })
+  })
+
+  it("threads an explicit toolsEnabled through resume", () => {
+    const r = parseDispatchAgentArgs({ resume: "run-9", prompt: "go", toolsEnabled: false })
+    expect(r).toMatchObject({ mode: "resume", toolsEnabled: false, background: false })
+  })
+
+  it("resume without a prompt is an error", () => {
+    const r = parseDispatchAgentArgs({ resume: "run-9" })
+    expect(r.mode).toBe("error")
+    expect((r as { message: string }).message).toMatch(/requires a non-empty `prompt`/)
+  })
+
+  it("precedence: collect > resume > dispatches > single", () => {
+    expect(parseDispatchAgentArgs({ collect: "c1", resume: "r1", prompt: "x" }).mode).toBe(
+      "collect"
+    )
+    expect(
+      parseDispatchAgentArgs({
+        resume: "r1",
+        prompt: "x",
+        dispatches: [{ subagentId: "a", prompt: "y" }],
+      }).mode
+    ).toBe("resume")
+    expect(parseDispatchAgentArgs({ resume: "r1", prompt: "x", subagentId: "a" }).mode).toBe(
+      "resume"
+    )
+  })
+
+  it("advertises resume in the schema and description", () => {
+    const entry = buildDispatchAgentManifestEntry([{ id: "explore", description: "d" }])
+    expect(JSON.stringify(entry.jsonSchema)).toContain('"resume"')
+    expect(entry.description).toContain('{resume:"<runId>"')
+  })
 })

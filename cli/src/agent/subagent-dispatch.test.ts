@@ -256,15 +256,67 @@ describe("handleCliDispatchAgent", () => {
     resolveRun({ text: "bg done" })
   })
 
-  it("collects a backgrounded run's result on a later collect call", async () => {
+  it("collects a backgrounded run's result on a later collect call (idempotent)", async () => {
     const run = jest.fn().mockResolvedValue({ text: "async finished" })
     registerCliSubagentContext("s1", makeCtx({ run, mintRunId: () => "bg-collect" }))
     await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go", background: true }))
     const resp = await handleCliDispatchAgent(req({ collect: "bg-collect" }))
     expect(resp.result).toContain("async finished")
-    // A second collect of the same id is now unknown (entry dropped).
+    // Collect is idempotent: a re-collect answers from the journal instead of
+    // reporting the run unknown.
     const again = await handleCliDispatchAgent(req({ collect: "bg-collect" }))
-    expect(again.result).toContain('no background run "bg-collect"')
+    expect(again.result).toContain("async finished")
+  })
+
+  it("resumes a finished background run with the prior prompt + outcome as context", async () => {
+    // Real tmp home: the resume path reads the journal, and a fake home makes
+    // the CLI DB snapshot dispose throw (the pre-existing red-test trap).
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-resume-"))
+    const prompts: string[] = []
+    const run = jest.fn(async (_def: unknown, prompt: string) => {
+      prompts.push(prompt)
+      return { text: prompts.length === 1 ? "first outcome" : "follow-up outcome" }
+    })
+    registerCliSubagentContext("s1", makeCtx({ run, mintRunId: () => "bg-resume", home }))
+    await handleCliDispatchAgent(
+      req({ subagentId: "reviewer", prompt: "audit auth", background: true })
+    )
+    await handleCliDispatchAgent(req({ collect: "bg-resume" }))
+
+    const resp = await handleCliDispatchAgent(req({ resume: "bg-resume", prompt: "fix issue 2" }))
+
+    expect(resp.result).toContain("follow-up outcome")
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(prompts[1]).toContain("You previously worked on this task:")
+    expect(prompts[1]).toContain("audit auth")
+    expect(prompts[1]).toContain("first outcome")
+    expect(prompts[1]).toContain("fix issue 2")
+  })
+
+  it("refuses to resume an unknown or still-running run", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-resume-"))
+    registerCliSubagentContext("s1", makeCtx({ home }))
+    const missing = await handleCliDispatchAgent(req({ resume: "ghost", prompt: "x" }))
+    expect(missing.result).toContain('no background run "ghost"')
+
+    let resolveRun!: (r: { text: string }) => void
+    const run = jest.fn(
+      () =>
+        new Promise<{ text: string }>((res) => {
+          resolveRun = res
+        })
+    )
+    registerCliSubagentContext("s1", makeCtx({ run, mintRunId: () => "bg-live", home }))
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go", background: true }))
+    const live = await handleCliDispatchAgent(req({ resume: "bg-live", prompt: "more" }))
+    expect(live.result).toContain("still running")
+    resolveRun({ text: "done" })
+  })
+
+  it("requires a prompt for resume", async () => {
+    registerCliSubagentContext("s1", makeCtx())
+    const resp = await handleCliDispatchAgent(req({ resume: "bg-1" }))
+    expect(resp.result).toContain("requires a non-empty `prompt`")
   })
 
   it("reports an unknown subagent synchronously even in background mode", async () => {

@@ -40,6 +40,10 @@ import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import { steerBlocksOf, steerTextOf } from "@/lib/claude/steer"
 import { isSessionOpen, maybeDrainSteer, sessionStatusOf, steerArmed } from "./steer-runtime"
+import {
+  maybeDrainBackgroundResults,
+  registerBackgroundReplaySend,
+} from "./background-result-runtime"
 import { tagBranchSiblings } from "@/lib/chat/branch-regen"
 import { mirrorTruncateToDesktop } from "@/lib/chat/mirror-truncate"
 import {
@@ -1315,6 +1319,19 @@ export function useClaudeChat() {
     }
   }, [send])
 
+  // Background-run result delivery: register the hook's send as the replay
+  // channel, and drain pending results whenever a session (re)opens idle —
+  // covers relaunches (journaled pending rows) and panes closed at settle.
+  useEffect(() => {
+    return registerBackgroundReplaySend((framedText, sessionId) => {
+      void sendRef.current?.(framedText, undefined, { sessionId })
+    })
+  }, [])
+  const openSessionIdsForDrain = useChatStore((s) => s.openSessionIds)
+  useEffect(() => {
+    for (const sessionId of openSessionIdsForDrain) maybeDrainBackgroundResults(sessionId)
+  }, [openSessionIdsForDrain])
+
   // Self-paced /loop kick-off: when the runtime creates or resumes a loop
   // for the ACTIVE session, dispatch its next iteration silently — the same
   // skipUserAppend path as every later continuation, so the send never trips
@@ -1883,6 +1900,10 @@ async function handleEvent(
         if (!evt.error || steerArmed.has(evt.sessionId)) {
           drainSteerVia(evt.sessionId, sendRef)
         }
+        // Then deliver any settled background-run results. Steer wins: if the
+        // steer replay just started a new turn, the idle check inside defers
+        // this to the NEXT settle.
+        maybeDrainBackgroundResults(evt.sessionId)
       }
       return
     }

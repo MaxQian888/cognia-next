@@ -37,8 +37,12 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
 
   if (parsed.mode === "collect") {
     const r = await collectRendererBackgroundResult(parsed.runId)
-    if (!r) return `No background run "${parsed.runId}" found (already collected or unknown).`
+    if (!r) return `No background run "${parsed.runId}" found.`
     return renderDispatchOutcomeForModel(parsed.runId, r)
+  }
+
+  if (parsed.mode === "resume") {
+    return resumeDispatchRun(req.sessionId, parsed)
   }
 
   const caller = await resolveCaller(req.sessionId)
@@ -70,6 +74,67 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
     },
   })
   return outcomes.map((o) => o.text).join("\n\n---\n\n")
+}
+
+/**
+ * Continue a FINISHED run with a follow-up prompt. The prior prompt + outcome
+ * (all the ephemeral session leaves behind) are re-framed as context and the
+ * same subagent is re-dispatched. Never throws — guards collapse into a
+ * readable tool result.
+ */
+async function resumeDispatchRun(
+  sessionId: string,
+  parsed: { runId: string; prompt: string; toolsEnabled?: boolean; background: boolean }
+): Promise<string> {
+  const [{ getBackgroundTaskRecord }, { frameResumePrompt }, { getDispatchableSubagentDef }] =
+    await Promise.all([
+      import("@/lib/db/background-tasks"),
+      import("@/lib/background-tasks/completion-delivery"),
+      import("@/lib/claude/agents/subagents"),
+    ])
+
+  let record: Awaited<ReturnType<typeof getBackgroundTaskRecord>>
+  try {
+    record = await getBackgroundTaskRecord(parsed.runId)
+  } catch {
+    record = undefined
+  }
+  if (!record || record.host !== "renderer" || record.kind !== "subagent") {
+    return `No background run "${parsed.runId}" found.`
+  }
+  if (record.status === "running") {
+    return `Run "${parsed.runId}" is still running — collect it with dispatch_agent({collect:"${parsed.runId}"}) or wait for it to finish.`
+  }
+  if (!getDispatchableSubagentDef(record.subagentId)) {
+    return `Cannot resume run "${parsed.runId}" — subagent "${record.subagentId}" is no longer available.`
+  }
+
+  const caller = await resolveCaller(sessionId)
+  const framedPrompt = frameResumePrompt(
+    {
+      prompt: record.prompt,
+      outcome: record.resultText ?? record.error ?? "(no output recorded)",
+    },
+    parsed.prompt
+  )
+  const { runId, text } = await startDispatchRun({
+    subagentId: record.subagentId,
+    prompt: framedPrompt,
+    toolsEnabled: parsed.toolsEnabled ?? record.toolsEnabled ?? true,
+    background: parsed.background,
+    parentSessionId: sessionId,
+    caller,
+    label: `${record.subagentId} (resumed)`,
+    resumeOfRunId: record.runId,
+  })
+  // Provenance: link the original row to its continuation (best-effort).
+  try {
+    const { updateBackgroundTaskRecord } = await import("@/lib/db/background-tasks")
+    await updateBackgroundTaskRecord(record.runId, { resumedByRunId: runId })
+  } catch {
+    // Journal bookkeeping only.
+  }
+  return text
 }
 
 /**

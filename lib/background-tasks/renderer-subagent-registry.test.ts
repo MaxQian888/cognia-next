@@ -17,6 +17,7 @@ import {
   interruptRendererBackgroundTasksOnBoot,
   journalRendererForegroundRun,
   listRendererBackgroundRuns,
+  setRendererBackgroundSettleListener,
   startRendererBackgroundRun,
 } from "./renderer-subagent-registry"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
@@ -228,6 +229,32 @@ describe("renderer subagent background registry", () => {
     })
   })
 
+  it("collect is idempotent — re-collects answer from the journal and stamp collectedAt", async () => {
+    startRendererBackgroundRun("r1", meta(), Promise.resolve(ok("done twice")))
+
+    const first = await collectRendererBackgroundResult("r1")
+    expect(first).toMatchObject({ text: "done twice" })
+    // Second collect falls back to the journal instead of "not found".
+    const second = await collectRendererBackgroundResult("r1")
+    expect(second).toMatchObject({ text: "done twice", channel: "text" })
+    await expect(getDb().backgroundTasks.get("r1")).resolves.toMatchObject({
+      collectedAt: expect.any(Number),
+    })
+  })
+
+  it("notifies the registered settle listener with meta + settle payload", async () => {
+    const listener = jest.fn()
+    setRendererBackgroundSettleListener(listener)
+    startRendererBackgroundRun("r1", meta(), Promise.resolve(ok("done")))
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(listener).toHaveBeenCalledWith(
+      "r1",
+      expect.objectContaining({ subagentId: "reviewer", sessionId: "ses_1", mode: "background" }),
+      expect.objectContaining({ status: "done", resultText: "done" })
+    )
+  })
+
   it("journals a background failure with its envelope message + partial output", async () => {
     const failed: PluginSubagentDispatchResult = {
       text: "429 too many requests",
@@ -283,11 +310,11 @@ describe("renderer subagent background registry", () => {
     await expect(collectRendererBackgroundResult("running-row")).resolves.toBeUndefined()
   })
 
-  it("does not replay the journal after a live result was collected", async () => {
+  it("replays the journal after the live result was collected (idempotent collect)", async () => {
     startRendererBackgroundRun("r1", meta(), Promise.resolve(ok("done")))
 
     await expect(collectRendererBackgroundResult("r1")).resolves.toMatchObject({ text: "done" })
-    await expect(collectRendererBackgroundResult("r1")).resolves.toBeUndefined()
+    await expect(collectRendererBackgroundResult("r1")).resolves.toMatchObject({ text: "done" })
   })
 
   it("falls back to an interrupted notice for journaled interrupted runs", async () => {

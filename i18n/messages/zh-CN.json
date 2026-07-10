@@ -1423,6 +1423,9 @@
       "description": "编辑该队友的身份、提示词、工具与插件能力。",
       "rosterSection": {
         "description": "存在于队员行而非预设配置上的字段。",
+        "externalInstance": "外部智能体实例",
+        "externalInstanceAuto": "自动（预设默认）",
+        "externalInstanceHint": "将该成员绑定到某个已配置的具体实例，使其使用该实例自己的账号、环境与设置运行。",
         "runtime": "运行时",
         "specialization": "专长",
         "temperature": "温度（{value}）",
@@ -3974,6 +3977,12 @@
       "fields": {
         "elapsed": "耗时：{value}",
         "startedAt": "开始：{value}"
+      },
+      "notify": {
+        "autoResumed": "{count, plural, other {已自动恢复 # 个被中断的后台运行}}",
+        "body": "运行 {runId}",
+        "doneTitle": "子代理“{subagentId}”已完成（{elapsed}）",
+        "failedTitle": "子代理“{subagentId}”失败（{elapsed}）"
       },
       "open": "打开任务中心",
       "status": {

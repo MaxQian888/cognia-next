@@ -52,6 +52,26 @@ jest.mock("@/lib/db/sessions", () => ({
   __esModule: true,
   getSession: jest.fn(),
 }))
+jest.mock("@/lib/db/background-tasks", () => ({
+  __esModule: true,
+  createDexieBackgroundTaskJournal: () => ({
+    recordStart: jest.fn(),
+    recordSettle: jest.fn(),
+    list: jest.fn(async () => []),
+    get: jest.fn(async () => undefined),
+    update: jest.fn(async () => undefined),
+    clearSettled: jest.fn(async () => undefined),
+  }),
+  getBackgroundTaskRecord: jest.fn(),
+  updateBackgroundTaskRecord: jest.fn(async () => undefined),
+  listBackgroundTaskRecords: jest.fn(async () => []),
+  interruptBackgroundTasksOnBoot: jest.fn(async () => []),
+}))
+import { getBackgroundTaskRecord, updateBackgroundTaskRecord } from "@/lib/db/background-tasks"
+const mockGetRecord = getBackgroundTaskRecord as jest.MockedFunction<typeof getBackgroundTaskRecord>
+const mockUpdateRecord = updateBackgroundTaskRecord as jest.MockedFunction<
+  typeof updateBackgroundTaskRecord
+>
 
 const mockDispatch = dispatchSubagent as jest.MockedFunction<typeof dispatchSubagent>
 const mockGetDef = getDispatchableSubagentDef as jest.MockedFunction<
@@ -313,6 +333,74 @@ describe("runDispatchAgentTool — call modes", () => {
   it("returns a clear message when collecting an unknown run", async () => {
     const out = await runDispatchAgentTool({ sessionId: "chat-1", args: { collect: "ghost" } })
     expect(out).toMatch(/no background run/i)
+  })
+
+  describe("resume mode", () => {
+    const finishedRecord = (over: Record<string, unknown> = {}) =>
+      ({
+        runId: "orig-1",
+        kind: "subagent",
+        subagentId: "coder",
+        prompt: "audit the auth flow",
+        sessionId: "chat-1",
+        host: "renderer",
+        status: "done",
+        startedAt: 1000,
+        settledAt: 2000,
+        resultText: "found 3 issues",
+        toolsEnabled: false,
+        ...over,
+      }) as never
+
+    it("re-dispatches the same subagent with the prior prompt + outcome framed as context", async () => {
+      mockGetRecord.mockResolvedValue(finishedRecord())
+      mockGetDef.mockReturnValue({ id: "coder", name: "coder", description: "d" } as never)
+      mockDispatch.mockResolvedValue(ok("follow-up outcome"))
+
+      const out = await runDispatchAgentTool({
+        sessionId: "chat-1",
+        args: { resume: "orig-1", prompt: "fix issue 2" },
+      })
+
+      expect(out).toContain("follow-up outcome")
+      expect(out).toContain("[coder (resumed)]")
+      const [, framedPrompt, opts] = mockDispatch.mock.calls[0]
+      expect(framedPrompt).toContain("You previously worked on this task:")
+      expect(framedPrompt).toContain("audit the auth flow")
+      expect(framedPrompt).toContain("found 3 issues")
+      expect(framedPrompt).toContain("fix issue 2")
+      // The original run's tool flag is inherited when not overridden.
+      expect(opts).toMatchObject({ toolsEnabled: false })
+      // Provenance: original row linked to the continuation.
+      expect(mockUpdateRecord).toHaveBeenCalledWith(
+        "orig-1",
+        expect.objectContaining({ resumedByRunId: expect.any(String) })
+      )
+    })
+
+    it("refuses to resume unknown / running / def-less runs with readable messages", async () => {
+      mockGetRecord.mockResolvedValue(undefined)
+      expect(
+        await runDispatchAgentTool({ sessionId: "chat-1", args: { resume: "ghost", prompt: "x" } })
+      ).toMatch(/no background run "ghost"/i)
+
+      mockGetRecord.mockResolvedValue(finishedRecord({ status: "running" }))
+      expect(
+        await runDispatchAgentTool({ sessionId: "chat-1", args: { resume: "orig-1", prompt: "x" } })
+      ).toMatch(/still running/i)
+
+      mockGetRecord.mockResolvedValue(finishedRecord())
+      mockGetDef.mockReturnValue(undefined)
+      expect(
+        await runDispatchAgentTool({ sessionId: "chat-1", args: { resume: "orig-1", prompt: "x" } })
+      ).toMatch(/no longer available/i)
+      expect(mockDispatch).not.toHaveBeenCalled()
+    })
+
+    it("resume without a prompt surfaces the parse error", async () => {
+      const out = await runDispatchAgentTool({ sessionId: "chat-1", args: { resume: "orig-1" } })
+      expect(out).toMatch(/requires a non-empty `prompt`/)
+    })
   })
 
   it("surfaces a rejection result and records it as rejected", async () => {

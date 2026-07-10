@@ -163,6 +163,12 @@
       "elapsed": "耗时：{value}",
       "startedAt": "开始：{value}"
     },
+    "notify": {
+      "autoResumed": "{count, plural, other {已自动恢复 # 个被中断的后台运行}}",
+      "body": "运行 {runId}",
+      "doneTitle": "子代理“{subagentId}”已完成（{elapsed}）",
+      "failedTitle": "子代理“{subagentId}”失败（{elapsed}）"
+    },
     "open": "打开任务中心",
     "status": {
       "done": "完成",

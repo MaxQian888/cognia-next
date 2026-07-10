@@ -163,6 +163,12 @@
       "elapsed": "Elapsed: {value}",
       "startedAt": "Started: {value}"
     },
+    "notify": {
+      "autoResumed": "{count, plural, one {Auto-resumed # interrupted background run} other {Auto-resumed # interrupted background runs}}",
+      "body": "Run {runId}",
+      "doneTitle": "Subagent \"{subagentId}\" finished ({elapsed})",
+      "failedTitle": "Subagent \"{subagentId}\" failed ({elapsed})"
+    },
     "open": "Open Job Center",
     "status": {
       "done": "Done",

@@ -36,7 +36,6 @@ const runHomes = new Map<string, string | undefined>()
 // never read another session's subagent output even though the registry +
 // journal are process-/disk-global.
 const runOwners = new Map<string, string>()
-const collectedRunIds = new Set<string>()
 const interruptedHomes = new Set<string>()
 const dexieJournal = createDexieBackgroundTaskJournal()
 
@@ -73,11 +72,16 @@ export function hasCliBackgroundRun(runId: string): boolean {
   return registry.has(runId)
 }
 
+/**
+ * Collect a background run's result. IDEMPOTENT: after the live entry is
+ * consumed, every later collect answers from the journal (results stay
+ * collectable) — a model that re-collects always gets the result instead of
+ * "not found". `collectedAt` stamps the latest successful collect.
+ */
 export async function collectCliBackgroundResult(
   runId: string,
   options: { home?: string; owner?: string } = {}
 ): Promise<string | undefined> {
-  if (collectedRunIds.has(runId)) return undefined
   // Cross-session isolation: when an owner is supplied, a run started by a
   // different session is invisible — return `undefined` (the dispatch layer then
   // reports it as an unknown run) WITHOUT consuming it, so the rightful owner can
@@ -89,25 +93,53 @@ export async function collectCliBackgroundResult(
   try {
     const live = await registry.collect(runId)
     if (live !== undefined) {
-      collectedRunIds.add(runId)
+      markCliCollected(runId)
+      runHomes.delete(runId)
+      runOwners.delete(runId)
       return live
     }
   } catch (err) {
-    collectedRunIds.add(runId)
-    return errorMessage(err)
-  } finally {
+    markCliCollected(runId)
     runHomes.delete(runId)
     runOwners.delete(runId)
+    return errorMessage(err)
   }
 
   const record = await readJournalRecord(runId, options.home)
   if (!record || record.host !== "cli") return undefined
   if (options.owner !== undefined && record.sessionId !== options.owner) return undefined
-  if (record.status === "done") return record.resultText ?? ""
-  if (record.status === "error")
+  if (record.status === "done") {
+    markCliCollected(runId, options.home)
+    return record.resultText ?? ""
+  }
+  if (record.status === "error") {
+    markCliCollected(runId, options.home)
     return record.error ?? record.resultText ?? "Background run failed."
-  if (record.status === "interrupted") return backgroundTaskInterruptedMessage(runId)
+  }
+  if (record.status === "interrupted") {
+    markCliCollected(runId, options.home)
+    return backgroundTaskInterruptedMessage(runId)
+  }
   return undefined
+}
+
+/** Read a run's journal record with owner scoping (resume mode). */
+export async function getCliBackgroundRecord(
+  runId: string,
+  options: { home?: string; owner?: string } = {}
+) {
+  const record = await readJournalRecord(runId, options.home)
+  if (!record || record.host !== "cli") return undefined
+  if (options.owner !== undefined && record.sessionId !== options.owner) return undefined
+  return record
+}
+
+/** Best-effort collect bookkeeping through the serialized journal queue. */
+function markCliCollected(runId: string, home?: string): void {
+  void enqueueJournal(home ?? runHomes.get(runId), async (handle) => {
+    await dexieJournal.update(runId, { collectedAt: Date.now() })
+    handle.scheduleFlush()
+  }).catch(() => undefined)
 }
 
 export function listCliBackgroundRuns(owner?: string): CliBackgroundRunInfo[] {
@@ -140,7 +172,6 @@ export function __clearAllCliBackgroundRunsForTesting(): void {
   registry.__clearForTesting()
   runHomes.clear()
   runOwners.clear()
-  collectedRunIds.clear()
   interruptedHomes.clear()
   journalQueue = Promise.resolve()
 }
