@@ -1423,9 +1423,6 @@
       "description": "编辑该队友的身份、提示词、工具与插件能力。",
       "rosterSection": {
         "description": "存在于队员行而非预设配置上的字段。",
-        "externalInstance": "外部智能体实例",
-        "externalInstanceAuto": "自动（预设默认）",
-        "externalInstanceHint": "将该成员绑定到某个已配置的具体实例，使其使用该实例自己的账号、环境与设置运行。",
         "runtime": "运行时",
         "specialization": "专长",
         "temperature": "温度（{value}）",
@@ -3424,6 +3421,9 @@
       "ariaSteerNow": "中断当前回合并立即发送队列中的消息",
       "interruptHint": "按 Esc 中断",
       "interruptHintTouch": "点按中断",
+      "metricContext": "上下文 {pct}%",
+      "metricSpeed": "{value} tok/s",
+      "metricTokens": "{value} tok",
       "queued": "{count} 条待发送",
       "steerNow": "立即发送",
       "waitingApproval": "等待审批",
@@ -3432,14 +3432,19 @@
     "sessionCost": {
       "byModelTitle": "按模型拆分",
       "cache": "缓存",
+      "cacheHit": "缓存命中",
       "cacheReadShort": "读",
       "cacheWriteShort": "写",
       "cost": "成本",
       "description": "来自 SDK result 事件的每轮持久化合计；按模型拆分来自 sessionUsage 表。",
+      "duration": "生成耗时",
       "input": "输入",
       "noModelData": "尚无持久化用量记录——上面的汇总来自内存中已加载的轮次。",
       "output": "输出",
+      "reasoning": "推理",
+      "speed": "速度",
       "title": "会话成本",
+      "tokPerSec": "{value} tok/s",
       "tokensTitle": "输入：{input} · 输出：{output}",
       "trigger": "会话成本",
       "turns": "轮次"
@@ -5267,9 +5272,6 @@
       "backoffFixed": "固定",
       "backoffFixedDelay": "固定间隔",
       "backoffStrategy": "退避策略",
-      "boundAccount": "账号",
-      "boundAccountActive": "使用当前账号",
-      "boundAccountDesc": "让该实例使用某个指定账号运行，而不是该提供商的当前账号，从而保持实例之间相互隔离。",
       "chatFailurePolicy": "对话失败策略",
       "chatFailurePolicyDesc": "外部代理在对话模式下失败时的处理策略",
       "chatFailurePolicyFallback": "回退到内置代理",
@@ -5290,6 +5292,9 @@
         "usedPercent": "已使用 {percent}%"
       },
       "codexDefaultEffort": "默认推理力度",
+      "codexExtraSkillRoots": "额外 skill 文件夹",
+      "codexExtraSkillRootsDesc": "Codex 除默认的 .agents/skills 位置外,还会扫描这些绝对路径文件夹下的 SKILL.md。每次该 agent 连接时都会重新挂载。每行一个路径。",
+      "codexExtraSkillRootsPlaceholder": "/Users/me/my-skills\n/opt/shared/codex-skills",
       "codexModelDefault": "模型默认",
       "codexNetworkAccess": "网络访问",
       "codexNetworkAccessDesc": "允许沙箱内的命令访问网络。",
@@ -5300,6 +5305,7 @@
       "codexSandboxReadOnly": "只读",
       "codexSandboxWorkspaceWrite": "工作区可写",
       "codexServerDefault": "服务端默认",
+      "codexSkillRootsBrowse": "浏览…",
       "codexSummaryAuto": "自动",
       "codexSummaryConcise": "简洁",
       "codexSummaryDetailed": "详细",
@@ -5956,8 +5962,12 @@
       "count": "{count, plural, other {# 条事件}}",
       "empty": "暂无最近动态",
       "kind": {
+        "broadcastEnqueued": "广播已入队",
+        "broadcastPartialFailure": "广播部分失败",
+        "conversationCreated": "会话已创建",
         "deliveryDeadlettered": "投递失败——已放弃",
         "deliveryError": "投递错误",
+        "dispatchRuleMatched": "已按派发规则路由",
         "goalBlockedIm": "目标被拦截",
         "goalStartedIm": "目标已启动",
         "inboundDeferredManualMode": "回复已挂起——手动模式",
@@ -5976,7 +5986,11 @@
         "pluginInboundBlocked": "被插件拦截",
         "pluginRateBlocked": "被插件限流",
         "pluginTransformPiiBlocked": "插件改写被拦截——PII",
+        "siblingBotBudgetExhausted": "同群机器人回复额度已用尽",
+        "siblingBotIgnored": "已忽略同群机器人消息",
+        "taskDispatched": "任务已派发",
         "teamDispatched": "已路由到团队",
+        "teamPostedAsBot": "团队以机器人身份发送",
         "workflowDispatched": "已路由到工作流"
       },
       "title": "动态",
@@ -6306,6 +6320,7 @@
     "outboundSource": {
       "draftApproved": "草稿已批准",
       "manual": "手动",
+      "skill": "技能",
       "workflow": "工作流",
       "workflowTooltip": "由工作流节点 {nodeId} 发送 — 点击打开运行记录"
     },
@@ -11861,6 +11876,7 @@
         "sensitiveBadge": "敏感",
         "title": "审查 {name} 申请的能力",
         "togglePermissionAriaLabel": "切换权限 {permission}",
+        "unimplementedHint": "当前插件运行时尚未支持——授予它不会产生任何效果。",
         "unsignedAuthor": "未签名作者"
       },
       "fromLocalButton": {
@@ -14501,17 +14517,27 @@
       },
       "title": "健康评估"
     },
+    "averages": {
+      "cost": "成本",
+      "duration": "生成耗时",
+      "title": "每轮平均",
+      "tokens": "Token"
+    },
     "degradedTree": "对话以线性时间线展示（未存储分支数据）。",
     "empty": "活动还不足以分析。",
     "idle": {
       "headline": "轮次之间出现 {count} 处超过 {seconds}s 的空闲间隙"
     },
     "kpi": {
+      "cacheHit": "缓存命中",
       "cost": "成本",
       "denials": "拒绝",
+      "duration": "生成耗时",
       "errors": "错误",
       "idleGaps": "空闲间隙",
       "modelSwitches": "模型切换",
+      "reasoning": "推理",
+      "speed": "速度",
       "tokens": "Token",
       "tools": "工具调用",
       "turns": "轮次"
@@ -14530,7 +14556,10 @@
       "thrashing": "检测到重复的命令/编辑反复操作",
       "title": "摩擦与反复操作"
     },
-    "title": "会话洞察"
+    "title": "会话洞察",
+    "units": {
+      "tokPerSec": "{value} tok/s"
+    }
   },
   "settings": {
     "a2ui": {
@@ -16365,6 +16394,10 @@
         "detail": {
           "adapterMissing": "找不到该适配器，可能已被其他窗口删除。",
           "editCredentials": "编辑凭据",
+          "fieldMode": "模式",
+          "fieldPublicUrl": "公开 URL",
+          "fieldTransport": "传输",
+          "fieldType": "类型",
           "noSelection": "在左侧选择一个适配器，查看其配置、健康状态、会话和审计日志。"
         },
         "detailTabs": {
@@ -16487,6 +16520,27 @@
         "transportLabels": {
           "dingtalkStream": "Stream 模式 WSS"
         }
+      },
+      "aiBindingDefaults": {
+        "characterDefault": "默认",
+        "characterHelp": "此机器人默认使用的人设；会话可用 /character 单独绑定。",
+        "characterLabel": "默认人设",
+        "modelDefault": "默认",
+        "modelHelp": "此机器人使用的提供商 + 模型。优先于人设自带的模型；会话内 /model 仍然最高。",
+        "modelLabel": "默认提供商 · 模型",
+        "notConfigured": "{id}（未配置）",
+        "precedenceNote": "会话级覆盖（/model、/team、收件箱切换器）始终优先于这些机器人级默认值。",
+        "reasoningDefault": "默认",
+        "reasoningHelp": "此机器人回复的思考强度。模型不支持推理时自动忽略。",
+        "reasoningLabel": "默认思考强度",
+        "reasoning_high": "高",
+        "reasoning_low": "低",
+        "reasoning_max": "最高",
+        "reasoning_medium": "中",
+        "reasoning_xhigh": "特高",
+        "teamHelp": "入站消息将派发给该 Agent 团队；会话可用 /team 单独绑定，或用 /team off 关闭。",
+        "teamLabel": "默认 Agent 团队",
+        "title": "AI 绑定默认值"
       },
       "audit": {
         "collapseAria": "收起审计条目",
@@ -16806,6 +16860,40 @@
         "unknownId": "?",
         "unknownUsername": "unknown"
       },
+      "dispatchRules": {
+        "actionCharacter": "人设",
+        "actionLabel": "路由到",
+        "actionTeam": "团队",
+        "actionWorkflow": "工作流",
+        "addRule": "添加规则",
+        "channelAny": "任意",
+        "channelLabel": "会话类型",
+        "channel_channel": "频道",
+        "channel_group": "群聊",
+        "channel_private": "私聊",
+        "channel_thread": "话题",
+        "characterMissing": "{id}…（已删除）",
+        "characterNone": "选择人设…",
+        "deleteAria": "删除规则",
+        "empty": "暂无规则——所有消息按机器人级默认值路由。",
+        "enabledAria": "启用规则",
+        "help": "命中规则的入站消息将路由到对应的人设、团队或工作流。规则自上而下匹配，首个命中生效。会话级覆盖（/team、/character、/workflow）仍优先于规则；规则优先于机器人级默认值。",
+        "keywordsHelp": "逗号分隔；任一关键词命中即匹配（不区分大小写的子串）。",
+        "keywordsLabel": "关键词",
+        "keywordsPlaceholder": "bug, 崩溃, 紧急",
+        "moveDownAria": "下移规则",
+        "moveUpAria": "上移规则",
+        "nameLabel": "规则名称",
+        "namePlaceholder": "规则 {index}",
+        "patternInvalid": "正则无效——该条件永远不会命中。",
+        "patternLabel": "正则表达式",
+        "patternPlaceholder": "^\\[紧急\\]",
+        "senderIdsLabel": "发送者 ID",
+        "senderIdsPlaceholder": "u_12345, ou_abcdef",
+        "targetLabel": "目标",
+        "title": "派发规则",
+        "workflowPlaceholder": "工作流 ID…"
+      },
       "helpAndWelcome": {
         "enableCardHelp": "机器人入群或用户首次发消息时，用一张卡片引导用户。每个会话仅发送一次。",
         "enableCardLabel": "发送欢迎卡片",
@@ -16857,6 +16945,17 @@
             "always": "始终响应每一条消息",
             "directOnly": "仅私聊 — 群聊永不回应",
             "mentionOnly": "仅 @ 机器人 — 群聊中需要被 @（默认）"
+          },
+          "sibling": {
+            "budgetAria": "同群机器人每群每小时回复额度",
+            "budgetHelp": "每个群每小时最多对同群机器人消息回复的次数。",
+            "budgetLabel": "回复额度（每群 / 小时）",
+            "help": "如何处理同一群里你自己另一个机器人发出的消息。忽略可防止机器人互相触发循环。",
+            "options": {
+              "ignore": "忽略 — 永不回应同群机器人（默认）",
+              "respond": "回应 — 允许回复，但受下方额度限制"
+            },
+            "title": "同群机器人"
           },
           "title": "响应策略"
         },
@@ -16954,7 +17053,10 @@
         "whoami": {
           "dingtalkNoProbe": "钉钉适配器没有主动探测身份的接口 — 下方的凭据是配置时录入的。",
           "lastProbeAt": "上次探测：{time}",
+          "missingScopesHint": "请在飞书开发者后台 → 权限管理中开启这些权限并重新发布应用，然后重新探测。群管理需要 im:chat:create、im:chat:update、im:chat.members:write_only 和 contact:user.id:readonly。",
+          "missingScopesTitle": "检测到缺失的权限 scope",
           "onebotNoProbe": "OneBot 适配器没有主动探测身份的接口 — 下方的 QQ UIN 是配置时录入的。",
+          "openId": "Open ID",
           "probeButton": "探测身份",
           "probeFailed": "探测失败",
           "qqOfficialNoProbe": "QQ 官方适配器没有主动探测身份的接口 — 下方的 AppID 是配置时录入的。",
@@ -17305,6 +17407,11 @@
         "overview": "概览",
         "tunnel": "隧道"
       },
+      "teamPicker": {
+        "aria": "选择 Agent 团队",
+        "missing": "{id}…（已删除）",
+        "none": "无"
+      },
       "telegram": {
         "adapterCreated": "适配器已创建。",
         "adapterUpdated": "适配器已更新。",
@@ -17550,6 +17657,40 @@
       },
       "model": "模型",
       "provider": "服务商",
+      "runStatusBar": {
+        "contextPct": {
+          "description": "最新回合后模型上下文窗口的占用比例。",
+          "heading": "上下文占用",
+          "label": "显示上下文占用"
+        },
+        "cost": {
+          "description": "本会话的估算成本。",
+          "heading": "成本",
+          "label": "显示成本"
+        },
+        "description": "选择输入框上方的运行状态条在回合运行时显示哪些指标。",
+        "elapsed": {
+          "description": "活跃工作计时（审批等待时暂停）。",
+          "heading": "耗时",
+          "label": "显示耗时"
+        },
+        "outputTokens": {
+          "description": "本会话生成的输出 token 总数。",
+          "heading": "输出 token",
+          "label": "显示输出 token"
+        },
+        "speed": {
+          "description": "生成吞吐（每秒 token）。",
+          "heading": "模型速度",
+          "label": "显示模型速度"
+        },
+        "title": "运行状态条",
+        "tools": {
+          "description": "运行回合中的工具调用次数。",
+          "heading": "工具数",
+          "label": "显示工具数"
+        }
+      },
       "sidebar": {
         "contentSearch": {
           "description": "不仅匹配会话标题，也匹配消息正文内容（速度较慢）。",
@@ -20247,6 +20388,21 @@
       }
     },
     "subagents": {
+      "backgroundTasks": {
+        "autoResume": "启动时自动恢复被中断的运行",
+        "autoResumeHint": "默认关闭——开启后，被崩溃/退出中断的后台子代理运行会在启动时重新派发（有次数上限）。",
+        "denyList": "派发拒绝列表",
+        "denyListHint": "每行一个作用于子代理 id 的 glob（如 Explore、myplugin:*、template:*）。被拒绝的 id 不会进入 dispatch_agent 工具，并在派发时被拒。",
+        "denyListPlaceholder": "template:*\nmyplugin:reviewer",
+        "description": "后台子代理生命周期与派发权限。",
+        "maxAttempts": "最大自动恢复次数",
+        "maxAttemptsHint": "每条运行血缘链的自动恢复次数上限（防止崩溃循环）。",
+        "save": "保存",
+        "saved": "后台任务设置已保存。",
+        "surfaceAsks": "上浮子代理权限请求",
+        "surfaceAsksHint": "开启（默认）：被派发子代理的权限请求会显示在本聊天中。关闭：自动拒绝。",
+        "title": "后台任务与权限"
+      },
       "description": "由父代理派生的子代理模板与实时运行状态。模板会持久化保存,运行时数据为内存级,重启后清空。",
       "import": {
         "applyButton": "导入 {count} 个",
@@ -20291,6 +20447,8 @@
       },
       "nesting": {
         "description": "允许聊天代理派发可再派发更深层子代理的子代理，并提供受控深度、预算以及循环/超时守卫。",
+        "dispatchMaxRetries": "瞬时失败重试",
+        "dispatchMaxRetriesHint": "瞬时派发失败（限流、超时、网络、sidecar 重启）的重试次数。0 = 禁用。默认 1。",
         "enabled": "启用嵌套派发",
         "enabledHint": "默认关闭——代理保持标准的单层 Task 工具。",
         "maxDepth": "最大嵌套深度",
@@ -22292,10 +22450,13 @@
         "colInput": "输入",
         "colModel": "模型",
         "colOutput": "输出",
+        "colSpeed": "速度",
         "colTurns": "轮次",
         "description": "各模型的 Token 与估算成本。SDK 未上报的成本会按模型定价回填。",
         "donutCenter": "合计",
         "empty": "该范围内还没有用量。",
+        "speed": "速度",
+        "speedUnit": "{value} tok/s",
         "title": "按模型成本",
         "totalCost": "总成本",
         "totalTokens": "总 Token",

@@ -1423,9 +1423,6 @@
       "description": "Edit identity, prompt, tools, and plugin capabilities for this teammate.",
       "rosterSection": {
         "description": "Fields that live on the teammate row, not on its preset config.",
-        "externalInstance": "External agent instance",
-        "externalInstanceAuto": "Auto (preset default)",
-        "externalInstanceHint": "Bind this teammate to a specific configured instance so it runs with that instance's own account, environment, and settings.",
         "runtime": "Runtime",
         "specialization": "Specialization",
         "temperature": "Temperature ({value})",
@@ -3424,6 +3421,9 @@
       "ariaSteerNow": "Interrupt the current turn and send queued messages now",
       "interruptHint": "Esc to interrupt",
       "interruptHintTouch": "Tap to interrupt",
+      "metricContext": "context {pct}%",
+      "metricSpeed": "{value} tok/s",
+      "metricTokens": "{value} tok",
       "queued": "{count} queued",
       "steerNow": "Send now",
       "waitingApproval": "Waiting for approval",
@@ -3432,14 +3432,19 @@
     "sessionCost": {
       "byModelTitle": "By model",
       "cache": "Cache",
+      "cacheHit": "Cache hit",
       "cacheReadShort": "Read",
       "cacheWriteShort": "Write",
       "cost": "Cost",
       "description": "Persisted per-turn totals from the SDK's result events. Per-model split is sourced from the sessionUsage Dexie table.",
+      "duration": "Gen time",
       "input": "Input",
       "noModelData": "No persisted usage rows yet — totals above come from in-memory turns.",
       "output": "Output",
+      "reasoning": "Reasoning",
+      "speed": "Speed",
       "title": "Session cost",
+      "tokPerSec": "{value} tok/s",
       "tokensTitle": "Input: {input} · Output: {output}",
       "trigger": "Session cost",
       "turns": "Turns"
@@ -5267,9 +5272,6 @@
       "backoffFixed": "Fixed",
       "backoffFixedDelay": "Fixed Delay",
       "backoffStrategy": "Backoff Strategy",
-      "boundAccount": "Account",
-      "boundAccountActive": "Use active account",
-      "boundAccountDesc": "Run this instance with a specific account instead of the provider's active account, so instances stay isolated.",
       "chatFailurePolicy": "Chat Failure Policy",
       "chatFailurePolicyDesc": "Behavior when external agent execution fails in chat mode",
       "chatFailurePolicyFallback": "Fallback to built-in agent",
@@ -5290,6 +5292,9 @@
         "usedPercent": "{percent}% used"
       },
       "codexDefaultEffort": "Default reasoning effort",
+      "codexExtraSkillRoots": "Extra skill folders",
+      "codexExtraSkillRootsDesc": "Absolute folders Codex scans for SKILL.md files, in addition to the default .agents/skills locations. Re-applied every time this agent connects. One path per line.",
+      "codexExtraSkillRootsPlaceholder": "/Users/me/my-skills\n/opt/shared/codex-skills",
       "codexModelDefault": "Model default",
       "codexNetworkAccess": "Network access",
       "codexNetworkAccessDesc": "Allow sandboxed commands to reach the network.",
@@ -5300,6 +5305,7 @@
       "codexSandboxReadOnly": "Read only",
       "codexSandboxWorkspaceWrite": "Workspace write",
       "codexServerDefault": "Server default",
+      "codexSkillRootsBrowse": "Browse…",
       "codexSummaryAuto": "Auto",
       "codexSummaryConcise": "Concise",
       "codexSummaryDetailed": "Detailed",
@@ -5956,8 +5962,12 @@
       "count": "{count, plural, =1 {1 event} other {# events}}",
       "empty": "No recent activity",
       "kind": {
+        "broadcastEnqueued": "Broadcast enqueued",
+        "broadcastPartialFailure": "Broadcast partially failed",
+        "conversationCreated": "Conversation created",
         "deliveryDeadlettered": "Delivery failed — gave up",
         "deliveryError": "Delivery error",
+        "dispatchRuleMatched": "Routed by dispatch rule",
         "goalBlockedIm": "Goal blocked",
         "goalStartedIm": "Goal started",
         "inboundDeferredManualMode": "Reply held — manual mode",
@@ -5976,7 +5986,11 @@
         "pluginInboundBlocked": "Blocked by plugin",
         "pluginRateBlocked": "Rate-limited by plugin",
         "pluginTransformPiiBlocked": "Plugin transform blocked — PII",
+        "siblingBotBudgetExhausted": "Sibling bot reply budget exhausted",
+        "siblingBotIgnored": "Sibling bot message ignored",
+        "taskDispatched": "Task dispatched",
         "teamDispatched": "Routed to team",
+        "teamPostedAsBot": "Team posted as bot",
         "workflowDispatched": "Routed to workflow"
       },
       "title": "Activity",
@@ -6306,6 +6320,7 @@
     "outboundSource": {
       "draftApproved": "Approved draft",
       "manual": "Manual",
+      "skill": "Skill",
       "workflow": "Workflow",
       "workflowTooltip": "Sent by workflow node {nodeId} — click to open the run"
     },
@@ -11861,6 +11876,7 @@
         "sensitiveBadge": "Sensitive",
         "title": "Review capabilities for {name}",
         "togglePermissionAriaLabel": "Toggle permission {permission}",
+        "unimplementedHint": "Not available yet in this plugin runtime — granting it has no effect.",
         "unsignedAuthor": "Unsigned author"
       },
       "fromLocalButton": {
@@ -14501,17 +14517,27 @@
       },
       "title": "Health assessments"
     },
+    "averages": {
+      "cost": "Cost",
+      "duration": "Gen time",
+      "title": "Per-turn averages",
+      "tokens": "Tokens"
+    },
     "degradedTree": "Conversation shown as a linear timeline (branch data isn't stored).",
     "empty": "Not enough activity to analyze yet.",
     "idle": {
       "headline": "{count} idle gap(s) over {seconds}s between turns"
     },
     "kpi": {
+      "cacheHit": "Cache hit",
       "cost": "Cost",
       "denials": "Denials",
+      "duration": "Gen time",
       "errors": "Errors",
       "idleGaps": "Idle gaps",
       "modelSwitches": "Model switches",
+      "reasoning": "Reasoning",
+      "speed": "Speed",
       "tokens": "Tokens",
       "tools": "Tool calls",
       "turns": "Turns"
@@ -14530,7 +14556,10 @@
       "thrashing": "Repeated command/edit thrashing detected",
       "title": "Friction & thrashing"
     },
-    "title": "Session insights"
+    "title": "Session insights",
+    "units": {
+      "tokPerSec": "{value} tok/s"
+    }
   },
   "settings": {
     "a2ui": {
@@ -16365,6 +16394,10 @@
         "detail": {
           "adapterMissing": "Adapter row not found. It may have been deleted in another tab.",
           "editCredentials": "Edit credentials",
+          "fieldMode": "Mode",
+          "fieldPublicUrl": "Public URL",
+          "fieldTransport": "Transport",
+          "fieldType": "Type",
           "noSelection": "Select an adapter on the left to see its configuration, health, conversations, and audit log."
         },
         "detailTabs": {
@@ -16487,6 +16520,27 @@
         "transportLabels": {
           "dingtalkStream": "Stream Mode WSS"
         }
+      },
+      "aiBindingDefaults": {
+        "characterDefault": "Default",
+        "characterHelp": "Persona this bot answers as unless a conversation binds its own (/character).",
+        "characterLabel": "Default persona",
+        "modelDefault": "Default",
+        "modelHelp": "Provider + model this bot uses. Beats the persona's own model; /model in a chat still wins.",
+        "modelLabel": "Default provider · model",
+        "notConfigured": "{id} (not configured)",
+        "precedenceNote": "Per-conversation overrides (/model, /team, inbox switchers) always beat these bot-level defaults.",
+        "reasoningDefault": "Default",
+        "reasoningHelp": "Thinking depth for this bot's replies. Dropped automatically on models without reasoning.",
+        "reasoningLabel": "Default reasoning",
+        "reasoning_high": "High",
+        "reasoning_low": "Low",
+        "reasoning_max": "Max",
+        "reasoning_medium": "Medium",
+        "reasoning_xhigh": "Extra high",
+        "teamHelp": "Inbound messages dispatch to this Agent Team unless a conversation binds its own (/team) or turns teams off (/team off).",
+        "teamLabel": "Default Agent Team",
+        "title": "AI binding defaults"
       },
       "audit": {
         "collapseAria": "Collapse audit entry",
@@ -16806,6 +16860,40 @@
         "unknownId": "?",
         "unknownUsername": "unknown"
       },
+      "dispatchRules": {
+        "actionCharacter": "Character",
+        "actionLabel": "Route to",
+        "actionTeam": "Team",
+        "actionWorkflow": "Workflow",
+        "addRule": "Add rule",
+        "channelAny": "Any",
+        "channelLabel": "Channel kind",
+        "channel_channel": "Channel",
+        "channel_group": "Group",
+        "channel_private": "Private",
+        "channel_thread": "Thread",
+        "characterMissing": "{id}… (missing)",
+        "characterNone": "Pick a character…",
+        "deleteAria": "Delete rule",
+        "empty": "No rules yet — every message follows the bot-level defaults.",
+        "enabledAria": "Enable rule",
+        "help": "Inbound messages matching a rule route to its character, team, or workflow. Rules run top-down; the first match wins. Conversation overrides (/team, /character, /workflow) still beat rules; rules beat the bot-level defaults.",
+        "keywordsHelp": "Comma-separated; any keyword matches (case-insensitive substring).",
+        "keywordsLabel": "Keywords",
+        "keywordsPlaceholder": "bug, crash, urgent",
+        "moveDownAria": "Move rule down",
+        "moveUpAria": "Move rule up",
+        "nameLabel": "Rule name",
+        "namePlaceholder": "Rule {index}",
+        "patternInvalid": "Invalid pattern — this condition will never match.",
+        "patternLabel": "Regex pattern",
+        "patternPlaceholder": "^\\[urgent\\]",
+        "senderIdsLabel": "Sender IDs",
+        "senderIdsPlaceholder": "u_12345, ou_abcdef",
+        "targetLabel": "Target",
+        "title": "Dispatch rules",
+        "workflowPlaceholder": "Workflow id…"
+      },
       "helpAndWelcome": {
         "enableCardHelp": "Greet users with a card when the bot joins a chat or on their first message. Sent once per conversation.",
         "enableCardLabel": "Send a welcome card",
@@ -16857,6 +16945,17 @@
             "always": "Always respond to every message",
             "directOnly": "Direct messages only — never respond in groups",
             "mentionOnly": "Mention only — require @bot in groups (default)"
+          },
+          "sibling": {
+            "budgetAria": "Sibling bot reply budget per chat per hour",
+            "budgetHelp": "Maximum AI replies to sibling-bot messages per chat per hour.",
+            "budgetLabel": "Reply budget (per chat / hour)",
+            "help": "How to treat messages sent by another of your own bots in the same group. Ignoring them prevents bot-to-bot loops.",
+            "options": {
+              "ignore": "Ignore — never respond to sibling bots (default)",
+              "respond": "Respond — allow replies, bounded by the budget below"
+            },
+            "title": "Sibling bots"
           },
           "title": "Mention strategy"
         },
@@ -16954,7 +17053,10 @@
         "whoami": {
           "dingtalkNoProbe": "DingTalk adapters don't expose an active identity probe — the credentials below were entered when the adapter was configured.",
           "lastProbeAt": "Last probed at {time}",
+          "missingScopesHint": "Enable these permissions in the Lark developer console → Permissions, re-publish the app, then re-probe. Chat management needs im:chat:create, im:chat:update, im:chat.members:write_only and contact:user.id:readonly.",
+          "missingScopesTitle": "Missing permission scopes detected",
           "onebotNoProbe": "OneBot adapters do not expose an active identity probe — the QQ UIN below was entered when the adapter was configured.",
+          "openId": "Open ID",
           "probeButton": "Probe identity",
           "probeFailed": "Probe failed",
           "qqOfficialNoProbe": "QQ Official adapters don't expose an active identity probe — the AppID below was entered when the adapter was configured.",
@@ -17305,6 +17407,11 @@
         "overview": "Overview",
         "tunnel": "Tunnel"
       },
+      "teamPicker": {
+        "aria": "Select an Agent Team",
+        "missing": "{id}… (missing)",
+        "none": "None"
+      },
       "telegram": {
         "adapterCreated": "Adapter created.",
         "adapterUpdated": "Adapter updated.",
@@ -17550,6 +17657,40 @@
       },
       "model": "Model",
       "provider": "Provider",
+      "runStatusBar": {
+        "contextPct": {
+          "description": "How full the model's context window is after the latest turn.",
+          "heading": "Context usage",
+          "label": "Show context usage"
+        },
+        "cost": {
+          "description": "Estimated session cost so far.",
+          "heading": "Cost",
+          "label": "Show cost"
+        },
+        "description": "Choose which metrics the run-status bar above the composer shows while a turn runs.",
+        "elapsed": {
+          "description": "The active-work clock (pauses during approvals).",
+          "heading": "Elapsed time",
+          "label": "Show elapsed time"
+        },
+        "outputTokens": {
+          "description": "Total output tokens generated this session.",
+          "heading": "Output tokens",
+          "label": "Show output tokens"
+        },
+        "speed": {
+          "description": "Generation throughput in tokens per second.",
+          "heading": "Model speed",
+          "label": "Show model speed"
+        },
+        "title": "Run status bar",
+        "tools": {
+          "description": "Number of tool calls in the running turn.",
+          "heading": "Tool count",
+          "label": "Show tool count"
+        }
+      },
       "sidebar": {
         "contentSearch": {
           "description": "Also match text inside messages, not just conversation titles (slower).",
@@ -20247,6 +20388,21 @@
       }
     },
     "subagents": {
+      "backgroundTasks": {
+        "autoResume": "Auto-resume interrupted runs on boot",
+        "autoResumeHint": "Off by default — when on, background sub-agent runs interrupted by a crash/quit are re-dispatched at startup (attempt-capped).",
+        "denyList": "Dispatch deny-list",
+        "denyListHint": "One glob per line over subagent ids (e.g. Explore, myplugin:*, template:*). Denied ids never enter the dispatch_agent tool and are refused at dispatch time.",
+        "denyListPlaceholder": "template:*\nmyplugin:reviewer",
+        "description": "Background sub-agent lifecycle and dispatch permissions.",
+        "maxAttempts": "Max auto-resume attempts",
+        "maxAttemptsHint": "Cap on chained auto-resume attempts per run lineage (prevents crash loops).",
+        "save": "Save",
+        "saved": "Background task settings saved.",
+        "surfaceAsks": "Surface sub-agent permission asks",
+        "surfaceAsksHint": "On (default): a dispatched sub-agent's permission prompts appear in this chat. Off: they are auto-denied.",
+        "title": "Background tasks & permissions"
+      },
       "description": "Reusable templates and live status for sub-agents spawned by a parent agent. Templates persist across sessions; runtime data is ephemeral.",
       "import": {
         "applyButton": "Import {count} agent(s)",
@@ -20291,6 +20447,8 @@
       },
       "nesting": {
         "description": "Let the chat agent dispatch sub-agents that can themselves dispatch further sub-agents, with controlled depth, budget, and cycle/timeout guards.",
+        "dispatchMaxRetries": "Transient-failure retries",
+        "dispatchMaxRetriesHint": "Retries for transient dispatch failures (rate-limit, timeout, network, sidecar restart). 0 disables. Default 1.",
         "enabled": "Enable nested dispatch",
         "enabledHint": "Off by default — the agent keeps the standard single-level Task tool.",
         "maxDepth": "Max nesting depth",
@@ -22292,10 +22450,13 @@
         "colInput": "Input",
         "colModel": "Model",
         "colOutput": "Output",
+        "colSpeed": "Speed",
         "colTurns": "Turns",
         "description": "Per-model tokens and estimated cost. Costs the SDK did not report are back-filled from model pricing.",
         "donutCenter": "Total",
         "empty": "No usage in this range yet.",
+        "speed": "Speed",
+        "speedUnit": "{value} tok/s",
         "title": "Cost by model",
         "totalCost": "Total cost",
         "totalTokens": "Total tokens",
