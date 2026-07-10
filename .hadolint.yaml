@@ -1,0 +1,8 @@
+# hadolint config — used locally and by the images.yml `dockerfile-lint` job.
+#
+# DL3008 (pin exact apt package versions) is ignored deliberately: Debian's
+# archive drops superseded package versions, so pinned installs break on
+# every point release without improving reproducibility (base images are
+# already pinned by tag). Everything else fails the gate.
+ignored:
+  - DL3008
