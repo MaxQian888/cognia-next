@@ -3528,6 +3528,68 @@ export class PluginManager {
       }
     }
 
+    // VS Code `contributes.grammars[]` (`manifest.vscodeGrammars`, W5.1) —
+    // TextMate grammars read from the plugin dir and registered through
+    // grammars-bridge; the shiki highlight seam consumes them.
+    if (plugin.manifest.vscodeGrammars?.length) {
+      try {
+        const { registerGrammarsForPlugin } = await import("@/lib/plugin/bridge/grammars-bridge")
+        const result = await registerGrammarsForPlugin(
+          pluginId,
+          plugin.manifest.vscodeGrammars,
+          plugin.path ?? ""
+        )
+        if (result.errors.length > 0) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] ${result.errors.length} grammar contribution(s) failed: ${result.errors.join("; ")}`
+          )
+        }
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] failed to register VS Code grammars:`, err)
+      }
+    }
+
+    // VS Code `contributes.iconThemes[]` (`manifest.vscodeIconThemes`, W5.1) —
+    // registered through icons-bridge; the project file tree resolves icons.
+    if (plugin.manifest.vscodeIconThemes?.length) {
+      try {
+        const { registerIconThemesForPlugin } = await import("@/lib/plugin/bridge/icons-bridge")
+        const result = await registerIconThemesForPlugin(
+          pluginId,
+          plugin.manifest.vscodeIconThemes,
+          plugin.path ?? ""
+        )
+        if (result.errors.length > 0) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] ${result.errors.length} icon theme contribution(s) failed: ${result.errors.join("; ")}`
+          )
+        }
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] failed to register VS Code icon themes:`, err)
+      }
+    }
+
+    // VS Code `contributes.snippets[]` (`manifest.vscodeSnippets`, W5.1) —
+    // registered through snippets-bridge; the Monaco completion source
+    // (`lib/monaco/snippets.ts:listSnippetsForLanguage`) already reads it.
+    if (plugin.manifest.vscodeSnippets?.length) {
+      try {
+        const { registerSnippetsForPlugin } = await import("@/lib/plugin/bridge/snippets-bridge")
+        const result = await registerSnippetsForPlugin(
+          pluginId,
+          plugin.manifest.vscodeSnippets,
+          plugin.path ?? ""
+        )
+        if (result.errors.length > 0) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] ${result.errors.length} snippet contribution(s) failed: ${result.errors.join("; ")}`
+          )
+        }
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] failed to register VS Code snippets:`, err)
+      }
+    }
+
     // Declarative CLI wrapper tools (`manifest.cliTools`) — materialized
     // into ordinary registry tools whose execute() runs the safety pipeline
     // in `lib/plugin/cli-tools/execute-cli-tool.ts` (consent → binary
@@ -3708,6 +3770,32 @@ export class PluginManager {
         unregisterLanguagesByPlugin(pluginId)
       } catch {
         // Bridge import can fail in extremely early teardown — best effort.
+      }
+    }
+
+    // Drop VS Code grammar / icon theme / snippet contributions (W5.1).
+    if (plugin.manifest.vscodeGrammars?.length) {
+      try {
+        const { unregisterGrammarsByPlugin } = await import("@/lib/plugin/bridge/grammars-bridge")
+        unregisterGrammarsByPlugin(pluginId)
+      } catch {
+        // best effort
+      }
+    }
+    if (plugin.manifest.vscodeIconThemes?.length) {
+      try {
+        const { unregisterIconThemesByPlugin } = await import("@/lib/plugin/bridge/icons-bridge")
+        unregisterIconThemesByPlugin(pluginId)
+      } catch {
+        // best effort
+      }
+    }
+    if (plugin.manifest.vscodeSnippets?.length) {
+      try {
+        const { unregisterSnippetsByPlugin } = await import("@/lib/plugin/bridge/snippets-bridge")
+        unregisterSnippetsByPlugin(pluginId)
+      } catch {
+        // best effort
       }
     }
 

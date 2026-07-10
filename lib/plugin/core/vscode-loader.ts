@@ -342,6 +342,13 @@ export async function unloadVscodeExtension(pluginId: string): Promise<void> {
  * the Node sidecar.
  */
 function hasThemeOnlyContributions(manifest: PluginManifest): boolean {
-  const themesCount = (manifest.themes ?? []).length
-  return themesCount > 0
+  // W5.1: grammar-only / icon-theme-only / snippet-only extensions are as
+  // legitimate as theme-only ones — none of them need a `vscodeMain` bundle.
+  return (
+    (manifest.themes ?? []).length > 0 ||
+    (manifest.vscodeGrammars ?? []).length > 0 ||
+    (manifest.vscodeIconThemes ?? []).length > 0 ||
+    (manifest.vscodeSnippets ?? []).length > 0 ||
+    (manifest.vscodeLanguages ?? []).length > 0
+  )
 }

@@ -218,3 +218,54 @@ describe("grammars-bridge", () => {
     })
   })
 })
+
+// ── W5.1: enable-time manifest registration ──────────────────────────────────
+jest.mock("@/lib/file/file-operations", () => ({
+  readTextFile: jest.fn(),
+}))
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const fileOps = require("@/lib/file/file-operations") as { readTextFile: jest.Mock }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { registerGrammarsForPlugin } = require("./grammars-bridge") as {
+  registerGrammarsForPlugin: (
+    pluginId: string,
+    entries: Array<{ scopeName: string; language?: string; path: string }>,
+    baseDir: string
+  ) => Promise<{ registered: number; errors: string[] }>
+}
+
+describe("registerGrammarsForPlugin (W5.1)", () => {
+  beforeEach(() => {
+    __resetGrammarsForTesting()
+    fileOps.readTextFile.mockReset()
+  })
+
+  it("reads the grammar file from the plugin dir and registers it", async () => {
+    fileOps.readTextFile.mockResolvedValue(
+      JSON.stringify({ scopeName: "source.foo", patterns: [] })
+    )
+    const result = await registerGrammarsForPlugin(
+      "p1",
+      [{ scopeName: "source.foo", language: "foo", path: "syntaxes/foo.json" }],
+      "/plugins/p1"
+    )
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(fileOps.readTextFile).toHaveBeenCalledWith("/plugins/p1/syntaxes/foo.json")
+    expect(findGrammarByScopeName("source.foo")?.pluginId).toBe("p1")
+  })
+
+  it("rejects traversal paths and collects per-entry errors", async () => {
+    fileOps.readTextFile.mockResolvedValue("{}")
+    const result = await registerGrammarsForPlugin(
+      "p1",
+      [
+        { scopeName: "source.evil", path: "../outside.json" },
+        { scopeName: "", path: "syntaxes/x.json" },
+      ],
+      "/plugins/p1"
+    )
+    expect(result.registered).toBe(0)
+    expect(result.errors).toHaveLength(2)
+    expect(result.errors[0]).toMatch(/unsafe grammar path/)
+  })
+})

@@ -603,6 +603,28 @@ export interface PluginManifest {
    */
   vscodeLanguages?: VsCodeLanguage[]
 
+  /**
+   * VS Code `contributes.grammars[]` projected onto the manifest at install
+   * time (W5.1). Registered through `grammars-bridge` on enable; the shiki
+   * highlight seam consumes registered TextMate grammars for contributed
+   * languages. Paths are relative to the plugin root.
+   */
+  vscodeGrammars?: Array<{ scopeName: string; language?: string; path: string }>
+
+  /**
+   * VS Code `contributes.iconThemes[]` projected onto the manifest at install
+   * time (W5.1). Registered through `icons-bridge` on enable; the project
+   * file tree resolves file icons from the active contributed theme.
+   */
+  vscodeIconThemes?: Array<{ id: string; label: string; path: string }>
+
+  /**
+   * VS Code `contributes.snippets[]` projected onto the manifest at install
+   * time (W5.1). Registered through `snippets-bridge` on enable; the Monaco
+   * completion source (`lib/monaco/snippets.ts`) already reads the bridge.
+   */
+  vscodeSnippets?: Array<{ language: string; path: string }>
+
   /** Style entry point (CSS) */
   styles?: string
 

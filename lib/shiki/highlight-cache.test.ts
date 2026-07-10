@@ -1,11 +1,20 @@
 // Override the project-wide shiki mock with a jest.fn we can drive per-test
 // (the default mirrors __mocks__/shiki.js: resolve to `<pre><code>…</code></pre>`).
+const loadLanguageMock = jest.fn()
 jest.mock("shiki", () => ({
   codeToHtml: jest.fn(async (code: string) => `<pre><code>${code}</code></pre>`),
+  bundledLanguages: { ts: true, js: true, python: true },
+  getSingletonHighlighter: jest.fn(async () => ({ loadLanguage: loadLanguageMock })),
 }))
 
 import { codeToHtml } from "shiki"
-import { getCachedHighlight, highlightCached, clearHighlightCache } from "./highlight-cache"
+import {
+  getCachedHighlight,
+  highlightCached,
+  clearHighlightCache,
+  __resetPluginGrammarLoadsForTesting,
+} from "./highlight-cache"
+import { registerGrammar, __resetGrammarsForTesting } from "@/lib/plugin/bridge/grammars-bridge"
 
 describe("highlight-cache", () => {
   beforeEach(() => {
@@ -74,5 +83,37 @@ describe("highlight-cache", () => {
     expect(getCachedHighlight("temp", "ts")).toBeDefined()
     clearHighlightCache()
     expect(getCachedHighlight("temp", "ts")).toBeUndefined()
+  })
+})
+
+// ── W5.1: plugin grammar loading through the shiki singleton ─────────────────
+describe("plugin grammar seam (W5.1)", () => {
+  beforeEach(() => {
+    clearHighlightCache()
+    __resetPluginGrammarLoadsForTesting()
+    __resetGrammarsForTesting()
+    loadLanguageMock.mockClear()
+  })
+
+  it("loads a registered plugin grammar for a non-bundled language once", async () => {
+    registerGrammar({
+      pluginId: "p1",
+      scopeName: "source.svelte",
+      language: "svelte",
+      grammarPath: "syntaxes/svelte.json",
+      payload: JSON.stringify({ scopeName: "source.svelte", patterns: [] }),
+    })
+    await highlightCached("<div/>", "svelte")
+    await highlightCached("<span/>", "svelte")
+    expect(loadLanguageMock).toHaveBeenCalledTimes(1)
+    expect(loadLanguageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "svelte", scopeName: "source.svelte" })
+    )
+  })
+
+  it("does not touch the singleton for bundled or unknown languages", async () => {
+    await highlightCached("x", "ts")
+    await highlightCached("y", "not-a-language")
+    expect(loadLanguageMock).not.toHaveBeenCalled()
   })
 })

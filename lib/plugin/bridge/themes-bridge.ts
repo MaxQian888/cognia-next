@@ -29,6 +29,7 @@ import {
 } from "@/lib/theme/theme-registry"
 import { registerThemePack, unregisterThemePacksByPlugin } from "@/lib/theme/theme-pack-registry"
 import { readTextFile } from "@/lib/file/file-operations"
+import { isUnsafeRelativePath, joinPluginPath } from "./plugin-file-path"
 import {
   stripJsonComments,
   vscodeThemeToCustomTheme,
@@ -45,28 +46,6 @@ export interface ThemesBridgeError {
 export interface ThemesBridgeRegisterResult {
   registered: number
   errors: ThemesBridgeError[]
-}
-
-/**
- * Reject `vscodeJsonPath` values that try to escape the plugin root.
- * Allowed: relative subpaths like `themes/dark.json` or `./dark.json`.
- * Blocked: `..` segments, leading `/`, leading `\`, drive letters.
- */
-function isUnsafeRelativePath(path: string): boolean {
-  if (typeof path !== "string" || path.length === 0) return true
-  // Drive letter (Windows) or POSIX absolute.
-  if (/^([A-Za-z]:)?[\\/]/.test(path)) return true
-  // Any `..` segment after splitting on either separator.
-  const segments = path.split(/[\\/]+/)
-  return segments.some((seg) => seg === "..")
-}
-
-function joinPluginPath(baseDir: string, relative: string): string {
-  if (baseDir.endsWith("/") || baseDir.endsWith("\\")) {
-    return baseDir + relative
-  }
-  // Use `/` — Tauri's plugin-fs accepts both separators on Windows.
-  return `${baseDir}/${relative}`
 }
 
 /**

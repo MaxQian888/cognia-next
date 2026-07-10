@@ -517,3 +517,61 @@ describe("mapActivationEvent", () => {
     expect(mapActivationEvent("onTerminal", warnings)).toBe("onTerminal")
   })
 })
+
+// ── W5.1: grammars / iconThemes / snippets projections ───────────────────────
+describe("adaptVscodeManifest W5.1 projections", () => {
+  it("projects grammars, icon themes, and snippets onto the manifest", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "svelte",
+        publisher: "svelte",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+        contributes: {
+          grammars: [
+            { language: "svelte", scopeName: "source.svelte", path: "syntaxes/svelte.json" },
+            // Malformed (no scopeName) must be dropped.
+            { language: "bad", path: "syntaxes/bad.json" } as never,
+          ],
+          iconThemes: [
+            { id: "svelte-icons", label: "Svelte Icons", path: "icons/theme.json" },
+            { path: "icons/broken.json" } as never,
+          ],
+          snippets: [
+            { language: "svelte", path: "snippets/svelte.json" },
+            { language: 42, path: "snippets/bad.json" } as never,
+          ],
+        },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeGrammars).toEqual([
+      { language: "svelte", scopeName: "source.svelte", path: "syntaxes/svelte.json" },
+    ])
+    expect(result.manifest.vscodeIconThemes).toEqual([
+      { id: "svelte-icons", label: "Svelte Icons", path: "icons/theme.json" },
+    ])
+    expect(result.manifest.vscodeSnippets).toEqual([
+      { language: "svelte", path: "snippets/svelte.json" },
+    ])
+    // Bundle-less grammar/snippet contributions still yield a capability.
+    expect(result.manifest.capabilities).toContain("themes")
+  })
+
+  it("omits the fields when nothing is contributed", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "plain",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeGrammars).toBeUndefined()
+    expect(result.manifest.vscodeIconThemes).toBeUndefined()
+    expect(result.manifest.vscodeSnippets).toBeUndefined()
+  })
+})

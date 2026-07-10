@@ -122,6 +122,40 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
       Boolean(lang) && typeof (lang as { id?: unknown }).id === "string"
   )
 
+  // ── Grammars / icon themes / snippets contributed via VS Code (W5.1) ──
+  // Projected onto the manifest so the plugin manager can feed the
+  // grammars/icons/snippets bridges on enable. Only structurally valid
+  // entries survive; paths stay relative (the bridges enforce traversal
+  // safety again at read time).
+  const rawGrammars = Array.isArray(pkgJson.contributes?.grammars)
+    ? (pkgJson.contributes.grammars as Array<Record<string, unknown>>)
+    : []
+  const vscodeGrammars = rawGrammars
+    .filter((g) => g && typeof g.scopeName === "string" && typeof g.path === "string")
+    .map((g) => ({
+      scopeName: g.scopeName as string,
+      ...(typeof g.language === "string" ? { language: g.language } : {}),
+      path: g.path as string,
+    }))
+
+  const rawIconThemes = Array.isArray(pkgJson.contributes?.iconThemes)
+    ? (pkgJson.contributes.iconThemes as Array<Record<string, unknown>>)
+    : []
+  const vscodeIconThemes = rawIconThemes
+    .filter((t) => t && typeof t.id === "string" && typeof t.path === "string")
+    .map((t) => ({
+      id: t.id as string,
+      label: typeof t.label === "string" ? t.label : (t.id as string),
+      path: t.path as string,
+    }))
+
+  const rawSnippets = Array.isArray(pkgJson.contributes?.snippets)
+    ? (pkgJson.contributes.snippets as Array<Record<string, unknown>>)
+    : []
+  const vscodeSnippets = rawSnippets
+    .filter((sn) => sn && typeof sn.language === "string" && typeof sn.path === "string")
+    .map((sn) => ({ language: sn.language as string, path: sn.path as string }))
+
   // ── Final cognia manifest ─────────────────────────────────────────────
   const manifest: PluginManifest = {
     id,
@@ -154,6 +188,9 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
     },
     ...(themes.length > 0 ? { themes } : {}),
     ...(vscodeLanguages.length > 0 ? { vscodeLanguages } : {}),
+    ...(vscodeGrammars.length > 0 ? { vscodeGrammars } : {}),
+    ...(vscodeIconThemes.length > 0 ? { vscodeIconThemes } : {}),
+    ...(vscodeSnippets.length > 0 ? { vscodeSnippets } : {}),
   }
 
   return {
@@ -275,6 +312,11 @@ function inferCapabilities(pkgJson: VsCodeManifest): PluginCapability[] {
   if (Array.isArray(c.commands) && c.commands.length > 0) out.add("commands")
   if (Array.isArray(c.themes) && c.themes.length > 0) out.add("themes")
   if (Array.isArray(c.iconThemes) && c.iconThemes.length > 0) out.add("themes")
+  // W5.1 — grammar/snippet-only extensions ride the appearance capability
+  // (like icon themes) so a bundle-less contribution still yields a
+  // non-empty capability set.
+  if (Array.isArray(c.grammars) && c.grammars.length > 0) out.add("themes")
+  if (Array.isArray(c.snippets) && c.snippets.length > 0) out.add("themes")
   if (Array.isArray(c.productIconThemes) && c.productIconThemes.length > 0) out.add("themes")
   if (Array.isArray(c.chatParticipants) && c.chatParticipants.length > 0) out.add("modes")
   if (Array.isArray(c.mcpServerDefinitionProviders) && c.mcpServerDefinitionProviders.length > 0) {

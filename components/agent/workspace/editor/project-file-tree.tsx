@@ -15,6 +15,13 @@ import {
   FilePlusIcon,
   FolderPlusIcon,
 } from "lucide-react"
+import { useSyncExternalStore } from "react"
+import {
+  getActiveIconTheme,
+  resolveFileIcon,
+  subscribeIconThemes,
+} from "@/lib/plugin/bridge/icons-bridge"
+import { joinPluginPath } from "@/lib/plugin/bridge/plugin-file-path"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -366,7 +373,7 @@ function TreeRow({
             {entry.isDir ? (
               <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
             ) : (
-              <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <TreeFileIcon filename={name} />
             )}
             {isRenaming ? (
               <Input
@@ -438,4 +445,56 @@ function CreateInput({
       />
     </div>
   )
+}
+
+// ── W5.1: plugin-contributed file icons ──────────────────────────────────────
+// Renders the active contributed VS Code icon theme's image icon for a file
+// when one resolves (image-path definitions only — font-glyph themes fall
+// back), else the standard lucide file icon. Reactive to icon-theme
+// registration through the bridge's subscribe channel.
+function subscribeIconThemeVersion(onStoreChange: () => void): () => void {
+  return subscribeIconThemes(() => onStoreChange())
+}
+
+let iconThemeVersion = 0
+subscribeIconThemes(() => {
+  iconThemeVersion += 1
+})
+
+function TreeFileIcon({ filename }: { filename: string }) {
+  useSyncExternalStore(
+    subscribeIconThemeVersion,
+    () => iconThemeVersion,
+    () => iconThemeVersion
+  )
+  const theme = getActiveIconTheme()
+  if (theme?.baseDir) {
+    const def = resolveFileIcon(theme.id, filename)
+    if (def?.iconPath) {
+      // `iconPath` is relative to the theme JSON's directory.
+      const dir = theme.jsonPath.includes("/")
+        ? theme.jsonPath.slice(0, theme.jsonPath.lastIndexOf("/"))
+        : ""
+      const abs = joinPluginPath(theme.baseDir, dir ? `${dir}/${def.iconPath}` : def.iconPath)
+      const src = toDisplayableFileSrc(abs)
+      if (src) {
+        // eslint-disable-next-line @next/next/no-img-element
+        return <img src={src} alt="" aria-hidden className="size-3.5 shrink-0" />
+      }
+    }
+  }
+  return <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+}
+
+/** Tauri asset-protocol URL for an absolute path; null off-desktop. */
+function toDisplayableFileSrc(absPath: string): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { convertFileSrc } = require("@tauri-apps/api/core") as {
+      convertFileSrc?: (p: string) => string
+    }
+    return convertFileSrc ? convertFileSrc(absPath) : null
+  } catch {
+    return null
+  }
 }

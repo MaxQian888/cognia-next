@@ -66,6 +66,12 @@ export interface VsCodeIconThemeData {
 }
 
 export interface IconThemeContribution {
+  /**
+   * Plugin root the theme was read from (W5.1). Consumers join this with the
+   * directory of `jsonPath` to resolve relative `iconPath` image references.
+   * Absent for contributions registered directly with raw JSON (tests).
+   */
+  baseDir?: string
   /** Stable id = `${pluginId}.${themeId}`. */
   id: string
   /** Owning plugin id. */
@@ -111,6 +117,7 @@ export function registerIconTheme(input: {
   name: string
   jsonPath: string
   jsonText: string
+  baseDir?: string
 }): IconThemeContribution {
   let data: VsCodeIconThemeData
   try {
@@ -129,6 +136,7 @@ export function registerIconTheme(input: {
     name: input.name,
     jsonPath: input.jsonPath,
     data,
+    ...(input.baseDir ? { baseDir: input.baseDir } : {}),
   }
   themes.set(contribution.id, contribution)
   emit({ type: "register", contribution })
@@ -206,6 +214,15 @@ export function resolveFileIcon(
   return undefined
 }
 
+/**
+ * The icon theme consumers render from (W5.1). There is no user-facing
+ * selector yet, so the FIRST registered contribution wins deterministically —
+ * mirroring the first-wins conflict policy elsewhere in the plugin system.
+ */
+export function getActiveIconTheme(): IconThemeContribution | undefined {
+  return themes.values().next().value
+}
+
 export function subscribeIconThemes(listener: (event: IconThemeEvent) => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
@@ -214,4 +231,44 @@ export function subscribeIconThemes(listener: (event: IconThemeEvent) => void): 
 export function __resetIconThemesForTesting(): void {
   themes.clear()
   listeners.clear()
+}
+
+// ── W5.1: enable-time registration from manifest.vscodeIconThemes ────────────
+import { readTextFile } from "@/lib/file/file-operations"
+import { isUnsafeRelativePath, joinPluginPath } from "./plugin-file-path"
+
+export interface IconThemeManifestEntry {
+  id: string
+  label: string
+  path: string
+}
+
+export async function registerIconThemesForPlugin(
+  pluginId: string,
+  entries: readonly IconThemeManifestEntry[],
+  baseDir: string
+): Promise<{ registered: number; errors: string[] }> {
+  const errors: string[] = []
+  let registered = 0
+  for (const entry of entries) {
+    try {
+      if (!entry.id) throw new Error("missing icon theme id")
+      if (isUnsafeRelativePath(entry.path)) {
+        throw new Error(`unsafe icon theme path "${entry.path}"`)
+      }
+      const jsonText = await readTextFile(joinPluginPath(baseDir, entry.path))
+      registerIconTheme({
+        pluginId,
+        themeId: entry.id,
+        name: entry.label || entry.id,
+        jsonPath: entry.path,
+        jsonText,
+        baseDir,
+      })
+      registered += 1
+    } catch (err) {
+      errors.push(`${entry.id || entry.path}: ${(err as Error).message}`)
+    }
+  }
+  return { registered, errors }
 }
