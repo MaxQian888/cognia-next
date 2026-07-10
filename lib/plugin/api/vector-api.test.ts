@@ -387,16 +387,30 @@ describe("PII gate (W2.4)", () => {
     await expect(api.search("c", "mail leak@example.com")).rejects.toThrow(/PII/)
   })
 
-  it("blocks addDocuments only for docs that would be embedded", async () => {
+  it("blocks addDocuments on leaking content or metadata (with or without embedding)", async () => {
     const api = createVectorAPI("test-plugin")
     await expect(
       api.addDocuments("c", [{ id: "1", content: "mail leak@example.com", metadata: {} }])
     ).rejects.toThrow(/PII/)
-    // Precomputed embedding → content never leaves the device.
+    // A precomputed embedding does NOT bypass the gate: on cloud vector
+    // providers the stored content/metadata still leave the device.
     await expect(
       api.addDocuments("c", [
         { id: "2", content: "mail leak@example.com", metadata: {}, embedding: [0.1] },
       ])
-    ).resolves.toEqual(["2"])
+    ).rejects.toThrow(/PII/)
+    await expect(
+      api.addDocuments("c", [
+        {
+          id: "3",
+          content: "clean",
+          metadata: { note: "mail leak@example.com" },
+          embedding: [0.1],
+        },
+      ])
+    ).rejects.toThrow(/PII/)
+    await expect(
+      api.addDocuments("c", [{ id: "4", content: "clean", metadata: {}, embedding: [0.1] }])
+    ).resolves.toEqual(["4"])
   })
 })

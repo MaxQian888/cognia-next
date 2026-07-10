@@ -20,7 +20,7 @@ import {
 } from "@cognia/vector/embedding"
 import { createPluginSystemLogger } from "../core/logger"
 import { createApiGuardedAPI } from "./api-permission-gate"
-import { assertNoLeakingPii } from "./plugin-pii-gate"
+import { assertNoLeakingPii, assertNoLeakingPiiDeep } from "./plugin-pii-gate"
 import type {
   PluginVectorAPI,
   VectorDocument,
@@ -163,12 +163,18 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     },
 
     addDocuments: async (collection: string, docs: VectorDocument[]) => {
-      // Documents without a precomputed embedding get their content sent to
-      // the embedder by the store — gate that content like a direct embed.
+      // Gate EVERY document's content + metadata: docs without an embedding
+      // get content sent to the embedder, and on cloud vector providers the
+      // stored content/metadata themselves leave the device.
       assertNoLeakingPii(
         pluginId,
         "ctx.vector.addDocuments",
-        docs.filter((d) => !d.embedding).map((d) => d.content)
+        docs.map((d) => d.content)
+      )
+      assertNoLeakingPiiDeep(
+        pluginId,
+        "ctx.vector.addDocuments",
+        docs.map((d) => d.metadata)
       )
       const vs = await getStore()
       const prefixedCollection = prefixCollection(collection)
@@ -190,7 +196,12 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
       assertNoLeakingPii(
         pluginId,
         "ctx.vector.updateDocuments",
-        docs.filter((d) => !d.embedding).map((d) => d.content)
+        docs.map((d) => d.content)
+      )
+      assertNoLeakingPiiDeep(
+        pluginId,
+        "ctx.vector.updateDocuments",
+        docs.map((d) => d.metadata)
       )
       const vs = await getStore()
       const prefixedCollection = prefixCollection(collection)

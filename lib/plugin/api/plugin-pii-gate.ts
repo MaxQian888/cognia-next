@@ -9,7 +9,7 @@
  * model sends with no human review step, so the same gate applies here.
  */
 
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
 
 export class PluginPiiError extends Error {
   public readonly pluginId: string
@@ -37,6 +37,22 @@ export function assertNoLeakingPii(
 ): void {
   for (const text of texts) {
     if (typeof text === "string" && text.length > 0 && !hasNoLeakingPii(text)) {
+      throw new PluginPiiError(pluginId, site)
+    }
+  }
+}
+
+/**
+ * Deep variant for structured values (e.g. vector document metadata):
+ * throws when any nested string trips the PII detector.
+ */
+export function assertNoLeakingPiiDeep(
+  pluginId: string,
+  site: string,
+  values: ReadonlyArray<unknown>
+): void {
+  for (const value of values) {
+    if (value !== undefined && value !== null && !hasNoLeakingPiiDeep(value)) {
       throw new PluginPiiError(pluginId, site)
     }
   }

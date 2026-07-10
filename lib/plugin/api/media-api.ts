@@ -29,6 +29,7 @@ import { useSettingsStore } from "@/stores"
 import { isTauri } from "@/lib/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createApiGuardedAPI } from "./api-permission-gate"
+import { assertNoLeakingPii } from "./plugin-pii-gate"
 import type { PluginManager } from "../core/manager"
 
 // =============================================================================
@@ -1447,6 +1448,9 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
       },
 
       generateVariation: async (imageData: ImageData, prompt?: string): Promise<ImageData> => {
+        // PII red-line: the free-form prompt goes verbatim to the image
+        // provider (executeProviderImageEdit → /images/edits).
+        assertNoLeakingPii(pluginId, "ctx.media.ai.generateVariation", [prompt])
         return runImageAi(pluginId, "ai.generateVariation", () =>
           executeProviderImageEdit(
             prompt
@@ -1462,6 +1466,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         mask: ImageData,
         prompt: string
       ): Promise<ImageData> => {
+        assertNoLeakingPii(pluginId, "ctx.media.ai.inpaint", [prompt])
         return runImageAi(pluginId, "ai.inpaint", () =>
           executeProviderImageEdit(
             `Modify only the masked region of this image. ${prompt}`,
