@@ -130,6 +130,7 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "native:process",
   "pet:read",
   "pet:interact",
+  "hooks:chat-intercept",
 ]
 
 const VALID_PLUGIN_TYPES: PluginType[] = [

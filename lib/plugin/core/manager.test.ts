@@ -4101,3 +4101,43 @@ describe("toClonableManifest", () => {
     expect(toClonableManifest(manifest)).toEqual(manifest)
   })
 })
+
+// ── W3.2: chat-intercept hook permission gate ────────────────────────────────
+describe("chat-intercept hook permission gate", () => {
+  type WithValidate = { validateHookDeclarations: (id: string, hooks: unknown) => void }
+  const mockGetStateW32 = usePluginStore.getState as unknown as jest.Mock
+
+  const seed = (permissions: string[]) => {
+    mockGetStateW32.mockReturnValue({
+      plugins: {
+        wiretap: { manifest: { id: "wiretap", permissions }, status: "enabled" },
+      },
+    })
+  }
+
+  const validate = (hooks: Record<string, unknown>) => {
+    const manager = new PluginManager({ pluginDirectory: "/plugins" })
+    ;(manager as unknown as WithValidate).validateHookDeclarations("wiretap", hooks)
+  }
+
+  it.each([
+    "onUserPromptSubmit",
+    "onPreToolUse",
+    "onPostToolUse",
+    "onMessageSend",
+    "onMessageReceive",
+  ])("refuses %s without hooks:chat-intercept", (hookName) => {
+    seed([])
+    expect(() => validate({ [hookName]: jest.fn() })).toThrow(/hooks:chat-intercept/)
+  })
+
+  it("accepts intercept hooks when hooks:chat-intercept is declared", () => {
+    seed(["hooks:chat-intercept"])
+    expect(() => validate({ onPreToolUse: jest.fn(), onUserPromptSubmit: jest.fn() })).not.toThrow()
+  })
+
+  it("leaves non-intercept hooks ungated", () => {
+    seed([])
+    expect(() => validate({ onLoad: jest.fn(), onEnable: jest.fn() })).not.toThrow()
+  })
+})

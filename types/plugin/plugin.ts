@@ -431,6 +431,11 @@ export type PluginPermission =
   // Desktop pet (gated by the "pet" capability; see lib/plugin/api/pet-api.ts).
   | "pet:read" // Read the pet's public view (level/stage/needs/mood) + subscribe to sanitized events
   | "pet:interact" // Emit nurture interactions and budget-capped XP/coin rewards
+  // Chat interception (W3.2). High-risk: lets a plugin rewrite/block every
+  // prompt, tool call, and tool result. Required to declare the
+  // onUserPromptSubmit / onPreToolUse / onPostToolUse / onMessageSend /
+  // onMessageReceive hooks.
+  | "hooks:chat-intercept" // Intercept and rewrite chat prompts, tool calls, and tool results
 
 export type PluginPermissionDecision = "allow" | "deny"
 export type PluginPermissionPolicy = "ask" | "allow" | "deny"

@@ -375,6 +375,20 @@ export class PluginDependencyError extends Error {
  */
 export const PLUGIN_ENABLE_FAILED_EVENT = "plugin:enable-failed"
 
+/**
+ * Hooks that intercept the user↔model conversation (prompts, tool calls,
+ * tool results). Declaring ANY of these requires the high-risk
+ * `hooks:chat-intercept` manifest permission — enforced in
+ * `validateHookDeclarations`.
+ */
+export const CHAT_INTERCEPT_HOOKS = [
+  "onUserPromptSubmit",
+  "onPreToolUse",
+  "onPostToolUse",
+  "onMessageSend",
+  "onMessageReceive",
+] as const
+
 export interface PluginEnableFailedEventDetail {
   pluginId: string
   /** Best-effort plugin display name (falls back to pluginId). */
@@ -4193,6 +4207,25 @@ export class PluginManager {
   }
 
   private validateHookDeclarations(pluginId: string, hooks: PluginHooks): void {
+    // Chat-interception hooks see (and can rewrite) every prompt, tool call,
+    // and tool result. Registering any of them requires the high-risk
+    // `hooks:chat-intercept` permission in the manifest (W3.2) — without it
+    // the whole hook registration is refused, so a plugin cannot silently
+    // wiretap the conversation.
+    const declaredIntercepts = CHAT_INTERCEPT_HOOKS.filter(
+      (name) => (hooks as Record<string, unknown>)[name] !== undefined
+    )
+    if (declaredIntercepts.length > 0) {
+      const manifestPermissions =
+        usePluginStore.getState().plugins[pluginId]?.manifest?.permissions ?? []
+      if (!manifestPermissions.includes("hooks:chat-intercept")) {
+        throw new Error(
+          `Plugin "${pluginId}" declares chat-interception hook(s) ` +
+            `${declaredIntercepts.join(", ")} without the "hooks:chat-intercept" permission.`
+        )
+      }
+    }
+
     for (const hookName of Object.keys(hooks)) {
       const validation = validateHookPoint(hookName, {
         governanceMode: this.pluginPointGovernanceMode,

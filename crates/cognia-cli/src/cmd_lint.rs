@@ -67,6 +67,8 @@ const VALID_PERMISSIONS: &[&str] = &[
     "git:write",
     "goal:read",
     "goal:write",
+    "team:read",
+    "team:write",
     "subscription:read",
     "perf:read",
     "connectors:read",
@@ -92,6 +94,7 @@ const VALID_PERMISSIONS: &[&str] = &[
     "native:process",
     "pet:read",
     "pet:interact",
+    "hooks:chat-intercept",
 ];
 
 /// Canonical plugin capabilities. MUST stay in lockstep with

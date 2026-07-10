@@ -191,9 +191,14 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "auth:consume": "Consume sessions from a registered auth provider",
   "pet:read": "Read the desktop pet's public state and subscribe to its events",
   "pet:interact": "Care for the desktop pet and grant budget-capped rewards",
+  "hooks:chat-intercept":
+    "Intercept every chat prompt, tool call, and tool result — can rewrite or block them",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
+  // Chat interception sees (and can rewrite) everything the user and the
+  // model exchange, including tool inputs/outputs — surveillance-grade.
+  "hooks:chat-intercept",
   "shell:execute",
   "process:spawn",
   "python:execute",
