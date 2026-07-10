@@ -174,7 +174,14 @@ describe("DiscordConfigDialog — create new", () => {
 
   it("does not surface an Interactions endpoint before the Discord adapter supports webhook transport", () => {
     render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
-    expect(screen.queryByText(/interactions endpoint url/i)).not.toBeInTheDocument()
+    // The Delivery section DESCRIPTION legitimately mentions the phrase as
+    // future context ("…and the Interactions Endpoint URL for slash
+    // commands."), so a substring regex false-matches. Assert the actual URL
+    // field is absent instead: its label (exact) and its copy control.
+    expect(screen.queryByText("Interactions Endpoint URL")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /copy interactions endpoint url/i })
+    ).not.toBeInTheDocument()
   })
 
   it("shows error toast when bot token is empty on Save", async () => {
