@@ -9,6 +9,7 @@ import {
   grantPermission,
   revokePermission,
   pluginHasApiPermission,
+  expandManifestPermission,
 } from "./permission-api"
 import type { PluginAPIPermission } from "@/types/plugin/plugin"
 import { requestPluginPermission } from "@/lib/plugin/security/permission-requests"
@@ -340,40 +341,105 @@ describe("Permission API", () => {
   })
 
   describe("Permission types", () => {
+    // Complete enumeration of the PluginAPIPermission union. The `satisfies`
+    // check plus the `Missing` guard below make this list drift-proof at
+    // compile time: adding a union member without listing it here (and
+    // mapping it in permissionMapping) is a typecheck error.
+    const ALL_API_PERMISSIONS = [
+      "session:read",
+      "session:write",
+      "session:delete",
+      "project:read",
+      "project:write",
+      "project:delete",
+      "vector:read",
+      "vector:write",
+      "canvas:read",
+      "canvas:write",
+      "canvas:run",
+      "canvas:collaborate",
+      "artifact:read",
+      "artifact:write",
+      "ai:chat",
+      "ai:embed",
+      "agent:control",
+      "agent:dispatch-external",
+      "agent:dispatch",
+      "agent:shared-memory:read",
+      "twin:read",
+      "export:session",
+      "export:project",
+      "theme:read",
+      "theme:write",
+      "media:image:read",
+      "media:image:write",
+      "media:video:read",
+      "media:video:write",
+      "media:video:export",
+      "extension:ui",
+      "notification:show",
+      "ipc:call",
+      "ipc:expose",
+      "events:publish",
+      "events:subscribe",
+    ] as const satisfies readonly PluginAPIPermission[]
+
+    // Compile-time exhaustiveness: if a future PluginAPIPermission member is
+    // absent from ALL_API_PERMISSIONS, `Missing` is that literal type and the
+    // assignment below fails to typecheck, naming the missing permission.
+    type Missing = Exclude<PluginAPIPermission, (typeof ALL_API_PERMISSIONS)[number]>
+    const assertExhaustive: [Missing] extends [never] ? true : Missing = true
+
+    it("enumerates the full PluginAPIPermission union", () => {
+      expect(assertExhaustive).toBe(true)
+      expect(new Set(ALL_API_PERMISSIONS).size).toBe(ALL_API_PERMISSIONS.length)
+    })
+
     it("should handle all API permission types", () => {
-      const allPermissions: PluginAPIPermission[] = [
-        "session:read",
-        "session:write",
-        "session:delete",
-        "project:read",
-        "project:write",
-        "project:delete",
-        "vector:read",
-        "vector:write",
-        "canvas:read",
-        "canvas:write",
-        "artifact:read",
-        "artifact:write",
-        "ai:chat",
-        "ai:embed",
-        "export:session",
-        "export:project",
-        "theme:read",
-        "theme:write",
-        "media:image:read",
-        "media:image:write",
-        "media:video:read",
-        "media:video:write",
-        "media:video:export",
-        "extension:ui",
-        "notification:show",
-      ]
+      const api = createPermissionAPI(testPluginId, [...ALL_API_PERMISSIONS])
 
-      const api = createPermissionAPI(testPluginId, allPermissions)
-
-      for (const perm of allPermissions) {
+      for (const perm of ALL_API_PERMISSIONS) {
         expect(api.hasPermission(perm)).toBe(true)
       }
+    })
+
+    it("round-trips every PluginAPIPermission through permissionMapping individually", () => {
+      // Drift guard: declaring exactly one permission in a manifest must
+      // grant exactly that API permission — a permission silently dropped by
+      // permissionMapping (the W2.1 bug) fails here.
+      for (const perm of ALL_API_PERMISSIONS) {
+        const pluginId = `drift-guard:${perm}`
+        initializePluginPermissions(pluginId, [perm])
+        expect(`${perm}:${pluginHasApiPermission(pluginId, perm)}`).toBe(`${perm}:true`)
+        revokePluginPermissions(pluginId)
+      }
+    })
+
+    it("grants the previously dropped agent/twin/canvas permissions", () => {
+      const api = createPermissionAPI("previously-dropped", [
+        "agent:dispatch",
+        "agent:shared-memory:read",
+        "twin:read",
+        "canvas:run",
+        "canvas:collaborate",
+      ])
+      expect(api.hasPermission("agent:dispatch")).toBe(true)
+      expect(api.hasPermission("agent:shared-memory:read")).toBe(true)
+      expect(api.hasPermission("twin:read")).toBe(true)
+      expect(api.hasPermission("canvas:run")).toBe(true)
+      expect(api.hasPermission("canvas:collaborate")).toBe(true)
+    })
+  })
+
+  describe("legacy aliases", () => {
+    it("expands legacy `secrets` to the secrets permissions, not settings", () => {
+      expect(expandManifestPermission("secrets")).toEqual(["secrets:read", "secrets:write"])
+    })
+
+    it("keeps the other legacy aliases intact", () => {
+      expect(expandManifestPermission("storage")).toEqual(["settings:read", "settings:write"])
+      expect(expandManifestPermission("network")).toEqual(["network:fetch"])
+      expect(expandManifestPermission("unknown:perm")).toEqual(["unknown:perm"])
     })
   })
 })

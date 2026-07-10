@@ -43,12 +43,22 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "vector:write": ["vector:write"],
   "canvas:read": ["canvas:read"],
   "canvas:write": ["canvas:write"],
+  "canvas:run": ["canvas:run"],
+  "canvas:collaborate": ["canvas:collaborate"],
   "artifact:read": ["artifact:read"],
   "artifact:write": ["artifact:write"],
   "ai:chat": ["ai:chat"],
   "ai:embed": ["ai:embed"],
   "agent:control": ["agent:control"],
   "agent:dispatch-external": ["agent:dispatch-external"],
+  // Subagent dispatch + shared-memory/twin introspection. Identity mappings —
+  // without these the manifest declarations are silently dropped and
+  // `ctx.agent.dispatchSubagent`/`runTeam` and
+  // `ctx.agent.context.readSharedMemory`/`queryTwinMemory` (gated by
+  // `pluginHasApiPermission` in `lib/plugin/core/context.ts`) always throw.
+  "agent:dispatch": ["agent:dispatch"],
+  "agent:shared-memory:read": ["agent:shared-memory:read"],
+  "twin:read": ["twin:read"],
   "export:session": ["export:session"],
   "export:project": ["export:project"],
   "theme:read": ["theme:read"],
@@ -84,10 +94,13 @@ const legacyAliases: Record<string, string[]> = {
   database: ["database:read", "database:write"],
   clipboard: ["clipboard:read", "clipboard:write"],
   notifications: ["notification"],
-  secrets: ["settings:read", "settings:write"],
+  // Legacy `secrets` must expand to the secrets permissions themselves, not
+  // settings — mapping it to settings both under-granted (no secret access)
+  // and over-granted (settings access the plugin never declared).
+  secrets: ["secrets:read", "secrets:write"],
 }
 
-function expandManifestPermission(permission: string): string[] {
+export function expandManifestPermission(permission: string): string[] {
   if (legacyAliases[permission]) {
     return legacyAliases[permission]
   }
