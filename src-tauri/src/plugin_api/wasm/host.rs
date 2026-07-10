@@ -131,9 +131,12 @@ impl WasmPluginHost {
             return Err(format!("wasmMain not found: {wasm_path:?}"));
         }
         let bytes = std::fs::read(&wasm_path).map_err(|e| format!("read {wasm_path:?}: {e}"))?;
-        let plugin_api_version = parse_plugin_api_version(&bytes)
-            .map_err(|e| format!("scan api-version: {e}"))?
-            .unwrap_or_else(|| manifest.wasm.api_version.clone());
+        // The embedded `cognia:api-version` custom section is the trusted
+        // source of the ABI version. A binary that omits it is malformed
+        // (ADR-0013): we do NOT fall back to the manifest-declared version,
+        // which is attacker-controlled JSON.
+        let plugin_api_version =
+            parse_plugin_api_version(&bytes).map_err(|e| format!("scan api-version: {e}"))?;
         if !api_version_compatible(&plugin_api_version, HOST_API_VERSION) {
             return Err(format!(
                 "WASM api-version {plugin_api_version} incompatible with host {HOST_API_VERSION}"
@@ -298,6 +301,21 @@ mod tests {
         let _ = linker;
         assert!(WasmPluginHost::version_linker("0.2.0").is_err());
         assert!(WasmPluginHost::version_linker("garbage").is_err());
+    }
+
+    #[test]
+    fn load_rejects_binary_missing_api_version_section() {
+        // A structurally-valid component preamble with no `cognia:api-version`
+        // custom section must be rejected at load — `load` no longer trusts the
+        // manifest-declared version as a fallback (ADR-0013).
+        const EMPTY_COMPONENT: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+        let state = WasmPluginState::default();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("main.wasm"), EMPTY_COMPONENT).unwrap();
+        let err =
+            WasmPluginHost::load(&state, manifest_v01(), tmp.path().to_path_buf()).unwrap_err();
+        assert!(err.contains("scan api-version"), "unexpected error: {err}");
+        assert!(err.contains(super::super::API_VERSION_SECTION), "unexpected error: {err}");
     }
 
     #[test]

@@ -24,6 +24,7 @@
     "sensitiveBadge": "Sensitive",
     "title": "Review capabilities for {name}",
     "togglePermissionAriaLabel": "Toggle permission {permission}",
+    "unimplementedHint": "Not available yet in this plugin runtime — granting it has no effect.",
     "unsignedAuthor": "Unsigned author"
   },
   "fromLocalButton": {

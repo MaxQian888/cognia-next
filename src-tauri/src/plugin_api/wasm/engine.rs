@@ -66,14 +66,17 @@ fn spawn_epoch_ticker(engine: Engine) {
 }
 
 /// Extract the embedded `cognia:api-version` custom-section payload from a
-/// component binary. Returns `Ok(None)` when the section is missing — the
-/// host treats that as a malformed plugin (per ADR 0013 §"ABI versioning").
-pub fn parse_plugin_api_version(bytes: &[u8]) -> wasmtime::Result<Option<String>> {
+/// component binary. Per ADR 0013 §"ABI versioning" a binary that omits the
+/// section is **malformed**: the manifest-declared version is attacker-
+/// controlled, so a plugin that fails to stamp the section at build time must
+/// be rejected rather than trusted. Errors when the section is absent (or its
+/// payload is not UTF-8); returns the trimmed version string otherwise.
+pub fn parse_plugin_api_version(bytes: &[u8]) -> wasmtime::Result<String> {
     let mut parser = wasmparser::Parser::new(0);
     let mut buf = bytes;
     loop {
         let payload = match parser.parse(buf, true)? {
-            wasmparser::Chunk::NeedMoreData(_) => return Ok(None),
+            wasmparser::Chunk::NeedMoreData(_) => return Err(missing_section_error()),
             wasmparser::Chunk::Parsed { consumed, payload } => {
                 buf = &buf[consumed..];
                 payload
@@ -83,12 +86,19 @@ pub fn parse_plugin_api_version(bytes: &[u8]) -> wasmtime::Result<Option<String>
             wasmparser::Payload::CustomSection(reader) if reader.name() == API_VERSION_SECTION => {
                 let v = String::from_utf8(reader.data().to_vec())
                     .map_err(|e| wasmtime::Error::msg(format!("invalid api-version utf8: {e}")))?;
-                return Ok(Some(v.trim().to_string()));
+                return Ok(v.trim().to_string());
             }
-            wasmparser::Payload::End(_) => return Ok(None),
+            wasmparser::Payload::End(_) => return Err(missing_section_error()),
             _ => continue,
         }
     }
+}
+
+fn missing_section_error() -> wasmtime::Error {
+    wasmtime::Error::msg(format!(
+        "missing `{API_VERSION_SECTION}` custom section — plugin binary is malformed \
+         (the manifest-declared api-version is not trusted)"
+    ))
 }
 
 /// Compare a plugin's declared API version against the host's. v0.x bumps
@@ -154,11 +164,41 @@ mod tests {
     }
 
     #[test]
-    fn parse_plugin_api_version_returns_none_when_section_missing() {
-        // Empty buffer triggers NeedMoreData → None. Realistic plugins
-        // without our custom section are exercised once the wasmtime
-        // integration tests come online (M1.4 fixtures).
-        let v = parse_plugin_api_version(&[0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0]).unwrap();
-        assert_eq!(v, None);
+    fn parse_plugin_api_version_rejects_binary_without_section() {
+        // A well-formed core-module preamble with no sections: the api-version
+        // custom section is absent, so the binary is malformed and must be
+        // rejected (ADR-0013) — the manifest-declared version is not trusted.
+        let err = parse_plugin_api_version(&[0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0]).unwrap_err();
+        assert!(
+            err.to_string().contains(API_VERSION_SECTION),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_plugin_api_version_rejects_truncated_binary() {
+        // A truncated buffer can't carry the section — it is rejected (either
+        // as a wasmparser header error or as a missing-section error). Either
+        // way `load` refuses to trust it.
+        assert!(parse_plugin_api_version(&[0x00, 0x61]).is_err());
+    }
+
+    #[test]
+    fn parse_plugin_api_version_reads_the_custom_section() {
+        // Hand-build a core module whose only section is the `cognia:api-version`
+        // custom section carrying "0.1.0". Layout: magic + version, then a
+        // custom section (id 0x00): LEB size, LEB name-len, name bytes, data.
+        let name = API_VERSION_SECTION.as_bytes();
+        let data = b"0.1.0";
+        let mut payload = Vec::new();
+        payload.push(name.len() as u8); // name is < 128 bytes → single LEB byte
+        payload.extend_from_slice(name);
+        payload.extend_from_slice(data);
+        let mut bytes = vec![0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0];
+        bytes.push(0x00); // custom section id
+        bytes.push(payload.len() as u8); // section size (< 128 → single byte)
+        bytes.extend_from_slice(&payload);
+        let v = parse_plugin_api_version(&bytes).expect("section parses");
+        assert_eq!(v, "0.1.0");
     }
 }

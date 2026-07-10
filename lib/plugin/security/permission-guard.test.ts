@@ -13,6 +13,7 @@ import {
   PERMISSION_GROUPS,
   PERMISSION_DESCRIPTIONS,
   DANGEROUS_PERMISSIONS,
+  WASM_UNIMPLEMENTED_PERMISSIONS,
 } from "./permission-guard"
 import type { PluginPermission as _PluginPermission } from "@/types/plugin"
 
@@ -529,6 +530,17 @@ describe("Permission Constants", () => {
   it("should have dangerous permissions list", () => {
     expect(DANGEROUS_PERMISSIONS).toContain("shell:execute")
     expect(DANGEROUS_PERMISSIONS).toContain("process:spawn")
+  })
+
+  it("lists the WASM stub capabilities that have no backend in api-version 0.1", () => {
+    // These map to host stubs that return a typed `cognia:not-implemented`
+    // error; the grant sheet renders them disabled so a user isn't misled.
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).toContain("clipboard:read")
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).toContain("clipboard:write")
+    // network:fetch is a real, enforced capability (ai rides it) — not a stub.
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain("network:fetch")
+    // notification still emits an audit-log entry, so it is not listed either.
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain("notification")
   })
 
   it("flags network egress as dangerous (arbitrary-host fetch is an exfiltration channel)", () => {

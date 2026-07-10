@@ -29,6 +29,7 @@ import { Separator } from "@/components/ui/separator"
 import {
   DANGEROUS_PERMISSIONS,
   PERMISSION_DESCRIPTIONS,
+  WASM_UNIMPLEMENTED_PERMISSIONS,
 } from "@/lib/plugin/security/permission-guard"
 import { cn } from "@/lib/utils"
 import type { PluginManifest, PluginPermission } from "@/types/plugin"
@@ -63,13 +64,7 @@ export interface WasmCapabilityGrantDecision {
 }
 
 type GroupId =
-  | "filesystem"
-  | "network"
-  | "clipboard"
-  | "notifications"
-  | "osProcess"
-  | "secrets"
-  | "other"
+  "filesystem" | "network" | "clipboard" | "notifications" | "osProcess" | "secrets" | "other"
 
 interface GroupBucket {
   id: GroupId
@@ -121,6 +116,9 @@ function groupPermissions(declared: PluginPermission[]): GroupBucket[] {
     }))
 }
 
+/** Capabilities the WASM host stubs (typed `not-implemented`) — rendered disabled. */
+const UNIMPLEMENTED = new Set<PluginPermission>(WASM_UNIMPLEMENTED_PERMISSIONS)
+
 export function WasmCapabilityGrantSheet({
   manifest,
   authorFingerprint,
@@ -134,14 +132,21 @@ export function WasmCapabilityGrantSheet({
   const optional = useMemo(() => manifest.optionalPermissions ?? [], [manifest.optionalPermissions])
   const preopens = manifest.wasm?.fs?.preopens ?? []
 
-  // Start with all "required" perms checked, all optional unchecked.
-  const [granted, setGranted] = useState<Set<PluginPermission>>(() => new Set(declared))
+  // Start with all "required" perms checked, all optional unchecked. Stubbed
+  // (not-implemented) capabilities are never pre-granted — granting them would
+  // imply a working capability that the WASM host actually refuses at runtime.
+  const [granted, setGranted] = useState<Set<PluginPermission>>(
+    () => new Set(declared.filter((p) => !UNIMPLEMENTED.has(p)))
+  )
   const [grantedPreopens, setGrantedPreopens] = useState<Set<string>>(() => new Set(preopens))
 
   const groupsDeclared = useMemo(() => groupPermissions(declared), [declared])
   const groupsOptional = useMemo(() => groupPermissions(optional), [optional])
 
   const toggle = (perm: PluginPermission) => {
+    // Stubbed capabilities can't be granted — the checkbox is disabled, but
+    // guard here too so no code path re-adds them.
+    if (UNIMPLEMENTED.has(perm)) return
     setGranted((prev) => {
       const next = new Set(prev)
       if (next.has(perm)) next.delete(perm)
@@ -309,30 +314,49 @@ function PermissionGroupList({ title, groups, granted, onToggle }: PermissionGro
             )}
           </div>
           <ul className="space-y-1.5">
-            {group.perms.map((perm) => (
-              <li
-                key={perm}
-                className={cn(
-                  "flex items-start gap-2 rounded-md border px-2 py-1.5",
-                  granted.has(perm) ? "border-foreground/20" : "border-dashed opacity-70"
-                )}
-              >
-                <Checkbox
-                  id={`perm-${perm}`}
-                  checked={granted.has(perm)}
-                  onCheckedChange={() => onToggle(perm)}
-                  aria-label={t("togglePermissionAriaLabel", { permission: perm })}
-                />
-                <div className="text-sm">
-                  <label htmlFor={`perm-${perm}`} className="font-mono cursor-pointer">
-                    {perm}
-                  </label>
-                  <p className="text-xs text-muted-foreground">
-                    {PERMISSION_DESCRIPTIONS[perm] ?? t("customPermission")}
-                  </p>
-                </div>
-              </li>
-            ))}
+            {group.perms.map((perm) => {
+              const unimplemented = UNIMPLEMENTED.has(perm)
+              return (
+                <li
+                  key={perm}
+                  className={cn(
+                    "flex items-start gap-2 rounded-md border px-2 py-1.5",
+                    unimplemented
+                      ? "border-dashed opacity-60"
+                      : granted.has(perm)
+                        ? "border-foreground/20"
+                        : "border-dashed opacity-70"
+                  )}
+                >
+                  <Checkbox
+                    id={`perm-${perm}`}
+                    checked={!unimplemented && granted.has(perm)}
+                    disabled={unimplemented}
+                    onCheckedChange={() => onToggle(perm)}
+                    aria-label={t("togglePermissionAriaLabel", { permission: perm })}
+                  />
+                  <div className="text-sm">
+                    <label
+                      htmlFor={`perm-${perm}`}
+                      className={cn(
+                        "font-mono",
+                        unimplemented ? "cursor-default" : "cursor-pointer"
+                      )}
+                    >
+                      {perm}
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      {PERMISSION_DESCRIPTIONS[perm] ?? t("customPermission")}
+                    </p>
+                    {unimplemented && (
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        {t("unimplementedHint")}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         </div>
       ))}

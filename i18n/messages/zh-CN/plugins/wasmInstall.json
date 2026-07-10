@@ -24,6 +24,7 @@
     "sensitiveBadge": "敏感",
     "title": "审查 {name} 申请的能力",
     "togglePermissionAriaLabel": "切换权限 {permission}",
+    "unimplementedHint": "当前插件运行时尚未支持——授予它不会产生任何效果。",
     "unsignedAuthor": "未签名作者"
   },
   "fromLocalButton": {

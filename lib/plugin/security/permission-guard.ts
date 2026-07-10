@@ -248,6 +248,23 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   "cli:execute",
 ]
 
+/**
+ * WASM host capabilities that are declared in the WIT contract but have no real
+ * backend in the current api-version (0.1). Their host stubs return a typed
+ * `cognia:not-implemented` error (see `src-tauri/src/plugin_api/wasm/mod.rs`),
+ * so granting them buys the plugin nothing today. The install-time grant sheet
+ * renders these disabled with a hint and never adds them to the granted set, so
+ * a user is not misled into believing a stubbed capability works.
+ *
+ * `ai.generate-text` is intentionally NOT listed: it has no dedicated
+ * permission (it rides `network:fetch`, which is a real, enforced capability).
+ * `notification` is omitted too: its host impl still emits an audit-log entry.
+ */
+export const WASM_UNIMPLEMENTED_PERMISSIONS: PluginPermission[] = [
+  "clipboard:read",
+  "clipboard:write",
+]
+
 // =============================================================================
 // Permission Guard
 // =============================================================================

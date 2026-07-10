@@ -21,7 +21,7 @@ const baseManifest: PluginManifest = {
   wasmMain: "main.wasm",
   wasm: { apiVersion: "0.1.0" },
   permissions: ["notification", "filesystem:read", "process:spawn"],
-  optionalPermissions: ["clipboard:write"],
+  optionalPermissions: ["secrets:read"],
   author: { name: "Alice", publicKey: "QUJD" }, // base64("ABC")
 }
 
@@ -59,7 +59,7 @@ describe("WasmCapabilityGrantSheet", () => {
     })
     expect(reqCheckbox).toHaveAttribute("data-state", "checked")
     const optCheckbox = screen.getByRole("checkbox", {
-      name: 'togglePermissionAriaLabel:{"permission":"clipboard:write"}',
+      name: 'togglePermissionAriaLabel:{"permission":"secrets:read"}',
     })
     expect(optCheckbox).toHaveAttribute("data-state", "unchecked")
   })
@@ -75,7 +75,7 @@ describe("WasmCapabilityGrantSheet", () => {
         onConfirm={onConfirm}
       />
     )
-    // Untick filesystem:read; tick clipboard:write.
+    // Untick filesystem:read; tick secrets:read (optional).
     fireEvent.click(
       screen.getByRole("checkbox", {
         name: 'togglePermissionAriaLabel:{"permission":"filesystem:read"}',
@@ -83,7 +83,7 @@ describe("WasmCapabilityGrantSheet", () => {
     )
     fireEvent.click(
       screen.getByRole("checkbox", {
-        name: 'togglePermissionAriaLabel:{"permission":"clipboard:write"}',
+        name: 'togglePermissionAriaLabel:{"permission":"secrets:read"}',
       })
     )
     fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
@@ -91,7 +91,7 @@ describe("WasmCapabilityGrantSheet", () => {
     const decision = onConfirm.mock.calls[0][0]
     expect(decision.pluginId).toBe("demo.wasm")
     expect(decision.grantedPermissions).toEqual(
-      expect.arrayContaining(["notification", "process:spawn", "clipboard:write"])
+      expect.arrayContaining(["notification", "process:spawn", "secrets:read"])
     )
     expect(decision.grantedPermissions).not.toContain("filesystem:read")
   })
@@ -151,6 +151,37 @@ describe("WasmCapabilityGrantSheet", () => {
     expect(screen.getByText("noSensitivePermissions")).toBeInTheDocument()
     // No dangerous warning card.
     expect(screen.queryByText(/^dangerousWarning:/)).not.toBeInTheDocument()
+  })
+
+  it("renders not-yet-implemented caps disabled and excludes them from the grant", () => {
+    const onConfirm = jest.fn()
+    const manifest: PluginManifest = {
+      ...baseManifest,
+      // clipboard:read is a WASM host stub (typed not-implemented).
+      permissions: ["notification", "clipboard:read"],
+      optionalPermissions: [],
+    }
+    render(
+      <WasmCapabilityGrantSheet
+        manifest={manifest}
+        authorFingerprint=""
+        open
+        onOpenChange={() => {}}
+        onConfirm={onConfirm}
+      />
+    )
+    const stub = screen.getByRole("checkbox", {
+      name: 'togglePermissionAriaLabel:{"permission":"clipboard:read"}',
+    })
+    // Disabled, unchecked, and the hint is shown.
+    expect(stub).toBeDisabled()
+    expect(stub).toHaveAttribute("data-state", "unchecked")
+    expect(screen.getByText("unimplementedHint")).toBeInTheDocument()
+    // Confirming does not grant the stubbed capability, but keeps the real one.
+    fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
+    const decision = onConfirm.mock.calls[0][0]
+    expect(decision.grantedPermissions).toContain("notification")
+    expect(decision.grantedPermissions).not.toContain("clipboard:read")
   })
 
   it("calls onCancel and closes when the user backs out", () => {

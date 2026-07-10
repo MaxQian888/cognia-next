@@ -216,16 +216,26 @@ impl cognia::plugin::process::Host for HostState {
 impl cognia::plugin::clipboard::Host for HostState {
     async fn read_text(&mut self) -> Result<String, String> {
         clipboard::check_read(self)?;
-        // v0.1 returns empty; the real implementation lands when we ship
-        // `tauri-plugin-clipboard-manager`-backed access to the renderer's
-        // clipboard. Returning Ok(empty) keeps guest contract stable.
-        Ok(String::new())
+        // The `tauri-plugin-clipboard-manager`-backed bridge to the renderer's
+        // clipboard is not wired in v0.1. Returning `Ok("")` here would look
+        // like an empty clipboard to the guest; instead surface a typed
+        // not-implemented error (over the WIT `result` channel) so the guest
+        // can branch. The capability gate above still runs first, so a denial
+        // is reported before this.
+        Err(super::super::not_implemented_error(
+            "clipboard.read-text",
+            "the host clipboard bridge is not wired in api-version 0.1",
+        ))
     }
 
     async fn write_text(&mut self, _value: String) -> Result<(), String> {
         clipboard::check_write(self)?;
-        log::info!("[plugin:{}] clipboard.write_text (stubbed)", self.plugin_id);
-        Ok(())
+        // Same as `read_text`: no clipboard backend in v0.1. A silent `Ok(())`
+        // would tell the guest the write succeeded; return typed not-implemented.
+        Err(super::super::not_implemented_error(
+            "clipboard.write-text",
+            "the host clipboard bridge is not wired in api-version 0.1",
+        ))
     }
 }
 
@@ -256,11 +266,10 @@ impl cognia::plugin::ai::Host for HostState {
         // clear error the guest can branch on (the permission + validation
         // gates above still run, so capability denial is reported first).
         let _ = &opts;
-        Err(
-            "ai.generate_text is not available to WASM plugins in api-version 0.1: \
-             the host provider bridge is not wired yet"
-                .to_string(),
-        )
+        Err(super::super::not_implemented_error(
+            "ai.generate-text",
+            "the host provider bridge (models, quotas, PII gate) is not wired in api-version 0.1",
+        ))
     }
 }
 
@@ -353,10 +362,58 @@ mod tests {
             .generate_text("summarize this".into(), gen_opts())
             .await;
         let err = result.expect_err("ai.generate_text must not return fake content");
-        assert!(err.contains("not available"), "unexpected message: {err}");
+        assert!(
+            err.starts_with(super::super::super::NOT_IMPLEMENTED_CODE),
+            "must carry the stable not-implemented code the guest branches on: {err}"
+        );
         assert!(
             !err.contains("stub"),
             "must not leak a stub marker into guest output: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn clipboard_read_text_returns_typed_not_implemented() {
+        use cognia::plugin::clipboard::Host as _;
+        // With the capability granted, a stubbed read must NOT masquerade as an
+        // empty clipboard — it returns the typed not-implemented code so the
+        // guest can tell "no backend" from "clipboard was empty".
+        let mut state = host(&["clipboard:read"]);
+        let err = state
+            .read_text()
+            .await
+            .expect_err("clipboard.read-text must not return fake empty text");
+        assert!(
+            err.starts_with(super::super::super::NOT_IMPLEMENTED_CODE),
+            "unexpected message: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn clipboard_write_text_returns_typed_not_implemented() {
+        use cognia::plugin::clipboard::Host as _;
+        let mut state = host(&["clipboard:write"]);
+        let err = state
+            .write_text("hello".into())
+            .await
+            .expect_err("clipboard.write-text must not claim a fake success");
+        assert!(
+            err.starts_with(super::super::super::NOT_IMPLEMENTED_CODE),
+            "unexpected message: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn clipboard_reports_capability_denial_before_not_implemented() {
+        use cognia::plugin::clipboard::Host as _;
+        // Without the capability the denial fires first — the guest sees a
+        // capability error, not the not-implemented code.
+        let mut state = host(&[]);
+        let err = state.read_text().await.expect_err("missing capability must error");
+        assert!(err.contains("clipboard:read"), "unexpected message: {err}");
+        assert!(
+            !err.starts_with(super::super::super::NOT_IMPLEMENTED_CODE),
+            "denial must not be masked by not-implemented: {err}"
         );
     }
 
