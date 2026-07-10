@@ -19,6 +19,16 @@ jest.mock("@/lib/db/plugins", () => ({
   getPlugin: jest.fn(),
 }))
 
+// The embedded PluginFrontendTrustCard reads its persisted grant through the
+// manager singleton in a state initializer; the real one throws when
+// uninitialized.
+jest.mock("@/lib/plugin/core/manager", () => ({
+  getPluginManager: () => ({
+    isFrontendTrusted: () => false,
+    setFrontendTrust: jest.fn(),
+  }),
+}))
+
 const mockGetGranted = jest.fn<PluginPermission[], [string]>(() => [])
 const mockSetTier = jest.fn()
 
@@ -93,5 +103,32 @@ describe("PluginDetailPermissions", () => {
     render(<PluginDetailPermissions pluginId="alpha" />)
     expect(screen.getAllByText("clipboard:read").length).toBeGreaterThan(0)
     expect(screen.getAllByText("network:fetch").length).toBeGreaterThan(0)
+  })
+
+  it("renders the frontend trust card for a renderer-JS plugin from an untrusted source", () => {
+    // makePlugin defaults to type:"frontend" + source:"marketplace" — the
+    // exact combination the trust boundary gates.
+    mockPlugin = makePlugin(["clipboard:read"])
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.getByTestId("plugin-frontend-trust-card")).toBeInTheDocument()
+  })
+
+  it("renders the frontend trust card in the no-permissions empty state too", () => {
+    mockPlugin = makePlugin([])
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.getByText("noPermissions")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-frontend-trust-card")).toBeInTheDocument()
+  })
+
+  it("does not render the trust card for an inherently trusted source", () => {
+    mockPlugin = { ...makePlugin(["clipboard:read"]), source: "builtin" }
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.queryByTestId("plugin-frontend-trust-card")).not.toBeInTheDocument()
+  })
+
+  it("does not render the trust card for an isolated-host plugin type", () => {
+    mockPlugin = { ...makePlugin(["clipboard:read"]), type: "wasm" }
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.queryByTestId("plugin-frontend-trust-card")).not.toBeInTheDocument()
   })
 })

@@ -41,6 +41,12 @@
   "emptyCapabilities": "This plugin declares no capabilities.",
   "emptyDescription": "Pick a plugin from the list to inspect, configure, and govern it.",
   "emptyTitle": "Select a plugin",
+  "frontendTrust": {
+    "blockedHint": "Until trusted, this plugin will not load. Only trust plugins from authors you know.",
+    "description": "This plugin runs its code directly in the app, unsandboxed — it can access your data and everything the app can. It came from an untrusted source, so it only runs after you trust it.",
+    "switchAria": "Trust this plugin's frontend code",
+    "title": "Trust frontend code"
+  },
   "logs": {
     "aria": "Python host log entries",
     "clear": "Clear",

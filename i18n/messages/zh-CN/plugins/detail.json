@@ -41,6 +41,12 @@
   "emptyCapabilities": "此插件未声明任何能力。",
   "emptyDescription": "从列表中选择插件即可查看、配置并治理它。",
   "emptyTitle": "选择一个插件",
+  "frontendTrust": {
+    "blockedHint": "在你信任它之前，此插件不会加载。请只信任你了解的作者的插件。",
+    "description": "此插件的代码会直接在应用内运行且不受沙箱限制——它能访问你的数据以及应用能做的一切。它来自不受信任的来源，因此需要你信任后才会运行。",
+    "switchAria": "信任此插件的前端代码",
+    "title": "信任前端代码"
+  },
   "logs": {
     "aria": "Python 宿主日志条目",
     "clear": "清空",

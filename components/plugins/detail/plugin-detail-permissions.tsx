@@ -19,7 +19,8 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { AuditLogEntry } from "../audit-log-entry"
-import type { PluginManifest, PluginPermission } from "@/types/plugin"
+import { PluginFrontendTrustCard } from "./plugin-frontend-trust-card"
+import type { PluginManifest, PluginPermission, PluginSource, PluginType } from "@/types/plugin"
 
 export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.permissionReview")
@@ -60,12 +61,29 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
     return <p className="text-sm text-muted-foreground">{tDetail("notFound")}</p>
   }
 
+  // PluginRow stores type/source as plain strings (Dexie row shape); narrow
+  // them the same way the manifest is narrowed above. The card renders null
+  // unless the plugin is renderer-JS from an untrusted source.
+  const trustCard = (
+    <PluginFrontendTrustCard
+      pluginId={pluginId}
+      type={rowState.row.type as PluginType}
+      source={rowState.row.source as PluginSource}
+    />
+  )
+
   if (allListed.length === 0) {
-    return <p className="text-sm text-muted-foreground">{tDetail("noPermissions")}</p>
+    return (
+      <div className="space-y-3">
+        {trustCard}
+        <p className="text-sm text-muted-foreground">{tDetail("noPermissions")}</p>
+      </div>
+    )
   }
 
   return (
     <div className="space-y-3">
+      {trustCard}
       <Card className="p-0 overflow-hidden">
         <div className="overflow-x-auto">
           <Table>

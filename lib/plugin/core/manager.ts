@@ -48,6 +48,11 @@ import { PluginThemesBridge } from "@/lib/plugin/bridge/themes-bridge"
 import { PluginLifecycleHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { isPluginSuspendEligible } from "@/lib/plugin/core/idle-policy"
 import { seedPluginConfigDefaults } from "@/lib/plugin/core/config-defaults"
+import {
+  isInherentlyTrustedFrontendSource,
+  readPolicy,
+  writePolicy,
+} from "@/lib/plugin/core/plugins-policy-storage"
 import { emitPluginConfigChange } from "@/lib/plugin/api/config-api"
 import { clearPluginSecrets } from "@/lib/plugin/api/secrets-api"
 
@@ -366,6 +371,26 @@ export class PluginDependencyError extends Error {
         .join(", ")}`
     )
     this.name = "PluginDependencyError"
+  }
+}
+
+/**
+ * Thrown when a `frontend`/`hybrid` plugin from a source that is not
+ * inherently trusted (`local`/`marketplace`/`git`) is loaded before the user
+ * has explicitly trusted it (ADR 0013 frontend trust boundary). These plugins
+ * execute un-sandboxed JavaScript in the renderer realm, so the load is
+ * refused outright rather than degraded. Typed so UI callers can point the
+ * user at the trust toggle instead of showing a generic load failure.
+ */
+export class PluginFrontendTrustError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly source: PluginSource
+  ) {
+    super(
+      `Cannot load plugin "${pluginId}": it runs un-sandboxed JavaScript in the renderer and comes from the untrusted source "${source}". Grant it explicit trust in the plugin's Permissions tab to load it.`
+    )
+    this.name = "PluginFrontendTrustError"
   }
 }
 
@@ -1907,6 +1932,18 @@ export class PluginManager {
         throw new Error(`Signature verification failed for plugin ${pluginId}`)
       }
 
+      // Frontend trust boundary (ADR 0013): renderer-JS plugins from an
+      // untrusted source need an explicit per-plugin user grant before any of
+      // their code is imported or evaluated. Kept outside the retry boundary
+      // below — refusal is a policy decision, not a transient failure.
+      if (
+        (plugin.manifest.type === "frontend" || plugin.manifest.type === "hybrid") &&
+        !isInherentlyTrustedFrontendSource(plugin.source) &&
+        !this.isFrontendTrusted(pluginId)
+      ) {
+        throw new PluginFrontendTrustError(pluginId, plugin.source)
+      }
+
       this.registerPluginPermissions(pluginId, plugin.manifest.permissions || [])
 
       // Seed declarative-config defaults into the persisted row BEFORE building
@@ -2730,6 +2767,23 @@ export class PluginManager {
       clearInterval(this.idleSweepTimer)
       this.idleSweepTimer = null
     }
+  }
+
+  /**
+   * Whether the user has explicitly trusted this plugin's renderer-JS
+   * execution (frontend trust boundary). Only consulted for
+   * `frontend`/`hybrid` plugins from a non-inherently-trusted source.
+   */
+  isFrontendTrusted(pluginId: string): boolean {
+    return readPolicy().trustedFrontendPlugins.includes(pluginId)
+  }
+
+  /** Grant or revoke the user's renderer-JS trust for one plugin. */
+  setFrontendTrust(pluginId: string, next: boolean): void {
+    const policy = readPolicy()
+    const trusted = policy.trustedFrontendPlugins.filter((id) => id !== pluginId)
+    if (next) trusted.push(pluginId)
+    writePolicy({ ...policy, trustedFrontendPlugins: trusted })
   }
 
   private async verifyPluginSignature(pluginPath: string, pluginId: string): Promise<boolean> {

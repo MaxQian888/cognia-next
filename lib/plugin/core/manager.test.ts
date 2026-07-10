@@ -7,6 +7,7 @@ import {
   PluginManager,
   PluginEnableError,
   PluginDependencyError,
+  PluginFrontendTrustError,
   PythonRuntimeDisabledError,
   resolveGovernanceMode,
   createPluginManager,
@@ -49,6 +50,19 @@ jest.mock("@/stores/plugin-runtime", () => ({
 jest.mock("@/lib/plugin/security/signature", () => ({
   getPluginSignatureVerifier: jest.fn(),
 }))
+
+// Partial mock: keep the pure `isInherentlyTrustedFrontendSource` real, but
+// stub the localStorage-backed read/write (this suite runs in the node env
+// where `window` is undefined, so the real readPolicy always returns
+// DEFAULT_POLICY and per-test trust grants would be impossible).
+jest.mock("@/lib/plugin/core/plugins-policy-storage", () => {
+  const actual = jest.requireActual("@/lib/plugin/core/plugins-policy-storage")
+  return {
+    ...actual,
+    readPolicy: jest.fn(() => actual.DEFAULT_POLICY),
+    writePolicy: jest.fn(),
+  }
+})
 
 jest.mock("@/lib/plugin/security/permission-guard", () => ({
   getPermissionGuard: jest.fn(),
@@ -114,6 +128,7 @@ jest.mock("@/lib/plugin/security/wasm-grant", () => ({
 }))
 
 import { usePluginStore } from "@/stores/plugin-runtime"
+import { DEFAULT_POLICY, readPolicy, writePolicy } from "@/lib/plugin/core/plugins-policy-storage"
 import { getPlugin, updatePlugin, upsertPlugin } from "@/lib/db/plugins"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
@@ -3605,6 +3620,144 @@ describe("PluginManager", () => {
           manager as unknown as { initializePythonRuntime: () => Promise<void> }
         ).initializePythonRuntime()
       ).resolves.toBeUndefined()
+    })
+  })
+
+  describe("frontend trust boundary (ADR 0013)", () => {
+    const mockReadPolicy = readPolicy as jest.MockedFunction<typeof readPolicy>
+    const mockWritePolicy = writePolicy as jest.MockedFunction<typeof writePolicy>
+
+    const createTrustPlugin = (
+      id: string,
+      type: PluginManifest["type"],
+      source: Plugin["source"]
+    ): Plugin => ({
+      manifest: {
+        ...createManifest(id),
+        type,
+        ...(type === "hybrid" ? { pythonMain: "main.py" } : {}),
+        ...(type === "wasm"
+          ? { wasmMain: "plugin.wasm", main: undefined, wasm: { apiVersion: "0.1.0" } }
+          : {}),
+      },
+      status: "installed",
+      source,
+      path: `/plugins/${id}`,
+      config: {},
+    })
+
+    const createTrustStore = (plugin: Plugin) => ({
+      plugins: { [plugin.manifest.id]: plugin } as Record<string, Plugin>,
+      loadPlugin: jest.fn(async () => undefined),
+      setPluginError: jest.fn(),
+      registerPluginHooks: jest.fn(),
+      registerPluginTool: jest.fn(),
+    })
+
+    const stubTrustLoader = (manager: PluginManager) => {
+      const loader = (
+        manager as unknown as {
+          loader: {
+            load: jest.Mock
+            isLoaded: (pluginId: string) => boolean
+          }
+        }
+      ).loader
+      loader.load = jest.fn(async (plugin: Plugin) => ({
+        manifest: plugin.manifest,
+        activate: jest.fn(),
+      }))
+      loader.isLoaded = jest.fn(() => false)
+      return loader
+    }
+
+    const withTrusted = (ids: string[]) => ({ ...DEFAULT_POLICY, trustedFrontendPlugins: ids })
+
+    beforeEach(() => {
+      mockReadPolicy.mockReset()
+      mockReadPolicy.mockImplementation(() => DEFAULT_POLICY)
+      mockWritePolicy.mockReset()
+    })
+
+    it("isFrontendTrusted reflects the persisted trust list", () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      mockReadPolicy.mockReturnValue(withTrusted(["alpha"]))
+      expect(manager.isFrontendTrusted("alpha")).toBe(true)
+      expect(manager.isFrontendTrusted("beta")).toBe(false)
+    })
+
+    it("setFrontendTrust(true) adds the id once, even when already trusted", () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      mockReadPolicy.mockReturnValue(withTrusted(["alpha"]))
+      manager.setFrontendTrust("alpha", true)
+      expect(mockWritePolicy).toHaveBeenCalledWith(withTrusted(["alpha"]))
+    })
+
+    it("setFrontendTrust(false) removes the id and preserves other grants", () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      mockReadPolicy.mockReturnValue(withTrusted(["alpha", "beta"]))
+      manager.setFrontendTrust("alpha", false)
+      expect(mockWritePolicy).toHaveBeenCalledWith(withTrusted(["beta"]))
+    })
+
+    it("loadPlugin refuses an untrusted-source frontend plugin before any JS executes", async () => {
+      const plugin = createTrustPlugin("fe-local", "frontend", "local")
+      mockGetState.mockReturnValue(createTrustStore(plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const loader = stubTrustLoader(manager)
+
+      await expect(manager.loadPlugin("fe-local")).rejects.toBeInstanceOf(PluginFrontendTrustError)
+      expect(loader.load).not.toHaveBeenCalled()
+    })
+
+    it("loadPlugin refuses an untrusted-source hybrid plugin", async () => {
+      const plugin = createTrustPlugin("hy-market", "hybrid", "marketplace")
+      mockGetState.mockReturnValue(createTrustStore(plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      const loader = stubTrustLoader(manager)
+
+      await expect(manager.loadPlugin("hy-market")).rejects.toBeInstanceOf(PluginFrontendTrustError)
+      expect(loader.load).not.toHaveBeenCalled()
+    })
+
+    it("loadPlugin loads a frontend plugin once the user has trusted it", async () => {
+      const plugin = createTrustPlugin("fe-local", "frontend", "local")
+      mockGetState.mockReturnValue(createTrustStore(plugin))
+      mockReadPolicy.mockReturnValue(withTrusted(["fe-local"]))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const loader = stubTrustLoader(manager)
+
+      await manager.loadPlugin("fe-local")
+      expect(loader.load).toHaveBeenCalled()
+    })
+
+    it("loadPlugin does not gate frontend plugins from an inherently trusted source", async () => {
+      const plugin = createTrustPlugin("fe-dev", "frontend", "dev")
+      mockGetState.mockReturnValue(createTrustStore(plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const loader = stubTrustLoader(manager)
+
+      await manager.loadPlugin("fe-dev")
+      expect(loader.load).toHaveBeenCalled()
+    })
+
+    it("loadPlugin does not gate isolated-host plugin types from an untrusted source", async () => {
+      const plugin = createTrustPlugin("wasm-local", "wasm", "local")
+      mockGetState.mockReturnValue(createTrustStore(plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const loader = stubTrustLoader(manager)
+
+      await manager.loadPlugin("wasm-local")
+      expect(loader.load).toHaveBeenCalled()
+    })
+
+    it("carries pluginId + source on the typed error", () => {
+      const error = new PluginFrontendTrustError("alpha", "marketplace")
+      expect(error.name).toBe("PluginFrontendTrustError")
+      expect(error.pluginId).toBe("alpha")
+      expect(error.source).toBe("marketplace")
+      expect(error.message).toContain("alpha")
+      expect(error.message).toContain("marketplace")
     })
   })
 
