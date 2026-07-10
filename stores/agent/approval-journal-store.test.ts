@@ -1,6 +1,9 @@
+/** @jest-environment jsdom */
 import {
   useApprovalJournalStore,
   toPersistedApproval,
+  markUnsettledInterrupted,
+  migrateApprovalJournal,
   type PersistedApproval,
 } from "./approval-journal-store"
 import type { PendingApproval } from "@/lib/claude/types"
@@ -56,6 +59,56 @@ describe("approval journal store", () => {
     s.record(entry())
     s.dismiss("req-1")
     expect(useApprovalJournalStore.getState().entries).toEqual([])
+  })
+
+  it("clearSettled drops only settled entries", () => {
+    useApprovalJournalStore.setState({
+      entries: [
+        { ...entry({ requestId: "a" }), status: "pending" },
+        { ...entry({ requestId: "b" }), status: "settled" },
+        { ...entry({ requestId: "c" }), status: "interrupted" },
+      ],
+    })
+    useApprovalJournalStore.getState().clearSettled()
+    expect(useApprovalJournalStore.getState().entries.map((e) => e.requestId)).toEqual(["a", "c"])
+  })
+})
+
+describe("persist rehydration", () => {
+  it("rehydrates from localStorage and marks restored asks interrupted", async () => {
+    window.localStorage.setItem(
+      "cognia-approval-journal",
+      JSON.stringify({
+        version: 1,
+        state: { entries: [{ ...entry({ requestId: "restored" }), status: "pending" }] },
+      })
+    )
+    await useApprovalJournalStore.persist.rehydrate()
+    const restored = useApprovalJournalStore
+      .getState()
+      .entries.find((e) => e.requestId === "restored")
+    expect(restored?.status).toBe("interrupted")
+    window.localStorage.clear()
+    reset()
+  })
+})
+
+describe("rehydrate + migrate helpers", () => {
+  it("markUnsettledInterrupted flips pending/settled rows to interrupted", () => {
+    const out = markUnsettledInterrupted([
+      { ...entry({ requestId: "a" }), status: "pending" },
+      { ...entry({ requestId: "b" }), status: "interrupted" },
+    ])
+    expect(out.every((e) => e.status === "interrupted")).toBe(true)
+    // The already-interrupted entry is returned by reference (unchanged).
+    expect(out[1]).toMatchObject({ requestId: "b" })
+  })
+
+  it("migrateApprovalJournal stamps legacy rows interrupted and tolerates undefined", () => {
+    expect(migrateApprovalJournal({ entries: [{ requestId: "x" }] }).entries[0].status).toBe(
+      "interrupted"
+    )
+    expect(migrateApprovalJournal(undefined).entries).toEqual([])
   })
 })
 

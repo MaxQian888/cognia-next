@@ -47,6 +47,27 @@ interface ApprovalJournalState {
 /** FIFO cap — approvals are transient; never let the journal grow unbounded. */
 const MAX_ENTRIES = 100
 
+/**
+ * The sidecar waiter died with the previous page — mark every unsettled
+ * restored ask interrupted (info-only). Pure; exported for the rehydrate hook
+ * and its test.
+ */
+export function markUnsettledInterrupted(entries: PersistedApproval[]): PersistedApproval[] {
+  return entries.map((e) =>
+    e.status === "interrupted" ? e : { ...e, status: "interrupted" as const }
+  )
+}
+
+/** Migrate legacy persisted rows (any version) to interrupted. Pure. */
+export function migrateApprovalJournal(persisted: unknown): {
+  entries: PersistedApproval[]
+} {
+  const p = persisted as { entries?: Array<Partial<PersistedApproval>> } | undefined
+  return {
+    entries: (p?.entries ?? []).map((e) => ({ ...e, status: "interrupted" }) as PersistedApproval),
+  }
+}
+
 export const useApprovalJournalStore = create<ApprovalJournalState>()(
   persist(
     (set) => ({
@@ -80,16 +101,10 @@ export const useApprovalJournalStore = create<ApprovalJournalState>()(
       // unanswerable and must render as interrupted (info-only), not live.
       onRehydrateStorage: () => (state) => {
         if (!state) return
-        state.entries = state.entries.map((e) =>
-          e.status === "interrupted" ? e : { ...e, status: "interrupted" as const }
-        )
+        state.entries = markUnsettledInterrupted(state.entries)
       },
-      migrate: (persisted) => {
-        const p = persisted as { entries?: Array<Partial<PersistedApproval>> } | undefined
-        return {
-          entries: (p?.entries ?? []).map((e) => ({ ...e, status: "interrupted" as const })),
-        } as Pick<ApprovalJournalState, "entries">
-      },
+      migrate: (persisted) =>
+        migrateApprovalJournal(persisted) as Pick<ApprovalJournalState, "entries">,
     }
   )
 )
