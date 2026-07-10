@@ -95,6 +95,13 @@ export interface IpcExposedMethodDescriptor {
   handler: (...args: unknown[]) => unknown | Promise<unknown>
   schema?: IpcMethodSchema
   description?: string
+  /**
+   * Target-side ACL: plugin ids allowed to invoke this method. Omitted =
+   * callable by any plugin (back-compat). The owner can always call its
+   * own methods. Enumeration (`getExposedMethods`/`describeExposedMethods`)
+   * only lists methods the asking plugin may call.
+   */
+  allowedCallers?: string[]
 }
 
 /** Either a bare handler (back-compat) or a descriptor with schema/description. */
@@ -113,7 +120,12 @@ export interface IpcExposedMethodInfo {
 /** Plugin-scoped façade over the inter-plugin IPC manager. */
 export interface PluginIPCAPI {
   send: (targetPluginId: string, channel: string, data: unknown) => Promise<void>
-  broadcast: (channel: string, data: unknown) => void
+  /**
+   * Publish to every subscriber of `channel` (except the sender). Pass
+   * `options.to` to restrict delivery to an explicit receiver allowlist —
+   * without it any subscribed plugin receives the payload.
+   */
+  broadcast: (channel: string, data: unknown, options?: { to?: string[] }) => void
   on: (channel: string, handler: (data: unknown, senderId: string) => void) => () => void
   expose: (methods: IpcExposedMethods) => void
   call: <T>(

@@ -557,12 +557,15 @@ describe("createIPCAPI", () => {
     expect(api.describeExposedMethods).toBeDefined()
   })
 
-  it("exposes service discovery (describeExposedMethods) ungated", () => {
-    mockHasPerm.mockReturnValue(false)
-    const api = createIPCAPI("plugin-a")
+  it("gates service discovery (describeExposedMethods) behind ipc:call (W3.5)", () => {
     getPluginIPC().expose("plugin-b", {
       ping: { handler: () => "pong", description: "health check" },
     })
+    mockHasPerm.mockReturnValue(false)
+    const api = createIPCAPI("plugin-a")
+    expect(() => api.describeExposedMethods("plugin-b")).toThrow(/ipc:call/)
+
+    mockHasPerm.mockReturnValue(true)
     const described = api.describeExposedMethods("plugin-b")
     expect(described).toEqual([{ name: "ping", description: "health check", schema: undefined }])
   })
@@ -603,11 +606,11 @@ describe("createIPCAPI", () => {
       await expect(caller.call<number>("plugin-b", "add", [2, 3])).resolves.toBe(5)
     })
 
-    it("leaves on() and getExposedMethods ungated", () => {
+    it("leaves on() ungated but gates enumeration behind ipc:call (W3.5)", () => {
       mockHasPerm.mockReturnValue(false)
       const api = createIPCAPI("plugin-a")
       expect(() => api.on("c", () => {})).not.toThrow()
-      expect(() => api.getExposedMethods("plugin-b")).not.toThrow()
+      expect(() => api.getExposedMethods("plugin-b")).toThrow(/ipc:call/)
     })
   })
 })
@@ -654,6 +657,83 @@ describe("createIPCAPI new options", () => {
     controller.abort()
     await expect(api.call("plugin-b", "slow", [], { signal: controller.signal })).rejects.toThrow(
       /aborted/i
+    )
+  })
+})
+
+// ── W3.5/W3.6: target-side ACL, scoped broadcast, owned channels ─────────────
+describe("IPC hardening (W3.5/W3.6)", () => {
+  let ipc: PluginIPC
+
+  beforeEach(() => {
+    resetPluginIPC()
+    ipc = getPluginIPC()
+    mockHasPerm.mockReturnValue(true)
+  })
+
+  it("enforces the exposer's allowedCallers on call()", async () => {
+    ipc.expose("provider", {
+      secret: { handler: () => 42, allowedCallers: ["friend"] },
+    })
+    await expect(ipc.call("friend", "provider", "secret")).resolves.toBe(42)
+    await expect(ipc.call("stranger", "provider", "secret")).rejects.toThrow(
+      /does not allow calls from "stranger"/
+    )
+    // The owner can always call itself.
+    await expect(ipc.call("provider", "provider", "secret")).resolves.toBe(42)
+  })
+
+  it("filters enumeration to methods the caller may invoke", () => {
+    ipc.expose("provider", {
+      open: () => 1,
+      restricted: { handler: () => 2, allowedCallers: ["friend"] },
+    })
+    expect(ipc.getExposedMethods("provider", "friend")).toEqual(["open", "restricted"])
+    expect(ipc.getExposedMethods("provider", "stranger")).toEqual(["open"])
+    expect(ipc.describeExposedMethods("provider", "stranger").map((m) => m.name)).toEqual(["open"])
+  })
+
+  it("restricts broadcast delivery to the `to` allowlist", () => {
+    const friend = jest.fn()
+    const eavesdropper = jest.fn()
+    ipc.subscribe("friend", "news", friend)
+    ipc.subscribe("eavesdropper", "news", eavesdropper)
+
+    ipc.broadcast("sender", "news", { x: 1 }, { to: ["friend"] })
+    expect(friend).toHaveBeenCalledWith({ x: 1 }, "sender")
+    expect(eavesdropper).not.toHaveBeenCalled()
+
+    ipc.broadcast("sender", "news", { x: 2 })
+    expect(eavesdropper).toHaveBeenCalledWith({ x: 2 }, "sender")
+  })
+
+  it("blocks publishing on another registered plugin's owned channel", () => {
+    ipc.registerPlugin("owner")
+    expect(() => ipc.broadcast("intruder", "owner:events", {})).toThrow(/owned by plugin "owner"/)
+    // The owner itself and non-plugin prefixes stay allowed.
+    expect(() => ipc.broadcast("owner", "owner:events", {})).not.toThrow()
+    expect(() => ipc.broadcast("intruder", "weather:today", {})).not.toThrow()
+  })
+
+  it("evicts a plugin's breakers on unregisterPlugin (W3.7)", async () => {
+    ipc.expose("flaky", {
+      boom: () => {
+        throw new Error("boom")
+      },
+    })
+    await expect(ipc.call("caller", "flaky", "boom")).rejects.toThrow()
+    expect(ipc.getBreakerState("flaky", "boom")).not.toBeNull()
+    ipc.unregisterPlugin("flaky")
+    expect(ipc.getBreakerState("flaky", "boom")).toBeNull()
+  })
+
+  it("gates the idle-target force-wake behind the caller's ipc:call", async () => {
+    // Registered plugin without ipc:call must not trigger the wake path —
+    // the lookup just fails with the normal error.
+    ipc.registerPlugin("powerless")
+    mockHasPerm.mockReturnValue(false)
+    await expect(ipc.call("powerless", "sleeping-target", "m")).rejects.toThrow(
+      /no exposed methods/
     )
   })
 })
