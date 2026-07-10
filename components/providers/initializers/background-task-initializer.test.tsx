@@ -2,7 +2,7 @@ import { render, waitFor } from "@testing-library/react"
 
 const interruptRendererBackgroundTasksOnBoot = jest.fn(async (): Promise<unknown[]> => [])
 const setRendererBackgroundSettleListener = jest.fn()
-const registerBackgroundResultNotifyStrings = jest.fn(() => jest.fn())
+const registerBackgroundResultNotifyStrings = jest.fn((_strings: unknown) => jest.fn())
 const onBackgroundRunSettled = jest.fn()
 const redispatchBackgroundRun = jest.fn(async (): Promise<unknown> => ({
   ok: true,
@@ -24,8 +24,8 @@ jest.mock("@/lib/background-tasks/renderer-subagent-registry", () => ({
 }))
 jest.mock("@/hooks/chat/background-result-runtime", () => ({
   onBackgroundRunSettled: (...args: unknown[]) => onBackgroundRunSettled(...(args as [])),
-  registerBackgroundResultNotifyStrings: (...args: unknown[]) =>
-    registerBackgroundResultNotifyStrings(...(args as [])),
+  registerBackgroundResultNotifyStrings: (strings: unknown) =>
+    registerBackgroundResultNotifyStrings(strings),
 }))
 jest.mock("@/lib/background-tasks/redispatch", () => ({
   DEFAULT_MAX_AUTO_RESUME_ATTEMPTS: 2,
@@ -88,7 +88,7 @@ it("wires the settle listener + localized notify copy, and unwires on unmount", 
     { status: "done" }
   )
   expect(registerBackgroundResultNotifyStrings).toHaveBeenCalledTimes(1)
-  const strings = registerBackgroundResultNotifyStrings.mock.calls[0][0] as unknown as {
+  const strings = registerBackgroundResultNotifyStrings.mock.calls[0]![0] as {
     title: (p: { subagentId: string; status: string; elapsed: string }) => string
     body: (p: { runId: string }) => string
   }

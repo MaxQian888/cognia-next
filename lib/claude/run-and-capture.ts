@@ -967,7 +967,9 @@ async function captureAssistantReplyCore(
             // telemetry (subagent runtime store, TUI footer) can show a running
             // token figure before the authoritative end-of-turn usage lands.
             if (cap?.onEvent) {
-              const partialUsage = extractUsage(inner.message)
+              // extractUsage reads `.usage` / `.message.usage` off any SDK
+              // message shape; the assistant message carries per-call usage.
+              const partialUsage = extractUsage(inner.message as never)
               if (partialUsage) emitEvent({ type: "usage", usage: partialUsage, partial: true })
             }
           }
