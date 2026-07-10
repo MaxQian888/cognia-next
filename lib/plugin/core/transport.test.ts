@@ -276,3 +276,42 @@ describe("listPluginPermissions", () => {
     expect(mockInvoke).toHaveBeenCalledWith("plugin_permission_list", { pluginId: "my-plugin" })
   })
 })
+
+// ── W6.3: retry only idempotent APIs by default ──────────────────────────────
+describe("idempotency-aware retry (W6.3)", () => {
+  beforeEach(() => {
+    mockInvoke.mockReset()
+  })
+
+  const timeoutResponse = {
+    requestId: "r",
+    success: false,
+    error: { code: "TIMEOUT", message: "slow" },
+    runtimeVersion: "1",
+    compat: { sdkVersion: "2.0.0", minSupportedSdk: "1.0.0", compatible: true },
+  }
+
+  it("retries a read-shaped api on TIMEOUT", async () => {
+    mockInvoke
+      .mockResolvedValueOnce(timeoutResponse)
+      .mockResolvedValueOnce({ ...timeoutResponse, success: true, data: 42, error: undefined })
+    await expect(invokePluginApi("p", "secrets:get", {}, { retryDelayMs: 1 })).resolves.toBe(42)
+    expect(mockInvoke).toHaveBeenCalledTimes(2)
+  })
+
+  it("does NOT retry a side-effecting api by default", async () => {
+    mockInvoke.mockResolvedValue(timeoutResponse)
+    await expect(invokePluginApi("p", "secrets:set", {}, { retryDelayMs: 1 })).rejects.toThrow()
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
+  })
+
+  it("honours an explicit idempotent override", async () => {
+    mockInvoke
+      .mockResolvedValueOnce(timeoutResponse)
+      .mockResolvedValueOnce({ ...timeoutResponse, success: true, data: "ok", error: undefined })
+    await expect(
+      invokePluginApi("p", "cache:set", {}, { idempotent: true, retryDelayMs: 1 })
+    ).resolves.toBe("ok")
+    expect(mockInvoke).toHaveBeenCalledTimes(2)
+  })
+})

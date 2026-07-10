@@ -32,9 +32,18 @@ export function recordPluginPointDiagnostic(
 ): void {
   const existing = diagnosticsByPlugin.get(pluginId) || []
   existing.push(diagnostic)
+  // Ring buffer (W6.7): a chatty failure site (retry loop, per-chunk hook)
+  // previously grew this unboundedly across a long session. Mirrors the
+  // 100-entry cap in tools-bridge.ts.
+  if (existing.length > MAX_DIAGNOSTICS_PER_PLUGIN) {
+    existing.splice(0, existing.length - MAX_DIAGNOSTICS_PER_PLUGIN)
+  }
   diagnosticsByPlugin.set(pluginId, existing)
   notify()
 }
+
+/** Per-plugin diagnostics retention (ring buffer, W6.7). */
+export const MAX_DIAGNOSTICS_PER_PLUGIN = 100
 
 export function getPluginPointDiagnostics(pluginId: string): PluginPointDiagnostic[] {
   return [...(diagnosticsByPlugin.get(pluginId) || [])]

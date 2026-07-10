@@ -83,3 +83,20 @@ describe("createDexieAPI", () => {
     expect(apiB.table("items").name).toBe("plugin-b:items")
   })
 })
+
+// ── W6.6: table() accepts already-namespaced names via resolveTableName ──────
+describe("table() namespace resolution (W6.6)", () => {
+  it("passes an already-namespaced own-table name through (no double prefix)", () => {
+    const tableMock = jest.fn().mockReturnValue({} as never)
+    const api = createDexieAPI({ table: tableMock } as never, "p1")
+    api.table("p1:repos")
+    expect(tableMock).toHaveBeenCalledWith("p1:repos")
+    api.table("repos")
+    expect(tableMock).toHaveBeenCalledWith("p1:repos")
+  })
+
+  it("still rejects another plugin's prefix", () => {
+    const api = createDexieAPI({ table: jest.fn() } as never, "p1")
+    expect(() => api.table("p2:repos")).toThrow(/not in its namespace/)
+  })
+})

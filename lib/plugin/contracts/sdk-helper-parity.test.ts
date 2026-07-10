@@ -1,8 +1,10 @@
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { REPO_ROOT } from "./contract-path-audit"
 import { PLUGIN_CAPABILITY_CONTRACTS, getPluginCapabilityContract } from "./plugin-capabilities"
+import { OVERLAY_REGISTRY_CAPABILITY_KEYS } from "./capability-bridge-map"
+import { MODULE_BRIDGE_CAPABILITY_KEYS } from "./module-bridge-map"
 
 /**
  * Content-level SDK parity for the plugin capability contracts.
@@ -81,5 +83,76 @@ describe("plugin SDK helper parity (content-level)", () => {
       .filter((c) => c.typescriptSdk.some((rel) => DEFINE_HELPER_RE.test(rel.replace(/\\/g, "/"))))
       .map((c) => c.id)
     expect(offenders).toEqual([])
+  })
+})
+
+// ── W6.8: reverse parity — dead SDK surface & undocumented host surface ──────
+describe("reverse SDK parity (W6.8)", () => {
+  const DEFINE_DIR = join(REPO_ROOT, "packages/plugin-sdk/src/define")
+  const defineFiles = readdirSync(DEFINE_DIR)
+    .filter((f) => f.startsWith("define-") && f.endsWith(".ts") && !f.endsWith(".test.ts"))
+    .filter((f) => f !== "define-plugin.ts") // the root plugin factory, not a capability helper
+
+  // ① Dead-SDK-surface guard: every shipped define-* helper file must be
+  // referenced by some capability contract's typescriptSdk binding — a
+  // helper nothing points at is unreachable documentation-wise and rots.
+  // Known debt (2026-07-10, W6.8 initial sweep): helpers that existed before
+  // this guard without a contract binding. Fix by adding the file to the
+  // owning contract's typescriptSdk — do NOT add new entries here.
+  const KNOWN_UNBOUND_DEFINE_HELPERS = new Set([
+    "define-a2ui-component.ts",
+    "define-a2ui-template.ts",
+    "define-agent-tool.ts",
+    "define-ai-provider.ts",
+    "define-command.ts",
+    "define-external-agent-preset.ts",
+    "define-guardrail.ts",
+    "define-mcp-server-preset.ts",
+    "define-mode.ts",
+    "define-native-anthropic-tool.ts",
+    "define-ocr-provider.ts",
+    "define-pet-achievement.ts",
+    "define-pet-item.ts",
+    "define-quick-action.ts",
+    "define-scheduled-task.ts",
+    "define-skill.ts",
+    "define-tool.ts",
+    "define-subagent.ts",
+    "define-workspace-backend.ts",
+  ])
+
+  it("every define-* helper is bound by a capability contract", () => {
+    const bound = new Set(
+      PLUGIN_CAPABILITY_CONTRACTS.flatMap((c) => c.typescriptSdk).map((rel) =>
+        rel.replace(/\\/g, "/").split("/").pop()
+      )
+    )
+    const orphans = defineFiles.filter((f) => !bound.has(f) && !KNOWN_UNBOUND_DEFINE_HELPERS.has(f))
+    expect(orphans).toEqual([])
+  })
+
+  it("the known-unbound list only shrinks (no stale entries)", () => {
+    const stale = [...KNOWN_UNBOUND_DEFINE_HELPERS].filter((f) => !defineFiles.includes(f))
+    expect(stale).toEqual([])
+  })
+
+  // ② Undocumented-host-surface guard: every overlay-registry and
+  // module-bridge capability must expose at least one TypeScript SDK binding
+  // in its contract — a host surface plugins can feed but the SDK never
+  // names is undiscoverable.
+  it("every overlay/module-bridge capability has a TypeScript SDK binding", () => {
+    const hostCapabilities = [
+      ...OVERLAY_REGISTRY_CAPABILITY_KEYS,
+      ...MODULE_BRIDGE_CAPABILITY_KEYS,
+    ] as string[]
+    // Known debt: "view" (view containers/trees/webviews) predates this
+    // guard without a typed SDK binding. Do NOT add new entries.
+    const KNOWN_UNBOUND_CAPABILITIES = new Set(["view"])
+    const missing = hostCapabilities.filter((id) => {
+      if (KNOWN_UNBOUND_CAPABILITIES.has(id)) return false
+      const contract = getPluginCapabilityContract(id as never)
+      return !contract || contract.typescriptSdk.length === 0
+    })
+    expect(missing).toEqual([])
   })
 })

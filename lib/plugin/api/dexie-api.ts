@@ -13,9 +13,11 @@ export interface PluginDexieAPI {
   /**
    * Returns a Dexie Table scoped to this plugin.
    *
-   * `name` is the logical table name as declared in manifest.dexie.tables —
-   * no namespace prefix. Throws if the name is not in the plugin's registered
-   * set (i.e. not declared in the manifest).
+   * `name` is the logical table name (no prefix) or an already-namespaced
+   * `<pluginId>:<name>`. Throws when the name resolves outside this plugin's
+   * namespace. NOTE: this validates the NAMESPACE only — whether the table
+   * actually exists (was declared in `manifest.dexie.tables` and applied to
+   * the schema) is Dexie's own lookup error at call time (W6.6).
    */
   table<T, K = unknown>(name: string): Dexie.Table<T, K>
 
@@ -43,6 +45,11 @@ export function createDexieAPI(db: Dexie, pluginId: string): PluginDexieAPI {
   //  - `<pluginId>:x`   → passes through (already correctly namespaced)
   //  - `<other>:x`      → rejected (cross-plugin / core-table access)
   const resolveTableName = (name: string): string => {
+    if (!name) {
+      throw new Error(
+        `Plugin "${pluginId}" attempted to access table "${name}" which is not in its namespace`
+      )
+    }
     const parsed = fromNamespacedTableName(name)
     if (parsed) {
       if (parsed.pluginId !== pluginId) {
@@ -57,20 +64,11 @@ export function createDexieAPI(db: Dexie, pluginId: string): PluginDexieAPI {
 
   return {
     table<T, K = unknown>(name: string): Dexie.Table<T, K> {
-      const namespacedName = toNamespacedTableName(pluginId, name)
-
-      // Verify the requested table actually belongs to this plugin.
-      // fromNamespacedTableName returns null for non-prefixed names, and the
-      // pluginId check guards against a plugin somehow injecting another
-      // plugin's prefix into `name` (e.g. "other-plugin:repos").
-      const parsed = fromNamespacedTableName(namespacedName)
-      if (!parsed || parsed.pluginId !== pluginId) {
-        throw new Error(
-          `Plugin "${pluginId}" attempted to access table "${name}" which is not in its namespace`
-        )
-      }
-
-      return db.table<T, K>(namespacedName)
+      // W6.6: route through the same resolver rawDb() uses so an
+      // already-namespaced `<pluginId>:foo` passes through instead of being
+      // double-prefixed to `<pluginId>:<pluginId>:foo` (which always threw),
+      // and cross-plugin prefixes are rejected identically on both paths.
+      return db.table<T, K>(resolveTableName(name))
     },
 
     rawDb(): Dexie {

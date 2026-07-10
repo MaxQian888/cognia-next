@@ -46,8 +46,16 @@ export interface InvokePluginApiOptions {
   timeoutMs?: number
   context?: unknown
   sdkVersion?: string
+  /**
+   * Retry attempts after the first failure. Defaults to 1 for idempotent
+   * (read-shaped) APIs and 0 otherwise (W6.3) — a TIMEOUT on a
+   * side-effecting call may have executed host-side, so blind retry could
+   * double-execute. Pass explicitly to override either way.
+   */
   retries?: number
   retryDelayMs?: number
+  /** Force the idempotency classification instead of deriving it from `api`. */
+  idempotent?: boolean
 }
 
 export class PluginGatewayError extends Error {
@@ -86,6 +94,17 @@ function shouldRetry(code: PluginApiErrorCode): boolean {
   return code === "TIMEOUT" || code === "INTERNAL"
 }
 
+/**
+ * Read-shaped APIs are safe to retry; anything else (set/write/delete/run/…)
+ * may have executed host-side before the failure surfaced (W6.3).
+ */
+const IDEMPOTENT_API_PATTERN =
+  /:(get|list|read|stat|exists|has|describe|query|watch|status|info|count|peek)([:.]|$)/
+
+export function isIdempotentPluginApi(api: string): boolean {
+  return IDEMPOTENT_API_PATTERN.test(api)
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -97,7 +116,8 @@ export async function invokePluginApi<T = unknown>(
   options: InvokePluginApiOptions = {}
 ): Promise<T> {
   const requestId = createRequestId()
-  const retries = options.retries ?? 1
+  const idempotent = options.idempotent ?? isIdempotentPluginApi(api)
+  const retries = options.retries ?? (idempotent ? 1 : 0)
   const retryDelayMs = options.retryDelayMs ?? 150
   const request: PluginApiInvokeRequest = {
     sdkVersion: options.sdkVersion ?? "2.0.0",
