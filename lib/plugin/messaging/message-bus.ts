@@ -251,6 +251,24 @@ export class MessageBus {
     this.removeSubscription(subscriptionId)
   }
 
+  /** Remove a subscription only when `ownerId` created it (W3.7). */
+  offOwned(ownerId: string, subscriptionId: string): void {
+    const owns = (sub: EventSubscription) => sub.id === subscriptionId && sub.source.id === ownerId
+    for (const sub of this.subscriptions.values()) {
+      if (owns(sub)) {
+        this.subscriptions.delete(sub.id)
+        return
+      }
+    }
+    if (this.wildcardSubscriptions.some(owns)) {
+      this.wildcardSubscriptions = this.wildcardSubscriptions.filter((sub) => !owns(sub))
+      return
+    }
+    this.patternSubscriptions = this.patternSubscriptions.filter(
+      ({ subscription }) => !owns(subscription)
+    )
+  }
+
   offAll(sourceId: string): void {
     // Remove from regular subscriptions
     for (const [id, sub] of this.subscriptions.entries()) {
@@ -311,7 +329,28 @@ export class MessageBus {
   // Event Delivery
   // ===========================================================================
 
+  /**
+   * Synchronous delivery depth. Handlers may emit while being delivered to;
+   * beyond MAX_SYNC_DELIVER_DEPTH the nested emit is deferred to a microtask
+   * so a re-emitting handler pair can't blow the stack (W3.7).
+   */
+  private deliverDepth = 0
+  private static readonly MAX_SYNC_DELIVER_DEPTH = 16
+
   private deliverEvent(event: BusEvent): void {
+    if (this.deliverDepth >= MessageBus.MAX_SYNC_DELIVER_DEPTH) {
+      queueMicrotask(() => this.deliverEvent(event))
+      return
+    }
+    this.deliverDepth++
+    try {
+      this.deliverEventNow(event)
+    } finally {
+      this.deliverDepth--
+    }
+  }
+
+  private deliverEventNow(event: BusEvent): void {
     const toRemove: string[] = []
 
     // Collect matching subscriptions
@@ -437,6 +476,14 @@ export class MessageBus {
     sourceId?: string
     since?: number
     limit?: number
+    /**
+     * Plugin id asking for history (W3.6). When set, payloads of OTHER
+     * plugins' events are stripped (replaced with undefined + a
+     * `payloadRedacted` metadata flag) — the retention window is not a
+     * cross-plugin data leak. System/user-sourced events keep their payloads
+     * (they are ids-only by design; see adapter-hooks' PII note).
+     */
+    viewerId?: string
   }): BusEvent[] {
     let events = [...this.eventHistory]
 
@@ -459,6 +506,19 @@ export class MessageBus {
 
     if (options?.limit) {
       events = events.slice(-options.limit)
+    }
+
+    const viewerId = options?.viewerId
+    if (viewerId) {
+      events = events.map((e) =>
+        e.source.type === "plugin" && e.source.id !== viewerId
+          ? {
+              ...e,
+              payload: undefined,
+              metadata: { ...e.metadata, payloadRedacted: true },
+            }
+          : e
+      )
     }
 
     return events
@@ -609,13 +669,16 @@ export function createEventAPI(pluginId: string): PluginEventAPI {
       return bus.once(eventType, handler, { source, filter })
     },
 
-    off: (subscriptionId: string) => bus.off(subscriptionId),
+    // Owner-scoped (W3.7): a plugin can only remove ITS OWN subscriptions —
+    // `bus.off(id)` was owner-unaware, and the ids handed to plugins come from
+    // the unsubscribe closures anyway.
+    off: (subscriptionId: string) => bus.offOwned(pluginId, subscriptionId),
 
     offAll: () => bus.offAll(pluginId),
 
     getHistory: (eventType?: string | RegExp, limit?: number) => {
       requirePerm("events:subscribe", "getHistory")
-      return bus.getHistory({ eventType, limit })
+      return bus.getHistory({ eventType, limit, viewerId: pluginId })
     },
   }
 }

@@ -404,3 +404,74 @@ describe("SystemEvents", () => {
     expect(SystemEvents.MESSAGE_SENT).toBeDefined()
   })
 })
+
+// ── W3.6/W3.7: history redaction, owner-scoped off, reentrancy guard ─────────
+describe("MessageBus hardening (W3.6/W3.7)", () => {
+  beforeEach(() => {
+    resetMessageBus()
+  })
+
+  afterEach(() => {
+    revokePluginPermissions("viewer")
+    revokePluginPermissions("other")
+  })
+
+  it("strips other plugins' payloads from a plugin's getHistory view", () => {
+    const bus = getMessageBus()
+    bus.emitFromPlugin("other", "custom:secret", { token: "s3cr3t" })
+    bus.emitFromPlugin("viewer", "custom:own", { mine: true })
+    bus.emitFromSystem(SystemEvents.AGENT_COMPLETED, { sessionId: "s1" })
+
+    initializePluginPermissions("viewer", ["events:subscribe"])
+    const api = createEventAPI("viewer")
+    const history = api.getHistory()
+
+    const otherEvt = history.find((e) => e.type === "custom:secret")
+    expect(otherEvt?.payload).toBeUndefined()
+    expect(otherEvt?.metadata?.payloadRedacted).toBe(true)
+
+    const ownEvt = history.find((e) => e.type === "custom:own")
+    expect(ownEvt?.payload).toEqual({ mine: true })
+
+    // System events are ids-only by design and stay readable.
+    const sysEvt = history.find((e) => e.type === SystemEvents.AGENT_COMPLETED)
+    expect(sysEvt?.payload).toEqual({ sessionId: "s1" })
+  })
+
+  it("off() through the plugin façade only removes the plugin's own subscription", () => {
+    const bus = getMessageBus()
+    const victimHandler = jest.fn()
+    // Another plugin's subscription, created with a known source.
+    bus.on("custom:evt", victimHandler, { source: { type: "plugin", id: "other" } })
+    const victimId = (
+      bus as unknown as { subscriptions: Map<string, { id: string }> }
+    ).subscriptions
+      .values()
+      .next().value!.id
+
+    initializePluginPermissions("viewer", ["events:subscribe"])
+    const api = createEventAPI("viewer")
+    api.off(victimId) // must be a no-op — viewer doesn't own it
+
+    bus.emitFromSystem("custom:evt", {})
+    expect(victimHandler).toHaveBeenCalledTimes(1)
+
+    // The owner CAN remove it through its own façade.
+    initializePluginPermissions("other", ["events:subscribe"])
+    createEventAPI("other").off(victimId)
+    bus.emitFromSystem("custom:evt", {})
+    expect(victimHandler).toHaveBeenCalledTimes(1)
+  })
+
+  it("bounds re-emitting handlers instead of blowing the stack", () => {
+    const bus = getMessageBus()
+    let count = 0
+    bus.on("custom:ping", () => {
+      count++
+      if (count < 200) bus.emitFromSystem("custom:ping", {})
+    })
+    expect(() => bus.emitFromSystem("custom:ping", {})).not.toThrow()
+    // The first 16 deliveries run synchronously; the rest defer to microtasks.
+    expect(count).toBeGreaterThanOrEqual(16)
+  })
+})

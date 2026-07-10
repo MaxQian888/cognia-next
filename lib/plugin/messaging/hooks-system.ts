@@ -1038,17 +1038,22 @@ export class PluginEventHooks {
       if (!plugin || plugin.status !== "enabled" || !plugin.hooks) continue
 
       const startTime = performance.now()
+      // The timeout timer must be cleared on the fast path (W3.7): per-chunk
+      // dispatchers (dispatchStreamChunk) call executeHook thousands of times
+      // per stream, and an uncleared racer both leaks a pending timer per call
+      // and rejects into the void later.
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined
       try {
         const hookPromise = Promise.resolve(executor(plugin.hooks as PluginHooksAll, pluginId))
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
             () =>
               reject(
                 new Error(`Hook ${hookName} timed out after ${timeoutMs}ms for plugin ${pluginId}`)
               ),
             timeoutMs
           )
-        )
+        })
         const result = await Promise.race([hookPromise, timeoutPromise])
         results.push({
           success: true,
@@ -1068,6 +1073,8 @@ export class PluginEventHooks {
           duration: performance.now() - startTime,
           skipped: false,
         })
+      } finally {
+        if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
       }
     }
 

@@ -1238,3 +1238,29 @@ describe("PluginEventHooks - dispatchConnectorDecision (plugin⇄IM)", () => {
     expect(d).toEqual({ action: "allow" })
   })
 })
+
+// ── W3.7: the executeHook timeout racer must not leak timers ─────────────────
+describe("executeHook timer hygiene", () => {
+  it("clears the timeout racer once the hook settles", async () => {
+    jest.useFakeTimers()
+    try {
+      ;(usePluginStore.getState as jest.Mock).mockReturnValue({
+        plugins: {
+          fast: {
+            status: "enabled",
+            hooks: { onStreamChunk: jest.fn() },
+          },
+        },
+      })
+      const eventHooks = getPluginEventHooks()
+      // Per-chunk dispatch: each call used to strand one pending timer.
+      eventHooks.dispatchStreamChunk("s", "chunk", "full")
+      eventHooks.dispatchStreamChunk("s", "chunk2", "fullfull")
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(jest.getTimerCount()).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
