@@ -259,16 +259,22 @@ describe("runtime preset overlay", () => {
     expect(getDynamicPresetEntry("plugin-x")?.pluginId).toBe("plug")
   })
 
-  it("registerPreset returns the previous entry when an id is re-registered", () => {
+  it("rejects a cross-plugin re-registration (first-wins) but allows same-plugin refresh", () => {
     registerPreset("plugin-x", fakeConfig, { pluginId: "plug-1" })
+
+    // W4.2: a DIFFERENT plugin may not hijack the id — the incumbent wins.
     const prev = registerPreset(
       "plugin-x",
-      { ...fakeConfig, name: "Updated" },
+      { ...fakeConfig, name: "Hijacked" },
       { pluginId: "plug-2" }
     )
     expect(prev?.pluginId).toBe("plug-1")
+    expect(getPresetConfig("plugin-x")?.name).toBe("Fake Plugin Agent")
+    expect(getDynamicPresetEntry("plugin-x")?.pluginId).toBe("plug-1")
+
+    // The SAME plugin still refreshes its own entry (hot reload).
+    registerPreset("plugin-x", { ...fakeConfig, name: "Updated" }, { pluginId: "plug-1" })
     expect(getPresetConfig("plugin-x")?.name).toBe("Updated")
-    expect(getDynamicPresetEntry("plugin-x")?.pluginId).toBe("plug-2")
   })
 
   it("unregisterPreset removes a single entry; idempotent second call returns false", () => {

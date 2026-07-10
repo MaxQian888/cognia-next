@@ -192,6 +192,8 @@ export const EXTERNAL_AGENT_PRESETS: Record<
 // fallback when the plugin is disabled.
 // ============================================================================
 
+import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
+
 interface RegisteredPreset {
   config: ExternalAgentPresetConfig
   pluginId?: string
@@ -210,6 +212,20 @@ export function registerPreset(
   opts?: { pluginId?: string }
 ): RegisteredPreset | undefined {
   const previous = dynamicPresets.get(id)
+  // W4.2 first-wins-cross-plugin: a DIFFERENT plugin re-using a dynamic id is
+  // rejected (the incumbent wins) so plugin B can't hijack plugin A's preset
+  // and B's disable can't drop A's entry. Same-plugin refresh (hot reload)
+  // and static-id shadowing (dynamic-over-static, documented above) keep
+  // their existing semantics.
+  if (previous && previous.pluginId !== opts?.pluginId) {
+    reportRegistryConflict({
+      pluginId: opts?.pluginId ?? "unknown",
+      attemptedId: id,
+      registry: "external-agent-preset",
+      winnerPluginId: previous.pluginId,
+    })
+    return previous
+  }
   dynamicPresets.set(id, { config, pluginId: opts?.pluginId })
   return previous
 }
