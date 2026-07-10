@@ -20,6 +20,7 @@ import {
 } from "@cognia/vector/embedding"
 import { createPluginSystemLogger } from "../core/logger"
 import { createApiGuardedAPI } from "./api-permission-gate"
+import { assertNoLeakingPii } from "./plugin-pii-gate"
 import type {
   PluginVectorAPI,
   VectorDocument,
@@ -162,6 +163,13 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     },
 
     addDocuments: async (collection: string, docs: VectorDocument[]) => {
+      // Documents without a precomputed embedding get their content sent to
+      // the embedder by the store — gate that content like a direct embed.
+      assertNoLeakingPii(
+        pluginId,
+        "ctx.vector.addDocuments",
+        docs.filter((d) => !d.embedding).map((d) => d.content)
+      )
       const vs = await getStore()
       const prefixedCollection = prefixCollection(collection)
 
@@ -179,6 +187,11 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     },
 
     updateDocuments: async (collection: string, docs: VectorDocument[]) => {
+      assertNoLeakingPii(
+        pluginId,
+        "ctx.vector.updateDocuments",
+        docs.filter((d) => !d.embedding).map((d) => d.content)
+      )
       const vs = await getStore()
       const prefixedCollection = prefixCollection(collection)
 
@@ -213,6 +226,8 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
       query: string,
       options?: VectorSearchOptions
     ): Promise<VectorSearchResult[]> => {
+      // The store embeds the query text — same red-line as ctx.vector.embed.
+      assertNoLeakingPii(pluginId, "ctx.vector.search", [query])
       const vs = await getStore()
       const prefixedCollection = prefixCollection(collection)
       const mappedFilters = mapVectorFilters(options?.filters)
@@ -260,6 +275,8 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     },
 
     embed: async (text: string): Promise<number[]> => {
+      // PII red-line: embedding sends the text to the configured embedder.
+      assertNoLeakingPii(pluginId, "ctx.vector.embed", [text])
       const config = getEmbeddingConfig()
       const apiKey = getApiKey(config.provider)
       const result = await generateEmbedding(text, config, apiKey)
@@ -267,6 +284,7 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     },
 
     embedBatch: async (texts: string[]): Promise<number[][]> => {
+      assertNoLeakingPii(pluginId, "ctx.vector.embedBatch", texts)
       const config = getEmbeddingConfig()
       const apiKey = getApiKey(config.provider)
       const result = await generateEmbeddings(texts, config, apiKey)

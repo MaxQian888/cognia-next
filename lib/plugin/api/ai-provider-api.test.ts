@@ -645,3 +645,18 @@ describe("permission gate", () => {
     expect(() => api.chat([], {})).toThrow(/ai:chat/)
   })
 })
+
+describe("PII gate (W2.4)", () => {
+  it("blocks chat when a message leaks PII", async () => {
+    const api = createAIProviderAPI("test-plugin")
+    const messages: AIChatMessage[] = [{ role: "user", content: "email me at leak@example.com" }]
+    // chat is an async generator — the gate throws on the first pull,
+    // before anything is dispatched to a provider.
+    await expect(api.chat(messages)[Symbol.asyncIterator]().next()).rejects.toThrow(/PII/)
+  })
+
+  it("blocks embed when a text leaks PII", async () => {
+    const api = createAIProviderAPI("test-plugin")
+    await expect(api.embed(["sk-ant-api03-abcdefghijklmnopqrstuvwx"])).rejects.toThrow(/PII/)
+  })
+})

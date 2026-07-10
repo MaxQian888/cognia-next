@@ -378,3 +378,25 @@ describe("permission gate", () => {
     expect(() => api.search("c", "q")).toThrow(/vector:read/)
   })
 })
+
+describe("PII gate (W2.4)", () => {
+  it("blocks embed / embedBatch / search on leaking text", async () => {
+    const api = createVectorAPI("test-plugin")
+    await expect(api.embed("mail leak@example.com")).rejects.toThrow(/PII/)
+    await expect(api.embedBatch(["ok", "mail leak@example.com"])).rejects.toThrow(/PII/)
+    await expect(api.search("c", "mail leak@example.com")).rejects.toThrow(/PII/)
+  })
+
+  it("blocks addDocuments only for docs that would be embedded", async () => {
+    const api = createVectorAPI("test-plugin")
+    await expect(
+      api.addDocuments("c", [{ id: "1", content: "mail leak@example.com", metadata: {} }])
+    ).rejects.toThrow(/PII/)
+    // Precomputed embedding → content never leaves the device.
+    await expect(
+      api.addDocuments("c", [
+        { id: "2", content: "mail leak@example.com", metadata: {}, embedding: [0.1] },
+      ])
+    ).resolves.toEqual(["2"])
+  })
+})

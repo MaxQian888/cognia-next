@@ -22,6 +22,7 @@ import type {
 } from "@/types/plugin/plugin"
 import { createPluginSystemLogger } from "../core/logger"
 import { createApiGuardedAPI } from "./api-permission-gate"
+import { assertNoLeakingPii } from "./plugin-pii-gate"
 import {
   registerProviderDefinition,
   unregisterProvider,
@@ -278,6 +279,13 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
       messages: AIChatMessage[],
       options?: AIChatOptions
     ): AsyncIterable<AIChatChunk> {
+      // PII red-line (same gate as Twin/Goal/Connector): plugin-driven sends
+      // have no human review, so leaking content aborts before dispatch.
+      assertNoLeakingPii(
+        pluginId,
+        "ctx.ai.chat",
+        messages.map((m) => m.content)
+      )
       // Check for custom provider first
       for (const provider of customProviders.values()) {
         if (options?.model && provider.models.some((m) => m.id === options.model)) {
@@ -335,6 +343,7 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
     },
 
     embed: async (texts: string[]): Promise<number[][]> => {
+      assertNoLeakingPii(pluginId, "ctx.ai.embed", texts)
       // Check custom providers for embedding support
       for (const provider of customProviders.values()) {
         if (provider.embed) {
