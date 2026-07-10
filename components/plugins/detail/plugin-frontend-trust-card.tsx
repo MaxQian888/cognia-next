@@ -48,7 +48,9 @@ export function PluginFrontendTrustCard({
   }
 
   const onToggle = (next: boolean) => {
-    getPluginManager().setFrontendTrust(pluginId, next)
+    // Fire-and-forget: revoking also disables a running plugin behind the
+    // manager's lifecycle lock; the switch reflects the grant immediately.
+    void getPluginManager().setFrontendTrust(pluginId, next)
     setTrusted(next)
   }
 

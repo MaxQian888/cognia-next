@@ -1128,7 +1128,12 @@ export class PluginManager {
             // Don't auto-enable plugins the active runtime profile blocks
             // (e.g. desktop-native built-ins on the browser/mobile shell) —
             // each would throw in loadPlugin and fire a failure toast at boot.
-            !this.isBlockedByRuntimeProfile(plugin.manifest)
+            !this.isBlockedByRuntimeProfile(plugin.manifest) &&
+            // Same for renderer-JS plugins awaiting the user's frontend trust
+            // grant: enabling would throw PluginFrontendTrustError and toast
+            // on EVERY boot until re-trusted. They stay visible in /plugins
+            // (the detail Permissions tab shows the trust toggle).
+            !this.requiresExplicitFrontendTrust(plugin)
         )
         .map((plugin) => plugin.manifest.id)
     )
@@ -1936,11 +1941,7 @@ export class PluginManager {
       // untrusted source need an explicit per-plugin user grant before any of
       // their code is imported or evaluated. Kept outside the retry boundary
       // below — refusal is a policy decision, not a transient failure.
-      if (
-        (plugin.manifest.type === "frontend" || plugin.manifest.type === "hybrid") &&
-        !isInherentlyTrustedFrontendSource(plugin.source) &&
-        !this.isFrontendTrusted(pluginId)
-      ) {
+      if (this.requiresExplicitFrontendTrust(plugin)) {
         throw new PluginFrontendTrustError(pluginId, plugin.source)
       }
 
@@ -2778,12 +2779,41 @@ export class PluginManager {
     return readPolicy().trustedFrontendPlugins.includes(pluginId)
   }
 
-  /** Grant or revoke the user's renderer-JS trust for one plugin. */
-  setFrontendTrust(pluginId: string, next: boolean): void {
+  /**
+   * Grant or revoke the user's renderer-JS trust for one plugin.
+   *
+   * Revocation takes effect immediately: a plugin whose un-sandboxed JS is
+   * already running in the renderer is disabled (or unloaded when it was
+   * loaded but never enabled) — otherwise flipping the switch off would only
+   * matter on the next load while the untrusted code keeps running.
+   */
+  async setFrontendTrust(pluginId: string, next: boolean): Promise<void> {
     const policy = readPolicy()
     const trusted = policy.trustedFrontendPlugins.filter((id) => id !== pluginId)
     if (next) trusted.push(pluginId)
     writePolicy({ ...policy, trustedFrontendPlugins: trusted })
+    if (next) return
+
+    const plugin = usePluginStore.getState().plugins[pluginId]
+    if (!plugin || !this.requiresExplicitFrontendTrust(plugin)) return
+    if (plugin.status === "enabled") {
+      await this.disablePlugin(pluginId, "frontend-trust-revoked")
+    } else if (this.loader.isLoaded(pluginId)) {
+      await this.unloadPlugin(pluginId)
+    }
+  }
+
+  /**
+   * Whether the frontend trust boundary (ADR 0013) blocks this plugin from
+   * loading right now: renderer-JS type, non-inherently-trusted source, and
+   * no explicit user grant.
+   */
+  private requiresExplicitFrontendTrust(plugin: Plugin): boolean {
+    return (
+      (plugin.manifest.type === "frontend" || plugin.manifest.type === "hybrid") &&
+      !isInherentlyTrustedFrontendSource(plugin.source) &&
+      !this.isFrontendTrusted(plugin.manifest.id)
+    )
   }
 
   private async verifyPluginSignature(pluginPath: string, pluginId: string): Promise<boolean> {
@@ -3053,6 +3083,17 @@ export class PluginManager {
       // throw in loadPlugin and spam an activation-failure toast on every
       // matching event. They remain enable-able manually from `/plugins`.
       if (this.isBlockedByRuntimeProfile(plugin.manifest)) {
+        continue
+      }
+
+      // Same rationale for renderer-JS plugins awaiting the user's frontend
+      // trust grant: lazy activation would throw PluginFrontendTrustError and
+      // toast on every matching event. Manual enable from /plugins still
+      // surfaces the error (pointing at the trust toggle).
+      if (this.requiresExplicitFrontendTrust(plugin)) {
+        loggers.manager.debug(
+          `[plugin:${plugin.manifest.id}] activation for "${event}" skipped: awaiting frontend trust grant`
+        )
         continue
       }
 

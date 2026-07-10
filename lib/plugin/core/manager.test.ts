@@ -2349,6 +2349,9 @@ describe("PluginManager", () => {
   })
 
   describe("handleActivationEvent", () => {
+    // Fixtures use source "dev" (inherently trusted): these frontend-type
+    // plugins would otherwise be skipped by the frontend trust boundary
+    // before reaching the event-matching behavior under test.
     it("should activate plugin when command activation event matches", async () => {
       const pluginA: Plugin = {
         manifest: {
@@ -2356,7 +2359,7 @@ describe("PluginManager", () => {
           activationEvents: ["onCommand:test-command"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/event-plugin",
         config: {},
       }
@@ -2366,7 +2369,7 @@ describe("PluginManager", () => {
           activationEvents: ["onCommand:other-command"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/other-plugin",
         config: {},
       }
@@ -2394,7 +2397,7 @@ describe("PluginManager", () => {
           activationEvents: ["onCommand:git-tools.*"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/wildcard-plugin",
         config: {},
       }
@@ -2423,7 +2426,7 @@ describe("PluginManager", () => {
           activateOnStartup: true,
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/startup-plugin",
         config: {},
       }
@@ -2449,7 +2452,7 @@ describe("PluginManager", () => {
           activationEvents: ["onAgentTool:docker_*"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/legacy-tool-plugin",
         config: {},
       }
@@ -2475,7 +2478,7 @@ describe("PluginManager", () => {
           activationEvents: ["onView:settings.plugins"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/view-plugin",
         config: {},
       }
@@ -2485,7 +2488,7 @@ describe("PluginManager", () => {
           activationEvents: ["onView:inbox.*"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/inbox-view-plugin",
         config: {},
       }
@@ -2514,7 +2517,7 @@ describe("PluginManager", () => {
           activationEvents: ["onCommand:settings.plugins"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/cmd-only-plugin",
         config: {},
       }
@@ -2536,7 +2539,7 @@ describe("PluginManager", () => {
           activationEvents: ["onTool:boom"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/fail-activate",
         config: {},
       }
@@ -2752,6 +2755,13 @@ describe("PluginManager", () => {
         config: {},
       }
       mockGetState.mockReturnValue({ plugins: { "third-party.web": legacySupported } })
+      // A local-source frontend plugin only lazy-activates once the user has
+      // granted it frontend trust — the point here is the runtime fallback,
+      // so grant it for this event.
+      ;(readPolicy as jest.Mock).mockImplementationOnce(() => ({
+        ...DEFAULT_POLICY,
+        trustedFrontendPlugins: ["third-party.web"],
+      }))
 
       const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "mobile" })
       const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
@@ -3686,18 +3696,115 @@ describe("PluginManager", () => {
       expect(manager.isFrontendTrusted("beta")).toBe(false)
     })
 
-    it("setFrontendTrust(true) adds the id once, even when already trusted", () => {
+    it("setFrontendTrust(true) adds the id once, even when already trusted", async () => {
       const manager = new PluginManager({ pluginDirectory: "/plugins" })
       mockReadPolicy.mockReturnValue(withTrusted(["alpha"]))
-      manager.setFrontendTrust("alpha", true)
+      await manager.setFrontendTrust("alpha", true)
       expect(mockWritePolicy).toHaveBeenCalledWith(withTrusted(["alpha"]))
     })
 
-    it("setFrontendTrust(false) removes the id and preserves other grants", () => {
+    it("setFrontendTrust(false) removes the id and preserves other grants", async () => {
       const manager = new PluginManager({ pluginDirectory: "/plugins" })
       mockReadPolicy.mockReturnValue(withTrusted(["alpha", "beta"]))
-      manager.setFrontendTrust("alpha", false)
+      mockGetState.mockReturnValue({ plugins: {} })
+      await manager.setFrontendTrust("alpha", false)
       expect(mockWritePolicy).toHaveBeenCalledWith(withTrusted(["beta"]))
+    })
+
+    it("revoking trust disables a currently enabled gated plugin", async () => {
+      const plugin = { ...createTrustPlugin("fe-run", "frontend", "local"), status: "enabled" }
+      mockGetState.mockReturnValue(createTrustStore(plugin as Plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const disableSpy = jest.spyOn(manager, "disablePlugin").mockResolvedValue(undefined)
+      const unloadSpy = jest.spyOn(manager, "unloadPlugin").mockResolvedValue(undefined)
+
+      await manager.setFrontendTrust("fe-run", false)
+
+      expect(disableSpy).toHaveBeenCalledWith("fe-run", "frontend-trust-revoked")
+      expect(unloadSpy).not.toHaveBeenCalled()
+    })
+
+    it("revoking trust unloads a loaded-but-not-enabled gated plugin", async () => {
+      const plugin = { ...createTrustPlugin("fe-loaded", "frontend", "local"), status: "loaded" }
+      mockGetState.mockReturnValue(createTrustStore(plugin as Plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const loader = stubTrustLoader(manager)
+      ;(loader.isLoaded as jest.Mock).mockReturnValue(true)
+      const disableSpy = jest.spyOn(manager, "disablePlugin").mockResolvedValue(undefined)
+      const unloadSpy = jest.spyOn(manager, "unloadPlugin").mockResolvedValue(undefined)
+
+      await manager.setFrontendTrust("fe-loaded", false)
+
+      expect(unloadSpy).toHaveBeenCalledWith("fe-loaded")
+      expect(disableSpy).not.toHaveBeenCalled()
+    })
+
+    it("revoking trust does not touch a plugin from an inherently trusted source", async () => {
+      const plugin = { ...createTrustPlugin("fe-dev", "frontend", "dev"), status: "enabled" }
+      mockGetState.mockReturnValue(createTrustStore(plugin as Plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const disableSpy = jest.spyOn(manager, "disablePlugin").mockResolvedValue(undefined)
+
+      await manager.setFrontendTrust("fe-dev", false)
+
+      expect(disableSpy).not.toHaveBeenCalled()
+    })
+
+    it("granting trust never disables anything", async () => {
+      const plugin = { ...createTrustPlugin("fe-run", "frontend", "local"), status: "enabled" }
+      mockGetState.mockReturnValue(createTrustStore(plugin as Plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const disableSpy = jest.spyOn(manager, "disablePlugin").mockResolvedValue(undefined)
+      const unloadSpy = jest.spyOn(manager, "unloadPlugin").mockResolvedValue(undefined)
+
+      await manager.setFrontendTrust("fe-run", true)
+
+      expect(disableSpy).not.toHaveBeenCalled()
+      expect(unloadSpy).not.toHaveBeenCalled()
+    })
+
+    it("startup restore skips an untrusted gated plugin instead of toasting every boot", async () => {
+      const gated: Plugin = {
+        ...createTrustPlugin("fe-revoked", "frontend", "local"),
+        manifest: {
+          ...createTrustPlugin("fe-revoked", "frontend", "local").manifest,
+          activationEvents: ["startup"],
+        },
+      }
+      mockGetState.mockReturnValue({ plugins: { "fe-revoked": gated } })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+      expect(enableSpy).not.toHaveBeenCalled()
+
+      // Once trusted, the same restore pass enables it again.
+      mockReadPolicy.mockReturnValue(withTrusted(["fe-revoked"]))
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+      expect(enableSpy).toHaveBeenCalledWith("fe-revoked")
+    })
+
+    it("activation events skip an untrusted gated plugin instead of toasting per event", async () => {
+      const gated: Plugin = {
+        ...createTrustPlugin("fe-lazy", "frontend", "local"),
+        manifest: {
+          ...createTrustPlugin("fe-lazy", "frontend", "local").manifest,
+          activationEvents: ["startup"],
+        },
+      }
+      mockGetState.mockReturnValue({
+        plugins: { "fe-lazy": gated },
+        setPluginError: jest.fn(),
+      })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+      expect(enableSpy).not.toHaveBeenCalled()
+
+      mockReadPolicy.mockReturnValue(withTrusted(["fe-lazy"]))
+      await manager.handleActivationEvent("startup")
+      expect(enableSpy).toHaveBeenCalledWith("fe-lazy", "activation:startup")
     })
 
     it("loadPlugin refuses an untrusted-source frontend plugin before any JS executes", async () => {
