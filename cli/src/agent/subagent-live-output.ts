@@ -290,8 +290,10 @@ export function applyLiveSubagentEvent(liveId: string, event: CaptureStreamEvent
       entry.approxChars += approxResultChars(event.result)
       break
     }
-    // Exact end-of-turn token spend — replaces the running estimate.
+    // Exact end-of-turn token spend — replaces the running estimate. Skip
+    // mid-run partial snapshots (non-cumulative), which would underreport.
     case "usage": {
+      if (event.partial) break
       const u = event.usage
       entry.usageTokens =
         (u.inputTokens ?? 0) +

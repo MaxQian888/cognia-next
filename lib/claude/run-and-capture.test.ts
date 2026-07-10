@@ -165,11 +165,40 @@ describe("runAndCaptureAssistantReply", () => {
     fire(sessionEnded())
     await promise
     const usageEvent = events.find((e) => e.type === "usage") as
-      | { type: "usage"; usage: { totalCostUsd?: number; inputTokens?: number } }
-      | undefined
+      { type: "usage"; usage: { totalCostUsd?: number; inputTokens?: number } } | undefined
     expect(usageEvent).toBeDefined()
     expect(usageEvent?.usage.totalCostUsd).toBe(0.42)
     expect(usageEvent?.usage.inputTokens).toBe(1000)
+  })
+
+  it("emits a partial usage event from an assistant message's own usage", async () => {
+    const events: Array<{ type: string; partial?: boolean; usage?: { inputTokens?: number } }> = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e as never),
+    })
+    await flushUntilSubscribed()
+    // An assistant message carrying per-call usage → a mid-run partial snapshot.
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "assistant",
+        uuid: "uuid-asst-1",
+        session_id: SESSION,
+        message: {
+          id: "m-1",
+          role: "assistant",
+          content: [{ type: "text", text: "streaming…" }],
+          usage: { input_tokens: 120, output_tokens: 30 },
+        },
+      },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    await promise
+    const partial = events.find((e) => e.type === "usage" && e.partial === true)
+    expect(partial).toBeDefined()
+    expect(partial?.usage?.inputTokens).toBe(120)
   })
 
   it("falls back to result.result when assistant text is empty", async () => {

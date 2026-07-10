@@ -975,6 +975,7 @@
   "subagentPart": {
     "abort": "Stop sub-agent",
     "backgroundRunning": "Running in background…",
+    "cutOff": "Cut off by an error before finishing — this is the last output.",
     "depthBadge": "depth {n}",
     "durationMs": "{ms}ms",
     "logsTailNote": "Showing the last {n} log entries",
@@ -986,6 +987,7 @@
       "maxDepth": "Dispatch rejected — max nesting depth reached."
     },
     "resultHeading": "Result",
+    "retrying": "retry {n}",
     "rowAria": "{name} sub-agent — {status}",
     "title": "Sub-agent",
     "tokens": "{n} tokens",

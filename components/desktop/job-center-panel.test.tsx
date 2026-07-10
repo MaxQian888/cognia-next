@@ -24,6 +24,24 @@ jest.mock("@/lib/db/background-tasks", () => ({
   clearSettledBackgroundTasks: (...args: unknown[]) => clearSettledBackgroundTasks(...args),
 }))
 
+const redispatchBackgroundRun = jest.fn()
+jest.mock("@/lib/background-tasks/redispatch", () => ({
+  redispatchBackgroundRun: (...args: unknown[]) => redispatchBackgroundRun(...args),
+}))
+const cancelSubagentRun = jest.fn()
+jest.mock("@/lib/claude/agents/cancel-subagent", () => ({
+  cancelSubagentRun: (...args: unknown[]) => cancelSubagentRun(...args),
+}))
+const managerCancelAgent = jest.fn()
+jest.mock("@/lib/ai/agent/background-agent-manager", () => ({
+  getBackgroundAgentManager: () => ({ cancelAgent: (id: string) => managerCancelAgent(id) }),
+}))
+let liveSubAgent: Record<string, unknown> | undefined
+jest.mock("@/stores/agent/subagent-runtime-store", () => ({
+  useSubagentRuntimeStore: (selector: (s: unknown) => unknown) =>
+    selector({ subAgents: liveSubAgent ? { "run-live": liveSubAgent } : {} }),
+}))
+
 let runningCount = 0
 jest.mock("@/components/execution/use-execution-monitor", () => ({
   useExecutionMonitor: () => ({ rows: [], runningCount, isLoading: false }),
@@ -87,6 +105,12 @@ beforeEach(() => {
   })
   cancelRendererBackgroundRun.mockReturnValue(true)
   clearSettledBackgroundTasks.mockResolvedValue(undefined)
+  redispatchBackgroundRun.mockReset()
+  redispatchBackgroundRun.mockResolvedValue({ ok: true, runId: "new-run" })
+  cancelSubagentRun.mockReset()
+  managerCancelAgent.mockReset()
+  managerCancelAgent.mockReturnValue(true)
+  liveSubAgent = undefined
   runningCount = 0
 })
 
@@ -224,4 +248,83 @@ it("reports clear-settled failures", async () => {
   await waitFor(() =>
     expect(toastError).toHaveBeenCalledWith("Could not clear settled jobs: locked")
   )
+})
+
+it("routes cancellation by kind and mode", async () => {
+  const user = userEvent.setup()
+  useClientLiveQuery.mockReturnValue([
+    row({ runId: "run-fg", mode: "foreground", status: "running" }),
+    row({ runId: "run-plugin", kind: "plugin-agent", status: "running", pluginId: "p1" }),
+  ])
+  render(<JobCenterPanel />)
+  await user.click(screen.getByTestId("status-job-center"))
+
+  await user.click(screen.getByTestId("job-cancel-run-fg"))
+  expect(cancelSubagentRun).toHaveBeenCalledWith("run-fg")
+  expect(cancelRendererBackgroundRun).not.toHaveBeenCalled()
+
+  await user.click(screen.getByTestId("job-cancel-run-plugin"))
+  expect(managerCancelAgent).toHaveBeenCalledWith("run-plugin")
+})
+
+it("hides Collect for foreground rows and shows kind/mode badges", async () => {
+  const user = userEvent.setup()
+  useClientLiveQuery.mockReturnValue([
+    row({
+      runId: "run-fg-done",
+      mode: "foreground",
+      status: "done",
+      settledAt: Date.now(),
+      resultText: "ok",
+    }),
+  ])
+  render(<JobCenterPanel />)
+  await user.click(screen.getByTestId("status-job-center"))
+  await user.click(screen.getByRole("tab", { name: /History/ }))
+
+  expect(screen.queryByTestId("job-collect-run-fg-done")).toBeNull()
+  expect(screen.getByText("Foreground")).toBeInTheDocument()
+  expect(screen.getByText("Subagent")).toBeInTheDocument()
+})
+
+it("re-runs an interrupted row and shows a pending-delivery chip", async () => {
+  const user = userEvent.setup()
+  useClientLiveQuery.mockReturnValue([
+    row({
+      runId: "run-int",
+      status: "interrupted",
+      settledAt: Date.now(),
+      error: "crashed",
+    }),
+    row({
+      runId: "run-pending",
+      status: "done",
+      settledAt: Date.now(),
+      resultText: "done",
+      deliveryState: "pending",
+    }),
+  ])
+  render(<JobCenterPanel />)
+  await user.click(screen.getByTestId("status-job-center"))
+  await user.click(screen.getByRole("tab", { name: /History/ }))
+
+  expect(screen.getByTestId("job-pending-delivery-run-pending")).toBeInTheDocument()
+  await user.click(screen.getByTestId("job-rerun-run-int"))
+  await waitFor(() =>
+    expect(redispatchBackgroundRun).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-int" }),
+      { kind: "manual" }
+    )
+  )
+  expect(toastSuccess).toHaveBeenCalled()
+})
+
+it("shows live token + tool telemetry for a running subagent row", async () => {
+  const user = userEvent.setup()
+  liveSubAgent = { tokenUsage: { totalTokens: 1234 }, toolUses: 7 }
+  render(<JobCenterPanel />)
+  await user.click(screen.getByTestId("status-job-center"))
+
+  expect(screen.getByTestId("job-tokens-run-live").textContent).toMatch(/1234/)
+  expect(screen.getByTestId("job-tools-run-live").textContent).toMatch(/7/)
 })

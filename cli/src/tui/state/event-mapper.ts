@@ -54,6 +54,9 @@ export function captureEventToActions(event: CaptureStreamEvent): TuiAction[] {
       ]
     }
     case "usage":
+      // Skip mid-run partial snapshots (non-cumulative); the footer shows the
+      // authoritative end-of-turn usage only.
+      if (event.partial) return []
       return [{ type: "SET_USAGE", usage: event.usage }]
     case "compact":
       return [

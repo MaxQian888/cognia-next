@@ -975,6 +975,7 @@
   "subagentPart": {
     "abort": "停止子代理",
     "backgroundRunning": "后台运行中…",
+    "cutOff": "因错误在完成前中断——这是最后的输出。",
     "depthBadge": "深度 {n}",
     "durationMs": "{ms}ms",
     "logsTailNote": "仅显示最近 {n} 条日志",
@@ -986,6 +987,7 @@
       "maxDepth": "派发被拒 — 已达最大嵌套深度。"
     },
     "resultHeading": "结果",
+    "retrying": "重试 {n}",
     "rowAria": "{name} 子代理 — {status}",
     "title": "子代理",
     "tokens": "{n} tokens",

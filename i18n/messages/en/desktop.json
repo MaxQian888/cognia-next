@@ -146,7 +146,13 @@
       "cancelAria": "Cancel background run {runId}",
       "clearSettled": "Clear settled",
       "collect": "Collect",
-      "collectAria": "Collect background run {runId}"
+      "collectAria": "Collect background run {runId}",
+      "reDispatched": "re-dispatched",
+      "rerun": "Re-run"
+    },
+    "delivery": {
+      "pending": "Pending delivery",
+      "pendingHint": "Delivered when the originating chat is open and idle."
     },
     "description": "Background subagent runs started by dispatch_agent.",
     "duration": {
@@ -161,7 +167,18 @@
     },
     "fields": {
       "elapsed": "Elapsed: {value}",
-      "startedAt": "Started: {value}"
+      "startedAt": "Started: {value}",
+      "toolCalls": "Tools: {value}",
+      "tokens": "Tokens: {value}"
+    },
+    "kind": {
+      "pluginAgent": "Plugin agent",
+      "subagent": "Subagent",
+      "teamDelegation": "Team delegation"
+    },
+    "mode": {
+      "background": "Background",
+      "foreground": "Foreground"
     },
     "notify": {
       "autoResumed": "{count, plural, one {Auto-resumed # interrupted background run} other {Auto-resumed # interrupted background runs}}",
@@ -189,7 +206,9 @@
       "cleared": "Settled background jobs cleared.",
       "collectFailed": "Could not collect background result: {error}",
       "collectMissing": "That background run is no longer available.",
-      "collected": "Background result collected."
+      "collected": "Background result collected.",
+      "rerunFailed": "Could not re-run: {reason}",
+      "rerunStarted": "Re-running in the background."
     },
     "trigger": "Jobs"
   },

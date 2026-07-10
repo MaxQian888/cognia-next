@@ -13,7 +13,11 @@ import {
   cancelRendererBackgroundRun,
   collectRendererBackgroundResult,
 } from "@/lib/background-tasks/renderer-subagent-registry"
+import { redispatchBackgroundRun } from "@/lib/background-tasks/redispatch"
+import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
+import { cancelSubagentRun } from "@/lib/claude/agents/cancel-subagent"
 import { clearSettledBackgroundTasks, listBackgroundTaskRecords } from "@/lib/db/background-tasks"
+import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useClientLiveQuery } from "@/hooks/data"
 import { ExecutionMonitorPanel } from "@/components/execution/execution-monitor-panel"
 import { useExecutionMonitor } from "@/components/execution/use-execution-monitor"
@@ -217,7 +221,18 @@ function TaskRow({ record, now }: { record: BackgroundTaskJournalRecord; now: nu
   const t = useTranslations("desktop.jobCenter")
   const [collecting, setCollecting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  const [rerunning, setRerunning] = useState(false)
   const isRunning = record.status === "running"
+  const isForeground = record.mode === "foreground"
+  const isSubagent = record.kind === "subagent"
+  const isInterrupted = record.status === "interrupted"
+  const alreadyRedispatched = !!record.resumedByRunId
+  const pendingDelivery =
+    (record.status === "done" || record.status === "error") && record.deliveryState === "pending"
+  // Live telemetry for a running subagent run (runId === runtime-store id).
+  const live = useSubagentRuntimeStore((s) => s.subAgents[record.runId])
+  const liveTokens = live?.tokenUsage?.totalTokens
+  const liveToolUses = live?.toolUses
   const elapsed = elapsedParts(record.startedAt, record.settledAt, now)
   const elapsedText =
     elapsed.minutes > 0
@@ -247,7 +262,18 @@ function TaskRow({ record, now }: { record: BackgroundTaskJournalRecord; now: nu
   const cancel = async () => {
     setCancelling(true)
     try {
-      const cancelled = cancelRendererBackgroundRun(record.runId)
+      // Route cancellation by kind/mode: background subagent runs through the
+      // background registry; foreground subagent runs through the cancel
+      // registry; plugin-agent / team-delegation rows through the manager.
+      let cancelled = false
+      if (isSubagent && isForeground) {
+        cancelSubagentRun(record.runId)
+        cancelled = true
+      } else if (isSubagent) {
+        cancelled = cancelRendererBackgroundRun(record.runId)
+      } else {
+        cancelled = getBackgroundAgentManager().cancelAgent(record.runId)
+      }
       if (cancelled) toast.success(t("toast.cancelled"))
       else toast.error(t("toast.cancelUnavailable"))
     } finally {
@@ -255,12 +281,25 @@ function TaskRow({ record, now }: { record: BackgroundTaskJournalRecord; now: nu
     }
   }
 
+  const rerun = async () => {
+    setRerunning(true)
+    try {
+      const outcome = await redispatchBackgroundRun(record, { kind: "manual" })
+      if (outcome.ok) toast.success(t("toast.rerunStarted"))
+      else toast.error(t("toast.rerunFailed", { reason: outcome.message }))
+    } finally {
+      setRerunning(false)
+    }
+  }
+
   return (
     <article className="flex flex-col gap-3 rounded-md border bg-background p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-medium">{record.subagentId}</span>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-medium">
+              {record.label ?? record.subagentId}
+            </span>
             <StatusBadge
               value={record.status}
               labelNamespace="desktop.jobCenter.status"
@@ -268,28 +307,86 @@ function TaskRow({ record, now }: { record: BackgroundTaskJournalRecord; now: nu
               pulse={isRunning}
               className="text-[10px]"
             />
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+              {t(`kind.${kindKey(record.kind)}`)}
+            </Badge>
+            {isForeground ? (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                {t("mode.foreground")}
+              </Badge>
+            ) : null}
+            {record.pluginId ? (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                {record.pluginId}
+              </Badge>
+            ) : null}
+            {pendingDelivery ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] text-amber-600"
+                title={t("delivery.pendingHint")}
+                data-testid={`job-pending-delivery-${record.runId}`}
+              >
+                {t("delivery.pending")}
+              </Badge>
+            ) : null}
+            {alreadyRedispatched ? (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                {t("actions.reDispatched")}
+              </Badge>
+            ) : null}
           </div>
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{record.prompt}</p>
         </div>
-        <BackgroundedRunControls
-          variant="labeled"
-          isRunning={isRunning}
-          onCollect={() => void collect()}
-          onAbort={() => void cancel()}
-          collecting={collecting}
-          aborting={cancelling}
-          collectLabel={t("actions.collect")}
-          collectAria={t("actions.collectAria", { runId: record.runId })}
-          abortLabel={t("actions.cancel")}
-          abortAria={t("actions.cancelAria", { runId: record.runId })}
-          collectTestId={`job-collect-${record.runId}`}
-          abortTestId={`job-cancel-${record.runId}`}
-        />
+        <div className="flex shrink-0 items-center gap-1">
+          {isInterrupted && isSubagent && !alreadyRedispatched ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void rerun()}
+              disabled={rerunning}
+              data-testid={`job-rerun-${record.runId}`}
+            >
+              {t("actions.rerun")}
+            </Button>
+          ) : null}
+          <BackgroundedRunControls
+            variant="labeled"
+            isRunning={isRunning}
+            // Foreground rows are awaited inline by their parent turn — never
+            // collectable; only background subagent rows expose Collect.
+            {...(isForeground || !isSubagent
+              ? {}
+              : {
+                  onCollect: () => void collect(),
+                  collecting,
+                  collectLabel: t("actions.collect"),
+                  collectAria: t("actions.collectAria", { runId: record.runId }),
+                  collectTestId: `job-collect-${record.runId}`,
+                })}
+            onAbort={() => void cancel()}
+            aborting={cancelling}
+            abortLabel={t("actions.cancel")}
+            abortAria={t("actions.cancelAria", { runId: record.runId })}
+            abortTestId={`job-cancel-${record.runId}`}
+          />
+        </div>
       </div>
 
       <div className="grid gap-1 text-[11px] text-muted-foreground sm:grid-cols-2">
         <span>{t("fields.startedAt", { value: formatTime(record.startedAt) })}</span>
         <span>{t("fields.elapsed", { value: elapsedText })}</span>
+        {isRunning && typeof liveTokens === "number" && liveTokens > 0 ? (
+          <span data-testid={`job-tokens-${record.runId}`}>
+            {t("fields.tokens", { value: liveTokens })}
+          </span>
+        ) : null}
+        {isRunning && typeof liveToolUses === "number" && liveToolUses > 0 ? (
+          <span data-testid={`job-tools-${record.runId}`}>
+            {t("fields.toolCalls", { value: liveToolUses })}
+          </span>
+        ) : null}
       </div>
 
       <p
@@ -306,6 +403,18 @@ function TaskRow({ record, now }: { record: BackgroundTaskJournalRecord; now: nu
 
 function preview(record: BackgroundTaskJournalRecord): string {
   return record.resultText ?? record.error ?? record.prompt
+}
+
+/** Journal kind → i18n key segment. */
+function kindKey(kind: BackgroundTaskJournalRecord["kind"]): string {
+  switch (kind) {
+    case "plugin-agent":
+      return "pluginAgent"
+    case "team-delegation":
+      return "teamDelegation"
+    default:
+      return "subagent"
+  }
 }
 
 function formatTime(timestamp: number): string {

@@ -203,11 +203,7 @@ export class RunAndCaptureError extends Error {
   constructor(
     message: string,
     readonly code:
-      | "session_error"
-      | "no_assistant_text"
-      | "aborted"
-      | "send_failed"
-      | "sidecar_exited"
+      "session_error" | "no_assistant_text" | "aborted" | "send_failed" | "sidecar_exited"
   ) {
     super(message)
     this.name = "RunAndCaptureError"
@@ -249,7 +245,17 @@ export type CaptureStreamEvent =
    * cannot rely on the resolved `RunAndCaptureResult.usage` alone — this event
    * delivers it from the in-stream result message instead.
    */
-  | { type: "usage"; usage: UsageInfo }
+  | {
+      type: "usage"
+      usage: UsageInfo
+      /**
+       * True for a MID-run per-assistant-message snapshot (not cumulative);
+       * consumers that want a live figure SUM these and let the final
+       * authoritative (non-partial) `result`-message usage replace the sum.
+       * Absent/false = the end-of-turn authoritative usage.
+       */
+      partial?: boolean
+    }
   /**
    * A context-compaction boundary crossed mid-stream. Both dispatch paths emit
    * the same `system` / `compact_boundary` message — the generic AI-SDK path
@@ -955,6 +961,14 @@ async function captureAssistantReplyCore(
               // tool-only assistant turn (no text) — still remember the
               // message id so session_ended can attribute correctly.
               lastMessageId = inner.uuid
+            }
+            // Mid-run usage snapshot: the assistant message carries its own
+            // per-call `usage`. Emit it as a `partial` usage event so live
+            // telemetry (subagent runtime store, TUI footer) can show a running
+            // token figure before the authoritative end-of-turn usage lands.
+            if (cap?.onEvent) {
+              const partialUsage = extractUsage(inner.message)
+              if (partialUsage) emitEvent({ type: "usage", usage: partialUsage, partial: true })
             }
           }
         } else if (inner.type === "user") {

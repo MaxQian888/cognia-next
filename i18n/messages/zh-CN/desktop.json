@@ -146,7 +146,13 @@
       "cancelAria": "取消后台运行 {runId}",
       "clearSettled": "清除已结束",
       "collect": "收集",
-      "collectAria": "收集后台运行 {runId}"
+      "collectAria": "收集后台运行 {runId}",
+      "reDispatched": "已重新派发",
+      "rerun": "重新运行"
+    },
+    "delivery": {
+      "pending": "待投递",
+      "pendingHint": "当发起的聊天打开且空闲时投递。"
     },
     "description": "由 dispatch_agent 启动的后台子代理运行。",
     "duration": {
@@ -161,7 +167,18 @@
     },
     "fields": {
       "elapsed": "耗时：{value}",
-      "startedAt": "开始：{value}"
+      "startedAt": "开始：{value}",
+      "toolCalls": "工具：{value}",
+      "tokens": "Tokens：{value}"
+    },
+    "kind": {
+      "pluginAgent": "插件代理",
+      "subagent": "子代理",
+      "teamDelegation": "团队委托"
+    },
+    "mode": {
+      "background": "后台",
+      "foreground": "前台"
     },
     "notify": {
       "autoResumed": "{count, plural, other {已自动恢复 # 个被中断的后台运行}}",
@@ -189,7 +206,9 @@
       "cleared": "已清除结束的后台任务。",
       "collectFailed": "无法收集后台结果：{error}",
       "collectMissing": "这个后台运行已不可用。",
-      "collected": "已收集后台结果。"
+      "collected": "已收集后台结果。",
+      "rerunFailed": "无法重新运行：{reason}",
+      "rerunStarted": "已在后台重新运行。"
     },
     "trigger": "任务"
   },

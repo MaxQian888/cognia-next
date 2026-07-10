@@ -107,6 +107,7 @@ const SubagentLogBody = memo(function SubagentLogBody({
   toolCalls,
   finalResponse,
   tokenUsage,
+  cutOff,
 }: {
   summary?: string
   logs: SubagentLogEntry[]
@@ -118,6 +119,8 @@ const SubagentLogBody = memo(function SubagentLogBody({
   toolCalls: SubAgentToolCall[]
   finalResponse?: string
   tokenUsage?: SubAgentTokenUsage
+  /** The run failed mid-stream and `finalResponse` is its salvaged partial. */
+  cutOff?: boolean
 }) {
   const t = useTranslations("chat.subagentPart")
   const tailLogs = useMemo(() => logs.slice(-50), [logs])
@@ -156,6 +159,11 @@ const SubagentLogBody = memo(function SubagentLogBody({
           <div className="rounded bg-muted/30 p-2 text-xs">
             <MarkdownRenderer content={finalResponse} />
           </div>
+          {cutOff ? (
+            <p className="text-[10px] italic text-amber-600" data-testid="subagent-cutoff-note">
+              {t("cutOff")}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -249,8 +257,12 @@ export const SubagentPart = memo(function SubagentPart({
   const rejection = live?.rejection ?? part.rejection
   const backgrounded = (live?.backgrounded ?? part.backgrounded) === true && status === "running"
   const depth = live?.depth ?? part.depth
-  const tokenUsage = live?.result?.tokenUsage ?? part.tokenUsage
+  // Prefer the LIVE cumulative usage while running (fed by the dispatch run
+  // tracker), then the authoritative result usage, then the persisted part.
+  const tokenUsage = live?.tokenUsage ?? live?.result?.tokenUsage ?? part.tokenUsage
   const tokenTotal = tokenUsage?.totalTokens
+  const retryCount = live?.retryCount ?? 0
+  const cutOff = (live?.errorEnvelope?.partialText ?? "").length > 0
   const toolCalls = live?.toolCalls ?? part.toolCalls ?? []
   const finalResponse = live?.result?.finalResponse ?? part.finalResponse
   const isRunning = part.completedAt == null && status === "running"
@@ -327,6 +339,15 @@ export const SubagentPart = memo(function SubagentPart({
                 {t("backgroundRunning")}
               </Badge>
             ) : null}
+            {isRunning && retryCount > 0 ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] text-amber-600"
+                data-testid="subagent-retry-badge"
+              >
+                {t("retrying", { n: retryCount })}
+              </Badge>
+            ) : null}
             <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               {lastLog?.message ?? ""}
             </span>
@@ -377,6 +398,7 @@ export const SubagentPart = memo(function SubagentPart({
               toolCalls={toolCalls}
               finalResponse={finalResponse}
               tokenUsage={tokenUsage}
+              cutOff={cutOff}
             />
           </div>
         </MotionCollapse>
@@ -419,6 +441,15 @@ export const SubagentPart = memo(function SubagentPart({
                 data-testid="subagent-background-badge"
               >
                 {t("backgroundRunning")}
+              </Badge>
+            ) : null}
+            {isRunning && retryCount > 0 ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] text-amber-600"
+                data-testid="subagent-retry-badge"
+              >
+                {t("retrying", { n: retryCount })}
               </Badge>
             ) : null}
             {typeof tokenTotal === "number" && tokenTotal > 0 ? (
@@ -467,6 +498,7 @@ export const SubagentPart = memo(function SubagentPart({
             toolCalls={toolCalls}
             finalResponse={finalResponse}
             tokenUsage={tokenUsage}
+            cutOff={cutOff}
           />
         </CollapsibleContent>
       </Collapsible>

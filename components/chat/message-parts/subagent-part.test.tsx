@@ -235,6 +235,57 @@ describe("SubagentPart", () => {
     expect(screen.getByTestId("subagent-tokens-badge").textContent).toMatch(/15/)
   })
 
+  it("prefers the live cumulative token usage while running (telemetry)", () => {
+    useSubagentRuntimeStore.getState().upsert(
+      makeSubAgent({
+        status: "running",
+        tokenUsage: { promptTokens: 200, completionTokens: 40, totalTokens: 240 },
+      })
+    )
+    render(
+      <SubagentPart
+        part={{
+          ...basePart,
+          status: "running",
+          tokenUsage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        }}
+      />
+    )
+    // The live figure (240) wins over the stale part snapshot (15).
+    expect(screen.getByTestId("subagent-tokens-badge").textContent).toMatch(/240/)
+  })
+
+  it("shows a retry badge while a run is retrying", () => {
+    useSubagentRuntimeStore.getState().upsert(makeSubAgent({ status: "running", retryCount: 2 }))
+    render(<SubagentPart part={{ ...basePart, status: "running" }} />)
+    expect(screen.getByTestId("subagent-retry-badge").textContent).toMatch(/2/)
+  })
+
+  it("hides the retry badge once the run is no longer running", () => {
+    useSubagentRuntimeStore.getState().upsert(makeSubAgent({ status: "completed", retryCount: 2 }))
+    render(<SubagentPart part={{ ...basePart, status: "completed" }} />)
+    expect(screen.queryByTestId("subagent-retry-badge")).toBeNull()
+  })
+
+  it("renders the cut-off note when a failed run salvaged partial output", () => {
+    useSubagentRuntimeStore.getState().upsert(
+      makeSubAgent({
+        status: "failed",
+        errorEnvelope: { code: "rate-limit", retryable: true, partialText: "half the findings" },
+        result: {
+          success: false,
+          finalResponse: "half the findings",
+          steps: [],
+          totalSteps: 0,
+          duration: 0,
+        },
+      })
+    )
+    render(<SubagentPart part={{ ...basePart, status: "failed" }} mode="detailed" />)
+    expect(screen.getByTestId("subagent-result")).toHaveTextContent("half the findings")
+    expect(screen.getByTestId("subagent-cutoff-note")).toBeInTheDocument()
+  })
+
   describe("inline tool list + result + abort (Part 2)", () => {
     it("renders a grouped tool activity when ≥2 tool calls (detailed/open)", () => {
       useSubagentRuntimeStore.getState().upsert(
