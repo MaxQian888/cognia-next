@@ -41,8 +41,25 @@
     "webPickFormats": "支持 .md / .markdown / .mdc / .yaml / .yml。",
     "webPickHint": "拖入文件或点击浏览。"
   },
+  "backgroundTasks": {
+    "autoResume": "启动时自动恢复被中断的运行",
+    "autoResumeHint": "默认关闭——开启后，被崩溃/退出中断的后台子代理运行会在启动时重新派发（有次数上限）。",
+    "denyList": "派发拒绝列表",
+    "denyListHint": "每行一个作用于子代理 id 的 glob（如 Explore、myplugin:*、template:*）。被拒绝的 id 不会进入 dispatch_agent 工具，并在派发时被拒。",
+    "denyListPlaceholder": "template:*\nmyplugin:reviewer",
+    "description": "后台子代理生命周期与派发权限。",
+    "maxAttempts": "最大自动恢复次数",
+    "maxAttemptsHint": "每条运行血缘链的自动恢复次数上限（防止崩溃循环）。",
+    "save": "保存",
+    "saved": "后台任务设置已保存。",
+    "surfaceAsks": "上浮子代理权限请求",
+    "surfaceAsksHint": "开启（默认）：被派发子代理的权限请求会显示在本聊天中。关闭：自动拒绝。",
+    "title": "后台任务与权限"
+  },
   "nesting": {
     "description": "允许聊天代理派发可再派发更深层子代理的子代理，并提供受控深度、预算以及循环/超时守卫。",
+    "dispatchMaxRetries": "瞬时失败重试",
+    "dispatchMaxRetriesHint": "瞬时派发失败（限流、超时、网络、sidecar 重启）的重试次数。0 = 禁用。默认 1。",
     "enabled": "启用嵌套派发",
     "enabledHint": "默认关闭——代理保持标准的单层 Task 工具。",
     "maxDepth": "最大嵌套深度",

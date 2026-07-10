@@ -17,6 +17,7 @@ import { SettingsPageHeader } from "@/components/settings/common/settings-sectio
 import { SubagentTemplatesTab } from "./subagent-templates-tab"
 import { SubagentRuntimeTab } from "./subagent-runtime-tab"
 import { SubagentNestingCard } from "./subagent-nesting-card"
+import { BackgroundTasksCard } from "./background-tasks-card"
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,
@@ -55,6 +56,10 @@ export function SubagentsSection() {
 
       <div className="rounded-lg border p-4">
         <SubagentNestingCard />
+      </div>
+
+      <div className="rounded-lg border p-4">
+        <BackgroundTasksCard />
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>

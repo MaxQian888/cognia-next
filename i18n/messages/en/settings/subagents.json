@@ -41,8 +41,25 @@
     "webPickFormats": "Accepts .md / .markdown / .mdc / .yaml / .yml.",
     "webPickHint": "Drop files here or click to browse."
   },
+  "backgroundTasks": {
+    "autoResume": "Auto-resume interrupted runs on boot",
+    "autoResumeHint": "Off by default — when on, background sub-agent runs interrupted by a crash/quit are re-dispatched at startup (attempt-capped).",
+    "denyList": "Dispatch deny-list",
+    "denyListHint": "One glob per line over subagent ids (e.g. Explore, myplugin:*, template:*). Denied ids never enter the dispatch_agent tool and are refused at dispatch time.",
+    "denyListPlaceholder": "template:*\nmyplugin:reviewer",
+    "description": "Background sub-agent lifecycle and dispatch permissions.",
+    "maxAttempts": "Max auto-resume attempts",
+    "maxAttemptsHint": "Cap on chained auto-resume attempts per run lineage (prevents crash loops).",
+    "save": "Save",
+    "saved": "Background task settings saved.",
+    "surfaceAsks": "Surface sub-agent permission asks",
+    "surfaceAsksHint": "On (default): a dispatched sub-agent's permission prompts appear in this chat. Off: they are auto-denied.",
+    "title": "Background tasks & permissions"
+  },
   "nesting": {
     "description": "Let the chat agent dispatch sub-agents that can themselves dispatch further sub-agents, with controlled depth, budget, and cycle/timeout guards.",
+    "dispatchMaxRetries": "Transient-failure retries",
+    "dispatchMaxRetriesHint": "Retries for transient dispatch failures (rate-limit, timeout, network, sidecar restart). 0 disables. Default 1.",
     "enabled": "Enable nested dispatch",
     "enabledHint": "Off by default — the agent keeps the standard single-level Task tool.",
     "maxDepth": "Max nesting depth",

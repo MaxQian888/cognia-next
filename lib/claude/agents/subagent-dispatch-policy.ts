@@ -5,11 +5,12 @@
  * enum (the model can't even try it) and is refused fail-closed at dispatch
  * time (the enum can drift within a session).
  *
- * Pure — shared by the enum builder (build-options), the dispatch guard
- * (`dispatchSubagent`), and the CLI available-list. Reuses the shared glob
- * machinery from `lib/claude/permissions/ruleset` (NOT a new matcher):
- * most-specific-match wins; `ask` is reserved and treated as `allow` in v1.
- * Default allow when no rule matches or no rules are configured.
+ * Pure — used by the renderer enum builder (build-options) and the dispatch
+ * guard (`dispatchSubagent`). The CLI host has no access to renderer Dexie
+ * settings, so it enforces only the `disabled` flag, not this settings-level
+ * policy. Reuses the shared glob machinery from `lib/claude/permissions/ruleset`
+ * (NOT a new matcher): most-specific-match wins; `ask` is reserved and treated
+ * as `allow` in v1. Default allow when no rule matches or no rules configured.
  */
 
 import { matchGlob, type ToolRules } from "@/lib/claude/permissions/ruleset"

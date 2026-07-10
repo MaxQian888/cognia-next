@@ -78,11 +78,6 @@ export function envelopeForBudgetExhausted(message: string): PluginDispatchError
   return { code: "budget-exhausted", retryable: false, message }
 }
 
-/** Envelope for a run interrupted by a host restart (journal reconstruction). */
-export function envelopeForInterrupted(message: string): PluginDispatchErrorEnvelope {
-  return { code: "interrupted", retryable: false, message }
-}
-
 /**
  * Model-facing rendering of a dispatch outcome (Claude Code v2.1.199
  * semantics): a run that streamed text before dying returns that partial

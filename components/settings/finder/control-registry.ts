@@ -139,6 +139,21 @@ export const SETTING_CONTROLS: SettingControl[] = [
     settingKey: "subagentNesting",
     keywords: ["nesting", "depth", "子代理", "嵌套"],
   },
+  {
+    id: "subagent-background-tasks",
+    sectionId: "agent-runtime",
+    labelKey: "backgroundTasks",
+    settingKey: "backgroundTasks",
+    keywords: [
+      "background",
+      "auto-resume",
+      "dispatch policy",
+      "subagent permissions",
+      "后台",
+      "自动恢复",
+      "派发策略",
+    ],
+  },
   // network
   {
     id: "network-proxy",

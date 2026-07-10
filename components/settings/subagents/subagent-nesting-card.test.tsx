@@ -48,8 +48,29 @@ describe("SubagentNestingCard", () => {
     fireEvent.change(screen.getByLabelText("timeout"), { target: { value: "30" } })
     fireEvent.click(screen.getByRole("button", { name: "save" }))
     expect(save).toHaveBeenCalledWith({
-      subagentNesting: { enabled: true, maxDepth: 3, tokenBudget: 0, timeoutMs: 30000 },
+      subagentNesting: {
+        enabled: true,
+        maxDepth: 3,
+        tokenBudget: 0,
+        timeoutMs: 30000,
+        dispatchMaxRetries: 1,
+      },
     })
+  })
+
+  it("hydrates and saves the dispatch-retry knob (always enabled)", () => {
+    mockSettings = { subagentNesting: { enabled: false, maxDepth: 2, dispatchMaxRetries: 3 } }
+    render(<SubagentNestingCard />)
+    const retries = screen.getByLabelText("dispatchMaxRetries")
+    expect(retries).toHaveValue(3)
+    expect(retries).not.toBeDisabled() // retries apply even with nesting off
+    fireEvent.change(retries, { target: { value: "0" } })
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subagentNesting: expect.objectContaining({ dispatchMaxRetries: 0 }),
+      })
+    )
   })
 
   it("clamps maxDepth to the 1–5 range", () => {

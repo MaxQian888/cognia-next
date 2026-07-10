@@ -32,6 +32,7 @@ export function SubagentNestingCard() {
   const [maxDepth, setMaxDepth] = useState(2)
   const [tokenBudget, setTokenBudget] = useState(0)
   const [timeoutSeconds, setTimeoutSeconds] = useState(0)
+  const [dispatchMaxRetries, setDispatchMaxRetries] = useState(1)
 
   useEffect(() => {
     const cfg = settings?.subagentNesting
@@ -41,6 +42,7 @@ export function SubagentNestingCard() {
     setMaxDepth(cfg.maxDepth ?? 2)
     setTokenBudget(cfg.tokenBudget ?? 0)
     setTimeoutSeconds(cfg.timeoutMs ? Math.round(cfg.timeoutMs / 1000) : 0)
+    setDispatchMaxRetries(cfg.dispatchMaxRetries ?? 1)
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [settings])
 
@@ -52,9 +54,16 @@ export function SubagentNestingCard() {
           maxDepth,
           tokenBudget: tokenBudget > 0 ? tokenBudget : 0,
           timeoutMs: timeoutSeconds > 0 ? timeoutSeconds * 1000 : 0,
+          dispatchMaxRetries,
         },
       })
-      log.info("subagentNesting.saved", { enabled, maxDepth, tokenBudget, timeoutSeconds })
+      log.info("subagentNesting.saved", {
+        enabled,
+        maxDepth,
+        tokenBudget,
+        timeoutSeconds,
+        dispatchMaxRetries,
+      })
       toast.success(t("saved"))
     } catch (err) {
       log.error("subagentNesting.saveFailed", err)
@@ -127,6 +136,20 @@ export function SubagentNestingCard() {
           aria-label={t("timeout")}
         />
         <p className="text-xs text-muted-foreground">{t("timeoutHint")}</p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="settings-subagent-dispatch-retries">{t("dispatchMaxRetries")}</Label>
+        <Input
+          id="settings-subagent-dispatch-retries"
+          type="number"
+          min={0}
+          max={5}
+          value={dispatchMaxRetries}
+          onChange={(e) => setDispatchMaxRetries(clampInt(e.target.value, 0, 5, 1))}
+          aria-label={t("dispatchMaxRetries")}
+        />
+        <p className="text-xs text-muted-foreground">{t("dispatchMaxRetriesHint")}</p>
       </div>
 
       <div className="flex justify-end">

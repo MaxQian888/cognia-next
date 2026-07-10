@@ -2,7 +2,6 @@ import {
   toDispatchErrorEnvelope,
   envelopeForRejection,
   envelopeForBudgetExhausted,
-  envelopeForInterrupted,
   renderDispatchOutcomeForModel,
 } from "./dispatch-error"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
@@ -101,13 +100,9 @@ describe("rejection / guard envelopes", () => {
     })
   })
 
-  it("budget / interrupted helpers are non-retryable", () => {
+  it("budget helper is non-retryable", () => {
     expect(envelopeForBudgetExhausted("budget gone")).toMatchObject({
       code: "budget-exhausted",
-      retryable: false,
-    })
-    expect(envelopeForInterrupted("host stopped")).toMatchObject({
-      code: "interrupted",
       retryable: false,
     })
   })
