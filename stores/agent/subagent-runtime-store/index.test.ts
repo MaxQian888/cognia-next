@@ -315,6 +315,26 @@ describe("subagent-runtime-store — runtime slice", () => {
       expect(snapshot().subAgents).toBe(before)
     })
 
+    it("usage patch replaces the live cumulative token usage", () => {
+      snapshot().upsert(makeSubAgent({}))
+      snapshot().applyRunEvent("sa-1", {
+        usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 },
+      })
+      expect(snapshot().subAgents["sa-1"]!.tokenUsage).toEqual({
+        promptTokens: 100,
+        completionTokens: 20,
+        totalTokens: 120,
+      })
+    })
+
+    it("retry patch bumps retryCount (floored, non-negative)", () => {
+      snapshot().upsert(makeSubAgent({ retryCount: 0 }))
+      snapshot().applyRunEvent("sa-1", { retry: { attempt: 2.9 } })
+      expect(snapshot().subAgents["sa-1"]!.retryCount).toBe(2)
+      snapshot().applyRunEvent("sa-1", { retry: { attempt: -5 } })
+      expect(snapshot().subAgents["sa-1"]!.retryCount).toBe(0)
+    })
+
     it("caps the tool-call list at the last 100 entries", () => {
       snapshot().upsert(makeSubAgent({ toolCalls: [] }))
       for (let i = 0; i < 110; i++) {
