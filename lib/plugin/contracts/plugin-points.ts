@@ -907,7 +907,9 @@ export const CANONICAL_RUNTIME_POINTS = [
 
 export type CanonicalRuntimePoint = (typeof CANONICAL_RUNTIME_POINTS)[number]
 
-const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
+// Exported for the W3.4 dispatch-reachability gate (runtime-proof-audit.test.ts)
+// which verifies each binding function is referenced by production code.
+export const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
   "workflow.node": "lib/workflow/nodes/registry.ts:registerNodeExecutor",
   "workflow.trigger": "lib/workflow/triggers/registry.ts:registerPluginTrigger",
   "workflow.task":

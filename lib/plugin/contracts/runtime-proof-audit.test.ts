@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 import { auditPluginRuntimeClaims } from "./runtime-proof-audit"
-import { CANONICAL_HOOK_POINTS, DEPRECATED_HOOK_POINTS } from "./plugin-points"
+import {
+  CANONICAL_HOOK_POINTS,
+  CANONICAL_RUNTIME_POINTS,
+  DEPRECATED_HOOK_POINTS,
+  RUNTIME_POINT_BINDINGS,
+} from "./plugin-points"
 
 describe("plugin runtime proof audit", () => {
   it("reports supported capabilities with executable proof metadata", () => {
@@ -74,31 +79,22 @@ describe("plugin runtime proof audit", () => {
     expect(report.runtimeRisks).toEqual([])
   })
 
-  // ADR 0016 P1-9 — strengthen the proof audit: every canonical hook must
-  // have at least one host call site outside hooks-system.ts (where the
-  // dispatcher is defined), or live in DEPRECATED_HOOK_POINTS. The runtime
-  // audit at `auditPluginPointContracts()` only checks metadata existence,
-  // so we shore it up here with a build-time grep that can hit the file
-  // system. Failure means a hook is silent — wire it or demote it.
+  // ADR 0016 P1-9 / W3.4 — dispatch-reachability gate. Every canonical hook
+  // must be reachable through a LIVE chain: hooks-system dispatcher → (an
+  // optional `lib/claude/adapter-hooks.ts` wrapper) → a production caller.
+  // The original check green-lit a hook as soon as adapter-hooks.ts called
+  // the dispatcher, even when the wrapper itself was dead (the exact bug
+  // that left onPreToolUse/onPostToolUse dormant while reporting healthy) —
+  // and its assertion was vacuous (a found call site always passed, a
+  // missing one soft-passed). The chain check below fails on either.
   describe("every canonical hook has a host call site (build-time check)", () => {
     const REPO_ROOT = resolve(__dirname, "../../..")
+    const ADAPTER_HOOKS_FILE = "lib/claude/adapter-hooks.ts"
 
-    // Hook naming is inconsistent in hooks-system.ts. Most are
-    // `dispatch<HookName-without-leading-on>` (e.g., onProjectCreate →
-    // dispatchProjectCreate), but agent-plan, scheduled-task, and session
-    // hooks keep the "On" prefix. Try both forms.
-    const candidateDispatcherNames = (hookName: string): [string, string] => {
-      const stripped = hookName.startsWith("on") ? hookName.slice(2) : hookName
-      return [
-        `dispatch${stripped}`,
-        `dispatch${hookName.charAt(0).toUpperCase()}${hookName.slice(1)}`,
-      ]
-    }
-
-    const findCallSite = (dispatcherCandidates: string[]): string | null => {
-      // Walk lib/, hooks/, stores/, app/, components/ excluding the
-      // dispatcher's own definition file. Use git ls-files for speed +
-      // gitignore awareness; fall back gracefully if it fails.
+    // One shared snapshot of every production source file. Read once — the
+    // per-hook checks then run over in-memory strings.
+    const productionSources: Map<string, string> = (() => {
+      const map = new Map<string, string>()
       let files: string[]
       try {
         const out = execSync(`git -C "${REPO_ROOT}" ls-files lib hooks stores app components`, {
@@ -116,20 +112,89 @@ describe("plugin runtime proof audit", () => {
               !p.endsWith("plugin-points.ts")
           )
       } catch {
-        return null
+        return map // empty map → suite soft-passes (sandboxed CI without git)
       }
-
-      for (const name of dispatcherCandidates) {
-        const pattern = new RegExp(`\\.${name}\\s*\\(`)
-        for (const file of files) {
-          const full = resolve(REPO_ROOT, file)
-          try {
-            const src = readFileSync(full, "utf8")
-            if (pattern.test(src)) return file
-          } catch {
-            // ignore unreadable files
-          }
+      for (const file of files) {
+        try {
+          map.set(file, readFileSync(resolve(REPO_ROOT, file), "utf8"))
+        } catch {
+          // ignore unreadable files
         }
+      }
+      return map
+    })()
+
+    // Hook naming is inconsistent in hooks-system.ts. Most are
+    // `dispatch<HookName-without-leading-on>` (e.g., onProjectCreate →
+    // dispatchProjectCreate), but agent-plan, scheduled-task, and session
+    // hooks keep the "On" prefix. Try both forms.
+    const candidateDispatcherNames = (hookName: string): [string, string] => {
+      const stripped = hookName.startsWith("on") ? hookName.slice(2) : hookName
+      return [
+        `dispatch${stripped}`,
+        `dispatch${hookName.charAt(0).toUpperCase()}${hookName.slice(1)}`,
+      ]
+    }
+
+    /** Files whose source matches `pattern`, optionally excluding some. */
+    const filesMatching = (pattern: RegExp, exclude: Set<string> = new Set()): string[] => {
+      const hits: string[] = []
+      for (const [file, src] of productionSources) {
+        if (exclude.has(file)) continue
+        if (pattern.test(src)) hits.push(file)
+      }
+      return hits
+    }
+
+    /**
+     * Names of the exported adapter-hooks wrapper functions whose bodies call
+     * one of `dispatcherCandidates`. Parsed from the adapter-hooks source by
+     * splitting on `export (async )function` boundaries.
+     */
+    const adapterWrapperNames = (dispatcherCandidates: string[]): string[] => {
+      const src = productionSources.get(ADAPTER_HOOKS_FILE)
+      if (!src) return []
+      const names: string[] = []
+      const fnRe = /export\s+(?:async\s+)?function\s+(\w+)/g
+      const boundaries: Array<{ name: string; start: number }> = []
+      for (let m = fnRe.exec(src); m; m = fnRe.exec(src)) {
+        boundaries.push({ name: m[1], start: m.index })
+      }
+      for (let i = 0; i < boundaries.length; i++) {
+        const body = src.slice(boundaries[i].start, boundaries[i + 1]?.start ?? src.length)
+        if (dispatcherCandidates.some((d) => new RegExp(`\\.${d}\\s*\\(`).test(body))) {
+          names.push(boundaries[i].name)
+        }
+      }
+      return names
+    }
+
+    /**
+     * The W3.4 chain check. Returns the production file that proves the hook
+     * live, or null when the chain is broken:
+     *   1. a non-adapter production file calls the dispatcher directly, OR
+     *   2. adapter-hooks wraps the dispatcher AND some non-adapter production
+     *      file references the wrapper (imports are accepted as proof — an
+     *      unused import fails lint, so a reference implies a call).
+     */
+    const findLiveCallSite = (dispatcherCandidates: string[], hookName?: string): string | null => {
+      for (const name of dispatcherCandidates) {
+        const direct = filesMatching(new RegExp(`\\.${name}\\s*\\(`), new Set([ADAPTER_HOOKS_FILE]))
+        if (direct.length > 0) return direct[0]
+      }
+      // Shared dispatchers take the hook name as a string argument
+      // (e.g. `dispatchConnectorDecision("onConnectorInbound", …)`).
+      if (hookName) {
+        const literal = filesMatching(
+          new RegExp(`\\.dispatch\\w*\\(\\s*["']${hookName}["']`),
+          new Set([ADAPTER_HOOKS_FILE])
+        )
+        if (literal.length > 0) return literal[0]
+      }
+      const wrappers = adapterWrapperNames(dispatcherCandidates)
+      for (const wrapper of wrappers) {
+        const callers = filesMatching(new RegExp(`\\b${wrapper}\\b`), new Set([ADAPTER_HOOKS_FILE]))
+        if (callers.length > 0) return callers[0]
       }
       return null
     }
@@ -151,7 +216,6 @@ describe("plugin runtime proof audit", () => {
       // model switch, compaction, workflow contribution events). The fully-dead
       // ones with no wire plan (onMessageRender / onAgentToolCall / onChatRequest)
       // were demoted to DEPRECATED_HOOK_POINTS instead of allowlisted.
-      "onMessageSend",
       "onMessageEdit",
       "onMessageDelete",
       "onChatRegenerate",
@@ -165,6 +229,15 @@ describe("plugin runtime proof audit", () => {
       "onSessionDelete",
       "onSessionSwitch",
       "onAgentStep",
+      // 2026-07-10 (W3.4) — the scheduled-task lifecycle hooks have no host
+      // dispatch anywhere (lib/scheduler never calls the dispatchers); kept
+      // canonical as wire candidates for the scheduler executor.
+      "onScheduledTaskCreate",
+      "onScheduledTaskUpdate",
+      "onScheduledTaskDelete",
+      "onScheduledTaskPause",
+      "onScheduledTaskResume",
+      "onScheduledTaskBeforeRun",
       "onWorkflowNodeRegister",
       "onWorkflowNodeUnregister",
       "onWorkflowTriggerRegister",
@@ -173,23 +246,81 @@ describe("plugin runtime proof audit", () => {
 
     for (const hookName of CANONICAL_HOOK_POINTS) {
       if ((ALLOWED_SILENT_EXCEPTIONS as Set<string>).has(hookName)) continue
-      it(`hook "${hookName}" has a host call site`, () => {
-        const dispatchers = candidateDispatcherNames(hookName)
-        const callSite = findCallSite([...dispatchers])
-        // If grep is unavailable (sandboxed CI), treat as a soft-pass — the
-        // CI workflow runs the equivalent gate via `pnpm audit:silent-flags`
-        // already. Avoid false negatives.
-        if (callSite === null) return
-        expect({ hookName, callSite }).toEqual(
-          expect.objectContaining({ hookName, callSite: expect.any(String) })
-        )
+      it(`hook "${hookName}" has a live dispatch chain`, () => {
+        // If the file snapshot is unavailable (sandboxed CI without git),
+        // soft-pass — the CI workflow runs `pnpm audit:silent-flags` too.
+        if (productionSources.size === 0) return
+        const callSite = findLiveCallSite([...candidateDispatcherNames(hookName)], hookName)
+        if (callSite === null) {
+          throw new Error(
+            `Canonical hook "${hookName}" has no live dispatch chain: no production file ` +
+              `calls its dispatcher (directly or through a referenced adapter-hooks wrapper). ` +
+              `Wire it, demote it to DEPRECATED_HOOK_POINTS, or allowlist it with a wire plan.`
+          )
+        }
       })
     }
+
+    it("the chain check itself fails on a deliberately-unwired dispatcher", () => {
+      if (productionSources.size === 0) return
+      expect(findLiveCallSite(["dispatchThisHookDoesNotExistAnywhere"])).toBeNull()
+    })
+
+    it("follows the adapter-wrapper chain for the W3.1 tool hooks", () => {
+      if (productionSources.size === 0) return
+      // Regression lock: these were the dormant hooks that motivated the
+      // chain check — they must now resolve through adapter-hooks to a real
+      // production caller (the chat pump).
+      expect(findLiveCallSite(["dispatchPreToolUse"])).not.toBeNull()
+      expect(findLiveCallSite(["dispatchPostToolUse"])).not.toBeNull()
+      expect(findLiveCallSite(["dispatchOnMessageSend", "dispatchMessageSend"])).not.toBeNull()
+    })
 
     it("DEPRECATED_HOOK_POINTS list is disjoint from CANONICAL_HOOK_POINTS", () => {
       const canonical = new Set<string>(CANONICAL_HOOK_POINTS)
       const overlap = DEPRECATED_HOOK_POINTS.filter((name) => canonical.has(name))
       expect(overlap).toEqual([])
+    })
+
+    // ── W3.4: runtime-point reachability ────────────────────────────────────
+    // `contract-path-audit` only checks the binding FILE exists; a registry
+    // can exist and never be fed. Here every CANONICAL_RUNTIME_POINTS binding
+    // function must be referenced by some production file other than its own
+    // definition file (bridges/ctx APIs count — they are the feeding path).
+    describe("every canonical runtime point's binding function is referenced", () => {
+      // Bindings whose reachability the simple reference-grep cannot prove
+      // (descriptive bindings without a `:function` part are skipped inline).
+      // Keep empty unless a point is knowingly dormant WITH a wire plan —
+      // additions here are debt, reviewed like ALLOWED_SILENT_EXCEPTIONS.
+      const KNOWN_DORMANT_RUNTIME_POINTS = new Set<string>([
+        // 2026-07-10 (W3.4 initial sweep) — registries that exist but are not
+        // fed by any production caller yet. Each needs its bridge/ctx wiring
+        // (or a truthful demotion) in a follow-up; do NOT add new entries
+        // without a wire plan.
+        "workflow.task", // executePluginInvoke defined but the node never routes to it
+        "provider.ai-llm", // ai-provider-registry.registerLlmProvider unfed
+        "provider.ai-embedding", // ai-provider-registry.registerEmbeddingProvider unfed
+        "modal.mount", // plugin-modal-store.registerPluginModal unfed
+      ])
+
+      for (const point of CANONICAL_RUNTIME_POINTS) {
+        if (KNOWN_DORMANT_RUNTIME_POINTS.has(point)) continue
+        const binding = RUNTIME_POINT_BINDINGS[point]
+        const match = /^(\S+\.tsx?):(\w+)/.exec(binding)
+        if (!match) continue // descriptive binding (no function) — path audit covers it
+        const [, bindingFile, fnName] = match
+        it(`runtime point "${point}" (${fnName}) is fed by production code`, () => {
+          if (productionSources.size === 0) return
+          const refs = filesMatching(new RegExp(`\\b${fnName}\\b`), new Set([bindingFile]))
+          if (refs.length === 0) {
+            throw new Error(
+              `Runtime point "${point}" binds ${binding}, but no production file references ` +
+                `${fnName} outside its definition — the registry can never be fed. Wire the ` +
+                `bridge/ctx API or add the point to KNOWN_DORMANT_RUNTIME_POINTS with a wire plan.`
+            )
+          }
+        })
+      }
     })
   })
 })
