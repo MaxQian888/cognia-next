@@ -13,7 +13,7 @@
  */
 
 import React from "react"
-import { render, screen, within, act } from "@testing-library/react"
+import { render, screen, within, act, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ExternalAgentSettings } from "./external-agent-settings"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
@@ -143,6 +143,12 @@ jest.mock("./codex-app-server-status-card", () => ({
   CodexAppServerStatusCard: () => <div data-testid="codex-status-card" />,
 }))
 
+// The extra-skill-roots "Browse…" button opens a native Tauri folder picker.
+const pickDirectoryMock = jest.fn(async (): Promise<string | null> => null)
+jest.mock("@/lib/files/file-bridge", () => ({
+  pickDirectory: () => pickDirectoryMock(),
+}))
+
 // Use the real `presets.ts` module — its registry exposes the four shipping
 // presets so the gallery has actual data to render. We only spy on
 // `getAvailablePresets` for one test that needs to override the list.
@@ -170,6 +176,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     removeAgentMock.mockClear()
     connectMock.mockClear()
     disconnectMock.mockClear()
+    pickDirectoryMock.mockReset()
   })
 
   // Flush the async preferred-Codex-preset effect so its setState lands inside
@@ -260,6 +267,57 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     // Defaults: workspaceWrite sandbox with network off; no effort/summary
     // overrides until the user picks them.
     expect(input.codexOptions).toEqual({ sandboxMode: "workspaceWrite", networkAccess: false })
+  })
+
+  it("saves trimmed, de-duped extra skill roots from the folders textarea", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-codex-app-server"))
+    })
+    const textarea = await screen.findByTestId("codex-skill-roots")
+    await act(async () => {
+      fireEvent.change(textarea, {
+        target: { value: "/team/skills\n /team/skills \n/opt/more\n\n" },
+      })
+    })
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /^add$/i }))
+    })
+    const input = addAgentMock.mock.calls[0][0]
+    expect(input.codexOptions.extraSkillRoots).toEqual(["/team/skills", "/opt/more"])
+  })
+
+  it("appends a folder chosen via Browse and never duplicates it", async () => {
+    const user = userEvent.setup()
+    pickDirectoryMock.mockResolvedValue("/picked/skills")
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-codex-app-server"))
+    })
+    const browse = await screen.findByTestId("codex-skill-roots-browse")
+    await act(async () => {
+      await user.click(browse)
+    })
+    await act(async () => {
+      await user.click(browse)
+    })
+    const textarea = (await screen.findByTestId("codex-skill-roots")) as HTMLTextAreaElement
+    expect(textarea.value).toBe("/picked/skills")
+  })
+
+  it("leaves the skill roots unchanged when the folder picker is cancelled", async () => {
+    const user = userEvent.setup()
+    pickDirectoryMock.mockResolvedValue(null)
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-codex-app-server"))
+    })
+    await act(async () => {
+      await user.click(await screen.findByTestId("codex-skill-roots-browse"))
+    })
+    const textarea = (await screen.findByTestId("codex-skill-roots")) as HTMLTextAreaElement
+    expect(textarea.value).toBe("")
   })
 
   it("does not render the Codex options section for non-codex protocols", async () => {

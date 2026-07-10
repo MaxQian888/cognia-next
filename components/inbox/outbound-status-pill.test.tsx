@@ -169,6 +169,13 @@ describe("OutboundStatusPill", () => {
       expect(badge).toHaveAttribute("data-source", "draft-approved")
     })
 
+    it("renders Skill badge when source=skill (im.* chat-management sends)", () => {
+      mockJob = { ...makeJob("sk", "sent"), source: "skill" }
+      render(<OutboundStatusPill jobId="sk" />)
+      const badge = screen.getByTestId("outbound-source-badge-sk")
+      expect(badge).toHaveAttribute("data-source", "skill")
+    })
+
     it("omits the workflow badge when source=workflow but sourceWorkflow is missing", () => {
       mockJob = { ...makeJob("wfo", "sent"), source: "workflow" }
       render(<OutboundStatusPill jobId="wfo" />)

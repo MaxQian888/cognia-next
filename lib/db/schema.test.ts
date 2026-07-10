@@ -998,6 +998,81 @@ describe("getDb", () => {
     expect(legacy?.userTokenStoredAt).toBeUndefined()
   })
 
+  // v107 — inbound dispatch rules (W3 multi-bot). Additive optional JSON
+  // column on `adapterInstances`; verify the full rule shape round-trips
+  // and that pre-v107 rows read back with the field absent.
+  it("v107 dispatchRules round-trip on adapterInstances", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(107)
+    const now = Date.now()
+
+    await db.adapterInstances.put({
+      id: "tg-v107",
+      type: "telegram",
+      displayName: "Rules bot",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+      dispatchRules: [
+        {
+          id: "rule-1",
+          enabled: true,
+          name: "Bug triage",
+          match: {
+            keywords: ["bug", "崩溃"],
+            pattern: "^\\[urgent\\]",
+            senderIds: ["u_ops"],
+            channelKinds: ["group", "private"],
+          },
+          action: { teamId: "team_triage" },
+        },
+        {
+          id: "rule-2",
+          match: {},
+          action: { characterId: "char_support", workflowId: "wf_escalate" },
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+    const row = await db.adapterInstances.get("tg-v107")
+    expect(row?.dispatchRules).toHaveLength(2)
+    expect(row?.dispatchRules?.[0]).toEqual({
+      id: "rule-1",
+      enabled: true,
+      name: "Bug triage",
+      match: {
+        keywords: ["bug", "崩溃"],
+        pattern: "^\\[urgent\\]",
+        senderIds: ["u_ops"],
+        channelKinds: ["group", "private"],
+      },
+      action: { teamId: "team_triage" },
+    })
+    expect(row?.dispatchRules?.[1].action.workflowId).toBe("wf_escalate")
+
+    // Pre-v107 row (no dispatchRules) still reads back fine.
+    await db.adapterInstances.put({
+      id: "tg-pre-v107",
+      type: "telegram",
+      displayName: "Legacy bot",
+      enabled: false,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "manual",
+      createdAt: now,
+      updatedAt: now,
+    })
+    const legacyRules = await db.adapterInstances.get("tg-pre-v107")
+    expect(legacyRules?.dispatchRules).toBeUndefined()
+  })
+
   // v45 — `adapter.heartbeat` AuditKind is accepted by the
   // `connectorAudit` table writer and the index can filter it out.
   it("v45 adapter.heartbeat audit rows round-trip and are filterable by kind", async () => {
@@ -2672,6 +2747,75 @@ describe("v94 petInventory (pet economy)", () => {
     await db.petInventory.put({ id: "berry", qty: 4, acquiredAt: 100, updatedAt: 300 })
     expect(await db.petInventory.count()).toBe(2)
     expect((await db.petInventory.get("berry"))?.qty).toBe(4)
+  })
+})
+
+describe("v106 instance-level AI binding defaults (multi-bot connectors W1/W2)", () => {
+  it("round-trips adapter binding defaults and the teamDisabled sentinel", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(106)
+    const now = Date.now()
+
+    await db.adapterInstances.put({
+      id: "lark-v106",
+      type: "lark",
+      displayName: "Lark Bot A",
+      enabled: true,
+      transportMode: "webhook",
+      settings: {},
+      credentialsRef: {
+        keyringService: "com.cognia.platforms",
+        accounts: ["lark-v106:appSecret"],
+      },
+      trigger: {
+        rules: [{ kind: "private-default" }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      },
+      defaultMode: "auto",
+      defaultTeamId: "team_alpha",
+      defaultModel: "claude-fable-5",
+      defaultProvider: "anthropic",
+      defaultReasoning: "high",
+      lastMissingScopes: ["im:chat:create"],
+      createdAt: now,
+      updatedAt: now,
+    })
+    const row = await db.adapterInstances.get("lark-v106")
+    expect(row?.defaultTeamId).toBe("team_alpha")
+    expect(row?.defaultModel).toBe("claude-fable-5")
+    expect(row?.defaultProvider).toBe("anthropic")
+    expect(row?.defaultReasoning).toBe("high")
+    expect(row?.lastMissingScopes).toEqual(["im:chat:create"])
+
+    await db.conversationOverrides.put({
+      id: "co-v106",
+      conversationKey: "lark:lark-v106:oc_v106",
+      sessionId: "s_v106",
+      teamDisabled: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    expect((await db.conversationOverrides.get("co-v106"))?.teamDisabled).toBe(true)
+
+    await db.outboundQueue.put({
+      id: "job-v106",
+      adapterId: "lark-v106",
+      conversationKey: "lark:lark-v106:oc_v106",
+      request: {
+        conversationRef: { platform: "lark", adapterId: "lark-v106", channelId: "oc_v106" },
+        segments: [{ type: "text", text: "hello" }],
+        metadata: { idempotencyKey: "idem-v106" },
+      },
+      source: "skill",
+      status: "pending",
+      attempts: 0,
+      createdAt: now,
+      nextAttemptAt: now,
+      idempotencyKey: "idem-v106",
+    })
+    expect((await db.outboundQueue.get("job-v106"))?.source).toBe("skill")
   })
 })
 

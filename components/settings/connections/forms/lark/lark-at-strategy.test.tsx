@@ -55,4 +55,62 @@ describe("LarkAtStrategy", () => {
       expect(row?.atResponseStrategy).toBe("direct_only")
     })
   })
+
+  // ── Sibling-bot policy (W5 multi-bot same-group) ──
+
+  it("selects the ignore sibling policy by default and hides the budget input", async () => {
+    await getDb().adapterInstances.put(baseRow())
+    render(<LarkAtStrategy adapterId="lark-as" />)
+    await waitFor(() => {
+      expect(screen.getByTestId("sibling-policy-ignore")).toHaveAttribute("data-state", "checked")
+    })
+    expect(screen.queryByTestId("sibling-budget-input")).not.toBeInTheDocument()
+  })
+
+  it("persists siblingBotPolicy when the operator picks respond", async () => {
+    await getDb().adapterInstances.put(baseRow())
+    render(<LarkAtStrategy adapterId="lark-as" />)
+    await waitFor(() => screen.getByTestId("sibling-policy-respond"))
+    fireEvent.click(screen.getByTestId("sibling-policy-respond"))
+    await waitFor(async () => {
+      const row = await getDb().adapterInstances.get("lark-as")
+      expect(row?.siblingBotPolicy).toBe("respond")
+    })
+  })
+
+  it("shows the budget input for respond and persists botInterplayBudget", async () => {
+    await getDb().adapterInstances.put(baseRow({ siblingBotPolicy: "respond" }))
+    render(<LarkAtStrategy adapterId="lark-as" />)
+    await waitFor(() => screen.getByTestId("sibling-budget-input"))
+    // Default budget shown when the row carries none.
+    expect(screen.getByTestId("sibling-budget-input")).toHaveValue(4)
+    fireEvent.change(screen.getByTestId("sibling-budget-input"), { target: { value: "7" } })
+    await waitFor(async () => {
+      const row = await getDb().adapterInstances.get("lark-as")
+      expect(row?.botInterplayBudget).toBe(7)
+    })
+  })
+
+  it("does not persist an invalid budget", async () => {
+    await getDb().adapterInstances.put(baseRow({ siblingBotPolicy: "respond" }))
+    render(<LarkAtStrategy adapterId="lark-as" />)
+    await waitFor(() => screen.getByTestId("sibling-budget-input"))
+    fireEvent.change(screen.getByTestId("sibling-budget-input"), { target: { value: "0" } })
+    fireEvent.change(screen.getByTestId("sibling-budget-input"), { target: { value: "" } })
+    // Give any (wrong) write a chance to land, then assert nothing persisted.
+    await new Promise((r) => setTimeout(r, 50))
+    const row = await getDb().adapterInstances.get("lark-as")
+    expect(row?.botInterplayBudget).toBeUndefined()
+  })
+
+  it("reflects a persisted respond policy with its stored budget", async () => {
+    await getDb().adapterInstances.put(
+      baseRow({ siblingBotPolicy: "respond", botInterplayBudget: 9 })
+    )
+    render(<LarkAtStrategy adapterId="lark-as" />)
+    await waitFor(() => {
+      expect(screen.getByTestId("sibling-policy-respond")).toHaveAttribute("data-state", "checked")
+    })
+    expect(screen.getByTestId("sibling-budget-input")).toHaveValue(9)
+  })
 })

@@ -20,6 +20,7 @@
 import type { ChatSession } from "@/lib/claude/types"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
+import { parseConversationKey } from "@/types/connectors/event"
 import { getDb } from "@/lib/db/schema"
 
 /**
@@ -67,6 +68,58 @@ export async function listSessionsByConversationKey(
   return all
     .filter((s) => s.platformBinding?.conversationKey === conversationKey)
     .sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/** A conversation bound to the same remote chat through ANOTHER adapter. */
+export interface SiblingConversation {
+  adapterId: string
+  conversationKey: string
+  sessionId: string
+}
+
+/**
+ * Sessions bound to the SAME remote chat through OTHER adapter instances
+ * (W5 multi-bot same-group collaboration). Sibling = same platform + same
+ * `remoteChatId`, different `adapterId`. Thread-scoped keys (4-part) are
+ * excluded on both sides of the comparison — a sibling conversation is the
+ * base group binding, which is what `team_post_to_chat` targets.
+ *
+ * There is no index on `remoteChatId` (it sits mid-key), so this is a
+ * filter-scan over platform-bound sessions — acceptable at session-table
+ * scale, mirroring the legacy-fallback scans above. Newest session wins per
+ * sibling conversationKey.
+ */
+export async function listSiblingConversations(
+  conversationKey: string
+): Promise<SiblingConversation[]> {
+  let origin
+  try {
+    origin = parseConversationKey(conversationKey)
+  } catch {
+    return []
+  }
+  const db = getDb()
+  const bound = await db.sessions.filter((s) => s.platformConversationKey != null).toArray()
+  const newestByKey = new Map<string, ChatSession>()
+  for (const s of bound.sort((a, b) => b.updatedAt - a.updatedAt)) {
+    const key = s.platformConversationKey!
+    let parsed
+    try {
+      parsed = parseConversationKey(key)
+    } catch {
+      continue
+    }
+    if (parsed.threadId) continue
+    if (parsed.platform !== origin.platform) continue
+    if (parsed.remoteChatId !== origin.remoteChatId) continue
+    if (parsed.adapterId === origin.adapterId) continue
+    if (!newestByKey.has(key)) newestByKey.set(key, s)
+  }
+  return [...newestByKey.entries()].map(([key, s]) => ({
+    adapterId: parseConversationKey(key).adapterId,
+    conversationKey: key,
+    sessionId: s.id,
+  }))
 }
 
 /**

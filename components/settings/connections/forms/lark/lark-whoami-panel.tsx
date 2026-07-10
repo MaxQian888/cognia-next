@@ -14,7 +14,13 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CheckCircle2Icon, LoaderIcon, RefreshCwIcon, XCircleIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  CheckCircle2Icon,
+  LoaderIcon,
+  RefreshCwIcon,
+  XCircleIcon,
+} from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -123,7 +129,7 @@ export function LarkWhoamiPanel({ adapterId }: LarkWhoamiPanelProps) {
                   <span className="font-mono">{whoami.appId}</span>
                 </div>
                 <div>
-                  <span>open_id: </span>
+                  <span>{t("openId")}: </span>
                   <span className="font-mono break-all">{whoami.openId}</span>
                 </div>
                 {whoami.tenantKey && (
@@ -154,6 +160,25 @@ export function LarkWhoamiPanel({ adapterId }: LarkWhoamiPanelProps) {
           <p className="text-xs text-muted-foreground" data-testid="lark-whoami-empty">
             {t("unknown")}
           </p>
+        )}
+        {(row?.lastMissingScopes?.length ?? 0) > 0 && (
+          <div
+            className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
+            data-testid="lark-whoami-missing-scopes"
+          >
+            <AlertTriangleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div className="flex-1 break-words space-y-1">
+              <div className="font-medium">{t("missingScopesTitle")}</div>
+              <div className="flex flex-wrap gap-1">
+                {row!.lastMissingScopes!.map((s) => (
+                  <Badge key={s} variant="outline" className="font-mono text-xs">
+                    {s}
+                  </Badge>
+                ))}
+              </div>
+              <div>{t("missingScopesHint")}</div>
+            </div>
+          </div>
         )}
         {lastError && (
           <div

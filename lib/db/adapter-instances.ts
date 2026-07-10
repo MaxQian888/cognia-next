@@ -82,6 +82,23 @@ export async function updateAdapterInstance(
       | "welcomeText"
       // In-chat control-command permission gate (control-plane).
       | "controlCommands"
+      // Token-usage presence config + runner state (usage-status-runner and
+      // the UsagePresence settings form already write these — the whitelist
+      // had silently lagged, tripping tsc at both call sites).
+      | "presence"
+      | "presenceState"
+      // v106 (W1 multi-bot) — instance-level AI binding defaults.
+      | "defaultTeamId"
+      | "defaultModel"
+      | "defaultProvider"
+      | "defaultReasoning"
+      // v106 (W2 chat management) — scopes observed missing at runtime.
+      | "lastMissingScopes"
+      // v107 (W3 multi-bot) — declarative inbound dispatch rules.
+      | "dispatchRules"
+      // W5 (multi-bot same-group) — sibling-bot inbound guard.
+      | "siblingBotPolicy"
+      | "botInterplayBudget"
     >
   >
 ): Promise<void> {

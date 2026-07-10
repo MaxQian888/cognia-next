@@ -1484,6 +1484,26 @@ export function useClaudeChat() {
 
   const respondToApproval = useCallback(
     async (approval: PendingApproval, decision: ApprovalDecision): Promise<void> => {
+      // Built-in-skill desktop consent (W2 dual-channel HITL): synthetic
+      // approvals are resolved IN-RENDERER via the approval registry — there
+      // is no sidecar-side permission waiting, so `approveTool` must never
+      // see these request ids. "Always allow" maps to a session-scoped
+      // bypass (skills are renderer-side; the sidecar ruleset doesn't apply).
+      {
+        const { isBuiltInSkillApprovalRequestId, grantDesktopSkillSessionBypass } =
+          await import("@/lib/skills/built-in/desktop-hitl")
+        if (isBuiltInSkillApprovalRequestId(approval.requestId)) {
+          if (decision === "allow_always") {
+            grantDesktopSkillSessionBypass(approval.sessionId, approval.toolName)
+          }
+          const { resolveApproval } = await import("@/lib/connectors/hitl/approval-registry")
+          resolveApproval(approval.sessionId, approval.requestId, {
+            decision: decision === "deny" ? "deny" : "allow",
+          })
+          store.getState().clearApproval(approval.requestId, approval.sessionId)
+          return
+        }
+      }
       // Persist the always-allow choice. Prefer a TARGET-SCOPED rule
       // (`Bash(git *)`, `Read(/path/x)`) so the grant is precise and future
       // matching calls auto-resolve via the sidecar ruleset — falling back to a

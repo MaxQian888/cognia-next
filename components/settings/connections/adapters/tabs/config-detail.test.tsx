@@ -369,6 +369,16 @@ describe("ConfigDetail — shared sub-sections", () => {
     expect(section).toHaveAttribute("data-platform", "onebot")
     expect(section).toHaveAttribute("data-adapter-id", "onebot-1")
   })
+
+  it("renders the AiBindingDefaults section for every platform (W1 multi-bot)", () => {
+    render(withIntl(<ConfigDetail row={makeRow("telegram")} />))
+    expect(screen.getByTestId("ai-binding-defaults")).toBeInTheDocument()
+  })
+
+  it("renders the DispatchRules section for every platform (W3 multi-bot)", () => {
+    render(withIntl(<ConfigDetail row={makeRow("telegram")} />))
+    expect(screen.getByTestId("dispatch-rules")).toBeInTheDocument()
+  })
 })
 
 // ---------------------------------------------------------------------------

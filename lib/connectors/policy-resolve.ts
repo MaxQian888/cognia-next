@@ -80,3 +80,33 @@ export function resolveBinding(input: BindingResolutionInput): ResolvedBinding {
 
   return { mode, characterId, trigger }
 }
+
+export interface EffectiveTeamBinding {
+  teamId: string | undefined
+  /** Where the effective team came from — audited so operators can tell a
+   * `/team`-bound chat from a bot-default dispatch. */
+  source: "override" | "instance-default" | "none"
+}
+
+/**
+ * Resolve which Agent Team (if any) answers an inbound turn.
+ *
+ * Precedence: `override.teamDisabled` (the `/team off` sentinel) suppresses
+ * everything → explicit conversation `teamId` → the bot instance's
+ * `defaultTeamId` → none. Empty/whitespace ids are treated as unset so a
+ * blanked-out settings field can never dispatch to team `""`.
+ *
+ * Shared by the connector runtime (dispatch decision) and `/status`
+ * (display) so the two can't drift.
+ */
+export function resolveEffectiveTeamBinding(
+  adapter: Pick<AdapterInstanceRow, "defaultTeamId">,
+  override: Pick<ConversationOverrideRow, "teamId" | "teamDisabled"> | null | undefined
+): EffectiveTeamBinding {
+  if (override?.teamDisabled === true) return { teamId: undefined, source: "none" }
+  const overrideTeamId = override?.teamId?.trim()
+  if (overrideTeamId) return { teamId: overrideTeamId, source: "override" }
+  const instanceTeamId = adapter.defaultTeamId?.trim()
+  if (instanceTeamId) return { teamId: instanceTeamId, source: "instance-default" }
+  return { teamId: undefined, source: "none" }
+}

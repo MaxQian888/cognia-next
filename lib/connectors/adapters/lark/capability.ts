@@ -21,6 +21,13 @@ import {
  *    upload.
  */
 export const LARK_CAPS: readonly Capability[] = [
+  // Chat management (W2 multi-bot): implemented by
+  // `lark/chat-management.ts` over /im/v1/chats + /contact/v3 — paired with
+  // the optional PlatformAdapter methods wired in `lark/index.ts`.
+  "chat.create",
+  "chat.members",
+  "chat.update",
+  "contact.resolve",
   "delete",
   "edit",
   "history.fetch",

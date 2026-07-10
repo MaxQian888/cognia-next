@@ -142,6 +142,18 @@ export interface BuiltInSkill<Args extends ZodTypeAny = ZodTypeAny> {
   /** Zod schema validating the args the assistant passes to `execute`. */
   inputSchema: Args
   /**
+   * Top-level arg fields that INTENTIONALLY carry contact identifiers
+   * (emails / phone numbers / name queries) destined for the platform's OWN
+   * directory API — e.g. `im.resolve_contact`'s lookup keys. The
+   * dispatcher's serialized-args PII scan excludes exactly these fields
+   * (they would otherwise hard-block the skill's entire purpose: the email
+   * detector fires on every lookup); every other field is still scanned,
+   * and the values remain visible in the HITL surface where one exists.
+   * Use sparingly and only for identifier-lookup fields — never for free
+   * text that leaves the platform's tenant.
+   */
+  piiArgFields?: readonly string[]
+  /**
    * Skill body. Receives validated args + ctx. MUST NOT touch the DOM,
    * Tauri, or React. May call `execFile` to lark-cli, may hit Lark
    * OpenAPI directly, may read from Dexie via `lib/db/*` helpers.

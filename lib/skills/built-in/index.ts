@@ -43,3 +43,6 @@ export { runBuiltInSkill } from "./dispatcher"
 
 // Lark family — wired in A3.
 import "./lark"
+// Platform-neutral im.* chat-management family — W2 multi-bot. Gated by
+// adapter capability flags (`chat.create` …) via each skill's `requires`.
+import "./im"

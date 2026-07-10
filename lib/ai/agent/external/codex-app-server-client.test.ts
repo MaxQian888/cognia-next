@@ -58,7 +58,7 @@ jest.mock("@/lib/native/external-agent", () => ({
   }),
 }))
 
-import { CodexAppServerAdapter } from "./codex-app-server-client"
+import { CodexAppServerAdapter, type CodexAppServerStatus } from "./codex-app-server-client"
 import { loggers } from "@/lib/logging"
 import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@/lib/logging/truncate"
 
@@ -854,6 +854,68 @@ describe("CodexAppServerAdapter", () => {
       await adapter.setSkillEnabled("/s/deploy", false)
       const write = lastWritten((m) => m.method === "skills/config/write")
       expect((write!.params as Record<string, unknown>).enabled).toBe(false)
+    })
+
+    it("registers extra skill roots (trimmed + de-duped) and refreshes the list", async () => {
+      const adapter = await connectedAdapter()
+      const seen: CodexAppServerStatus[] = []
+      adapter.onStatusUpdate((s) => seen.push(s))
+      const ok = await adapter.setExtraSkillRoots([" /a ", "/a", "/b", "  "])
+      expect(ok).toBe(true)
+      const write = lastWritten((m) => m.method === "skills/extraRoots/set")
+      expect((write!.params as Record<string, unknown>).extraRoots).toEqual(["/a", "/b"])
+      expect(adapter.getStatus().skills).toEqual([
+        { name: "deploy", path: "/s/deploy", enabled: true },
+      ])
+      expect(adapter.getStatus().extraSkillRootsUnsupported).toBe(false)
+      expect(seen.length).toBeGreaterThan(0)
+    })
+
+    it("flags unsupported extra skill roots on older CLIs and skips the refresh", async () => {
+      const adapter = await connectedAdapter()
+      responders["skills/extraRoots/set"] = () => ({
+        __error: { code: -32601, message: "method not found" },
+      })
+      writes.length = 0
+      const ok = await adapter.setExtraSkillRoots(["/a"])
+      expect(ok).toBe(false)
+      expect(adapter.getStatus().extraSkillRootsUnsupported).toBe(true)
+      expect(lastWritten((m) => m.method === "skills/list")).toBeUndefined()
+    })
+
+    it("returns false from setExtraSkillRoots when not connected", async () => {
+      const adapter = new CodexAppServerAdapter()
+      expect(await adapter.setExtraSkillRoots(["/a"])).toBe(false)
+    })
+
+    it("re-registers configured extra skill roots on connect", async () => {
+      const adapter = new CodexAppServerAdapter()
+      await adapter.connect({
+        ...config,
+        codexOptions: { extraSkillRoots: ["/team/skills", "/team/skills", " "] },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const write = lastWritten((m) => m.method === "skills/extraRoots/set")
+      expect(write).toBeDefined()
+      expect((write!.params as Record<string, unknown>).extraRoots).toEqual(["/team/skills"])
+    })
+
+    it("skips extra-root registration on connect when none are configured", async () => {
+      await connectedAdapter()
+      expect(lastWritten((m) => m.method === "skills/extraRoots/set")).toBeUndefined()
+    })
+
+    it("connects cleanly even when extra-root registration errors", async () => {
+      responders["skills/extraRoots/set"] = () => ({
+        __error: { code: -32000, message: "boom" },
+      })
+      const adapter = new CodexAppServerAdapter()
+      await adapter.connect({
+        ...config,
+        codexOptions: { extraSkillRoots: ["/team/skills"] },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(adapter.isConnected()).toBe(true)
     })
   })
 

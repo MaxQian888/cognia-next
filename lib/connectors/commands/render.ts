@@ -54,6 +54,7 @@ export function renderUsage(name: ControlCommandName): string {
 export interface StatusView {
   mode: string
   model: string
+  provider: string
   character: string
   reasoning: string
   approvalMode: string
@@ -68,6 +69,7 @@ export function renderStatus(v: StatusView): string {
     "当前设置 / Current settings:",
     `• 模式 / mode: ${v.mode}`,
     `• 模型 / model: ${v.model}`,
+    `• 提供商 / provider: ${v.provider}`,
     `• 审批 / approval: ${v.approvalMode}`,
     `• 思考强度 / reasoning: ${v.reasoning}`,
     `• 角色 / character: ${v.character}`,
@@ -75,6 +77,14 @@ export function renderStatus(v: StatusView): string {
     `• 工作流 / workflow: ${v.workflow}`,
     `• 会话 / session: ${v.sessionTitle} (${v.sessionIdPrefix})`,
   ].join("\n")
+}
+
+/**
+ * Annotate a value that came from the BOT-instance default (W1) rather than a
+ * per-conversation override, so `/status` readers can tell the two apart.
+ */
+export function withBotDefault(value: string): string {
+  return `${value}（bot 默认 / bot default）`
 }
 
 export interface SessionLine {
@@ -126,6 +136,9 @@ export function confirmTeam(name: string): string {
 }
 export function confirmTeamCleared(): string {
   return "已解绑团队 / Team unbound"
+}
+export function confirmTeamDisabled(): string {
+  return "此会话已关闭团队（包括机器人默认团队）/ Team disabled for this chat (including the bot default)"
 }
 export function confirmWorkflow(name: string): string {
   return `已绑定工作流 / Workflow bound: ${name}`

@@ -10,9 +10,13 @@
  * lives in `dispatcher.ts`.
  */
 
-import type { A2UISegmentContent } from "@/types/connectors/segment"
 import type { BuiltInSkillContext } from "../types"
 import { execLarkCli, type ExecLarkCliInput, type LarkCliResult } from "./exec-lark-cli"
+
+// The confirm card moved to the shared tier when the platform-neutral `im.*`
+// family landed (W2) — re-exported here so every lark skill file keeps its
+// original import path.
+export { buildConfirmSurface } from "../_shared/confirm-surface"
 
 /**
  * Resolve the Lark adapter a skill invocation should authenticate as.
@@ -58,67 +62,6 @@ export function argsToFlags(
 
 function camelToKebab(s: string): string {
   return s.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase())
-}
-
-/**
- * Standard HITL confirm card. Two buttons (Confirm / Cancel) — the
- * dispatcher's binding looks up `Confirm`'s action by component id.
- *
- *   - `title` — short headline, e.g. "Create calendar event"
- *   - `summary` — one or two sentences describing what will change
- *   - `details` — optional key/value rows shown beneath the summary
- */
-export function buildConfirmSurface(input: {
-  surfaceId: string
-  title: string
-  summary: string
-  details?: ReadonlyArray<{ label: string; value: string }>
-  confirmLabel?: string
-  cancelLabel?: string
-}): A2UISegmentContent {
-  const detailRows = (input.details ?? []).map((d, i) => ({
-    component: "Text",
-    props: { text: `**${d.label}**: ${d.value}` },
-    id: `detail_${i}`,
-  }))
-  return {
-    rootId: input.surfaceId,
-    surfaceType: "inline",
-    title: input.title,
-    components: {
-      [input.surfaceId]: {
-        component: "Card",
-        props: { title: input.title },
-        children: ["summary", ...detailRows.map((r) => r.id), "actions"],
-      },
-      summary: {
-        component: "Text",
-        props: { text: input.summary },
-      },
-      ...Object.fromEntries(detailRows.map((r) => [r.id, r])),
-      actions: {
-        component: "Row",
-        children: ["btn_confirm", "btn_cancel"],
-      },
-      btn_confirm: {
-        component: "Button",
-        props: {
-          label: input.confirmLabel ?? "Confirm",
-          variant: "primary",
-          action: { type: "button", value: "confirm" },
-        },
-      },
-      btn_cancel: {
-        component: "Button",
-        props: {
-          label: input.cancelLabel ?? "Cancel",
-          variant: "secondary",
-          action: { type: "button", value: "cancel" },
-        },
-      },
-    },
-    dataModel: {},
-  }
 }
 
 /**

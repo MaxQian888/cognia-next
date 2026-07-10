@@ -46,6 +46,13 @@ jest.mock("@/lib/search/search-cache", () => ({
     set: jest.fn(),
   })),
 }))
+// Built-in-skill context hydration (W2) — overridable per test so the suite
+// can pin that the HYDRATED context (imBinding + override row) reaches
+// runBuiltInSkill, closing the old bare-{sessionId} gate bypass.
+const mockResolveSkillContext = jest.fn(async (sessionId: string) => ({ sessionId }))
+jest.mock("@/lib/skills/built-in/context", () => ({
+  resolveBuiltInSkillContext: (sessionId: string) => mockResolveSkillContext(sessionId),
+}))
 
 import { webSearch, webFetch, buildFetchExtractor } from "@/lib/web/web-tools-core"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
@@ -358,6 +365,46 @@ describe("handlePluginToolExec — built-in skill fallback", () => {
         toolUseId: "use-1",
         result: { status: "ok", data: { events: [] } },
       })
+    )
+  })
+
+  it("passes the HYDRATED session context (imBinding + override) to the dispatcher (W2)", async () => {
+    __setPluginToolResolverForTesting({ getTool: () => undefined })
+    const imBinding = {
+      adapterId: "lark-1",
+      platform: "lark" as const,
+      conversationKey: "lark:lark-1:oc_1",
+    }
+    mockResolveSkillContext.mockResolvedValueOnce({
+      sessionId: "session-1",
+      imBinding,
+      imOverrideRow: { requireHitlForWrites: true },
+    } as never)
+
+    const { registerBuiltInSkill } = await import("@/lib/skills/built-in/registry")
+    const { z } = await import("zod")
+    const execute = jest.fn().mockResolvedValue({ ok: true })
+    registerBuiltInSkill({
+      id: "fallback.hydrated",
+      family: "fallback",
+      label: { en: "x", "zh-CN": "x" },
+      description: { en: "x", "zh-CN": "x" },
+      platforms: "any",
+      mutation: "read",
+      imAccess: "always",
+      mcpToolName: "fallback_hydrated",
+      inputSchema: z.object({}),
+      execute,
+    })
+
+    await handlePluginToolExec(makeRequest({ name: "fallback_hydrated", args: {} }))
+
+    expect(mockResolveSkillContext).toHaveBeenCalledWith("session-1")
+    // The dispatcher receives the IM binding — the gates (imAccess /
+    // allowlist / HITL) can no longer be bypassed by the tool-call path.
+    expect(execute).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ sessionId: "session-1", imBinding })
     )
   })
 

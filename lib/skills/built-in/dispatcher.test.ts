@@ -8,6 +8,13 @@
 import "fake-indexeddb/auto"
 import { z } from "zod"
 
+// Desktop consent surface (W2 dual-channel HITL) — mocked so tests control
+// the approve/deny outcome instead of waiting on a real dialog + TTL.
+const mockDesktopApproval = jest.fn()
+jest.mock("./desktop-hitl", () => ({
+  requestDesktopSkillApproval: (...a: unknown[]) => mockDesktopApproval(...a),
+}))
+
 import { runBuiltInSkill } from "./dispatcher"
 import { registerBuiltInSkill, __resetSharedBuiltInSkillRegistry } from "./registry"
 import type { BuiltInSkill, BuiltInSkillContext } from "./types"
@@ -175,6 +182,38 @@ describe("runBuiltInSkill — read tier in IM", () => {
   })
 })
 
+describe("runBuiltInSkill — piiArgFields exemption (identifier-lookup fields)", () => {
+  it("allows emails inside a declared piiArgFields field (im.resolve_contact pattern)", async () => {
+    registerBuiltInSkill(
+      mkSkill({
+        inputSchema: z.object({ emails: z.array(z.string()), adapterId: z.string().optional() }),
+        piiArgFields: ["emails"],
+      })
+    )
+    const r = await runBuiltInSkill(
+      "lark.calendar.list_events",
+      { emails: ["alice@example.com"] },
+      desktopCtx
+    )
+    expect(r.status).toBe("ok")
+  })
+
+  it("still blocks PII in fields NOT declared in piiArgFields", async () => {
+    registerBuiltInSkill(
+      mkSkill({
+        inputSchema: z.object({ emails: z.array(z.string()), note: z.string().optional() }),
+        piiArgFields: ["emails"],
+      })
+    )
+    const r = await runBuiltInSkill(
+      "lark.calendar.list_events",
+      { emails: [], note: "reach me at bob@example.com" },
+      desktopCtx
+    )
+    expect(r).toMatchObject({ status: "denied", reason: "pii_blocked" })
+  })
+})
+
 describe("runBuiltInSkill — write tier HITL routing", () => {
   it("returns pending_hitl in IM by default", async () => {
     registerBuiltInSkill(
@@ -237,7 +276,10 @@ describe("runBuiltInSkill — write tier HITL routing", () => {
     expect(r.status).toBe("ok")
   })
 
-  it("write tier in desktop session skips HITL", async () => {
+  // W2 dual-channel HITL: the former "desktop skips HITL" v1 shortcut is
+  // gone — desktop writes now suspend on the chat tool-approval dialog.
+  it("write tier in a desktop session executes after the consent dialog approves", async () => {
+    mockDesktopApproval.mockResolvedValueOnce({ approved: true, reason: "user" })
     registerBuiltInSkill(
       mkSkill({
         id: "lark.calendar.create_event",
@@ -252,6 +294,50 @@ describe("runBuiltInSkill — write tier HITL routing", () => {
       desktopCtx
     )
     expect(r.status).toBe("ok")
+    expect(mockDesktopApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "s_x",
+        skill: expect.objectContaining({ id: "lark.calendar.create_event" }),
+      })
+    )
+  })
+
+  it("write tier in a desktop session is denied when the consent dialog declines", async () => {
+    mockDesktopApproval.mockResolvedValueOnce({ approved: false, reason: "user" })
+    registerBuiltInSkill(
+      mkSkill({
+        id: "lark.calendar.create_event",
+        mutation: "write",
+        hitlSurface,
+        mcpToolName: "lark_calendar_create_event",
+      })
+    )
+    const r = await runBuiltInSkill(
+      "lark.calendar.create_event",
+      { calendarId: "cal_1" },
+      desktopCtx
+    )
+    expect(r).toMatchObject({ status: "denied", reason: "hitl_rejected" })
+  })
+
+  it("write tier in a desktop session is denied with a retry hint on TTL expiry", async () => {
+    mockDesktopApproval.mockResolvedValueOnce({ approved: false, reason: "expired" })
+    registerBuiltInSkill(
+      mkSkill({
+        id: "lark.calendar.create_event",
+        mutation: "write",
+        hitlSurface,
+        mcpToolName: "lark_calendar_create_event",
+      })
+    )
+    const r = await runBuiltInSkill(
+      "lark.calendar.create_event",
+      { calendarId: "cal_1" },
+      desktopCtx
+    )
+    expect(r).toMatchObject({ status: "denied", reason: "hitl_rejected" })
+    if (r.status === "denied") expect(r.message).toMatch(/timed out/)
+    expect(mockDesktopApproval).toHaveBeenCalledTimes(1)
   })
 })
 

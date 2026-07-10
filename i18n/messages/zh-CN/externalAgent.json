@@ -270,7 +270,11 @@
     "codexSummaryAuto": "自动",
     "codexSummaryConcise": "简洁",
     "codexSummaryDetailed": "详细",
-    "codexSummaryNone": "关闭"
+    "codexSummaryNone": "关闭",
+    "codexExtraSkillRoots": "额外 skill 文件夹",
+    "codexExtraSkillRootsDesc": "Codex 除默认的 .agents/skills 位置外,还会扫描这些绝对路径文件夹下的 SKILL.md。每次该 agent 连接时都会重新挂载。每行一个路径。",
+    "codexExtraSkillRootsPlaceholder": "/Users/me/my-skills\n/opt/shared/codex-skills",
+    "codexSkillRootsBrowse": "浏览…"
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",

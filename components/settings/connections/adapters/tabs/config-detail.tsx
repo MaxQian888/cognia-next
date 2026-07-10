@@ -42,6 +42,8 @@ import { LarkAtStrategy } from "../../forms/lark/lark-at-strategy"
 import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
 import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
+import { AiBindingDefaults } from "../../forms/ai-binding-defaults"
+import { DispatchRules } from "../../forms/dispatch-rules"
 import { UsagePresence } from "../../forms/usage-presence"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterTransportLabelKey } from "../platform-meta"
@@ -77,22 +79,22 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
         </CardHeader>
         <CardContent className="space-y-1 text-xs text-muted-foreground">
           <div>
-            <span>type: </span>
+            <span>{t("fieldType")}: </span>
             <span className="font-mono">{row.type}</span>
           </div>
           <div>
-            <span>transport: </span>
+            <span>{t("fieldTransport")}: </span>
             <span className="font-mono" title={row.transportMode}>
               {transportLabel}
             </span>
           </div>
           <div>
-            <span>mode: </span>
+            <span>{t("fieldMode")}: </span>
             <span className="font-mono">{row.defaultMode}</span>
           </div>
           {row.publicUrl && (
             <div>
-              <span>publicUrl: </span>
+              <span>{t("fieldPublicUrl")}: </span>
               <span className="font-mono break-all">{row.publicUrl}</span>
             </div>
           )}
@@ -126,6 +128,16 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
       {/* In-chat control-command permission gate (control-plane). Self-
        * managing; one mount covers every platform. */}
       <ControlCommands adapterId={row.id} />
+
+      {/* Instance-level AI binding defaults (persona / team / model /
+       * reasoning — W1 multi-bot). Self-managing; one mount covers every
+       * platform, so the 11 per-platform create dialogs stay untouched. */}
+      <AiBindingDefaults adapterId={row.id} />
+
+      {/* Inbound dispatch rules (条件规则表 — W3 multi-bot). Declarative
+       * keyword/regex/sender/channel → character|team|workflow routing;
+       * self-managing, one mount covers every platform. */}
+      <DispatchRules adapterId={row.id} />
 
       {/* End-to-end verify: send a synthetic message through the same
        * bus path the runner uses. Lives here (not in the create dialog)

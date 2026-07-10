@@ -620,8 +620,7 @@ export async function runTeamLifecycle(
     const isoCfg = team.config.workspaceIsolation
     let workspaceAllocator: import("./team/workspace/allocator").AgentWorkspaceAllocator | undefined
     let workspaceLedger:
-      | Map<string, import("./team/workspace/reconciler").ReconcileCandidate>
-      | undefined
+      Map<string, import("./team/workspace/reconciler").ReconcileCandidate> | undefined
     let workspaceReconcile:
       | {
           mode: import("./team/workspace/reconciler").ReconcileMode
@@ -719,6 +718,9 @@ export async function runTeamLifecycle(
       concurrency,
       modelPref,
       gatePolicy,
+      // IM/workflow trigger origin — lets run-scoped consumers (e.g. the
+      // team_post_to_chat collaboration tool) resolve the bound conversation.
+      ...(deps.triggeredFrom ? { triggeredFrom: deps.triggeredFrom } : {}),
       storeWriter: deps.storeWriter,
       ...(rateLimitResume ? { rateLimitResume } : {}),
       ...(twinDeps ? { twinDeps } : {}),

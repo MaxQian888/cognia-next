@@ -1254,6 +1254,13 @@ export interface CodexAgentOptions {
   networkAccess?: boolean
   /** Extra writable roots for workspaceWrite. */
   writableRoots?: string[]
+  /**
+   * Absolute folder paths registered as extra Codex skill roots via the
+   * `skills/extraRoots/set` app-server RPC. Codex discovers every `SKILL.md`
+   * under these directories in addition to the default `.agents/skills`
+   * locations. Re-applied on every connect (the server never persists them).
+   */
+  extraSkillRoots?: string[]
   /** Default reasoning effort (model-specific values, e.g. "low"…"xhigh"). */
   defaultReasoningEffort?: string
   /** Reasoning summary verbosity: "auto" | "concise" | "detailed" | "none". */

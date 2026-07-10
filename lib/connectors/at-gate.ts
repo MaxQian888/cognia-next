@@ -28,6 +28,7 @@ import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
+import { findSiblingBotSender } from "@/lib/connectors/sibling-bots"
 
 export type AtResponseStrategy = "always" | "mention_only" | "direct_only"
 
@@ -35,10 +36,7 @@ export type AtResponseStrategy = "always" | "mention_only" | "direct_only"
 export const DEFAULT_AT_RESPONSE_STRATEGY: AtResponseStrategy = "mention_only"
 
 export type AtGateReason =
-  | "chat_blocklist"
-  | "chat_allowlist"
-  | "at_mention_required"
-  | "at_direct_only"
+  "chat_blocklist" | "chat_allowlist" | "at_mention_required" | "at_direct_only"
 
 export interface AtGateDecision {
   allowed: boolean
@@ -97,6 +95,49 @@ export function shouldRespondToMessage(
   }
 }
 
+// ── Sibling-bot interplay budget (W5 multi-bot same-group) ──────────────────
+// When `siblingBotPolicy === "respond"`, each (adapterId, chatId) pair may
+// AI-respond to at most `botInterplayBudget` sibling-bot messages per sliding
+// hour. In-memory by design: the budget is an anti-loop damper, not an
+// accounting ledger — a restart resetting it is acceptable (and safe, since
+// the default policy is "ignore").
+
+/** Default sibling-bot responses per chat per hour when the row sets none. */
+export const DEFAULT_BOT_INTERPLAY_BUDGET = 4
+
+const INTERPLAY_WINDOW_MS = 60 * 60 * 1000
+
+/** Epoch-ms timestamps of consumed responses, keyed `${adapterId} ${chatId}`. */
+const interplayLedger = new Map<string, number[]>()
+
+/** Test-only: wipe the sliding-hour ledger between cases. */
+export function __resetSiblingInterplayBudgetForTesting(): void {
+  interplayLedger.clear()
+}
+
+/**
+ * Try to consume one sibling-response slot for (adapterId, chatId). Returns
+ * `true` (and records the spend) while under `budget` in the trailing hour,
+ * `false` once the budget is exhausted. `now` is injectable for tests.
+ */
+export function consumeSiblingInterplayBudget(
+  adapterId: string,
+  chatId: string,
+  budget: number,
+  now: number = Date.now()
+): boolean {
+  const key = `${adapterId} ${chatId}`
+  const cutoff = now - INTERPLAY_WINDOW_MS
+  const spent = (interplayLedger.get(key) ?? []).filter((t) => t > cutoff)
+  if (spent.length >= budget) {
+    interplayLedger.set(key, spent)
+    return false
+  }
+  spent.push(now)
+  interplayLedger.set(key, spent)
+  return true
+}
+
 /**
  * Runtime wrapper used by every adapter dispatcher (Telegram / Discord /
  * Slack / Lark / OneBot) immediately before `ctx.emit()`.
@@ -120,6 +161,42 @@ export async function gateInboundEvent(
 ): Promise<boolean> {
   const row = await getAdapterInstance(adapterId).catch(() => undefined)
   if (!row) return true
+
+  // ── Sibling-bot anti-loop guard (W5) ─────────────────────────────────
+  // Only fresh messages can start a bot↔bot loop; edits / deletes / system
+  // events pass through like everywhere else in this gate. The check sits
+  // in this async wrapper (not the sync `shouldRespondToMessage`) so every
+  // adapter dispatcher inherits it without a signature ripple.
+  if (!event.kind || event.kind === "create") {
+    const sibling = await findSiblingBotSender(event).catch(() => null)
+    if (sibling) {
+      const policy = row.siblingBotPolicy ?? "ignore"
+      if (policy === "ignore") {
+        await appendAudit({
+          adapterId,
+          kind: "inbound.sibling_bot_ignored",
+          at: Date.now(),
+          conversationKey: event.conversationKey,
+          fields: { siblingAdapterId: sibling.id },
+        }).catch(() => undefined)
+        return false
+      }
+      const budget = row.botInterplayBudget ?? DEFAULT_BOT_INTERPLAY_BUDGET
+      const chatId = event.channel.platformChannelId ?? event.channel.id
+      if (!consumeSiblingInterplayBudget(adapterId, chatId, budget)) {
+        await appendAudit({
+          adapterId,
+          kind: "inbound.sibling_bot_budget_exhausted",
+          at: Date.now(),
+          conversationKey: event.conversationKey,
+          fields: { siblingAdapterId: sibling.id, budget },
+        }).catch(() => undefined)
+        return false
+      }
+      // Under budget — fall through to the normal mention/allowlist gates.
+    }
+  }
+
   const decision = shouldRespondToMessage(event, row)
   if (decision.allowed) return true
   await appendAudit({

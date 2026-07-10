@@ -837,6 +837,30 @@ describe("useClaudeChat — actions", () => {
     expect(chatState.clearApproval).toHaveBeenCalledWith("r-1", "sess-1")
   })
 
+  it("respondToApproval resolves builtin-skill: approvals locally, never via approveTool", async () => {
+    const { resolveApproval, awaitApproval } =
+      await import("@/lib/connectors/hitl/approval-registry")
+    void resolveApproval
+    const pending = awaitApproval("sess-1", "builtin-skill:im.create_chat:x", { ttlMs: 0 })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.respondToApproval(
+        {
+          sessionId: "sess-1",
+          requestId: "builtin-skill:im.create_chat:x",
+          toolName: "im_create_chat",
+        } as never,
+        "allow"
+      )
+    })
+    // Resolved in-renderer: the pending registry promise settles, the card is
+    // cleared, and the sidecar approveTool IPC is never touched.
+    await expect(pending).resolves.toEqual({ decision: "allow" })
+    expect(approveToolMock).not.toHaveBeenCalled()
+    expect(chatState.clearApproval).toHaveBeenCalledWith("builtin-skill:im.create_chat:x", "sess-1")
+  })
+
   it("respondToApproval (allow_always) toggles the always-allow list", async () => {
     const { result } = renderHook(() => useClaudeChat())
     await flush()

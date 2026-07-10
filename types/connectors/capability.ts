@@ -36,6 +36,18 @@ export const ALL_CAPABILITIES = [
   // The adapter can pin a message so a periodically edited card stays
   // visible at the top of a conversation (`pinMessage()`).
   "pin",
+  // Chat management (W2 multi-bot) — declared when the adapter implements
+  // the matching optional `PlatformAdapter` method. These flags gate the
+  // platform-neutral `im.*` built-in skills via `requires:` in the skill
+  // manifest, so incapable platforms simply never surface the tools.
+  //   - `chat.create`     — `createChat()` (make a new group chat)
+  //   - `chat.members`    — `addChatMembers()` + `removeChatMembers()`
+  //   - `chat.update`     — `updateChat()` (rename / description)
+  //   - `contact.resolve` — `resolveContacts()` (email/phone/name → member id)
+  "chat.create",
+  "chat.members",
+  "chat.update",
+  "contact.resolve",
   // platform-specific rich content (escape hatches)
   "rich-markdown.telegram",
   "rich-markdown.slack",

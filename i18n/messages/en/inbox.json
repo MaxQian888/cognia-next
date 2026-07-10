@@ -27,6 +27,10 @@
       "inboundMemberAdded": "Member joined",
       "inboundMemberRemoved": "Member left",
       "inboundPolicyBlocked": "Blocked by policy",
+      "broadcastEnqueued": "Broadcast enqueued",
+      "broadcastPartialFailure": "Broadcast partially failed",
+      "conversationCreated": "Conversation created",
+      "dispatchRuleMatched": "Routed by dispatch rule",
       "inboundReadIndicator": "Message read",
       "inboundWelcomeSent": "Welcome card sent",
       "notifyImPiiBlocked": "Notification blocked — PII",
@@ -34,7 +38,11 @@
       "pluginInboundBlocked": "Blocked by plugin",
       "pluginRateBlocked": "Rate-limited by plugin",
       "pluginTransformPiiBlocked": "Plugin transform blocked — PII",
+      "siblingBotBudgetExhausted": "Sibling bot reply budget exhausted",
+      "siblingBotIgnored": "Sibling bot message ignored",
+      "taskDispatched": "Task dispatched",
       "teamDispatched": "Routed to team",
+      "teamPostedAsBot": "Team posted as bot",
       "workflowDispatched": "Routed to workflow"
     },
     "title": "Activity",
@@ -364,6 +372,7 @@
   "outboundSource": {
     "draftApproved": "Approved draft",
     "manual": "Manual",
+    "skill": "Skill",
     "workflow": "Workflow",
     "workflowTooltip": "Sent by workflow node {nodeId} — click to open the run"
   },

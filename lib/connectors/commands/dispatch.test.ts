@@ -436,6 +436,54 @@ describe("maybeHandleControlCommand", () => {
     expect(text).toMatch(/Main/)
   })
 
+  it("/status surfaces bot-instance defaults (annotated) when no override is set", async () => {
+    const h = harness({ active: session("s1", "Main") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/status" }),
+      makeAdapter({
+        defaultTeamId: "team_bot",
+        defaultModel: "claude-fable-5",
+        defaultProvider: "anthropic",
+        defaultReasoning: "high",
+      }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    const text = h.enqueued[0].text
+    expect(text).toMatch(/claude-fable-5（bot 默认 \/ bot default）/)
+    expect(text).toMatch(/provider: anthropic（bot 默认 \/ bot default）/)
+    expect(text).toMatch(/reasoning: high（bot 默认 \/ bot default）/)
+    expect(text).toMatch(/team: team_bot（bot 默认 \/ bot default）/)
+  })
+
+  it("/status shows team off (not the bot default) when teamDisabled is set", async () => {
+    const h = harness({ active: session("s1", "Main") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/status" }),
+      makeAdapter({ defaultTeamId: "team_bot" }),
+      { teamDisabled: true } as ConversationOverrideRow,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.enqueued[0].text).toMatch(/team: 已关闭 \/ off/)
+  })
+
+  it("/status prefers the conversation override over the bot default", async () => {
+    const h = harness({ active: session("s1", "Main") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/status" }),
+      makeAdapter({ defaultModel: "bot-model", defaultTeamId: "team_bot" }),
+      { modelOverride: "gpt-5", teamId: "team_chat" } as ConversationOverrideRow,
+      RESOLVED,
+      h.deps
+    )
+    const text = h.enqueued[0].text
+    expect(text).toMatch(/model: gpt-5\n/)
+    expect(text).toMatch(/team: team_chat\n/)
+    expect(text).not.toMatch(/bot-model/)
+  })
+
   it("/team <name> binds the team", async () => {
     const h = harness({ active: session("s1") })
     await maybeHandleControlCommand(
@@ -445,11 +493,11 @@ describe("maybeHandleControlCommand", () => {
       RESOLVED,
       h.deps
     )
-    expect(h.patches[0].patch).toEqual({ teamId: "team_r" })
+    expect(h.patches[0].patch).toEqual({ teamId: "team_r", teamDisabled: undefined })
     expect(h.enqueued[0].text).toMatch(/Team bound: Researchers/)
   })
 
-  it("/team off clears the binding", async () => {
+  it("/team off clears the binding and sets the teamDisabled sentinel", async () => {
     const h = harness({ active: session("s1") })
     await maybeHandleControlCommand(
       makeEvent({ plainText: "/team off" }),
@@ -458,8 +506,21 @@ describe("maybeHandleControlCommand", () => {
       RESOLVED,
       h.deps
     )
-    expect(h.patches[0].patch).toEqual({ teamId: undefined })
+    expect(h.patches[0].patch).toEqual({ teamId: undefined, teamDisabled: true })
     expect(h.enqueued[0].text).toMatch(/Team unbound/)
+  })
+
+  it("/team off on a bot with a defaultTeamId announces that the bot default is also off", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/team off" }),
+      makeAdapter({ defaultTeamId: "team_bot" }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches[0].patch).toEqual({ teamId: undefined, teamDisabled: true })
+    expect(h.enqueued[0].text).toMatch(/包括机器人默认团队|including the bot default/)
   })
 
   it("/dir reports the working-context summary", async () => {

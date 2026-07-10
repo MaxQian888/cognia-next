@@ -46,6 +46,17 @@ const KIND_LABEL_KEY: Partial<Record<AuditKind, string>> = {
   "notify.im_pii_blocked": "notifyImPiiBlocked",
   "workflow.dispatched": "workflowDispatched",
   "team.dispatched": "teamDispatched",
+  "dispatch.rule_matched": "dispatchRuleMatched",
+  // Chat management (W2 multi-bot).
+  "conversation.created": "conversationCreated",
+  "broadcast.enqueued": "broadcastEnqueued",
+  "broadcast.partial_failure": "broadcastPartialFailure",
+  // Task dispatch (W4 任务派发).
+  "task.dispatched": "taskDispatched",
+  // Sibling-bot guard + multi-identity team posting (W5 multi-bot same-group).
+  "inbound.sibling_bot_ignored": "siblingBotIgnored",
+  "inbound.sibling_bot_budget_exhausted": "siblingBotBudgetExhausted",
+  "team.posted_as_bot": "teamPostedAsBot",
 }
 
 /** Maps each assignment-trail kind to its i18n key under `inbox.activity.assignment`. */

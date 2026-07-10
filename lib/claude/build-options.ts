@@ -982,24 +982,53 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const imProviderOverride = imOverrideRow?.providerOverride
   const imModelOverride = imOverrideRow?.modelOverride
 
-  // --- Model: IM channel override > per-session > member override > mode override > character > app default ------
+  // Bot-instance AI binding defaults (W1 multi-bot). Hoisted next to the
+  // override read so the model/provider/effort chains and the capability
+  // block below share ONE adapter-row read. Same threading contract as
+  // `imOverrideRow`: `undefined` → resolver does its own best-effort Dexie
+  // read for platform-bound sessions (covers desktop-inbox sends the bus
+  // never saw); `null` → looked up, none found, skip.
+  let imAdapterRow = ctx.imAdapterRow ?? undefined
+  if (ctx.imAdapterRow === undefined && session?.platformBinding?.adapterId) {
+    try {
+      const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
+      imAdapterRow = await getAdapterInstance(session.platformBinding.adapterId)
+    } catch {
+      // Best-effort — a missing adapter row must not crash the send; the
+      // chain simply skips the bot-default layer.
+    }
+  }
+  // Empty strings saved by a blanked-out settings field must not shadow the
+  // character / app defaults.
+  const imDefaultModel = imAdapterRow?.defaultModel?.trim() || undefined
+  const imDefaultProvider = imAdapterRow?.defaultProvider?.trim() || undefined
+
+  // --- Model: IM channel override > per-session > member override > mode override > bot default > character > app default ------
+  // The bot-instance default deliberately BEATS `character.model`: an
+  // operator pinning a model on a bot expects that model even when the
+  // persona declares one (D1). Explicit `/model` and per-session choices
+  // still win. Alias-valued defaults resolve through the alias engine below
+  // like every other source.
   let model: string | undefined =
     imModelOverride ??
     session?.model ??
     memberOverride?.modelOverride ??
     modeUpdate?.model ??
+    imDefaultModel ??
     character?.model ??
     appSettings?.defaultModel
 
-  // --- Provider: IM channel override > per-session override > character > app default > "anthropic" -----
+  // --- Provider: IM channel override > per-session override > bot default > character > app default > "anthropic" -----
   // The sidecar uses `provider` to pick which dispatcher (`anthropic` vs the
   // generic `ai-sdk` runner) to invoke. Credentials travel inline so the
   // sidecar never reads keys from disk. Resolution is best-effort: when the
   // selected provider has no key configured we leave both fields off and
-  // let the sidecar fall back to ANTHROPIC_API_KEY (legacy path).
+  // let the sidecar fall back to ANTHROPIC_API_KEY (legacy path) — that
+  // best-effort semantic also covers a stale bot-default provider id.
   let providerId =
     imProviderOverride ??
     session?.providerOverride ??
+    imDefaultProvider ??
     character?.providerId ??
     appSettings?.defaultProvider ??
     "anthropic"
@@ -1753,14 +1782,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   let connectorCapabilityPrompt: string | null = null
   if (session?.platformBinding?.adapterId) {
     try {
-      // Reuse the adapter row threaded from the connector runtime (bus Step 2)
-      // when present; otherwise fall back to a Dexie read (desktop / other
-      // callers don't pass it).
-      let adapterRow = ctx.imAdapterRow
-      if (adapterRow === undefined) {
-        const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
-        adapterRow = await getAdapterInstance(session.platformBinding.adapterId)
-      }
+      // Reuse the adapter row hoisted next to the imOverrideRow read (one
+      // read serves the model/provider/effort chains AND this capability
+      // block, whether threaded from the bus or fetched here).
+      const adapterRow = imAdapterRow
       const matrix = adapterRow?.lastKnownCapabilities
       if (adapterRow && matrix && Object.keys(matrix).length > 0) {
         const capCacheKey = `${adapterRow.id}:${adapterRow.updatedAt}:${session.platformBinding.platform}`
@@ -2804,7 +2829,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // turn. When no model is resolved here the sidecar picks its own
   // (effort-capable) default, so we can't judge capability and forward as
   // before. When a model IS resolved, gate on it.
-  const effort = imOverrideRow?.reasoningOverride ?? session?.effort ?? appSettings?.defaultEffort
+  // Bot-instance default effort slots below the per-session choice and above
+  // the app default (same W1 layering as model/provider); the
+  // `modelSupportsEffort` gate below covers a bot default set on a
+  // non-reasoning model.
+  const effort =
+    imOverrideRow?.reasoningOverride ??
+    session?.effort ??
+    imAdapterRow?.defaultReasoning ??
+    appSettings?.defaultEffort
   if (effort && (!opts.model || modelSupportsEffort(opts.provider, opts.model))) {
     opts.effort = effort
   } else if (effort && opts.model) {

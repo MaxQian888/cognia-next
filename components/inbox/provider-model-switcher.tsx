@@ -40,14 +40,19 @@ interface ProviderModelSwitcherProps {
   onChange?: (next: { providerOverride?: string; modelOverride?: string }) => void
 }
 
-interface ProviderModelOption {
+export interface ProviderModelOption {
   providerId: string
   modelId: string
   /** Display label for the menu item. */
   label: string
 }
 
-function collectOptions(settings: AppSettings | undefined): ProviderModelOption[] {
+/**
+ * Enumerate the configured provider+model pairs from app settings. Exported
+ * (pure) so the adapter-detail `AiBindingDefaults` section reuses the exact
+ * same option source as this per-conversation switcher.
+ */
+export function collectOptions(settings: AppSettings | undefined): ProviderModelOption[] {
   const out: ProviderModelOption[] = []
   if (!settings) return out
 

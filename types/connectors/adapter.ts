@@ -1,17 +1,20 @@
 import type { PlatformKind } from "./platform-kind"
 import type { A2UICapabilityMatrix, Capability } from "./capability"
+import type {
+  ChatMembersInput,
+  ChatMembersResult,
+  ContactCandidate,
+  CreateChatInput,
+  CreateChatResult,
+  ResolveContactsInput,
+  UpdateChatInput,
+} from "./chat-management"
 import type { ConversationReference, NormalizedInboundEvent } from "./event"
 import type { OutboundRequest, OutboundResult } from "./outbound"
 import type { PresenceStatusInput } from "./presence"
 
 export type TransportMode =
-  | "longpoll"
-  | "webhook"
-  | "reverse-ws"
-  | "forward-ws"
-  | "gateway"
-  | "imap-smtp"
-  | "stub" // tests only
+  "longpoll" | "webhook" | "reverse-ws" | "forward-ws" | "gateway" | "imap-smtp" | "stub" // tests only
 
 export interface AdapterMeta {
   type: PlatformKind
@@ -181,6 +184,22 @@ export interface PlatformAdapter {
    * the top of a conversation. Optional; paired with the `pin` capability.
    */
   pinMessage?(conversationKey: string, messageId: string): Promise<void>
+  /**
+   * Chat management (W2 multi-bot) — all optional, each paired with a
+   * capability flag the adapter must also declare:
+   *   `createChat` ↔ `chat.create`, `addChatMembers`/`removeChatMembers` ↔
+   *   `chat.members`, `updateChat` ↔ `chat.update`, `resolveContacts` ↔
+   *   `contact.resolve`.
+   * Consumed by the platform-neutral `im.*` built-in skills through
+   * `getRunningAdapter(adapterId)` — never through platform-specific paths.
+   * Permission failures throw `ChatManagementScopeError` so callers can
+   * surface the missing console scope to the operator.
+   */
+  createChat?(input: CreateChatInput): Promise<CreateChatResult>
+  addChatMembers?(input: ChatMembersInput): Promise<ChatMembersResult>
+  removeChatMembers?(input: ChatMembersInput): Promise<ChatMembersResult>
+  updateChat?(input: UpdateChatInput): Promise<void>
+  resolveContacts?(input: ResolveContactsInput): Promise<ContactCandidate[]>
   /**
    * Per-adapter A2UI projection matrix. Returned synchronously so
    * `build-options.ts:resolveSendOptions` can inject a capability-aware

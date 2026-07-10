@@ -18,6 +18,7 @@ import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import type { ResolvedBinding } from "./../policy-resolve"
+import { resolveEffectiveTeamBinding } from "./../policy-resolve"
 import type { ChatSession } from "@/lib/claude/types"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { appendAudit } from "@/lib/connectors/audit"
@@ -178,14 +179,35 @@ export async function maybeHandleControlCommand(
     case "status": {
       const charId = override?.characterId ?? resolved.characterId
       const character = charId ? await getCharacterById(charId).catch(() => undefined) : undefined
+      // Effective values: per-conversation override first, then the BOT-level
+      // instance default (annotated so the reader can tell them apart), then
+      // the literal "default"/"none" fallback. Same resolver the runtime
+      // dispatch uses, so `/status` can't drift from actual routing.
+      const teamBinding = resolveEffectiveTeamBinding(adapterRow, override ?? null)
+      const botDefault = (v: string | undefined): string | undefined =>
+        v?.trim() ? R.withBotDefault(v.trim()) : undefined
       await reply(
         R.renderStatus({
           mode: override?.mode ?? resolved.mode,
-          model: override?.modelOverride ?? "默认 / default",
+          model: override?.modelOverride ?? botDefault(adapterRow.defaultModel) ?? "默认 / default",
+          provider:
+            override?.providerOverride ??
+            botDefault(adapterRow.defaultProvider) ??
+            "默认 / default",
           character: character?.name ?? "默认 / default",
-          reasoning: override?.reasoningOverride ?? "默认 / default",
+          reasoning:
+            override?.reasoningOverride ??
+            botDefault(adapterRow.defaultReasoning) ??
+            "默认 / default",
           approvalMode: override?.approvalMode ?? "prompt",
-          team: override?.teamId ?? "无 / none",
+          team:
+            teamBinding.source === "override"
+              ? (teamBinding.teamId as string)
+              : teamBinding.source === "instance-default"
+                ? R.withBotDefault(teamBinding.teamId as string)
+                : override?.teamDisabled
+                  ? "已关闭 / off"
+                  : "无 / none",
           workflow: override?.workflowId ?? "无 / none",
           sessionTitle: active?.title ?? "无 / none",
           sessionIdPrefix: active ? idPrefix(active.id) : "—",
@@ -331,8 +353,14 @@ export async function maybeHandleControlCommand(
 
     case "team": {
       if (!arg || arg.toLowerCase() === "off") {
-        await persist({ teamId: undefined })
-        await reply(R.confirmTeamCleared(), "applied")
+        // `teamDisabled` is the explicit sentinel: with a bot-level
+        // `defaultTeamId` in play, merely clearing `teamId` would silently
+        // fall back to the bot default instead of turning teams off.
+        await persist({ teamId: undefined, teamDisabled: true })
+        await reply(
+          adapterRow.defaultTeamId?.trim() ? R.confirmTeamDisabled() : R.confirmTeamCleared(),
+          "applied"
+        )
         return true
       }
       const team = await resolveTeam(arg)
@@ -340,7 +368,7 @@ export async function maybeHandleControlCommand(
         await reply(R.renderUsage("team"), "applied")
         return true
       }
-      await persist({ teamId: team.id })
+      await persist({ teamId: team.id, teamDisabled: undefined })
       await reply(R.confirmTeam(team.name), "applied")
       return true
     }

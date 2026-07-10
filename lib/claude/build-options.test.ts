@@ -63,6 +63,13 @@ jest.mock("@/lib/db/conversation-overrides", () => ({
   readForResolution: jest.fn(),
 }))
 
+// W1 multi-bot — instance-level AI binding defaults. The resolver hoists ONE
+// adapter-row read (threaded `ctx.imAdapterRow` or this fallback) that feeds
+// the model/provider/effort chains and the A2UI capability block.
+jest.mock("@/lib/db/adapter-instances", () => ({
+  getAdapterInstance: jest.fn(),
+}))
+
 // ADR-0028 — env-resolver bridges the renderer to the Rust per-account env
 // builder. Mock both helpers so resolveSendOptions exercises the integration
 // path without a real Tauri transport.
@@ -150,7 +157,7 @@ import {
   resolveMemberConfig,
   resolveSendOptions,
 } from "./build-options"
-import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type { AppSettings, Character, ChatSession, Skill, Team, TeamMember } from "./types"
 import type { Project } from "@/types"
 
@@ -1689,6 +1696,153 @@ describe("resolveSendOptions — model precedence", () => {
     // read — the mock is harmless because nothing consumes it.
     expect(opts.model).toBe("session-model")
     expect(opts.provider).toBe("anthropic")
+  })
+
+  // ── W1 multi-bot — instance-level binding defaults ─────────────────────────
+
+  it("bot defaultModel/defaultProvider apply when session/override/character are silent", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+      character: makeChar({ id: "c1" }),
+      appSettings: { defaultModel: "app-default", defaultProvider: "openai" } as AppSettings,
+      imOverrideRow: null,
+      imAdapterRow: {
+        id: "tg-1",
+        defaultModel: "claude-fable-5",
+        defaultProvider: "anthropic",
+      } as AdapterInstanceRow,
+    })
+    expect(opts.model).toBe("claude-fable-5")
+    expect(opts.provider).toBe("anthropic")
+  })
+
+  it("bot defaultModel BEATS character.model but loses to session.model and the IM override", async () => {
+    const base = {
+      character: makeChar({ id: "c1", model: "char-model", providerId: "anthropic" }),
+      imOverrideRow: null,
+      imAdapterRow: { id: "tg-1", defaultModel: "bot-model" } as AdapterInstanceRow,
+    }
+    // Beats the character's own model (D1 — operator pin wins).
+    const optsChar = await resolveSendOptions({
+      ...base,
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+    })
+    expect(optsChar.model).toBe("bot-model")
+
+    // Loses to an explicit per-session model.
+    const optsSession = await resolveSendOptions({
+      ...base,
+      session: makeSession({
+        id: "s1",
+        model: "session-model",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+    })
+    expect(optsSession.model).toBe("session-model")
+
+    // Loses to the per-conversation `/model` override.
+    const optsIm = await resolveSendOptions({
+      ...base,
+      imOverrideRow: { modelOverride: "im-model" } as ConversationOverrideRow,
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+    })
+    expect(optsIm.model).toBe("im-model")
+  })
+
+  it("empty-string bot defaults are treated as unset (no shadowing)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+      character: makeChar({ id: "c1", model: "char-model", providerId: "openai" }),
+      imOverrideRow: null,
+      imAdapterRow: { id: "tg-1", defaultModel: "  ", defaultProvider: "" } as AdapterInstanceRow,
+    })
+    expect(opts.model).toBe("char-model")
+    expect(opts.provider).toBe("openai")
+  })
+
+  it("bot defaultReasoning beats the app default but loses to session.effort", async () => {
+    const base = {
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+      appSettings: { defaultEffort: "low" } as AppSettings,
+      imOverrideRow: null,
+      imAdapterRow: {
+        id: "tg-1",
+        defaultReasoning: "high",
+      } as AdapterInstanceRow,
+    }
+    const opts = await resolveSendOptions({
+      ...base,
+      session: makeSession({
+        id: "s1",
+        model: "claude-opus-4-8",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+    })
+    expect(opts.effort).toBe("high")
+
+    const optsSession = await resolveSendOptions({
+      ...base,
+      session: makeSession({
+        id: "s1",
+        model: "claude-opus-4-8",
+        effort: "medium",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+    })
+    expect(optsSession.effort).toBe("medium")
+  })
+
+  it("falls back to a Dexie adapter-row read for platform-bound sessions when ctx.imAdapterRow is undefined", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const instances = require("@/lib/db/adapter-instances")
+    const mGetAdapter = instances.getAdapterInstance as jest.Mock
+    mGetAdapter.mockResolvedValueOnce({ id: "tg-1", defaultModel: "bot-model" })
+    // `clearMocks` (jest.config) clears call history but NOT the queued
+    // `mockResolvedValueOnce` implementations, so a member-override Once left
+    // over by an earlier test would win over the bot default in the model
+    // chain. Drain it so this test observes the Dexie fallback in isolation.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    ;(require("@/lib/db/conversation-overrides").readForResolution as jest.Mock).mockReset()
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+    })
+    expect(mGetAdapter).toHaveBeenCalledWith("tg-1")
+    expect(opts.model).toBe("bot-model")
+  })
+
+  it("ctx.imAdapterRow === null skips the Dexie adapter-row read entirely", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const instances = require("@/lib/db/adapter-instances")
+    const mGetAdapter = instances.getAdapterInstance as jest.Mock
+    mGetAdapter.mockClear()
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        model: "session-model",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+      imOverrideRow: null,
+      imAdapterRow: null,
+    })
+    expect(mGetAdapter).not.toHaveBeenCalled()
+    expect(opts.model).toBe("session-model")
   })
 })
 

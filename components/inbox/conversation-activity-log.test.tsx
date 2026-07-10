@@ -78,6 +78,48 @@ describe("ConversationActivityLog", () => {
     expect(screen.getByTestId("activity-row-e2")).toHaveTextContent("Member joined")
   })
 
+  it("labels the chat-management kinds (W2 multi-bot)", () => {
+    mockActivity.mockReturnValue([
+      { id: "c1", kind: "conversation.created", at: 1_700_000_010_000, adapterId: "a1" },
+      { id: "c2", kind: "broadcast.enqueued", at: 1_700_000_011_000, adapterId: "a1" },
+      { id: "c3", kind: "broadcast.partial_failure", at: 1_700_000_012_000, adapterId: "a1" },
+    ])
+    render(<ConversationActivityLog conversationKey="ck" />)
+    fireEvent.click(screen.getByTestId("activity-log-toggle"))
+    expect(screen.getByTestId("activity-row-c1")).toHaveTextContent("Conversation created")
+    expect(screen.getByTestId("activity-row-c2")).toHaveTextContent("Broadcast enqueued")
+    expect(screen.getByTestId("activity-row-c3")).toHaveTextContent("Broadcast partially failed")
+  })
+
+  it("labels the task-dispatch kind (W4)", () => {
+    mockActivity.mockReturnValue([
+      { id: "t1", kind: "task.dispatched", at: 1_700_000_013_000, adapterId: "a1" },
+    ])
+    render(<ConversationActivityLog conversationKey="ck" />)
+    fireEvent.click(screen.getByTestId("activity-log-toggle"))
+    expect(screen.getByTestId("activity-row-t1")).toHaveTextContent("Task dispatched")
+  })
+
+  it("labels the sibling-bot guard + team-posting kinds (W5)", () => {
+    mockActivity.mockReturnValue([
+      { id: "w1", kind: "inbound.sibling_bot_ignored", at: 1_700_000_014_000, adapterId: "a1" },
+      {
+        id: "w2",
+        kind: "inbound.sibling_bot_budget_exhausted",
+        at: 1_700_000_015_000,
+        adapterId: "a1",
+      },
+      { id: "w3", kind: "team.posted_as_bot", at: 1_700_000_016_000, adapterId: "a1" },
+    ])
+    render(<ConversationActivityLog conversationKey="ck" />)
+    fireEvent.click(screen.getByTestId("activity-log-toggle"))
+    expect(screen.getByTestId("activity-row-w1")).toHaveTextContent("Sibling bot message ignored")
+    expect(screen.getByTestId("activity-row-w2")).toHaveTextContent(
+      "Sibling bot reply budget exhausted"
+    )
+    expect(screen.getByTestId("activity-row-w3")).toHaveTextContent("Team posted as bot")
+  })
+
   it("falls back to the raw kind for an unmapped audit kind", () => {
     mockActivity.mockReturnValue([
       { id: "e9", kind: "some.unmapped.kind", at: 1_700_000_009_000, adapterId: "a1" },

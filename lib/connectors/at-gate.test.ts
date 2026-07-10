@@ -1,11 +1,18 @@
 /** @jest-environment node */
 
-import { shouldRespondToMessage, gateInboundEvent, DEFAULT_AT_RESPONSE_STRATEGY } from "./at-gate"
+import {
+  shouldRespondToMessage,
+  gateInboundEvent,
+  consumeSiblingInterplayBudget,
+  DEFAULT_AT_RESPONSE_STRATEGY,
+  DEFAULT_BOT_INTERPLAY_BUDGET,
+  __resetSiblingInterplayBudgetForTesting,
+} from "./at-gate"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 // ---------------------------------------------------------------------------
-// Module-level mocks for the two I/O dependencies of gateInboundEvent.
+// Module-level mocks for the I/O dependencies of gateInboundEvent.
 // ---------------------------------------------------------------------------
 
 jest.mock("@/lib/db/adapter-instances", () => ({
@@ -14,12 +21,17 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 jest.mock("@/lib/connectors/audit", () => ({
   appendAudit: jest.fn(async () => undefined),
 }))
+jest.mock("@/lib/connectors/sibling-bots", () => ({
+  findSiblingBotSender: jest.fn(async () => null),
+}))
 
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
+import { findSiblingBotSender } from "@/lib/connectors/sibling-bots"
 
 const mockGetAdapterInstance = getAdapterInstance as jest.MockedFunction<typeof getAdapterInstance>
 const mockAppendAudit = appendAudit as jest.MockedFunction<typeof appendAudit>
+const mockFindSibling = findSiblingBotSender as jest.MockedFunction<typeof findSiblingBotSender>
 
 // ---------------------------------------------------------------------------
 // Fixture builders
@@ -309,6 +321,8 @@ describe("shouldRespondToMessage — explicit kind:create is gated normally", ()
 describe("gateInboundEvent", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockFindSibling.mockResolvedValue(null)
+    __resetSiblingInterplayBudgetForTesting()
   })
 
   it("returns true (fail-open) when the adapter row is not found in Dexie", async () => {
@@ -370,5 +384,155 @@ describe("gateInboundEvent", () => {
     const result = await gateInboundEvent("tg-1", event)
     expect(result).toBe(true)
     expect(mockAppendAudit).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// gateInboundEvent — sibling-bot anti-loop guard (W5 multi-bot same-group)
+// ---------------------------------------------------------------------------
+
+describe("gateInboundEvent — sibling-bot guard", () => {
+  const siblingRow = { id: "tg-2" } as AdapterInstanceRow
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    __resetSiblingInterplayBudgetForTesting()
+    mockFindSibling.mockResolvedValue(siblingRow)
+  })
+
+  it("default policy ignores a sibling-bot message and audits it", async () => {
+    mockGetAdapterInstance.mockResolvedValue(makeAdapter({ atResponseStrategy: "always" }))
+    const event = makeEvent({ kind: "create" })
+    expect(await gateInboundEvent("tg-1", event)).toBe(false)
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapterId: "tg-1",
+        kind: "inbound.sibling_bot_ignored",
+        conversationKey: event.conversationKey,
+        fields: { siblingAdapterId: "tg-2" },
+      })
+    )
+  })
+
+  it('explicit "ignore" policy behaves like the default', async () => {
+    mockGetAdapterInstance.mockResolvedValue(
+      makeAdapter({ atResponseStrategy: "always", siblingBotPolicy: "ignore" })
+    )
+    expect(await gateInboundEvent("tg-1", makeEvent({ kind: "create" }))).toBe(false)
+  })
+
+  it('"respond" policy allows a sibling message under budget (normal gates still apply)', async () => {
+    mockGetAdapterInstance.mockResolvedValue(
+      makeAdapter({ atResponseStrategy: "always", siblingBotPolicy: "respond" })
+    )
+    expect(await gateInboundEvent("tg-1", makeEvent({ kind: "create" }))).toBe(true)
+    expect(mockAppendAudit).not.toHaveBeenCalled()
+  })
+
+  it('"respond" still enforces the mention gate after the sibling check', async () => {
+    mockGetAdapterInstance.mockResolvedValue(
+      makeAdapter({ atResponseStrategy: "mention_only", siblingBotPolicy: "respond" })
+    )
+    const event = makeEvent({ kind: "create", mentions: { selfMentioned: false, users: [] } })
+    expect(await gateInboundEvent("tg-1", event)).toBe(false)
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "inbound.policy_blocked", reason: "at_mention_required" })
+    )
+  })
+
+  it("exhausts the per-chat budget and audits the drop", async () => {
+    mockGetAdapterInstance.mockResolvedValue(
+      makeAdapter({
+        atResponseStrategy: "always",
+        siblingBotPolicy: "respond",
+        botInterplayBudget: 2,
+      })
+    )
+    const event = makeEvent({ kind: "create" })
+    expect(await gateInboundEvent("tg-1", event)).toBe(true)
+    expect(await gateInboundEvent("tg-1", event)).toBe(true)
+    expect(await gateInboundEvent("tg-1", event)).toBe(false)
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "inbound.sibling_bot_budget_exhausted",
+        fields: { siblingAdapterId: "tg-2", budget: 2 },
+      })
+    )
+  })
+
+  it("tracks the budget per chat — another chat is unaffected", async () => {
+    mockGetAdapterInstance.mockResolvedValue(
+      makeAdapter({
+        atResponseStrategy: "always",
+        siblingBotPolicy: "respond",
+        botInterplayBudget: 1,
+      })
+    )
+    const chatA = makeEvent({ kind: "create" })
+    const chatB = makeEvent({
+      kind: "create",
+      conversationKey: "telegram:tg-1:chat-200",
+      channel: { id: "chat-200", kind: "group", platformChannelId: "chat-200" },
+    })
+    expect(await gateInboundEvent("tg-1", chatA)).toBe(true)
+    expect(await gateInboundEvent("tg-1", chatA)).toBe(false)
+    expect(await gateInboundEvent("tg-1", chatB)).toBe(true)
+  })
+
+  it("skips the sibling check for non-create kinds", async () => {
+    mockGetAdapterInstance.mockResolvedValue(makeAdapter({ atResponseStrategy: "always" }))
+    const event = makeEvent({ kind: "edit" })
+    expect(await gateInboundEvent("tg-1", event)).toBe(true)
+    expect(mockFindSibling).not.toHaveBeenCalled()
+  })
+
+  it("fails open when the sibling lookup rejects", async () => {
+    mockFindSibling.mockRejectedValue(new Error("dexie down"))
+    mockGetAdapterInstance.mockResolvedValue(makeAdapter({ atResponseStrategy: "always" }))
+    expect(await gateInboundEvent("tg-1", makeEvent({ kind: "create" }))).toBe(true)
+  })
+
+  it("non-sibling messages are unaffected", async () => {
+    mockFindSibling.mockResolvedValue(null)
+    mockGetAdapterInstance.mockResolvedValue(makeAdapter({ atResponseStrategy: "always" }))
+    expect(await gateInboundEvent("tg-1", makeEvent({ kind: "create" }))).toBe(true)
+    expect(mockAppendAudit).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// consumeSiblingInterplayBudget — sliding-hour window (clock injected)
+// ---------------------------------------------------------------------------
+
+describe("consumeSiblingInterplayBudget", () => {
+  beforeEach(() => {
+    __resetSiblingInterplayBudgetForTesting()
+  })
+
+  it("defaults to 4 responses per chat per hour", () => {
+    expect(DEFAULT_BOT_INTERPLAY_BUDGET).toBe(4)
+  })
+
+  it("allows exactly `budget` spends inside one hour", () => {
+    const t0 = 1_000_000_000
+    expect(consumeSiblingInterplayBudget("a", "c", 2, t0)).toBe(true)
+    expect(consumeSiblingInterplayBudget("a", "c", 2, t0 + 1_000)).toBe(true)
+    expect(consumeSiblingInterplayBudget("a", "c", 2, t0 + 2_000)).toBe(false)
+  })
+
+  it("frees budget once spends age out of the trailing hour", () => {
+    const t0 = 1_000_000_000
+    const HOUR = 60 * 60 * 1000
+    expect(consumeSiblingInterplayBudget("a", "c", 1, t0)).toBe(true)
+    expect(consumeSiblingInterplayBudget("a", "c", 1, t0 + HOUR - 1)).toBe(false)
+    expect(consumeSiblingInterplayBudget("a", "c", 1, t0 + HOUR + 1)).toBe(true)
+  })
+
+  it("scopes the ledger to (adapterId, chatId)", () => {
+    const t0 = 1_000_000_000
+    expect(consumeSiblingInterplayBudget("a", "c1", 1, t0)).toBe(true)
+    expect(consumeSiblingInterplayBudget("a", "c2", 1, t0)).toBe(true)
+    expect(consumeSiblingInterplayBudget("b", "c1", 1, t0)).toBe(true)
+    expect(consumeSiblingInterplayBudget("a", "c1", 1, t0)).toBe(false)
   })
 })

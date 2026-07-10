@@ -364,9 +364,13 @@ export async function handlePluginToolExec(
     const builtIn = await resolveBuiltInSkillByMcpName(request.name)
     if (builtIn) {
       const { runBuiltInSkill } = await import("@/lib/skills/built-in/dispatcher")
-      const result = await runBuiltInSkill(builtIn.id, request.args, {
-        sessionId: request.sessionId,
-      })
+      // Hydrate the IM binding + override row from the session (W2). A bare
+      // `{sessionId}` context used to bypass EVERY dispatcher gate (imAccess,
+      // per-chat allowlist, HITL) for IM-bound sessions — the ADR-0026 trust
+      // model only held on the slash-command path.
+      const { resolveBuiltInSkillContext } = await import("@/lib/skills/built-in/context")
+      const skillCtx = await resolveBuiltInSkillContext(request.sessionId)
+      const result = await runBuiltInSkill(builtIn.id, request.args, skillCtx)
       // The dispatcher returns a discriminated union; on `denied` /
       // `pending_hitl` / `error` we surface the structured payload so the
       // model can see the reason. The SDK turns this into a tool result
@@ -405,10 +409,7 @@ export async function handlePluginToolExec(
     if (request.name.startsWith("terminal_dock_")) {
       const { runTerminalDockAction } = await import("@/lib/terminal/dock-tool-handler")
       const action = request.name.slice("terminal_dock_".length) as
-        | "spawn"
-        | "write"
-        | "read_recent"
-        | "wait_for_exit"
+        "spawn" | "write" | "read_recent" | "wait_for_exit"
       const result = await runTerminalDockAction({
         action,
         args: request.args,

@@ -34,6 +34,10 @@
     "detail": {
       "adapterMissing": "找不到该适配器，可能已被其他窗口删除。",
       "editCredentials": "编辑凭据",
+      "fieldMode": "模式",
+      "fieldPublicUrl": "公开 URL",
+      "fieldTransport": "传输",
+      "fieldType": "类型",
       "noSelection": "在左侧选择一个适配器，查看其配置、健康状态、会话和审计日志。"
     },
     "detailTabs": {
@@ -355,6 +359,66 @@
       "unsupported": "不支持"
     }
   },
+  "aiBindingDefaults": {
+    "characterDefault": "默认",
+    "characterHelp": "此机器人默认使用的人设；会话可用 /character 单独绑定。",
+    "characterLabel": "默认人设",
+    "modelDefault": "默认",
+    "modelHelp": "此机器人使用的提供商 + 模型。优先于人设自带的模型；会话内 /model 仍然最高。",
+    "modelLabel": "默认提供商 · 模型",
+    "notConfigured": "{id}（未配置）",
+    "precedenceNote": "会话级覆盖（/model、/team、收件箱切换器）始终优先于这些机器人级默认值。",
+    "reasoningDefault": "默认",
+    "reasoningHelp": "此机器人回复的思考强度。模型不支持推理时自动忽略。",
+    "reasoningLabel": "默认思考强度",
+    "reasoning_high": "高",
+    "reasoning_low": "低",
+    "reasoning_max": "最高",
+    "reasoning_medium": "中",
+    "reasoning_xhigh": "特高",
+    "teamHelp": "入站消息将派发给该 Agent 团队；会话可用 /team 单独绑定，或用 /team off 关闭。",
+    "teamLabel": "默认 Agent 团队",
+    "title": "AI 绑定默认值"
+  },
+  "dispatchRules": {
+    "actionCharacter": "人设",
+    "actionLabel": "路由到",
+    "actionTeam": "团队",
+    "actionWorkflow": "工作流",
+    "addRule": "添加规则",
+    "channelAny": "任意",
+    "channelLabel": "会话类型",
+    "channel_channel": "频道",
+    "channel_group": "群聊",
+    "channel_private": "私聊",
+    "channel_thread": "话题",
+    "characterMissing": "{id}…（已删除）",
+    "characterNone": "选择人设…",
+    "deleteAria": "删除规则",
+    "empty": "暂无规则——所有消息按机器人级默认值路由。",
+    "enabledAria": "启用规则",
+    "help": "命中规则的入站消息将路由到对应的人设、团队或工作流。规则自上而下匹配，首个命中生效。会话级覆盖（/team、/character、/workflow）仍优先于规则；规则优先于机器人级默认值。",
+    "keywordsHelp": "逗号分隔；任一关键词命中即匹配（不区分大小写的子串）。",
+    "keywordsLabel": "关键词",
+    "keywordsPlaceholder": "bug, 崩溃, 紧急",
+    "moveDownAria": "下移规则",
+    "moveUpAria": "上移规则",
+    "nameLabel": "规则名称",
+    "namePlaceholder": "规则 {index}",
+    "patternInvalid": "正则无效——该条件永远不会命中。",
+    "patternLabel": "正则表达式",
+    "patternPlaceholder": "^\\[紧急\\]",
+    "senderIdsLabel": "发送者 ID",
+    "senderIdsPlaceholder": "u_12345, ou_abcdef",
+    "targetLabel": "目标",
+    "title": "派发规则",
+    "workflowPlaceholder": "工作流 ID…"
+  },
+  "teamPicker": {
+    "aria": "选择 Agent 团队",
+    "missing": "{id}…（已删除）",
+    "none": "无"
+  },
   "controlCommands": {
     "allowlistHelp": "每行一个平台用户 ID。只有这些用户可以执行会改变状态的命令。",
     "allowlistLabel": "允许的用户 ID",
@@ -540,6 +604,17 @@
         "directOnly": "仅私聊 — 群聊永不回应",
         "mentionOnly": "仅 @ 机器人 — 群聊中需要被 @（默认）"
       },
+      "sibling": {
+        "budgetAria": "同群机器人每群每小时回复额度",
+        "budgetHelp": "每个群每小时最多对同群机器人消息回复的次数。",
+        "budgetLabel": "回复额度（每群 / 小时）",
+        "help": "如何处理同一群里你自己另一个机器人发出的消息。忽略可防止机器人互相触发循环。",
+        "options": {
+          "ignore": "忽略 — 永不回应同群机器人（默认）",
+          "respond": "回应 — 允许回复，但受下方额度限制"
+        },
+        "title": "同群机器人"
+      },
       "title": "响应策略"
     },
     "cancel": "取消",
@@ -622,7 +697,10 @@
     },
     "whoami": {
       "lastProbeAt": "上次探测：{time}",
+      "missingScopesHint": "请在飞书开发者后台 → 权限管理中开启这些权限并重新发布应用，然后重新探测。群管理需要 im:chat:create、im:chat:update、im:chat.members:write_only 和 contact:user.id:readonly。",
+      "missingScopesTitle": "检测到缺失的权限 scope",
       "onebotNoProbe": "OneBot 适配器没有主动探测身份的接口 — 下方的 QQ UIN 是配置时录入的。",
+      "openId": "Open ID",
       "probeButton": "探测身份",
       "probeFailed": "探测失败",
       "reprobeButton": "重新探测",

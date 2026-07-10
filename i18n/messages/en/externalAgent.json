@@ -270,7 +270,11 @@
     "codexSummaryAuto": "Auto",
     "codexSummaryConcise": "Concise",
     "codexSummaryDetailed": "Detailed",
-    "codexSummaryNone": "None"
+    "codexSummaryNone": "None",
+    "codexExtraSkillRoots": "Extra skill folders",
+    "codexExtraSkillRootsDesc": "Absolute folders Codex scans for SKILL.md files, in addition to the default .agents/skills locations. Re-applied every time this agent connects. One path per line.",
+    "codexExtraSkillRootsPlaceholder": "/Users/me/my-skills\n/opt/shared/codex-skills",
+    "codexSkillRootsBrowse": "Browse…"
   },
   "statusConnected": "Connected",
   "statusConnecting": "Connecting",

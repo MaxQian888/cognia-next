@@ -23,6 +23,10 @@
       "inboundDeferredQuietHours": "回复已延后——安静时段",
       "inboundDeleted": "消息已撤回",
       "inboundEdited": "消息已编辑",
+      "broadcastEnqueued": "广播已入队",
+      "broadcastPartialFailure": "广播部分失败",
+      "conversationCreated": "会话已创建",
+      "dispatchRuleMatched": "已按派发规则路由",
       "inboundHelpServed": "已发送帮助卡片",
       "inboundMemberAdded": "成员加入",
       "inboundMemberRemoved": "成员退出",
@@ -34,7 +38,11 @@
       "pluginInboundBlocked": "被插件拦截",
       "pluginRateBlocked": "被插件限流",
       "pluginTransformPiiBlocked": "插件改写被拦截——PII",
+      "siblingBotBudgetExhausted": "同群机器人回复额度已用尽",
+      "siblingBotIgnored": "已忽略同群机器人消息",
+      "taskDispatched": "任务已派发",
       "teamDispatched": "已路由到团队",
+      "teamPostedAsBot": "团队以机器人身份发送",
       "workflowDispatched": "已路由到工作流"
     },
     "title": "动态",
@@ -364,6 +372,7 @@
   "outboundSource": {
     "draftApproved": "草稿已批准",
     "manual": "手动",
+    "skill": "技能",
     "workflow": "工作流",
     "workflowTooltip": "由工作流节点 {nodeId} 发送 — 点击打开运行记录"
   },

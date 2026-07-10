@@ -34,6 +34,10 @@
     "detail": {
       "adapterMissing": "Adapter row not found. It may have been deleted in another tab.",
       "editCredentials": "Edit credentials",
+      "fieldMode": "Mode",
+      "fieldPublicUrl": "Public URL",
+      "fieldTransport": "Transport",
+      "fieldType": "Type",
       "noSelection": "Select an adapter on the left to see its configuration, health, conversations, and audit log."
     },
     "detailTabs": {
@@ -355,6 +359,66 @@
       "unsupported": "Unsupported"
     }
   },
+  "aiBindingDefaults": {
+    "characterDefault": "Default",
+    "characterHelp": "Persona this bot answers as unless a conversation binds its own (/character).",
+    "characterLabel": "Default persona",
+    "modelDefault": "Default",
+    "modelHelp": "Provider + model this bot uses. Beats the persona's own model; /model in a chat still wins.",
+    "modelLabel": "Default provider · model",
+    "notConfigured": "{id} (not configured)",
+    "precedenceNote": "Per-conversation overrides (/model, /team, inbox switchers) always beat these bot-level defaults.",
+    "reasoningDefault": "Default",
+    "reasoningHelp": "Thinking depth for this bot's replies. Dropped automatically on models without reasoning.",
+    "reasoningLabel": "Default reasoning",
+    "reasoning_high": "High",
+    "reasoning_low": "Low",
+    "reasoning_max": "Max",
+    "reasoning_medium": "Medium",
+    "reasoning_xhigh": "Extra high",
+    "teamHelp": "Inbound messages dispatch to this Agent Team unless a conversation binds its own (/team) or turns teams off (/team off).",
+    "teamLabel": "Default Agent Team",
+    "title": "AI binding defaults"
+  },
+  "dispatchRules": {
+    "actionCharacter": "Character",
+    "actionLabel": "Route to",
+    "actionTeam": "Team",
+    "actionWorkflow": "Workflow",
+    "addRule": "Add rule",
+    "channelAny": "Any",
+    "channelLabel": "Channel kind",
+    "channel_channel": "Channel",
+    "channel_group": "Group",
+    "channel_private": "Private",
+    "channel_thread": "Thread",
+    "characterMissing": "{id}… (missing)",
+    "characterNone": "Pick a character…",
+    "deleteAria": "Delete rule",
+    "empty": "No rules yet — every message follows the bot-level defaults.",
+    "enabledAria": "Enable rule",
+    "help": "Inbound messages matching a rule route to its character, team, or workflow. Rules run top-down; the first match wins. Conversation overrides (/team, /character, /workflow) still beat rules; rules beat the bot-level defaults.",
+    "keywordsHelp": "Comma-separated; any keyword matches (case-insensitive substring).",
+    "keywordsLabel": "Keywords",
+    "keywordsPlaceholder": "bug, crash, urgent",
+    "moveDownAria": "Move rule down",
+    "moveUpAria": "Move rule up",
+    "nameLabel": "Rule name",
+    "namePlaceholder": "Rule {index}",
+    "patternInvalid": "Invalid pattern — this condition will never match.",
+    "patternLabel": "Regex pattern",
+    "patternPlaceholder": "^\\[urgent\\]",
+    "senderIdsLabel": "Sender IDs",
+    "senderIdsPlaceholder": "u_12345, ou_abcdef",
+    "targetLabel": "Target",
+    "title": "Dispatch rules",
+    "workflowPlaceholder": "Workflow id…"
+  },
+  "teamPicker": {
+    "aria": "Select an Agent Team",
+    "missing": "{id}… (missing)",
+    "none": "None"
+  },
   "controlCommands": {
     "allowlistHelp": "One platform user ID per line. Only these users may run state-changing commands.",
     "allowlistLabel": "Allowed user IDs",
@@ -540,6 +604,17 @@
         "directOnly": "Direct messages only — never respond in groups",
         "mentionOnly": "Mention only — require @bot in groups (default)"
       },
+      "sibling": {
+        "budgetAria": "Sibling bot reply budget per chat per hour",
+        "budgetHelp": "Maximum AI replies to sibling-bot messages per chat per hour.",
+        "budgetLabel": "Reply budget (per chat / hour)",
+        "help": "How to treat messages sent by another of your own bots in the same group. Ignoring them prevents bot-to-bot loops.",
+        "options": {
+          "ignore": "Ignore — never respond to sibling bots (default)",
+          "respond": "Respond — allow replies, bounded by the budget below"
+        },
+        "title": "Sibling bots"
+      },
       "title": "Mention strategy"
     },
     "cancel": "Cancel",
@@ -622,7 +697,10 @@
     },
     "whoami": {
       "lastProbeAt": "Last probed at {time}",
+      "missingScopesHint": "Enable these permissions in the Lark developer console → Permissions, re-publish the app, then re-probe. Chat management needs im:chat:create, im:chat:update, im:chat.members:write_only and contact:user.id:readonly.",
+      "missingScopesTitle": "Missing permission scopes detected",
       "onebotNoProbe": "OneBot adapters do not expose an active identity probe — the QQ UIN below was entered when the adapter was configured.",
+      "openId": "Open ID",
       "probeButton": "Probe identity",
       "probeFailed": "Probe failed",
       "reprobeButton": "Re-probe",

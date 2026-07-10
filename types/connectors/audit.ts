@@ -21,6 +21,15 @@ export type AuditKind =
   // first-inbound (`inbound.welcome_sent`). Both short-circuit the AI turn.
   | "inbound.help_served"
   | "inbound.welcome_sent"
+  // Sibling-bot inbound guard (W5 multi-bot same-group collaboration).
+  // `sibling_bot_ignored` — the message was authored by another of our own
+  // bot instances and the adapter's `siblingBotPolicy` is "ignore" (default),
+  // so the AI turn was suppressed to prevent cross-instance loops.
+  // `sibling_bot_budget_exhausted` — policy is "respond" but the per-chat
+  // sliding-hour `botInterplayBudget` ran out. Both carry
+  // `fields.siblingAdapterId`; the budget kind also carries `fields.budget`.
+  | "inbound.sibling_bot_ignored"
+  | "inbound.sibling_bot_budget_exhausted"
   | "outbound.enqueued"
   | "outbound.ai_run_enqueued"
   // outboundQueue soft cap (5000) tripped — `enqueueOutbound` aged the
@@ -103,6 +112,14 @@ export type AuditKind =
   // Fired when `overrideRow.teamId` routed the turn to `runTeamLifecycle`
   // instead of the single-character `runAndCapture` path.
   | "team.dispatched"
+  // Inbound dispatch rule decided the routing (W3 multi-bot 条件规则表).
+  // Fired from the connector runtime's ai-run branch when a matched
+  // `AdapterInstanceRow.dispatchRules` entry actually routed the turn (it
+  // was not shadowed by an explicit conversation override). Carries
+  // `fields.ruleId`, optional `fields.ruleName`, exactly one of
+  // `fields.teamId` / `fields.workflowId` / `fields.characterId` (the axis
+  // the rule decided), and `fields.sourceMessageId`.
+  | "dispatch.rule_matched"
   // Visual Workflow dispatch from an inbound IM message (workflow⇄IM parity).
   // Fired when `overrideRow.workflowId` routed the turn to `startWorkflowFromIM`
   // (`lib/workflow/runtime/start-from-im.ts`) instead of the single-character
@@ -170,6 +187,32 @@ export type AuditKind =
   // the AI-run turn before building the send. Carries `reason` + `fields.key`
   // (the source key). Advisory/additive — only further restricts the policy.
   | "plugin.rate_blocked"
+  // Chat management (W2 multi-bot). `conversation.created` — a conversation
+  // was proactively materialized (agent `im.create_chat` or future UI flow):
+  // the platform chat was created and a platform-bound ChatSession pre-minted
+  // by `lib/connectors/conversation-bootstrap.ts`. Carries
+  // `fields.remoteChatId` + `fields.name` + `fields.source`.
+  | "conversation.created"
+  // `im.broadcast` fan-out: `enqueued` after the per-target enqueue loop
+  // (carries `fields.targetCount` / `fields.enqueued` / `fields.skipped`);
+  // `partial_failure` additionally fired when at least one target was
+  // skipped (bad key / no session) so operators can find silent drops.
+  | "broadcast.enqueued"
+  | "broadcast.partial_failure"
+  // `im.dispatch_task` (W4 任务派发): a lead agent dispatched a sub-task to a
+  // dedicated conversation — chat created (or existing one targeted), a
+  // responder bound on the override row, and the brief posted. Carries
+  // `fields.conversationKey`, exactly one of `fields.teamId` /
+  // `fields.characterId` (the bound responder), `fields.created` (new chat vs
+  // existing conversation), and `fields.runStarted` when a team auto-run was
+  // attempted.
+  | "task.dispatched"
+  // `team_post_to_chat` (W5 多机器人同群协作): a running team turn posted a
+  // message into its own bound conversation or a SIBLING conversation (same
+  // remote group, different bot instance) under that bot's identity. Carries
+  // `fields.fromAdapterId` (the run's origin bot) and `fields.targetAdapterId`
+  // (the identity that posts), plus the team/teammate that issued the call.
+  | "team.posted_as_bot"
 
 export interface AuditEntry {
   id: string

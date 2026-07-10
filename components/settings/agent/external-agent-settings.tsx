@@ -20,13 +20,16 @@ import {
   Loader2,
   Terminal,
   Globe,
+  FolderPlus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { pickDirectory } from "@/lib/files/file-bridge"
 import { toast } from "@/components/ui/sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -124,6 +127,21 @@ interface AgentFormData {
   codexDefaultEffort: string
   /** Empty string = server default */
   codexReasoningSummary: "" | "auto" | "concise" | "detailed" | "none"
+  /** Newline-separated absolute folders registered as extra Codex skill roots */
+  codexExtraSkillRoots: string
+}
+
+/** Split the newline-separated skill-roots textarea into clean, unique paths. */
+function parseSkillRootLines(value: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const line of value.split("\n")) {
+    const path = line.trim()
+    if (!path || seen.has(path)) continue
+    seen.add(path)
+    out.push(path)
+  }
+  return out
 }
 
 const DEFAULT_TIMEOUT_MS = "300000"
@@ -152,6 +170,7 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   codexNetworkAccess: false,
   codexDefaultEffort: "",
   codexReasoningSummary: "",
+  codexExtraSkillRoots: "",
 }
 
 /** Static effort choices offered as per-agent defaults; the true per-model
@@ -258,6 +277,7 @@ function AgentEditorDialog({
       codexNetworkAccess: agent.codexOptions?.networkAccess ?? false,
       codexDefaultEffort: agent.codexOptions?.defaultReasoningEffort ?? "",
       codexReasoningSummary: agent.codexOptions?.reasoningSummary ?? "",
+      codexExtraSkillRoots: agent.codexOptions?.extraSkillRoots?.join("\n") ?? "",
     }
   })
 
@@ -359,6 +379,9 @@ function AgentEditorDialog({
           : {}),
         ...(formData.codexReasoningSummary
           ? { reasoningSummary: formData.codexReasoningSummary }
+          : {}),
+        ...(parseSkillRootLines(formData.codexExtraSkillRoots).length
+          ? { extraSkillRoots: parseSkillRootLines(formData.codexExtraSkillRoots) }
           : {}),
       }
     }
@@ -691,6 +714,41 @@ function AgentEditorDialog({
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="codexExtraSkillRoots">{t("codexExtraSkillRoots")}</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-testid="codex-skill-roots-browse"
+                    onClick={async () => {
+                      const dir = await pickDirectory()
+                      if (!dir) return
+                      setFormData((prev) => {
+                        const roots = parseSkillRootLines(prev.codexExtraSkillRoots)
+                        if (roots.includes(dir)) return prev
+                        return { ...prev, codexExtraSkillRoots: [...roots, dir].join("\n") }
+                      })
+                    }}
+                  >
+                    <FolderPlus className="h-4 w-4" />
+                    {t("codexSkillRootsBrowse")}
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground">{t("codexExtraSkillRootsDesc")}</p>
+                <Textarea
+                  id="codexExtraSkillRoots"
+                  data-testid="codex-skill-roots"
+                  value={formData.codexExtraSkillRoots}
+                  onChange={(e) =>
+                    setFormData({ ...formData, codexExtraSkillRoots: e.target.value })
+                  }
+                  placeholder={t("codexExtraSkillRootsPlaceholder")}
+                  rows={3}
+                  className="font-mono text-xs"
+                />
               </div>
             </>
           )}

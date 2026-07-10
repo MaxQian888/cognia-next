@@ -18,6 +18,7 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { getDb } from "@/lib/db/schema"
@@ -25,10 +26,15 @@ import { updateAdapterInstance } from "@/lib/db/adapter-instances"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import {
   DEFAULT_AT_RESPONSE_STRATEGY,
+  DEFAULT_BOT_INTERPLAY_BUDGET,
   type AtResponseStrategy,
 } from "@/lib/connectors/adapters/lark/at-gate"
 
 const STRATEGIES: AtResponseStrategy[] = ["always", "mention_only", "direct_only"]
+
+type SiblingBotPolicy = NonNullable<AdapterInstanceRow["siblingBotPolicy"]>
+
+const SIBLING_POLICIES: SiblingBotPolicy[] = ["ignore", "respond"]
 
 export interface LarkAtStrategyProps {
   adapterId: string
@@ -47,6 +53,7 @@ export function LarkAtStrategy({ adapterId }: LarkAtStrategyProps) {
   )
 
   const current: AtResponseStrategy = row?.atResponseStrategy ?? DEFAULT_AT_RESPONSE_STRATEGY
+  const siblingPolicy: SiblingBotPolicy = row?.siblingBotPolicy ?? "ignore"
 
   const onChange = async (value: string) => {
     if (!STRATEGIES.includes(value as AtResponseStrategy)) return
@@ -55,6 +62,29 @@ export function LarkAtStrategy({ adapterId }: LarkAtStrategyProps) {
       await updateAdapterInstance(adapterId, {
         atResponseStrategy: value as AtResponseStrategy,
       })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onSiblingPolicyChange = async (value: string) => {
+    if (!SIBLING_POLICIES.includes(value as SiblingBotPolicy)) return
+    setSaving(true)
+    try {
+      await updateAdapterInstance(adapterId, {
+        siblingBotPolicy: value as SiblingBotPolicy,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onBudgetChange = async (raw: string) => {
+    const parsed = Number.parseInt(raw, 10)
+    if (!Number.isInteger(parsed) || parsed < 1) return
+    setSaving(true)
+    try {
+      await updateAdapterInstance(adapterId, { botInterplayBudget: parsed })
     } finally {
       setSaving(false)
     }
@@ -94,6 +124,50 @@ export function LarkAtStrategy({ adapterId }: LarkAtStrategyProps) {
         {!row?.atResponseStrategy && (
           <p className="text-xs text-muted-foreground italic">{t("defaultNotice")}</p>
         )}
+
+        {/* ── Sibling-bot policy (W5 multi-bot same-group) ── */}
+        <div className="space-y-2 border-t pt-3">
+          <p className="text-sm font-medium">{t("sibling.title")}</p>
+          <p className="text-xs text-muted-foreground">{t("sibling.help")}</p>
+          <RadioGroup
+            value={siblingPolicy}
+            onValueChange={(v) => void onSiblingPolicyChange(v)}
+            disabled={saving}
+          >
+            {SIBLING_POLICIES.map((value) => (
+              <div key={value} className="flex items-start gap-2">
+                <RadioGroupItem
+                  value={value}
+                  id={`sibling-policy-${value}`}
+                  data-testid={`sibling-policy-${value}`}
+                />
+                <div className="flex-1 space-y-0.5">
+                  <Label htmlFor={`sibling-policy-${value}`} className="cursor-pointer">
+                    {t(`sibling.options.${value}`)}
+                  </Label>
+                </div>
+              </div>
+            ))}
+          </RadioGroup>
+          {siblingPolicy === "respond" && (
+            <div className="space-y-1">
+              <Label htmlFor="sibling-budget" className="text-xs">
+                {t("sibling.budgetLabel")}
+              </Label>
+              <Input
+                id="sibling-budget"
+                data-testid="sibling-budget-input"
+                type="number"
+                min={1}
+                className="h-8 w-24"
+                defaultValue={row?.botInterplayBudget ?? DEFAULT_BOT_INTERPLAY_BUDGET}
+                onChange={(e) => void onBudgetChange(e.target.value)}
+                aria-label={t("sibling.budgetAria")}
+              />
+              <p className="text-xs text-muted-foreground">{t("sibling.budgetHelp")}</p>
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   )

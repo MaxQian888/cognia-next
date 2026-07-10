@@ -29,6 +29,7 @@ import type {
   CreateConsensusInput,
   SharedMemoryEntry,
 } from "@/types/agent/agent-team"
+import type { AuditKind } from "@/types/connectors/audit"
 import type { TwinKnowledgeHit } from "@/lib/ai/agent/team/twin-context"
 import {
   canSendMessage,
@@ -62,6 +63,7 @@ export const TEAM_TOOL_NAMES = {
   addTaskComment: "task_add_comment",
   getTask: "task_get",
   twinKnowledgeSearch: "twin_knowledge_search",
+  postToChat: "team_post_to_chat",
 } as const
 
 /** Synthetic plugin id tagging the promoted team-collaboration manifest entries. */
@@ -163,6 +165,35 @@ export interface TeamToolDeps {
   }) => Promise<
     { ok: true; twinId: string; hits: TwinKnowledgeHit[] } | { ok: false; error: string }
   >
+  // ── team_post_to_chat (W5 multi-bot same-group) ────────────────────────────
+  /**
+   * Resolve the IM conversation this team run originated from: the run's
+   * `triggeredFrom` binding on its registered `TeamRunContext` (keyed by
+   * `caller.runId`). `null` when the run was not IM-triggered.
+   */
+  resolveOriginConversation: (
+    caller: TeamToolCaller
+  ) => Promise<{ adapterId: string; conversationKey: string } | null>
+  /** Sibling conversations of the origin (same remote chat, other adapters). */
+  listSiblingConversations: (
+    conversationKey: string
+  ) => Promise<Array<{ adapterId: string; conversationKey: string; sessionId: string }>>
+  /** PII gate — `true` when the message is safe to leave the device. */
+  messagePassesPiiGate: (message: string) => Promise<boolean>
+  /** Enqueue one outbound text message on the durable outbound queue. */
+  postToConversation: (input: {
+    adapterId: string
+    conversationKey: string
+    text: string
+  }) => Promise<void>
+  /** Append a connector audit row (best-effort; failures must not throw). */
+  appendAuditEntry: (entry: {
+    adapterId: string
+    kind: AuditKind
+    conversationKey?: string
+    reason?: string
+    fields?: Record<string, unknown>
+  }) => Promise<void>
 }
 
 const SEND_MESSAGE_SCHEMA = {
@@ -286,6 +317,19 @@ const GET_TASK_SCHEMA = {
   required: ["taskId"],
 } as const
 
+const POST_TO_CHAT_SCHEMA = {
+  type: "object",
+  properties: {
+    conversationKey: {
+      type: "string",
+      description:
+        "Target conversation key (platform:adapterId:chatId). Must be this run's own bound conversation or a sibling conversation of it (another of our bots in the same group).",
+    },
+    message: { type: "string", description: "Text message to post (PII-gated)." },
+  },
+  required: ["conversationKey", "message"],
+} as const
+
 const TWIN_KNOWLEDGE_SEARCH_SCHEMA = {
   type: "object",
   properties: {
@@ -374,6 +418,11 @@ export function buildTeamCollabManifestEntries(
       TEAM_TOOL_NAMES.getTask,
       "Fetch a task by id, including its full comment thread.",
       GET_TASK_SCHEMA as unknown as Record<string, unknown>
+    ),
+    entry(
+      TEAM_TOOL_NAMES.postToChat,
+      "Post a message into this run's IM conversation, or into a SIBLING conversation (another of our bot instances in the same group chat) so it is delivered under that bot's identity. Only available for IM-triggered runs; use im_broadcast for arbitrary fan-out.",
+      POST_TO_CHAT_SCHEMA as unknown as Record<string, unknown>
     ),
     ...(opts.includeTwinKnowledgeSearch
       ? [
@@ -537,6 +586,56 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
         twinDeps,
       })
       return { ok: true, twinId: target, hits: res.hits }
+    },
+    // ── team_post_to_chat (W5) — origin/sibling resolution + delivery ────────
+    resolveOriginConversation: async (c) => {
+      if (!c.runId) return null
+      const { getTeamRunContext } = await import("@/lib/ai/agent/team/team-run-context")
+      const tf = getTeamRunContext(c.runId)?.triggeredFrom
+      return tf?.adapterId && tf?.conversationKey
+        ? { adapterId: tf.adapterId, conversationKey: tf.conversationKey }
+        : null
+    },
+    listSiblingConversations: async (conversationKey) => {
+      const { listSiblingConversations } = await import("@/lib/connectors/session-bindings")
+      return listSiblingConversations(conversationKey)
+    },
+    messagePassesPiiGate: async (message) => {
+      const { hasNoLeakingPiiDeep } = await import("@/lib/twin/ingest/redact")
+      return hasNoLeakingPiiDeep(message)
+    },
+    postToConversation: async (input) => {
+      // Mirrors the `im.broadcast` enqueue path: durable outbound queue with a
+      // fresh idempotency key; per-adapter rate limit / circuit breaker /
+      // quiet-hours all apply automatically downstream.
+      const [{ parseConversationKey }, bindings, { enqueueOutbound }, { newIdempotencyKey }] =
+        await Promise.all([
+          import("@/types/connectors/event"),
+          import("@/lib/connectors/session-bindings"),
+          import("@/lib/db/outbound-jobs"),
+          import("@/types/connectors/outbound"),
+        ])
+      const parsed = parseConversationKey(input.conversationKey)
+      const session = await bindings.findSessionByConversationKey(input.conversationKey)
+      const conversationRef = session?.platformBinding?.conversationRef ?? {
+        platform: parsed.platform,
+        adapterId: input.adapterId,
+        channelId: parsed.remoteChatId,
+      }
+      await enqueueOutbound({
+        adapterId: input.adapterId,
+        conversationKey: input.conversationKey,
+        request: {
+          conversationRef,
+          segments: [{ type: "text", text: input.text }],
+          metadata: { idempotencyKey: newIdempotencyKey() },
+        },
+        source: "skill",
+      })
+    },
+    appendAuditEntry: async (entry) => {
+      const { appendAudit } = await import("@/lib/connectors/audit")
+      await appendAudit({ ...entry, at: Date.now() }).catch(() => undefined)
     },
   }
 }
@@ -707,6 +806,61 @@ export async function runTeamBuiltinTool(
         if (!taskId) return "Error: task_get requires a `taskId`."
         const task = d.getTask(taskId)
         return task ?? `Error: task ${taskId} not found.`
+      }
+      case TEAM_TOOL_NAMES.postToChat: {
+        const conversationKey = asString(args.conversationKey).trim()
+        const message = asString(args.message).trim()
+        if (!conversationKey) return "Error: team_post_to_chat requires a `conversationKey`."
+        if (!message) return "Error: team_post_to_chat requires non-empty `message`."
+        // 1. Origin — the IM conversation this team run was triggered from.
+        const origin = await d.resolveOriginConversation(caller)
+        if (!origin) {
+          return "Error: this team run is not bound to an IM conversation — team_post_to_chat is only available for IM-triggered runs."
+        }
+        // 2. Target must be the origin itself or one of its siblings (same
+        //    remote group chat via ANOTHER of our bot instances).
+        let target: { adapterId: string; conversationKey: string }
+        if (conversationKey === origin.conversationKey) {
+          target = origin
+        } else {
+          const siblings = await d.listSiblingConversations(origin.conversationKey)
+          const hit = siblings.find((s) => s.conversationKey === conversationKey)
+          if (!hit) {
+            return "Error: target is not this run's conversation or a sibling — use im_broadcast for arbitrary fan-out."
+          }
+          target = hit
+        }
+        // 3. PII gate before anything leaves the device.
+        if (!(await d.messagePassesPiiGate(message))) {
+          await d.appendAuditEntry({
+            adapterId: target.adapterId,
+            kind: "adapter.error",
+            conversationKey,
+            reason: "pii_blocked",
+            fields: { tool: TEAM_TOOL_NAMES.postToChat, teamId: caller.teamId },
+          })
+          return "Error: message rejected by the PII gate — redact identifiers and retry."
+        }
+        // 4. Deliver via the durable outbound queue + audit the identity used.
+        await d.postToConversation({
+          adapterId: target.adapterId,
+          conversationKey,
+          text: message,
+        })
+        await d.appendAuditEntry({
+          adapterId: target.adapterId,
+          kind: "team.posted_as_bot",
+          conversationKey,
+          fields: {
+            fromAdapterId: origin.adapterId,
+            targetAdapterId: target.adapterId,
+            teamId: caller.teamId,
+            teammateId: caller.teammateId,
+          },
+        })
+        return target.adapterId === origin.adapterId
+          ? "Posted to this run's conversation."
+          : `Posted to sibling conversation ${conversationKey} under adapter ${target.adapterId}'s identity.`
       }
       case TEAM_TOOL_NAMES.twinKnowledgeSearch: {
         const query = asString(args.query).trim()

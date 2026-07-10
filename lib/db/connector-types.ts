@@ -53,6 +53,51 @@ export interface AdapterImplMetadata {
 }
 
 /**
+ * Match conditions for one inbound dispatch rule (W3 multi-bot). Every
+ * provided field must hold for the rule to match (AND across fields); the
+ * list-valued fields match on ANY entry (OR within a field). An empty /
+ * absent match object is a catch-all. Empty arrays are treated as "not
+ * provided" so a blanked-out settings field can never make a rule
+ * unmatchable by accident.
+ */
+export interface DispatchRuleMatch {
+  /** ANY keyword matches (case-insensitive substring of plainText). */
+  keywords?: string[]
+  /**
+   * Regex source tested against plainText (invalid patterns never match;
+   * compiled once and cached by source).
+   */
+  pattern?: string
+  /** ANY id matches event.sender.id OR event.sender.remoteUserId. */
+  senderIds?: string[]
+  /** Restrict to these channel kinds (types/connectors/event.ts ChannelKind). */
+  channelKinds?: Array<"private" | "group" | "channel" | "thread">
+}
+
+/**
+ * Routing target of a dispatch rule. At least one field must be set for
+ * the rule to participate in matching; `teamId` wins over `workflowId`
+ * wins over `characterId` at dispatch time.
+ */
+export interface DispatchRuleAction {
+  characterId?: string
+  teamId?: string
+  workflowId?: string
+}
+
+/** One declarative inbound dispatch rule — see `AdapterInstanceRow.dispatchRules`. */
+export interface DispatchRule {
+  id: string
+  /** default true */
+  enabled?: boolean
+  /** operator label for UI/audit */
+  name?: string
+  match: DispatchRuleMatch
+  /** at least one field; teamId wins over workflowId wins over characterId at dispatch */
+  action: DispatchRuleAction
+}
+
+/**
  * One row per configured adapter instance (one Telegram bot, one Discord
  * guild connection, etc.). The `credentialsRef` field points into the OS
  * keyring — it never holds the actual secret value.
@@ -132,6 +177,28 @@ export interface AdapterInstanceRow {
   chatAllowlist?: string[]
   chatBlocklist?: string[]
   /**
+   * How to treat inbound messages authored by ANOTHER of our own bot
+   * instances in the same remote chat (W5 multi-bot same-group
+   * collaboration; non-indexed additive, same placement rationale as
+   * `welcomeCardEnabled`). Detected by
+   * `lib/connectors/sibling-bots.ts:findSiblingBotSender` and enforced in
+   * the shared inbound gate (`lib/connectors/at-gate.ts:gateInboundEvent`).
+   *
+   *   - "ignore" (default) — never AI-respond to a sibling bot's message
+   *     (audited as `inbound.sibling_bot_ignored`), killing cross-instance
+   *     mention loops at the door.
+   *   - "respond" — sibling messages may trigger a response, but bounded by
+   *     `botInterplayBudget`; over-budget messages are dropped with
+   *     `inbound.sibling_bot_budget_exhausted`.
+   */
+  siblingBotPolicy?: "ignore" | "respond"
+  /**
+   * Max AI responses to sibling-bot messages per chat per sliding hour when
+   * `siblingBotPolicy === "respond"` (default 4). Guards against slow-burn
+   * bot↔bot ping-pong that the mention gate alone cannot stop.
+   */
+  botInterplayBudget?: number
+  /**
    * Cross-provider help / welcome card settings (shared across every IM
    * adapter, same row-level placement rationale as `quietHours`/`muted`:
    * a cross-cutting concern the bus reads without parsing platform-specific
@@ -175,6 +242,54 @@ export interface AdapterInstanceRow {
     mode?: "everyone" | "private-only" | "allowlist"
     allowedUserIds?: string[]
   }
+  /**
+   * Instance-level AI binding defaults (per-bot "which agent answers"),
+   * same non-indexed-JSON placement rationale as `welcomeCardEnabled` — no
+   * schema-version index change (documented anchor: v106). `undefined`
+   * means "no bot-level default"; empty strings are treated as unset by
+   * every reader. Precedence: an explicit per-conversation override
+   * (`ConversationOverrideRow`) always wins; the bot default wins over the
+   * character's own `model`/`providerId` (an operator pinning a model on a
+   * bot expects that model even when the persona declares one); app
+   * settings are the final fallback.
+   *
+   *   - `defaultTeamId`   — dispatch inbound AI-runs to this Agent Team
+   *                         unless the conversation binds/disables one
+   *                         (`resolveEffectiveTeamBinding`).
+   *   - `defaultModel`    — model id or routing alias; resolved through the
+   *                         same alias engine as every other model source.
+   *   - `defaultProvider` — provider id; unknown ids keep the resolver's
+   *                         best-effort fallback semantics.
+   *   - `defaultReasoning`— reasoning-effort level; silently dropped by the
+   *                         existing `modelSupportsEffort` gate when the
+   *                         effective model cannot reason.
+   */
+  defaultTeamId?: string
+  defaultModel?: string
+  defaultProvider?: string
+  defaultReasoning?: "low" | "medium" | "high" | "xhigh" | "max"
+  /**
+   * Platform scopes observed missing at runtime (chat-management calls that
+   * failed with a permission error record the scope they needed here, e.g.
+   * Lark `im:chat:create`). Rendered as a warning row by the whoami panel so
+   * the operator learns which Developer Console permissions to enable.
+   * Best-effort, append-only-with-dedup; cleared by a successful re-probe.
+   * Non-indexed additive.
+   */
+  lastMissingScopes?: string[]
+  /**
+   * Declarative inbound dispatch rules (条件规则表, W3 multi-bot) — same
+   * non-indexed-JSON placement rationale as `welcomeCardEnabled`: no
+   * schema-version index change (documented anchor: v107). Evaluated in
+   * array order by `lib/connectors/dispatch-rules.ts:matchDispatchRule`;
+   * the first enabled rule whose match conditions ALL hold routes the
+   * inbound AI-run to the rule's character / team / workflow. Precedence:
+   * explicit conversation override (`/team`, `/character`, `/workflow`,
+   * `teamDisabled`) > first matching rule > instance defaults
+   * (`defaultTeamId` / `defaultCharacterId`). Deterministic condition
+   * table only — no AI triage in v1.
+   */
+  dispatchRules?: DispatchRule[]
   /**
    * Cached bot identity probe written by
    * `lib/connectors/adapters/lark/whoami.ts:probeBotIdentity`. The
@@ -299,11 +414,16 @@ export type OutboundJobStatus = "pending" | "sending" | "sent" | "failed" | "dea
  *   - `"draft-approved"` — the message originated as a `ConnectorDraftRow`
  *                          (manual-mode AI reply), then the operator
  *                          clicked Approve.
+ *   - `"skill"`          — an `im.*` built-in skill (agent-invoked chat
+ *                          management: first message of a freshly created
+ *                          chat, or an `im.broadcast` fan-out target)
+ *                          enqueued the send after passing its own PII gate
+ *                          and HITL confirmation.
  *
  * Rows persisted before v41 backfill to `"ai-run"` because that's the
  * only path that existed when they were created.
  */
-export type OutboundJobSource = "ai-run" | "manual" | "workflow" | "draft-approved"
+export type OutboundJobSource = "ai-run" | "manual" | "workflow" | "draft-approved" | "skill"
 
 /**
  * Cross-reference back to the Visual Workflow node that produced a
@@ -484,6 +604,16 @@ export interface ConversationOverrideRow {
    * inbox responder selector; `/team off` clears it. Non-indexed additive.
    */
   teamId?: string
+  /**
+   * Explicit "no team in this conversation" sentinel. `/team off` used to
+   * just clear `teamId`, which was indistinguishable from "never bound" —
+   * with `AdapterInstanceRow.defaultTeamId` in play that could no longer
+   * express "run single-character here even though the bot defaults to a
+   * team". `true` suppresses BOTH the conversation `teamId` and the bot's
+   * `defaultTeamId` (`resolveEffectiveTeamBinding`); re-binding via
+   * `/team <name>` clears the flag. Non-indexed additive.
+   */
+  teamDisabled?: boolean
   /**
    * Per-conversation Visual Workflow binding (workflow⇄IM parity). When set
    * (and `teamId` is NOT set — `teamId` wins routing), an inbound AI-run

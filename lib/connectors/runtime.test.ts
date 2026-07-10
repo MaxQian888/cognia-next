@@ -25,7 +25,7 @@ import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { createAdapterInstance, getAdapterInstance } from "@/lib/db/adapter-instances"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
-import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow, DispatchRule } from "@/lib/db/connector-types"
 import { installRuntime, inboundEventToSendContent, type RunAndCaptureFn } from "./runtime"
 import { getBus, __resetBusForTesting } from "./bus"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
@@ -154,7 +154,12 @@ async function callHandler(
  */
 async function seedAdapter(
   adapterId: string,
-  patch: Partial<{ quietHours?: { from: string; to: string; tz: string }; muted?: boolean }> = {}
+  patch: Partial<{
+    quietHours?: { from: string; to: string; tz: string }
+    muted?: boolean
+    defaultTeamId?: string
+    dispatchRules?: DispatchRule[]
+  }> = {}
 ): Promise<void> {
   await createAdapterInstance({
     type: "telegram",
@@ -808,6 +813,154 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
   })
 
+  // ── instance-level defaultTeamId (W1) ──────────────────────────────────────
+
+  it("dispatches to the bot's defaultTeamId when no conversation override binds a team", async () => {
+    const key = "telegram:adapter_1:chat_inst_team"
+    await seedAdapter("adapter_1", { defaultTeamId: "team_bot" })
+    await getDb().sessions.add({
+      id: "s_inst",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
+    expect((mockStartTeamRunFromIM.mock.calls[0][0] as { teamId: string }).teamId).toBe("team_bot")
+    const audit = await getDb().connectorAudit.toArray()
+    const dispatched = audit.find((r) => r.kind === "team.dispatched")
+    expect(dispatched?.fields?.teamSource).toBe("instance-default")
+  })
+
+  it("conversation override teamId beats the bot defaultTeamId", async () => {
+    const key = "telegram:adapter_1:chat_inst_vs_override"
+    await seedAdapter("adapter_1", { defaultTeamId: "team_bot" })
+    await getDb().sessions.add({
+      id: "s_iv",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({ conversationKey: key, sessionId: "s_iv", teamId: "team_chat" })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect((mockStartTeamRunFromIM.mock.calls[0][0] as { teamId: string }).teamId).toBe("team_chat")
+  })
+
+  it("teamDisabled suppresses the bot defaultTeamId → single-character ai-run", async () => {
+    const key = "telegram:adapter_1:chat_team_off"
+    await seedAdapter("adapter_1", { defaultTeamId: "team_bot" })
+    await getDb().sessions.add({
+      id: "s_off",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({ conversationKey: key, sessionId: "s_off", teamDisabled: true })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(mockStartTeamRunFromIM).not.toHaveBeenCalled()
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
+  })
+
+  it("stale instance-default team (team_not_found) falls through to single-character ai-run", async () => {
+    const key = "telegram:adapter_1:chat_inst_stale"
+    await seedAdapter("adapter_1", { defaultTeamId: "ghost_team" })
+    mockStartTeamRunFromIM.mockResolvedValueOnce({
+      started: false,
+      reason: "team_not_found",
+    } as never)
+    await getDb().sessions.add({
+      id: "s_stale",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    // The deleted bot-default team must not brick the instance: audit + run
+    // the normal single-character path.
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
+    const audit = await getDb().connectorAudit.toArray()
+    expect(
+      audit.some((r) => r.kind === "adapter.error" && r.reason === "instance_default_team_missing")
+    ).toBe(true)
+  })
+
+  it("stale OVERRIDE team keeps the audit+stop behaviour (no fallthrough)", async () => {
+    const key = "telegram:adapter_1:chat_override_stale"
+    await seedAdapter("adapter_1")
+    mockStartTeamRunFromIM.mockResolvedValueOnce({
+      started: false,
+      reason: "team_not_found",
+    } as never)
+    await getDb().sessions.add({
+      id: "s_ostale",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({ conversationKey: key, sessionId: "s_ostale", teamId: "ghost" })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "adapter.error" && r.reason === "team_not_found")).toBe(
+      true
+    )
+  })
+
+  it("PII gate covers instance-default team dispatch (fail-closed)", async () => {
+    const key = "telegram:adapter_1:chat_inst_pii"
+    await seedAdapter("adapter_1", { defaultTeamId: "team_bot" })
+    await getDb().sessions.add({
+      id: "s_ipii",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+
+    await callHandler(
+      makeEvent({
+        conversationKey: key,
+        segments: [{ type: "text", text: "email me at alice@corp.com" }],
+        plainText: "email me at alice@corp.com",
+      }),
+      "ai-run"
+    )
+
+    expect(mockStartTeamRunFromIM).not.toHaveBeenCalled()
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    const pii = audit.find((r) => r.kind === "adapter.error" && r.reason === "pii_blocked")
+    expect(pii?.fields?.teamSource).toBe("instance-default")
+  })
+
   it("teamId wins when both teamId and workflowId are set", async () => {
     const key = "telegram:adapter_1:chat_both"
     await seedAdapter("adapter_1")
@@ -859,6 +1012,186 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     expect(audit.some((r) => r.kind === "adapter.error" && r.reason === "workflow-not-found")).toBe(
       true
     )
+  })
+})
+
+describe("installRuntime — ai-run (dispatch rules W3)", () => {
+  beforeEach(() => {
+    mockStartTeamRunFromIM.mockClear()
+    mockStartTeamRunFromIM.mockResolvedValue({ started: true })
+    mockStartWorkflowFromIM.mockClear()
+    mockStartWorkflowFromIM.mockResolvedValue({ ok: true, runId: "run_x" })
+  })
+
+  const TEAM_RULE: DispatchRule = {
+    id: "rule_team",
+    name: "Runtime keyword",
+    match: { keywords: ["runtime"] },
+    action: { teamId: "team_rule" },
+  }
+
+  it("routes to the rule's team when no override binds one (audits rule_matched + teamSource rule)", async () => {
+    const key = "telegram:adapter_1:chat_rule_team"
+    await seedAdapter("adapter_1", { dispatchRules: [TEAM_RULE] })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
+    expect((mockStartTeamRunFromIM.mock.calls[0][0] as { teamId: string }).teamId).toBe("team_rule")
+    const audit = await getDb().connectorAudit.toArray()
+    const dispatched = audit.find((r) => r.kind === "team.dispatched")
+    expect(dispatched?.fields?.teamSource).toBe("rule")
+    const matched = audit.find((r) => r.kind === "dispatch.rule_matched")
+    expect(matched?.fields).toMatchObject({
+      ruleId: "rule_team",
+      ruleName: "Runtime keyword",
+      teamId: "team_rule",
+    })
+    expect(typeof matched?.fields?.sourceMessageId).toBe("string")
+  })
+
+  it("conversation override teamId beats a matching rule (no rule_matched audit)", async () => {
+    const key = "telegram:adapter_1:chat_rule_vs_override"
+    await seedAdapter("adapter_1", { dispatchRules: [TEAM_RULE] })
+    await getDb().sessions.add({
+      id: "s_rvo",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({ conversationKey: key, sessionId: "s_rvo", teamId: "team_over" })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect((mockStartTeamRunFromIM.mock.calls[0][0] as { teamId: string }).teamId).toBe("team_over")
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.find((r) => r.kind === "team.dispatched")?.fields?.teamSource).toBe("override")
+    expect(audit.some((r) => r.kind === "dispatch.rule_matched")).toBe(false)
+  })
+
+  it("rule team beats the instance defaultTeamId", async () => {
+    const key = "telegram:adapter_1:chat_rule_vs_inst"
+    await seedAdapter("adapter_1", { defaultTeamId: "team_bot", dispatchRules: [TEAM_RULE] })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect((mockStartTeamRunFromIM.mock.calls[0][0] as { teamId: string }).teamId).toBe("team_rule")
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.find((r) => r.kind === "team.dispatched")?.fields?.teamSource).toBe("rule")
+  })
+
+  it("a non-matching rule falls through to the instance defaultTeamId", async () => {
+    const key = "telegram:adapter_1:chat_rule_miss"
+    await seedAdapter("adapter_1", {
+      defaultTeamId: "team_bot",
+      dispatchRules: [{ id: "r_miss", match: { keywords: ["deploy"] }, action: { teamId: "t" } }],
+    })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect((mockStartTeamRunFromIM.mock.calls[0][0] as { teamId: string }).teamId).toBe("team_bot")
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.find((r) => r.kind === "team.dispatched")?.fields?.teamSource).toBe(
+      "instance-default"
+    )
+    expect(audit.some((r) => r.kind === "dispatch.rule_matched")).toBe(false)
+  })
+
+  it("teamDisabled suppresses a rule-sourced team → single-character ai-run", async () => {
+    const key = "telegram:adapter_1:chat_rule_team_off"
+    await seedAdapter("adapter_1", { dispatchRules: [TEAM_RULE] })
+    await getDb().sessions.add({
+      id: "s_rto",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({ conversationKey: key, sessionId: "s_rto", teamDisabled: true })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(mockStartTeamRunFromIM).not.toHaveBeenCalled()
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "dispatch.rule_matched")).toBe(false)
+  })
+
+  it("rule workflowId routes to the workflow orchestrator when no team resolved", async () => {
+    const key = "telegram:adapter_1:chat_rule_wf"
+    await seedAdapter("adapter_1", {
+      dispatchRules: [
+        { id: "rule_wf", match: { keywords: ["runtime"] }, action: { workflowId: "wf_rule" } },
+      ],
+    })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    expect(mockStartTeamRunFromIM).not.toHaveBeenCalled()
+    expect(mockStartWorkflowFromIM).toHaveBeenCalledTimes(1)
+    expect((mockStartWorkflowFromIM.mock.calls[0][0] as { workflowId: string }).workflowId).toBe(
+      "wf_rule"
+    )
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.find((r) => r.kind === "workflow.dispatched")?.fields?.workflowId).toBe("wf_rule")
+    const matched = audit.find((r) => r.kind === "dispatch.rule_matched")
+    expect(matched?.fields).toMatchObject({ ruleId: "rule_wf", workflowId: "wf_rule" })
+  })
+
+  it("PII gate covers a rule-sourced team (fail-closed, teamSource rule)", async () => {
+    const key = "telegram:adapter_1:chat_rule_pii"
+    await seedAdapter("adapter_1", {
+      dispatchRules: [{ id: "r_pii", match: {}, action: { teamId: "team_rule" } }],
+    })
+
+    await callHandler(
+      makeEvent({
+        conversationKey: key,
+        segments: [{ type: "text", text: "email me at alice@corp.com" }],
+        plainText: "email me at alice@corp.com",
+      }),
+      "ai-run"
+    )
+
+    expect(mockStartTeamRunFromIM).not.toHaveBeenCalled()
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    const pii = audit.find((r) => r.kind === "adapter.error" && r.reason === "pii_blocked")
+    expect(pii?.fields?.teamSource).toBe("rule")
+    // Blocked before dispatch → the rule never "decided" a routed turn.
+    expect(audit.some((r) => r.kind === "dispatch.rule_matched")).toBe(false)
+  })
+
+  it("rule characterId retargets the send-options persona but not the session binding", async () => {
+    const key = "telegram:adapter_1:chat_rule_char"
+    // The resolved binding's character has no twin; the rule's character is
+    // twin-bound — a twin-deps build proves the rule character was the one
+    // loaded into the send options.
+    await getDb().characters.put({ id: "char_abc", name: "Plain" } as never)
+    await getDb().characters.put({ id: "char_rule", name: "Twinned", twinId: "twin_r" } as never)
+    await seedAdapter("adapter_1", {
+      dispatchRules: [
+        { id: "rule_char", match: { keywords: ["runtime"] }, action: { characterId: "char_rule" } },
+      ],
+    })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
+    expect(tryBuildTwinDepsImpl).toHaveBeenCalledTimes(1)
+    // Session creation keeps the resolved binding's character.
+    const sessions = await getDb().sessions.toArray()
+    expect(sessions[0].characterId).toBe("char_abc")
+    const audit = await getDb().connectorAudit.toArray()
+    const matched = audit.find((r) => r.kind === "dispatch.rule_matched")
+    expect(matched?.fields).toMatchObject({ ruleId: "rule_char", characterId: "char_rule" })
   })
 })
 

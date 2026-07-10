@@ -2296,6 +2296,50 @@ export class CogniaDB extends Dexie {
     this.version(105).stores({
       fleetSessions: "&id, [agent+sessionId], startedAt, endedAt, agent, outcome",
     })
+
+    // v106 — instance-level AI binding defaults + chat-management scaffolding
+    //   (multi-bot × multi-agent connectors, W1/W2). Pure additive optional
+    //   columns; no index changes, no row rewrites, no upgrade hook.
+    //
+    //   `adapterInstances`:
+    //   • `defaultTeamId?` / `defaultModel?` / `defaultProvider?` /
+    //     `defaultReasoning?` — per-bot AI binding defaults resolved by
+    //     `resolveEffectiveTeamBinding` (`lib/connectors/policy-resolve.ts`)
+    //     and the model/provider/effort chains in
+    //     `lib/claude/build-options.ts`. Conversation overrides still win;
+    //     the bot default wins over the character's own model/provider.
+    //   • `lastMissingScopes?: string[]` — platform scopes observed missing
+    //     by chat-management calls; rendered by the Lark whoami panel.
+    //
+    //   `conversationOverrides`:
+    //   • `teamDisabled?: boolean` — explicit `/team off` sentinel that
+    //     suppresses both the override teamId and the bot `defaultTeamId`.
+    //
+    //   `outboundQueue`:
+    //   • `OutboundJobSource` union gains `"skill"` (im.* built-in skills:
+    //     new-chat first message, broadcast fan-out targets).
+    //
+    //   None of these fields are indexed (all are filter-only blobs read
+    //   from rows fetched by primary key / conversationKey), so the bump is
+    //   `stores({})`.
+    this.version(106).stores({})
+
+    // v107 — inbound dispatch rules (条件规则表 v1, W3 multi-bot). Pure
+    //   additive optional column; no index changes, no row rewrites, no
+    //   upgrade hook.
+    //
+    //   `adapterInstances`:
+    //   • `dispatchRules?: DispatchRule[]` — declarative per-instance rules
+    //     (keywords / regex / senderIds / channelKinds → character | team |
+    //     workflow), evaluated in array order by
+    //     `lib/connectors/dispatch-rules.ts:matchDispatchRule`. Precedence at
+    //     dispatch (`lib/connectors/runtime.ts` ai-run branch): explicit
+    //     conversation override (`/team`, `/character`, `/workflow`,
+    //     `teamDisabled`) > first matching rule > instance defaults.
+    //
+    //   The field is a filter-only JSON blob read from rows fetched by
+    //   primary key, so the bump is `stores({})`.
+    this.version(107).stores({})
   }
 
   sessionState!: Table<SessionStateRow, string>

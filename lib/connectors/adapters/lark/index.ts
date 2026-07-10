@@ -34,6 +34,7 @@ import {
 } from "./serialize"
 import { getTenantAccessToken, getUserAccessToken } from "./auth"
 import { LarkApiError, withTatRefresh, withUserTokenRefresh } from "./auth-retry"
+import { createLarkChatManagement } from "./chat-management"
 import { resolveLarkMediaKeys } from "./upload"
 import { enrichLarkInboundMedia } from "./inbound-media"
 import { createLarkPresence } from "./presence"
@@ -556,6 +557,11 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     await doRequest(call.method, urlPath, call.payload)
   }
 
+  // Chat management (W2 multi-bot): five optional PlatformAdapter methods,
+  // paired with the `chat.create` / `chat.members` / `chat.update` /
+  // `contact.resolve` flags declared in LARK_CAPS.
+  const chatMgmt = createLarkChatManagement(opts.id, resolveCredentials)
+
   const adapter: PlatformAdapter & { addReaction?: typeof addReaction } = {
     get meta() {
       return {
@@ -579,6 +585,11 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     refreshCredentials,
     setPresenceStatus: presence.setPresenceStatus,
     pinMessage: presence.pinMessage,
+    createChat: chatMgmt.createChat,
+    addChatMembers: chatMgmt.addChatMembers,
+    removeChatMembers: chatMgmt.removeChatMembers,
+    updateChat: chatMgmt.updateChat,
+    resolveContacts: chatMgmt.resolveContacts,
     a2uiCapability: () => LARK_A2UI_CAPABILITY,
     platformSkillCapabilities: () => {
       // Lazy ESM import via the synchronous bundler entry. The barrel

@@ -226,6 +226,28 @@ export interface CodexAppServerStatus {
   requiresOpenaiAuth?: boolean
   /** `account/rateLimits/read` / `account/rateLimits/updated` snapshot. */
   rateLimits?: CodexRateLimitsInfo | null
+  /**
+   * `true` when the connected Codex CLI lacks the `skills/extraRoots/set`
+   * method, so configured extra skill folders cannot be registered. Left
+   * `undefined` until the roots are applied (or when there are none).
+   */
+  extraSkillRootsUnsupported?: boolean
+}
+
+/**
+ * Trim, drop blanks, and de-duplicate a list of extra skill folder paths before
+ * sending them over the wire. Order is preserved (first occurrence wins).
+ */
+function normalizeSkillRoots(roots: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of roots) {
+    const path = raw.trim()
+    if (!path || seen.has(path)) continue
+    seen.add(path)
+    out.push(path)
+  }
+  return out
 }
 
 interface PendingApproval {
@@ -348,6 +370,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       // Best-effort account + rate-limit snapshot for the status card; older
       // CLIs without the account surface degrade silently via callOptional.
       void this.refreshAccount()
+      // Re-register configured extra skill folders — the app-server never
+      // persists them across restarts, so every connect must re-apply.
+      void this.applyConfiguredExtraSkillRoots()
 
       this._capabilities = {
         streaming: true,
@@ -2020,6 +2045,39 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   async setSkillEnabled(path: string, enabled: boolean): Promise<void> {
     await this.peer?.sendRequest("skills/config/write", { path, enabled })
     await this.refreshSkills()
+  }
+
+  /**
+   * Register absolute folder paths as extra Codex skill roots for this
+   * app-server process (`skills/extraRoots/set`). Codex then discovers every
+   * `SKILL.md` under them, on top of the default `.agents/skills` locations.
+   * The roots are not persisted by the server, so callers re-apply on connect.
+   * Older CLIs without the method degrade silently (the status snapshot flags
+   * `extraSkillRootsUnsupported`). Returns `true` when the method was accepted.
+   */
+  async setExtraSkillRoots(roots: string[]): Promise<boolean> {
+    if (!this.peer) return false
+    const extraRoots = normalizeSkillRoots(roots)
+    await this.callOptional("skills/extraRoots/set", { extraRoots })
+    const supported = !this.unsupportedMethods.has("skills/extraRoots/set")
+    this.status = { ...this.status, extraSkillRootsUnsupported: !supported }
+    this.notifyStatus()
+    if (supported) await this.refreshSkills()
+    return supported
+  }
+
+  /**
+   * Best-effort connect-time application of the configured extra skill roots.
+   * No-ops when none are configured so an untouched process makes no RPC.
+   */
+  private async applyConfiguredExtraSkillRoots(): Promise<void> {
+    const roots = this._config?.codexOptions?.extraSkillRoots
+    if (!roots || roots.length === 0) return
+    try {
+      await this.setExtraSkillRoots(roots)
+    } catch (error) {
+      log.warn("Failed to apply Codex extra skill roots", { error })
+    }
   }
 
   getStatus(): CodexAppServerStatus {

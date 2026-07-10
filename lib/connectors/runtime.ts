@@ -27,6 +27,7 @@ import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segm
 import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-a2ui-dispatch"
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
+import { matchDispatchRule, resolveEffectiveRouting } from "./dispatch-rules"
 import type { SendContent, StoredMessage, AppSettings, ChatSession } from "@/lib/claude/types"
 import type { AuditKind } from "@/types/connectors/audit"
 import type { InboxSendPolicy } from "@/lib/claude/build-options"
@@ -491,11 +492,46 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // "adapter.error" audit row, not an unhandled rejection.
         // `adapterRow` and `override` were already fetched by the bus and
         // threaded in — no re-read here.
+        // ── Effective routing (override → dispatch rule → instance default) ──
+        // W3 inbound dispatch rules: the instance's declarative rule table is
+        // evaluated once per turn, then composed with the conversation
+        // override and the instance defaults. Computed here so the PII gate,
+        // the dispatch branches, and the audits below all agree on the same
+        // routing. `teamDisabled` (the `/team off` sentinel) suppresses the
+        // rule-sourced team AND the bot-level default.
+        const ruleHit = matchDispatchRule(adapterRow.dispatchRules, event)
+        const routing = resolveEffectiveRouting(adapterRow, override, ruleHit)
+        const effectiveTeamId = routing.teamId
+        const effectiveWorkflowId = routing.workflowId
+
+        // One-shot `dispatch.rule_matched` audit writer — appended only when
+        // the matched rule's action actually decided the routing (i.e. was
+        // not shadowed by an explicit conversation override), right before
+        // the decided branch dispatches.
+        const auditRuleDecision = async (
+          target: Partial<Record<"teamId" | "workflowId" | "characterId", string>>
+        ): Promise<void> => {
+          if (!ruleHit) return
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "dispatch.rule_matched",
+            at: Date.now(),
+            conversationKey: event.conversationKey,
+            fields: {
+              ruleId: ruleHit.rule.id,
+              ...(ruleHit.rule.name ? { ruleName: ruleHit.rule.name } : {}),
+              ...target,
+              sourceMessageId: storedMsg.id,
+            },
+          })
+        }
+
         // ── PII gate for team / workflow dispatch ──
         // Both branches below forward `event.plainText` straight into their own
         // runtimes, bypassing `safeSendPrompt`. Enforce the same fail-closed
-        // red-line here (single choke point covering both) before any dispatch.
-        if ((override?.teamId || override?.workflowId) && !isInboundTextPiiSafe(event)) {
+        // red-line here (single choke point covering both — including
+        // rule-sourced teams/workflows) before any dispatch.
+        if ((effectiveTeamId || effectiveWorkflowId) && !isInboundTextPiiSafe(event)) {
           await appendAudit({
             adapterId: event.adapterId,
             kind: "adapter.error",
@@ -504,8 +540,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             reason: "pii_blocked",
             message: "team/workflow dispatch prompt rejected by PII gate before dispatch",
             fields: {
-              ...(override?.teamId ? { teamId: override.teamId } : {}),
-              ...(override?.workflowId ? { workflowId: override.workflowId } : {}),
+              ...(effectiveTeamId
+                ? { teamId: effectiveTeamId, teamSource: routing.teamSource }
+                : {}),
+              ...(effectiveWorkflowId ? { workflowId: effectiveWorkflowId } : {}),
               sourceMessageId: storedMsg.id,
             },
           })
@@ -518,35 +556,61 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // path. The team's progress + final result fan back to this
         // conversation via the workflow-progress-runner (triggeredFrom). Skip
         // the rest of the ai-run branch on success.
-        if (override?.teamId) {
+        if (effectiveTeamId) {
+          if (routing.teamSource === "rule") {
+            await auditRuleDecision({ teamId: effectiveTeamId })
+          }
           const res = await startTeamRunFromIM({
-            teamId: override.teamId,
+            teamId: effectiveTeamId,
             goal: event.plainText,
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
             sessionId: session.id,
           })
+          const staleInstanceDefault =
+            !res.started &&
+            res.reason === "team_not_found" &&
+            routing.teamSource === "instance-default"
           await appendAudit({
             adapterId: event.adapterId,
             kind: res.started ? "team.dispatched" : "adapter.error",
             at: Date.now(),
             conversationKey: event.conversationKey,
-            ...(res.started ? {} : { reason: res.reason ?? "team_dispatch_failed" }),
-            fields: { teamId: override.teamId, sourceMessageId: storedMsg.id },
+            ...(res.started
+              ? {}
+              : {
+                  reason: staleInstanceDefault
+                    ? "instance_default_team_missing"
+                    : (res.reason ?? "team_dispatch_failed"),
+                }),
+            fields: {
+              teamId: effectiveTeamId,
+              teamSource: routing.teamSource,
+              sourceMessageId: storedMsg.id,
+            },
           })
-          break
+          // A deleted team behind the BOT default must not brick every
+          // message on the instance — fall through to the single-character
+          // ai-run below. An explicitly `/team`-bound (or rule-bound)
+          // conversation keeps the audit+stop behaviour (the operator asked
+          // for that team).
+          if (!staleInstanceDefault) break
         }
 
         // ── Visual Workflow dispatch (workflow⇄IM parity) ──
-        // When the conversation is bound to a Visual Workflow (and NOT a team —
-        // `teamId` wins above), route the turn to the workflow orchestrator via
-        // `startWorkflowFromIM`. The message text is surfaced to trigger-aware
-        // nodes as `$trigger.payload.message`; progress + final fan back through
-        // the same `workflow-progress-runner` the team path uses. Skip the rest
+        // When the conversation (or a matched dispatch rule) binds a Visual
+        // Workflow (and NOT a team — `teamId` wins above), route the turn to
+        // the workflow orchestrator via `startWorkflowFromIM`. The message
+        // text is surfaced to trigger-aware nodes as
+        // `$trigger.payload.message`; progress + final fan back through the
+        // same `workflow-progress-runner` the team path uses. Skip the rest
         // of the ai-run branch on dispatch.
-        if (override?.workflowId) {
+        if (effectiveWorkflowId) {
+          if (routing.workflowSource === "rule") {
+            await auditRuleDecision({ workflowId: effectiveWorkflowId })
+          }
           const res = await startWorkflowFromIM({
-            workflowId: override.workflowId,
+            workflowId: effectiveWorkflowId,
             runParams: { message: event.plainText },
             triggeredFrom: {
               source: "im",
@@ -561,7 +625,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             at: Date.now(),
             conversationKey: event.conversationKey,
             ...(res.ok ? {} : { reason: res.reason ?? "workflow_dispatch_failed" }),
-            fields: { workflowId: override.workflowId, sourceMessageId: storedMsg.id },
+            fields: { workflowId: effectiveWorkflowId, sourceMessageId: storedMsg.id },
           })
           break
         }
@@ -589,6 +653,20 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           break
         }
 
+        // ── Rule-sourced character (single-character path) ──
+        // A matched rule's `characterId` applies to the SEND options only
+        // (an explicit `/character` override is already folded into
+        // `resolved.characterId` by `resolveBinding` and wins). Session
+        // creation above deliberately kept `resolved.characterId` — the
+        // rule retargets this turn's persona, not the session binding.
+        const effectiveResolved: ResolvedBinding =
+          routing.characterSource === "rule" && routing.characterId
+            ? { ...resolved, characterId: routing.characterId }
+            : resolved
+        if (routing.characterSource === "rule" && routing.characterId) {
+          await auditRuleDecision({ characterId: routing.characterId })
+        }
+
         // Resolve the send options (character + twin + memory context) through
         // the shared helper so an ai-run and a draft prepare from identical
         // grounding. `emitTrace: true` mints the connector root span, ended on
@@ -596,7 +674,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const { sendOptions, appSettings } = await resolveInboundSendOptions({
           event,
           session,
-          resolved,
+          resolved: effectiveResolved,
           override,
           adapterRow,
           emitTrace: true,

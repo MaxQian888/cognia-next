@@ -10,6 +10,7 @@ import {
   listSessionsByConversationKey,
   findActiveSessionForConversation,
   createPlatformSession,
+  listSiblingConversations,
 } from "./session-bindings"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { ChatSession } from "@/lib/claude/types"
@@ -127,5 +128,57 @@ describe("session-bindings", () => {
 
   it("findActiveSessionForConversation returns undefined when nothing bound", async () => {
     expect(await findActiveSessionForConversation(KEY, undefined)).toBeUndefined()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// listSiblingConversations (W5 multi-bot same-group collaboration)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("listSiblingConversations", () => {
+  it("returns conversations bound to the same remote chat via OTHER adapters", async () => {
+    await getDb().sessions.bulkAdd([
+      imSession("s-own", 100, "telegram:tg-1:42"),
+      imSession("s-sib", 200, "telegram:tg-2:42"),
+    ])
+    const siblings = await listSiblingConversations(KEY)
+    expect(siblings).toEqual([
+      { adapterId: "tg-2", conversationKey: "telegram:tg-2:42", sessionId: "s-sib" },
+    ])
+  })
+
+  it("excludes the origin's own adapter, other chats, and other platforms", async () => {
+    await getDb().sessions.bulkAdd([
+      imSession("s-own", 100, "telegram:tg-1:42"), // own adapter → excluded
+      imSession("s-other-chat", 100, "telegram:tg-2:99"), // different remote chat
+      imSession("s-other-platform", 100, "lark:tg-2:42"), // different platform
+    ])
+    expect(await listSiblingConversations(KEY)).toEqual([])
+  })
+
+  it("excludes thread-scoped (4-part) sibling keys", async () => {
+    await getDb().sessions.bulkAdd([imSession("s-thread", 100, "telegram:tg-2:42:thread-7")])
+    expect(await listSiblingConversations(KEY)).toEqual([])
+  })
+
+  it("dedupes multiple sessions per sibling conversation, keeping the newest", async () => {
+    await getDb().sessions.bulkAdd([
+      imSession("s-old", 100, "telegram:tg-2:42"),
+      imSession("s-new", 300, "telegram:tg-2:42"),
+      imSession("s-third-bot", 200, "telegram:tg-3:42"),
+    ])
+    const siblings = await listSiblingConversations(KEY)
+    expect(siblings).toHaveLength(2)
+    expect(siblings.find((s) => s.adapterId === "tg-2")?.sessionId).toBe("s-new")
+    expect(siblings.find((s) => s.adapterId === "tg-3")?.sessionId).toBe("s-third-bot")
+  })
+
+  it("ignores sessions with unparseable keys and returns [] for an invalid origin", async () => {
+    await getDb().sessions.add({
+      ...imSession("s-bad", 100),
+      platformConversationKey: "garbage",
+    } as ChatSession)
+    expect(await listSiblingConversations(KEY)).toEqual([])
+    expect(await listSiblingConversations("not-a-key")).toEqual([])
   })
 })

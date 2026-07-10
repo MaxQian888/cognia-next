@@ -27,6 +27,12 @@ describe("LARK_CAPS", () => {
     }
   })
 
+  it("declares the four chat-management capabilities (W2 multi-bot)", () => {
+    for (const cap of ["chat.create", "chat.members", "chat.update", "contact.resolve"]) {
+      expect(LARK_CAPS).toContain(cap)
+    }
+  })
+
   it("does not include typing (no native typing for bots)", () => {
     expect(LARK_CAPS).not.toContain("typing")
   })

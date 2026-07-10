@@ -152,6 +152,20 @@ describe("createLarkAdapter", () => {
     expect(adapter.meta.transportModes).toContain("webhook")
   })
 
+  it("wires the five chat-management methods, paired with their capability flags (W2)", () => {
+    const adapter = makeAdapter()
+    // Methods present on the adapter surface…
+    expect(typeof adapter.createChat).toBe("function")
+    expect(typeof adapter.addChatMembers).toBe("function")
+    expect(typeof adapter.removeChatMembers).toBe("function")
+    expect(typeof adapter.updateChat).toBe("function")
+    expect(typeof adapter.resolveContacts).toBe("function")
+    // …and the paired flags declared in meta.capabilities.
+    for (const cap of ["chat.create", "chat.members", "chat.update", "contact.resolve"]) {
+      expect(adapter.meta.capabilities).toContain(cap)
+    }
+  })
+
   it("health() starts as 'starting'", () => {
     const adapter = makeAdapter()
     expect(adapter.health().state).toBe("starting")

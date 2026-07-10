@@ -98,7 +98,19 @@ export async function runBuiltInSkill(
 
   // 3 — PII gate on serialised args. Skill authors are encouraged to keep
   // arg shapes tight; this catches anything that leaks through despite that.
-  const serialised = safeStringify(validArgs)
+  // `piiArgFields` (identifier-lookup fields like `im.resolve_contact`'s
+  // emails/phones, destined for the platform's OWN directory) are excluded
+  // from the scan — the email detector would otherwise hard-block the
+  // skill's entire purpose. Everything else is still scanned.
+  const scanTarget =
+    skill.piiArgFields?.length && validArgs && typeof validArgs === "object"
+      ? Object.fromEntries(
+          Object.entries(validArgs as Record<string, unknown>).filter(
+            ([k]) => !skill.piiArgFields!.includes(k)
+          )
+        )
+      : validArgs
+  const serialised = safeStringify(scanTarget)
   if (!hasNoLeakingPii(serialised)) {
     // NOTE: do NOT include the raw args in the audit row — they contain PII
     // by definition. Only the redacted preview is safe.
@@ -166,6 +178,7 @@ export async function runBuiltInSkill(
     ctx.hitlBypass === true
   )
 
+  let desktopApproved = false
   if (hitlRequired) {
     // We MUST have a hitlSurface — `registry.register()` enforces this for
     // write/destructive skills, but guard anyway in case a future runtime
@@ -176,52 +189,81 @@ export async function runBuiltInSkill(
         message: `Skill "${skill.id}" requires HITL but defines no hitlSurface.`,
       }
     }
-    const surface = skill.hitlSurface(validArgs as never)
-    if (!ctx.imBinding) {
-      // Can't render confirm cards outside an IM channel. Should never
-      // happen — desktop in-app uses a different consent overlay path.
+    if (ctx.imBinding) {
+      const surface = skill.hitlSurface(validArgs as never)
+      // Persist the binding so the inbound callback can re-fire the skill
+      // with `hitlBypass: true`.
+      const actionId = `skill_invoke:${skill.id}:${cryptoRandomId()}`
+      await recordCallbackBinding({
+        adapterId: ctx.imBinding.adapterId,
+        actionId,
+        kind: "skill_invoke",
+        surfaceId: surface.rootId,
+        conversationKey: ctx.imBinding.conversationKey,
+        createdAt: now,
+        expiresAt: now + SKILL_INVOKE_TTL_MS,
+        payload: { skillId: skill.id, args: validArgs as never },
+      })
+      await safeAppendAudit({
+        adapterId: ctx.imBinding.adapterId,
+        kind: "builtin_skill_hitl_pending",
+        at: now,
+        conversationKey: ctx.imBinding.conversationKey,
+        reason: "hitl_required",
+        message: `Awaiting user confirmation for ${skill.id}`,
+        fields: { skillId: skill.id, mutation: skill.mutation, bindingActionId: actionId },
+      })
       return {
-        status: "error",
-        message: `Skill "${skill.id}" requires HITL but session has no IM binding.`,
+        status: "pending_hitl",
+        bindingId: `${ctx.imBinding.adapterId}:${actionId}`,
+        surfaceId: surface.rootId,
       }
     }
-    // Persist the binding so the inbound callback can re-fire the skill
-    // with `hitlBypass: true`.
-    const actionId = `skill_invoke:${skill.id}:${cryptoRandomId()}`
-    await recordCallbackBinding({
-      adapterId: ctx.imBinding.adapterId,
-      actionId,
-      kind: "skill_invoke",
-      surfaceId: surface.rootId,
-      conversationKey: ctx.imBinding.conversationKey,
-      createdAt: now,
-      expiresAt: now + SKILL_INVOKE_TTL_MS,
-      payload: { skillId: skill.id, args: validArgs as never },
+    // Desktop consent (W2 dual-channel HITL): suspend on the chat pane's
+    // tool-approval dialog. The sidecar is already awaiting the
+    // `plugin_tool_exec` response, so blocking here suspends the turn.
+    const { requestDesktopSkillApproval } = await import("./desktop-hitl")
+    const outcome = await requestDesktopSkillApproval({
+      sessionId: ctx.sessionId,
+      skill,
+      args: validArgs,
     })
-    await safeAppendAudit({
-      adapterId: ctx.imBinding.adapterId,
-      kind: "builtin_skill_hitl_pending",
-      at: now,
-      conversationKey: ctx.imBinding.conversationKey,
-      reason: "hitl_required",
-      message: `Awaiting user confirmation for ${skill.id}`,
-      fields: { skillId: skill.id, mutation: skill.mutation, bindingActionId: actionId },
-    })
-    return {
-      status: "pending_hitl",
-      bindingId: `${ctx.imBinding.adapterId}:${actionId}`,
-      surfaceId: surface.rootId,
+    if (!outcome.approved) {
+      const reason = outcome.reason === "expired" ? "expired" : "user_cancelled"
+      await safeAppendAudit({
+        adapterId: "<desktop>",
+        kind: "builtin_skill_hitl_rejected",
+        at: now,
+        reason,
+        message: `Desktop consent ${reason} for ${skill.id}`,
+        fields: { skillId: skill.id, mutation: skill.mutation },
+      })
+      return {
+        status: "denied",
+        reason: "hitl_rejected",
+        message:
+          outcome.reason === "expired"
+            ? `Confirmation for "${skill.id}" timed out — re-run the tool and approve the dialog.`
+            : `The user declined "${skill.id}".`,
+      }
     }
+    desktopApproved = true
   }
 
   // Audit pending → execute → audit done.
   await safeAppendAudit({
     adapterId: ctx.imBinding?.adapterId ?? "<no-adapter>",
-    kind: ctx.hitlBypass ? "builtin_skill_hitl_approved" : "builtin_skill_invoked",
+    kind:
+      ctx.hitlBypass || desktopApproved ? "builtin_skill_hitl_approved" : "builtin_skill_invoked",
     at: now,
     conversationKey: ctx.imBinding?.conversationKey,
     message: `Invoking ${skill.id}`,
-    fields: { skillId: skill.id, mutation: skill.mutation, hitlBypass: ctx.hitlBypass === true },
+    fields: {
+      skillId: skill.id,
+      mutation: skill.mutation,
+      hitlBypass: ctx.hitlBypass === true,
+      ...(desktopApproved ? { desktopApproved: true } : {}),
+    },
   })
 
   try {
@@ -342,16 +384,14 @@ function computeHitlRequired(
   bypass: boolean
 ): boolean {
   if (bypass) return false
-  if (!isImSession) {
-    // In-app desktop chat doesn't go through A2UI confirm cards. The
-    // consent overlay (Computer Use's ConsentOverlay equivalent) is the
-    // future hook here — for v1 we let desktop chat run skills without
-    // HITL because the user is staring at the chat already.
-    return false
-  }
   if (skill.mutation === "read") return false
   if (skill.mutation === "destructive") return true
-  // write
+  // write. Desktop sessions have no override row, so `requireHitlForWrites`
+  // is undefined there → HITL applies; the desktop consent dialog (W2
+  // dual-channel — `desktop-hitl.ts`) serves it. The former
+  // "desktop skips HITL" v1 shortcut is gone: combined with the tool-exec
+  // context-hydration fix it used to let IM sessions execute writes
+  // silently through the tool-call path.
   return requireHitlForWrites !== false
 }
 

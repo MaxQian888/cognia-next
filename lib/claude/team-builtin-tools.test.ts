@@ -41,6 +41,22 @@ const runTwinSearchMock = jest.fn()
 jest.mock("@/lib/ai/agent/team/twin-context", () => ({
   searchTwinKnowledge: (...a: unknown[]) => runTwinSearchMock(...a),
 }))
+// team_post_to_chat (W5) default-deps seams — all dynamic-imported by
+// defaultTeamToolDeps, so the factories run lazily during the tests.
+const enqueueOutboundMock = jest.fn()
+jest.mock("@/lib/db/outbound-jobs", () => ({
+  enqueueOutbound: (...a: unknown[]) => enqueueOutboundMock(...a),
+}))
+const appendAuditMock = jest.fn()
+jest.mock("@/lib/connectors/audit", () => ({
+  appendAudit: (...a: unknown[]) => appendAuditMock(...a),
+}))
+const findSessionByConversationKeyMock = jest.fn()
+const listSiblingConversationsDbMock = jest.fn()
+jest.mock("@/lib/connectors/session-bindings", () => ({
+  findSessionByConversationKey: (...a: unknown[]) => findSessionByConversationKeyMock(...a),
+  listSiblingConversations: (...a: unknown[]) => listSiblingConversationsDbMock(...a),
+}))
 
 const caller: TeamToolCaller = {
   teamId: "team-1",
@@ -107,6 +123,21 @@ function makeDeps(over: Partial<TeamToolDeps> = {}): {
         hits: [{ text: "redacted passage", sourceTitle: "Doc", score: 0.9 }],
       }
     }) as TeamToolDeps["searchTwinKnowledge"],
+    // team_post_to_chat (W5) — origin bound to lark:bot-a:chat-1 with one sibling.
+    resolveOriginConversation: (async () => ({
+      adapterId: "bot-a",
+      conversationKey: "lark:bot-a:chat-1",
+    })) as TeamToolDeps["resolveOriginConversation"],
+    listSiblingConversations: (async () => [
+      { adapterId: "bot-b", conversationKey: "lark:bot-b:chat-1", sessionId: "sess-b" },
+    ]) as TeamToolDeps["listSiblingConversations"],
+    messagePassesPiiGate: (async () => true) as TeamToolDeps["messagePassesPiiGate"],
+    postToConversation: (async (input) => {
+      rec("postToConversation")(input)
+    }) as TeamToolDeps["postToConversation"],
+    appendAuditEntry: (async (entry) => {
+      rec("appendAuditEntry")(entry)
+    }) as TeamToolDeps["appendAuditEntry"],
     ...over,
   }
   return { deps, calls }
@@ -696,6 +727,234 @@ describe("defaultTeamToolDeps.searchTwinKnowledge (authorization + redaction)", 
     )
     expect(runTwinSearchMock).toHaveBeenCalledWith(
       expect.objectContaining({ twinId: "twMember", query: "how" })
+    )
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// team_post_to_chat (W5 multi-bot same-group collaboration)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("team_post_to_chat", () => {
+  it("validates conversationKey and message", async () => {
+    const { deps } = makeDeps()
+    expect(
+      await runTeamBuiltinTool(TEAM_TOOL_NAMES.postToChat, { message: "hi" }, caller, deps)
+    ).toMatch(/requires a `conversationKey`/)
+    expect(
+      await runTeamBuiltinTool(
+        TEAM_TOOL_NAMES.postToChat,
+        { conversationKey: "lark:bot-a:chat-1", message: "  " },
+        caller,
+        deps
+      )
+    ).toMatch(/requires non-empty `message`/)
+  })
+
+  it("errors when the run has no IM origin", async () => {
+    const { deps, calls } = makeDeps({
+      resolveOriginConversation: (async () => null) as TeamToolDeps["resolveOriginConversation"],
+    })
+    expect(
+      await runTeamBuiltinTool(
+        TEAM_TOOL_NAMES.postToChat,
+        { conversationKey: "lark:bot-a:chat-1", message: "hi" },
+        caller,
+        deps
+      )
+    ).toMatch(/not bound to an IM conversation/)
+    expect(calls.postToConversation).toBeUndefined()
+  })
+
+  it("posts to the run's own conversation and audits team.posted_as_bot", async () => {
+    const { deps, calls } = makeDeps()
+    const out = await runTeamBuiltinTool(
+      TEAM_TOOL_NAMES.postToChat,
+      { conversationKey: "lark:bot-a:chat-1", message: "status: done" },
+      caller,
+      deps
+    )
+    expect(out).toMatch(/Posted to this run's conversation/)
+    expect((calls.postToConversation[0] as [Record<string, unknown>])[0]).toEqual({
+      adapterId: "bot-a",
+      conversationKey: "lark:bot-a:chat-1",
+      text: "status: done",
+    })
+    expect((calls.appendAuditEntry[0] as [Record<string, unknown>])[0]).toMatchObject({
+      kind: "team.posted_as_bot",
+      adapterId: "bot-a",
+      fields: expect.objectContaining({
+        fromAdapterId: "bot-a",
+        targetAdapterId: "bot-a",
+        teamId: "team-1",
+        teammateId: "tm-a",
+      }),
+    })
+  })
+
+  it("posts to a SIBLING conversation under the sibling adapter's identity", async () => {
+    const { deps, calls } = makeDeps()
+    const out = await runTeamBuiltinTool(
+      TEAM_TOOL_NAMES.postToChat,
+      { conversationKey: "lark:bot-b:chat-1", message: "posting as B" },
+      caller,
+      deps
+    )
+    expect(out).toMatch(/sibling conversation .* adapter bot-b/)
+    expect((calls.postToConversation[0] as [Record<string, unknown>])[0]).toEqual({
+      adapterId: "bot-b",
+      conversationKey: "lark:bot-b:chat-1",
+      text: "posting as B",
+    })
+    expect((calls.appendAuditEntry[0] as [Record<string, unknown>])[0]).toMatchObject({
+      kind: "team.posted_as_bot",
+      fields: expect.objectContaining({ fromAdapterId: "bot-a", targetAdapterId: "bot-b" }),
+    })
+  })
+
+  it("rejects a target that is neither the origin nor a sibling", async () => {
+    const { deps, calls } = makeDeps()
+    expect(
+      await runTeamBuiltinTool(
+        TEAM_TOOL_NAMES.postToChat,
+        { conversationKey: "lark:bot-x:chat-99", message: "hi" },
+        caller,
+        deps
+      )
+    ).toMatch(/not this run's conversation or a sibling.*im_broadcast/)
+    expect(calls.postToConversation).toBeUndefined()
+    expect(calls.appendAuditEntry).toBeUndefined()
+  })
+
+  it("denies + audits when the PII gate rejects the message", async () => {
+    const { deps, calls } = makeDeps({
+      messagePassesPiiGate: (async () => false) as TeamToolDeps["messagePassesPiiGate"],
+    })
+    expect(
+      await runTeamBuiltinTool(
+        TEAM_TOOL_NAMES.postToChat,
+        { conversationKey: "lark:bot-b:chat-1", message: "alice@example.com" },
+        caller,
+        deps
+      )
+    ).toMatch(/rejected by the PII gate/)
+    expect(calls.postToConversation).toBeUndefined()
+    expect((calls.appendAuditEntry[0] as [Record<string, unknown>])[0]).toMatchObject({
+      kind: "adapter.error",
+      reason: "pii_blocked",
+      adapterId: "bot-b",
+    })
+  })
+
+  it("manifest offers team_post_to_chat alongside the base tools", () => {
+    const names = buildTeamCollabManifestEntries().map((e) => e.name)
+    expect(names).toContain(TEAM_TOOL_NAMES.postToChat)
+  })
+})
+
+describe("defaultTeamToolDeps — team_post_to_chat wiring", () => {
+  beforeEach(() => {
+    enqueueOutboundMock.mockReset()
+    appendAuditMock.mockReset().mockResolvedValue(undefined)
+    findSessionByConversationKeyMock.mockReset().mockResolvedValue(undefined)
+    listSiblingConversationsDbMock.mockReset().mockResolvedValue([])
+  })
+
+  it("resolveOriginConversation reads the run's triggeredFrom from TeamRunContext", async () => {
+    const { registerTeamRunContext, unregisterTeamRunContext } =
+      await import("@/lib/ai/agent/team/team-run-context")
+    registerTeamRunContext({
+      runId: "run-w5",
+      teamId: "team-1",
+      triggeredFrom: { source: "im", adapterId: "bot-a", conversationKey: "lark:bot-a:chat-1" },
+    } as unknown as import("@/lib/ai/agent/team/team-run-context").TeamRunContext)
+    try {
+      const deps = await defaultTeamToolDeps()
+      expect(await deps.resolveOriginConversation({ ...caller, runId: "run-w5" })).toEqual({
+        adapterId: "bot-a",
+        conversationKey: "lark:bot-a:chat-1",
+      })
+      // No runId → no origin; unknown runId → no origin.
+      expect(
+        await deps.resolveOriginConversation({ teamId: "t", teammateId: "m", teammateName: "M" })
+      ).toBeNull()
+      expect(await deps.resolveOriginConversation({ ...caller, runId: "ghost" })).toBeNull()
+    } finally {
+      unregisterTeamRunContext("run-w5")
+    }
+  })
+
+  it("postToConversation enqueues on the durable outbound queue with a fresh idempotency key", async () => {
+    const deps = await defaultTeamToolDeps()
+    await deps.postToConversation({
+      adapterId: "bot-b",
+      conversationKey: "lark:bot-b:chat-1",
+      text: "hello",
+    })
+    expect(enqueueOutboundMock).toHaveBeenCalledTimes(1)
+    const job = enqueueOutboundMock.mock.calls[0]![0] as {
+      adapterId: string
+      conversationKey: string
+      source: string
+      request: {
+        conversationRef: Record<string, unknown>
+        segments: Array<{ type: string; text: string }>
+        metadata: { idempotencyKey: string }
+      }
+    }
+    expect(job).toMatchObject({
+      adapterId: "bot-b",
+      conversationKey: "lark:bot-b:chat-1",
+      source: "skill",
+    })
+    expect(job.request.segments).toEqual([{ type: "text", text: "hello" }])
+    expect(job.request.metadata.idempotencyKey).toBeTruthy()
+    // No bound session → synthesized conversationRef from the parsed key.
+    expect(job.request.conversationRef).toMatchObject({
+      platform: "lark",
+      adapterId: "bot-b",
+      channelId: "chat-1",
+    })
+  })
+
+  it("postToConversation prefers the bound session's conversationRef", async () => {
+    findSessionByConversationKeyMock.mockResolvedValue({
+      id: "s1",
+      platformBinding: {
+        conversationRef: { platform: "lark", adapterId: "bot-b", chatId: "oc_native" },
+      },
+    } as never)
+    const deps = await defaultTeamToolDeps()
+    await deps.postToConversation({
+      adapterId: "bot-b",
+      conversationKey: "lark:bot-b:chat-1",
+      text: "hello",
+    })
+    expect(
+      (enqueueOutboundMock.mock.calls[0]![0] as { request: { conversationRef: unknown } }).request
+        .conversationRef
+    ).toEqual({ platform: "lark", adapterId: "bot-b", chatId: "oc_native" })
+  })
+
+  it("listSiblingConversations and appendAuditEntry delegate to the real modules", async () => {
+    listSiblingConversationsDbMock.mockResolvedValue([
+      { adapterId: "bot-b", conversationKey: "lark:bot-b:chat-1", sessionId: "s" },
+    ] as never)
+    const deps = await defaultTeamToolDeps()
+    expect(await deps.listSiblingConversations("lark:bot-a:chat-1")).toHaveLength(1)
+    expect(listSiblingConversationsDbMock).toHaveBeenCalledWith("lark:bot-a:chat-1")
+    await deps.appendAuditEntry({ adapterId: "bot-b", kind: "team.posted_as_bot" })
+    expect(appendAuditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ adapterId: "bot-b", kind: "team.posted_as_bot" })
+    )
+    expect((appendAuditMock.mock.calls[0]![0] as unknown as { at: number }).at).toBeGreaterThan(0)
+  })
+
+  it("messagePassesPiiGate delegates to hasNoLeakingPiiDeep", async () => {
+    const deps = await defaultTeamToolDeps()
+    const { hasNoLeakingPiiDeep } = await import("@/lib/twin/ingest/redact")
+    expect(await deps.messagePassesPiiGate("plain safe text")).toBe(
+      hasNoLeakingPiiDeep("plain safe text")
     )
   })
 })

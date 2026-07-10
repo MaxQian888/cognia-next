@@ -103,6 +103,14 @@ export interface TeamRunContext {
    * working — consumers treat absence as the interactive (block) policy.
    */
   readonly gatePolicy?: import("./gate-policy").TeamGatePolicy
+  /**
+   * Trigger origin of this run (IM conversation binding, workflow, …).
+   * Threaded from `runTeamLifecycle`'s `deps.triggeredFrom` so run-scoped
+   * consumers (e.g. the `team_post_to_chat` collaboration tool) can resolve
+   * the originating IM conversation without a store lookup. Undefined for
+   * interactive/UI runs.
+   */
+  readonly triggeredFrom?: import("@/types/workflow/visual").WorkflowTriggeredFrom
   readonly storeWriter: TeamStoreWriter
   /**
    * Per-teammate cache of capability resolution. Populated lazily by the
