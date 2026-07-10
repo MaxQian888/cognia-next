@@ -29,8 +29,7 @@ let actionHandler:
     }) => void)
   | null = null
 let dataChangeHandler:
-  | ((change: { surfaceId: string; path: string; value: unknown }) => void)
-  | null = null
+  ((change: { surfaceId: string; path: string; value: unknown }) => void) | null = null
 
 jest.mock("@/lib/a2ui/catalog", () => ({
   registerComponent: (...args: unknown[]) => mockRegisterCatalogComponent(...args),
@@ -245,5 +244,65 @@ describe("PluginA2UIBridge", () => {
 
     expect(registry.registerTemplate).toHaveBeenCalledWith("plugin-a", template)
     expect(registry.unregisterTemplate).toHaveBeenCalledWith("plugin-a:analytics")
+  })
+})
+
+// ── W4.1: first-wins across plugins, owner-scoped teardown ───────────────────
+describe("A2UI first-wins conflict handling (W4.1)", () => {
+  let registry: jest.Mocked<PluginRegistry>
+  let bridge: PluginA2UIBridge
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockA2UISubscribe.mockImplementation(() => jest.fn())
+    registry = createMockRegistry()
+    bridge = new PluginA2UIBridge({
+      registry,
+      hooksManager: createMockHooksManager(),
+      contextResolver: () => undefined,
+    })
+  })
+
+  it("keeps the first plugin's catalog entry when a second plugin claims the type", () => {
+    bridge.registerComponent("plugin-a", createMockComponent())
+    mockRegisterCatalogComponent.mockClear()
+    mockRegisterPluginComponent.mockClear()
+
+    bridge.registerComponent("plugin-b", createMockComponent())
+
+    // Catalog NOT overwritten; loser never tracked in the plugin store...
+    expect(mockRegisterCatalogComponent).not.toHaveBeenCalled()
+    expect(mockRegisterPluginComponent).not.toHaveBeenCalled()
+    // ...but the rejection still routes through the registry's conflict channel.
+    expect(registry.registerComponent).toHaveBeenCalledWith("plugin-b", expect.anything())
+  })
+
+  it("allows a same-plugin re-registration (hot reload)", () => {
+    bridge.registerComponent("plugin-a", createMockComponent())
+    mockRegisterCatalogComponent.mockClear()
+    bridge.registerComponent("plugin-a", createMockComponent())
+    expect(mockRegisterCatalogComponent).toHaveBeenCalledTimes(1)
+  })
+
+  it("disabling the rejected plugin does not remove the winner's registration", () => {
+    bridge.registerComponent("plugin-a", createMockComponent())
+    bridge.registerComponent("plugin-b", createMockComponent())
+    mockUnregisterCatalogComponent.mockClear()
+    registry.unregisterComponent.mockClear()
+
+    bridge.unregisterPluginComponents("plugin-b")
+
+    expect(mockUnregisterCatalogComponent).not.toHaveBeenCalled()
+    expect(registry.unregisterComponent).not.toHaveBeenCalled()
+
+    // The winner's teardown still works.
+    bridge.unregisterPluginComponents("plugin-a")
+    expect(mockUnregisterCatalogComponent).toHaveBeenCalledWith("PluginWidget")
+  })
+
+  it("ownership guard also protects direct unregisterComponent calls", () => {
+    bridge.registerComponent("plugin-a", createMockComponent())
+    bridge.unregisterComponent("PluginWidget", "plugin-b")
+    expect(mockUnregisterCatalogComponent).not.toHaveBeenCalled()
   })
 })
