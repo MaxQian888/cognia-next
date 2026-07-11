@@ -193,6 +193,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     clipboard: layer.clipboard
       ? { ...acc.clipboard, ...stripUndefined(layer.clipboard) }
       : acc.clipboard,
+    logging: layer.logging ? { ...acc.logging, ...stripUndefined(layer.logging) } : acc.logging,
     editor: normalizeEditor(layer.editor, acc.editor),
     notices: layer.notices ? { ...acc.notices, ...stripUndefined(layer.notices) } : acc.notices,
     streamIdleTimeoutMs: layer.streamIdleTimeoutMs ?? acc.streamIdleTimeoutMs,

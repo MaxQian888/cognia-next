@@ -177,6 +177,62 @@ export const clipboardSchema = z
   .strict()
 export type ClipboardConfig = z.infer<typeof clipboardSchema>
 
+/**
+ * CLI file-log levels, ordered least → most severe. Controls which sidecar /
+ * MCP events are persisted to `~/.cognia/logs/mcp.log` (the in-TUI `/mcp logs`
+ * panel always receives every event; this only gates the durable file).
+ */
+export const CLI_LOG_LEVELS = ["debug", "info", "warn", "error"] as const
+export type CliLogLevel = (typeof CLI_LOG_LEVELS)[number]
+
+/**
+ * Logging preferences for the CLI's durable log files under
+ * `~/.cognia/logs/`. Every field is optional; absent values fall back to
+ * {@link CLI_LOGGING_DEFAULTS} (which reproduce the historic hard-coded
+ * behavior: info+ to mcp.log, 2 MiB rotation, unrotated crash.log).
+ */
+export const cliLoggingSchema = z
+  .object({
+    /** Minimum severity persisted to `mcp.log`. */
+    fileLevel: z.enum(CLI_LOG_LEVELS).optional(),
+    /** Size threshold (KiB) at which `mcp.log` rotates to `mcp.log.1`. */
+    mcpLogMaxKb: z.number().int().min(64).optional(),
+    /** Size threshold (KiB) at which `crash.log` rotates to `crash.log.1`;
+     * `0` keeps the historic append-forever behavior. */
+    crashLogMaxKb: z.number().int().min(0).optional(),
+  })
+  .strict()
+export type CliLoggingConfig = z.infer<typeof cliLoggingSchema>
+
+/** Fully-resolved logging preferences. */
+export interface ResolvedCliLoggingConfig {
+  fileLevel: CliLogLevel
+  mcpLogMaxKb: number
+  crashLogMaxKb: number
+}
+
+/** Baseline logging behavior (matches the previous hard-coded constants). */
+export const CLI_LOGGING_DEFAULTS: ResolvedCliLoggingConfig = {
+  fileLevel: "info",
+  mcpLogMaxKb: 2048,
+  crashLogMaxKb: 1024,
+}
+
+/** Resolve the sparse `logging` config section against {@link CLI_LOGGING_DEFAULTS}. */
+export function resolveCliLoggingConfig(
+  logging: CliLoggingConfig | undefined
+): ResolvedCliLoggingConfig {
+  return { ...CLI_LOGGING_DEFAULTS, ...(logging ? stripUndefinedShallow(logging) : {}) }
+}
+
+/** Rank of a {@link CliLogLevel} for threshold comparisons (higher = more severe). */
+export function cliLogLevelRank(level: string): number {
+  const index = CLI_LOG_LEVELS.indexOf(level as CliLogLevel)
+  // Unknown levels (e.g. "notice" from a misbehaving MCP server) rank as
+  // "info" so they are neither always dropped nor always kept.
+  return index === -1 ? CLI_LOG_LEVELS.indexOf("info") : index
+}
+
 /** How the `command` jumps to a line/col when opening a file. Drives the arg
  * shape in `tui/runtime/editor.describeEditor` for an editor not in its table. */
 export const EDITOR_GOTO_FORMATS = ["vscode", "sublime", "vim", "jetbrains", "none"] as const
@@ -636,6 +692,9 @@ export const cliConfigFileSchema = z
     /** Clipboard OSC 52 strategy for `/copy` & the copy keybinding. Absent ⇒
      * `"auto"` (native helper locally, OSC 52 over SSH). */
     clipboard: clipboardSchema.optional(),
+    /** Durable-log preferences (`~/.cognia/logs/`): mcp.log file level +
+     * rotation size, crash.log rotation. Absent ⇒ {@link CLI_LOGGING_DEFAULTS}. */
+    logging: cliLoggingSchema.optional(),
     /** Preferred external editor for `/open` and clickable tool-card paths. A
      * bare string is sugar for `{ command }`. Absent ⇒ auto-detected. */
     editor: z.union([z.string().min(1), editorConfigSchema]).optional(),
@@ -816,6 +875,9 @@ export interface ResolvedConfig {
   /** Clipboard OSC 52 strategy (`auto` / `always` / `never`). Absent ⇒ `auto`
    * (native helper locally, OSC 52 escape over SSH). */
   clipboard?: ClipboardConfig
+  /** Durable-log preferences (mcp.log level/rotation, crash.log rotation).
+   * Sparse; resolved per-use via {@link resolveCliLoggingConfig}. */
+  logging?: CliLoggingConfig
   /** Preferred external editor (normalized to the object form). Absent ⇒
    * auto-detected at use time by `tui/runtime/editor.detectEditor`. */
   editor?: EditorConfig

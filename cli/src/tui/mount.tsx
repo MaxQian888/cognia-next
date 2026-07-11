@@ -18,7 +18,7 @@ import { isTrusted } from "../config/trusted-folders"
 import { resolveLayoutMode, readLayoutCapability } from "./layout-mode"
 import { enterAltScreen, exitAltScreen, applyMouseMode, resetMouse } from "./screen"
 import { resetTerminalTitle } from "./terminal-title"
-import { DEFAULT_MOUSE_MODE } from "../config/schema"
+import { DEFAULT_MOUSE_MODE, resolveCliLoggingConfig } from "../config/schema"
 import type { CreateSession } from "./hooks/useAgentSession"
 import type { ResolvedConfig } from "../config/schema"
 
@@ -41,7 +41,10 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   // async faults (uncaughtException / unhandledRejection) to ~/.cognia/logs, and
   // keep the TUI alive on a stray rejection instead of letting Node tear it down
   // and smear the terminal. Guards are removed in the `finally` restore below.
-  const crashLogger = defaultCrashLogger(home)
+  const crashLogger = defaultCrashLogger(
+    home,
+    resolveCliLoggingConfig(deps.config.logging).crashLogMaxKb * 1024
+  )
   const uninstallCrashGuards = installProcessCrashGuards(crashLogger)
   // Pin the displayed model to the one the agent will actually run with, so the
   // banner/footer/`/model` list are in sync from the very first frame — not just

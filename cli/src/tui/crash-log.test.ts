@@ -92,3 +92,53 @@ describe("formatCrashRecord", () => {
     expect(JSON.parse(line)).toEqual({ time: "t", source: "s", message: "m" })
   })
 })
+
+describe("createCrashLogger — rotation", () => {
+  function seams(initialSize: number) {
+    const lines: string[] = []
+    const rotations: Array<[string, string]> = []
+    let size = initialSize
+    const log = createCrashLogger({
+      file: "/tmp/crash.log",
+      append: (_f, line) => {
+        lines.push(line)
+        size += Buffer.byteLength(line, "utf8")
+      },
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+      maxBytes: 200,
+      sizeOf: () => size,
+      rotate: (file, rotated) => {
+        rotations.push([file, rotated])
+        size = 0
+      },
+    })
+    return { log, lines, rotations }
+  }
+
+  it("rotates to crash.log.1 once the file would exceed maxBytes", () => {
+    const s = seams(190)
+    s.log("render", new Error("boom"))
+    expect(s.rotations).toEqual([["/tmp/crash.log", "/tmp/crash.log.1"]])
+    expect(s.lines).toHaveLength(1)
+  })
+
+  it("does not rotate an empty or small file", () => {
+    const s = seams(0)
+    s.log("render", new Error("boom"))
+    expect(s.rotations).toEqual([])
+  })
+
+  it("never rotates when maxBytes is absent (historic behavior)", () => {
+    const lines: string[] = []
+    const rotations: string[] = []
+    const log = createCrashLogger({
+      file: "/tmp/crash.log",
+      append: (_f, line) => void lines.push(line),
+      sizeOf: () => 10_000_000,
+      rotate: () => void rotations.push("rotated"),
+    })
+    log("render", new Error("boom"))
+    expect(rotations).toEqual([])
+    expect(lines).toHaveLength(1)
+  })
+})

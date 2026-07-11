@@ -165,3 +165,55 @@ describe("mcp-log-file — real filesystem", () => {
     expect(fs.existsSync(`${file}.1`)).toBe(true)
   })
 })
+
+describe("mcp-log-file — level filter + live getters", () => {
+  it("skips entries below minLevel and keeps those at or above it", () => {
+    const fake = fakeFs()
+    const write = createMcpLogFileWriter({
+      file: "/log/mcp.log",
+      fsOps: fake.ops,
+      minLevel: "warn",
+    })
+    write(entry({ level: "debug", message: "dropped-debug" }))
+    write(entry({ level: "info", message: "dropped-info" }))
+    write(entry({ level: "warn", message: "kept-warn" }))
+    write(entry({ level: "error", message: "kept-error" }))
+    const content = fake.files.get("/log/mcp.log") ?? ""
+    expect(content).not.toContain("dropped-debug")
+    expect(content).not.toContain("dropped-info")
+    expect(content).toContain("kept-warn")
+    expect(content).toContain("kept-error")
+  })
+
+  it("re-reads a minLevel getter per write (live settings change)", () => {
+    const fake = fakeFs()
+    let level = "error"
+    const write = createMcpLogFileWriter({
+      file: "/log/mcp.log",
+      fsOps: fake.ops,
+      minLevel: () => level,
+    })
+    write(entry({ level: "info", message: "before-change" }))
+    level = "debug"
+    write(entry({ level: "info", message: "after-change" }))
+    const content = fake.files.get("/log/mcp.log") ?? ""
+    expect(content).not.toContain("before-change")
+    expect(content).toContain("after-change")
+  })
+
+  it("re-reads a maxBytes getter per write", () => {
+    const fake = fakeFs()
+    let max = 10_000_000
+    const lineLen = formatMcpLogFileLine(entry({ message: "x".repeat(40) })).length
+    const write = createMcpLogFileWriter({
+      file: "/log/mcp.log",
+      fsOps: fake.ops,
+      maxBytes: () => max,
+    })
+    write(entry({ message: "x".repeat(40) }))
+    write(entry({ message: "x".repeat(40) }))
+    max = lineLen // next write must rotate
+    write(entry({ message: "x".repeat(40) }))
+    expect(fake.rotations).toEqual([["/log/mcp.log", "/log/mcp.log.1"]])
+  })
+})

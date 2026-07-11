@@ -45,12 +45,40 @@ export interface CrashLoggerDeps {
   append?: (file: string, line: string) => void
   /** Clock — defaults to the real wall clock. */
   now?: () => Date
+  /** Rotate to `<file>.1` once the file exceeds this many bytes before a
+   * write; `0`/absent keeps the historic append-forever behavior. Crashes are
+   * rare, so this stats the file per write instead of tracking a counter. */
+  maxBytes?: number
+  /** Size probe seam — defaults to a real `statSync` (0 when missing). */
+  sizeOf?: (file: string) => number
+  /** Rotation seam — defaults to a real rename that drops any prior `.1`. */
+  rotate?: (file: string, rotated: string) => void
 }
 
 /** Real-fs append: ensures the parent dir exists, then appends the line. */
 function realAppend(file: string, line: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   fs.appendFileSync(file, line, "utf8")
+}
+
+/** Real-fs size probe (0 when the file doesn't exist). */
+function realSizeOf(file: string): number {
+  try {
+    return fs.statSync(file).size
+  } catch {
+    return 0
+  }
+}
+
+/** Real-fs rotation: drop any prior generation (renameSync fails on Windows
+ * when the destination exists), then rename. */
+function realRotate(file: string, rotated: string): void {
+  try {
+    fs.rmSync(rotated, { force: true })
+  } catch {
+    // ignore — a missing/locked prior generation shouldn't block rotation
+  }
+  fs.renameSync(file, rotated)
 }
 
 /**
@@ -61,6 +89,8 @@ function realAppend(file: string, line: string): void {
 export function createCrashLogger(deps: CrashLoggerDeps): CrashLogger {
   const append = deps.append ?? realAppend
   const now = deps.now ?? (() => new Date())
+  const sizeOf = deps.sizeOf ?? realSizeOf
+  const rotate = deps.rotate ?? realRotate
   return (source, error, info) => {
     const err = error instanceof Error ? error : new Error(String(error))
     const rec: CrashRecord = {
@@ -71,14 +101,22 @@ export function createCrashLogger(deps: CrashLoggerDeps): CrashLogger {
       ...(info ? { info } : {}),
     }
     try {
-      append(deps.file, formatCrashRecord(rec))
+      const line = formatCrashRecord(rec)
+      if (deps.maxBytes && deps.maxBytes > 0) {
+        const size = sizeOf(deps.file)
+        if (size > 0 && size + Buffer.byteLength(line, "utf8") > deps.maxBytes) {
+          rotate(deps.file, `${deps.file}.1`)
+        }
+      }
+      append(deps.file, line)
     } catch {
       // Intentionally ignored — see the doc comment.
     }
   }
 }
 
-/** Convenience: a real-fs crash logger writing under the given CLI home dir. */
-export function defaultCrashLogger(home: string): CrashLogger {
-  return createCrashLogger({ file: crashLogPath(home) })
+/** Convenience: a real-fs crash logger writing under the given CLI home dir.
+ * `maxBytes` bounds crash.log via one-generation rotation (0/absent = never). */
+export function defaultCrashLogger(home: string, maxBytes?: number): CrashLogger {
+  return createCrashLogger({ file: crashLogPath(home), maxBytes })
 }

@@ -12,6 +12,7 @@
 import fs from "node:fs"
 import path from "node:path"
 
+import { cliLogLevelRank, type ResolvedCliLoggingConfig } from "../../config/schema"
 import type { McpLogEntry } from "../state/types"
 
 /** Absolute path to the MCP log for a given CLI home dir. */
@@ -72,8 +73,13 @@ const realFsOps: McpLogFsOps = {
 export interface McpLogFileDeps {
   /** Target log file (absolute). */
   file: string
-  /** Rotate once the file would exceed this many bytes. Default ~2 MB. */
-  maxBytes?: number
+  /** Rotate once the file would exceed this many bytes. Default ~2 MB. A
+   * getter is re-read per write, so a live settings change applies without
+   * rebuilding the writer. */
+  maxBytes?: number | (() => number)
+  /** Minimum severity persisted (`debug` < `info` < `warn` < `error`); entries
+   * below it are skipped. Absent ⇒ everything. Getter = live re-read. */
+  minLevel?: string | (() => string)
   /** Filesystem seam — defaults to real fs. */
   fsOps?: McpLogFsOps
 }
@@ -87,12 +93,15 @@ export type McpLogFileWriter = (entry: McpLogFileEntry) => void
  * rotation doesn't `stat` on every line.
  */
 export function createMcpLogFileWriter(deps: McpLogFileDeps): McpLogFileWriter {
-  const maxBytes = deps.maxBytes ?? 2_000_000
   const ops = deps.fsOps ?? realFsOps
   const rotated = `${deps.file}.1`
   let size = -1 // lazy seed
   let dirEnsured = false
   return (entry) => {
+    const minLevel = typeof deps.minLevel === "function" ? deps.minLevel() : deps.minLevel
+    if (minLevel && cliLogLevelRank(entry.level) < cliLogLevelRank(minLevel)) return
+    const maxBytes =
+      (typeof deps.maxBytes === "function" ? deps.maxBytes() : deps.maxBytes) ?? 2_000_000
     const line = formatMcpLogFileLine(entry)
     // Count UTF-8 BYTES, not UTF-16 code units: `size` is seeded from the file's
     // real byte size, so using `line.length` undercounts multibyte (CJK/emoji)
@@ -117,7 +126,16 @@ export function createMcpLogFileWriter(deps: McpLogFileDeps): McpLogFileWriter {
   }
 }
 
-/** Convenience: a real-fs MCP log writer under the given CLI home dir. */
-export function defaultMcpLogFileWriter(home: string): McpLogFileWriter {
-  return createMcpLogFileWriter({ file: mcpLogFilePath(home) })
+/** Convenience: a real-fs MCP log writer under the given CLI home dir. When
+ * resolved logging prefs are supplied they set the persisted file level and
+ * rotation size (the caller rebuilds the writer when the prefs change). */
+export function defaultMcpLogFileWriter(
+  home: string,
+  logging?: ResolvedCliLoggingConfig
+): McpLogFileWriter {
+  return createMcpLogFileWriter({
+    file: mcpLogFilePath(home),
+    maxBytes: logging ? logging.mcpLogMaxKb * 1024 : undefined,
+    minLevel: logging?.fileLevel,
+  })
 }

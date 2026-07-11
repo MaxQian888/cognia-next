@@ -27,6 +27,7 @@ import { defaultMcpLogFileWriter, type McpLogFileWriter } from "../runtime/mcp-l
 import { parseRateLimitHeaders, rateLimitWarning } from "../format/rate-limits"
 import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import { resolveCliLoggingConfig } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ThinkingLevel } from "../../config/schema"
 import type { Cell, PermissionMode, TuiAction } from "../state/types"
@@ -209,9 +210,17 @@ export function useAgentSession({
   // Durable MCP-log file sink (rotating `~/.cognia/logs/mcp.log`). Home-scoped;
   // built once (useMemo, not a render-time ref write) so the effect below keeps a
   // stable identity. Injected in tests to stay off-disk.
+  // The writer is rebuilt when the logging prefs change (its internal size
+  // counter re-seeds lazily from the file), so a `/settings → Logging` change
+  // applies from the next captured line.
   const writeMcpLogFile = useMemo<McpLogFileWriter>(
-    () => appendMcpLog ?? defaultMcpLogFileWriter(resolveHome(process.env, os.homedir())),
-    [appendMcpLog]
+    () =>
+      appendMcpLog ??
+      defaultMcpLogFileWriter(
+        resolveHome(process.env, os.homedir()),
+        resolveCliLoggingConfig(config.logging)
+      ),
+    [appendMcpLog, config.logging]
   )
   // Throttle the "MCP server error" toast so a burst of stderr error lines warns
   // once, not once per line. Holds the epoch ms of the last error toast.
