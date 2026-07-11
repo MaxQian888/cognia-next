@@ -128,6 +128,22 @@
     "trace": "追踪",
     "warn": "警告"
   },
+  "nativeViewer": {
+    "empty": "扫描窗口内没有匹配的日志条目。",
+    "entryCount": "{count} 条",
+    "filePlain": "普通日志",
+    "fileSelectLabel": "日志文件",
+    "fileStructured": "结构化日志",
+    "levelAll": "全部级别",
+    "levelSelectLabel": "最低级别",
+    "refresh": "刷新",
+    "retry": "重试",
+    "searchLabel": "搜索原生日志",
+    "searchPlaceholder": "过滤消息…",
+    "truncatedBadge": "扫描窗口外还有更早的条目",
+    "unavailableDescription": "移动端需先与桌面端配对——原生日志读取自桌面应用。",
+    "unavailableTitle": "原生日志不可用"
+  },
   "panel": {
     "addBookmark": "收藏此日志",
     "agentTrace": {

@@ -60,6 +60,9 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "twin_job_status",
   // App-data backup export (pure read/snapshot).
   "backup_export",
+  // Native log read-back (bounded tail reads over on-disk log files).
+  "logs_query",
+  "logs_list_files",
 ])
 
 // ---------------------------------------------------------------------------

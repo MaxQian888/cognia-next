@@ -10,8 +10,10 @@ import { invoke } from "@tauri-apps/api/core"
 let isTauriValue = false
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriValue,
+  transport: { call: jest.fn(), subscribe: jest.fn() },
 }))
 
+import { transport } from "@/lib/tauri"
 import {
   getNativeLoggingReadiness,
   getNativeLoggingReadinessSnapshot,
@@ -22,6 +24,8 @@ import {
   openNativeLogDirectory,
   getTracingLevels,
   setTracingLevels,
+  queryNativeLogs,
+  listNativeLogFiles,
 } from "./native-logging"
 import {
   resetNativeLoggingReadinessForTest,
@@ -280,5 +284,68 @@ describe("tracing level controls", () => {
     isTauriValue = true
     mockedInvoke.mockRejectedValueOnce(new Error("boom"))
     expect(await setTracingLevels([])).toBeNull()
+  })
+})
+
+describe("native log read-back (transport-based)", () => {
+  const mockedCall = transport.call as jest.Mock
+
+  beforeEach(() => {
+    mockedCall.mockReset()
+  })
+
+  it("queryNativeLogs sends the query through the unified transport", async () => {
+    const result = {
+      entries: [
+        {
+          timestamp: "2026-07-11T01:00:00Z",
+          epochMs: 1,
+          level: "warn",
+          target: "network",
+          message: "slow",
+        },
+      ],
+      fileSize: 10,
+      scannedBytes: 10,
+      truncated: false,
+      path: "C:/logs/cognia-structured.log",
+    }
+    mockedCall.mockResolvedValueOnce(result)
+
+    const out = await queryNativeLogs({ file: "structured", minLevel: "warn", limit: 50 })
+
+    expect(out).toEqual(result)
+    expect(mockedCall).toHaveBeenCalledWith("logs_query", {
+      query: { file: "structured", minLevel: "warn", limit: 50 },
+    })
+  })
+
+  it("queryNativeLogs defaults to an empty query object", async () => {
+    mockedCall.mockResolvedValueOnce({
+      entries: [],
+      fileSize: 0,
+      scannedBytes: 0,
+      truncated: false,
+      path: "",
+    })
+    await queryNativeLogs()
+    expect(mockedCall).toHaveBeenCalledWith("logs_query", { query: {} })
+  })
+
+  it("queryNativeLogs returns null when the transport rejects", async () => {
+    mockedCall.mockRejectedValueOnce(new Error("unpaired"))
+    expect(await queryNativeLogs()).toBeNull()
+  })
+
+  it("listNativeLogFiles returns the file listing", async () => {
+    const files = [{ name: "cognia.log", size: 123, modifiedMs: 5 }]
+    mockedCall.mockResolvedValueOnce(files)
+    expect(await listNativeLogFiles()).toEqual(files)
+    expect(mockedCall).toHaveBeenCalledWith("logs_list_files", {})
+  })
+
+  it("listNativeLogFiles returns null when the transport rejects", async () => {
+    mockedCall.mockRejectedValueOnce(new Error("web stub"))
+    expect(await listNativeLogFiles()).toBeNull()
   })
 })

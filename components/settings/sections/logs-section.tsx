@@ -6,6 +6,7 @@ import { ExternalLinkIcon, ScrollTextIcon } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { LogSettings } from "@/components/logging/log-settings"
+import { NativeLogViewer } from "@/components/logging/native-log-viewer"
 
 interface Props {
   /** Closes the host Settings dialog/sheet when the user clicks "Open Log Panel". */
@@ -46,6 +47,18 @@ export function LogsSection({ onClose }: Props) {
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground pt-0">
           {t("logs.linkCardFooter")}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">{t("logs.nativeCardTitle")}</CardTitle>
+          <CardDescription className="text-xs mt-0.5">
+            {t("logs.nativeCardDescription")}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <NativeLogViewer />
         </CardContent>
       </Card>
 
