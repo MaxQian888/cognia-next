@@ -257,6 +257,11 @@
     "title": "New goal",
     "trigger": "New goal"
   },
+  "remote": {
+    "applied": "Applied on desktop.",
+    "failed": "Couldn't reach the desktop — try again.",
+    "notAllowed": "This device doesn't have remote-control permission."
+  },
   "status": {
     "active": "active",
     "budget_limited": "budget limited",

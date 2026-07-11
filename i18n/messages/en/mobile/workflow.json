@@ -10,6 +10,12 @@
     "rejectedToast": "Rejected.",
     "respondFailedToast": "Couldn't reach the desktop — try again."
   },
+  "cancelRun": "Cancel run",
+  "cancelRunConfirm": "Cancel run",
+  "cancelRunDescription": "Asks the desktop to stop this run. Steps already completed keep their results.",
+  "cancelRunFailed": "Couldn't cancel — the desktop may be unreachable or the run already finished.",
+  "cancelRunSuccess": "Run cancelled.",
+  "cancelRunTitle": "Cancel this run?",
   "density": {
     "comfortable": "Comfortable rows",
     "compact": "Compact rows"

@@ -30,6 +30,7 @@ import {
 import { cn } from "@/lib/utils"
 import { getDb } from "@/lib/db/schema"
 import { deleteAllRunsForWorkflow } from "@/lib/db/workflows"
+import { transport } from "@/lib/tauri/transport-instance"
 import {
   DEFAULT_RUN_FILTERS,
   filterRuns,
@@ -57,6 +58,8 @@ export function MobileRunsList({ workflowId }: MobileRunsListProps) {
   )
   const [status, setStatus] = useState<RunStatus | "all">("all")
   const [confirmClear, setConfirmClear] = useState(false)
+  const [cancelTarget, setCancelTarget] = useState<WorkflowRunRow | null>(null)
+  const [cancelling, setCancelling] = useState(false)
   // Pin "now" at mount so the date-window boundary stays stable across renders.
   const [now] = useState(() => Date.now())
 
@@ -68,6 +71,30 @@ export function MobileRunsList({ workflowId }: MobileRunsListProps) {
     const filters: RunListFilters = { ...DEFAULT_RUN_FILTERS, status }
     return filterRuns(workflowRuns, filters, now)
   }, [workflowRuns, status, now])
+
+  // Remote-cancel an in-flight run on the desktop. The run row's status
+  // flips via the normal sync-down of `workflowRuns`, so no local mutation.
+  const handleCancelRun = async () => {
+    const run = cancelTarget
+    setCancelTarget(null)
+    if (!run) return
+    setCancelling(true)
+    try {
+      const result = (await transport.call("workflow_cancel_run", { runId: run.id })) as {
+        cancelled?: boolean
+      } | null
+      if (result?.cancelled) {
+        toast.success(t("cancelRunSuccess"))
+      } else {
+        toast.error(t("cancelRunFailed"))
+      }
+    } catch {
+      // Desktop unreachable — the list keeps rendering the last-synced rows.
+      toast.error(t("cancelRunFailed"))
+    } finally {
+      setCancelling(false)
+    }
+  }
 
   const handleClear = async () => {
     setConfirmClear(false)
@@ -112,7 +139,34 @@ export function MobileRunsList({ workflowId }: MobileRunsListProps) {
         ) : null}
       </div>
 
-      <RunVerticalGantt runs={runs} className="rounded-md border border-border bg-card" />
+      <RunVerticalGantt
+        runs={runs}
+        onCancelRun={cancelling ? undefined : setCancelTarget}
+        className="rounded-md border border-border bg-card"
+      />
+
+      <AlertDialog
+        open={cancelTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setCancelTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("cancelRunTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("cancelRunDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tList("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void handleCancelRun()}
+              data-testid="mobile-runs-confirm-cancel-run"
+            >
+              {t("cancelRunConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
         <AlertDialogContent>

@@ -1,16 +1,34 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { EyeIcon, PauseIcon, PinIcon, PinOffIcon, PlayIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { WorkflowGraphViewer, type WorkflowGraph } from "./workflow-graph-viewer"
 import { enqueue as enqueueOutbound } from "@/lib/db/mobile-outbound-queue"
 import { useSettingsStore } from "@/stores/settings"
 import type { WorkflowRow } from "@/types/workflow/visual"
+
+/**
+ * Project the persisted React Flow graph into the read-only viewer's shape.
+ * Disabled nodes still render — the viewer is about orientation, and hiding
+ * them would make the arrow chain lie about the saved graph.
+ */
+function toViewerGraph(workflow: WorkflowRow): WorkflowGraph {
+  return {
+    nodes: workflow.nodes.map((n) => ({
+      id: n.id,
+      label: n.data?.label,
+      kind: n.type,
+      description: typeof n.data?.notes === "string" ? n.data.notes : undefined,
+    })),
+    edges: workflow.edges.map((e) => ({ from: e.source, to: e.target })),
+  }
+}
 
 import { WorkflowDeleteConfirm } from "./workflow-delete-confirm"
 
@@ -29,8 +47,15 @@ export interface WorkflowRowActionsSheetProps {
  */
 export function WorkflowRowActionsSheet({ workflow, onOpenChange }: WorkflowRowActionsSheetProps) {
   const t = useTranslations("mobile.workflowList.actions")
-  const router = useRouter()
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [graphOpen, setGraphOpen] = useState(false)
+  // Android hardware / browser back closes the sheet instead of navigating.
+  // (Must run before the `!workflow` early return — rules of hooks.)
+  useBackDismiss(workflow !== null && !deleteOpen && !graphOpen, () => onOpenChange(false))
+  useBackDismiss(graphOpen, () => {
+    setGraphOpen(false)
+    onOpenChange(false)
+  })
 
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
@@ -63,26 +88,38 @@ export function WorkflowRowActionsSheet({ workflow, onOpenChange }: WorkflowRowA
     onOpenChange(false)
   }
 
-  async function handlePauseSchedule() {
+  // Cron trigger nodes carried in the synced workflow snapshot. The desktop's
+  // scheduler mirrors `enabled` into `node.data.disabled` on every flip
+  // (see lib/scheduler/sources/workflow-source.ts), so the snapshot is the
+  // phone's source of truth for the paused/active state.
+  const cronTriggers = workflow.nodes.filter((n) => n.type === "trigger.cron")
+  const schedulePaused =
+    cronTriggers.length > 0 && cronTriggers.every((n) => n.data?.disabled === true)
+
+  async function handleToggleSchedule() {
     if (!workflow) return
-    // Wave 4 / ADR-0026 — `workflow_schedule_pause` is not yet in the
-    // mobile outbound command surface (see lib/db/mobile-outbound-types.ts
-    // SOURCE OF TRUTH). For now we toast a deferred-to-desktop hint so
-    // the action sheet entry surfaces the intent without enqueuing an
-    // RPC that the Rust dispatcher would 404.
-    toast.message(t("pauseDeferred"))
+    const command = schedulePaused ? "workflow_schedule_resume" : "workflow_schedule_pause"
+    for (const node of cronTriggers) {
+      await enqueueOutbound({
+        command,
+        payload: { triggerId: node.id },
+        label: `${schedulePaused ? "Resume" : "Pause"} schedule · ${workflow.name}`,
+      })
+    }
+    toast.success(t(schedulePaused ? "resumeQueued" : "pauseQueued", { name: workflow.name }))
     onOpenChange(false)
   }
 
   function handleViewGraph() {
     if (!workflow) return
-    router.push(`/workflows/editor?id=${encodeURIComponent(workflow.id)}`)
-    onOpenChange(false)
+    // The desktop canvas editor is unusable on a phone — open the read-only
+    // vertical graph viewer in a bottom sheet instead (Wave 2.9 wiring).
+    setGraphOpen(true)
   }
 
   return (
     <>
-      <Sheet open={workflow !== null && !deleteOpen} onOpenChange={onOpenChange}>
+      <Sheet open={workflow !== null && !deleteOpen && !graphOpen} onOpenChange={onOpenChange}>
         <SheetContent side="bottom" className="gap-0 p-0" data-testid="workflow-row-actions-sheet">
           <SheetHeader className="px-4 pt-4">
             <SheetTitle className="text-base">{workflow.name}</SheetTitle>
@@ -97,15 +134,21 @@ export function WorkflowRowActionsSheet({ workflow, onOpenChange }: WorkflowRowA
               <PlayIcon className="size-4" aria-hidden="true" />
               {t("run")}
             </Button>
-            <Button
-              variant="ghost"
-              className="justify-start"
-              onClick={() => void handlePauseSchedule()}
-              data-testid="workflow-action-pause"
-            >
-              <PauseIcon className="size-4" aria-hidden="true" />
-              {t("pause")}
-            </Button>
+            {cronTriggers.length > 0 ? (
+              <Button
+                variant="ghost"
+                className="justify-start"
+                onClick={() => void handleToggleSchedule()}
+                data-testid="workflow-action-pause"
+              >
+                {schedulePaused ? (
+                  <PlayIcon className="size-4" aria-hidden="true" />
+                ) : (
+                  <PauseIcon className="size-4" aria-hidden="true" />
+                )}
+                {schedulePaused ? t("resume") : t("pause")}
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               className="justify-start"
@@ -137,6 +180,29 @@ export function WorkflowRowActionsSheet({ workflow, onOpenChange }: WorkflowRowA
               <Trash2Icon className="size-4" aria-hidden="true" />
               {t("delete")}
             </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={graphOpen}
+        onOpenChange={(open) => {
+          setGraphOpen(open)
+          if (!open) onOpenChange(false)
+        }}
+      >
+        <SheetContent
+          side="bottom"
+          className="max-h-[85vh] gap-0"
+          data-testid="workflow-graph-sheet"
+        >
+          <SheetHeader className="px-4 pt-4">
+            <SheetTitle className="text-base">
+              {t("graphSheetTitle", { name: workflow.name })}
+            </SheetTitle>
+          </SheetHeader>
+          <div className="overflow-y-auto p-4 pb-6">
+            <WorkflowGraphViewer graph={toViewerGraph(workflow)} />
           </div>
         </SheetContent>
       </Sheet>

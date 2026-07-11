@@ -257,6 +257,11 @@
     "title": "新建目标",
     "trigger": "新建目标"
   },
+  "remote": {
+    "applied": "已在桌面端执行。",
+    "failed": "无法连接桌面端——请重试。",
+    "notAllowed": "此设备没有远程控制权限。"
+  },
   "status": {
     "active": "进行中",
     "budget_limited": "预算耗尽",

@@ -8,6 +8,15 @@ import { makeDefaultLoader, withPlugin, type SimpleOutcome, type ValueOutcome } 
  * and by Backup to remind users when an automatic backup is due.
  */
 
+/**
+ * The app-wide Android notification channel. Created at boot
+ * (`companion-boot-provider`) with IMPORTANCE_HIGH so reminders can
+ * heads-up; [`schedule`] routes every notification here by default —
+ * a spec without an explicit `channelId` would otherwise land on the
+ * plugin's auto-created default-importance `"default"` channel.
+ */
+export const DEFAULT_CHANNEL_ID = "cognia-default"
+
 export interface LocalNotificationSpec {
   id: number
   title: string
@@ -102,7 +111,12 @@ export async function schedule(
   loader: LocalNotificationsLoader = defaultLoader
 ): Promise<ValueOutcome<number[]>> {
   return withPlugin(loader, async (n) => {
-    const result = await n.schedule({ notifications })
+    const result = await n.schedule({
+      notifications: notifications.map((spec) => ({
+        channelId: DEFAULT_CHANNEL_ID,
+        ...spec,
+      })),
+    })
     return {
       kind: "ok" as const,
       value: result.notifications.map((x) => x.id),
@@ -141,7 +155,15 @@ export async function ensureChannel(
 ): Promise<SimpleOutcome> {
   const { id, name, description, importance = 4, sound } = opts
   return withPlugin(loader, async (n) => {
-    if (!n.createChannel) return { kind: "ok" as const } // iOS — no-op
+    // Channels are Android-only. The `!n.createChannel` property check is NOT
+    // enough against the real Capacitor proxy (it fabricates a callable for
+    // any name and then rejects "not implemented" on iOS), so gate on the
+    // reported platform first; keep the property check for test doubles.
+    const platform = (
+      globalThis as { Capacitor?: { getPlatform?: () => string } }
+    ).Capacitor?.getPlatform?.()
+    if (platform === "ios") return { kind: "ok" as const }
+    if (!n.createChannel) return { kind: "ok" as const }
     await n.createChannel({ id, name, description, importance, sound })
     return { kind: "ok" as const }
   })

@@ -4,6 +4,7 @@
 import {
   cancel,
   checkPermission,
+  DEFAULT_CHANNEL_ID,
   ensureChannel,
   ensurePermission,
   listPending,
@@ -113,6 +114,22 @@ describe("schedule / cancel / listPending", () => {
     expect(out).toEqual({ kind: "ok", value: [1, 2] })
   })
 
+  it("schedule defaults channelId to the app channel", async () => {
+    const p = makePlugin()
+    await schedule([{ id: 1, title: "x", body: "y" }], async () => p)
+    expect(p.schedule).toHaveBeenCalledWith({
+      notifications: [{ id: 1, title: "x", body: "y", channelId: DEFAULT_CHANNEL_ID }],
+    })
+  })
+
+  it("schedule keeps an explicit channelId", async () => {
+    const p = makePlugin()
+    await schedule([{ id: 1, title: "x", body: "y", channelId: "custom" }], async () => p)
+    expect(p.schedule).toHaveBeenCalledWith({
+      notifications: [{ id: 1, title: "x", body: "y", channelId: "custom" }],
+    })
+  })
+
   it("cancel forwards id list", async () => {
     const p = makePlugin()
     await cancel([3, 4], async () => p)
@@ -153,5 +170,23 @@ describe("ensureChannel", () => {
     const p = { ...makePlugin(), createChannel: undefined }
     const out = await ensureChannel({ id: "x", name: "X" }, async () => p)
     expect(out).toEqual({ kind: "ok" })
+  })
+
+  it("no-ops on iOS even when the proxy fabricates createChannel", async () => {
+    // The real Capacitor proxy exposes a callable for ANY method name and
+    // rejects "not implemented" at call time — the platform gate must win.
+    ;(globalThis as { Capacitor?: { getPlatform: () => string } }).Capacitor = {
+      getPlatform: () => "ios",
+    }
+    try {
+      const p = makePlugin({
+        createChannel: jest.fn().mockRejectedValue(new Error("not implemented")),
+      })
+      const out = await ensureChannel({ id: "x", name: "X" }, async () => p)
+      expect(out).toEqual({ kind: "ok" })
+      expect(p.createChannel).not.toHaveBeenCalled()
+    } finally {
+      delete (globalThis as { Capacitor?: unknown }).Capacitor
+    }
   })
 })

@@ -28,6 +28,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { redactText } from "@/lib/twin/ingest/redact"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 export interface RedactReviewSheetProps {
   open: boolean
@@ -40,6 +41,7 @@ export interface RedactReviewSheetProps {
 
 export function RedactReviewSheet({ open, onOpenChange, text, onConfirm }: RedactReviewSheetProps) {
   const t = useTranslations("mobile.twinSources.redact")
+  useBackDismiss(open, () => onOpenChange(false))
   const { redacted, count } = useMemo(() => {
     const result = redactText(text)
     return { redacted: result.redacted, count: Object.keys(result.map).length }

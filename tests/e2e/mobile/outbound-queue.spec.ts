@@ -25,6 +25,8 @@ const COMMAND_KINDS = [
   // Workflow subsystem
   "workflow_trigger_manual",
   "workflow_delete",
+  "workflow_schedule_pause",
+  "workflow_schedule_resume",
   // Twin subsystem
   "twin_ingest_source",
   // Wave 2 desktop-write mutating RPCs

@@ -24,6 +24,7 @@ import { EmptyState } from "@/components/mobile/empty-state"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { GoalDetailSheet } from "@/components/goal/goal-detail-sheet"
 import { GoalAnalyticsPanel } from "@/components/goal/analytics/goal-analytics-panel"
+import { GoalRunControls } from "@/components/mobile/goals/goal-run-controls"
 import { GoalsMobileStatStrip } from "@/components/mobile/goals/goals-mobile-stat-strip"
 import {
   GoalsMobileSectionSwitcher,
@@ -150,6 +151,7 @@ function GoalRow({ goal, onOpen }: { goal: Goal; onOpen: () => void }) {
           </span>
         </div>
         <p className="line-clamp-2 text-sm font-medium">{goal.safeObjective}</p>
+        <GoalRunControls goal={goal} />
       </Card>
     </li>
   )

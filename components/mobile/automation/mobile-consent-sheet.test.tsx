@@ -134,6 +134,19 @@ describe("<MobileConsentSheet />", () => {
     expect(guardSpy).not.toHaveBeenCalled()
   })
 
+  it("rejects the current prompt on Android hardware back (popstate)", async () => {
+    stream = baseStream([prompt()])
+    render(<MobileConsentSheet />)
+    fireEvent.popState(window)
+    await waitFor(() =>
+      expect(respondMock).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "evt-1" }),
+        false,
+        false
+      )
+    )
+  })
+
   it("surfaces a toast and does not respond when the guard blocks (non-cancel)", async () => {
     guardImpl = async () => ({ kind: "blocked", reason: "lockout" })
     stream = baseStream([prompt()])

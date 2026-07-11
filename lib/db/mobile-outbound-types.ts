@@ -27,9 +27,12 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "connector_send",
   "connector_approve_draft",
   "connector_reject_draft",
-  // Workflow subsystem (mobile trigger button + delete mirror).
+  // Workflow subsystem (mobile trigger button + delete mirror + schedule
+  // pause/resume from the row-actions sheet).
   "workflow_trigger_manual",
   "workflow_delete",
+  "workflow_schedule_pause",
+  "workflow_schedule_resume",
   // Twin subsystem (twin-sources + twin-drafts panels).
   "twin_ingest_source",
   // Wave 2 desktop-write mutating RPCs.

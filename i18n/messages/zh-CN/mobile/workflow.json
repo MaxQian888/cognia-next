@@ -10,6 +10,12 @@
     "rejectedToast": "已拒绝。",
     "respondFailedToast": "无法连接桌面端——请重试。"
   },
+  "cancelRun": "取消运行",
+  "cancelRunConfirm": "取消运行",
+  "cancelRunDescription": "将请求桌面端停止此次运行，已完成的步骤会保留结果。",
+  "cancelRunFailed": "取消失败——桌面端可能不可达，或运行已结束。",
+  "cancelRunSuccess": "已取消运行。",
+  "cancelRunTitle": "取消此次运行？",
   "density": {
     "comfortable": "宽松行距",
     "compact": "紧凑行距"

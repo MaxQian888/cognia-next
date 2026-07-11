@@ -52,6 +52,15 @@ describe("<RedactReviewSheet />", () => {
     expect(onConfirm).toHaveBeenCalledWith(PII_TEXT)
   })
 
+  it("dismisses on Android hardware back (popstate)", () => {
+    const onOpenChange = jest.fn()
+    render(
+      <RedactReviewSheet open onOpenChange={onOpenChange} text={PII_TEXT} onConfirm={jest.fn()} />
+    )
+    window.dispatchEvent(new PopStateEvent("popstate"))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it("closes without confirming on cancel", async () => {
     const onConfirm = jest.fn()
     const onOpenChange = jest.fn()

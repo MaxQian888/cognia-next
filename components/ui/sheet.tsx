@@ -62,7 +62,12 @@ function SheetContent({
           side === "top" &&
             "inset-x-0 top-0 h-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
           side === "bottom" &&
-            "inset-x-0 bottom-0 h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+            // pb: bottom sheets sit flush against the screen edge — reserve the
+            // home-indicator inset so footers/action rows stay tappable on
+            // notched devices (0px on desktop). Arbitrary pb-* (not the
+            // `safe-area-pb` utility) so a caller's own pb-* still wins via
+            // tailwind-merge.
+            "inset-x-0 bottom-0 h-auto border-t pb-[env(safe-area-inset-bottom)] data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
           className
         )}
         {...props}

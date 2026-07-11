@@ -43,7 +43,11 @@ import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { saveExport } from "@/lib/files/save-export"
 import { notifyExportOutcome } from "@/lib/files/export-feedback"
-import { ensureChannel, schedule as scheduleLocalNotif } from "@/lib/capacitor/local-notifications"
+import {
+  DEFAULT_CHANNEL_ID,
+  ensureChannel,
+  schedule as scheduleLocalNotif,
+} from "@/lib/capacitor/local-notifications"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { applyBackupPackage } from "@/lib/data/apply-package"
 import { buildBackupPackage } from "@/lib/data/build-package"
@@ -143,7 +147,7 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
   useEffect(() => {
     if (!autoBackup) return
     void (async () => {
-      await ensureChannel({ id: "cognia-default", name: tNotif("notifChannel") })
+      await ensureChannel({ id: DEFAULT_CHANNEL_ID, name: tNotif("notifChannel") })
       await scheduleLocalNotif([
         {
           id: NOTIF_ID_DAILY,

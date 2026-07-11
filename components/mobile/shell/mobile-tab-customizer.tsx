@@ -38,6 +38,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { MeRow } from "@/components/mobile/me/me-row"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { cn } from "@/lib/utils"
 import { applyDragReorder } from "@/lib/shell/sidebar-nav"
 import { TAB_SPEC_BY_ID } from "./mobile-tab-bar"
@@ -51,6 +52,7 @@ import {
 export function MobileTabCustomizer(): React.ReactElement {
   const t = useTranslations("mobile.tabBar.customize")
   const [open, setOpen] = React.useState(false)
+  useBackDismiss(open, () => setOpen(false))
 
   return (
     <>

@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useCanControl } from "@/hooks/data/use-can-control"
 import {
@@ -68,6 +69,12 @@ export function MobileConsentSheet() {
     },
     [guard, respond, tm]
   )
+
+  // Android hardware back rejects the current prompt (same as swipe-down).
+  // Must be armed before the early return below so the hook order is stable.
+  useBackDismiss(canControl === true && current !== undefined, () => {
+    if (current) void respond(current, false, false)
+  })
 
   if (canControl !== true || !current) return null
 

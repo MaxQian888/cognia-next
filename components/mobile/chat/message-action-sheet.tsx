@@ -3,23 +3,39 @@
 /**
  * Mobile bottom sheet for per-message actions (Wave 1.7).
  *
- * Triggered by long-press on a message row in the mobile shell. Provides:
- *   - Copy plain text to clipboard
- *   - Share via the system share sheet (Capacitor Share / navigator.share)
- *
- * Quote and Delete intentionally left out of v1: composer wiring for a
- * "quote and reply" flow is part of a future wave, and a per-message
- * delete IPC is not yet exposed in `useChatStore`.
+ * Triggered by long-press on a message row in the mobile shell. Provides
+ * copy / quote / share / branch, plus — when the parent supplies the
+ * handlers — Regenerate (last assistant reply; the hover-only footer
+ * controls in `message-renderer` are invisible on touch) and Delete
+ * (confirmed destructive; the parent owns the store + Dexie + desktop
+ * mirror fan-out).
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CopyIcon, GitBranchIcon, QuoteIcon, Share2Icon } from "lucide-react"
+import {
+  CopyIcon,
+  GitBranchIcon,
+  QuoteIcon,
+  RefreshCcwIcon,
+  Share2Icon,
+  Trash2Icon,
+} from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 import type { UIMessage } from "ai"
 
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Drawer,
   DrawerContent,
@@ -27,6 +43,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { share } from "@/lib/capacitor/share"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
@@ -37,11 +54,29 @@ import { COMPOSER_APPEND_EVENT } from "@/components/chat/composer"
 export interface MessageActionSheetProps {
   message: UIMessage | null
   onOpenChange: (next: boolean) => void
+  /**
+   * Re-run the last assistant turn. Only pass when `message` IS the last
+   * assistant message and no turn is in flight — the row renders iff set.
+   */
+  onRegenerate?: () => void | Promise<void>
+  /**
+   * Remove the message everywhere (store + local Dexie + desktop mirror).
+   * The row renders iff set; the sheet adds the confirm step.
+   */
+  onDelete?: (message: UIMessage) => void | Promise<void>
 }
 
-export function MessageActionSheet({ message, onOpenChange }: MessageActionSheetProps) {
+export function MessageActionSheet({
+  message,
+  onOpenChange,
+  onRegenerate,
+  onDelete,
+}: MessageActionSheetProps) {
   const t = useTranslations("mobile.messageActions")
+  const tCommon = useTranslations("common")
   const open = message !== null
+  // Android hardware / browser back closes the sheet instead of navigating.
+  useBackDismiss(open, () => onOpenChange(false))
   // `busy` is always reset in the action handlers' try/finally below;
   // no separate effect needed to clear it on close.
   const [busy, setBusy] = useState(false)
@@ -49,6 +84,7 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
     sessionId: string
     messageId: string
   } | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const text = message ? extractPlainText(message) : ""
   const branchSessionId =
@@ -90,6 +126,27 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
     )
     void selectionFeedback()
     onOpenChange(false)
+  }
+
+  const onRegenerateRow = () => {
+    if (!onRegenerate) return
+    void onRegenerate()
+    onOpenChange(false)
+  }
+
+  const onDeleteConfirmed = async () => {
+    if (!message || !onDelete) return
+    setConfirmDelete(false)
+    setBusy(true)
+    try {
+      await onDelete(message)
+      toast.success(t("deleteSuccess"))
+      onOpenChange(false)
+    } catch (err) {
+      toast.error(t("deleteFailed", { message: err instanceof Error ? err.message : String(err) }))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const onShare = async () => {
@@ -149,9 +206,44 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
               testid="message-action-branch"
             />
           )}
+          {onRegenerate && (
+            <Row
+              icon={<RefreshCcwIcon className="size-4" />}
+              label={t("regenerate")}
+              onClick={onRegenerateRow}
+              disabled={busy}
+              testid="message-action-regenerate"
+            />
+          )}
+          {onDelete && (
+            <Row
+              icon={<Trash2Icon className="size-4 text-destructive" />}
+              label={t("delete")}
+              onClick={() => setConfirmDelete(true)}
+              disabled={busy}
+              testid="message-action-delete"
+            />
+          )}
         </StaggeredRows>
       </DrawerContent>
     </Drawer>
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("deleteConfirmDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void onDeleteConfirmed()}
+              data-testid="message-action-delete-confirm"
+            >
+              {t("deleteConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {branchTarget && (
         <BranchDialog
           sessionId={branchTarget.sessionId}

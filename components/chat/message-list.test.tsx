@@ -88,12 +88,41 @@ jest.mock("@/components/interactions/long-press", () => ({
 }))
 
 jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
-  MessageActionSheet: ({ message }: { message: unknown }) =>
+  MessageActionSheet: ({
+    message,
+    onRegenerate,
+    onDelete,
+  }: {
+    message: unknown
+    onRegenerate?: () => void
+    onDelete?: (m: unknown) => void
+  }) =>
     ReactForMocks.createElement(
       "div",
-      { "data-test": "action-sheet", "data-message": message ? "open" : "closed" },
-      null
+      {
+        "data-test": "action-sheet",
+        "data-message": message ? "open" : "closed",
+        "data-can-regenerate": String(Boolean(onRegenerate)),
+      },
+      message && onDelete
+        ? ReactForMocks.createElement("button", {
+            "data-test": "sheet-delete",
+            onClick: () => onDelete(message),
+          })
+        : null
     ),
+}))
+
+const dbDeleteMock = jest.fn(async (_id: string) => undefined)
+jest.mock("@/lib/db/schema", () => ({
+  ...jest.requireActual("@/lib/db/schema"),
+  getDb: () => ({ messages: { delete: (id: string) => dbDeleteMock(id) } }),
+}))
+
+const desktopDeleteMock = jest.fn(async (_sid: string, _mid: string) => undefined)
+jest.mock("@/lib/claude/ipc", () => ({
+  ...jest.requireActual("@/lib/claude/ipc"),
+  deleteMessage: (sid: string, mid: string) => desktopDeleteMock(sid, mid),
 }))
 
 jest.mock("@/lib/capacitor/haptics", () => ({
@@ -229,6 +258,63 @@ describe("MessageList", () => {
     )
     expect(document.querySelector("[data-test='long-press']")).toBeTruthy()
     expect(document.querySelector("[data-test='action-sheet']")).toBeTruthy()
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+
+  it("mobile delete fans out to store, local Dexie, and the desktop RPC", async () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    dbDeleteMock.mockClear()
+    desktopDeleteMock.mockClear()
+    const Wrapper = withAdapter(makeAdapter())
+    const msgs = [userMsg("m1", "hello"), userMsg("m2", "world")]
+    act(() => {
+      useChatStore.getState().setSessionMessages("ses_1", msgs)
+    })
+    render(
+      <Wrapper>
+        <MessageList messages={msgs} status="idle" />
+      </Wrapper>
+    )
+    // Long-press the first row to arm the sheet with that message.
+    fireEvent.click(document.querySelector("[data-test='long-press']")!)
+    fireEvent.click(document.querySelector("[data-test='sheet-delete']")!)
+    await act(async () => {})
+    expect(useChatStore.getState().sessions["ses_1"]!.messages.map((m) => m.id)).toEqual(["m2"])
+    expect(dbDeleteMock).toHaveBeenCalledWith("m1")
+    expect(desktopDeleteMock).toHaveBeenCalledWith("ses_1", "m1")
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+
+  it("only offers Regenerate for the last assistant message when idle", () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    const Wrapper = withAdapter(makeAdapter())
+    const assistant: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "reply" }],
+    }
+    render(
+      <Wrapper>
+        <MessageList
+          messages={[userMsg("m1", "hello"), assistant]}
+          status="idle"
+          onRegenerate={jest.fn()}
+        />
+      </Wrapper>
+    )
+    const rows = document.querySelectorAll("[data-test='long-press']")
+    // Arm the sheet with the USER message → no regenerate.
+    fireEvent.click(rows[0]!)
+    expect(document.querySelector("[data-test='action-sheet']")).toHaveAttribute(
+      "data-can-regenerate",
+      "false"
+    )
+    // Arm with the last assistant message → regenerate offered.
+    fireEvent.click(rows[1]!)
+    expect(document.querySelector("[data-test='action-sheet']")).toHaveAttribute(
+      "data-can-regenerate",
+      "true"
+    )
     ;(usePlatform as jest.Mock).mockReturnValue("desktop")
   })
 

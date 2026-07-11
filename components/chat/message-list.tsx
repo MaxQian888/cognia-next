@@ -14,6 +14,8 @@ import { HookNoticeMarker, isHookNoticeMessage } from "./message-parts/hook-noti
 import { LongPress } from "@/components/interactions/long-press"
 import { MessageActionSheet } from "@/components/mobile/chat/message-action-sheet"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
+import { deleteMessage as deleteMessageOnDesktop } from "@/lib/claude/ipc"
+import { getDb } from "@/lib/db/schema"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ConversationTimeline } from "./minimap/conversation-timeline"
@@ -103,6 +105,37 @@ export function MessageList({
     }
     return null
   }, [messages])
+
+  // Mobile per-message delete (long-press sheet). Three-way fan-out: the
+  // in-memory store slice (what the list renders), the phone's Dexie mirror,
+  // and the desktop's authoritative Dexie via the `message_delete` RPC. The
+  // RPC leg is best-effort — sync-down reconciles a missed delete later.
+  const handleDeleteMessage = useCallback(async (message: UIMessage) => {
+    const store = useChatStore.getState()
+    const metaSessionId = (message.metadata as { sessionId?: unknown } | undefined)?.sessionId
+    const sid =
+      typeof metaSessionId === "string" ? metaSessionId : (store.activeSessionId ?? undefined)
+    if (!sid) return
+    const slice = store.sessions[sid]
+    const current = slice?.messages ?? (sid === store.activeSessionId ? store.messages : undefined)
+    if (current) {
+      store.setSessionMessages(
+        sid,
+        current.filter((m) => m.id !== message.id)
+      )
+    }
+    try {
+      await getDb().messages.delete(message.id)
+    } catch {
+      // Local mirror miss (e.g. not yet persisted) — the store removal above
+      // already updated the visible list.
+    }
+    try {
+      await deleteMessageOnDesktop(sid, message.id)
+    } catch {
+      // Desktop unreachable / standalone mode — best-effort by design.
+    }
+  }, [])
 
   const showThinking = shouldShowThinking(messages, status)
   const totalCount = messages.length + (showThinking ? 1 : 0)
@@ -363,6 +396,18 @@ export function MessageList({
             onOpenChange={(next) => {
               if (!next) setActionMessage(null)
             }}
+            // Regenerate only makes sense for the last assistant reply and
+            // while no turn is in flight — mirrors the hover footer's gate in
+            // message-renderer (which is unreachable on touch).
+            onRegenerate={
+              onRegenerate &&
+              actionMessage &&
+              actionMessage.id === lastAssistantId &&
+              (status === "idle" || status === "error")
+                ? onRegenerate
+                : undefined
+            }
+            onDelete={status === "idle" || status === "error" ? handleDeleteMessage : undefined}
           />
         ) : null}
       </div>

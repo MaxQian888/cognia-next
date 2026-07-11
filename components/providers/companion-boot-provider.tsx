@@ -1,7 +1,7 @@
 "use client"
 
 import { usePathname, useRouter } from "next/navigation"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
 import { toast } from "sonner"
@@ -9,13 +9,17 @@ import { toast } from "sonner"
 import { usePlatform } from "@/hooks/use-platform"
 import { useSettingsStore } from "@/stores/settings"
 import { getShellColors } from "@/lib/appearance/shell-sync"
-import { subscribe as subscribeDeeplink } from "@/lib/capacitor/deeplink"
+import { minimizeApp, subscribeBackButton } from "@/lib/capacitor/app"
+import { getLaunchRoute, subscribe as subscribeDeeplink } from "@/lib/capacitor/deeplink"
 import { dispatchRoute, makeRouterNavigators } from "@/lib/capacitor/deeplink-router"
 import { registerNativePlugins } from "@/lib/capacitor/register-plugins"
 import { hide as hideSplash } from "@/lib/capacitor/splash-screen"
 import { syncWithTheme as syncStatusBar } from "@/lib/capacitor/status-bar"
 import { syncWithTheme as syncNavBar } from "@/lib/capacitor/navigation-bar"
-import { ensureChannel as ensureNotifChannel } from "@/lib/capacitor/local-notifications"
+import {
+  DEFAULT_CHANNEL_ID as NOTIF_CHANNEL_ID,
+  ensureChannel as ensureNotifChannel,
+} from "@/lib/capacitor/local-notifications"
 import {
   registerPushNotifications,
   reportPushTokenToDesktop,
@@ -72,6 +76,12 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
   const { resolvedTheme } = useTheme()
   const t = useTranslations("mobile.companion")
   const ranRef = useRef(false)
+  // Flips true once registerNativePlugins() has populated
+  // window.Capacitor.Plugins.* — the theme-sync effect below must not fire
+  // before that (effects run in declaration order, so its first invocation
+  // used to race registration and no-op as `unsupported`, leaving the
+  // status/nav bars unpainted until the next theme change).
+  const [pluginsReady, setPluginsReady] = useState(platform !== "mobile")
 
   const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
   const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
@@ -87,7 +97,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
   // not just light/dark. Falls back to safe defaults when the palette
   // can't be resolved.
   useEffect(() => {
-    if (platform !== "mobile") return
+    if (platform !== "mobile" || !pluginsReady) return
     const shellColors = getShellColors(
       {
         colorTheme: appearanceColorTheme,
@@ -100,6 +110,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
     void syncNavBar(resolvedTheme, shellColors.backgroundHex)
   }, [
     platform,
+    pluginsReady,
     resolvedTheme,
     appearanceColorTheme,
     appearanceActiveCustomThemeId,
@@ -120,6 +131,10 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       // wrapper (splash, haptics, camera, openSettings, …) silently no-ops.
       // Must run before any other native call below. Best-effort + self-logs.
       await registerNativePlugins()
+      // Unblock the theme-sync effect now that the plugin proxies exist
+      // (best-effort even when registration reported unavailable — the
+      // wrappers degrade to `unsupported` on their own).
+      setPluginsReady(true)
 
       // Hide native splash now that React has painted. Best-effort — if the
       // plugin is missing this is a no-op.
@@ -127,7 +142,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       // Ensure the LocalNotifications channel exists so offline-queue
       // backstops (Wave 3) can fire later without permission prompt churn.
       void ensureNotifChannel({
-        id: "cognia-default",
+        id: NOTIF_CHANNEL_ID,
         name: "cognia",
         description: "Pairing, sync, and offline-queue notifications",
         importance: 4,
@@ -138,10 +153,38 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       // share-target, and pair-qr routes that arrive while the app is
       // foregrounded.
       const navigators = makeRouterNavigators(router)
+      const dispatchedRaw = new Set<string>()
       const deeplinkUnsub = await subscribeDeeplink((route) => {
+        dispatchedRaw.add(route.raw)
         dispatchRoute(route, navigators)
       })
       cleanup.push(deeplinkUnsub)
+
+      // Cold start: when the app is launched BY a deeplink (share sheet,
+      // notification tap, pair QR), `appUrlOpen` can fire before the listener
+      // above registers — the URL only survives in `App.getLaunchUrl()`.
+      // Replay it once, deduped against anything the live listener already
+      // handled. No-op on plain launches (getLaunchRoute resolves null).
+      const launchRoute = await getLaunchRoute()
+      if (launchRoute && !cancelled && !dispatchedRaw.has(launchRoute.raw)) {
+        dispatchedRaw.add(launchRoute.raw)
+        dispatchRoute(launchRoute, navigators)
+      }
+
+      // Android hardware back. Registering the listener disables the App
+      // plugin's default (history back / exit at root), so re-implement it:
+      // history back keeps `useBackDismiss` sheets and SPA routes working
+      // exactly as before; at the root, minimize instead of exiting.
+      // Must sit BEFORE the standalone/unpaired early-returns — the back
+      // button has to work on /welcome and /pair too.
+      const backUnsub = await subscribeBackButton(({ canGoBack }) => {
+        if (canGoBack) {
+          window.history.back()
+        } else {
+          void minimizeApp()
+        }
+      })
+      cleanup.push(backUnsub)
 
       const config = await hydrateCompanionConfig()
       if (cancelled) return

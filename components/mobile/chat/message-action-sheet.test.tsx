@@ -62,14 +62,29 @@ const messages = {
       shareUnsupported: "Sharing isn't supported on this device.",
       shareFailed: "Share failed: {message}",
       branch: "Branch conversation",
+      regenerate: "Regenerate reply",
+      delete: "Delete message",
+      deleteConfirmTitle: "Delete this message?",
+      deleteConfirmDescription: "Removes it everywhere.",
+      deleteConfirm: "Delete",
+      deleteSuccess: "Message deleted.",
+      deleteFailed: "Delete failed: {message}",
     },
   },
+  common: { cancel: "Cancel" },
 }
 
-function renderSheet(message: UIMessage | null, onOpenChange: jest.Mock) {
+function renderSheet(
+  message: UIMessage | null,
+  onOpenChange: jest.Mock,
+  extra: {
+    onRegenerate?: () => void | Promise<void>
+    onDelete?: (m: UIMessage) => void | Promise<void>
+  } = {}
+) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <MessageActionSheet message={message} onOpenChange={onOpenChange} />
+      <MessageActionSheet message={message} onOpenChange={onOpenChange} {...extra} />
     </NextIntlClientProvider>
   )
 }
@@ -178,6 +193,42 @@ describe("MessageActionSheet", () => {
     })
     expect(mockToastSuccess).toHaveBeenCalledWith("Copied to clipboard.")
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("hides Regenerate and Delete rows when handlers are absent", () => {
+    renderSheet(makeMessage("hello"), jest.fn())
+    expect(screen.queryByTestId("message-action-regenerate")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("message-action-delete")).not.toBeInTheDocument()
+  })
+
+  it("runs onRegenerate and closes on the Regenerate row", () => {
+    const onOpenChange = jest.fn()
+    const onRegenerate = jest.fn()
+    renderSheet(makeMessage("hello"), onOpenChange, { onRegenerate })
+    fireEvent.click(screen.getByTestId("message-action-regenerate"))
+    expect(onRegenerate).toHaveBeenCalledTimes(1)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("Delete asks for confirmation before calling onDelete", async () => {
+    const onOpenChange = jest.fn()
+    const onDelete = jest.fn().mockResolvedValue(undefined)
+    const msg = makeMessage("hello")
+    renderSheet(msg, onOpenChange, { onDelete })
+    fireEvent.click(screen.getByTestId("message-action-delete"))
+    expect(onDelete).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId("message-action-delete-confirm"))
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith(msg))
+    expect(mockToastSuccess).toHaveBeenCalledWith("Message deleted.")
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("surfaces a toast when onDelete rejects", async () => {
+    const onDelete = jest.fn().mockRejectedValue(new Error("boom"))
+    renderSheet(makeMessage("hello"), jest.fn(), { onDelete })
+    fireEvent.click(screen.getByTestId("message-action-delete"))
+    fireEvent.click(await screen.findByTestId("message-action-delete-confirm"))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Delete failed: boom"))
   })
 
   it("renders the Quote row", () => {
