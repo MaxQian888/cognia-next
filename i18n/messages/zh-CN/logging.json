@@ -388,7 +388,16 @@
     "viewDetailsMenu": "查看详情",
     "viewDiagnostics": "查看诊断",
     "viewNativeDiagnostics": "查看原生诊断",
-    "warning": "警告"
+    "warning": "警告",
+    "clearConfirmTitle": "清空全部日志？",
+    "clearConfirmDescription": "将永久删除本设备上所有已持久化的日志条目，被删除条目的导出与书签将失效。",
+    "clearConfirmCancel": "取消",
+    "clearConfirmConfirm": "清空日志",
+    "clearedToast": "日志已清空",
+    "hintNextPrev": "上/下一条",
+    "hintExpand": "展开",
+    "hintRefresh": "刷新",
+    "hintAllShortcuts": "全部快捷键"
   },
   "settings": {
     "advanced": {

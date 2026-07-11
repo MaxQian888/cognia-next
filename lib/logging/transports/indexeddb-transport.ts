@@ -34,6 +34,11 @@ const DEFAULT_OPTIONS: IndexedDBTransportOptions = {
   retentionDays: 7,
 }
 
+/** How often the retention sweep re-runs while the app stays open. Cleanup
+ * used to run only on init/settings-save, so a long-lived session never
+ * pruned and the store could grow far past the retention policy. */
+export const CLEANUP_INTERVAL_MS = 30 * 60 * 1000
+
 /**
  * IndexedDB transport implementation
  */
@@ -43,6 +48,7 @@ export class IndexedDBTransport implements Transport {
   private db: IDBDatabase | null = null
   private buffer: StructuredLogEntry[] = []
   private flushTimer: ReturnType<typeof setTimeout> | null = null
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null
   private initPromise: Promise<void> | null = null
   private broadcastChannel: BroadcastChannel | null = null
 
@@ -78,6 +84,7 @@ export class IndexedDBTransport implements Transport {
         this.db = request.result
         this.startFlushTimer()
         this.cleanup()
+        this.startCleanupTimer()
         resolve()
       }
 
@@ -115,6 +122,19 @@ export class IndexedDBTransport implements Transport {
     this.flushTimer = setInterval(() => {
       this.flush()
     }, this.options.flushInterval)
+  }
+
+  /**
+   * Start the periodic retention sweep so a long-running session keeps
+   * honoring retentionDays / maxEntries (init-only cleanup never re-fires).
+   */
+  private startCleanupTimer(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer)
+    }
+    this.cleanupTimer = setInterval(() => {
+      this.cleanup()
+    }, CLEANUP_INTERVAL_MS)
   }
 
   /**
@@ -443,6 +463,11 @@ export class IndexedDBTransport implements Transport {
     if (this.flushTimer) {
       clearInterval(this.flushTimer)
       this.flushTimer = null
+    }
+
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer)
+      this.cleanupTimer = null
     }
 
     if (this.broadcastChannel) {

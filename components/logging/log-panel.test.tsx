@@ -7,7 +7,19 @@ import { render, screen, fireEvent } from "@testing-library/react"
 
 // ── Stub all heavy child components so the test focuses on LogPanel composition.
 jest.mock("./log-panel-toolbar", () => ({
-  LogPanelToolbar: () => <div data-testid="stub-toolbar" />,
+  LogPanelToolbar: ({
+    clearLogs,
+    onExport,
+  }: {
+    clearLogs?: () => void
+    onExport?: (format: string) => void
+  }) => (
+    <div data-testid="stub-toolbar">
+      <button data-testid="stub-toolbar-clear" onClick={() => clearLogs?.()} />
+      <button data-testid="stub-toolbar-export-ndjson" onClick={() => onExport?.("ndjson")} />
+      <button data-testid="stub-toolbar-export-csv" onClick={() => onExport?.("csv")} />
+    </div>
+  ),
 }))
 jest.mock("./log-panel-stats-bar", () => ({
   LogPanelStatsBar: () => <div data-testid="stub-stats-bar" />,
@@ -58,9 +70,14 @@ jest.mock("./log-trace-view", () => ({
 }))
 
 const mockToast = jest.fn() as jest.Mock & { dismiss?: jest.Mock }
-jest.mock("sonner", () => ({
-  toast: (...args: unknown[]) => mockToast(...args),
-}))
+const mockToastSuccess = jest.fn()
+const mockToastError = jest.fn()
+jest.mock("sonner", () => {
+  const toast = (...args: unknown[]) => mockToast(...args)
+  toast.success = (...args: unknown[]) => mockToastSuccess(...args)
+  toast.error = (...args: unknown[]) => mockToastError(...args)
+  return { toast }
+})
 
 const mockUseLogPanelUrlSync = jest.fn()
 jest.mock("@/hooks/logging/use-log-panel-url-sync", () => ({
@@ -667,5 +684,116 @@ describe("LogPanel — autoScroll toast on pages > 1", () => {
     expect(opts.action).toBeDefined()
     opts.action?.onClick?.()
     expect(setCurrentPage).toHaveBeenCalledWith(1)
+  })
+})
+
+describe("LogPanel — clear confirmation + exports", () => {
+  const sampleLogs = [
+    {
+      id: "l-1",
+      timestamp: "2026-07-11T01:00:00.000Z",
+      level: "error",
+      module: "net",
+      message: 'boom "quoted"',
+      traceId: "t-1",
+      sessionId: "s-1",
+      source: "frontend",
+      data: { code: 500 },
+    },
+  ]
+
+  function streamState(overrides: Record<string, unknown> = {}) {
+    return {
+      logs: sampleLogs,
+      isLoading: false,
+      error: null,
+      refresh: jest.fn(),
+      clearLogs: jest.fn(),
+      logRate: 0,
+      stats: {
+        total: 1,
+        byLevel: { trace: 0, debug: 0, info: 0, warn: 0, error: 1, fatal: 0 },
+      },
+      ...overrides,
+    }
+  }
+
+  let createObjectURLSpy: jest.SpyInstance | undefined
+  let revokeObjectURLSpy: jest.SpyInstance | undefined
+  let anchorClickSpy: jest.SpyInstance
+  let capturedBlobs: Blob[]
+
+  beforeEach(() => {
+    capturedBlobs = []
+    if (!URL.createObjectURL) {
+      Object.defineProperty(URL, "createObjectURL", { value: () => "blob:x", writable: true })
+      Object.defineProperty(URL, "revokeObjectURL", { value: () => {}, writable: true })
+    }
+    createObjectURLSpy = jest.spyOn(URL, "createObjectURL").mockImplementation(((blob: Blob) => {
+      capturedBlobs.push(blob)
+      return "blob:x"
+    }) as never)
+    revokeObjectURLSpy = jest.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    // Spy the anchor click so jsdom doesn't attempt a real navigation.
+    anchorClickSpy = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    createObjectURLSpy?.mockRestore()
+    revokeObjectURLSpy?.mockRestore()
+    anchorClickSpy.mockRestore()
+  })
+
+  it("asks for confirmation before clearing and only clears on confirm", () => {
+    const clearLogs = jest.fn()
+    mockUseLogStream.mockReturnValue(streamState({ clearLogs }))
+    render(<LogPanel />)
+
+    fireEvent.click(screen.getByTestId("stub-toolbar-clear"))
+    expect(clearLogs).not.toHaveBeenCalled()
+    const dialog = screen.getByRole("alertdialog")
+    expect(dialog).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /clear logs/i }))
+    expect(clearLogs).toHaveBeenCalledTimes(1)
+    expect(mockToastSuccess).toHaveBeenCalled()
+  })
+
+  it("does not clear when the dialog is cancelled", () => {
+    const clearLogs = jest.fn()
+    mockUseLogStream.mockReturnValue(streamState({ clearLogs }))
+    render(<LogPanel />)
+
+    fireEvent.click(screen.getByTestId("stub-toolbar-clear"))
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+    expect(clearLogs).not.toHaveBeenCalled()
+  })
+
+  it("exports NDJSON as one JSON object per line", async () => {
+    mockUseLogStream.mockReturnValue(streamState())
+    render(<LogPanel />)
+
+    fireEvent.click(screen.getByTestId("stub-toolbar-export-ndjson"))
+    expect(capturedBlobs).toHaveLength(1)
+    const text = await capturedBlobs[0].text()
+    const lines = text.split("\n").filter(Boolean)
+    expect(lines).toHaveLength(1)
+    expect(JSON.parse(lines[0]).id).toBe("l-1")
+    expect(anchorClickSpy).toHaveBeenCalled()
+  })
+
+  it("exports CSV with trace/session/source/data columns", async () => {
+    mockUseLogStream.mockReturnValue(streamState())
+    render(<LogPanel />)
+
+    fireEvent.click(screen.getByTestId("stub-toolbar-export-csv"))
+    expect(capturedBlobs).toHaveLength(1)
+    const text = await capturedBlobs[0].text()
+    const [header, row] = text.split("\n")
+    expect(header).toContain('"TraceId","SessionId","Source","Data"')
+    expect(row).toContain('"t-1"')
+    expect(row).toContain('"s-1"')
+    expect(row).toContain('"frontend"')
+    expect(row).toContain('""code"":500')
   })
 })

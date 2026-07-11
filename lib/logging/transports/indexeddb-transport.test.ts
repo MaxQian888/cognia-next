@@ -281,3 +281,52 @@ describe("IndexedDBTransport span support", () => {
     await transport.close()
   })
 })
+
+describe("IndexedDBTransport periodic retention sweep", () => {
+  it("re-runs cleanup on the interval while the transport stays open", async () => {
+    const transport = new IndexedDBTransport({ bufferSize: 10, flushInterval: 60_000 })
+    await awaitInit(transport)
+
+    const cleanupSpy = jest
+      .spyOn(transport as unknown as { cleanup: () => Promise<void> }, "cleanup")
+      .mockResolvedValue(undefined)
+
+    jest.useFakeTimers()
+    try {
+      const { CLEANUP_INTERVAL_MS } = await import("./indexeddb-transport")
+      // The timer was installed with real timers at init; reinstall it under
+      // fake timers via updateOptions → startFlushTimer path is flush-only, so
+      // exercise the private starter directly.
+      ;(transport as unknown as { startCleanupTimer: () => void }).startCleanupTimer()
+
+      jest.advanceTimersByTime(CLEANUP_INTERVAL_MS)
+      expect(cleanupSpy).toHaveBeenCalledTimes(1)
+      jest.advanceTimersByTime(CLEANUP_INTERVAL_MS)
+      expect(cleanupSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      jest.useRealTimers()
+    }
+    cleanupSpy.mockRestore()
+    await transport.close()
+  })
+
+  it("close() stops the retention sweep", async () => {
+    const transport = new IndexedDBTransport({ bufferSize: 10, flushInterval: 60_000 })
+    await awaitInit(transport)
+    const cleanupSpy = jest
+      .spyOn(transport as unknown as { cleanup: () => Promise<void> }, "cleanup")
+      .mockResolvedValue(undefined)
+
+    jest.useFakeTimers()
+    try {
+      const { CLEANUP_INTERVAL_MS } = await import("./indexeddb-transport")
+      ;(transport as unknown as { startCleanupTimer: () => void }).startCleanupTimer()
+      await transport.close()
+      jest.advanceTimersByTime(CLEANUP_INTERVAL_MS * 3)
+      expect(cleanupSpy).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+    cleanupSpy.mockRestore()
+  })
+})

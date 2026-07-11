@@ -388,7 +388,16 @@
     "viewDetailsMenu": "View details",
     "viewDiagnostics": "View Diagnostics",
     "viewNativeDiagnostics": "View Native Diagnostics",
-    "warning": "Warning"
+    "warning": "Warning",
+    "clearConfirmTitle": "Clear all logs?",
+    "clearConfirmDescription": "This permanently deletes every persisted log entry on this device. Exports and bookmarks of deleted entries stop working.",
+    "clearConfirmCancel": "Cancel",
+    "clearConfirmConfirm": "Clear logs",
+    "clearedToast": "Logs cleared",
+    "hintNextPrev": "next/prev",
+    "hintExpand": "expand",
+    "hintRefresh": "refresh",
+    "hintAllShortcuts": "all shortcuts"
   },
   "settings": {
     "advanced": {

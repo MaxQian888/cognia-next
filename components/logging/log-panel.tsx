@@ -23,6 +23,7 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useState,
   useDeferredValue,
 } from "react"
 import { useTranslations } from "next-intl"
@@ -57,6 +58,16 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useMediaQuery, useResizableLayout, type UseResizableLayoutResult } from "@/hooks/ui"
 import { AGENT_TRACE_MODULE } from "@cognia/agent-trace/log-adapter"
 import type { LogFilterPreset } from "@/types/logging"
@@ -446,14 +457,33 @@ export function LogPanel({
         return
       }
       if (format === "csv") {
-        const csvHeader = '"Timestamp","Level","Module","Message"\n'
+        // Full-fidelity columns: trace/session/source/data used to be dropped,
+        // which made CSV exports useless for correlating incidents.
+        const esc = (value: string) => `"${value.replace(/"/g, '""').replace(/[\r\n]+/g, " ")}"`
+        const csvHeader =
+          '"Timestamp","Level","Module","Message","TraceId","SessionId","Source","Data"\n'
         const csvContent = bundle.logs
-          .map(
-            (log) =>
-              `"${new Date(log.timestamp).toISOString()}","${log.level}","${log.module}","${log.message.replace(/"/g, '""').replace(/[\r\n]+/g, " ")}"`
+          .map((log) =>
+            [
+              esc(new Date(log.timestamp).toISOString()),
+              esc(log.level),
+              esc(log.module),
+              esc(log.message),
+              esc(log.traceId ?? ""),
+              esc(log.sessionId ?? ""),
+              esc(log.source ?? ""),
+              esc(log.data ? JSON.stringify(log.data) : ""),
+            ].join(",")
           )
           .join("\n")
         downloadBlob(createExportBlob(csvHeader + csvContent, "text/csv"), "csv")
+        return
+      }
+      if (format === "ndjson") {
+        // One JSON entry per line — streams into jq / Loki / Grafana without
+        // loading the whole export as a single document.
+        const ndjson = bundle.logs.map((log) => JSON.stringify(log)).join("\n")
+        downloadBlob(createExportBlob(ndjson, "application/x-ndjson"), "ndjson")
         return
       }
       const content = [
@@ -474,6 +504,16 @@ export function LogPanel({
     },
     [buildExportBundle, createExportBlob, downloadBlob]
   )
+
+  // Clearing is destructive and irreversible — gate it behind a confirmation
+  // dialog instead of firing straight from the More menu.
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false)
+  const handleClearRequest = useCallback(() => setConfirmClearOpen(true), [])
+  const handleClearConfirm = useCallback(() => {
+    setConfirmClearOpen(false)
+    void clearLogs()
+    toast.success(t("panel.clearedToast"))
+  }, [clearLogs, t])
 
   const relatedLogs = useMemo(() => {
     if (!filters.selectedLog?.traceId) return []
@@ -912,7 +952,7 @@ export function LogPanel({
           setAutoRefresh={filters.setAutoRefresh}
           refresh={refresh}
           onExport={handleExport}
-          clearLogs={clearLogs}
+          clearLogs={handleClearRequest}
           showDetailPanel={filters.showDetailPanel}
           setShowDetailPanel={filters.setShowDetailPanel}
           autoScroll={filters.autoScroll}
@@ -940,6 +980,21 @@ export function LogPanel({
           density={filters.density}
           setDensity={filters.setDensity}
         />
+
+        <AlertDialog open={confirmClearOpen} onOpenChange={setConfirmClearOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("panel.clearConfirmTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("panel.clearConfirmDescription")}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("panel.clearConfirmCancel")}</AlertDialogCancel>
+              <AlertDialogAction onClick={handleClearConfirm}>
+                {t("panel.clearConfirmConfirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Stats bar */}
         {showStats && (

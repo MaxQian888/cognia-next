@@ -220,6 +220,13 @@ describe("LogPanelToolbar — More actions menu", () => {
     expect(props.onExport).toHaveBeenCalledWith("text")
   })
 
+  it("invokes onExport('ndjson') from the More menu", async () => {
+    const { props } = renderToolbar()
+    await openMore()
+    fireEvent.click(screen.getByText("NDJSON"))
+    expect(props.onExport).toHaveBeenCalledWith("ndjson")
+  })
+
   it("fires clearLogs", async () => {
     const { props } = renderToolbar()
     await openMore()

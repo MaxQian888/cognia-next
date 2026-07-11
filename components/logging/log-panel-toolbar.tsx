@@ -80,7 +80,7 @@ import type { LogLevel } from "@/lib/logging"
 import type { LogFilterPreset, PresetTimeRange } from "@/types/logging"
 import type { Density, ViewMode, PanelSource } from "@/hooks/logging/use-log-panel-filters"
 
-export type ExportFormat = "json" | "csv" | "text"
+export type ExportFormat = "json" | "csv" | "text" | "ndjson"
 
 export interface LogPanelToolbarProps {
   // View mode
@@ -401,12 +401,13 @@ function LogPanelToolbarImpl({
           <TooltipContent>
             <div className="text-xs space-y-0.5">
               <div>
-                <kbd className="font-mono">j/k</kbd> next/prev ·{" "}
-                <kbd className="font-mono">Enter</kbd> expand
+                <kbd className="font-mono">j/k</kbd> {t("panel.hintNextPrev")} ·{" "}
+                {/* i18n-exempt: key name, not UI prose */}
+                <kbd className="font-mono">Enter</kbd> {t("panel.hintExpand")}
               </div>
               <div>
-                <kbd className="font-mono">r</kbd> refresh · <kbd className="font-mono">?</kbd> all
-                shortcuts
+                <kbd className="font-mono">r</kbd> {t("panel.hintRefresh")} ·{" "}
+                <kbd className="font-mono">?</kbd> {t("panel.hintAllShortcuts")}
               </div>
             </div>
           </TooltipContent>
@@ -455,11 +456,18 @@ function LogPanelToolbarImpl({
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => onExport("json")}>
               <FileJson className="h-4 w-4 mr-2" />
+              {/* i18n-exempt: file-format name, not UI prose */}
               JSON
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onExport("csv")}>
               <FileSpreadsheet className="h-4 w-4 mr-2" />
+              {/* i18n-exempt: file-format name, not UI prose */}
               CSV
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onExport("ndjson")}>
+              <FileJson className="h-4 w-4 mr-2" />
+              {/* i18n-exempt: file-format name, not UI prose */}
+              NDJSON
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onExport("text")}>
               <FileText className="h-4 w-4 mr-2" />
