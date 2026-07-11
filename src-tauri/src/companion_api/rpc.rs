@@ -417,6 +417,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     // ── App-data backup ─────────────────────────────────────────────────────
     "backup_export",
     "backup_import",
+    // ── Native log read-back ────────────────────────────────────────────────
+    // Bounded tail queries over the desktop's on-disk log files
+    // (`cognia-structured.log` / `cognia.log`) so mobile diagnostics can view
+    // desktop logs. Pure reads; parsing is best-effort (see logging::query).
+    "logs_query",
+    "logs_list_files",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -499,6 +505,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "goal_status",
     // App-data backup export is a pure read (snapshots current state).
     "backup_export",
+    // Native log read-back — bounded tail reads over on-disk log files.
+    "logs_query",
+    "logs_list_files",
 ];
 
 // ---------------------------------------------------------------------------
@@ -2554,6 +2563,24 @@ pub(super) async fn dispatch(
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
 
+        // ── Native log read-back ────────────────────────────────────────────
+        // Free functions over the log directory — no Tauri state needed, so
+        // these also work from the headless `cognia-server` process.
+        "logs_query" => {
+            // Accept both the Tauri arg shape `{ query: {...} }` (what
+            // `transport.call("logs_query", { query })` sends on every
+            // platform) and a bare flattened query object.
+            let raw = args.get("query").cloned().unwrap_or_else(|| args.clone());
+            let query: crate::logging::query::NativeLogQuery = serde_json::from_value(raw)
+                .map_err(|e| RpcError::malformed(format!("invalid logs query: {e}")))?;
+            crate::logging::query::query_native_logs(&query)
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "logs_list_files" => crate::logging::query::list_native_log_files()
+            .map_err(RpcError::internal)
+            .and_then(to_json),
+
         unknown => Err(RpcError::unknown_command(unknown)),
     }
 }
@@ -3775,6 +3802,19 @@ mod tests {
     #[tokio::test]
     async fn dispatch_coverage_session_list() {
         assert_not_404!("session_list", json!({ "limit": 20, "offset": 0 }));
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_logs_query() {
+        assert_not_404!(
+            "logs_query",
+            json!({ "query": { "file": "structured", "minLevel": "warn", "limit": 10 } })
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_logs_list_files() {
+        assert_not_404!("logs_list_files", json!({}));
     }
 
     // ── Missing-field 400s ───────────────────────────────────────────────────

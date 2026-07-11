@@ -629,6 +629,8 @@ pub fn run() {
             logging::commands::platform_logging_forward,
             logging::commands::tracing_logging_get_levels,
             logging::commands::tracing_logging_set_levels,
+            logging::commands::logs_query,
+            logging::commands::logs_list_files,
             crash::commands::crash_set_context,
             crash::commands::crash_push_breadcrumb,
             crash::commands::crash_list_reports,

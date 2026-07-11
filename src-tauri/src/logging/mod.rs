@@ -16,6 +16,7 @@
 pub mod commands;
 pub mod native_bootstrap;
 pub mod platform;
+pub mod query;
 pub mod tracing_setup;
 
 use crate::crash::retention::LOG_MAX_FILE_SIZE;

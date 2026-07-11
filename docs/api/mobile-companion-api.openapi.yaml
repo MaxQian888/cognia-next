@@ -130,6 +130,8 @@ tags:
     description: App-data backup export / import.
   - name: rpc-settings
     description: User-facing settings + per-conversation overrides.
+  - name: rpc-logs
+    description: Bounded read-back over the desktop's on-disk log files.
   - name: events
     description: WebSocket bridge for live Tauri events (chat messages, run state, …).
 
@@ -6858,6 +6860,151 @@ paths:
           }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/logs_query:
+    post:
+      operationId: rpcLogsQuery
+      tags: [rpc-logs]
+      summary: Bounded tail query over the desktop's on-disk log files (read-only).
+      description: |
+        Reads the tail (at most 4 MiB) of `cognia-structured.log` (JSON lines
+        from the Rust tracing subscriber) or `cognia.log` (plain
+        tauri-plugin-log lines) and returns filtered entries newest-first.
+        Parsing is best-effort — unparseable lines are skipped.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    properties:
+                      {
+                        query:
+                          {
+                            type: object,
+                            description: Filter set. A bare flattened query object (no wrapper) is also accepted.,
+                            properties:
+                              {
+                                file:
+                                  { type: string, enum: [structured, plain], default: structured },
+                                minLevel: { type: string, enum: [trace, debug, info, warn, error] },
+                                target:
+                                  {
+                                    type: string,
+                                    description: Hierarchy prefix match on the record target.,
+                                  },
+                                contains:
+                                  {
+                                    type: string,
+                                    description: Case-insensitive substring match on the message.,
+                                  },
+                                sinceMs:
+                                  {
+                                    type: integer,
+                                    format: int64,
+                                    description: Only entries at or after this Unix-epoch ms.,
+                                  },
+                                limit: { type: integer, minimum: 1, maximum: 1000, default: 200 },
+                              },
+                          },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Filtered log entries,
+            newest first,
+            plus scan metadata.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        required: [entries, fileSize, scannedBytes, truncated, path],
+                        properties:
+                          {
+                            entries:
+                              {
+                                type: array,
+                                items:
+                                  {
+                                    type: object,
+                                    required: [timestamp, level, target, message],
+                                    properties:
+                                      {
+                                        timestamp: { type: string },
+                                        epochMs: { type: integer, format: int64 },
+                                        level: { type: string },
+                                        target: { type: string },
+                                        message: { type: string },
+                                        fields: { type: object, additionalProperties: true },
+                                      },
+                                  },
+                              },
+                            fileSize: { type: integer, format: int64 },
+                            scannedBytes: { type: integer, format: int64 },
+                            truncated: { type: boolean },
+                            path: { type: string },
+                          },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/logs_list_files:
+    post:
+      operationId: rpcLogsListFiles
+      tags: [rpc-logs]
+      summary: List the desktop's log-directory files with sizes (read-only).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: {} } } }
+      responses:
+        "200":
+          {
+            description: Log files,
+            newest-modified first.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: array,
+                        items:
+                          {
+                            type: object,
+                            required: [name, size],
+                            properties:
+                              {
+                                name: { type: string },
+                                size: { type: integer, format: int64 },
+                                modifiedMs: { type: integer, format: int64 },
+                              },
+                          },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
         "500":
           {
             description: error,
