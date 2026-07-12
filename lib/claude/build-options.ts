@@ -108,7 +108,7 @@ import {
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { PLAN_MODE_PROMPT } from "./plan-mode-prompt"
+import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
 
 /**
  * Snippet appended to `appendSystemPrompt` when brief mode is on. Exported so

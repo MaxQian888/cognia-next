@@ -22,9 +22,11 @@ import {
   CheckCircle2Icon,
   CircleIcon,
   ClockIcon,
+  ListIcon,
   MinusCircleIcon,
   MoreHorizontalIcon,
   PencilIcon,
+  SparklesIcon,
   XCircleIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -137,11 +139,16 @@ export function PlanApprovalCard({
   onRefine,
   onEdit,
   disabled,
+  interactiveView,
+  interactiveStyle,
 }: PlanApprovalCardProps) {
   const t = useTranslations("plan")
   const [feedback, setFeedback] = useState("")
   const [editing, setEditing] = useState(false)
   const [editTitle, setEditTitle] = useState("")
+  // Enhanced view opt-out is per-card, not persisted: the setting turns the
+  // interactive body on by default; this flips back to the classic list.
+  const [classicView, setClassicView] = useState(false)
   const [editSteps, setEditSteps] = useState("")
   const [editMarkdown, setEditMarkdown] = useState("")
   const steps = [...plan.steps].sort((a, b) => a.order - b.order)
@@ -156,6 +163,9 @@ export function PlanApprovalCard({
   const progressPct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0
   const canEdit = Boolean(onEdit) && plan.status === "awaiting_approval"
 
+  // The interactive HTML body edits the plan, so it shares canEdit's gate.
+  const interactiveAvailable = Boolean(interactiveView) && canEdit
+  const showInteractive = interactiveAvailable && !classicView && !editing
   const openEditor = () => {
     setEditTitle(plan.title)
     setEditSteps(steps.map((s) => s.title).join("\n"))
@@ -188,7 +198,28 @@ export function PlanApprovalCard({
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-semibold">{t("approval.title")}</span>
         <div className="flex items-center gap-1">
-          {canEdit && (
+          {interactiveAvailable && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-6"
+              disabled={disabled}
+              onClick={() => setClassicView((v) => !v)}
+              aria-label={
+                classicView
+                  ? t("approval.interactive.viewInteractive")
+                  : t("approval.interactive.viewClassic")
+              }
+              data-testid="plan-approval-view-toggle"
+            >
+              {classicView ? (
+                <SparklesIcon className="size-3.5" />
+              ) : (
+                <ListIcon className="size-3.5" />
+              )}
+            </Button>
+          )}
+          {canEdit && !showInteractive && (
             <Button
               size="icon"
               variant="ghost"

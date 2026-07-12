@@ -1,4 +1,4 @@
-import { PLAN_MODE_PROMPT } from "./plan-mode-prompt"
+import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
 
 // Drift tripwire: both surfaces (GUI PLAN_MODE_SNIPPET, CLI
 // PLAN_MODE_PROMPT_SECTION) re-export this constant. These contract phrases
@@ -28,5 +28,20 @@ describe("PLAN_MODE_PROMPT contract", () => {
   it("re-exports identically on both surfaces", async () => {
     const { PLAN_MODE_SNIPPET } = await import("./build-options")
     expect(PLAN_MODE_SNIPPET).toBe(PLAN_MODE_PROMPT)
+  })
+})
+
+describe("PLAN_MODE_STRUCTURED_STEPS_SNIPPET contract", () => {
+  it("is additive — the shared base prompt does not embed it", () => {
+    expect(PLAN_MODE_PROMPT).not.toContain("## Steps")
+  })
+
+  it("asks for the parse-friendly step list the interactive editor projects", () => {
+    // `parsePlanText` recognises top-level bullets / numbered items; the
+    // snippet must keep steering the model toward exactly that shape.
+    expect(PLAN_MODE_STRUCTURED_STEPS_SNIPPET).toContain("## Steps")
+    expect(PLAN_MODE_STRUCTURED_STEPS_SNIPPET).toContain("numbered list")
+    expect(PLAN_MODE_STRUCTURED_STEPS_SNIPPET).toContain("imperative")
+    expect(PLAN_MODE_STRUCTURED_STEPS_SNIPPET).toContain("interactive step editor")
   })
 })

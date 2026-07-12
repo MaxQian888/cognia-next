@@ -27,9 +27,13 @@ const getAllAgents = jest.fn()
 const createAgentFromPreset = jest.fn()
 const isFromPreset = jest.fn()
 const resolvePreferredCodex = jest.fn<Promise<string>, []>(async () => "codex")
+const supportsExternalAgents = jest.fn(() => true)
 
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: () => ({ addAgent, getAllAgents }),
+}))
+jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
+  supportsExternalAgents: () => supportsExternalAgents(),
 }))
 jest.mock("@/lib/ai/agent/external/presets", () => ({
   createAgentFromPreset: (...args: unknown[]) => createAgentFromPreset(...args),
@@ -47,6 +51,7 @@ beforeEach(() => {
   createAgentFromPreset.mockReset()
   isFromPreset.mockReset().mockReturnValue(null)
   resolvePreferredCodex.mockReset().mockResolvedValue("codex")
+  supportsExternalAgents.mockReset().mockReturnValue(true)
 })
 
 describe("resolveTeammatePresetId", () => {
@@ -138,6 +143,15 @@ describe("resolveTeammateExternalAgent", () => {
     )
     expect(resolvePreferredCodex).not.toHaveBeenCalled()
     expect(createAgentFromPreset).toHaveBeenCalledWith("gemini-cli")
+  })
+
+  it("returns null on hosts without external-agent support (browser shell)", async () => {
+    supportsExternalAgents.mockReturnValue(false)
+    const tm = teammate({ config: { runtime: "codex" } } as Partial<AgentTeammate>)
+    const result = await resolveTeammateExternalAgent(tm, EMPTY_CAPS, ctx())
+    expect(result).toBeNull()
+    // Never reaches the manager — no addAgent, no connect-time throw.
+    expect(addAgent).not.toHaveBeenCalled()
   })
 
   it("returns null when the preset is unknown (caller falls back)", async () => {

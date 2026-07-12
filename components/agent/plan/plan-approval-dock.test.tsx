@@ -4,7 +4,11 @@
 
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { PlanApprovalDock, PLAN_APPROVED_PROMPT } from "./plan-approval-dock"
+import {
+  PlanApprovalDock,
+  PLAN_APPROVED_PROMPT,
+  buildPlanApprovedPrompt,
+} from "./plan-approval-dock"
 import type { AgentPlan, PlanStep } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
 
@@ -89,6 +93,7 @@ function plan(over: Partial<AgentPlan> = {}): AgentPlan {
 beforeEach(() => {
   jest.clearAllMocks()
   buildClient.mockReturnValue({})
+  __setMockSettings({ foo: 1 })
 })
 
 describe("PlanApprovalDock", () => {

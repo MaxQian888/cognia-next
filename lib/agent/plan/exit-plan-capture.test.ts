@@ -10,13 +10,15 @@ import {
   planInputFromExitPlanMode,
 } from "./exit-plan-capture"
 
+// 30s: the first cold Dexie open (full schema migration chain) can exceed the
+// 5s default on slower disks — same bump as the other cold-Dexie suites.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
   __resetPlanRuntimeForTesting()
-})
+}, 30_000)
 
 describe("parsePlanText", () => {
   it("splits dash and asterisk bullets", () => {

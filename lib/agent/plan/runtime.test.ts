@@ -31,6 +31,8 @@ jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
 
 const isTauriMock = detect.isTauri as jest.Mock
 
+// 30s: the first cold Dexie open (full schema migration chain) can exceed the
+// 5s default on slower disks — same bump as the other cold-Dexie suites.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -39,7 +41,7 @@ beforeEach(async () => {
   __resetPlanRuntimeForTesting()
   isTauriMock.mockReturnValue(false)
   runWorkflowMock.mockReset()
-})
+}, 30_000)
 
 function createInput(over: Partial<CreatePlanInput> = {}): CreatePlanInput {
   return {

@@ -43,6 +43,13 @@ export async function resolveTeammateExternalAgent(
   let presetId = resolveTeammatePresetId(teammate, resolvedCaps)
   if (!presetId) return null
 
+  // External CLI agents only run on the desktop / headless host. Without this
+  // guard the browser shell reached `manager.addAgent`, whose connect throws a
+  // desktop-only error that escaped `dispatchTeammate` uncaught instead of
+  // taking the documented graceful fallback to the built-in runtime.
+  const { supportsExternalAgents } = await import("@/lib/ai/agent/external/agent-transport")
+  if (!supportsExternalAgents()) return null
+
   const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
   const { createAgentFromPreset, isFromPreset, resolvePreferredCodexExecutablePresetId } =
     await import("@/lib/ai/agent/external/presets")

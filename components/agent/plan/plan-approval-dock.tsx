@@ -143,7 +143,7 @@ export function PlanApprovalDock({
     setBusy(true)
     try {
       await getPlanRuntime().approvePlan(plan.id)
-      await onResume(PLAN_APPROVED_PROMPT, mode)
+      await onResume(buildPlanApprovedPrompt(plan), mode)
       // Leave `busy` true — approvePlan flips the status so this dock unmounts.
     } catch {
       setBusy(false)
@@ -185,10 +185,14 @@ export function PlanApprovalDock({
       await getPlanRuntime().updatePlanDraft(plan.id, {
         title,
         steps: linearSteps(titles),
-        // Keep the full body in metadata so the card can render it back.
-        ...("planText" in patch
-          ? { metadata: { ...plan.metadata, planText: patch.planText } }
-          : {}),
+        // Keep the full body in metadata so the card can render it back, and
+        // stamp `userEdited` so approval embeds the adjusted plan (the model's
+        // transcript still holds its original proposal).
+        metadata: {
+          ...plan.metadata,
+          userEdited: true,
+          ...("planText" in patch ? { planText: patch.planText } : {}),
+        },
       })
     } finally {
       setBusy(false)
