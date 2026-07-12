@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Next.js 16 (React 19) + Tauri 2.9 + Capacitor 7 + TypeScript + Tailwind v4 + shadcn/ui + Zustand. The same Next.js static export feeds three shells: the browser (`pnpm dev`), the Tauri desktop app (`pnpm tauri dev`), and the Capacitor mobile shell (`pnpm mobile:sync`).
+Next.js 16 (React 19) + Tauri 2.9 + Capacitor 8 + TypeScript + Tailwind v4 + shadcn/ui + Zustand. The same Next.js static export feeds three shells: the browser (`pnpm dev`), the Tauri desktop app (`pnpm tauri dev`), and the Capacitor mobile shell (`pnpm mobile:sync`).
 
 ## Working Rules (read before touching code)
 
@@ -80,7 +80,7 @@ running** — use its MCP tools to author/preview stories, not as an always-on s
 | -------- | --------- | ---- | ------------------------------------------------------------ |
 | Main app | `/`       | 3000 | static export (`out/`) — consumed by Tauri **and** Capacitor |
 | Docs     | `docs/`   | 3001 | full Next.js server (Fumadocs)                               |
-| Mobile   | `mobile/` | —    | Capacitor 7 shell over `../out`                              |
+| Mobile   | `mobile/` | —    | Capacitor 8 shell over `../out`                              |
 
 Install from repo root only — single `pnpm-lock.yaml`.
 
