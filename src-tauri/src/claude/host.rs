@@ -295,8 +295,11 @@ mod tests {
     #[tokio::test]
     async fn inject_provider_env_forwards_custom_headers() {
         let keys = ApiKeyState::new();
-        keys.set_provider(Some("sk-moon".into()), Some("https://api.moonshot.cn/anthropic".into()))
-            .await;
+        keys.set_provider(
+            Some("sk-moon".into()),
+            Some("https://api.moonshot.cn/anthropic".into()),
+        )
+        .await;
         keys.set_custom_headers(vec![(
             "anthropic-beta".into(),
             "context-1m-2025-08-07".into(),
@@ -315,8 +318,10 @@ mod tests {
                 )
             })
             .collect();
-        assert!(envs.iter().any(|(k, v)| k == "ANTHROPIC_CUSTOM_HEADER_anthropic-beta"
-            && v.as_deref() == Some("context-1m-2025-08-07")));
+        assert!(envs
+            .iter()
+            .any(|(k, v)| k == "ANTHROPIC_CUSTOM_HEADER_anthropic-beta"
+                && v.as_deref() == Some("context-1m-2025-08-07")));
     }
 
     #[tokio::test]
@@ -349,7 +354,9 @@ mod tests {
             EventBus::new(),
             ApiKeyState::new(),
         );
-        let err = host.resolve_script().expect_err("missing script must error");
+        let err = host
+            .resolve_script()
+            .expect_err("missing script must error");
         assert!(err.contains("COGNIA_SIDECAR_SCRIPT"));
 
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -367,10 +374,7 @@ mod tests {
         std::env::set_var(SIDECAR_SCRIPT_ENV, "X:/somewhere/claude-host.mjs");
         let host = HeadlessSidecarHost::from_env(EventBus::new(), ApiKeyState::new())
             .expect("from_env with var set");
-        assert_eq!(
-            host.script,
-            PathBuf::from("X:/somewhere/claude-host.mjs")
-        );
+        assert_eq!(host.script, PathBuf::from("X:/somewhere/claude-host.mjs"));
         match prev {
             Some(v) => std::env::set_var(SIDECAR_SCRIPT_ENV, v),
             None => std::env::remove_var(SIDECAR_SCRIPT_ENV),

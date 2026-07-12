@@ -57,7 +57,8 @@ const DEVICE_CODE_EXPIRES_IN_SECS: i64 = 15 * 60;
 /// `codex_cli_rs`-shaped User-Agent. The accounts service derives its
 /// `originator` from the UA prefix; mirroring codex's shape keeps us recognised
 /// as the same first-party client. The version is not validated.
-const CODEX_USER_AGENT: &str = concat!("codex_cli_rs/", env!("CARGO_PKG_VERSION"), " (cognia-next)");
+const CODEX_USER_AGENT: &str =
+    concat!("codex_cli_rs/", env!("CARGO_PKG_VERSION"), " (cognia-next)");
 
 /// Raw `POST /deviceauth/usercode` response. Some captures key the code as
 /// `usercode`; `interval` arrives as a JSON string in the reference impl.
@@ -365,8 +366,7 @@ mod tests {
 
     #[test]
     fn code_success_resp_parses_server_minted_pkce_bundle() {
-        let raw =
-            r#"{"authorization_code":"ac-1","code_challenge":"cc-1","code_verifier":"cv-1"}"#;
+        let raw = r#"{"authorization_code":"ac-1","code_challenge":"cc-1","code_verifier":"cv-1"}"#;
         let parsed: CodeSuccessResp = serde_json::from_str(raw).unwrap();
         assert_eq!(parsed.authorization_code, "ac-1");
         assert_eq!(parsed.code_verifier, "cv-1");
@@ -394,7 +394,10 @@ mod tests {
         let json = serde_json::to_value(&d).unwrap();
         assert_eq!(json["device_code"], "da");
         assert_eq!(json["user_code"], "uc");
-        assert_eq!(json["verification_uri"], "https://auth.openai.com/codex/device");
+        assert_eq!(
+            json["verification_uri"],
+            "https://auth.openai.com/codex/device"
+        );
         assert_eq!(json["expires_in"], 900);
         assert!(json["verification_uri_complete"].is_null());
     }

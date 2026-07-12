@@ -13,7 +13,8 @@ pub fn validate_external_url(raw: &str) -> Result<url::Url, String> {
     if !(raw.starts_with("http://") || raw.starts_with("https://")) {
         return Err("browser preview only supports http(s) URLs".to_string());
     }
-    raw.parse::<url::Url>().map_err(|e| format!("invalid url: {e}"))
+    raw.parse::<url::Url>()
+        .map_err(|e| format!("invalid url: {e}"))
 }
 
 /// JS string literal for safe interpolation into an `eval` call.
@@ -216,7 +217,8 @@ mod tests {
             NavDisposition::Loaded("http://a/b".to_string())
         );
         // Non-http reported URL: cancelled, never re-emitted.
-        let bad = "https://cognia.invalid/__cognia_loaded?data=%7B%22url%22%3A%22file%3A%2F%2F%2Fx%22%7D";
+        let bad =
+            "https://cognia.invalid/__cognia_loaded?data=%7B%22url%22%3A%22file%3A%2F%2F%2Fx%22%7D";
         assert_eq!(classify_navigation(bad), NavDisposition::Block);
     }
 }

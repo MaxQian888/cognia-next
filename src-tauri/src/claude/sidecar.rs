@@ -949,8 +949,13 @@ mod tests {
 
     #[test]
     fn build_hook_fire_payload_skips_no_op() {
-        assert!(build_hook_fire_payload("s1", "PreToolUse", Some("Bash"), &decision(None, None, &[]))
-            .is_none());
+        assert!(build_hook_fire_payload(
+            "s1",
+            "PreToolUse",
+            Some("Bash"),
+            &decision(None, None, &[])
+        )
+        .is_none());
     }
 
     #[test]
@@ -978,9 +983,13 @@ mod tests {
 
     #[test]
     fn build_hook_fire_payload_omits_tool_name_as_null() {
-        let payload =
-            build_hook_fire_payload("s1", "UserPromptSubmit", None, &decision(None, Some("ctx"), &[]))
-                .expect("context fire should build a payload");
+        let payload = build_hook_fire_payload(
+            "s1",
+            "UserPromptSubmit",
+            None,
+            &decision(None, Some("ctx"), &[]),
+        )
+        .expect("context fire should build a payload");
         assert_eq!(payload["event"]["tool_name"], Value::Null);
         assert_eq!(payload["event"]["outcome"], "context");
         assert_eq!(payload["event"]["additional_context"], "ctx");

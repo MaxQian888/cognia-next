@@ -684,13 +684,9 @@ mod tests {
         // as a host event on the sidecar channel.
         let mut echoed = None;
         for _ in 0..100 {
-            if let Some((_, payload)) = host
-                .events()
-                .into_iter()
-                .find(|(channel, payload)| {
-                    channel == super::super::sidecar::SIDECAR_EVENT && payload["type"] == "echo"
-                })
-            {
+            if let Some((_, payload)) = host.events().into_iter().find(|(channel, payload)| {
+                channel == super::super::sidecar::SIDECAR_EVENT && payload["type"] == "echo"
+            }) {
                 echoed = Some(payload);
                 break;
             }

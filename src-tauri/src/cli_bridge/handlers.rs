@@ -789,10 +789,12 @@ mod tests {
     fn acp_token_payload_rejects_wrong_secret() {
         let payload = build_acp_token_payload(7890, TEST_SECRET, "").unwrap();
         let token = payload["token"].as_str().unwrap();
-        assert!(
-            crate::companion_api::jwt::verify(b"another-secret-32-bytes-exactly_", token, "device")
-                .is_err()
-        );
+        assert!(crate::companion_api::jwt::verify(
+            b"another-secret-32-bytes-exactly_",
+            token,
+            "device"
+        )
+        .is_err());
     }
 
     #[test]

@@ -99,20 +99,26 @@ impl EmitterEventSink {
 
 impl ExternalAgentEventSink for EmitterEventSink {
     fn stdout_line(&self, agent_id: &str, line: &str) {
-        self.emitter.emit(STDOUT_CHANNEL, stdout_payload(agent_id, line));
+        self.emitter
+            .emit(STDOUT_CHANNEL, stdout_payload(agent_id, line));
     }
 
     fn stderr_line(&self, agent_id: &str, line: &str) {
-        self.emitter.emit(STDERR_CHANNEL, stderr_payload(agent_id, line));
+        self.emitter
+            .emit(STDERR_CHANNEL, stderr_payload(agent_id, line));
     }
 
     fn exited(&self, agent_id: &str, code: Option<i32>, signal: Option<String>) {
         // Mirror the historical payload order: a state-change to Stopped
         // followed by the exit event.
-        self.emitter
-            .emit(STATE_CHANGE_CHANNEL, state_change_payload(agent_id, "Stopped"));
-        self.emitter
-            .emit(EXIT_CHANNEL, exit_payload(agent_id, code, signal.as_deref()));
+        self.emitter.emit(
+            STATE_CHANGE_CHANNEL,
+            state_change_payload(agent_id, "Stopped"),
+        );
+        self.emitter.emit(
+            EXIT_CHANNEL,
+            exit_payload(agent_id, code, signal.as_deref()),
+        );
     }
 }
 
@@ -335,7 +341,10 @@ mod tests {
             crate::companion_api::event_bus::SubscribeResult::Ok { replay, .. } => {
                 assert_eq!(replay.len(), 1);
                 assert_eq!(replay[0].event_type, STDOUT_CHANNEL);
-                assert_eq!(replay[0].payload, json!({ "agentId": "a1", "data": "hello" }));
+                assert_eq!(
+                    replay[0].payload,
+                    json!({ "agentId": "a1", "data": "hello" })
+                );
             }
             _ => panic!("subscribe failed"),
         }

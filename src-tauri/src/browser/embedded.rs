@@ -508,8 +508,12 @@ pub async fn browser_embed_capture(
                 (p.x, p.y)
             })
             .unwrap_or((0, 0));
-        let region =
-            compute_embed_capture_region((inner.x, inner.y), (x, y, width, height), scale, monitor_origin);
+        let region = compute_embed_capture_region(
+            (inner.x, inner.y),
+            (x, y, width, height),
+            scale,
+            monitor_origin,
+        );
         let opts = crate::automation::types::ScreenshotOpts {
             region: Some(region),
             format: None,

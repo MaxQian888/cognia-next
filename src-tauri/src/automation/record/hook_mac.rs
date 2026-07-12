@@ -27,8 +27,8 @@ use std::thread::{self, JoinHandle};
 use core_foundation::base::TCFType;
 use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
 use core_graphics::event::{
-    CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
-    CGEventTapProxy, CallbackResult, EventField,
+    CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
+    CGEventTapProxy, CGEventType, CallbackResult, EventField,
 };
 use tokio::sync::mpsc::Sender;
 
@@ -165,12 +165,7 @@ pub(crate) fn to_signal(
 /// Read the integer event fields `to_signal` needs and emit the projected
 /// signal. Disable notifications re-enable the tap so a transient timeout /
 /// secure-input switch doesn't silently kill the session mid-recording.
-fn on_event(
-    tx: &Sender<RawSignal>,
-    port: &OnceLock<SendPtr>,
-    etype: CGEventType,
-    event: &CGEvent,
-) {
+fn on_event(tx: &Sender<RawSignal>, port: &OnceLock<SendPtr>, etype: CGEventType, event: &CGEvent) {
     match etype {
         CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
             if let Some(p) = port.get() {
@@ -179,13 +174,18 @@ fn on_event(
         }
         _ => {
             let loc = event.location();
-            let scroll_dy = event
-                .get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS_1)
-                as i32
-                * WHEEL_DELTA;
+            let scroll_dy =
+                event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS_1) as i32
+                    * WHEEL_DELTA;
             let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-            if let Some(sig) = to_signal(etype, loc.x as i32, loc.y as i32, scroll_dy, keycode, now_ms())
-            {
+            if let Some(sig) = to_signal(
+                etype,
+                loc.x as i32,
+                loc.y as i32,
+                scroll_dy,
+                keycode,
+                now_ms(),
+            ) {
                 // Non-blocking: a full buffer drops coarse observational noise
                 // rather than stalling the event stream.
                 let _ = tx.try_send(sig);
@@ -213,10 +213,11 @@ impl HookGuard {
                 // setter share it via `Arc`.
                 let port: Arc<OnceLock<SendPtr>> = Arc::new(OnceLock::new());
                 let port_cb = port.clone();
-                let callback = move |_proxy: CGEventTapProxy, etype: CGEventType, event: &CGEvent| {
-                    on_event(&tx, &port_cb, etype, event);
-                    CallbackResult::Keep
-                };
+                let callback =
+                    move |_proxy: CGEventTapProxy, etype: CGEventType, event: &CGEvent| {
+                        on_event(&tx, &port_cb, etype, event);
+                        CallbackResult::Keep
+                    };
 
                 let tap = match CGEventTap::new(
                     CGEventTapLocation::HID,
@@ -243,7 +244,9 @@ impl HookGuard {
                 };
 
                 // Publish the port so the callback can re-enable on disable.
-                let _ = port.set(SendPtr(tap.mach_port().as_concrete_TypeRef() as *const c_void));
+                let _ = port.set(SendPtr(
+                    tap.mach_port().as_concrete_TypeRef() as *const c_void
+                ));
 
                 let source = match tap.mach_port().create_runloop_source(0) {
                     Ok(source) => source,
@@ -298,14 +301,14 @@ mod tests {
         assert_eq!(cg_keycode_to_vk(0x00), 0x41); // A
         assert_eq!(cg_keycode_to_vk(0x06), 0x5A); // Z
         assert_eq!(cg_keycode_to_vk(0x11), 0x54); // T
-        // Digits.
+                                                  // Digits.
         assert_eq!(cg_keycode_to_vk(0x12), 0x31); // 1
         assert_eq!(cg_keycode_to_vk(0x1D), 0x30); // 0
-        // Commit + space.
+                                                  // Commit + space.
         assert_eq!(cg_keycode_to_vk(0x24), 0x0D); // Return
         assert_eq!(cg_keycode_to_vk(0x30), 0x09); // Tab
         assert_eq!(cg_keycode_to_vk(0x31), 0x20); // Space
-        // Unmapped (e.g. Escape 0x35, Left Shift 0x38) → 0 (reducer ignores).
+                                                  // Unmapped (e.g. Escape 0x35, Left Shift 0x38) → 0 (reducer ignores).
         assert_eq!(cg_keycode_to_vk(0x35), 0);
         assert_eq!(cg_keycode_to_vk(0x38), 0);
     }
@@ -318,7 +321,10 @@ mod tests {
         for kc in 0i64..=0x32 {
             let vk = cg_keycode_to_vk(kc);
             if vk != 0 {
-                assert!(seen.insert(vk), "duplicate VK 0x{vk:02X} for keycode 0x{kc:02X}");
+                assert!(
+                    seen.insert(vk),
+                    "duplicate VK 0x{vk:02X} for keycode 0x{kc:02X}"
+                );
             }
         }
         // 26 letters + 10 digits + space + tab + return = 39 distinct codes.

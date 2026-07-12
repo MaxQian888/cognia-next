@@ -361,7 +361,11 @@ mod tests {
         let _ = tokio::time::timeout(StdDuration::from_millis(200), core.clone().run_loop()).await;
 
         assert!(*emitter.fired.lock() >= 1);
-        assert_eq!(core.entry_count(), 0, "removed-during-emit must not resurrect");
+        assert_eq!(
+            core.entry_count(),
+            0,
+            "removed-during-emit must not resurrect"
+        );
     }
 
     #[tokio::test]

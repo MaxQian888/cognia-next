@@ -60,7 +60,12 @@ struct SchedulerDueAdapter {
 }
 
 impl DueEmitter<DateTime<Utc>> for SchedulerDueAdapter {
-    fn emit(&self, id: &str, _entry: DateTime<Utc>, fired_at: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    fn emit(
+        &self,
+        id: &str,
+        _entry: DateTime<Utc>,
+        fired_at: DateTime<Utc>,
+    ) -> Option<DateTime<Utc>> {
         self.inner.emit(TaskDueEvent {
             task_id: id.to_string(),
             fired_at_ms: fired_at.timestamp_millis(),

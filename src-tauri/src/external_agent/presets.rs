@@ -122,7 +122,9 @@ impl SpawnPolicy {
             .filter(|raw| !raw.trim().is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| data_dir.join("workspaces"));
-        let smoke = std::env::var(SMOKE_AGENT_ENV).map(|v| v == "1").unwrap_or(false);
+        let smoke = std::env::var(SMOKE_AGENT_ENV)
+            .map(|v| v == "1")
+            .unwrap_or(false);
         Self::new(workspaces_dir, smoke)
     }
 
@@ -201,7 +203,10 @@ impl SpawnPolicy {
             }
         };
         let canonical = requested.canonicalize().map_err(|e| {
-            PolicyViolation(format!("cwd {:?} does not resolve: {e}", requested.display()))
+            PolicyViolation(format!(
+                "cwd {:?} does not resolve: {e}",
+                requested.display()
+            ))
         })?;
         if !canonical.starts_with(&root) {
             return Err(PolicyViolation(format!(
@@ -285,7 +290,15 @@ mod tests {
     #[test]
     fn allowlisted_binaries_pass() {
         let (_tmp, p) = policy(false);
-        for bin in ["claude", "codex", "opencode", "cursor-agent", "cline", "gemini", "claude-code-acp"] {
+        for bin in [
+            "claude",
+            "codex",
+            "opencode",
+            "cursor-agent",
+            "cline",
+            "gemini",
+            "claude-code-acp",
+        ] {
             assert!(p.validate(config(bin, &[])).is_ok(), "{bin} must pass");
         }
         // Windows shims normalize.
@@ -343,7 +356,9 @@ mod tests {
         let validated = p.validate(config("claude", &[])).expect("default cwd");
         let root = tmp.path().join("workspaces").canonicalize().unwrap();
         assert_eq!(
-            PathBuf::from(validated.config.cwd.unwrap()).canonicalize().unwrap(),
+            PathBuf::from(validated.config.cwd.unwrap())
+                .canonicalize()
+                .unwrap(),
             root
         );
 
@@ -374,7 +389,10 @@ mod tests {
             ("HTTPS_PROXY".to_string(), "http://p".to_string()),
             ("LD_PRELOAD".to_string(), "/evil.so".to_string()),
             ("NODE_OPTIONS".to_string(), "--require evil".to_string()),
-            ("DYLD_INSERT_LIBRARIES".to_string(), "/evil.dylib".to_string()),
+            (
+                "DYLD_INSERT_LIBRARIES".to_string(),
+                "/evil.dylib".to_string(),
+            ),
             ("PATH".to_string(), "/evil".to_string()),
         ]);
         let validated = p.validate(cfg).expect("valid command");
@@ -383,7 +401,12 @@ mod tests {
         assert!(validated.config.env.contains_key("HTTPS_PROXY"));
         assert_eq!(
             validated.dropped_env_keys,
-            vec!["DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "NODE_OPTIONS", "PATH"]
+            vec![
+                "DYLD_INSERT_LIBRARIES",
+                "LD_PRELOAD",
+                "NODE_OPTIONS",
+                "PATH"
+            ]
         );
         assert_eq!(validated.config.env.len(), 3);
     }

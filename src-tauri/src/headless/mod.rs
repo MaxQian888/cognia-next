@@ -115,10 +115,8 @@ impl HeadlessServices {
             Arc::clone(&event_bus),
             api_keys.clone(),
         ));
-        let workspaces = std::env::temp_dir().join(format!(
-            "cognia-test-workspaces-{}",
-            std::process::id()
-        ));
+        let workspaces =
+            std::env::temp_dir().join(format!("cognia-test-workspaces-{}", std::process::id()));
         Self::new(
             sidecar_host,
             api_keys,

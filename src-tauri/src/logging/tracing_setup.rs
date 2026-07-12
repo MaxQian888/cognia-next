@@ -175,7 +175,11 @@ pub fn init() -> bool {
         .with_writer(writer)
         .with_filter(filter_fn(event_enabled));
 
-    if tracing_subscriber::registry().with(file_layer).try_init().is_err() {
+    if tracing_subscriber::registry()
+        .with(file_layer)
+        .try_init()
+        .is_err()
+    {
         return false;
     }
 

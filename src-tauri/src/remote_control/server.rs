@@ -685,7 +685,10 @@ mod tests {
         // Every sensitive target must be dispatchable, else the gate guards a
         // command that 404s anyway.
         for t in SENSITIVE_TARGETS {
-            assert!(KNOWN_TARGETS.contains(t), "sensitive target {t} not in KNOWN_TARGETS");
+            assert!(
+                KNOWN_TARGETS.contains(t),
+                "sensitive target {t} not in KNOWN_TARGETS"
+            );
             assert!(is_sensitive_target(t));
         }
         // Side-effect-free targets must NOT be flagged sensitive.

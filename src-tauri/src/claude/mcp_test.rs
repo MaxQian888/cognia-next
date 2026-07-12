@@ -26,7 +26,11 @@ const PROBE_RETRY_DELAY_MS: u64 = 500;
 
 /// Run `probe` up to `attempts` times, sleeping `delay_ms` before each retry.
 /// Returns the first `Ok`, or the LAST error once the budget is spent.
-async fn retry_probe<F, Fut>(attempts: u32, delay_ms: u64, mut probe: F) -> Result<Vec<McpToolInfo>, String>
+async fn retry_probe<F, Fut>(
+    attempts: u32,
+    delay_ms: u64,
+    mut probe: F,
+) -> Result<Vec<McpToolInfo>, String>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<Vec<McpToolInfo>, String>>,

@@ -193,7 +193,10 @@ mod tests {
     #[test]
     fn zero_area_window_is_not_visible() {
         assert!(!is_rect_visible(&Rect::new(0, 0, 0, 0), &[monitor()]));
-        assert!(!is_rect_visible(&Rect::new(100, 100, 1200, 0), &[monitor()]));
+        assert!(!is_rect_visible(
+            &Rect::new(100, 100, 1200, 0),
+            &[monitor()]
+        ));
     }
 
     #[test]

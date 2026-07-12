@@ -267,7 +267,10 @@ mod tests {
     #[test]
     fn hidden_window_never_recovers() {
         let elapsed = Some(TIMEOUT + Duration::from_secs(30));
-        assert_eq!(decide(elapsed, false, 0, TIMEOUT, MAX), WatchdogAction::Idle);
+        assert_eq!(
+            decide(elapsed, false, 0, TIMEOUT, MAX),
+            WatchdogAction::Idle
+        );
     }
 
     #[test]

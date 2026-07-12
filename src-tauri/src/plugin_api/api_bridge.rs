@@ -149,8 +149,14 @@ impl PluginApiError {
 fn parse_sdk_semver(s: &str) -> Option<(u32, u32, u32)> {
     let mut parts = s.trim().split('.');
     let major: u32 = parts.next()?.trim().parse().ok()?;
-    let minor: u32 = parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
-    let patch: u32 = parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
+    let minor: u32 = parts
+        .next()
+        .and_then(|p| p.trim().parse().ok())
+        .unwrap_or(0);
+    let patch: u32 = parts
+        .next()
+        .and_then(|p| p.trim().parse().ok())
+        .unwrap_or(0);
     Some((major, minor, patch))
 }
 
@@ -1511,11 +1517,7 @@ mod tests {
 
     #[test]
     fn incompatible_sdk_error_has_typed_code() {
-        let resp = err_response(
-            "req-3",
-            "0.9.0",
-            PluginApiError::incompatible_sdk("0.9.0"),
-        );
+        let resp = err_response("req-3", "0.9.0", PluginApiError::incompatible_sdk("0.9.0"));
         assert!(!resp.success);
         let s = serde_json::to_string(&resp).unwrap();
         assert!(s.contains("\"code\":\"INCOMPATIBLE_SDK\""));

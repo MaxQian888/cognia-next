@@ -659,8 +659,13 @@ mod tests {
         );
         // Then a string AXValue (text fields).
         assert_eq!(
-            pick_name(None, None, Some("hello@example.com".into()), Some("text field".into()))
-                .as_deref(),
+            pick_name(
+                None,
+                None,
+                Some("hello@example.com".into()),
+                Some("text field".into())
+            )
+            .as_deref(),
             Some("hello@example.com")
         );
         // Then the human-readable role description.

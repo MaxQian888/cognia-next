@@ -120,7 +120,8 @@ mod tests {
         let sel = sentinel(r##"{"selector":"#x"}"##);
         assert!(parse_spa_navigation(&sel).is_none());
         let mut u = url::Url::parse("https://cognia.invalid/__cognia_nav").unwrap();
-        u.query_pairs_mut().append_pair("data", r#"{"url":"http://a/"}"#);
+        u.query_pairs_mut()
+            .append_pair("data", r#"{"url":"http://a/"}"#);
         assert!(parse_selection(u.as_str()).is_none());
     }
 
@@ -138,10 +139,13 @@ mod tests {
         let sel = sentinel(r##"{"selector":"#x"}"##);
         assert!(parse_loaded(&sel).is_none());
         let mut nav = url::Url::parse("https://cognia.invalid/__cognia_nav").unwrap();
-        nav.query_pairs_mut().append_pair("data", r#"{"url":"http://a/"}"#);
+        nav.query_pairs_mut()
+            .append_pair("data", r#"{"url":"http://a/"}"#);
         assert!(parse_loaded(nav.as_str()).is_none());
         let mut loaded = url::Url::parse("https://cognia.invalid/__cognia_loaded").unwrap();
-        loaded.query_pairs_mut().append_pair("data", r#"{"url":"http://a/"}"#);
+        loaded
+            .query_pairs_mut()
+            .append_pair("data", r#"{"url":"http://a/"}"#);
         assert!(parse_selection(loaded.as_str()).is_none());
         assert!(parse_spa_navigation(loaded.as_str()).is_none());
     }

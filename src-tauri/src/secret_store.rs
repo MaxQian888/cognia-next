@@ -209,8 +209,7 @@ impl SecretStore {
             return Ok(());
         };
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("create secret-store dir: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("create secret-store dir: {e}"))?;
         }
         let plaintext =
             serde_json::to_vec(&self.cache).map_err(|e| format!("serialize secret-store: {e}"))?;
@@ -269,7 +268,9 @@ fn build_global() -> SecretStore {
     let key = match load_or_create_master_key() {
         Ok(key) => key,
         Err(e) => {
-            log::error!("secret-store master key unavailable ({e}); running in-memory this session");
+            log::error!(
+                "secret-store master key unavailable ({e}); running in-memory this session"
+            );
             return SecretStore::in_memory(random_key());
         }
     };
@@ -434,8 +435,8 @@ pub fn generate_master_key() -> [u8; 32] {
 
 #[cfg(not(test))]
 fn legacy_keyring_get(service: &str, account: &str) -> Result<Option<String>, String> {
-    let entry = keyring::Entry::new(service, account)
-        .map_err(|e| format!("legacy keyring init: {e}"))?;
+    let entry =
+        keyring::Entry::new(service, account).map_err(|e| format!("legacy keyring init: {e}"))?;
     match entry.get_password() {
         Ok(value) => Ok(Some(value)),
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -695,8 +696,14 @@ mod tests {
             Ok(_) => panic!("no key must be fatal"),
             Err(e) => e,
         };
-        assert!(err.contains(MASTER_KEY_ENV), "message names the env var: {err}");
-        assert!(err.contains("refusing to boot"), "message is explicit: {err}");
+        assert!(
+            err.contains(MASTER_KEY_ENV),
+            "message names the env var: {err}"
+        );
+        assert!(
+            err.contains("refusing to boot"),
+            "message is explicit: {err}"
+        );
 
         // 2. Malformed key → fatal.
         std::env::set_var(MASTER_KEY_ENV, "not-hex-at-all");
@@ -767,7 +774,10 @@ mod tests {
     #[test]
     fn parse_master_key_validates_length_and_hex() {
         assert!(parse_master_key("zz").is_err());
-        assert!(parse_master_key(&hex::encode([1u8; 16])).is_err(), "16 bytes rejected");
+        assert!(
+            parse_master_key(&hex::encode([1u8; 16])).is_err(),
+            "16 bytes rejected"
+        );
         let key = parse_master_key(&hex::encode([9u8; 32])).expect("valid");
         assert_eq!(key, [9u8; 32]);
         // Whitespace tolerated (key files often end with a newline).

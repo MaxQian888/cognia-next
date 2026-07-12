@@ -65,7 +65,8 @@ pub fn is_trusted() -> bool {
 pub fn prompt_trust() {
     let key = unsafe { CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt) };
     let val = cf_ax::boolean::CFBoolean::true_value();
-    let dict = cf_ax::dictionary::CFDictionary::from_CFType_pairs(&[(key.as_CFType(), val.as_CFType())]);
+    let dict =
+        cf_ax::dictionary::CFDictionary::from_CFType_pairs(&[(key.as_CFType(), val.as_CFType())]);
     unsafe {
         AXIsProcessTrustedWithOptions(dict.as_concrete_TypeRef() as CFDictionaryRef);
     }
@@ -76,7 +77,11 @@ pub fn prompt_trust() {
 fn set_bool_attr(el: &AXUIElement, name: &str) {
     let attr = cfstr(name);
     unsafe {
-        AXUIElementSetAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), kCFBooleanTrue as CFTypeRef);
+        AXUIElementSetAttributeValue(
+            el_ref(el),
+            attr.as_concrete_TypeRef(),
+            kCFBooleanTrue as CFTypeRef,
+        );
     }
 }
 
@@ -92,7 +97,8 @@ pub fn activate_web_a11y(app: &AXUIElement) {
 fn copy_element_attr(el: &AXUIElement, name: &str) -> Option<AXUIElement> {
     let attr = cfstr(name);
     let mut out: CFTypeRef = std::ptr::null();
-    let err = unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
+    let err =
+        unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
     if err != kAXErrorSuccess || out.is_null() {
         return None;
     }
@@ -142,7 +148,8 @@ pub fn has_visible_windows(app: &AXUIElement) -> bool {
 pub fn read_value_string(el: &AXUIElement) -> Option<String> {
     let attr = cfstr("AXValue");
     let mut out: CFTypeRef = std::ptr::null();
-    let err = unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
+    let err =
+        unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
     if err != kAXErrorSuccess || out.is_null() {
         return None;
     }
@@ -158,7 +165,8 @@ pub fn read_value_string(el: &AXUIElement) -> Option<String> {
 pub fn read_bool(el: &AXUIElement, name: &str) -> Option<bool> {
     let attr = cfstr(name);
     let mut out: CFTypeRef = std::ptr::null();
-    let err = unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
+    let err =
+        unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
     if err != kAXErrorSuccess || out.is_null() {
         return None;
     }
@@ -170,13 +178,18 @@ pub fn read_bool(el: &AXUIElement, name: &str) -> Option<bool> {
 fn read_ax_value_point(el: &AXUIElement, name: &str) -> Option<(f64, f64)> {
     let attr = cfstr(name);
     let mut out: CFTypeRef = std::ptr::null();
-    let err = unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
+    let err =
+        unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
     if err != kAXErrorSuccess || out.is_null() {
         return None;
     }
     let mut p = CGPoint { x: 0.0, y: 0.0 };
     let ok = unsafe {
-        AXValueGetValue(out as AXValueRef, kAXValueTypeCGPoint, &mut p as *mut _ as *mut c_void)
+        AXValueGetValue(
+            out as AXValueRef,
+            kAXValueTypeCGPoint,
+            &mut p as *mut _ as *mut c_void,
+        )
     };
     unsafe { CFRelease(out) };
     if ok {
@@ -189,13 +202,21 @@ fn read_ax_value_point(el: &AXUIElement, name: &str) -> Option<(f64, f64)> {
 fn read_ax_value_size(el: &AXUIElement, name: &str) -> Option<(f64, f64)> {
     let attr = cfstr(name);
     let mut out: CFTypeRef = std::ptr::null();
-    let err = unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
+    let err =
+        unsafe { AXUIElementCopyAttributeValue(el_ref(el), attr.as_concrete_TypeRef(), &mut out) };
     if err != kAXErrorSuccess || out.is_null() {
         return None;
     }
-    let mut s = CGSize { width: 0.0, height: 0.0 };
+    let mut s = CGSize {
+        width: 0.0,
+        height: 0.0,
+    };
     let ok = unsafe {
-        AXValueGetValue(out as AXValueRef, kAXValueTypeCGSize, &mut s as *mut _ as *mut c_void)
+        AXValueGetValue(
+            out as AXValueRef,
+            kAXValueTypeCGSize,
+            &mut s as *mut _ as *mut c_void,
+        )
     };
     unsafe { CFRelease(out) };
     if ok {

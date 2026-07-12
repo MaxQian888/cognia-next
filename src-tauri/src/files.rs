@@ -371,8 +371,18 @@ fn mtime_ms_of(meta: &std::fs::Metadata) -> Option<u64> {
 fn sort_dir_listing(entries: &mut [WorkspaceEntry]) {
     entries.sort_by(|a, b| {
         b.is_dir.cmp(&a.is_dir).then_with(|| {
-            let an = a.rel_path.rsplit('/').next().unwrap_or(&a.rel_path).to_lowercase();
-            let bn = b.rel_path.rsplit('/').next().unwrap_or(&b.rel_path).to_lowercase();
+            let an = a
+                .rel_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&a.rel_path)
+                .to_lowercase();
+            let bn = b
+                .rel_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&b.rel_path)
+                .to_lowercase();
             an.cmp(&bn)
         })
     });
@@ -588,17 +598,14 @@ pub fn fs_search_content_workspace(
         // symlink and read a target that may resolve OUTSIDE `root`, escaping
         // the sandbox (the size guard sees the link's own size, not the
         // target's). Real files only.
-        if file_type.map(|t| t.is_dir() || t.is_symlink()).unwrap_or(true) {
+        if file_type
+            .map(|t| t.is_dir() || t.is_symlink())
+            .unwrap_or(true)
+        {
             continue;
         }
         let path = dent.path();
-        if dent
-            .metadata()
-            .ok()
-            .map(|m| m.len())
-            .unwrap_or(0)
-            > CONTENT_SEARCH_MAX_FILE_BYTES
-        {
+        if dent.metadata().ok().map(|m| m.len()).unwrap_or(0) > CONTENT_SEARCH_MAX_FILE_BYTES {
             continue;
         }
         let contents = match std::fs::read_to_string(path) {
@@ -858,7 +865,8 @@ pub fn fs_delete_workspace_entry(
         return Err("refusing to delete the workspace root".into());
     }
     let (_root_path, target) = resolve_workspace_target(&root, &rel_path, true)?;
-    let meta = std::fs::symlink_metadata(&target).map_err(|e| format!("stat {}: {}", rel_path, e))?;
+    let meta =
+        std::fs::symlink_metadata(&target).map_err(|e| format!("stat {}: {}", rel_path, e))?;
     if meta.file_type().is_symlink() {
         return std::fs::remove_file(&target)
             .map_err(|e| format!("remove symlink {}: {}", rel_path, e));
@@ -920,7 +928,8 @@ pub fn fs_copy_workspace_entry(
     }
     reject_symlinked_final(&to)?;
     prepare_dest_parent(&root_path, &to)?;
-    let meta = std::fs::symlink_metadata(&from).map_err(|e| format!("stat {}: {}", from_rel_path, e))?;
+    let meta =
+        std::fs::symlink_metadata(&from).map_err(|e| format!("stat {}: {}", from_rel_path, e))?;
     if meta.is_dir() {
         if !recursive.unwrap_or(false) {
             return Err(format!(
@@ -963,7 +972,9 @@ fn prepare_dest_parent(root_path: &Path, dest: &Path) -> Result<(), String> {
 /// can't redirect the copy outside the workspace.
 fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::create_dir_all(to).map_err(|e| format!("mkdir {}: {}", to.display(), e))?;
-    for entry in std::fs::read_dir(from).map_err(|e| format!("read_dir {}: {}", from.display(), e))? {
+    for entry in
+        std::fs::read_dir(from).map_err(|e| format!("read_dir {}: {}", from.display(), e))?
+    {
         let entry = entry.map_err(|e| format!("read_dir entry: {}", e))?;
         let file_type = entry.file_type().map_err(|e| format!("file_type: {}", e))?;
         let src = entry.path();
@@ -1314,7 +1325,10 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("cognia-test-{}.txt", std::process::id()));
         let path = tmp.to_string_lossy().to_string();
         write_text_file_impl(path.clone(), "hello".into(), FsOrigin::Local).unwrap();
-        assert_eq!(read_text_file_impl(path.clone(), FsOrigin::Local).unwrap(), "hello");
+        assert_eq!(
+            read_text_file_impl(path.clone(), FsOrigin::Local).unwrap(),
+            "hello"
+        );
         let _ = std::fs::remove_file(&tmp);
     }
 
@@ -1731,12 +1745,17 @@ mod tests {
         assert!(std::path::Path::new(&inside).is_file());
 
         // Remote write OUTSIDE every root → hard error, and the file is NOT created.
-        let out_dir = std::env::temp_dir().join(format!("cognia-remote-out-{}", std::process::id()));
+        let out_dir =
+            std::env::temp_dir().join(format!("cognia-remote-out-{}", std::process::id()));
         let outside = out_dir.join("escape.txt");
         let outside_s = outside.to_string_lossy().to_string();
-        let err = write_text_file_impl(outside_s.clone(), "x".into(), FsOrigin::Remote).unwrap_err();
+        let err =
+            write_text_file_impl(outside_s.clone(), "x".into(), FsOrigin::Remote).unwrap_err();
         assert!(err.contains("outside the workspace roots"), "got: {err}");
-        assert!(!outside.exists(), "a blocked remote write must not create the file");
+        assert!(
+            !outside.exists(),
+            "a blocked remote write must not create the file"
+        );
 
         // Remote ensure_dir outside every root → also blocked.
         assert!(ensure_dir_impl(out_dir.to_string_lossy().to_string(), FsOrigin::Remote).is_err());
@@ -1748,7 +1767,10 @@ mod tests {
 
         // A remote READ is never containment-blocked (only writes are enforced);
         // it succeeds now that the local write created the file.
-        assert_eq!(read_text_file_impl(outside_s.clone(), FsOrigin::Remote).unwrap(), "x");
+        assert_eq!(
+            read_text_file_impl(outside_s.clone(), FsOrigin::Remote).unwrap(),
+            "x"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&out_dir);
@@ -1781,7 +1803,8 @@ mod tests {
         std::fs::write(root.join("zdir").join("child.txt"), "nested").unwrap();
         std::fs::write(root.join("afile.txt"), "hello").unwrap();
 
-        let entries = fs_list_workspace_dir(root.to_string_lossy().to_string(), None, None).unwrap();
+        let entries =
+            fs_list_workspace_dir(root.to_string_lossy().to_string(), None, None).unwrap();
         let names: Vec<_> = entries.iter().map(|e| e.rel_path.clone()).collect();
         // Immediate children only — never the nested file.
         assert!(names.iter().any(|n| n == "zdir"));
@@ -1807,7 +1830,8 @@ mod tests {
         std::fs::write(root.join("secret.txt"), "x").unwrap();
         std::fs::write(root.join("public.txt"), "x").unwrap();
 
-        let default = fs_list_workspace_dir(root.to_string_lossy().to_string(), None, None).unwrap();
+        let default =
+            fs_list_workspace_dir(root.to_string_lossy().to_string(), None, None).unwrap();
         let default_names: Vec<_> = default.iter().map(|e| e.rel_path.clone()).collect();
         assert!(default_names.iter().any(|n| n == "public.txt"));
         assert!(
@@ -1879,7 +1903,11 @@ mod tests {
             None,
         )
         .unwrap();
-        assert!(sensitive.is_empty(), "case-sensitive misses: {:?}", sensitive);
+        assert!(
+            sensitive.is_empty(),
+            "case-sensitive misses: {:?}",
+            sensitive
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1931,7 +1959,8 @@ mod tests {
     fn search_content_does_not_follow_symlinks_out_of_root() {
         let root = make_sandbox("grep-symlink");
         // A secret file OUTSIDE the workspace root.
-        let outside = std::env::temp_dir().join(format!("cognia-secret-{}.txt", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("cognia-secret-{}.txt", std::process::id()));
         std::fs::write(&outside, "SUPER_SECRET_TOKEN\n").unwrap();
         // A symlink inside the workspace pointing at it.
         std::os::unix::fs::symlink(&outside, root.join("link.txt")).unwrap();
@@ -1957,12 +1986,9 @@ mod tests {
         let root = make_sandbox("list-sub");
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src").join("main.rs"), "x").unwrap();
-        let sub = fs_list_workspace_dir(
-            root.to_string_lossy().to_string(),
-            Some("src".into()),
-            None,
-        )
-        .unwrap();
+        let sub =
+            fs_list_workspace_dir(root.to_string_lossy().to_string(), Some("src".into()), None)
+                .unwrap();
         assert!(sub.iter().any(|e| e.rel_path == "src/main.rs"));
 
         let escape =
@@ -1977,7 +2003,8 @@ mod tests {
         std::fs::write(root.join("f.txt"), "hello").unwrap();
         std::fs::create_dir_all(root.join("d")).unwrap();
 
-        let file = fs_stat_workspace_file(root.to_string_lossy().to_string(), "f.txt".into()).unwrap();
+        let file =
+            fs_stat_workspace_file(root.to_string_lossy().to_string(), "f.txt".into()).unwrap();
         assert!(file.exists && !file.is_dir);
         assert_eq!(file.size, 5);
         assert!(file.mtime_ms.is_some());
@@ -1989,10 +2016,8 @@ mod tests {
             fs_stat_workspace_file(root.to_string_lossy().to_string(), "nope.txt".into()).unwrap();
         assert!(!missing.exists);
 
-        let escape = fs_stat_workspace_file(
-            root.to_string_lossy().to_string(),
-            "../../etc/hosts".into(),
-        );
+        let escape =
+            fs_stat_workspace_file(root.to_string_lossy().to_string(), "../../etc/hosts".into());
         assert!(escape.is_err(), "traversal must be rejected");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2014,7 +2039,10 @@ mod tests {
             format!("../{outside_name}"),
         );
         assert!(escape.is_err(), "traversal mkdir must be rejected");
-        assert!(!outside.exists(), "rejected mkdir must not create outside root");
+        assert!(
+            !outside.exists(),
+            "rejected mkdir must not create outside root"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2022,7 +2050,8 @@ mod tests {
     fn delete_workspace_entry_file_dir_and_guards() {
         let root = make_sandbox("delete");
         std::fs::write(root.join("f.txt"), "x").unwrap();
-        fs_delete_workspace_entry(root.to_string_lossy().to_string(), "f.txt".into(), None).unwrap();
+        fs_delete_workspace_entry(root.to_string_lossy().to_string(), "f.txt".into(), None)
+            .unwrap();
         assert!(!root.join("f.txt").exists());
 
         // Non-empty dir: needs recursive.
@@ -2036,10 +2065,12 @@ mod tests {
         assert!(!root.join("d").exists());
 
         // Refuse the root itself.
-        assert!(
-            fs_delete_workspace_entry(root.to_string_lossy().to_string(), "".into(), Some(true))
-                .is_err()
-        );
+        assert!(fs_delete_workspace_entry(
+            root.to_string_lossy().to_string(),
+            "".into(),
+            Some(true)
+        )
+        .is_err());
 
         // Traversal onto an out-of-root file must be rejected and leave it intact.
         let victim = root

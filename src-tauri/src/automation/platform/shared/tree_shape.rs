@@ -182,7 +182,14 @@ fn walk_inner<N>(
         if *count >= budget.max_nodes {
             break;
         }
-        out.push(walk_inner(&child, budget, depth + 1, count, to_info, children));
+        out.push(walk_inner(
+            &child,
+            budget,
+            depth + 1,
+            count,
+            to_info,
+            children,
+        ));
     }
     info.children = if out.is_empty() { None } else { Some(out) };
     info
@@ -211,7 +218,10 @@ mod tests {
 
     #[test]
     fn empty_locator_matches_anything() {
-        assert!(matches_locator(&fields_of(&info("Save", "button")), &Locator::default()));
+        assert!(matches_locator(
+            &fields_of(&info("Save", "button")),
+            &Locator::default()
+        ));
     }
 
     #[test]
@@ -267,7 +277,10 @@ mod tests {
         assert_eq!(TreeBudget::from_opts(Some(3)).max_depth, 3);
         assert_eq!(TreeBudget::from_opts(Some(0)).max_depth, 1); // clamped up
         assert_eq!(TreeBudget::from_opts(Some(9999)).max_depth, 64); // clamped down
-        assert_eq!(TreeBudget::from_opts(None).max_depth, TreeBudget::DEFAULT.max_depth);
+        assert_eq!(
+            TreeBudget::from_opts(None).max_depth,
+            TreeBudget::DEFAULT.max_depth
+        );
     }
 
     // A toy native node for exercising walk_tree without an OS accessibility API.
@@ -339,6 +352,9 @@ mod tests {
             automation_id: Some("ok".into()),
             ..Default::default()
         };
-        assert_eq!(find_in_tree(&root, &l), Some(ElementRef("ref:Target".into())));
+        assert_eq!(
+            find_in_tree(&root, &l),
+            Some(ElementRef("ref:Target".into()))
+        );
     }
 }

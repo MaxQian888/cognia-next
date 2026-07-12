@@ -409,7 +409,10 @@ mod tests {
         // Without the capability the denial fires first — the guest sees a
         // capability error, not the not-implemented code.
         let mut state = host(&[]);
-        let err = state.read_text().await.expect_err("missing capability must error");
+        let err = state
+            .read_text()
+            .await
+            .expect_err("missing capability must error");
         assert!(err.contains("clipboard:read"), "unexpected message: {err}");
         assert!(
             !err.starts_with(super::super::super::NOT_IMPLEMENTED_CODE),

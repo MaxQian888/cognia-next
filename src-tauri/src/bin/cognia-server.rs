@@ -404,7 +404,8 @@ async fn run_serve(
     // LAN bind (false) so the headless server is reachable on every
     // interface — the typical deployment puts this behind a reverse proxy
     // or VPN; binding to loopback in a server context defeats the purpose.
-    let handle = server::spawn_server(port, false, tls_material.clone(), Arc::clone(&shared)).await?;
+    let handle =
+        server::spawn_server(port, false, tls_material.clone(), Arc::clone(&shared)).await?;
     // Publish the bind port for the public /healthz endpoint so emulator
     // probes can confirm the right server (matches the test+production
     // path used by CompanionServerState::start in mod.rs).

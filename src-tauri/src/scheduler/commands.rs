@@ -370,7 +370,9 @@ pub async fn scheduler_get_pending_confirmations(
 
 /// Request admin elevation
 #[tauri::command]
-pub async fn scheduler_request_elevation(state: State<'_, SchedulerState>) -> Result<bool, CommandError> {
+pub async fn scheduler_request_elevation(
+    state: State<'_, SchedulerState>,
+) -> Result<bool, CommandError> {
     match state.request_elevation().await {
         Ok(elevated) => Ok(elevated),
         Err(e) => Err(CommandError::from(e)),

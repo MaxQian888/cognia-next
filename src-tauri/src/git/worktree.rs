@@ -22,12 +22,7 @@ use super::types::GitWorktree;
 /// `base_ref` (defaults to the current HEAD when `None`). Fails (typed
 /// [`GitError`]) if `branch` already exists or is already checked out
 /// elsewhere — the caller relies on that as the collision guard.
-pub async fn add(
-    main_repo: &str,
-    path: &str,
-    branch: &str,
-    base_ref: Option<&str>,
-) -> Result<()> {
+pub async fn add(main_repo: &str, path: &str, branch: &str, base_ref: Option<&str>) -> Result<()> {
     let cwd = PathBuf::from(main_repo);
     let mut args: Vec<String> = vec![
         "worktree".into(),
@@ -392,7 +387,9 @@ branch refs/heads/agent/run_x/alice/t1
 
         let a = tmp.path().join("a").to_string_lossy().into_owned();
         let b = tmp.path().join("b").to_string_lossy().into_owned();
-        add(&repo_str, &a, "agent/dup", None).await.expect("first add");
+        add(&repo_str, &a, "agent/dup", None)
+            .await
+            .expect("first add");
         // git refuses to check the same branch out in two worktrees.
         assert!(
             add(&repo_str, &b, "agent/dup", None).await.is_err(),

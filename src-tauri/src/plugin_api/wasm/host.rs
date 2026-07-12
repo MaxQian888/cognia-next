@@ -315,7 +315,10 @@ mod tests {
         let err =
             WasmPluginHost::load(&state, manifest_v01(), tmp.path().to_path_buf()).unwrap_err();
         assert!(err.contains("scan api-version"), "unexpected error: {err}");
-        assert!(err.contains(super::super::API_VERSION_SECTION), "unexpected error: {err}");
+        assert!(
+            err.contains(super::super::API_VERSION_SECTION),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

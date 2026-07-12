@@ -38,9 +38,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::exec_backend::ExecBackend;
-use super::process::{
-    ExternalAgentEventSink, ExternalAgentProcessState, ExternalAgentSpawnConfig,
-};
+use super::process::{ExternalAgentEventSink, ExternalAgentProcessState, ExternalAgentSpawnConfig};
 
 // ---------------------------------------------------------------------------
 // Environment contract (docker-compose.t2.yml is the canonical consumer)
@@ -133,10 +131,9 @@ impl ContainerBackendConfig {
 
 fn parse_env_number(key: &str, default: i64) -> Result<i64, String> {
     match std::env::var(key) {
-        Ok(v) if !v.trim().is_empty() => v
-            .trim()
-            .parse()
-            .map_err(|e| format!("invalid {key}: {e}")),
+        Ok(v) if !v.trim().is_empty() => {
+            v.trim().parse().map_err(|e| format!("invalid {key}: {e}"))
+        }
         _ => Ok(default),
     }
 }
@@ -181,7 +178,9 @@ pub enum RunnerEvent {
     Stdout(Vec<u8>),
     Stderr(Vec<u8>),
     /// Terminal — the sender closes after this.
-    Exited { code: Option<i64> },
+    Exited {
+        code: Option<i64>,
+    },
 }
 
 /// A started container with attached stdio.
@@ -250,7 +249,11 @@ impl ContainerBackend {
                     .to_string();
                 Ok(RunnerMount::Volume {
                     volume: volume.clone(),
-                    subpath: if subpath.is_empty() { None } else { Some(subpath) },
+                    subpath: if subpath.is_empty() {
+                        None
+                    } else {
+                        Some(subpath)
+                    },
                 })
             }
             None => Ok(RunnerMount::Bind {
@@ -324,11 +327,7 @@ impl ExecBackend for ContainerBackend {
             .ok_or_else(|| "container exec mode requires a workspace cwd".to_string())?;
         let mount = self.resolve_mount(&cwd)?;
 
-        let mut env: Vec<String> = config
-            .env
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect();
+        let mut env: Vec<String> = config.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
         env.sort();
 
         let mut cmd = Vec::with_capacity(config.args.len() + 1);
@@ -553,9 +552,8 @@ pub mod bollard_api {
         ContainerCreateBody, HostConfig, Mount, MountTypeEnum, MountVolumeOptions,
     };
     use bollard::query_parameters::{
-        AttachContainerOptionsBuilder, CreateContainerOptionsBuilder,
-        KillContainerOptionsBuilder, RemoveContainerOptionsBuilder, StartContainerOptions,
-        WaitContainerOptionsBuilder,
+        AttachContainerOptionsBuilder, CreateContainerOptionsBuilder, KillContainerOptionsBuilder,
+        RemoveContainerOptionsBuilder, StartContainerOptions, WaitContainerOptionsBuilder,
     };
     use bollard::Docker;
     use futures_util::StreamExt;
@@ -717,7 +715,11 @@ pub mod bollard_api {
             self.docker
                 .kill_container(
                     container_id,
-                    Some(KillContainerOptionsBuilder::default().signal("SIGKILL").build()),
+                    Some(
+                        KillContainerOptionsBuilder::default()
+                            .signal("SIGKILL")
+                            .build(),
+                    ),
                 )
                 .await
                 .map_err(|e| format!("kill_container failed: {e}"))
@@ -1026,11 +1028,7 @@ mod tests {
         wait_for(
             || {
                 let events = emitter.events();
-                events
-                    .iter()
-                    .filter(|(ch, _)| ch == STDOUT_CHANNEL)
-                    .count()
-                    == 2
+                events.iter().filter(|(ch, _)| ch == STDOUT_CHANNEL).count() == 2
                     && events.iter().any(|(ch, _)| ch == STDERR_CHANNEL)
             },
             "stdout/stderr line events",
@@ -1192,7 +1190,10 @@ mod tests {
     #[test]
     fn sanitize_container_name_replaces_unsafe_chars() {
         assert_eq!(sanitize_container_name("a/b:c 1"), "cognia-agent-a-b-c-1");
-        assert_eq!(sanitize_container_name("ok_id.9-x"), "cognia-agent-ok_id.9-x");
+        assert_eq!(
+            sanitize_container_name("ok_id.9-x"),
+            "cognia-agent-ok_id.9-x"
+        );
     }
 
     // Env-based tests mutate process env — serialize via the shared slot lock.
@@ -1240,9 +1241,15 @@ mod tests {
     async fn exec_backend_from_env_selection() {
         let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
         std::env::remove_var(EXEC_BACKEND_ENV);
-        assert_eq!(exec_backend_from_env().expect("default").kind(), "local-process");
+        assert_eq!(
+            exec_backend_from_env().expect("default").kind(),
+            "local-process"
+        );
         std::env::set_var(EXEC_BACKEND_ENV, "local-process");
-        assert_eq!(exec_backend_from_env().expect("local").kind(), "local-process");
+        assert_eq!(
+            exec_backend_from_env().expect("local").kind(),
+            "local-process"
+        );
         std::env::set_var(EXEC_BACKEND_ENV, "warp-drive");
         match exec_backend_from_env() {
             Err(err) => assert!(err.contains("warp-drive"), "{err}"),
