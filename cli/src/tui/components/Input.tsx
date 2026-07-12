@@ -32,6 +32,12 @@ import {
   type PasteResult,
 } from "@/lib/paste-collapse"
 import { suggest } from "../input/autosuggest"
+import {
+  enterNormalFromInsert,
+  handleVimNormalKey,
+  initialVimState,
+  type VimMode,
+} from "../input/vim"
 import { matchSlash, slashQuery } from "../commands/matcher"
 import { listVisibleCommands } from "../commands/registry"
 import { buildCommandHint } from "../commands/command-hint"
@@ -139,6 +145,7 @@ function InputImpl({
   onToggleSkill,
   onPopupOpenChange,
   placeholder = "Ask, run /commands, @ files, or ! shell",
+  vimEnabled = false,
 }: {
   input: InputState
   dispatch: (action: TuiAction) => void
@@ -174,6 +181,9 @@ function InputImpl({
   onPopupOpenChange?: (open: boolean) => void
   /** Dim hint shown on the empty first line until the user types. */
   placeholder?: string
+  /** Vim editing mode (`/vim`): Esc drops to NORMAL, `i`/`a`/… re-enter INSERT.
+   * See `input/vim.ts` for the supported motion/operator subset. */
+  vimEnabled?: boolean
 }) {
   const theme = useTheme()
   const buffer = input.buffer
@@ -186,6 +196,16 @@ function InputImpl({
 
   const [popupIndex, setPopupIndex] = useState(0)
   const [dismissed, setDismissed] = useState<string | null>(null)
+  // Vim mode: the modal state lives in a ref (mutated synchronously per key so
+  // a same-tick burst like `dd` composes), mirrored into state for the render
+  // of the mode indicator. `vimBufRef` tracks the latest buffer applied this
+  // tick for the same reason — reducer updates land a render later.
+  const [vimMode, setVimMode] = useState<VimMode>("insert")
+  const vimStateRef = useRef(initialVimState())
+  const vimBufRef = useRef(buffer)
+  useEffect(() => {
+    vimBufRef.current = buffer
+  })
   // Async skill/agent candidates for the current `@` token, loaded in an effect.
   const [asyncCandidates, setAsyncCandidates] = useState<MentionCandidate[]>([])
   const [asyncLoading, setAsyncLoading] = useState(false)
@@ -505,6 +525,45 @@ function InputImpl({
       }
       return
     }
+    // Vim mode (`/vim`): Esc drops INSERT to NORMAL; NORMAL keys run through the
+    // pure interpreter in `input/vim.ts`. Popups keep their own key handling —
+    // they only appear in INSERT (NORMAL never inserts trigger characters).
+    if (vimEnabled) {
+      if (vimStateRef.current.mode === "insert") {
+        if (key.escape && !popupOpen) {
+          vimStateRef.current = { ...vimStateRef.current, mode: "normal", pending: null, count: "" }
+          setVimMode("normal")
+          const next = enterNormalFromInsert(vimBufRef.current)
+          vimBufRef.current = next
+          setBuffer(next)
+          return
+        }
+      } else {
+        const r = handleVimNormalKey(inputCh, key, vimStateRef.current, vimBufRef.current)
+        if (r.handled) {
+          vimStateRef.current = r.state
+          if (r.state.mode !== vimMode) setVimMode(r.state.mode)
+          if (r.buffer !== vimBufRef.current) {
+            vimBufRef.current = r.buffer
+            setBuffer(r.buffer)
+          }
+          if (r.request === "undo") {
+            setDismissed(null)
+            dispatch({ type: "INPUT_UNDO" })
+          } else if (r.request === "redo") {
+            setDismissed(null)
+            dispatch({ type: "INPUT_REDO" })
+          } else if (r.request === "submit") {
+            // A fresh prompt starts back in INSERT (Claude Code behaviour).
+            vimStateRef.current = initialVimState()
+            setVimMode("insert")
+            doSubmit()
+          }
+          return
+        }
+        // handled: false → control chords fall through to the default flow.
+      }
+    }
     // Accept an inline ghost suggestion: → at the very end of the draft fills
     // it in (a no-op move otherwise), before normal key interpretation.
     if (suggestion && key.rightArrow && cursorAtEnd) {
@@ -641,7 +700,9 @@ function InputImpl({
   const modeHint =
     !disabled && !popupOpen && commandMode === "bash"
       ? "shell mode · Enter runs this in your shell"
-      : null
+      : !disabled && vimEnabled && vimMode === "normal"
+        ? "-- NORMAL -- · i insert · dd/cw edit · Enter send"
+        : null
   const showPlaceholder = !disabled && !popupOpen && text.length === 0
 
   return (

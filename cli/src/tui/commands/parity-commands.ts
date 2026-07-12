@@ -64,12 +64,16 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "resume",
-    description: "pick a past session to resume",
+    description: "pick a past session to resume (or /resume <id>)",
     category: "session",
-    // Opens the session-selection panel (the same picker `/sessions` uses) so
-    // the user can choose which conversation to restore — mirrors Claude Code's
-    // `--resume`. The direct "most recent" path is `/continue` below.
-    handler: () => ({ kind: "openSessions" }),
+    argumentHint: "[id]",
+    // Bare → the session-selection panel (the same picker `/sessions` uses);
+    // with an id → resume that session directly — mirrors Claude Code's
+    // `--resume [id]`. The direct "most recent" path is `/continue` below.
+    handler: (ctx) => {
+      const id = ctx.args.trim()
+      return id ? { kind: "resumeSession", id } : { kind: "openSessions" }
+    },
   },
   {
     name: "continue",

@@ -77,6 +77,7 @@ function Harness({
   enabledSkillIds,
   onToggleSkill,
   onPopupOpenChange,
+  vimEnabled,
 }: {
   onSubmit: (t: string) => void
   disabled?: boolean
@@ -87,6 +88,7 @@ function Harness({
   enabledSkillIds?: Set<string>
   onToggleSkill?: (id: string, enabled: boolean) => void
   onPopupOpenChange?: (open: boolean) => void
+  vimEnabled?: boolean
 }) {
   const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
   const ld = listDirProp ?? listDir
@@ -104,6 +106,7 @@ function Harness({
       enabledSkillIds={enabledSkillIds}
       onToggleSkill={onToggleSkill}
       onPopupOpenChange={onPopupOpenChange}
+      vimEnabled={vimEnabled}
     />
   )
 }
@@ -632,5 +635,64 @@ describe("routePasteInsert (paste routing)", () => {
     key(body)
     expect(container.textContent).toContain("[Pasted")
     expect(container.textContent).not.toContain(body)
+  })
+})
+
+describe("Input vim mode (/vim)", () => {
+  beforeEach(() => __resetInk())
+
+  it("Esc drops to NORMAL (indicator shown) and printable keys stop inserting", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} vimEnabled />)
+    type("hello")
+    key("", { escape: true })
+    expect(container.textContent).toContain("-- NORMAL --")
+    // `z` is not a vim motion — swallowed, never inserted.
+    type("z")
+    expect(container.textContent).not.toContain("helloz")
+  })
+
+  it("NORMAL-mode edits work end to end (0, dw)", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} vimEnabled />)
+    type("one two")
+    key("", { escape: true })
+    type("0dw")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("two")
+  })
+
+  it("i returns to INSERT so typing works again", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} vimEnabled />)
+    type("abc")
+    key("", { escape: true })
+    type("i")
+    expect(container.textContent).not.toContain("-- NORMAL --")
+    type("x")
+    key("", { return: true })
+    // INSERT re-entered before the last char ("c") — cursor sat on it after Esc.
+    expect(onSubmit).toHaveBeenCalledWith("abxc")
+  })
+
+  it("Enter submits from NORMAL mode and resets to INSERT", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} vimEnabled />)
+    type("ship it")
+    key("", { escape: true })
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("ship it")
+    expect(container.textContent).not.toContain("-- NORMAL --")
+  })
+
+  it("without /vim, Esc keeps its default behaviour (no NORMAL mode)", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("hello")
+    key("", { escape: true })
+    expect(container.textContent).not.toContain("-- NORMAL --")
+    type("z")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("helloz")
   })
 })

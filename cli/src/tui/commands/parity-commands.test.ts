@@ -62,6 +62,10 @@ describe("PARITY_COMMANDS", () => {
     expect(find("resume").handler!(ctx())).toEqual({ kind: "openSessions" })
   })
 
+  it("/resume <id> resumes that session directly (resumeSession effect)", () => {
+    expect(find("resume").handler!(ctx("s-42"))).toEqual({ kind: "resumeSession", id: "s-42" })
+  })
+
   it("/continue resumes the most recent session directly (resumeLast effect)", () => {
     expect(find("continue").handler!(ctx())).toEqual({ kind: "resumeLast" })
   })

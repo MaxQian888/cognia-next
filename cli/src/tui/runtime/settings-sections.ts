@@ -12,14 +12,21 @@
  * whole panel structure is unit-testable without rendering.
  */
 import {
+  CLI_LOG_LEVELS,
+  CLI_LOGGING_DEFAULTS,
   CLIPBOARD_OSC52_MODES,
+  DEFAULT_COAUTHOR_TRAILER,
   DEFAULT_MOUSE_MODE,
   DEFAULT_OSC52_MAX_BYTES,
+  DEFAULT_PR_FOOTER,
   MASCOT_STYLES,
   OUTPUT_STYLES,
   RENDER_DEFAULTS,
   STATUS_THEMES,
+  resolveCliLoggingConfig,
+  resolveGitWorkflowConfig,
   resolveRenderConfig,
+  type CliLoggingConfig,
   type ResolvedConfig,
   type ResolvedRenderConfig,
 } from "../../config/schema"
@@ -42,8 +49,10 @@ export type SettingsSectionId =
   | "appearance"
   | "display"
   | "tools"
+  | "git"
   | "behavior"
   | "terminal"
+  | "logging"
   | "advanced"
   | "keybindings"
   | "workspace"
@@ -64,12 +73,26 @@ export type SettingsApplyTarget =
   /** A nested `clipboard.*` value (OSC 52 mode / byte cap), set via setClipboardConfig. */
   | { kind: "clipboard"; key: "osc52" | "osc52MaxBytes" }
   | { kind: "builtinTool"; key: keyof BuiltinToolsConfig }
+  /** A nested `git.*` boolean knob (co-author trailer / PR footer), set via
+   * setGitWorkflowConfig. Toggling ON restores the default text; a custom
+   * string is authored in config.json and survives until toggled off. */
+  | { kind: "gitWorkflow"; key: "coauthorTrailer" | "prFooter" }
+  /** A nested `logging.*` value (mcp.log level / rotation sizes), set via
+   * setLoggingConfig. Read live by the log-file writers — no SendOptions
+   * invalidation needed. */
+  | { kind: "logging"; key: keyof CliLoggingConfig }
   | { kind: "hook"; id: string }
   /** A transcript render preference (boolean toggle or numeric enum). */
   | { kind: "render"; key: keyof ResolvedRenderConfig }
 
 /** A single-field editor the App opens via FormOverlay / a dedicated command. */
-export type SettingsFormField = "systemPrompt" | "skillDirs" | "allowedTools" | "customTheme"
+export type SettingsFormField =
+  | "systemPrompt"
+  | "skillDirs"
+  | "allowedTools"
+  | "customTheme"
+  | "gitProtectedBranches"
+  | "gitBaseBranch"
 
 /** How a row behaves on the keyboard. */
 export type SettingsControl =
@@ -518,19 +541,69 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         control: { type: "form", field: "allowedTools" },
         description: "Restrict the agent to an allow-list of tools (empty = all tools allowed).",
       },
-      ...BUILTIN_TOOL_ROWS.map(
-        (t): SettingsRow => ({
-          id: `tool:${t.key}`,
-          label: t.label,
-          value: onOff(toolValue(config, t.key)),
-          control: {
-            type: "boolean",
-            current: toolValue(config, t.key),
-            apply: { kind: "builtinTool", key: t.key },
-          },
-          description: t.desc,
-        })
-      ),
+      ...BUILTIN_TOOL_ROWS.map((t): SettingsRow => ({
+        id: `tool:${t.key}`,
+        label: t.label,
+        value: onOff(toolValue(config, t.key)),
+        control: {
+          type: "boolean",
+          current: toolValue(config, t.key),
+          apply: { kind: "builtinTool", key: t.key },
+        },
+        description: t.desc,
+      })),
+    ],
+  }
+
+  const gitCfg = resolveGitWorkflowConfig(config.git)
+  const git: SettingsSectionView = {
+    id: "git",
+    title: "Git & PRs",
+    rows: [
+      {
+        id: "gitProtectedBranches",
+        label: "Protected branches…",
+        value: gitCfg.protectedBranches.join(" ") || "none",
+        control: { type: "form", field: "gitProtectedBranches" },
+        description: "Branches /commit refuses to commit to directly (space-separated).",
+      },
+      {
+        id: "gitBaseBranch",
+        label: "PR base branch…",
+        value: gitCfg.baseBranch ?? "auto (main → master)",
+        control: { type: "form", field: "gitBaseBranch" },
+        description: "Base branch /pr targets. Empty = auto-detect main → master.",
+      },
+      {
+        id: "gitCoauthorTrailer",
+        label: "Commit co-author trailer",
+        value:
+          gitCfg.coauthorTrailer === null
+            ? "off"
+            : gitCfg.coauthorTrailer === DEFAULT_COAUTHOR_TRAILER
+              ? "on"
+              : "custom",
+        control: {
+          type: "boolean",
+          current: gitCfg.coauthorTrailer !== null,
+          apply: { kind: "gitWorkflow", key: "coauthorTrailer" },
+        },
+        description:
+          "Append the Co-Authored-By trailer to /commit messages (custom text: config.json git.coauthorTrailer).",
+      },
+      {
+        id: "gitPrFooter",
+        label: "PR body footer",
+        value:
+          gitCfg.prFooter === null ? "off" : gitCfg.prFooter === DEFAULT_PR_FOOTER ? "on" : "custom",
+        control: {
+          type: "boolean",
+          current: gitCfg.prFooter !== null,
+          apply: { kind: "gitWorkflow", key: "prFooter" },
+        },
+        description:
+          "Append the Claude Code footer to /pr bodies (custom text: config.json git.prFooter).",
+      },
     ],
   }
 
@@ -580,6 +653,17 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
           "Wheel-scroll the transcript vs native click-drag text selection (fullscreen).",
       },
       {
+        id: "vim",
+        label: "Vim editing mode",
+        value: onOff(config.vim === true),
+        control: {
+          type: "boolean",
+          current: config.vim === true,
+          apply: { kind: "flag", key: "vim" },
+        },
+        description: "Modal NORMAL/INSERT editing in the composer (also /vim).",
+      },
+      {
         id: "terminalTitle",
         label: "Dynamic terminal title",
         value: onOff(config.terminalTitle !== false),
@@ -621,6 +705,65 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         value: editorLabel,
         control: { type: "delegate", command: "/editor" },
         description: "Preferred editor for /open and clickable file paths (blank = auto-detect).",
+      },
+    ],
+  }
+
+  const loggingCfg = resolveCliLoggingConfig(config.logging)
+  const logging: SettingsSectionView = {
+    id: "logging",
+    title: "Logging",
+    rows: [
+      {
+        id: "loggingFileLevel",
+        label: "File log level",
+        value: loggingCfg.fileLevel,
+        control: {
+          type: "enum",
+          options: [...CLI_LOG_LEVELS],
+          current: loggingCfg.fileLevel,
+          apply: { kind: "logging", key: "fileLevel" },
+        },
+        description:
+          "Minimum severity persisted to ~/.cognia/logs/mcp.log (the /mcp logs panel always shows everything).",
+      },
+      {
+        id: "loggingMcpLogMaxKb",
+        label: "MCP log rotation size (KiB)",
+        value: String(loggingCfg.mcpLogMaxKb),
+        control: {
+          type: "enum",
+          options: [...MCP_LOG_MAX_KB_OPTIONS],
+          current: String(loggingCfg.mcpLogMaxKb),
+          apply: { kind: "logging", key: "mcpLogMaxKb" },
+        },
+        description: "mcp.log rotates to mcp.log.1 once it exceeds this size.",
+      },
+      {
+        id: "loggingCrashLogMaxKb",
+        label: "Crash log rotation size (KiB)",
+        value: loggingCfg.crashLogMaxKb === 0 ? "never" : String(loggingCfg.crashLogMaxKb),
+        control: {
+          type: "enum",
+          options: [...CRASH_LOG_MAX_KB_OPTIONS],
+          current: String(loggingCfg.crashLogMaxKb),
+          apply: { kind: "logging", key: "crashLogMaxKb" },
+        },
+        description: "crash.log rotates to crash.log.1 once it exceeds this size (0 = never).",
+      },
+      {
+        id: "loggingViewMcpLogs",
+        label: "View MCP / sidecar logs…",
+        value: "open panel",
+        control: { type: "delegate", command: "/mcp logs" },
+        description: "Open the in-TUI log panel over the live MCP / sidecar event stream.",
+      },
+      {
+        id: "loggingLogDir",
+        label: "Log directory",
+        value: "~/.cognia/logs",
+        control: { type: "readonly" },
+        description: "Where crash.log and mcp.log live on disk.",
       },
     ],
   }
@@ -725,15 +868,13 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
     id: "keybindings",
     title: "Keybindings",
     rows: [
-      ...KEYBINDABLE_ACTIONS.map(
-        (action): SettingsRow => ({
-          id: `key:${action}`,
-          label: KEYBINDING_LABELS[action],
-          value: formatKeySpec(bindings[action]),
-          control: { type: "readonly" },
-          description: "Current binding — change it from Rebind a key… below.",
-        })
-      ),
+      ...KEYBINDABLE_ACTIONS.map((action): SettingsRow => ({
+        id: `key:${action}`,
+        label: KEYBINDING_LABELS[action],
+        value: formatKeySpec(bindings[action]),
+        control: { type: "readonly" },
+        description: "Current binding — change it from Rebind a key… below.",
+      })),
       {
         id: "rebind",
         label: "Rebind a key…",
@@ -776,7 +917,19 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
     ],
   }
 
-  return [model, appearance, display, tools, behavior, terminal, advanced, keybindings, workspace]
+  return [
+    model,
+    appearance,
+    display,
+    tools,
+    git,
+    behavior,
+    terminal,
+    logging,
+    advanced,
+    keybindings,
+    workspace,
+  ]
 }
 
 /** Preset options for the inline result line cap (Display section enum). */
@@ -798,6 +951,10 @@ export const SUBAGENT_IDLE_TIMEOUT_OPTIONS = ["0", "120000", "300000", "600000"]
 export const SUBAGENT_MAX_DEPTH_OPTIONS = ["1", "2", "3", "4"] as const
 /** Preset byte-cap options for the OSC 52 clipboard escape (`0` disables the cap). */
 export const OSC52_MAX_BYTES_OPTIONS = ["0", "65536", "74994", "131072", "262144"] as const
+/** Preset rotation sizes (KiB) for mcp.log. */
+export const MCP_LOG_MAX_KB_OPTIONS = ["512", "1024", "2048", "4096", "8192"] as const
+/** Preset rotation sizes (KiB) for crash.log (`0` = never rotate). */
+export const CRASH_LOG_MAX_KB_OPTIONS = ["0", "256", "512", "1024", "4096"] as const
 
 /** Render-pref keys that hold a number (vs. a boolean) — drives App's apply parse. */
 export const NUMERIC_RENDER_KEYS: ReadonlySet<keyof ResolvedRenderConfig> = new Set([
@@ -819,6 +976,7 @@ const FLAG_DEFAULTS: Record<BooleanFlagKey, boolean> = {
   autoCompact: true,
   showActiveSkills: false,
   terminalTitle: true,
+  vim: false,
 }
 
 /** Default value of every top-level numeric knob (matches the schema fallbacks). */
@@ -866,6 +1024,11 @@ export function applyTargetDefault(target: SettingsApplyTarget): string | boolea
       return target.key === "osc52" ? "auto" : String(DEFAULT_OSC52_MAX_BYTES)
     case "builtinTool":
       return DEFAULT_BUILTIN_TOOLS[target.key] ?? false
+    case "gitWorkflow":
+      // Both git booleans (co-author trailer / PR footer) default to on.
+      return true
+    case "logging":
+      return String(CLI_LOGGING_DEFAULTS[target.key])
     case "hook":
       return BUILTIN_HOOKS.find((h) => h.id === target.id)?.defaultEnabled ?? false
     case "render":

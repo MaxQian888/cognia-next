@@ -812,6 +812,9 @@ export type TuiAction =
     }
   /** Move a running shell cell to the background (keeps running). */
   | { type: "BASH_BACKGROUND"; id: string }
+  /** Bring a backgrounded running shell cell back to the foreground (`/bashes fg`).
+   * Every OTHER running bash cell is marked background — single-foreground invariant. */
+  | { type: "BASH_FOREGROUND"; id: string }
   // Cells
   | { type: "TOGGLE_COLLAPSE"; id: string }
   /** Expand every collapsed tool/thinking cell, or collapse them all when none

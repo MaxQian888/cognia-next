@@ -373,7 +373,7 @@ describe("CellView", () => {
     expect(text).toContain("Ctrl+B background")
   })
 
-  it("labels a backgrounded bash cell and drops the kill hint", () => {
+  it("labels a backgrounded bash cell, swapping the kill hint for /bashes", () => {
     const text = renderCell({
       id: "1",
       kind: "bash",
@@ -384,6 +384,7 @@ describe("CellView", () => {
     })
     expect(text).toContain("(background)")
     expect(text).not.toContain("Ctrl+C kill")
+    expect(text).toContain("/bashes")
   })
 
   it("shows no hint once a bash cell has settled", () => {

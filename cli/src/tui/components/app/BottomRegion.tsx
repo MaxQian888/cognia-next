@@ -167,6 +167,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
           popupRows={popupRows}
           keybindings={keybindings}
           mode={state.config.permissionMode}
+          vimEnabled={state.config.vim === true}
           enabledSkillIds={enabledSkillIds}
           onToggleSkill={toggleSkillEnabled}
           onPopupOpenChange={handlePopupOpenChange}

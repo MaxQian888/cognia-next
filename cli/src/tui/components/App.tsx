@@ -102,6 +102,8 @@ import {
   setRenderConfig,
   setNumberConfig,
   setClipboardConfig,
+  setGitWorkflowConfig,
+  setLoggingConfig,
   setSubagentModel,
   setEditorConfig,
 } from "../../config/mutate"
@@ -109,6 +111,7 @@ import { openInEditor, detectEditor } from "../runtime/editor"
 import { resolveKeybindings } from "../input/keybindings"
 import {
   DEFAULT_MOUSE_MODE,
+  resolveGitWorkflowConfig,
   resolveRenderConfig,
   resolveNotices,
   type SubagentModelOverride,
@@ -131,6 +134,7 @@ import type {
   OutputStyle,
   StatusTheme,
   MascotStyle,
+  CliLoggingConfig,
 } from "../../config/schema"
 import { clearTerminal, readThemeFile } from "./app/app-helpers"
 import { useBashShellout } from "./app/use-bash-shellout"
@@ -226,6 +230,9 @@ export interface AppProps {
   /** Composer history to seed (oldest → newest); defaults to none. `mount.tsx`
    * passes the persisted `~/.cognia/history.json`. */
   initialHistory?: string[]
+  /** Slash command to run once on mount, after the trust gate clears — the
+   * `--continue` / `--resume` launch flags (`/continue`, `/resume [id]`). */
+  initialCommand?: string
   /** Persist a newly-submitted composer line to the history store; defaults to
    * the real appender. Injected as a no-op by tests. */
   persistHistory?: (entry: string) => void
@@ -333,6 +340,7 @@ export function App({
   },
   persistPluginTools = setPluginToolsConfig,
   initialHistory = [],
+  initialCommand,
   persistHistory = (entry) => {
     try {
       appendHistory(home, entry)
@@ -509,7 +517,10 @@ export function App({
     runBash,
     backgroundForegroundBash,
     killForegroundBash,
+    killBash,
+    foregroundBash,
     hasForegroundRun,
+    sendInputToForeground,
     takeLastFailedBash,
   } = useBashShellout(runShell, state.config.cwd, dispatch)
 
@@ -956,6 +967,22 @@ export function App({
     doResume(items[0].sessionId)
   }, [doResume, home, readdir, transcriptFs])
 
+  // Resume a specific session by id (`/resume <id>` / `--resume <id>`). Validated
+  // against the session store so a typo'd id yields a notice, not an empty session.
+  const resumeSession = useCallback(
+    (id: string) => {
+      const fsRead: ReadDir = readdir ?? ((dir) => fs.readdirSync(dir))
+      const items = listSessions(home, { readdir: fsRead, transcriptFs })
+      const match = items.find((s) => s.sessionId === id)
+      if (!match) {
+        dispatch({ type: "NOTICE", message: `No session "${id}" — /sessions to browse.` })
+        return
+      }
+      doResume(match.sessionId)
+    },
+    [doResume, home, readdir, transcriptFs]
+  )
+
   // Interpret a pure CommandEffect produced by the dispatcher — see useApplyEffect.
   const applyEffect = useApplyEffect({
     agent,
@@ -972,7 +999,10 @@ export function App({
     pushHandoff,
     openSessions,
     resumeMostRecent,
+    resumeSession,
     runBash,
+    killBash,
+    foregroundBash,
     takeLastFailedBash,
     persistStatusBar,
     persistMascot,
@@ -1003,6 +1033,17 @@ export function App({
     },
     [applyEffect, state]
   )
+
+  // Launch-flag command (`--continue` / `--resume [id]`): run exactly once, and
+  // only after the startup trust gate has cleared — resuming a session while
+  // the gate is up would fight the gate's own phase transition.
+  const initialCommandRanRef = useRef(false)
+  useEffect(() => {
+    if (!initialCommand || initialCommandRanRef.current) return
+    if (state.phase !== "chat") return
+    initialCommandRanRef.current = true
+    runCommandLine(initialCommand)
+  }, [initialCommand, state.phase, runCommandLine])
 
   // Resolve `@skill:` / `@agent:` mentions in a submitted line before it is sent:
   // enable + persist mentioned skills, synchronously dispatch mentioned agents and
@@ -1139,6 +1180,12 @@ export function App({
         runBash(bang)
         return
       }
+      // A plain line submitted while a foreground `!command` holds the terminal
+      // is input for that command's stdin (a `y/n`, a passphrase), not a model
+      // message. To steer the model instead, background the run first (Ctrl+B).
+      if (!text.startsWith("/") && hasForegroundRun() && sendInputToForeground(text)) {
+        return
+      }
       if (!text.startsWith("/")) {
         // A message typed while a turn or a goal/loop run is in flight becomes a
         // `btw` steer: queued and delivered at the next turn boundary so it never
@@ -1168,6 +1215,8 @@ export function App({
       runCommandLine,
       sendThenDrainSteer,
       sendCopilot,
+      hasForegroundRun,
+      sendInputToForeground,
       state.copilot?.workflowId,
       state.editTarget,
       state.cells,
@@ -1256,6 +1305,28 @@ export function App({
             setBuiltinTools(home, { [target.key]: Boolean(value) } as Partial<BuiltinToolsConfig>)
             invalidate = true
             break
+          case "gitWorkflow": {
+            // ON restores the default trailer/footer text (clears the key so the
+            // resolver's default applies); OFF stores an explicit `false`.
+            // Read live by the /commit and /pr controllers — no SendOptions
+            // invalidation needed.
+            const gitPatch = { [target.key]: value === true ? undefined : false }
+            patch = { git: { ...cfg.git, ...gitPatch } }
+            setGitWorkflowConfig(home, gitPatch)
+            break
+          }
+          case "logging": {
+            // fileLevel is a string enum; the rotation sizes are numbers. Read
+            // live by the log-file writers — no SendOptions invalidation needed.
+            const logPatch = (
+              target.key === "fileLevel"
+                ? { fileLevel: String(value) }
+                : { [target.key]: Number(value) }
+            ) as CliLoggingConfig
+            patch = { logging: { ...cfg.logging, ...logPatch } }
+            setLoggingConfig(home, logPatch)
+            break
+          }
           case "hook":
             patch = {
               builtinHookOverrides: { ...cfg.builtinHookOverrides, [target.id]: Boolean(value) },
@@ -1312,6 +1383,9 @@ export function App({
       if (c.field === "systemPrompt") current = cfg.systemPrompt ?? ""
       else if (c.field === "skillDirs") current = (cfg.skillDirs ?? []).join(" ")
       else if (c.field === "allowedTools") current = (cfg.allowedTools ?? []).join(" ")
+      else if (c.field === "gitProtectedBranches")
+        current = resolveGitWorkflowConfig(cfg.git).protectedBranches.join(" ")
+      else if (c.field === "gitBaseBranch") current = cfg.git?.baseBranch ?? ""
       applyEffect({
         kind: "openForm",
         form: {

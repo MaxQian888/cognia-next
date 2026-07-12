@@ -232,7 +232,6 @@ export function cliLogLevelRank(level: string): number {
   // "info" so they are neither always dropped nor always kept.
   return index === -1 ? CLI_LOG_LEVELS.indexOf("info") : index
 }
-
 /** How the `command` jumps to a line/col when opening a file. Drives the arg
  * shape in `tui/runtime/editor.describeEditor` for an editor not in its table. */
 export const EDITOR_GOTO_FORMATS = ["vscode", "sublime", "vim", "jetbrains", "none"] as const
@@ -403,6 +402,74 @@ export const RENDER_DEFAULTS: ResolvedRenderConfig = {
 }
 
 /** Fill missing render-pref fields with {@link RENDER_DEFAULTS}. */
+/**
+ * Git dev-workflow preferences consumed by the `/commit` and `/pr` controllers.
+ * Every field is optional; absent values fall back to
+ * {@link GIT_WORKFLOW_DEFAULTS}, which reproduce the historic hard-coded
+ * behavior (protect master/main, default co-author trailer + PR footer,
+ * auto-detected base branch).
+ */
+export const gitWorkflowSchema = z
+  .object({
+    /** Branches `/commit` refuses to commit to directly. */
+    protectedBranches: z.array(z.string().min(1)).optional(),
+    /** Append the Co-Authored-By trailer to generated commits. `true`/absent ⇒
+     * the default Claude trailer; `false` ⇒ none; a string ⇒ that exact
+     * trailer line. */
+    coauthorTrailer: z.union([z.boolean(), z.string().min(1)]).optional(),
+    /** Append the "Generated with Claude Code" footer to drafted PR bodies.
+     * `true`/absent ⇒ the default footer; `false` ⇒ none; a string ⇒ that
+     * exact footer. */
+    prFooter: z.union([z.boolean(), z.string().min(1)]).optional(),
+    /** PR base branch override. Absent ⇒ auto-detect (main → master). */
+    baseBranch: z.string().min(1).optional(),
+  })
+  .strict()
+
+export type GitWorkflowConfig = z.infer<typeof gitWorkflowSchema>
+
+/** Resolved git-workflow preferences: trailer/footer collapsed to
+ * `string | null` (null = don't append). */
+export interface ResolvedGitWorkflowConfig {
+  protectedBranches: string[]
+  coauthorTrailer: string | null
+  prFooter: string | null
+  baseBranch: string | null
+}
+
+/** The trailer generated commits historically ended with (repo convention). */
+export const DEFAULT_COAUTHOR_TRAILER =
+  "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+
+/** The PR-body footer drafted PRs historically ended with. */
+export const DEFAULT_PR_FOOTER =
+  "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+
+/** Baseline git-workflow preferences — the historic hard-coded behavior. */
+export const GIT_WORKFLOW_DEFAULTS: ResolvedGitWorkflowConfig = {
+  protectedBranches: ["master", "main"],
+  coauthorTrailer: DEFAULT_COAUTHOR_TRAILER,
+  prFooter: DEFAULT_PR_FOOTER,
+  baseBranch: null,
+}
+
+/** Resolve the sparse `git` config section against {@link GIT_WORKFLOW_DEFAULTS}. */
+export function resolveGitWorkflowConfig(
+  git: GitWorkflowConfig | undefined
+): ResolvedGitWorkflowConfig {
+  const trailerOf = (v: boolean | string | undefined, fallback: string): string | null => {
+    if (v === false) return null
+    if (typeof v === "string") return v
+    return fallback
+  }
+  return {
+    protectedBranches: git?.protectedBranches ?? GIT_WORKFLOW_DEFAULTS.protectedBranches,
+    coauthorTrailer: trailerOf(git?.coauthorTrailer, DEFAULT_COAUTHOR_TRAILER),
+    prFooter: trailerOf(git?.prFooter, DEFAULT_PR_FOOTER),
+    baseBranch: git?.baseBranch ?? null,
+  }
+}
+
 export function resolveRenderConfig(render: RenderConfig | undefined): ResolvedRenderConfig {
   return { ...RENDER_DEFAULTS, ...(render ? stripUndefinedShallow(render) : {}) }
 }
@@ -664,6 +731,10 @@ export const cliConfigFileSchema = z
     /** Transcript rendering preferences (highlight/line-numbers/truncation).
      * Absent ⇒ {@link RENDER_DEFAULTS}. */
     render: renderConfigSchema.optional(),
+    /** Git dev-workflow preferences for `/commit` and `/pr` (protected
+     * branches, co-author trailer, PR footer, base branch). Absent ⇒
+     * {@link GIT_WORKFLOW_DEFAULTS}. */
+    git: gitWorkflowSchema.optional(),
     /** Keyboard binding overrides: action id → key spec (e.g. `"ctrl+o"`).
      * Absent ids fall back to the default binding table. */
     keybindings: z.record(z.string(), z.string()).optional(),
@@ -676,6 +747,9 @@ export const cliConfigFileSchema = z
      * the transcript; `"select"` keeps native click-drag text selection (losing
      * wheel-scroll). Only meaningful in the fullscreen layout on a TTY. */
     mouse: z.enum(MOUSE_MODES).optional(),
+    /** Vim editing mode for the composer (`/vim` to toggle): modal NORMAL/INSERT
+     * editing with the classic motions/operators. Absent ⇒ off. */
+    vim: z.boolean().optional(),
     /** Whether the TUI updates the terminal window/tab title to reflect live
      * session state (working / needs input / background activity / idle). Absent
      * ⇒ enabled; set `false` to leave the terminal title untouched. */
@@ -857,6 +931,9 @@ export interface ResolvedConfig {
   /** Transcript rendering preferences. Absent ⇒ {@link RENDER_DEFAULTS}. */
   render?: RenderConfig
   /** Keyboard binding overrides (action id → key spec). Absent ids ⇒ defaults. */
+  /** Git dev-workflow preferences for `/commit` and `/pr`. Absent ⇒
+   * {@link GIT_WORKFLOW_DEFAULTS}. */
+  git?: GitWorkflowConfig
   keybindings?: Record<string, string>
   /** TUI layout model (`fullscreen` / `scrollback`). Absent ⇒ `fullscreen`,
    * resolved (and capability-gated) by `tui/layout-mode.resolveLayoutMode`. */
@@ -864,6 +941,8 @@ export interface ResolvedConfig {
   /** Fullscreen mouse model (`select` / `scroll`). Absent ⇒ `scroll` (wheel
    * scrolls the transcript). Only meaningful in the fullscreen layout on a TTY. */
   mouse?: MouseMode
+  /** Vim editing mode for the composer. Absent ⇒ off. */
+  vim?: boolean
   /** Whether the TUI updates the terminal window/tab title with live session
    * state. Absent ⇒ enabled; `false` leaves the terminal title untouched. */
   terminalTitle?: boolean

@@ -10,8 +10,10 @@ import path from "node:path"
 import {
   cliConfigFileSchema,
   type CliConfigFile,
+  type CliLoggingConfig,
   type ClipboardConfig,
   type EditorConfig,
+  type GitWorkflowConfig,
   type MascotConfig,
   type RenderConfig,
   type StatusBarConfig,
@@ -323,6 +325,7 @@ export const BOOLEAN_FLAG_KEYS = [
   "autoCompact",
   "showActiveSkills",
   "terminalTitle",
+  "vim",
 ] as const
 export type BooleanFlagKey = (typeof BOOLEAN_FLAG_KEYS)[number]
 
@@ -392,6 +395,49 @@ export function setClipboardConfig(
   const current = readUserConfig(home, fsx)
   const clipboard = { ...current.clipboard, ...patch }
   return writeMergedConfig(home, { ...current, clipboard }, fsx)
+}
+
+/**
+ * Merge a git dev-workflow patch into `config.json`'s `git` object (protected
+ * branches / co-author trailer / PR footer / base branch). Same shape as
+ * {@link setClipboardConfig}; a key explicitly set to `undefined` in the patch
+ * clears it back to its default. Returns the path.
+ */
+export function setGitWorkflowConfig(
+  home: string,
+  patch: GitWorkflowConfig,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const git = { ...current.git, ...patch }
+  // Drop cleared keys so the file stays sparse (defaults resolve at read time).
+  for (const k of Object.keys(git) as (keyof GitWorkflowConfig)[]) {
+    if (git[k] === undefined) delete git[k]
+  }
+  return writeMergedConfig(home, { ...current, git: Object.keys(git).length ? git : undefined }, fsx)
+}
+
+/**
+ * Merge a logging-preferences patch into `config.json`'s `logging` object
+ * (mcp.log file level / rotation size, crash.log rotation). Same shape as
+ * {@link setClipboardConfig}; a key explicitly set to `undefined` in the patch
+ * clears it back to its default. Returns the path.
+ */
+export function setLoggingConfig(
+  home: string,
+  patch: CliLoggingConfig,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const logging = { ...current.logging, ...patch }
+  for (const k of Object.keys(logging) as (keyof CliLoggingConfig)[]) {
+    if (logging[k] === undefined) delete logging[k]
+  }
+  return writeMergedConfig(
+    home,
+    { ...current, logging: Object.keys(logging).length ? logging : undefined },
+    fsx
+  )
 }
 
 /** Top-level string-array keys editable from the settings panel. */

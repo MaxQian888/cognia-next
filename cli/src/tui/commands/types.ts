@@ -31,14 +31,7 @@ export type CommandArgSpec = SlashParamSpec
 
 /** Grouping buckets shown as sections in `/help` and (optionally) the palette. */
 export type CommandCategory =
-  | "chat"
-  | "session"
-  | "cognia"
-  | "mcp"
-  | "plugin"
-  | "config"
-  | "system"
-  | "custom"
+  "chat" | "session" | "cognia" | "mcp" | "plugin" | "config" | "system" | "custom"
 
 /** A nested verb, e.g. `/goal status` or `/mcp add`. */
 export interface SubcommandSpec {
@@ -96,10 +89,18 @@ export type CommandEffect =
   | { kind: "handoff" }
   | { kind: "openSessions" }
   | { kind: "resumeLast" }
+  /** Resume a specific past session by id (`/resume <id>` / `--resume <id>`). */
+  | { kind: "resumeSession"; id: string }
   | { kind: "runBash"; command: string }
   /** Ask the agent to diagnose the last failed `!command` (`/analyze`). The App
    * holds the captured command + output and builds the prompt. */
   | { kind: "analyzeBash" }
+  /** Kill a live `!command` run — foreground or backgrounded — by cell id
+   * (`/bashes kill`). The App owns the AbortController registry. */
+  | { kind: "bashKill"; id: string }
+  /** Bring a backgrounded `!command` run back to the foreground (`/bashes fg`)
+   * so Ctrl+C / Ctrl+B target it again. */
+  | { kind: "bashForeground"; id: string }
   | { kind: "runtime"; runtime: RuntimeRequest }
   /** Persist + live-apply a status-bar customization (`/statusbar`). */
   | { kind: "statusBar"; patch: StatusBarConfig }
@@ -216,9 +217,6 @@ export interface RuntimeRequest {
     | "view"
     | "plan"
     | "hooks"
-    | "addDir"
-    | "bashes"
-    | "rewind"
     | "council"
     | "orchestrate"
     | "commit"

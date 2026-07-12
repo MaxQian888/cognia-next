@@ -16,6 +16,7 @@ import {
   setConfigValue,
   setAdditionalRoots,
   setCustomTheme,
+  setGitWorkflowConfig,
   setStringArrayConfig,
   setKeybindings,
   setBooleanFlag,
@@ -64,7 +65,14 @@ export interface ApplyEffectDeps {
   pushHandoff?: (sessionId: string) => void | Promise<void>
   openSessions: () => void
   resumeMostRecent: () => void
+  /** Resume a specific past session by id (`/resume <id>`); the App validates
+   * the id against the session store and notices when it's unknown. */
+  resumeSession: (id: string) => void
   runBash: (command: string) => void
+  /** Kill a live `!command` run by cell id (`/bashes kill`). */
+  killBash: (id: string) => boolean
+  /** Re-foreground a backgrounded `!command` run (`/bashes fg`). */
+  foregroundBash: (id: string) => boolean
   takeLastFailedBash: () => BashFailure | null
   persistStatusBar: (home: string, patch: StatusBarConfig) => void
   persistMascot: (home: string, patch: MascotConfig) => void
@@ -116,7 +124,10 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     pushHandoff,
     openSessions,
     resumeMostRecent,
+    resumeSession,
     runBash,
+    killBash,
+    foregroundBash,
     takeLastFailedBash,
     persistStatusBar,
     persistMascot,
@@ -209,6 +220,9 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           break
         case "resumeLast":
           resumeMostRecent()
+          break
+        case "resumeSession":
+          resumeSession(effect.id)
           break
         case "rewindList": {
           const checkpoints = agent.listCheckpoints()
@@ -306,6 +320,18 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
         }
         case "runBash":
           runBash(effect.command)
+          break
+        case "bashKill":
+          // The registry owns the success notice; only the miss needs a message
+          // (the run settled between the picker opening and the choice).
+          if (!killBash(effect.id)) {
+            dispatch({ type: "NOTICE", message: "That command is no longer running." })
+          }
+          break
+        case "bashForeground":
+          if (!foregroundBash(effect.id)) {
+            dispatch({ type: "NOTICE", message: "That command is no longer running." })
+          }
           break
         case "analyzeBash": {
           // Diagnose the last failed foreground `!command` with the agent. The
@@ -507,6 +533,18 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
               const arr = effect.value.split(/\s+/).filter(Boolean)
               patch = { [field]: arr.length ? arr : undefined } as Partial<ResolvedConfig>
               setStringArrayConfig(home, field, arr)
+            } else if (field === "gitProtectedBranches") {
+              // Empty clears the key → the resolver's master/main default.
+              const arr = effect.value.split(/\s+/).filter(Boolean)
+              const gitPatch = { protectedBranches: arr.length ? arr : undefined }
+              patch = { git: { ...state.config.git, ...gitPatch } }
+              setGitWorkflowConfig(home, gitPatch)
+            } else if (field === "gitBaseBranch") {
+              // Empty clears the override → /pr auto-detects main → master.
+              const branch = effect.value.trim()
+              const gitPatch = { baseBranch: branch || undefined }
+              patch = { git: { ...state.config.git, ...gitPatch } }
+              setGitWorkflowConfig(home, gitPatch)
             }
           } catch {
             dispatch({ type: "NOTICE", message: "Setting changed (couldn't save to config)." })
@@ -709,7 +747,10 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       openInEditorFn,
       pushHandoff,
       resumeMostRecent,
+      resumeSession,
       runBash,
+      killBash,
+      foregroundBash,
       takeLastFailedBash,
       runShell,
       startGoalRun,

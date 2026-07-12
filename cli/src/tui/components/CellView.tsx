@@ -503,9 +503,11 @@ function BashView({ cell }: { cell: BashCell }) {
           {cell.output}
         </Text>
       ) : null}
-      {cell.status === "running" && !cell.background ? (
+      {cell.status === "running" ? (
         <Text color={theme.muted} dimColor>
-          Ctrl+C kill · Ctrl+B background
+          {cell.background
+            ? "/bashes to view · kill · foreground"
+            : "Ctrl+C kill · Ctrl+B background"}
         </Text>
       ) : null}
     </Box>

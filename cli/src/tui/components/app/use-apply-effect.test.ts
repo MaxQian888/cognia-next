@@ -41,7 +41,10 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
     pushHandoff: jest.fn(),
     openSessions: jest.fn(),
     resumeMostRecent: jest.fn(),
+    resumeSession: jest.fn(),
     runBash: jest.fn(),
+    killBash: jest.fn(() => true),
+    foregroundBash: jest.fn(() => true),
     takeLastFailedBash: jest.fn(() => null),
     persistStatusBar: jest.fn(),
     persistMascot: jest.fn(),
@@ -154,6 +157,40 @@ describe("useApplyEffect", () => {
     const deps = buildDeps()
     run(deps)({ kind: "runBash", command: "ls" })
     expect(deps.runBash).toHaveBeenCalledWith("ls")
+  })
+
+  it("resumeSession resumes the given session id", () => {
+    const deps = buildDeps()
+    run(deps)({ kind: "resumeSession", id: "s-42" })
+    expect(deps.resumeSession).toHaveBeenCalledWith("s-42")
+  })
+
+  it("bashKill kills via the registry and stays quiet on success", () => {
+    const deps = buildDeps()
+    run(deps)({ kind: "bashKill", id: "bash-1" })
+    expect(deps.killBash).toHaveBeenCalledWith("bash-1")
+    expect(deps.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: "That command is no longer running." })
+    )
+  })
+
+  it("bashKill notices when the run already settled", () => {
+    const deps = buildDeps({ killBash: jest.fn(() => false) })
+    run(deps)({ kind: "bashKill", id: "bash-9" })
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "NOTICE",
+      message: "That command is no longer running.",
+    })
+  })
+
+  it("bashForeground re-foregrounds via the registry, noticing on a miss", () => {
+    const deps = buildDeps({ foregroundBash: jest.fn(() => false) })
+    run(deps)({ kind: "bashForeground", id: "bash-9" })
+    expect(deps.foregroundBash).toHaveBeenCalledWith("bash-9")
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "NOTICE",
+      message: "That command is no longer running.",
+    })
   })
 
   it("notices when there is no failed command to analyze", () => {
