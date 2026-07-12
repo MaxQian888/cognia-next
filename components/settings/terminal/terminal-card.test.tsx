@@ -3,6 +3,15 @@
  */
 
 import { render, screen, fireEvent, cleanup, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+
+// Radix Select needs these pointer/scroll APIs jsdom doesn't ship.
+beforeAll(() => {
+  Element.prototype.scrollIntoView = jest.fn()
+  Element.prototype.hasPointerCapture = jest.fn(() => false)
+  Element.prototype.setPointerCapture = jest.fn()
+  Element.prototype.releasePointerCapture = jest.fn()
+})
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -249,6 +258,34 @@ describe("TerminalCard", () => {
     })
     expect(settingsSave).toHaveBeenLastCalledWith({
       terminal: expect.objectContaining({ confirmOnClose: false }),
+    })
+  })
+
+  it("renders the bell selector and persists a picked style", async () => {
+    const user = userEvent.setup()
+    render(<TerminalCard />)
+    const trigger = screen.getByTestId("terminal-card-bell")
+    await user.click(trigger)
+    await user.click(await screen.findByText("settings.terminal.bell.visual"))
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ bell: "visual" }),
+    })
+  })
+
+  it("groups color schemes by appearance with palette swatches", async () => {
+    const user = userEvent.setup()
+    render(<TerminalCard />)
+    await user.click(screen.getByTestId("terminal-card-color-scheme"))
+    // Group labels for dark/light palettes…
+    expect(await screen.findByText("settings.terminal.colorScheme.darkGroup")).toBeInTheDocument()
+    expect(screen.getByText("settings.terminal.colorScheme.lightGroup")).toBeInTheDocument()
+    // …and each named scheme carries its inline palette preview.
+    expect(screen.getByTestId("terminal-scheme-swatch-dracula")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-scheme-swatch-solarized-light")).toBeInTheDocument()
+    // Picking a scheme persists its id.
+    await user.click(screen.getByText("Dracula"))
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ colorScheme: "dracula" }),
     })
   })
 

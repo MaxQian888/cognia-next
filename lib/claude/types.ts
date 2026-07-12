@@ -2478,6 +2478,13 @@ export interface AppSettings {
      */
     unattendedAskPolicy?: "fail" | "consent" | "run"
     /**
+     * How the terminal surfaces the BEL character (`\x07`). `"none"`
+     * (default) ignores it; `"visual"` flashes the terminal container;
+     * `"sound"` plays a short WebAudio beep; `"both"` does both. Wired via
+     * xterm's `onBell` in `terminal-instance.tsx`.
+     */
+    bell?: "none" | "visual" | "sound" | "both"
+    /**
      * Terminal quick fixes (VS Code parity). When a finished command matches a
      * built-in matcher (`lib/terminal/quick-fix/`), a lightbulb at the command's
      * gutter offers a fix — `git push --set-upstream`, "did you mean", create-PR

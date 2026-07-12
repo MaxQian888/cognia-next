@@ -77,6 +77,58 @@ describe("TerminalProfiles", () => {
     })
   })
 
+  it("edits args as one-per-line text and persists the parsed array", async () => {
+    settingsState = { terminal: { profiles: [{ id: "profile-1", name: "PS", shell: "pwsh.exe" }] } }
+    render(<TerminalProfiles />)
+    const args = screen.getByTestId("terminal-profile-args-profile-1") as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(args, { target: { value: "-NoLogo\n-NoProfile" } })
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({
+        profiles: [expect.objectContaining({ args: ["-NoLogo", "-NoProfile"] })],
+      }),
+    })
+    // Clearing the textarea drops the field entirely (no empty array stored).
+    await act(async () => {
+      fireEvent.change(args, { target: { value: "" } })
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({
+        profiles: [expect.objectContaining({ args: undefined })],
+      }),
+    })
+  })
+
+  it("edits env as KEY=VALUE lines, keeping the half-typed draft text visible", async () => {
+    settingsState = { terminal: { profiles: [{ id: "profile-1", name: "PS", shell: "pwsh.exe" }] } }
+    render(<TerminalProfiles />)
+    const env = screen.getByTestId("terminal-profile-env-profile-1") as HTMLTextAreaElement
+    // A half-typed line parses to nothing but must stay visible while typing.
+    await act(async () => {
+      fireEvent.change(env, { target: { value: "NODE_ENV" } })
+    })
+    expect(env.value).toBe("NODE_ENV")
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({
+        profiles: [expect.objectContaining({ env: undefined })],
+      }),
+    })
+    await act(async () => {
+      fireEvent.change(env, { target: { value: "NODE_ENV=development\nFOO=1" } })
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({
+        profiles: [expect.objectContaining({ env: { NODE_ENV: "development", FOO: "1" } })],
+      }),
+    })
+    // Blur clears the draft; the textarea then reflects the persisted record.
+    await act(async () => {
+      fireEvent.blur(env)
+    })
+    expect(env.value).toBe("NODE_ENV=development\nFOO=1")
+  })
+
   it("removes a profile and clears the default pointer if it matched", async () => {
     settingsState = {
       terminal: {

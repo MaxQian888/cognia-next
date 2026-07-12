@@ -22,11 +22,17 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { AUTO_SCHEME_ID, TERMINAL_COLOR_SCHEMES } from "@/lib/terminal/color-schemes"
+import {
+  AUTO_SCHEME_ID,
+  TERMINAL_COLOR_SCHEMES,
+  type TerminalColorScheme,
+} from "@/lib/terminal/color-schemes"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -43,17 +49,7 @@ type TerminalSettings = NonNullable<
 
 /** Concrete (non-optional) font-weight union offered by the pickers. */
 type FontWeightOption =
-  | "normal"
-  | "bold"
-  | "100"
-  | "200"
-  | "300"
-  | "400"
-  | "500"
-  | "600"
-  | "700"
-  | "800"
-  | "900"
+  "normal" | "bold" | "100" | "200" | "300" | "400" | "500" | "600" | "700" | "800" | "900"
 
 const DEFAULT_VALUES: TerminalSettings = {
   defaultShell: "",
@@ -92,6 +88,7 @@ const DEFAULT_VALUES: TerminalSettings = {
   commandActions: true,
   stickyScroll: true,
   confirmOnClose: true,
+  bell: "none",
 }
 
 /** Font-weight options offered by the pickers — CSS keywords + the numeric scale. */
@@ -118,6 +115,38 @@ const CONTRAST_PRESETS: ReadonlyArray<{ value: number; labelKey: string }> = [
 ]
 
 const ASK_POLICIES: ReadonlyArray<"fail" | "consent" | "run"> = ["fail", "consent", "run"]
+
+const BELL_STYLES: ReadonlyArray<"none" | "visual" | "sound" | "both"> = [
+  "none",
+  "visual",
+  "sound",
+  "both",
+]
+
+/** Named schemes split by their palette appearance, for the grouped picker. */
+const DARK_SCHEMES = TERMINAL_COLOR_SCHEMES.filter((s) => s.appearance === "dark")
+const LIGHT_SCHEMES = TERMINAL_COLOR_SCHEMES.filter((s) => s.appearance === "light")
+
+/**
+ * Inline palette preview for a color-scheme option: the scheme's background
+ * as a chip with four representative ANSI dots (red / green / yellow / blue),
+ * so the user can compare palettes without applying them.
+ */
+function SchemeSwatch({ scheme }: { scheme: TerminalColorScheme }) {
+  const { theme } = scheme
+  return (
+    <span
+      aria-hidden
+      className="inline-flex h-4 items-center gap-0.5 rounded-sm border px-1"
+      style={{ backgroundColor: theme.background }}
+      data-testid={`terminal-scheme-swatch-${scheme.id}`}
+    >
+      {[theme.red, theme.green, theme.yellow, theme.blue].map((color, i) => (
+        <span key={i} className="size-1.5 rounded-full" style={{ backgroundColor: color }} />
+      ))}
+    </span>
+  )
+}
 
 const AUTOCOMPLETE_SOURCES: ReadonlyArray<"both" | "ai" | "history"> = ["both", "ai", "history"]
 
@@ -212,7 +241,9 @@ export function TerminalCard() {
             />
             <Input
               value={terminal.fontFamily ?? ""}
-              placeholder='"JetBrains Mono", monospace'
+              placeholder={
+                /* i18n-exempt: example font stack, not translatable UI */ '"JetBrains Mono", monospace'
+              }
               onChange={(e) => update({ fontFamily: e.target.value })}
               className="h-8 text-xs"
               aria-label={t("settings.terminal.fontFamily.label")}
@@ -378,11 +409,28 @@ export function TerminalCard() {
                 <SelectItem value={AUTO_SCHEME_ID} className="text-xs">
                   {t("settings.terminal.colorScheme.auto")}
                 </SelectItem>
-                {TERMINAL_COLOR_SCHEMES.map((scheme) => (
-                  <SelectItem key={scheme.id} value={scheme.id} className="text-xs">
-                    {scheme.name}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  <SelectLabel className="text-[11px]">
+                    {t("settings.terminal.colorScheme.darkGroup")}
+                  </SelectLabel>
+                  {DARK_SCHEMES.map((scheme) => (
+                    <SelectItem key={scheme.id} value={scheme.id} className="text-xs">
+                      <SchemeSwatch scheme={scheme} />
+                      {scheme.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+                <SelectGroup>
+                  <SelectLabel className="text-[11px]">
+                    {t("settings.terminal.colorScheme.lightGroup")}
+                  </SelectLabel>
+                  {LIGHT_SCHEMES.map((scheme) => (
+                    <SelectItem key={scheme.id} value={scheme.id} className="text-xs">
+                      <SchemeSwatch scheme={scheme} />
+                      {scheme.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>
@@ -456,7 +504,9 @@ export function TerminalCard() {
           {currentShellValue === CUSTOM ? (
             <Input
               value={terminal.defaultShell ?? ""}
-              placeholder="/usr/local/bin/fish"
+              placeholder={
+                /* i18n-exempt: example shell path, not translatable UI */ "/usr/local/bin/fish"
+              }
               onChange={(e) => update({ defaultShell: e.target.value })}
               className="h-8 text-xs"
               aria-label={t("settings.terminal.shell.customLabel")}
@@ -547,6 +597,28 @@ export function TerminalCard() {
             aria-label={t("settings.terminal.copyOnSelect.label")}
             data-testid="terminal-card-copy-on-select"
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-xs">{t("settings.terminal.bell.label")}</Label>
+          <Select
+            value={terminal.bell ?? "none"}
+            onValueChange={(value) =>
+              update({ bell: value as "none" | "visual" | "sound" | "both" })
+            }
+          >
+            <SelectTrigger className="h-8 text-xs" data-testid="terminal-card-bell">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {BELL_STYLES.map((b) => (
+                <SelectItem key={b} value={b} className="text-xs">
+                  {t(`settings.terminal.bell.${b}` as never)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground">{t("settings.terminal.bell.helper")}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
