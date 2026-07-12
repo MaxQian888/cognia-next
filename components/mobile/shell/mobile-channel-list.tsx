@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
@@ -70,14 +70,6 @@ const BUCKET_LABEL_KEY: Record<DateBucket, string> = {
   prev7: "bucketPrev7",
   prev30: "bucketPrev30",
   older: "bucketOlder",
-}
-
-function relativeTime(ms: number): string {
-  const diff = Date.now() - ms
-  if (diff < 60_000) return "now"
-  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m`
-  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h`
-  return `${Math.round(diff / 86_400_000)}d`
 }
 
 export function MobileChannelList({
@@ -471,6 +463,9 @@ function ChannelRow({
 }) {
   const { session, unread, glyph, color } = resolved
   const preview = showPreview ? session.lastMessagePreview : undefined
+  // Localized "3 minutes ago" via next-intl — the old hand-rolled "3m"/"2d"
+  // helper rendered raw English abbreviations for zh-CN users.
+  const format = useFormatter()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(session.title)
 
@@ -587,7 +582,7 @@ function ChannelRow({
                 ) : null}
                 {preview ? (
                   <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-                    {relativeTime(session.lastMessageAt ?? session.updatedAt)}
+                    {format.relativeTime(new Date(session.lastMessageAt ?? session.updatedAt))}
                   </span>
                 ) : null}
               </span>
@@ -595,7 +590,7 @@ function ChannelRow({
                 className="truncate text-[11px] text-muted-foreground"
                 data-testid={`mobile-channel-subtitle-${session.id}`}
               >
-                {preview ?? relativeTime(session.updatedAt)}
+                {preview ?? format.relativeTime(new Date(session.updatedAt))}
               </span>
             </span>
           </Button>

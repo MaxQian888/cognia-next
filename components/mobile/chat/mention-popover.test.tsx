@@ -41,6 +41,31 @@ describe("MentionPopover", () => {
     expect(screen.getByText(/no members/i)).toBeInTheDocument()
   })
 
+  it("does not steal focus from the composer when it opens (non-modal)", () => {
+    // The picker opens while the user is typing an @-query — if the Sheet
+    // grabbed focus, the textarea would blur and the virtual keyboard would
+    // dismiss, making type-to-filter impossible.
+    render(
+      <div>
+        <textarea data-testid="fake-composer" />
+        <MentionPopover
+          open={true}
+          query=""
+          members={[mkCharacter()]}
+          onPick={() => undefined}
+          onDismiss={() => undefined}
+        />
+      </div>
+    )
+    const composer = screen.getByTestId("fake-composer")
+    composer.focus()
+    expect(composer).toHaveFocus()
+    // Re-render with the sheet open (simulates the open transition settling).
+    fireEvent.input(composer, { target: { value: "@al" } })
+    expect(screen.getByTestId("mobile-mention-popover")).toBeInTheDocument()
+    expect(composer).toHaveFocus()
+  })
+
   it("lists members when open and at least one matches", () => {
     render(
       <MentionPopover

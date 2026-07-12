@@ -15,6 +15,9 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
+
+import { selectionFeedback } from "@/lib/capacitor/haptics"
 
 import { MeSection } from "@/components/mobile/me/me-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
@@ -71,13 +74,19 @@ export default function MobileProvidersPage() {
   const isRecommended = RECOMMENDED.includes(providerId as (typeof RECOMMENDED)[number])
 
   const onSave = async () => {
-    await setProviderConfig(providerId, {
-      enabled: true,
-      apiKey: apiKey.trim() || undefined,
-      baseURL: baseURL.trim() || undefined,
-    } as never)
-    await setDefaultProvider(providerId)
-    setSaved(true)
+    try {
+      await setProviderConfig(providerId, {
+        enabled: true,
+        apiKey: apiKey.trim() || undefined,
+        baseURL: baseURL.trim() || undefined,
+      } as never)
+      await setDefaultProvider(providerId)
+      setSaved(true)
+      void selectionFeedback()
+      toast.success(t("saveSuccess"))
+    } catch (err) {
+      toast.error(t("saveFailed", { message: err instanceof Error ? err.message : "" }))
+    }
   }
 
   return (

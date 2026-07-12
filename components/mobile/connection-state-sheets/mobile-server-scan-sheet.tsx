@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { TriangleAlertIcon, WifiIcon } from "lucide-react"
+import { RefreshCwIcon, TriangleAlertIcon, WifiIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,7 @@ import { companionConfigToPairedSummary } from "@/lib/connectivity/paired-summar
 import { requestMdnsPermission } from "@/lib/connectivity/mdns-permission"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import { useLanScan } from "@/hooks/connectivity/use-lan-scan"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 export interface MobileServerScanSheetProps {
   open: boolean
@@ -35,6 +36,9 @@ export interface MobileServerScanSheetProps {
  * banner (paired fp vs `/healthz` fp) and the recency sort.
  */
 export function MobileServerScanSheet({ open, onOpenChange }: MobileServerScanSheetProps) {
+  // Android hardware / browser back closes the sheet instead of navigating.
+  useBackDismiss(open, () => onOpenChange(false))
+
   const t = useTranslations("mobile.connectionState.scan")
   const router = useRouter()
   const [bannerDismissed, setBannerDismissed] = useState(false)
@@ -57,7 +61,7 @@ export function MobileServerScanSheet({ open, onOpenChange }: MobileServerScanSh
     return map
   }, [pairedSummaries])
 
-  const { servers, scanning, permission } = useLanScan({
+  const { servers, scanning, permission, rescan } = useLanScan({
     enabled: open,
     paired: pairedSummaries,
     requestPermission: requestMdnsPermission,
@@ -108,10 +112,23 @@ export function MobileServerScanSheet({ open, onOpenChange }: MobileServerScanSh
             <WifiIcon className="size-4" aria-hidden="true" />
             {t("title")}
             {scanning ? <Spinner className="size-3 text-muted-foreground" /> : null}
+            {!scanning ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="ml-auto h-7 gap-1.5 text-xs"
+                onClick={rescan}
+                data-testid="scan-rescan"
+              >
+                <RefreshCwIcon className="size-3.5" aria-hidden="true" />
+                {t("rescan")}
+              </Button>
+            ) : null}
           </SheetTitle>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-6 pt-2">
+        <div className="flex-1 overflow-y-auto px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
           {mismatches.length > 0 && !bannerDismissed ? (
             <Alert
               variant="destructive"
@@ -147,7 +164,11 @@ export function MobileServerScanSheet({ open, onOpenChange }: MobileServerScanSh
               }}
             />
           ) : sortedServers.length === 0 && !scanning ? (
-            <EmptyState icon={WifiIcon} title={t("empty")} />
+            <EmptyState
+              icon={WifiIcon}
+              title={t("empty")}
+              cta={{ label: t("rescan"), onSelect: rescan }}
+            />
           ) : (
             <ul className="flex flex-col gap-2" data-testid="mobile-server-scan-list">
               {sortedServers.map((server) => {

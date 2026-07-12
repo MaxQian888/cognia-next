@@ -49,6 +49,7 @@ import {
   checkPermission as checkLocal,
   requestPermission as requestLocal,
 } from "@/lib/capacitor/local-notifications"
+import { getAppInfo } from "@/lib/capacitor/app"
 import { getDeviceInfo, type DeviceDetails } from "@/lib/capacitor/device"
 import { openAppSettings } from "@/lib/capacitor/app-settings"
 
@@ -58,16 +59,13 @@ interface AppInfo {
 }
 
 async function loadAppInfo(): Promise<AppInfo> {
-  try {
-    const moduleId = "@capacitor/app"
-    const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-      App: { getInfo(): Promise<{ version: string; build: string }> }
-    }
-    const info = await mod.App.getInfo()
-    return { version: info.version, build: info.build }
-  } catch {
-    return { version: APP_VERSION, build: null }
+  // getAppInfo resolves through window.Capacitor.Plugins.App — a bare
+  // dynamic import never resolves inside the static-export WebView.
+  const out = await getAppInfo()
+  if (out.kind === "ok") {
+    return { version: out.value.version, build: out.value.build }
   }
+  return { version: APP_VERSION, build: null }
 }
 
 async function loadDevice(): Promise<DeviceDetails | null> {

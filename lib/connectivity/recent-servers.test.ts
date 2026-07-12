@@ -30,6 +30,11 @@ describe("recent-servers", () => {
     expect(typeof list[0].lastSeenAt).toBe("number")
   })
 
+  it("persists the deviceId recorded at pair time", () => {
+    recordRecentServer({ baseUrl: "https://desk:7890", deviceId: "device-full-uuid" })
+    expect(loadRecentServers()[0].deviceId).toBe("device-full-uuid")
+  })
+
   it("normalises trailing slashes and dedupes by baseUrl", () => {
     recordRecentServer({ baseUrl: "https://desk:7890", lastSeenAt: 1 })
     recordRecentServer({ baseUrl: "https://desk:7890/", lastSeenAt: 2 })

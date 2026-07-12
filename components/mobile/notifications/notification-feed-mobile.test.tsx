@@ -87,6 +87,8 @@ it("opening a notification navigates and marks read", async () => {
 
 it("refresh button re-pulls", async () => {
   render(<NotificationFeedMobile />)
-  await userEvent.click(screen.getByRole("button", { name: "refresh" }))
+  await userEvent.click(
+    screen.getByRole("button", { name: "notificationCenter.center.refresh" })
+  )
   expect(hook.refresh).toHaveBeenCalledTimes(2) // mount + click
 })

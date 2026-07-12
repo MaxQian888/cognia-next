@@ -98,9 +98,12 @@ const syncNavBarMock = jest.fn(async () => ({ kind: "ok" }))
 jest.mock("@/lib/capacitor/navigation-bar", () => ({
   syncWithTheme: (...args: unknown[]) => syncNavBarMock(...(args as [])),
 }))
+const localNotifActionUnsubMock = jest.fn()
+const onLocalNotifActionMock = jest.fn(async (_handler: unknown) => localNotifActionUnsubMock)
 jest.mock("@/lib/capacitor/local-notifications", () => ({
   DEFAULT_CHANNEL_ID: "cognia-default",
   ensureChannel: jest.fn(async () => ({ kind: "ok" })),
+  onAction: (handler: unknown) => onLocalNotifActionMock(handler),
 }))
 const backButtonUnsubMock = jest.fn()
 const subscribeBackButtonMock = jest.fn(
@@ -136,6 +139,8 @@ beforeEach(() => {
   getLaunchRouteMock.mockReset().mockResolvedValue(null)
   subscribeBackButtonMock.mockClear()
   backButtonUnsubMock.mockClear()
+  onLocalNotifActionMock.mockClear()
+  localNotifActionUnsubMock.mockClear()
   minimizeAppMock.mockClear()
   registerNativePluginsMock.mockClear()
   syncStatusBarMock.mockClear()
@@ -237,6 +242,34 @@ describe("<CompanionBootProvider /> — Android hardware back", () => {
     } finally {
       historyBack.mockRestore()
     }
+  })
+})
+
+describe("<CompanionBootProvider /> — local-notification taps", () => {
+  it("routes a tapped notification via its extra.route payload", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValueOnce(null)
+    getSettingsMock.mockResolvedValueOnce({ mobileRuntimeMode: "standalone" })
+
+    render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+
+    await waitFor(() => expect(onLocalNotifActionMock).toHaveBeenCalledTimes(1))
+    const handler = onLocalNotifActionMock.mock.calls[0][0] as (a: {
+      actionId: string
+      notification: { id: number; extra?: Record<string, unknown> }
+    }) => void
+
+    handler({ actionId: "tap", notification: { id: 9101, extra: { route: "/me/backup" } } })
+    expect(pushMock).toHaveBeenCalledWith("/me/backup")
+
+    // Non-path / missing routes are ignored.
+    handler({ actionId: "tap", notification: { id: 9102, extra: { route: "https://evil" } } })
+    handler({ actionId: "tap", notification: { id: 9103 } })
+    expect(pushMock).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -499,6 +532,35 @@ describe("<CompanionBootProvider /> — paired", () => {
     })
 
     expect(pushMock).toHaveBeenCalledWith("/inbox/c?key=s-123")
+  })
+
+  it("keeps boot listeners installed across in-app navigations", async () => {
+    // Regression: `pathname` in the boot effect's dep array made the FIRST
+    // navigation run the cleanup (tearing down backButton / deeplink / push /
+    // sync) while the ranRef guard blocked re-setup — native lifecycle dead
+    // for the rest of the session.
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+
+    const { rerender } = render(
+      <CompanionBootProvider>
+        <div>a</div>
+      </CompanionBootProvider>
+    )
+    await waitFor(() => expect(subscribeBackButtonMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(subscribePushMock).toHaveBeenCalled())
+
+    pathnameMock.mockReturnValue("/me")
+    rerender(
+      <CompanionBootProvider>
+        <div>b</div>
+      </CompanionBootProvider>
+    )
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(backButtonUnsubMock).not.toHaveBeenCalled()
+    expect(deeplinkUnsubMock).not.toHaveBeenCalled()
+    expect(subscribeBackButtonMock).toHaveBeenCalledTimes(1) // no duplicate re-install either
   })
 
   it("hydrates only once across re-renders", async () => {

@@ -29,10 +29,23 @@ export interface LocalNotificationSpec {
   extra?: Record<string, unknown>
 }
 
+export interface LocalNotificationAction {
+  /** Plugin-reported action: "tap" for a plain body tap. */
+  actionId: string
+  notification: {
+    id: number
+    extra?: Record<string, unknown>
+  }
+}
+
 interface LocalNotificationsShape {
   schedule(opts: { notifications: LocalNotificationSpec[] }): Promise<{
     notifications: Array<{ id: number }>
   }>
+  addListener(
+    event: "localNotificationActionPerformed",
+    handler: (action: LocalNotificationAction) => void
+  ): Promise<{ remove(): Promise<void> | void }>
   cancel(opts: { notifications: Array<{ id: number }> }): Promise<void>
   getPending(): Promise<{ notifications: LocalNotificationSpec[] }>
   requestPermissions(): Promise<{
@@ -141,6 +154,30 @@ export async function listPending(
     const result = await n.getPending()
     return { kind: "ok" as const, value: result.notifications }
   })
+}
+
+export type Unsubscribe = () => void
+
+/**
+ * Subscribe to notification taps (`localNotificationActionPerformed`).
+ * A tapped reminder brings the app to the foreground; without this
+ * listener the tap routes nowhere. The boot provider registers one
+ * handler and navigates via the notification's `extra.route` payload.
+ * Returns `null` when the plugin isn't available (web / desktop).
+ */
+export async function onAction(
+  handler: (action: LocalNotificationAction) => void,
+  loader: LocalNotificationsLoader = defaultLoader
+): Promise<Unsubscribe | null> {
+  try {
+    const n = await loader()
+    const listener = await n.addListener("localNotificationActionPerformed", handler)
+    return () => {
+      void listener.remove()
+    }
+  } catch {
+    return null
+  }
 }
 
 export async function ensureChannel(

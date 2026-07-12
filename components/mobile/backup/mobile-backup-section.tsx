@@ -154,6 +154,8 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
           title: t("autoBackup"),
           body: t("autoBackupHint"),
           schedule: { every: "day", count: 1 },
+          // Tap routing — consumed by the boot provider's onAction listener.
+          extra: { route: "/me/backup" },
         },
       ])
     })()

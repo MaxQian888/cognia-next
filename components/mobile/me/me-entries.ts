@@ -80,6 +80,12 @@ export interface MeEntry {
   section: MeSectionId
   /** Extra (bilingual) search keywords beyond the localized label. */
   keywords?: string[]
+  /**
+   * ADR-0056 D2 — page body renders a `PairedOnly` placeholder without a
+   * paired desktop. The row stays visible but is annotated on `/me` so the
+   * user knows before tapping.
+   */
+  pairedOnly?: boolean
 }
 
 /** Display order of the grouped sections. */
@@ -219,6 +225,7 @@ export const ME_ENTRIES: MeEntry[] = [
   // === Connection & extensions ===
   {
     id: "agent",
+    pairedOnly: true,
     icon: BotIcon,
     labelKey: "agentRow",
     href: "/me/agent",
@@ -300,6 +307,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "instructions",
+    pairedOnly: true,
     icon: ScrollTextIcon,
     labelKey: "instructionsRow",
     href: "/me/instructions",
@@ -323,6 +331,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "subagents",
+    pairedOnly: true,
     icon: NetworkIcon,
     labelKey: "subagentsRow",
     href: "/me/subagents",
@@ -331,6 +340,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "mcp",
+    pairedOnly: true,
     icon: ServerIcon,
     labelKey: "mcpRow",
     href: "/me/mcp",
@@ -339,6 +349,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "external-agents",
+    pairedOnly: true,
     icon: PlugIcon,
     labelKey: "externalAgentsRow",
     href: "/me/external-agents",
@@ -356,6 +367,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "github-delivery",
+    pairedOnly: true,
     icon: GitMergeIcon,
     labelKey: "githubDeliveryRow",
     href: "/me/github-delivery",
@@ -364,6 +376,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "slash-commands",
+    pairedOnly: true,
     icon: TerminalSquareIcon,
     labelKey: "slashCommandsRow",
     href: "/me/slash-commands",
@@ -372,6 +385,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "network",
+    pairedOnly: true,
     icon: NetworkIcon,
     labelKey: "networkRow",
     href: "/me/network",
@@ -380,6 +394,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "hooks",
+    pairedOnly: true,
     icon: WebhookIcon,
     labelKey: "hooksRow",
     href: "/me/hooks",
@@ -388,6 +403,7 @@ export const ME_ENTRIES: MeEntry[] = [
   },
   {
     id: "agent-teams-settings",
+    pairedOnly: true,
     icon: UsersRoundIcon,
     labelKey: "agentTeamsSettingsRow",
     href: "/me/agent-teams-settings",

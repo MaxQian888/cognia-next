@@ -16,7 +16,11 @@ const DIRECTORY_MAP: Record<Directory, string> = {
   documents: "DOCUMENTS",
   data: "DATA",
   cache: "CACHE",
-  external: "EXTERNAL_STORAGE",
+  // Capacitor 8 distinguishes `EXTERNAL` (app-scoped, no extra permission)
+  // from `EXTERNAL_STORAGE` (device root, needs legacy WRITE_EXTERNAL_STORAGE
+  // on Android ≤10). The app-scoped directory is the one every current
+  // consumer wants, so `external` maps there.
+  external: "EXTERNAL",
   library: "LIBRARY",
 }
 

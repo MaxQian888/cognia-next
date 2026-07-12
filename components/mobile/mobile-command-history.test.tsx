@@ -35,6 +35,11 @@ jest.mock("@/hooks/data/use-dexie-first-query", () => ({
   }),
 }))
 
+const execTerminalCommand = jest.fn()
+jest.mock("@/lib/terminal/remote-api", () => ({
+  execTerminalCommand: (req: unknown) => execTerminalCommand(req),
+}))
+
 import { MobileCommandHistory } from "./mobile-command-history"
 
 function row(over: Partial<TerminalHistoryRow> & { id: string }): TerminalHistoryRow {
@@ -130,5 +135,68 @@ describe("MobileCommandHistory", () => {
     render(<MobileCommandHistory />)
     await userEvent.click(screen.getByTestId("command-history-row-a"))
     expect(toastError).toHaveBeenCalledWith("mobile.commandHistory.copyError")
+  })
+
+  describe("run on desktop", () => {
+    it("asks for confirmation and does not exec until confirmed", async () => {
+      fixtureRows = [row({ id: "a", command: "git status" })]
+      render(<MobileCommandHistory />)
+      await userEvent.click(screen.getByTestId("command-history-run-a"))
+      expect(screen.getByTestId("command-history-run-dialog")).toBeInTheDocument()
+      expect(execTerminalCommand).not.toHaveBeenCalled()
+      // Cancel closes without running.
+      await userEvent.click(screen.getByTestId("command-history-run-cancel"))
+      expect(execTerminalCommand).not.toHaveBeenCalled()
+      expect(screen.queryByTestId("command-history-run-dialog")).toBeNull()
+    })
+
+    it("execs the command in shell mode on confirm and shows the output", async () => {
+      execTerminalCommand.mockResolvedValueOnce({
+        stdout: "On branch dev",
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+      })
+      fixtureRows = [row({ id: "a", command: "git status" })]
+      render(<MobileCommandHistory />)
+      await userEvent.click(screen.getByTestId("command-history-run-a"))
+      await userEvent.click(screen.getByTestId("command-history-run-confirm"))
+      expect(execTerminalCommand).toHaveBeenCalledWith({
+        command: "git status",
+        shell: true,
+        timeoutMs: 60_000,
+      })
+      const result = await screen.findByTestId("command-history-run-result")
+      expect(result).toHaveTextContent("On branch dev")
+      expect(result).toHaveTextContent('mobile.commandHistory.run.exitCode:{"code":0}')
+    })
+
+    it("marks a timed-out run and shows stderr when stdout is empty", async () => {
+      execTerminalCommand.mockResolvedValueOnce({
+        stdout: "",
+        stderr: "command timed out after 60000ms",
+        exitCode: null,
+        timedOut: true,
+      })
+      fixtureRows = [row({ id: "a", command: "sleep 999" })]
+      render(<MobileCommandHistory />)
+      await userEvent.click(screen.getByTestId("command-history-run-a"))
+      await userEvent.click(screen.getByTestId("command-history-run-confirm"))
+      const result = await screen.findByTestId("command-history-run-result")
+      expect(result).toHaveTextContent("mobile.commandHistory.run.timedOut")
+      expect(result).toHaveTextContent("command timed out after 60000ms")
+    })
+
+    it("closes the dialog and toasts when the RPC rejects (e.g. 403)", async () => {
+      execTerminalCommand.mockRejectedValueOnce(new Error("remote control not allowed"))
+      fixtureRows = [row({ id: "a", command: "git status" })]
+      render(<MobileCommandHistory />)
+      await userEvent.click(screen.getByTestId("command-history-run-a"))
+      await userEvent.click(screen.getByTestId("command-history-run-confirm"))
+      expect(toastError).toHaveBeenCalledWith(
+        'mobile.commandHistory.runError:{"message":"remote control not allowed"}'
+      )
+      expect(screen.queryByTestId("command-history-run-dialog")).toBeNull()
+    })
   })
 })

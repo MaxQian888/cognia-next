@@ -37,6 +37,7 @@ export const MOBILE_QUICK_ACTION_CATALOG: readonly MobileQuickActionMeta[] = [
   { id: "inbox", kind: "route", route: "/inbox", i18nKey: "inbox" },
   { id: "twin", kind: "route", route: "/twin", i18nKey: "twin" },
   { id: "agentTeams", kind: "route", route: "/agent-teams", i18nKey: "agentTeams" },
+  { id: "fleet", kind: "route", route: "/fleet", i18nKey: "fleet" },
   { id: "me", kind: "route", route: "/me", i18nKey: "me" },
 ] as const
 

@@ -60,6 +60,16 @@ export interface ComposerPlusMenuProps {
   onSend?: (content: SendContent) => Promise<void> | void
   /** Triggered with the raw error code on failure paths (permission, etc.). */
   onError?: (code: string, message: string) => void
+  /**
+   * Hide the voice-recording branch. The main chat composer sets this to
+   * false because voice input there is the transcription bridge (speech →
+   * text) — an audio *attachment* has no send path to the model. Connector
+   * chat surfaces keep the default (true) since `connector_send` can carry
+   * media payloads.
+   */
+  showVoice?: boolean
+  /** `accept` for the file-branch input; defaults to any file. */
+  fileAccept?: string
   className?: string
 }
 
@@ -77,7 +87,14 @@ const voiceLoader = makeDefaultLoader<VoiceRecorderShape>(
   "VoiceRecorder"
 )
 
-export function ComposerPlusMenu({ onAttach, onSend, onError, className }: ComposerPlusMenuProps) {
+export function ComposerPlusMenu({
+  onAttach,
+  onSend,
+  onError,
+  showVoice = true,
+  fileAccept,
+  className,
+}: ComposerPlusMenuProps) {
   const t = useTranslations("mobile.composerPlus")
   const [open, setOpen] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -249,12 +266,13 @@ export function ComposerPlusMenu({ onAttach, onSend, onError, className }: Compo
             <input
               type="file"
               multiple
+              accept={fileAccept}
               className="sr-only"
               onChange={onFilePicked}
               data-testid="composer-plus-file-input"
             />
           </label>
-          {recording ? (
+          {!showVoice ? null : recording ? (
             <Button
               type="button"
               variant="destructive"
@@ -343,6 +361,46 @@ async function packFileAsImageBlock(file: File): Promise<SendContentBlock | null
   return {
     type: "image",
     source: { type: "base64", media_type: file.type || "image/jpeg", data },
+  }
+}
+
+/**
+ * Fold a plus-menu attachment into plain `File`s so hosts with a file-based
+ * attachment pipeline (the shared chat composer's `acceptFiles`) can reuse
+ * their existing size/count/type gates instead of growing a parallel path.
+ * Voice payloads become an audio File; hosts that can't send audio should
+ * hide the branch via `showVoice={false}` rather than dropping it here.
+ */
+export async function attachmentToFiles(attachment: ComposerAttachment): Promise<File[]> {
+  switch (attachment.kind) {
+    case "file":
+      return [attachment.file]
+    case "files":
+      return attachment.files
+    case "photo": {
+      const source = attachment.base64
+        ? `data:${attachment.mime};base64,${attachment.base64}`
+        : attachment.uri
+      if (!source) return []
+      const blob = await (await fetch(source)).blob()
+      const ext = attachment.mime.split("/")[1] ?? "jpeg"
+      return [new File([blob], `photo-${Date.now()}.${ext}`, { type: attachment.mime })]
+    }
+    case "photos": {
+      const files = await Promise.all(
+        attachment.items.map(async (item, i) => {
+          const blob = await (await fetch(item.uri)).blob()
+          const ext = item.mime.split("/")[1] ?? "jpeg"
+          return new File([blob], `photo-${Date.now()}-${i}.${ext}`, { type: item.mime })
+        })
+      )
+      return files
+    }
+    case "voice": {
+      const blob = await (await fetch(attachment.recordingDataUrl)).blob()
+      const ext = attachment.mimeType.includes("aac") ? "aac" : "webm"
+      return [new File([blob], `voice-${Date.now()}.${ext}`, { type: attachment.mimeType })]
+    }
   }
 }
 

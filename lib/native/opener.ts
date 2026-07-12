@@ -8,6 +8,7 @@
  */
 
 import { isTauri } from "@/lib/tauri"
+import { isCapacitor } from "@/lib/platform/detect"
 
 export interface OpenUrlOptions {
   /** Optional explicit application id (Tauri-only). */
@@ -38,6 +39,19 @@ export async function openUrl(url: string, options: OpenUrlOptions = {}): Promis
     } catch (err) {
       // Fall through to web fallback if the plugin isn't bundled.
       console.warn("openUrl: tauri opener failed, falling back to window.open", err)
+    }
+  }
+
+  // Capacitor shell: `window.open` is unreliable inside the WebView (Android
+  // blocks new windows). Route through the in-app browser sheet instead —
+  // this is what makes the mobile OAuth "open authorize page" step work.
+  if (!options.forceWebFallback && isCapacitor()) {
+    try {
+      const { open } = await import("@/lib/capacitor/browser")
+      const out = await open({ url })
+      if (out.kind === "ok") return
+    } catch (err) {
+      console.warn("openUrl: capacitor browser failed, falling back to window.open", err)
     }
   }
 

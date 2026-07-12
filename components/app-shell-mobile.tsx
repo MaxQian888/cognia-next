@@ -80,8 +80,10 @@ import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { getDb, whenSeeded } from "@/lib/db/schema"
 import { markSessionRead } from "@/lib/db/session-state"
+import { updateSession } from "@/lib/db/sessions"
 import { listCharacters } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
+import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { guildFromSession } from "@/lib/claude/guild"
 import { loggers } from "@/lib/logging"
 import type { Character, SendContent, Team } from "@/lib/claude/types"
@@ -242,6 +244,24 @@ export function AppShellMobile() {
       }
     },
     [send]
+  )
+  // Resume the turn after a plan is approved in the mobile PlanApprovalDock.
+  // Mirrors `desktop-chat-workspace.resumeAfterPlanApproval`: set the store
+  // mode first (so the composer's persist effect can't clobber the row back
+  // to `plan`), write the session row authoritatively and AWAIT it before
+  // `send` (which resolves the mode from the row), and inject the resume turn
+  // with no user bubble. Plan mode is a direct-chat surface, so teams are
+  // excluded — the dock only renders here for the active bound session, so the
+  // active id IS the plan's session.
+  const resumeAfterPlanApproval = useCallback(
+    async (prompt: string, mode: PlanResumeMode) => {
+      const sid = activeSessionId
+      if (!sid || isTeamSession) return
+      useChatStore.getState().setPermissionMode(mode)
+      await updateSession(sid, { permissionMode: mode })
+      await directChat.send(prompt, undefined, { sessionId: sid, skipUserAppend: true })
+    },
+    [activeSessionId, isTeamSession, directChat]
   )
   const respondToApproval = (
     approval: typeof pendingApproval,
@@ -545,6 +565,11 @@ export function AppShellMobile() {
               onSteerFlush={isTeamSession ? teamChat.flushSteer : directChat.flushSteer}
               onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
               onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
+              // Plan-mode approval dock — direct-chat only (teams never enter
+              // plan mode). Without this a plan awaiting approval stranded the
+              // turn on mobile: the composer can enter plan mode but the dock
+              // never rendered.
+              onResumeAfterPlanApproval={isTeamSession ? undefined : resumeAfterPlanApproval}
               onCreate={handleNewDirect}
               onUseSample={(text) => void send(text)}
               onOpenSettings={openSettings}

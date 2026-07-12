@@ -19,6 +19,7 @@ import type { SyncableTable } from "@/lib/sync/types"
 import { transport } from "@/lib/tauri"
 import type { TransportTier } from "@/lib/tauri/transport-companion"
 import { cn } from "@/lib/utils"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 /**
  * Local mirror of the private `SyncState` shape in `companion-sync.ts`.
@@ -78,6 +79,8 @@ export function ConnectionDiagnosticsSheet({
   onOpenChange,
 }: ConnectionDiagnosticsSheetProps) {
   const t = useTranslations("mobile.connectionDiagnostics")
+  // Android hardware / browser back closes the sheet instead of navigating.
+  useBackDismiss(open, () => onOpenChange(false))
   const tShared = useTranslations("mobile.connectionState")
   const [tier, setTier] = useState<TransportTier>("offline")
   const [states, setStates] = useState<Record<SyncableTable, SyncState>>(() => snapshotSyncStates())
@@ -171,7 +174,7 @@ export function ConnectionDiagnosticsSheet({
           </SheetTitle>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-6 pt-2">
+        <div className="flex-1 overflow-y-auto px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
           {/* Tier row */}
           <section className="mb-4 rounded-md border p-3" data-testid="diagnostics-tier-row">
             <div className="mb-2 flex items-center justify-between gap-3">

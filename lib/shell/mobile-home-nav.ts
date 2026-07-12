@@ -12,6 +12,7 @@ import {
   BotIcon,
   CompassIcon,
   InboxIcon,
+  LayersIcon,
   PlusIcon,
   SearchIcon,
   UserRoundIcon,
@@ -35,6 +36,7 @@ export const MOBILE_QUICK_ACTION_ICONS: Record<string, LucideIcon> = {
   inbox: InboxIcon,
   twin: BotIcon,
   agentTeams: Users2Icon,
+  fleet: LayersIcon,
   me: UserRoundIcon,
 }
 

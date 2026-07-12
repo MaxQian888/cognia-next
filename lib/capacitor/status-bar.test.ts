@@ -65,6 +65,21 @@ describe("status-bar", () => {
     expect(sb.setBackgroundColor).not.toHaveBeenCalled()
   })
 
+  it("syncWithTheme skips setBackgroundColor on iOS (Android-only API)", async () => {
+    ;(globalThis as { Capacitor?: { getPlatform: () => string } }).Capacitor = {
+      getPlatform: () => "ios",
+    }
+    try {
+      const sb = makeSb()
+      const out = await syncWithTheme("dark", "#101820", async () => sb)
+      expect(out).toEqual({ kind: "ok" })
+      expect(sb.setStyle).toHaveBeenCalledWith({ style: "LIGHT" })
+      expect(sb.setBackgroundColor).not.toHaveBeenCalled()
+    } finally {
+      delete (globalThis as { Capacitor?: unknown }).Capacitor
+    }
+  })
+
   it("returns unsupported when plugin not loadable", async () => {
     const out = await setStyle("light", async () => {
       throw new Error("nope")

@@ -102,4 +102,21 @@ describe("<MobileTabBar />", () => {
     await user.click(screen.getByTestId("mobile-tab-discover"))
     expect(selectionFeedbackMock).toHaveBeenCalled()
   })
+
+  it("slides off-screen and blocks pointer events when keyboardHidden", () => {
+    render(<MobileTabBar keyboardHidden />)
+    const bar = screen.getByTestId("mobile-tab-bar")
+    expect(bar).toHaveAttribute("data-keyboard-hidden", "true")
+    expect(bar).toHaveAttribute("aria-hidden", "true")
+    expect(bar.className).toContain("translate-y-full")
+    expect(bar.className).toContain("pointer-events-none")
+  })
+
+  it("stays interactive when keyboardHidden is false (default)", () => {
+    render(<MobileTabBar />)
+    const bar = screen.getByTestId("mobile-tab-bar")
+    expect(bar).toHaveAttribute("data-keyboard-hidden", "false")
+    expect(bar).not.toHaveAttribute("aria-hidden")
+    expect(bar.className).not.toContain("translate-y-full")
+  })
 })

@@ -204,9 +204,8 @@ describe("pickPhoto", () => {
     expect(out).toMatchObject({ kind: "captured" })
   })
 
-  it("proceeds for the prompt source when a checked permission is already granted", async () => {
-    // The prompt source never triggers requestPermissions — it relies on the
-    // existing checkPermissions result (camera "limited" counts as usable).
+  it("proceeds for the prompt source when a checked permission is already usable", async () => {
+    // camera "limited" counts as usable — no redundant re-prompt.
     const cam = makeCam({
       checkPermissions: jest.fn().mockResolvedValue({ camera: "limited", photos: "denied" }),
     })
@@ -215,11 +214,25 @@ describe("pickPhoto", () => {
     expect(out).toMatchObject({ kind: "captured" })
   })
 
-  it("returns permission_denied for the prompt source when neither is granted", async () => {
+  it("requests both permissions for the prompt source on a fresh install", async () => {
+    // Fresh install: both states are "prompt" — the OS dialog must be shown
+    // (this used to dead-end at permission_denied without ever asking).
     const cam = makeCam({
-      checkPermissions: jest.fn().mockResolvedValue({ camera: "denied", photos: "denied" }),
+      checkPermissions: jest.fn().mockResolvedValue({ camera: "prompt", photos: "prompt" }),
+      requestPermissions: jest.fn().mockResolvedValue({ camera: "denied", photos: "granted" }),
     })
     const out = await pickPhoto({ source: "prompt", loader: async () => cam })
+    expect(cam.requestPermissions).toHaveBeenCalledWith({ permissions: ["camera", "photos"] })
+    expect(out).toMatchObject({ kind: "captured" })
+  })
+
+  it("returns permission_denied for the prompt source when the user denies the request", async () => {
+    const cam = makeCam({
+      checkPermissions: jest.fn().mockResolvedValue({ camera: "denied", photos: "denied" }),
+      requestPermissions: jest.fn().mockResolvedValue({ camera: "denied", photos: "denied" }),
+    })
+    const out = await pickPhoto({ source: "prompt", loader: async () => cam })
+    expect(cam.requestPermissions).toHaveBeenCalledWith({ permissions: ["camera", "photos"] })
     expect(out).toEqual({ kind: "permission_denied" })
   })
 

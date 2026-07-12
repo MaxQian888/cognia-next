@@ -65,8 +65,13 @@ export function MentionPopover({
   }, [members, query])
 
   return (
+    // modal={false}: the picker opens while the user is TYPING an @-query in
+    // the composer. A modal Sheet would steal focus on open (blurring the
+    // textarea and dismissing the virtual keyboard) and its overlay would
+    // swallow taps on the composer — making type-to-filter impossible.
     <Sheet
       open={open}
+      modal={false}
       onOpenChange={(next) => {
         if (!next) onDismiss()
       }}
@@ -74,6 +79,9 @@ export function MentionPopover({
       <SheetContent
         side="bottom"
         showCloseButton={false}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        onPointerDownOutside={() => onDismiss()}
         data-testid="mobile-mention-popover-panel"
         className={cn(
           // Float as a centred popover, not a true edge-to-edge bottom

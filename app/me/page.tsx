@@ -104,9 +104,12 @@ export default function MePage() {
   if (!mounted || platform !== "mobile") return null
 
   /** Right-aligned dynamic value for certain rows. */
-  const rowValue = (id: string): string | undefined => {
-    if (id === "devices") return paired && shortDeviceId ? shortDeviceId : undefined
-    if (id === "sync") return lastSyncedLabel
+  const rowValue = (entry: MeEntry): string | undefined => {
+    if (entry.id === "devices") return paired && shortDeviceId ? shortDeviceId : undefined
+    if (entry.id === "sync") return lastSyncedLabel
+    // ADR-0056 D2 — agent-class pages are dead UI without a paired desktop;
+    // annotate the row so the user knows before tapping into the placeholder.
+    if (entry.pairedOnly && !paired) return t("requiresDesktop")
     return undefined
   }
 
@@ -118,7 +121,7 @@ export default function MePage() {
           icon={entry.icon}
           label={t(entry.labelKey)}
           href={entry.href}
-          value={rowValue(entry.id)}
+          value={rowValue(entry)}
           testid={testid}
         />
       </LongPress>

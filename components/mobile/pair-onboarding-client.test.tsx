@@ -9,6 +9,8 @@ import {
   PairOnboardingClient,
   describeHttpError,
   describeNetworkError,
+  readPairParams,
+  resolveParamSelection,
   validateBaseUrl,
   validatePairJwt,
 } from "./pair-onboarding-client"
@@ -425,6 +427,134 @@ describe("<PairOnboardingClient /> — web host (ADR-0059 C2)", () => {
 // ---------------------------------------------------------------------------
 // Pure helpers (re-exported from ./pair/pair-helpers)
 // ---------------------------------------------------------------------------
+
+describe("readPairParams / resolveParamSelection", () => {
+  const RECENTS = [
+    {
+      baseUrl: "https://192.168.1.5:7890",
+      fingerprint: "FP-A",
+      label: "deviceAA",
+      lastSeenAt: 1,
+    },
+    { baseUrl: "https://192.168.1.9:7890", label: "deviceBB", lastSeenAt: 2 },
+  ]
+
+  it("parses switchTo/baseUrl/fingerprint from a search string", () => {
+    expect(readPairParams("?switchTo=deviceAA-1234&baseUrl=https%3A%2F%2Fx&fingerprint=F")).toEqual(
+      { switchTo: "deviceAA-1234", baseUrl: "https://x", fingerprint: "F" }
+    )
+    expect(readPairParams("")).toEqual({ switchTo: null, baseUrl: null, fingerprint: null })
+  })
+
+  it("prefers an explicit baseUrl param and locks the selection", () => {
+    const sel = resolveParamSelection(
+      { switchTo: null, baseUrl: "https://192.168.1.7:7890", fingerprint: "FP-X" },
+      RECENTS
+    )
+    expect(sel).toEqual({
+      baseUrl: "https://192.168.1.7:7890",
+      pairJwt: "",
+      fingerprint: "FP-X",
+      locked: true,
+      autoScan: false,
+    })
+  })
+
+  it("resolves switchTo through the recent-server label (deviceId prefix)", () => {
+    const sel = resolveParamSelection(
+      { switchTo: "deviceAA-full-uuid", baseUrl: null, fingerprint: null },
+      RECENTS
+    )
+    expect(sel).toEqual({
+      baseUrl: "https://192.168.1.5:7890",
+      pairJwt: "",
+      fingerprint: "FP-A",
+      locked: true,
+      autoScan: false,
+    })
+  })
+
+  it("resolves switchTo by exact deviceId ahead of the legacy label match", () => {
+    const recents = [
+      // Legacy-label decoy: label happens to equal the switchTo prefix.
+      { baseUrl: "https://decoy:7890", label: "deviceAA", lastSeenAt: 1 },
+      {
+        baseUrl: "https://real:7890",
+        fingerprint: "FP-R",
+        label: "other",
+        deviceId: "deviceAA-full-uuid",
+        lastSeenAt: 2,
+      },
+    ]
+    const sel = resolveParamSelection(
+      { switchTo: "deviceAA-full-uuid", baseUrl: null, fingerprint: null },
+      recents
+    )
+    expect(sel?.baseUrl).toBe("https://real:7890")
+    expect(sel?.fingerprint).toBe("FP-R")
+  })
+
+  it("returns null for a switchTo with no recent record and for empty params", () => {
+    expect(
+      resolveParamSelection({ switchTo: "unknown-device", baseUrl: null, fingerprint: null }, [])
+    ).toBeNull()
+    expect(
+      resolveParamSelection({ switchTo: null, baseUrl: null, fingerprint: null }, RECENTS)
+    ).toBeNull()
+  })
+})
+
+describe("<PairOnboardingClient /> — incoming query params", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/pair")
+  })
+
+  it("lands on the pair step with the server pre-filled for ?baseUrl=", async () => {
+    window.history.replaceState(null, "", "/pair?baseUrl=https%3A%2F%2F192.168.1.7%3A7890")
+    render(<PairOnboardingClient />)
+    expect(await screen.findByTestId("pair-pair-step")).toBeInTheDocument()
+    expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
+    expect(screen.getByTestId("pair-baseurl")).toHaveValue("https://192.168.1.7:7890")
+  })
+
+  it("lands on the pair step for ?switchTo= of a different, remembered server", async () => {
+    // Currently paired to dev-existing; switching to dev-other (remembered).
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+    window.localStorage.setItem(
+      "cognia.mobile.recentServers",
+      JSON.stringify([
+        { baseUrl: "https://10.0.0.9:7890", fingerprint: "FP-B", label: "dev-othe", lastSeenAt: 5 },
+      ])
+    )
+    window.history.replaceState(null, "", "/pair?switchTo=dev-other-uuid")
+    render(<PairOnboardingClient />)
+    expect(await screen.findByTestId("pair-pair-step")).toBeInTheDocument()
+    expect(screen.getByTestId("pair-baseurl")).toHaveValue("https://10.0.0.9:7890")
+  })
+
+  it("stays on the paired step when switchTo targets the already-active device", async () => {
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+    window.history.replaceState(null, "", "/pair?switchTo=dev-existing")
+    render(<PairOnboardingClient />)
+    expect(await screen.findByTestId("pair-paired-step")).toBeInTheDocument()
+  })
+})
 
 describe("validateBaseUrl", () => {
   it("rejects empty input", () => {

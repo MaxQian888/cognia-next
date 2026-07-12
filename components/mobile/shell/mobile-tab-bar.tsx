@@ -97,11 +97,17 @@ export interface MobileTabBarProps {
   className?: string
   /** Optional badge counts rendered as a red dot per tab. */
   badges?: Partial<Record<TabId, number>>
+  /**
+   * Slide the bar off-screen while the soft keyboard is open. Kept mounted
+   * (CSS translate, not unmount) so the per-tab entrance stagger doesn't
+   * replay on every keyboard dismiss.
+   */
+  keyboardHidden?: boolean
 }
 
 const MotionLink = motion.create(Link)
 
-export function MobileTabBar({ className, badges }: MobileTabBarProps) {
+export function MobileTabBar({ className, badges, keyboardHidden = false }: MobileTabBarProps) {
   const pathname = usePathname() ?? "/"
   const activeId = pickActiveTabId(pathname)
   const [, startTransition] = useTransition()
@@ -131,11 +137,15 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
         // `pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]` reserve
         // stays correct.
         "fixed inset-x-0 bottom-0 z-40 flex h-14 min-h-14 items-stretch border-t border-border bg-background/95 backdrop-blur safe-area-pb",
+        "transition-transform duration-200 ease-out",
+        keyboardHidden && "pointer-events-none translate-y-full",
         className
       )}
       role="tablist"
       aria-label={tShell("tabBarAria")}
+      aria-hidden={keyboardHidden || undefined}
       data-testid="mobile-tab-bar"
+      data-keyboard-hidden={keyboardHidden ? "true" : "false"}
     >
       {tabs.map((tab, index) => {
         const Icon = tab.icon

@@ -178,9 +178,15 @@ export async function pickPhoto(opts: PickPhotoOptions = {}): Promise<PhotoOutco
 
   try {
     let perms = await plugin.checkPermissions()
+    const usable = (state: string) => state === "granted" || state === "limited"
     if (
       (source === "camera" && perms.camera !== "granted") ||
-      (source === "photos" && perms.photos !== "granted")
+      (source === "photos" && perms.photos !== "granted") ||
+      // "prompt" uses whichever permission the user grants — on a fresh
+      // install neither is usable yet, and skipping the request here used
+      // to dead-end at permission_denied without ever showing the OS dialog.
+      // (`limited` counts as usable, so no redundant re-prompt.)
+      (source === "prompt" && !usable(perms.camera) && !usable(perms.photos))
     ) {
       perms = await plugin.requestPermissions({
         permissions:

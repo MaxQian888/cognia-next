@@ -17,6 +17,7 @@ import { SkillUpdateBanner } from "@/components/skills/skill-detail"
 import { SkillValidationSection } from "@/components/skills/skill-validation-section"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import type { Skill } from "@/lib/claude/types"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 interface Props {
   skill: Skill
@@ -30,6 +31,9 @@ interface Props {
  * + bundle reasons). Sync UI is intentionally hidden — sync is desktop-only.
  */
 export function MobileSkillSheet({ skill, open, onOpenChange }: Props) {
+  // Android hardware / browser back closes the sheet instead of navigating.
+  useBackDismiss(open, () => onOpenChange(false))
+
   const t = useTranslations("mobile.skills")
   const [name, setName] = useState(skill.name)
   const [description, setDescription] = useState(skill.description ?? "")

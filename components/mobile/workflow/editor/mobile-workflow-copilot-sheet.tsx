@@ -22,11 +22,12 @@
  * assistant tokens — the conversation keeps persisting to Dexie underneath.
  */
 
-import { Suspense, lazy, useEffect, useRef, useState } from "react"
+import { Suspense, lazy, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2Icon, X as CloseIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { cn } from "@/lib/utils"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import { isTauri } from "@/lib/tauri"
@@ -72,27 +73,9 @@ export function MobileWorkflowCopilotSheet({
 
   const reachable = canReachSidecar()
 
-  // Close on Android hardware / browser back while open, matching the drawer
-  // convention: push a history entry on open and pop it on close.
-  const poppedRef = useRef(false)
-  useEffect(() => {
-    if (!open) return
-    poppedRef.current = false
-    const onPop = () => {
-      poppedRef.current = true
-      onOpenChange(false)
-    }
-    window.history.pushState({ cogniaCopilot: true }, "")
-    window.addEventListener("popstate", onPop)
-    return () => {
-      window.removeEventListener("popstate", onPop)
-      // If we're unwinding for a reason OTHER than the user pressing back,
-      // drop the history entry we pushed so the stack stays balanced.
-      if (!poppedRef.current && typeof window.history.state?.cogniaCopilot === "boolean") {
-        window.history.back()
-      }
-    }
-  }, [open, onOpenChange])
+  // Close on Android hardware / browser back while open (shared history
+  // push/pop convention — see hooks/ui/use-back-dismiss.ts).
+  useBackDismiss(open, () => onOpenChange(false))
 
   return (
     <>

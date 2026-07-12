@@ -38,4 +38,25 @@ describe("requestMdnsPermission", () => {
     }))
     expect(out).toEqual({ kind: "prompt" })
   })
+
+  it("treats an UNIMPLEMENTED rejection as granted (real proxy fabricates the method)", async () => {
+    const err = Object.assign(new Error("requestPermissions is not implemented on android"), {
+      code: "UNIMPLEMENTED",
+    })
+    const out = await requestMdnsPermission(async () => ({
+      requestPermissions: async () => {
+        throw err
+      },
+    }))
+    expect(out).toEqual({ kind: "granted" })
+  })
+
+  it("treats a plain 'not implemented' message as granted too", async () => {
+    const out = await requestMdnsPermission(async () => ({
+      requestPermissions: async () => {
+        throw new Error("Method not implemented.")
+      },
+    }))
+    expect(out).toEqual({ kind: "granted" })
+  })
 })

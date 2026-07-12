@@ -8,6 +8,7 @@ import {
   ensureChannel,
   ensurePermission,
   listPending,
+  onAction,
   requestPermission,
   schedule,
 } from "./local-notifications"
@@ -20,6 +21,7 @@ function makePlugin(overrides: Record<string, unknown> = {}) {
     requestPermissions: jest.fn().mockResolvedValue({ display: "granted" }),
     checkPermissions: jest.fn().mockResolvedValue({ display: "granted" }),
     createChannel: jest.fn().mockResolvedValue(undefined),
+    addListener: jest.fn().mockResolvedValue({ remove: jest.fn() }),
     ...overrides,
   } as {
     schedule: jest.Mock
@@ -28,6 +30,7 @@ function makePlugin(overrides: Record<string, unknown> = {}) {
     requestPermissions: jest.Mock
     checkPermissions: jest.Mock
     createChannel: jest.Mock
+    addListener: jest.Mock
   }
 }
 
@@ -188,5 +191,27 @@ describe("ensureChannel", () => {
     } finally {
       delete (globalThis as { Capacitor?: unknown }).Capacitor
     }
+  })
+})
+
+describe("onAction", () => {
+  it("registers a localNotificationActionPerformed listener and returns an unsubscribe", async () => {
+    const remove = jest.fn()
+    const p = makePlugin({
+      addListener: jest.fn().mockResolvedValue({ remove }),
+    })
+    const handler = jest.fn()
+    const unsub = await onAction(handler, async () => p)
+    expect(p.addListener).toHaveBeenCalledWith("localNotificationActionPerformed", handler)
+    expect(typeof unsub).toBe("function")
+    unsub!()
+    expect(remove).toHaveBeenCalled()
+  })
+
+  it("returns null when the plugin is unavailable", async () => {
+    const unsub = await onAction(jest.fn(), async () => {
+      throw new Error("no plugin")
+    })
+    expect(unsub).toBeNull()
   })
 })

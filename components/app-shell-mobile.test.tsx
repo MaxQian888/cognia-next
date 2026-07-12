@@ -87,15 +87,28 @@ jest.mock("@/hooks/chat", () => ({
 }))
 
 const errorMessageRef: { current: string | null } = { current: null }
+const setPermissionMode = jest.fn()
 jest.mock("@/stores/chat", () => ({
-  useChatStore: <T,>(
-    selector: (s: { errorMessage: string | null; status: string; pendingApprovals: unknown[] }) => T
-  ): T =>
-    selector({
-      errorMessage: errorMessageRef.current,
-      status: "idle",
-      pendingApprovals: [],
-    }),
+  useChatStore: Object.assign(
+    <T,>(
+      selector: (s: {
+        errorMessage: string | null
+        status: string
+        pendingApprovals: unknown[]
+      }) => T
+    ): T =>
+      selector({
+        errorMessage: errorMessageRef.current,
+        status: "idle",
+        pendingApprovals: [],
+      }),
+    { getState: () => ({ setPermissionMode }) }
+  ),
+}))
+
+const updateSession = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/db/sessions", () => ({
+  updateSession: (...a: unknown[]) => updateSession(...a),
 }))
 
 const loadSettings = jest.fn().mockResolvedValue(undefined)
@@ -160,15 +173,27 @@ jest.mock("@/components/chat/chat-view", () => ({
   ChatPane: ({
     showHeader,
     onSend,
+    onResumeAfterPlanApproval,
   }: {
     showHeader?: boolean
     onSend?: (content: unknown) => Promise<void>
+    onResumeAfterPlanApproval?: (prompt: string, mode: string) => void | Promise<void>
   }) => (
-    <div data-testid="chat-pane" data-show-header={showHeader === false ? "false" : "true"}>
+    <div
+      data-testid="chat-pane"
+      data-show-header={showHeader === false ? "false" : "true"}
+      data-has-plan-resume={onResumeAfterPlanApproval ? "true" : "false"}
+    >
       <button
         data-testid="chat-send-stub"
         onClick={() => {
           void onSend?.("hi").catch(() => {})
+        }}
+      />
+      <button
+        data-testid="chat-plan-resume-stub"
+        onClick={() => {
+          void onResumeAfterPlanApproval?.("go", "acceptEdits")
         }}
       />
     </div>
@@ -280,6 +305,8 @@ beforeEach(() => {
   remove.mockReset().mockResolvedValue(undefined)
   rename.mockReset()
   directSend.mockReset().mockResolvedValue(undefined)
+  setPermissionMode.mockReset()
+  updateSession.mockReset().mockResolvedValue(undefined)
   hapterImpact.mockReset()
   hapterNotify.mockReset()
   setSelectedGuild.mockReset().mockImplementation((g: SelectedGuild) => {
@@ -372,6 +399,54 @@ describe("<AppShellMobile />", () => {
     activeSessionId = "s-1"
     render(<AppShellMobile />)
     expect(screen.getByTestId("mobile-active-title")).toHaveTextContent("Greetings")
+  })
+
+  it("resumes the turn after plan approval on a direct session (P0 dock wiring)", async () => {
+    // Regression: the mobile shell never passed onResumeAfterPlanApproval to
+    // ChatPane, so a plan awaiting approval stranded the turn — the dock never
+    // rendered. Assert the callback is wired AND resumes correctly.
+    sessionsRef.current = [
+      {
+        id: "s-1",
+        title: "Direct",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "s-1"
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+
+    expect(screen.getByTestId("chat-pane")).toHaveAttribute("data-has-plan-resume", "true")
+    await user.click(screen.getByTestId("chat-plan-resume-stub"))
+
+    // Store mode set first, then the session row is persisted, then the resume
+    // turn is injected with no user bubble.
+    expect(setPermissionMode).toHaveBeenCalledWith("acceptEdits")
+    await waitFor(() =>
+      expect(updateSession).toHaveBeenCalledWith("s-1", { permissionMode: "acceptEdits" })
+    )
+    expect(directSend).toHaveBeenCalledWith("go", undefined, {
+      sessionId: "s-1",
+      skipUserAppend: true,
+    })
+  })
+
+  it("does not wire plan approval for team sessions (plan mode is direct-only)", () => {
+    sessionsRef.current = [
+      {
+        id: "s-2",
+        title: "Team",
+        kind: "team",
+        teamId: "t-1",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "s-2"
+    render(<AppShellMobile />)
+    expect(screen.getByTestId("chat-pane")).toHaveAttribute("data-has-plan-resume", "false")
   })
 
   it("opens the members sheet when the members button is pressed (team session only)", async () => {

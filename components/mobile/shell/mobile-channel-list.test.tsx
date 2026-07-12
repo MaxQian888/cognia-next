@@ -42,6 +42,7 @@ jest.mock("@/hooks/data", () => ({
 }))
 
 jest.mock("next-intl", () => ({
+  useFormatter: () => ({ relativeTime: () => "now" }),
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     const map: Record<string, string> = {
       search: "Search",

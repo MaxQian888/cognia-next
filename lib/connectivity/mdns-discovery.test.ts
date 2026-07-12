@@ -52,6 +52,67 @@ describe("subscribe", () => {
   })
 })
 
+describe("default zeroconf adapter (window.Capacitor.Plugins.ZeroConf)", () => {
+  afterEach(() => {
+    delete (window as { Capacitor?: unknown }).Capacitor
+  })
+
+  it("watches _cognia._tcp, listens on 'discover', and maps resolved services", async () => {
+    const listeners: Array<(r: unknown) => void> = []
+    const events: string[] = []
+    const watch = jest.fn().mockResolvedValue(undefined)
+    const unwatch = jest.fn().mockResolvedValue(undefined)
+    const remove = jest.fn()
+    ;(window as unknown as { Capacitor?: { Plugins: Record<string, unknown> } }).Capacitor = {
+      Plugins: {
+        ZeroConf: {
+          watch,
+          unwatch,
+          addListener: async (event: string, h: (r: unknown) => void) => {
+            events.push(event)
+            listeners.push(h)
+            return { remove }
+          },
+        },
+      },
+    }
+
+    const seen: DiscoveredService[] = []
+    const unsub = await subscribe((s) => seen.push(s))
+
+    expect(watch).toHaveBeenCalledWith({ type: "_cognia._tcp", domain: "local." })
+    expect(events).toEqual(["discover"])
+
+    // `added` carries no addresses yet — must be dropped, not surfaced empty.
+    listeners[0]!({ action: "added", service: { name: "cognia-X" } })
+    expect(seen).toHaveLength(0)
+
+    listeners[0]!({
+      action: "resolved",
+      service: {
+        name: "cognia-X",
+        hostname: "cognia-X.local",
+        ipv4Addresses: ["192.168.1.10"],
+        port: 7891,
+        txtRecord: { ver: "0.1.0", fp: "abcd" },
+      },
+    })
+    expect(seen).toEqual([
+      {
+        name: "cognia-X",
+        hostname: "cognia-X.local",
+        ip: "192.168.1.10",
+        port: 7891,
+        txt: { ver: "0.1.0", fp: "abcd" },
+      },
+    ])
+
+    await unsub()
+    expect(unwatch).toHaveBeenCalledWith({ type: "_cognia._tcp", domain: "local." })
+    expect(remove).toHaveBeenCalled()
+  })
+})
+
 describe("startBroadcast / stopBroadcast", () => {
   it("invokes companion_mdns_start with full options", async () => {
     const invoke = jest.fn().mockResolvedValue("cognia-X._cognia._tcp.local.")

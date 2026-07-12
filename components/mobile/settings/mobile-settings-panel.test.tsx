@@ -197,6 +197,7 @@ describe("<MobileSettingsPanel />", () => {
     expect(saveMock).toHaveBeenCalledWith({
       biometricRequiredFor: {
         deletePairing: true,
+        escalatePermissionMode: true,
         exportBackup: true,
         revealSecrets: false,
         signOut: true,
@@ -209,6 +210,7 @@ describe("<MobileSettingsPanel />", () => {
         .biometricRequiredFor
     ).toEqual({
       deletePairing: true,
+      escalatePermissionMode: true,
       exportBackup: true,
       revealSecrets: false,
       signOut: true,

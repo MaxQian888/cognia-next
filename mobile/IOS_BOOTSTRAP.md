@@ -24,37 +24,19 @@ pnpm --filter mobile exec cap open ios
 
 ## Required Info.plist additions
 
-After `cap add ios` creates `mobile/ios/App/App/Info.plist`, paste the
-following key/value pairs into the top-level `<dict>` (Xcode will fold
-them into project-properties view):
+**Automated:** `node scripts/patch-ios-info-plist.mjs` (chained by
+`pnpm -F mobile add:ios`, rerunnable via `pnpm -F mobile patch:ios`) injects
+`NSBonjourServices` (`_cognia._tcp`) plus every `NS*UsageDescription` key the
+shipped plugins need — camera, photo library (read + add), microphone,
+Face ID, location-when-in-use, local network — with bilingual strings in
+`en.lproj` / `zh-Hans.lproj` `InfoPlist.strings`. iOS kills the app at
+permission-request time when one of these keys is missing, so run the
+patcher after every `cap add ios`.
+
+**Manual (paste into the top-level `<dict>`):** the remaining keys below are
+not yet automated:
 
 ```xml
-<key>NSCameraUsageDescription</key>
-<string>cognia 在你扫码配对、附加照片到聊天、给数字孪生录入文档时需要相机访问</string>
-
-<key>NSPhotoLibraryUsageDescription</key>
-<string>cognia 在你从相册附加图片到聊天或备份图集时需要相册访问</string>
-
-<key>NSPhotoLibraryAddUsageDescription</key>
-<string>cognia 在你保存聊天里的图片到相册时需要写入权限</string>
-
-<key>NSMicrophoneUsageDescription</key>
-<string>cognia 在你录制语音消息时需要麦克风访问</string>
-
-<key>NSFaceIDUsageDescription</key>
-<string>cognia 用 Face ID 解锁应用与确认敏感操作（删除配对、导出备份）</string>
-
-<key>NSLocationWhenInUseUsageDescription</key>
-<string>cognia 在工作流的位置触发器里需要当前位置（仅在前台使用）</string>
-
-<key>NSLocalNetworkUsageDescription</key>
-<string>cognia 通过局域网与你的桌面服务器配对与同步</string>
-
-<key>NSBonjourServices</key>
-<array>
-  <string>_cognia._tcp</string>
-</array>
-
 <!-- Cleartext loopback for LAN dev (release uses TLS — Wave 1.4) -->
 <key>NSAppTransportSecurity</key>
 <dict>

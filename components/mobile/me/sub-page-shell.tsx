@@ -11,8 +11,8 @@
  * stay in lock-step.
  */
 
-import { Suspense, type ReactNode } from "react"
-import Link from "next/link"
+import { Suspense, useCallback, type ReactNode } from "react"
+import { useRouter } from "next/navigation"
 import { ArrowLeftIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -65,6 +65,18 @@ export function SubPageShell({
   testid,
 }: SubPageShellProps) {
   const widthClass = width === "wide" ? "max-w-2xl lg:max-w-4xl" : "max-w-2xl"
+  const router = useRouter()
+  // Pop history instead of pushing another entry: `/me → subpage → back-arrow`
+  // used to grow history to `/me, subpage, /me`, so the hardware back button
+  // then returned the user to the subpage they had just left. Fall back to a
+  // replace() when there's nothing to pop (cold start straight on a subpage).
+  const onBack = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back()
+    } else {
+      router.replace(backHref)
+    }
+  }, [router, backHref])
   return (
     <main
       className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-background safe-area-pt"
@@ -73,15 +85,14 @@ export function SubPageShell({
       <header className="sticky top-0 z-10 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/75">
         <div className={cn("mx-auto flex w-full items-center gap-2", widthClass)}>
           <Button
-            asChild
+            type="button"
             variant="ghost"
             size="icon"
             aria-label={backAria}
+            onClick={onBack}
             data-testid="mobile-sub-page-back"
           >
-            <Link href={backHref}>
-              <ArrowLeftIcon className="size-5" aria-hidden="true" />
-            </Link>
+            <ArrowLeftIcon className="size-5" aria-hidden="true" />
           </Button>
           <h1 className="flex-1 truncate text-base font-semibold tracking-tight">{title}</h1>
           {headerAccessory ? <div className="shrink-0">{headerAccessory}</div> : null}

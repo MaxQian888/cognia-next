@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Status-bar (small) notification icon referenced by
+  `LocalNotifications.smallIcon: "ic_stat_icon"` in mobile/capacitor.config.ts.
+  Android renders small icons as pure-alpha silhouettes, so this must stay a
+  single white glyph on transparent — a chat bubble to match the app's core
+  surface. Without this resource the plugin logs a missing-drawable warning
+  and falls back to the (full-color, badly masked) launcher icon.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M20,2H4C2.9,2 2,2.9 2,4v18l4,-4h14c1.1,0 2,-0.9 2,-2V4C22,2.9 21.1,2 20,2z" />
+</vector>

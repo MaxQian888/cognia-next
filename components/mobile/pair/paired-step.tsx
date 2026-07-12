@@ -140,7 +140,13 @@ export function PairedStep({
     onAfterSignOut()
   }, [guard, t, onAfterSignOut])
 
-  const transportName = transport.constructor.name
+  // Explicit label — `constructor.name` gets mangled by production minifiers.
+  // Duck-typed on `onTierChange` (CompanionTransport-only) like the
+  // connection-state badge, so partially-mocked transports stay safe.
+  const transportName =
+    typeof (transport as { onTierChange?: unknown }).onTierChange === "function"
+      ? "CompanionTransport"
+      : "TauriTransport"
 
   return (
     <section className="flex flex-col gap-4" data-testid="pair-paired-step">

@@ -14,7 +14,9 @@ jest.mock("next/link", () => {
   return { __esModule: true, default: Link }
 })
 
+const relativeTimeMock = jest.fn((_d: Date) => "now")
 jest.mock("next-intl", () => ({
+  useFormatter: () => ({ relativeTime: (d: Date) => relativeTimeMock(d) }),
   useTranslations: () => (key: string) => {
     const map: Record<string, string> = {
       sessions: "Chats",
@@ -70,6 +72,7 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 beforeEach(() => {
+  relativeTimeMock.mockClear()
   listSessionsMock.mockReset().mockResolvedValue([])
   draftsCountMock.mockReset().mockResolvedValue(0)
   getLatestSuccessfulMock.mockReset().mockResolvedValue(undefined)
@@ -92,7 +95,7 @@ describe("<TodayStatsCard />", () => {
       expect(screen.getByTestId("stat-tile-sessions")).toHaveTextContent("12")
     })
     expect(screen.getByTestId("stat-tile-drafts")).toHaveTextContent("3")
-    expect(screen.getByTestId("stat-tile-backup")).toHaveTextContent(/2h/)
+    expect(screen.getByTestId("stat-tile-backup")).toHaveTextContent("now")
     expect(screen.getByTestId("stat-tile-storage")).toHaveTextContent("2048B")
     expect(screen.getByTestId("stat-tile-sessions")).toHaveAttribute("href", "/")
     expect(screen.getByTestId("stat-tile-drafts")).toHaveAttribute(
@@ -164,24 +167,23 @@ describe("<TodayStatsCard />", () => {
     expect(screen.getByTestId("stat-tile-backup")).toHaveTextContent(/now|m|h|d/)
   })
 
-  it.each([
-    ["now", 5_000, /now/],
-    ["minutes", 90_000, /\b2m/],
-    ["hours", 90 * 60 * 1000, /\b2h/],
-    ["days", 5 * 86_400_000, /\b5d/],
-  ])("formats %s for the backup tile", async (_label, ageMs, re) => {
+  it("delegates backup recency to the localized next-intl formatter", async () => {
+    // The tile must use useFormatter().relativeTime — the old hand-rolled
+    // "2h"/"5d" helper rendered raw English abbreviations for zh-CN users.
+    const backupTs = Date.now() - 90 * 60 * 1000
     render(
       <TodayStatsCard
         loaders={{
           sessionCount: async () => 0,
           pendingDrafts: async () => 0,
-          lastBackupMs: async () => Date.now() - ageMs,
+          lastBackupMs: async () => backupTs,
         }}
       />
     )
     await waitFor(() => {
-      expect(screen.getByTestId("stat-tile-backup")).toHaveTextContent(re)
+      expect(screen.getByTestId("stat-tile-backup")).toHaveTextContent("now")
     })
+    expect(relativeTimeMock).toHaveBeenCalledWith(new Date(backupTs))
   })
 
   it("flags a failed last backup attempt in red while keeping the last-success time", async () => {
@@ -201,7 +203,7 @@ describe("<TodayStatsCard />", () => {
       expect(screen.getByTestId("stat-tile-backup")).toHaveAttribute("data-status", "failed")
     })
     const tile = screen.getByTestId("stat-tile-backup")
-    expect(tile).toHaveTextContent(/2h/)
+    expect(tile).toHaveTextContent("now")
     expect(tile).toHaveTextContent("Last backup failed")
     expect(tile.querySelector(".text-destructive")).not.toBeNull()
   })
@@ -223,7 +225,7 @@ describe("<TodayStatsCard />", () => {
       expect(screen.getByTestId("stat-tile-backup")).toHaveAttribute("data-status", "stale")
     })
     const tile = screen.getByTestId("stat-tile-backup")
-    expect(tile).toHaveTextContent(/10d/)
+    expect(tile).toHaveTextContent("now")
     expect(tile.querySelector(".text-amber-600")).not.toBeNull()
   })
 

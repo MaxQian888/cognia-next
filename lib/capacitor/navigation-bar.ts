@@ -18,8 +18,14 @@
 import { makeDefaultLoader, withPlugin, type SimpleOutcome } from "./_shared"
 
 interface NavigationBarShape {
-  setNavigationBarColor(opts: { color: string }): Promise<void>
-  setNavigationBarLight?(opts: { light: boolean }): Promise<void>
+  /**
+   * `@capgo/capacitor-navigation-bar` v8 surface: one call carries both the
+   * background color and the icon contrast (`darkButtons: true` = dark icons
+   * for a light bar). There is NO separate `setNavigationBarLight` method —
+   * the old feature-check against the Capacitor proxy always "passed" and
+   * then rejected natively, so icon contrast was never actually applied.
+   */
+  setNavigationBarColor(opts: { color: string; darkButtons?: boolean }): Promise<void>
 }
 
 export type NavigationBarLoader = () => Promise<NavigationBarShape>
@@ -30,37 +36,19 @@ const defaultLoader: NavigationBarLoader = makeDefaultLoader<NavigationBarShape>
 )
 
 /**
- * Set the navigation bar background color. Hex (`#RRGGBB`) recommended;
- * the underlying plugin accepts CSS colors but resolves them on the
- * native side, so stick to explicit hex for portability.
+ * Set the navigation bar background color and icon contrast. Hex
+ * (`#RRGGBB`) recommended; the underlying plugin accepts CSS colors but
+ * resolves them on the native side, so stick to explicit hex for
+ * portability. `darkButtons` defaults to dark icons (light-bar reading);
+ * pass `false` for light icons on a dark bar.
  */
 export async function setNavigationBarColor(
   color: string,
+  darkButtons = true,
   loader: NavigationBarLoader = defaultLoader
 ): Promise<SimpleOutcome> {
   return withPlugin(loader, async (nb) => {
-    await nb.setNavigationBarColor({ color })
-    return { kind: "ok" as const }
-  })
-}
-
-/**
- * Toggle whether the navigation bar icons render in light variant
- * (white-on-dark) or dark variant (black-on-light).
- *
- * Plugins disagree on the parameter name historically. We feature-check
- * `setNavigationBarLight` at runtime; if the plugin doesn't expose it,
- * fall back gracefully (the OS will infer contrast from the bar color
- * itself on most devices).
- */
-export async function setLightContent(
-  light: boolean,
-  loader: NavigationBarLoader = defaultLoader
-): Promise<SimpleOutcome> {
-  return withPlugin(loader, async (nb) => {
-    if (typeof nb.setNavigationBarLight === "function") {
-      await nb.setNavigationBarLight({ light })
-    }
+    await nb.setNavigationBarColor({ color, darkButtons })
     return { kind: "ok" as const }
   })
 }
@@ -71,9 +59,6 @@ export async function setLightContent(
  * shell-sync helper. When `backgroundHex` is supplied the bar paints with
  * the live appearance palette; otherwise we fall back to the historical
  * near-white / near-black defaults so existing call sites keep working.
- *
- * Returns the outcome of the color call; `setLightContent` is best-effort
- * and its failure does not flip this result.
  */
 export async function syncWithTheme(
   resolvedTheme: "light" | "dark" | string | undefined,
@@ -82,9 +67,6 @@ export async function syncWithTheme(
 ): Promise<SimpleOutcome> {
   const isDark = resolvedTheme === "dark"
   const color = backgroundHex ?? (isDark ? "#0a0a0a" : "#ffffff")
-  // Icons should contrast the bar — light icons on dark bar.
-  const lightIcons = isDark
-  // Fire the icon-contrast hint but don't gate on it.
-  void setLightContent(lightIcons, loader)
-  return setNavigationBarColor(color, loader)
+  // Icons contrast the bar: dark icons on a light bar, light icons on dark.
+  return setNavigationBarColor(color, !isDark, loader)
 }

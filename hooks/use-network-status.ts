@@ -44,6 +44,15 @@ export function useNetworkStatus(): UseNetworkStatusResult {
       unsub = await subscribeNetwork((next) => {
         setStatus(next)
       })
+      // Unmounted while the subscribe was in flight — the cleanup below has
+      // already run with `unsub === null`, so drop the listener here.
+      if (cancelled) {
+        try {
+          unsub()
+        } catch {
+          // Best effort.
+        }
+      }
     })()
 
     return () => {

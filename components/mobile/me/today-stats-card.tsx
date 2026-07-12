@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
 import { AlertTriangleIcon, ClockAlertIcon } from "lucide-react"
 
@@ -55,14 +55,6 @@ const initial: Stats = {
   usageCost: 0,
 }
 
-function relative(ms: number, now: number = Date.now()): string {
-  const diff = now - ms
-  if (diff < 60_000) return "now"
-  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m`
-  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h`
-  return `${Math.round(diff / 86_400_000)}d`
-}
-
 const defaultLoaders = {
   sessionCount: async () => (await listSessions()).length,
   pendingDrafts: async () => getDb().twinDrafts.where("status").equals("pending").count(),
@@ -104,6 +96,9 @@ function resolveBackupHealth(loaders?: TodayStatsCardProps["loaders"]): () => Pr
 
 export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
   const t = useTranslations("mobile.me.todayStats")
+  // Localized "3 minutes ago" via next-intl — the old hand-rolled "3m"/"2d"
+  // helper rendered raw English abbreviations for zh-CN users.
+  const format = useFormatter()
   const [stats, setStats] = useState<Stats>(initial)
   const reduce = useReducedMotion()
 
@@ -174,7 +169,9 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
     },
     {
       label: t("backup"),
-      value: stats.lastBackupMs ? relative(stats.lastBackupMs) : t("backupNever"),
+      value: stats.lastBackupMs
+        ? format.relativeTime(new Date(stats.lastBackupMs))
+        : t("backupNever"),
       href: "/me/backup",
       testId: "stat-tile-backup",
       status: stats.backupStatus,

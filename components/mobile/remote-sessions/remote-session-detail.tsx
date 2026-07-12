@@ -20,20 +20,11 @@ import { useRemoteSessionStream } from "@/hooks/data/use-remote-session-stream"
 import { useConnectionState } from "@/hooks/companion/use-connection-state"
 import { useCommandHistory, handleHistoryArrowKey } from "@/hooks/use-command-history"
 import { OfflineBanner } from "@/components/mobile/offline-banner"
-import type { ConnectionState } from "@/lib/tauri/transport-companion"
+import { CONNECTION_STATE_META } from "@/components/mobile/connection-state-badge"
 import { cn } from "@/lib/utils"
 import { ApprovalCard } from "./approval-card"
 import type { UIMessage } from "ai"
 
-// Connection-state → (label key in `mobile.connectionState`, pill tone).
-// Mirrors the tone map in `connection-state-badge.tsx` so the in-session pill
-// reads consistently with the app-shell badge.
-const CONNECTION_META: Record<ConnectionState, { labelKey: string; tone: string }> = {
-  connected: { labelKey: "live", tone: "border-emerald-500/40 text-emerald-700 dark:text-emerald-300" },
-  reconnecting: { labelKey: "reconnecting", tone: "border-amber-500/40 text-amber-700 dark:text-amber-300" },
-  offline: { labelKey: "offline", tone: "border-zinc-500/40 text-zinc-600 dark:text-zinc-400" },
-  unauthenticated: { labelKey: "repairNeeded", tone: "border-red-500/40 text-red-700 dark:text-red-300" },
-}
 
 function messageText(message: UIMessage): string {
   return message.parts
@@ -83,9 +74,12 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
               variant="outline"
               data-testid="remote-connection-pill"
               data-state={connection}
-              className={cn("font-mono text-[10px] uppercase", CONNECTION_META[connection].tone)}
+              className={cn(
+                "font-mono text-[10px] uppercase",
+                CONNECTION_STATE_META[connection].tone
+              )}
             >
-              {tc(CONNECTION_META[connection].labelKey)}
+              {tc(CONNECTION_STATE_META[connection].labelKey)}
             </Badge>
           ) : null}
           {sessionEnded ? (

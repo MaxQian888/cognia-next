@@ -1,66 +1,66 @@
 /**
  * @jest-environment jsdom
  */
-import { setNavigationBarColor, setLightContent, syncWithTheme } from "./navigation-bar"
+import { setNavigationBarColor, syncWithTheme } from "./navigation-bar"
 
-function makeNb(opts: { withLight?: boolean } = {}) {
+function makeNb() {
   return {
     setNavigationBarColor: jest.fn().mockResolvedValue(undefined),
-    ...(opts.withLight !== false
-      ? { setNavigationBarLight: jest.fn().mockResolvedValue(undefined) }
-      : {}),
   }
 }
 
 describe("navigation-bar wrapper", () => {
-  it("setNavigationBarColor forwards the hex color", async () => {
+  it("setNavigationBarColor forwards the hex color with dark buttons by default", async () => {
     const nb = makeNb()
-    const out = await setNavigationBarColor("#abcdef", async () => nb)
+    const out = await setNavigationBarColor("#abcdef", undefined, async () => nb)
     expect(out).toEqual({ kind: "ok" })
-    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#abcdef" })
+    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#abcdef", darkButtons: true })
   })
 
-  it("setLightContent calls setNavigationBarLight when the plugin exposes it", async () => {
+  it("setNavigationBarColor forwards darkButtons=false for dark bars", async () => {
     const nb = makeNb()
-    await setLightContent(true, async () => nb)
-    expect(nb.setNavigationBarLight).toHaveBeenCalledWith({ light: true })
+    await setNavigationBarColor("#000000", false, async () => nb)
+    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#000000", darkButtons: false })
   })
 
-  it("setLightContent is a no-op when the plugin lacks setNavigationBarLight", async () => {
-    const nb = makeNb({ withLight: false })
-    const out = await setLightContent(true, async () => nb)
-    expect(out).toEqual({ kind: "ok" })
-  })
-
-  it("syncWithTheme picks the dark hex when resolved theme is dark", async () => {
+  it("syncWithTheme picks the dark hex + light icons when resolved theme is dark", async () => {
     const nb = makeNb()
     await syncWithTheme("dark", undefined, async () => nb)
-    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#0a0a0a" })
-    expect(nb.setNavigationBarLight).toHaveBeenCalledWith({ light: true })
+    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({
+      color: "#0a0a0a",
+      darkButtons: false,
+    })
   })
 
-  it("syncWithTheme picks the light hex when resolved theme is light", async () => {
+  it("syncWithTheme picks the light hex + dark icons when resolved theme is light", async () => {
     const nb = makeNb()
     await syncWithTheme("light", undefined, async () => nb)
-    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#ffffff" })
-    expect(nb.setNavigationBarLight).toHaveBeenCalledWith({ light: false })
+    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({
+      color: "#ffffff",
+      darkButtons: true,
+    })
   })
 
   it("syncWithTheme defaults to the light hex when the theme name is unknown", async () => {
     const nb = makeNb()
     await syncWithTheme(undefined, undefined, async () => nb)
-    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#ffffff" })
+    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({
+      color: "#ffffff",
+      darkButtons: true,
+    })
   })
 
   it("syncWithTheme prefers a token-derived backgroundHex over the historical fallback", async () => {
     const nb = makeNb()
     await syncWithTheme("dark", "#ff8800", async () => nb)
-    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({ color: "#ff8800" })
-    expect(nb.setNavigationBarLight).toHaveBeenCalledWith({ light: true })
+    expect(nb.setNavigationBarColor).toHaveBeenCalledWith({
+      color: "#ff8800",
+      darkButtons: false,
+    })
   })
 
   it("returns unsupported when the plugin module is missing", async () => {
-    const out = await setNavigationBarColor("#000000", async () => {
+    const out = await setNavigationBarColor("#000000", true, async () => {
       throw new Error("plugin not installed")
     })
     expect(out).toEqual({ kind: "unsupported" })
@@ -70,7 +70,7 @@ describe("navigation-bar wrapper", () => {
     const nb = {
       setNavigationBarColor: jest.fn().mockRejectedValue(new Error("native blew up")),
     }
-    const out = await setNavigationBarColor("#000000", async () => nb)
+    const out = await setNavigationBarColor("#000000", true, async () => nb)
     expect(out).toEqual({ kind: "error", message: "native blew up" })
   })
 })

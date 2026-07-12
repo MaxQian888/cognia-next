@@ -75,7 +75,9 @@ const config: CapacitorConfig = {
     LocalNotifications: {
       smallIcon: "ic_stat_icon",
       iconColor: "#3b82f6",
-      sound: "beep.wav",
+      // No custom `sound`: a `beep.wav` was referenced but never bundled (no
+      // res/raw asset), so Android logged a missing-resource error and fell
+      // back to the default anyway. Use the system default sound explicitly.
     },
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"],

@@ -23,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { openAppSettings } from "@/lib/capacitor/app-settings"
+import { notify } from "@/lib/capacitor/haptics"
 import { scan as scanBarcode } from "@/lib/capacitor/barcode"
 import { decodePairPayload } from "@/lib/qr/pair-payload"
 import { parsePairQrPayload } from "@/lib/qr/pair-qr"
@@ -268,8 +269,10 @@ export function PairStep({
         baseUrl: result.config.baseUrl,
         fingerprint: result.config.serverFingerprint,
         label: result.config.deviceId ? result.config.deviceId.slice(0, 8) : undefined,
+        deviceId: result.config.deviceId || undefined,
         serverVersion: result.config.serverVersion,
       })
+      void notify("success")
       onPaired(result.config)
       return
     }

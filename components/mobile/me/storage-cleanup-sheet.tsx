@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/sheet"
 import { useStorageCleanup } from "@/hooks/storage/use-storage-cleanup"
 import { StorageManager } from "@/lib/storage"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 export interface StorageCleanupSheetProps {
   open: boolean
@@ -33,6 +34,9 @@ export interface StorageCleanupSheetProps {
 }
 
 export function StorageCleanupSheet({ open, onOpenChange, onCleaned }: StorageCleanupSheetProps) {
+  // Android hardware / browser back closes the sheet instead of navigating.
+  useBackDismiss(open, () => onOpenChange(false))
+
   const t = useTranslations("mobile.me.storage")
   const { quick, deep, isRunning } = useStorageCleanup()
 

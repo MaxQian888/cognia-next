@@ -78,4 +78,81 @@ describe("scan", () => {
     await scan({ formats: ["AZTEC", "DATA_MATRIX"], loader: async () => s })
     expect(s.scan).toHaveBeenCalledWith({ formats: ["AZTEC", "DATA_MATRIX"] })
   })
+
+  describe("Android Google Barcode Scanner module gate", () => {
+    const setPlatform = (p: string | undefined) => {
+      ;(globalThis as { Capacitor?: unknown }).Capacitor = p ? { getPlatform: () => p } : undefined
+    }
+    afterEach(() => setPlatform(undefined))
+
+    it("does not touch the module methods on iOS", async () => {
+      setPlatform("ios")
+      const isAvail = jest.fn().mockResolvedValue({ available: false })
+      const install = jest.fn()
+      const s = makeScanner({
+        isGoogleBarcodeScannerModuleAvailable: isAvail,
+        installGoogleBarcodeScannerModule: install,
+      })
+      const out = await scan({ loader: async () => s })
+      expect(isAvail).not.toHaveBeenCalled()
+      expect(install).not.toHaveBeenCalled()
+      expect(out).toEqual({ kind: "scanned", raw: "PAYLOAD" })
+    })
+
+    it("skips install on Android when the module is already available", async () => {
+      setPlatform("android")
+      const install = jest.fn()
+      const s = makeScanner({
+        isGoogleBarcodeScannerModuleAvailable: jest.fn().mockResolvedValue({ available: true }),
+        installGoogleBarcodeScannerModule: install,
+      })
+      const out = await scan({ loader: async () => s })
+      expect(install).not.toHaveBeenCalled()
+      expect(out).toEqual({ kind: "scanned", raw: "PAYLOAD" })
+    })
+
+    it("installs the module then scans when it is unavailable (COMPLETED event)", async () => {
+      setPlatform("android")
+      let progressCb: ((e: { state: number }) => void) | undefined
+      const remove = jest.fn().mockResolvedValue(undefined)
+      const install = jest.fn().mockImplementation(async () => {
+        progressCb?.({ state: 4 }) // COMPLETED
+      })
+      const s = makeScanner({
+        isGoogleBarcodeScannerModuleAvailable: jest.fn().mockResolvedValue({ available: false }),
+        installGoogleBarcodeScannerModule: install,
+        addListener: jest
+          .fn()
+          .mockImplementation(async (_e: string, cb: (e: { state: number }) => void) => {
+            progressCb = cb
+            return { remove }
+          }),
+      })
+      const out = await scan({ loader: async () => s })
+      expect(install).toHaveBeenCalled()
+      expect(remove).toHaveBeenCalled() // listener cleaned up
+      expect(out).toEqual({ kind: "scanned", raw: "PAYLOAD" })
+    })
+
+    it("returns an error when the module install fails (FAILED event)", async () => {
+      setPlatform("android")
+      let progressCb: ((e: { state: number }) => void) | undefined
+      const s = makeScanner({
+        isGoogleBarcodeScannerModuleAvailable: jest.fn().mockResolvedValue({ available: false }),
+        installGoogleBarcodeScannerModule: jest.fn().mockImplementation(async () => {
+          progressCb?.({ state: 5 }) // FAILED (e.g. no Google Play Services)
+        }),
+        addListener: jest
+          .fn()
+          .mockImplementation(async (_e: string, cb: (e: { state: number }) => void) => {
+            progressCb = cb
+            return { remove: jest.fn().mockResolvedValue(undefined) }
+          }),
+        scan: jest.fn(),
+      })
+      const out = await scan({ loader: async () => s })
+      expect(out.kind).toBe("error")
+      expect(s.scan).not.toHaveBeenCalled() // never reached native scan
+    })
+  })
 })

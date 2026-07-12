@@ -39,14 +39,59 @@ jest.mock("@/components/chat/composer", () => ({
 jest.mock("@/lib/capacitor/haptics", () => ({
   __esModule: true,
   selectionFeedback: jest.fn(),
+  notify: jest.fn(),
+}))
+
+// Store hooks: plain selector-callable fakes so the sheet's bookmark / TTS
+// gates work without dragging Dexie-backed stores into jsdom.
+const chatState = {
+  bookmarkedIds: [] as string[],
+  toggleBookmark: jest.fn(),
+}
+jest.mock("@/stores/chat", () => ({
+  __esModule: true,
+  useChatStore: (selector: (s: typeof chatState) => unknown) => selector(chatState),
+}))
+
+const settingsState = { settings: { ttsEnabled: true } }
+jest.mock("@/stores/settings", () => ({
+  __esModule: true,
+  useSettingsStore: (selector: (s: typeof settingsState) => unknown) => selector(settingsState),
+}))
+
+const readAloudStatus = { isActive: false, isLoading: false }
+jest.mock("@/hooks/media/use-read-aloud-status", () => ({
+  __esModule: true,
+  useReadAloudStatus: () => readAloudStatus,
+}))
+
+jest.mock("@/lib/tts/speak-chat-message", () => ({
+  __esModule: true,
+  speakChatMessage: jest.fn(async () => {}),
+}))
+
+jest.mock("@/lib/tts/tts-orchestrator", () => ({
+  __esModule: true,
+  ttsOrchestrator: { stop: jest.fn() },
+}))
+
+// BranchNavigator reads the chat store's live messages; stub it so the
+// "variants" wrapper row can be asserted without store plumbing.
+jest.mock("@/components/chat/branch-navigator", () => ({
+  __esModule: true,
+  BranchNavigator: () => <div data-testid="branch-navigator" />,
 }))
 
 import { share } from "@/lib/capacitor/share"
 import { toast } from "sonner"
+import { speakChatMessage } from "@/lib/tts/speak-chat-message"
+import { ttsOrchestrator } from "@/lib/tts/tts-orchestrator"
 
 const mockShare = share as jest.Mock
 const mockToastSuccess = toast.success as jest.Mock
 const mockToastError = toast.error as jest.Mock
+const mockSpeak = speakChatMessage as jest.Mock
+const mockTtsStop = ttsOrchestrator.stop as jest.Mock
 
 const messages = {
   mobile: {
@@ -69,6 +114,15 @@ const messages = {
       deleteConfirm: "Delete",
       deleteSuccess: "Message deleted.",
       deleteFailed: "Delete failed: {message}",
+      edit: "Edit & resend",
+      editFailed: "Resend failed: {message}",
+      editInputAria: "Edit message text",
+      editResend: "Resend",
+      bookmark: "Bookmark",
+      bookmarkRemove: "Remove bookmark",
+      branchVariants: "Reply variants",
+      readAloud: "Read aloud",
+      stopReading: "Stop reading",
     },
   },
   common: { cancel: "Cancel" },
@@ -80,6 +134,8 @@ function renderSheet(
   extra: {
     onRegenerate?: () => void | Promise<void>
     onDelete?: (m: UIMessage) => void | Promise<void>
+    onEditResend?: (m: UIMessage, newText: string) => void | Promise<void>
+    character?: { voiceProfile?: undefined } | null
   } = {}
 ) {
   return render(
@@ -146,6 +202,13 @@ describe("MessageActionSheet", () => {
     mockShare.mockReset()
     mockToastSuccess.mockReset()
     mockToastError.mockReset()
+    mockSpeak.mockClear()
+    mockTtsStop.mockClear()
+    chatState.toggleBookmark.mockClear()
+    chatState.bookmarkedIds = []
+    settingsState.settings.ttsEnabled = true
+    readAloudStatus.isActive = false
+    readAloudStatus.isLoading = false
     Object.assign(navigator, {
       clipboard: { writeText: jest.fn().mockResolvedValue(undefined) },
     })
@@ -161,6 +224,24 @@ describe("MessageActionSheet", () => {
     renderSheet(makeMessage("hello"), jest.fn())
     expect(screen.getByTestId("message-action-copy")).toBeInTheDocument()
     expect(screen.getByTestId("message-action-share")).toBeInTheDocument()
+  })
+
+  it("shows a per-message usage footer for assistant messages with usage metadata", () => {
+    const msg = {
+      id: "m1",
+      role: "assistant",
+      parts: [{ type: "text", text: "hi" }],
+      metadata: { usage: { inputTokens: 12, outputTokens: 34, totalCostUsd: 0.005 } },
+    } as unknown as UIMessage
+    renderSheet(msg, jest.fn())
+    const usage = screen.getByTestId("message-action-usage")
+    expect(usage).toHaveTextContent("12")
+    expect(usage).toHaveTextContent("34")
+  })
+
+  it("omits the usage footer when the message carries no usage metadata", () => {
+    renderSheet(makeMessage("plain"), jest.fn())
+    expect(screen.queryByTestId("message-action-usage")).toBeNull()
   })
 
   it("hides the Branch row without a session id", () => {
@@ -288,5 +369,129 @@ describe("MessageActionSheet", () => {
     })
     expect(mockToastError).not.toHaveBeenCalled()
     expect(mockToastSuccess).not.toHaveBeenCalled()
+  })
+
+  it("hides the edit row when onEditResend is not provided", () => {
+    renderSheet(makeMessage("hello"), jest.fn())
+    expect(screen.queryByTestId("message-action-edit")).not.toBeInTheDocument()
+  })
+
+  it("opens the edit pane prefilled with the message text", () => {
+    renderSheet(makeMessage("original text"), jest.fn(), { onEditResend: jest.fn() })
+    fireEvent.click(screen.getByTestId("message-action-edit"))
+    const input = screen.getByTestId("message-action-edit-input") as HTMLTextAreaElement
+    expect(input.value).toBe("original text")
+    // Action list is replaced by the edit pane.
+    expect(screen.queryByTestId("message-action-copy")).not.toBeInTheDocument()
+  })
+
+  it("resends the trimmed edited text and closes the sheet", async () => {
+    const onEditResend = jest.fn().mockResolvedValue(undefined)
+    const onOpenChange = jest.fn()
+    const message = makeMessage("original text")
+    renderSheet(message, onOpenChange, { onEditResend })
+
+    fireEvent.click(screen.getByTestId("message-action-edit"))
+    fireEvent.change(screen.getByTestId("message-action-edit-input"), {
+      target: { value: "  fixed question  " },
+    })
+    fireEvent.click(screen.getByTestId("message-action-edit-send"))
+
+    await waitFor(() => {
+      expect(onEditResend).toHaveBeenCalledWith(message, "fixed question")
+    })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("disables resend when the edited text is blank", () => {
+    renderSheet(makeMessage("original"), jest.fn(), { onEditResend: jest.fn() })
+    fireEvent.click(screen.getByTestId("message-action-edit"))
+    fireEvent.change(screen.getByTestId("message-action-edit-input"), {
+      target: { value: "   " },
+    })
+    expect(screen.getByTestId("message-action-edit-send")).toBeDisabled()
+  })
+
+  it("cancel returns to the action list without resending", () => {
+    const onEditResend = jest.fn()
+    renderSheet(makeMessage("original"), jest.fn(), { onEditResend })
+    fireEvent.click(screen.getByTestId("message-action-edit"))
+    fireEvent.click(screen.getByTestId("message-action-edit-cancel"))
+    expect(screen.getByTestId("message-action-copy")).toBeInTheDocument()
+    expect(onEditResend).not.toHaveBeenCalled()
+  })
+
+  it("toggles the bookmark and closes on the Bookmark row", () => {
+    const onOpenChange = jest.fn()
+    renderSheet(makeMessage("hello"), onOpenChange)
+    fireEvent.click(screen.getByTestId("message-action-bookmark"))
+    expect(chatState.toggleBookmark).toHaveBeenCalledWith("m1")
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("labels the Bookmark row as removal when the message is already bookmarked", () => {
+    chatState.bookmarkedIds = ["m1"]
+    renderSheet(makeMessage("hello"), jest.fn())
+    expect(screen.getByTestId("message-action-bookmark")).toHaveTextContent("Remove bookmark")
+  })
+
+  it("starts read-aloud with the message text + character and closes", () => {
+    const onOpenChange = jest.fn()
+    const character = { voiceProfile: undefined }
+    renderSheet(makeMessage("say this"), onOpenChange, { character })
+    fireEvent.click(screen.getByTestId("message-action-read-aloud"))
+    expect(mockSpeak).toHaveBeenCalledWith({
+      messageId: "m1",
+      text: "say this",
+      character,
+    })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("stops read-aloud when it is already active", () => {
+    readAloudStatus.isActive = true
+    renderSheet(makeMessage("say this"), jest.fn())
+    const row = screen.getByTestId("message-action-read-aloud")
+    expect(row).toHaveTextContent("Stop reading")
+    fireEvent.click(row)
+    expect(mockTtsStop).toHaveBeenCalledTimes(1)
+    expect(mockSpeak).not.toHaveBeenCalled()
+  })
+
+  it("hides the read-aloud row when TTS is disabled or the message is not assistant", () => {
+    settingsState.settings.ttsEnabled = false
+    const { unmount } = renderSheet(makeMessage("hello"), jest.fn())
+    expect(screen.queryByTestId("message-action-read-aloud")).not.toBeInTheDocument()
+    unmount()
+
+    settingsState.settings.ttsEnabled = true
+    const userMsg = {
+      id: "m2",
+      role: "user",
+      parts: [{ type: "text", text: "hi" }],
+    } as UIMessage
+    renderSheet(userMsg, jest.fn())
+    expect(screen.queryByTestId("message-action-read-aloud")).not.toBeInTheDocument()
+  })
+
+  it("hosts the branch-variants navigator row for assistant messages", () => {
+    renderSheet(makeMessage("hello"), jest.fn())
+    expect(screen.getByTestId("message-action-branch-variants")).toBeInTheDocument()
+    expect(screen.getByTestId("branch-navigator")).toBeInTheDocument()
+  })
+
+  it("toasts and stays open when the resend fails", async () => {
+    const onEditResend = jest.fn().mockRejectedValue(new Error("offline"))
+    const onOpenChange = jest.fn()
+    renderSheet(makeMessage("original"), onOpenChange, { onEditResend })
+
+    fireEvent.click(screen.getByTestId("message-action-edit"))
+    fireEvent.click(screen.getByTestId("message-action-edit-send"))
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith("Resend failed: offline")
+    })
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(screen.getByTestId("message-action-edit-input")).toBeInTheDocument()
   })
 })

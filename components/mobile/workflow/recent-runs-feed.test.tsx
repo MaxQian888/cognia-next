@@ -39,6 +39,7 @@ jest.mock("@/lib/db/workflows", () => ({
 }))
 
 jest.mock("next-intl", () => ({
+  useFormatter: () => ({ relativeTime: () => "now" }),
   useTranslations: () => (key: string) => {
     const map: Record<string, string> = { runsHeader: "Recent runs", noRuns: "No runs" }
     return map[key] ?? key
@@ -93,21 +94,13 @@ describe("<RecentRunsFeed />", () => {
     expect(screen.getByTestId("recent-run-r9")).toHaveTextContent("missing")
   })
 
-  it("formats relative timestamps across all buckets", () => {
-    liveQueries.push(
-      [
-        run("r-now", "w", "running", Date.now() - 1_000),
-        run("r-min", "w", "succeeded", Date.now() - 90_000),
-        run("r-hr", "w", "failed", Date.now() - 90 * 60 * 1000),
-        run("r-day", "w", "cancelled", Date.now() - 5 * 86_400_000),
-      ],
-      []
-    )
+  it("delegates run timestamps to the localized next-intl formatter", () => {
+    // useFormatter().relativeTime replaces the old hand-rolled "2h"/"5d"
+    // helper that rendered raw English abbreviations for zh-CN users.
+    const ts = Date.now() - 90_000
+    liveQueries.push([run("r-min", "w", "succeeded", ts)], [])
     render(<RecentRunsFeed />)
-    expect(screen.getByTestId("recent-run-r-now")).toHaveTextContent(/now/)
-    expect(screen.getByTestId("recent-run-r-min")).toHaveTextContent(/2m/)
-    expect(screen.getByTestId("recent-run-r-hr")).toHaveTextContent(/2h/)
-    expect(screen.getByTestId("recent-run-r-day")).toHaveTextContent(/5d/)
+    expect(screen.getByTestId("recent-run-r-min")).toHaveTextContent(/now/)
   })
 
   it("renders an unknown status with the muted-foreground dot color", () => {

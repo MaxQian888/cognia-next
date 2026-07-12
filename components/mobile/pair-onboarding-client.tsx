@@ -35,7 +35,11 @@ import { mobileTransition } from "@/lib/ui/motion"
 import { buildTimeServerUrl } from "@/lib/platform/web-companion"
 import { hydrateCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
-import { loadRecentServers, recentServersToDiscovered } from "@/lib/connectivity/recent-servers"
+import {
+  loadRecentServers,
+  recentServersToDiscovered,
+  type RecentServer,
+} from "@/lib/connectivity/recent-servers"
 
 import { DiscoverStep } from "./pair/discover-step"
 import { PairStep } from "./pair/pair-step"
@@ -59,7 +63,7 @@ type PhasePaired = {
 }
 type Phase = PhaseLoading | PhaseUnpaired | PhasePaired
 
-interface Selection {
+export interface Selection {
   baseUrl: string
   pairJwt: string
   fingerprint: string
@@ -77,6 +81,72 @@ const EMPTY_SELECTION: Selection = {
 
 /** Stepper steps shown on a plain browser — there is no LAN discovery. */
 const WEB_STEPS: readonly PairStepName[] = ["pair", "paired"] as const
+
+/**
+ * Query params other surfaces navigate here with:
+ *   - `?baseUrl=…&fingerprint=…` — the connection-state scan sheet's
+ *     "tap a discovered server" path: pre-fill and lock the pair form.
+ *   - `?switchTo=<deviceId>`     — the paired-servers sheet's switch path:
+ *     resolve the device to a recent-server entry (recorded at pair time
+ *     with `label = deviceId.slice(0, 8)`) and pre-fill its baseUrl so the
+ *     user re-validates against that server without typing anything.
+ */
+export interface PairPageParams {
+  switchTo: string | null
+  baseUrl: string | null
+  fingerprint: string | null
+}
+
+export function readPairParams(search?: string): PairPageParams {
+  if (typeof window === "undefined" && search === undefined) {
+    return { switchTo: null, baseUrl: null, fingerprint: null }
+  }
+  const p = new URLSearchParams(search ?? window.location.search)
+  return {
+    switchTo: p.get("switchTo"),
+    baseUrl: p.get("baseUrl"),
+    fingerprint: p.get("fingerprint"),
+  }
+}
+
+/**
+ * Turn the incoming query params into a pair-step selection, or `null` when
+ * the params don't identify a target server (plain `/pair` visit, or a
+ * `switchTo` for a device we have no recent-server record of).
+ */
+export function resolveParamSelection(
+  params: PairPageParams,
+  recents: RecentServer[]
+): Selection | null {
+  if (params.baseUrl) {
+    return {
+      baseUrl: params.baseUrl,
+      pairJwt: "",
+      fingerprint: params.fingerprint ?? "",
+      locked: true,
+      autoScan: false,
+    }
+  }
+  if (params.switchTo) {
+    // Prefer the exact deviceId recorded at pair time; fall back to the
+    // legacy label match (`deviceId.slice(0, 8)`) for entries persisted
+    // before `deviceId` was added to the recent-server record.
+    const label = params.switchTo.slice(0, 8)
+    const match =
+      recents.find((r) => r.deviceId === params.switchTo) ??
+      recents.find((r) => r.label === label)
+    if (match) {
+      return {
+        baseUrl: match.baseUrl,
+        pairJwt: "",
+        fingerprint: match.fingerprint ?? "",
+        locked: true,
+        autoScan: false,
+      }
+    }
+  }
+  return null
+}
 
 /** Reveal the manual-entry escape on the loading screen after this long. */
 const SLOW_HINT_MS = 2500
@@ -116,6 +186,12 @@ export function PairOnboardingClient() {
   const [recentServers] = useState<DiscoveredServer[]>(() =>
     recentServersToDiscovered(loadRecentServers())
   )
+  // Incoming `?baseUrl=…` / `?switchTo=…` navigation (scan sheet / switch
+  // sheet). Read once on mount; resolved against the recent-server log.
+  const [paramSelection] = useState<Selection | null>(() =>
+    resolveParamSelection(readPairParams(), loadRecentServers())
+  )
+  const [switchToParam] = useState<string | null>(() => readPairParams().switchTo)
 
   // Hydrate cache from storage on mount; if a config exists, jump to the
   // paired step and let the user verify before continuing to chat.
@@ -160,7 +236,29 @@ export function PairOnboardingClient() {
             deviceId: cfg.deviceId,
             serverVersion: cfg.serverVersion,
           })
-          setStep("paired")
+          // Already paired to the requested target (or no target at all) →
+          // the usual paired step. A switch/prefill request for a DIFFERENT
+          // server drops onto the pair step with that server pre-filled so
+          // the user re-validates against it without re-typing.
+          const alreadyOnTarget =
+            switchToParam !== null
+              ? cfg.deviceId === switchToParam
+              : paramSelection === null || paramSelection.baseUrl === cfg.baseUrl
+          if (alreadyOnTarget) {
+            setStep("paired")
+          } else if (paramSelection) {
+            setSelection(paramSelection)
+            setStep("pair")
+          } else {
+            // switchTo for a device with no recent-server record — the
+            // Discover step (with its Recent group) is the best landing.
+            setSelection(unpairedSelection)
+            setStep(unpairedStep)
+          }
+        } else if (paramSelection) {
+          setPhase({ kind: "unpaired" })
+          setSelection(paramSelection)
+          setStep("pair")
         } else {
           setPhase({ kind: "unpaired" })
           setSelection(unpairedSelection)
@@ -180,8 +278,9 @@ export function PairOnboardingClient() {
       cancelled = true
       finish()
     }
-    // unpairedStep/-Selection are platform-derived and stable after mount.
-  }, [unpairedStep, unpairedSelection])
+    // unpairedStep/-Selection are platform-derived and stable after mount;
+    // paramSelection/switchToParam are read-once mount state.
+  }, [unpairedStep, unpairedSelection, paramSelection, switchToParam])
 
   const onSkipLoading = useCallback(() => {
     setPhase({ kind: "unpaired" })

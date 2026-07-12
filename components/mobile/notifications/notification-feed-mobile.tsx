@@ -52,7 +52,7 @@ export function NotificationFeedMobile() {
             size="icon"
             variant="ghost"
             className="size-8"
-            aria-label="refresh"
+            aria-label={t("center.refresh")}
             onClick={() => void refresh()}
           >
             <RefreshCwIcon className="size-4" />

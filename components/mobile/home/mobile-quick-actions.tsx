@@ -27,6 +27,8 @@ import {
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import type { MobileQuickActionItem } from "@/lib/shell/mobile-home-nav"
 import { useMobileHomeLayout } from "./use-mobile-home-layout"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
+
 import { MobileQuickActionsEditor } from "./mobile-quick-actions-editor"
 
 export interface MobileQuickActionsProps {
@@ -43,6 +45,9 @@ export function MobileQuickActions({ onNewChat, onSearch, className }: MobileQui
   const router = useRouter()
   const { resolved, isSectionHidden } = useMobileHomeLayout()
   const [editorOpen, setEditorOpen] = useState(false)
+  // Android hardware / browser back closes the editor sheet instead of
+  // navigating. (Must run before the section-hidden early return below.)
+  useBackDismiss(editorOpen, () => setEditorOpen(false))
 
   const dispatch = (item: MobileQuickActionItem) => {
     void selectionFeedback()

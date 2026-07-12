@@ -19,6 +19,7 @@ import { syncWithTheme as syncNavBar } from "@/lib/capacitor/navigation-bar"
 import {
   DEFAULT_CHANNEL_ID as NOTIF_CHANNEL_ID,
   ensureChannel as ensureNotifChannel,
+  onAction as onLocalNotifAction,
 } from "@/lib/capacitor/local-notifications"
 import {
   registerPushNotifications,
@@ -76,6 +77,20 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
   const { resolvedTheme } = useTheme()
   const t = useTranslations("mobile.companion")
   const ranRef = useRef(false)
+  // The boot effect below must run exactly once per mobile session. Keeping
+  // `pathname` / `router` / `t` in its dep array made the FIRST in-app
+  // navigation run the effect's cleanup (tearing down backButton, deeplink,
+  // push, and all sync installers) while the `ranRef` guard blocked re-setup —
+  // leaving the native lifecycle dead for the rest of the session. The boot
+  // closure reads all three through refs instead so the effect never re-fires.
+  const pathnameRef = useRef(pathname)
+  const routerRef = useRef(router)
+  const tRef = useRef(t)
+  useEffect(() => {
+    pathnameRef.current = pathname
+    routerRef.current = router
+    tRef.current = t
+  }, [pathname, router, t])
   // Flips true once registerNativePlugins() has populated
   // window.Capacitor.Plugins.* — the theme-sync effect below must not fire
   // before that (effects run in declaration order, so its first invocation
@@ -124,6 +139,21 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
 
     let cancelled = false
     const cleanup: Array<() => void | Promise<void>> = []
+    // Boot is async: if the effect tears down while a `await subscribe…` is
+    // still in flight, the cleanup loop below has already run. Registering
+    // through this helper disposes such late arrivals immediately instead of
+    // leaking the listener.
+    const addCleanup = (fn: () => void | Promise<void>) => {
+      if (cancelled) {
+        try {
+          void fn()
+        } catch {
+          /* best-effort */
+        }
+      } else {
+        cleanup.push(fn)
+      }
+    }
 
     void (async () => {
       // FIRST: create the window.Capacitor.Plugins.* proxies. Capacitor Android
@@ -148,17 +178,29 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         importance: 4,
       })
 
+      // Local-notification taps (backup-due / offline-queue reminders).
+      // Schedulers stamp `extra.route` with an in-app path; a tap
+      // foregrounds the app and this routes it. Without the listener the
+      // tap lands on whatever screen was last open.
+      const localNotifUnsub = await onLocalNotifAction((action) => {
+        const route = action.notification.extra?.route
+        if (typeof route === "string" && route.startsWith("/")) {
+          routerRef.current.push(route)
+        }
+      })
+      if (localNotifUnsub) addCleanup(localNotifUnsub)
+
       // Subscribe to deeplink routes. OAuth callbacks resolve through their
       // own awaitCallback subscription; the router below handles session,
       // share-target, and pair-qr routes that arrive while the app is
       // foregrounded.
-      const navigators = makeRouterNavigators(router)
+      const navigators = makeRouterNavigators(routerRef.current)
       const dispatchedRaw = new Set<string>()
       const deeplinkUnsub = await subscribeDeeplink((route) => {
         dispatchedRaw.add(route.raw)
         dispatchRoute(route, navigators)
       })
-      cleanup.push(deeplinkUnsub)
+      addCleanup(deeplinkUnsub)
 
       // Cold start: when the app is launched BY a deeplink (share sheet,
       // notification tap, pair QR), `appUrlOpen` can fire before the listener
@@ -184,7 +226,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
           void minimizeApp()
         }
       })
-      cleanup.push(backUnsub)
+      addCleanup(backUnsub)
 
       const config = await hydrateCompanionConfig()
       if (cancelled) return
@@ -200,14 +242,14 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       if (mode === "standalone") return
 
       if (!config) {
-        const onOnboarding = ONBOARDING_PREFIXES.some((p) => pathname.startsWith(p))
+        const onOnboarding = ONBOARDING_PREFIXES.some((p) => pathnameRef.current.startsWith(p))
         if (!onOnboarding) {
           // Chosen pairing but not paired yet → pair flow; mode not chosen yet
           // (and no legacy config) → the welcome chooser. Already-paired users
           // never reach here because `config` is present (backward compatible).
           const target = mode === "paired" ? "/pair" : "/welcome"
           log.info(`companion: unpaired, redirecting to ${target}`)
-          router.replace(target)
+          routerRef.current.replace(target)
         }
         return
       }
@@ -220,15 +262,15 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
           error: err instanceof Error ? err.message : String(err),
         })
       }
-      cleanup.push(installForegroundSync())
-      cleanup.push(installEventDrivenSync())
+      addCleanup(installForegroundSync())
+      addCleanup(installEventDrivenSync())
       // Wave 4 / ADR-0026 — also kick a sync on network up and app resume.
       // `installNetworkSync` and `installResumeSync` both return promises
       // that resolve to the teardown function; await before pushing so the
       // cleanup array has a real `() => void`, matching the existing
       // `installForegroundSync` / `installEventDrivenSync` shape.
-      cleanup.push(await installNetworkSync())
-      cleanup.push(await installResumeSync())
+      addCleanup(await installNetworkSync())
+      addCleanup(await installResumeSync())
 
       // ── Capability report (ADR-0060) ──────────────────────────────────
       // Report this device's platform capability manifest on each connect so
@@ -241,14 +283,14 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         typeof reporterTransport.getConnectionState === "function" &&
         typeof reporterTransport.onConnectionStateChange === "function"
       ) {
-        cleanup.push(installCapabilityReporter(reporterTransport as CapabilityReporterTransport))
+        addCleanup(installCapabilityReporter(reporterTransport as CapabilityReporterTransport))
       }
 
       // ── Remote step server (ADR-0061 P3) ─────────────────────────────
       // Serve desktop-issued `workflow://step-execute` requests (camera,
       // barcode, location, …) addressed to this device. Foreground-only by
       // nature — the WS subscription lives with the app session.
-      cleanup.push(
+      addCleanup(
         installRemoteStepServer({
           transport,
           getDeviceId: () => loadCompanionConfig()?.deviceId,
@@ -262,7 +304,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         const sent = await reportPushTokenToDesktop(push.token, push.platform)
         if (!sent.ok) {
           log.warn("companion: failed to report push token", { reason: sent.reason })
-          toast.error(t("pushTokenFailed", { reason: sent.reason }))
+          toast.error(tRef.current("pushTokenFailed", { reason: sent.reason }))
         } else {
           log.info("companion: push token reported", { platform: push.platform })
         }
@@ -285,7 +327,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
           navigators.pushSession(sessionId)
         }
       })
-      cleanup.push(unsubPush)
+      addCleanup(unsubPush)
     })()
 
     return () => {
@@ -303,7 +345,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         }
       }
     }
-  }, [platform, pathname, router, t])
+  }, [platform])
 
   return <>{children}</>
 }

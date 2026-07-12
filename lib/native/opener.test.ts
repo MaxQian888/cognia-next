@@ -1,5 +1,8 @@
 /** @jest-environment jsdom */
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
+jest.mock("@/lib/capacitor/browser", () => ({
+  open: jest.fn(async () => ({ kind: "ok" })),
+}))
 jest.mock(
   "@tauri-apps/plugin-opener",
   () => ({
@@ -75,6 +78,36 @@ describe("openUrl", () => {
     expect(open).toHaveBeenCalledWith("https://example.com", "_blank", "noopener,noreferrer")
 
     open.mockRestore()
+  })
+
+  test("routes through the Capacitor in-app browser on the mobile shell", async () => {
+    mockIsTauri.mockReturnValue(false)
+    const w = window as unknown as Record<string, unknown>
+    w.Capacitor = { isNativePlatform: () => true }
+    const open = jest.spyOn(window, "open").mockReturnValue(null)
+    try {
+      const { open: capOpen } = jest.requireMock("@/lib/capacitor/browser") as {
+        open: jest.Mock
+      }
+      capOpen.mockClear().mockResolvedValue({ kind: "ok" })
+
+      await openUrl("https://example.com/oauth")
+
+      expect(capOpen).toHaveBeenCalledWith({ url: "https://example.com/oauth" })
+      expect(open).not.toHaveBeenCalled()
+
+      // Plugin unavailable → falls through to window.open.
+      capOpen.mockResolvedValueOnce({ kind: "unsupported" })
+      await openUrl("https://example.com/oauth")
+      expect(open).toHaveBeenCalledWith(
+        "https://example.com/oauth",
+        "_blank",
+        "noopener,noreferrer"
+      )
+    } finally {
+      delete w.Capacitor
+      open.mockRestore()
+    }
   })
 })
 

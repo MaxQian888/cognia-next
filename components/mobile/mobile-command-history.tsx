@@ -3,10 +3,12 @@
 /**
  * Mobile command-history viewer (ADR-0039 phase 2).
  *
- * Read-only browse/search over the durable `terminalHistory` table mirrored
- * from the paired desktop by the `terminalHistory` sync handler. The phone has
- * no shell, so this never re-runs a command — `cwd`/`shell` are machine-local
- * and not portable — the only affordance is tap-to-copy.
+ * Browse/search over the durable `terminalHistory` table mirrored from the
+ * paired desktop by the `terminalHistory` sync handler. The phone has no
+ * shell of its own, so tapping a row copies it; the per-row run affordance
+ * replays the command ON THE PAIRED DESKTOP via the `terminal_exec`
+ * companion RPC (shell mode, remote-control-capability gated on the host)
+ * after an explicit confirm, and shows the captured output.
  *
  * Data comes through `useDexieFirstQuery`, so the list renders from Dexie
  * immediately (offline-capable) and kicks a background pull of just this table
@@ -16,14 +18,30 @@
 import { useMemo, useState } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { CopyIcon, SearchIcon, TerminalSquareIcon } from "lucide-react"
+import { CopyIcon, PlayIcon, SearchIcon, TerminalSquareIcon } from "lucide-react"
 
 import { MeSection } from "@/components/mobile/me/me-section"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
 import { getDb } from "@/lib/db/schema"
 import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
+import { execTerminalCommand, type RemoteExecResult } from "@/lib/terminal/remote-api"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
+
+/** Replay-dialog lifecycle: confirm → running → captured result. */
+type RunPhase = { kind: "confirm" } | { kind: "running" } | { kind: "done"; result: RemoteExecResult }
+
+/** Wall-clock budget for a replayed command — a phone UI shouldn't hang longer. */
+const RUN_TIMEOUT_MS = 60_000
 
 interface ProjectGroup {
   /** Owning project id, or `""` for the projectless bucket. */
@@ -84,6 +102,38 @@ export function MobileCommandHistory() {
     }
   }
 
+  // Replay-on-desktop dialog state. `runTarget` holds the command being
+  // confirmed/run; closing the dialog clears both.
+  const [runTarget, setRunTarget] = useState<string | null>(null)
+  const [runPhase, setRunPhase] = useState<RunPhase>({ kind: "confirm" })
+
+  const openRunDialog = (command: string) => {
+    setRunTarget(command)
+    setRunPhase({ kind: "confirm" })
+  }
+
+  const closeRunDialog = () => {
+    setRunTarget(null)
+    setRunPhase({ kind: "confirm" })
+  }
+
+  const handleRun = async (command: string) => {
+    setRunPhase({ kind: "running" })
+    try {
+      // Shell mode: history rows are full shell lines (pipes, &&, redirects),
+      // not bare argv — the host wraps them in its platform shell.
+      const result = await execTerminalCommand({
+        command,
+        shell: true,
+        timeoutMs: RUN_TIMEOUT_MS,
+      })
+      setRunPhase({ kind: "done", result })
+    } catch (error) {
+      closeRunDialog()
+      toast.error(t("runError", { message: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <p className="px-1 text-xs text-muted-foreground" data-testid="command-history-intro">
@@ -129,27 +179,114 @@ export function MobileCommandHistory() {
             testid={`command-history-group-${group.projectId || "none"}`}
           >
             {group.rows.map((row) => (
-              <button
-                key={row.id}
-                type="button"
-                onClick={() => handleCopy(row.command)}
-                aria-label={t("copyAria", { command: row.command })}
-                data-testid={`command-history-row-${row.id}`}
-                className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/50 active:bg-accent"
-              >
-                <TerminalSquareIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="truncate font-mono text-xs">{row.command}</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {t("uses", { count: row.uses })} · {format.relativeTime(new Date(row.ts))}
+              <div key={row.id} className="flex w-full items-stretch">
+                <button
+                  type="button"
+                  onClick={() => handleCopy(row.command)}
+                  aria-label={t("copyAria", { command: row.command })}
+                  data-testid={`command-history-row-${row.id}`}
+                  className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/50 active:bg-accent"
+                >
+                  <TerminalSquareIcon
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-hidden
+                  />
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate font-mono text-xs">{row.command}</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {t("uses", { count: row.uses })} · {format.relativeTime(new Date(row.ts))}
+                    </span>
                   </span>
-                </span>
-                <CopyIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-              </button>
+                  <CopyIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openRunDialog(row.command)}
+                  aria-label={t("runAria", { command: row.command })}
+                  data-testid={`command-history-run-${row.id}`}
+                  className="flex shrink-0 items-center px-3 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground active:bg-accent"
+                >
+                  <PlayIcon className="size-4" aria-hidden />
+                </button>
+              </div>
             ))}
           </MeSection>
         ))
       )}
+
+      <Dialog open={runTarget !== null} onOpenChange={(open) => !open && closeRunDialog()}>
+        <DialogContent className="max-w-[92vw] rounded-xl" data-testid="command-history-run-dialog">
+          <DialogHeader>
+            <DialogTitle>
+              {runPhase.kind === "done" ? t("run.resultTitle") : t("run.confirmTitle")}
+            </DialogTitle>
+            <DialogDescription className="break-all font-mono text-xs">
+              {runTarget ?? ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          {runPhase.kind === "confirm" ? (
+            <p className="text-xs text-muted-foreground">{t("run.confirmBody")}</p>
+          ) : null}
+          {runPhase.kind === "running" ? (
+            <p className="text-xs text-muted-foreground" data-testid="command-history-run-running">
+              {t("run.running")}
+            </p>
+          ) : null}
+          {runPhase.kind === "done" ? (
+            <div className="space-y-2" data-testid="command-history-run-result">
+              <p className="text-xs text-muted-foreground">
+                {runPhase.result.timedOut
+                  ? t("run.timedOut")
+                  : t("run.exitCode", { code: runPhase.result.exitCode ?? "?" })}
+              </p>
+              <pre className="max-h-60 overflow-auto rounded border bg-muted/40 p-2 font-mono text-[11px] whitespace-pre-wrap break-all">
+                {runPhase.result.stdout || runPhase.result.stderr || t("run.noOutput")}
+              </pre>
+              {runPhase.result.stdout && runPhase.result.stderr ? (
+                <pre className="max-h-40 overflow-auto rounded border border-destructive/40 bg-destructive/5 p-2 font-mono text-[11px] whitespace-pre-wrap break-all">
+                  {runPhase.result.stderr}
+                </pre>
+              ) : null}
+            </div>
+          ) : null}
+
+          <DialogFooter className="flex-row justify-end gap-2">
+            {runPhase.kind === "confirm" ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={closeRunDialog}
+                  data-testid="command-history-run-cancel"
+                >
+                  {t("run.cancel")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => runTarget && void handleRun(runTarget)}
+                  data-testid="command-history-run-confirm"
+                >
+                  {t("run.confirm")}
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={runPhase.kind === "running"}
+                onClick={closeRunDialog}
+                data-testid="command-history-run-close"
+              >
+                {t("run.close")}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

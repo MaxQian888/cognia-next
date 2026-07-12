@@ -220,13 +220,17 @@ export function installMobileSignalingController(
     await reupgrade()
   }
 
+  let disposed = false
   let netUnsub: (() => void) | null = null
   let resumeUnsub: (() => void) | null = null
   void subscribeNetworkFn((status) => {
     if (status.connected) void onTrigger()
   }).then(
     (u) => {
-      netUnsub = u
+      // Controller stopped while the subscribe was in flight — the dispose
+      // below already ran with a null unsub, so drop the listener here.
+      if (disposed) u()
+      else netUnsub = u
     },
     () => {
       // Subscription setup failed (no plugin / no window) — re-upgrade is
@@ -237,7 +241,8 @@ export function installMobileSignalingController(
     void onTrigger()
   }).then(
     (u) => {
-      resumeUnsub = u
+      if (disposed) u()
+      else resumeUnsub = u
     },
     () => {
       // Best-effort; see above.
@@ -245,6 +250,7 @@ export function installMobileSignalingController(
   )
 
   return () => {
+    disposed = true
     sub.unsubscribe()
     netUnsub?.()
     resumeUnsub?.()

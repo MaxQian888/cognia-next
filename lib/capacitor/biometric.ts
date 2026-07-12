@@ -19,10 +19,33 @@ export type BiometryType =
   | "FACE_AUTHENTICATION"
   | "IRIS_AUTHENTICATION"
   | "MULTIPLE"
+  | "DEVICE_CREDENTIAL"
   | "NONE"
 
+/**
+ * The native plugin returns `biometryType` as a NUMERIC enum
+ * (`NONE=0 … DEVICE_CREDENTIAL=7`), not the string union our public API
+ * exposes. Translate here — the single point where plugin values enter.
+ */
+const BIOMETRY_TYPE_BY_CODE: Record<number, BiometryType> = {
+  0: "NONE",
+  1: "TOUCH_ID",
+  2: "FACE_ID",
+  3: "FINGERPRINT",
+  4: "FACE_AUTHENTICATION",
+  5: "IRIS_AUTHENTICATION",
+  6: "MULTIPLE",
+  7: "DEVICE_CREDENTIAL",
+}
+
+function toBiometryType(raw: BiometryType | number | undefined): BiometryType | undefined {
+  if (raw === undefined) return undefined
+  if (typeof raw === "number") return BIOMETRY_TYPE_BY_CODE[raw] ?? "NONE"
+  return raw
+}
+
 interface BiometricShape {
-  isAvailable(): Promise<{ isAvailable: boolean; biometryType?: BiometryType }>
+  isAvailable(): Promise<{ isAvailable: boolean; biometryType?: BiometryType | number }>
   verifyIdentity(opts: {
     reason: string
     title?: string
@@ -51,7 +74,7 @@ export async function isAvailable(
     const r = await b.isAvailable()
     return {
       kind: "ok" as const,
-      value: { available: r.isAvailable, biometryType: r.biometryType },
+      value: { available: r.isAvailable, biometryType: toBiometryType(r.biometryType) },
     }
   })
   if (result && "kind" in result && result.kind === "unsupported") {
@@ -94,6 +117,16 @@ export async function verify(opts: VerifyOptions): Promise<VerifyOutcome> {
     return { kind: "verified" }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
+    // Prefer the plugin's numeric error code — messages vary by platform and
+    // locale. (15 app cancel / 16 user cancel / 17 user fallback; 2 lockout /
+    // 4 temporary lockout; 1 unavailable / 3 not enrolled.)
+    const rawCode = (err as { code?: string | number } | null)?.code
+    const code = typeof rawCode === "string" ? Number.parseInt(rawCode, 10) : rawCode
+    if (typeof code === "number" && Number.isFinite(code)) {
+      if (code === 15 || code === 16 || code === 17) return { kind: "cancelled" }
+      if (code === 2 || code === 4) return { kind: "lockout" }
+      if (code === 1 || code === 3) return { kind: "unavailable" }
+    }
     if (/cancel|user.*cancel/i.test(msg)) return { kind: "cancelled" }
     if (/lockout|too many|disabled/i.test(msg)) return { kind: "lockout" }
     return { kind: "error", message: msg }

@@ -52,6 +52,11 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => inboundUnreadRef.value,
 }))
 
+const keyboardRef = { value: { keyboardHeight: 0, isVisible: false } }
+jest.mock("@/hooks/ui/use-keyboard-insets", () => ({
+  useKeyboardInsets: () => keyboardRef.value,
+}))
+
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     inboundLedger: {
@@ -60,10 +65,13 @@ jest.mock("@/lib/db/schema", () => ({
   }),
 }))
 
+const wrapperStoreState: {
+  settings: { lastInboxViewedAt: number } | null
+  loaded: boolean
+} = { settings: { lastInboxViewedAt: 0 }, loaded: true }
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (
-    selector: (s: { settings: { lastInboxViewedAt: number } | null }) => unknown
-  ) => selector({ settings: { lastInboxViewedAt: 0 } }),
+  useSettingsStore: (selector: (s: typeof wrapperStoreState) => unknown) =>
+    selector(wrapperStoreState),
 }))
 
 jest.mock("next-intl", () => ({
@@ -83,7 +91,10 @@ describe("<MobileShellWrapper />", () => {
     platformMock.mockReset().mockReturnValue("mobile")
     pathnameMock.mockReset().mockReturnValue("/")
     inboundUnreadRef.value = 0
+    keyboardRef.value = { keyboardHeight: 0, isVisible: false }
     replaceMock.mockReset()
+    wrapperStoreState.settings = { lastInboxViewedAt: 0 }
+    wrapperStoreState.loaded = true
     // The tab bar + landing redirect read the real settings-store (the
     // `@/stores/settings` mock above only covers the wrapper's own selector).
     realSettingsStore.setState({ settings: null } as never)
@@ -255,6 +266,54 @@ describe("<MobileShellWrapper />", () => {
     expect(replaceMock).not.toHaveBeenCalled()
   })
 
+  it("does not hijack navigation when the landing setting changes after launch", () => {
+    // Launch at "/" with the default (chat) landing — decision is made once.
+    const { rerender } = render(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    expect(replaceMock).not.toHaveBeenCalled()
+
+    // The user later changes "default landing" in /me settings — the wrapper
+    // must NOT rip them out of the settings screen.
+    setTabLayout({
+      order: ["chat", "workflows", "discover", "me"],
+      hidden: [],
+      defaultLanding: "workflows",
+    })
+    rerender(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    expect(replaceMock).not.toHaveBeenCalled()
+  })
+
+  it("waits for settings hydration before deciding the landing tab", () => {
+    wrapperStoreState.loaded = false
+    setTabLayout({
+      order: ["chat", "workflows", "discover", "me"],
+      hidden: [],
+      defaultLanding: "workflows",
+    })
+    const { rerender } = render(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    // Not hydrated yet — no decision, no redirect.
+    expect(replaceMock).not.toHaveBeenCalled()
+
+    wrapperStoreState.loaded = true
+    rerender(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    expect(replaceMock).toHaveBeenCalledWith("/workflows")
+  })
+
   it("does not redirect on desktop platforms", () => {
     platformMock.mockReturnValue("web")
     setTabLayout({
@@ -313,6 +372,74 @@ describe("<MobileShellWrapper />", () => {
     expect(screen.getByTestId("mobile-shell-wrapper")).toHaveAttribute("data-full-viewport", "false")
     const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
     expect(inner?.className).toContain("min-h-[100dvh]")
+  })
+
+  it("slides the tab bar away and drops the bottom reserve while the keyboard is open", () => {
+    keyboardRef.value = { keyboardHeight: 320, isVisible: true }
+    const { container } = render(
+      <MobileShellWrapper>
+        <div>typing</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("mobile-shell-wrapper")).toHaveAttribute(
+      "data-keyboard-visible",
+      "true"
+    )
+    // Bar stays mounted (no entrance-stagger replay) but is translated off.
+    const bar = screen.getByTestId("mobile-tab-bar")
+    expect(bar).toHaveAttribute("data-keyboard-hidden", "true")
+    expect(bar.className).toContain("translate-y-full")
+    // The content column no longer reserves the tab-bar height.
+    const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
+    expect(inner?.className).not.toContain("pb-[calc(theme(spacing.14)")
+  })
+
+  it("lifts the content by the keyboard overlap when the frame did not resize", () => {
+    // Native-resize failed (iOS quirk / plugin missing): overlap is real.
+    keyboardRef.value = { keyboardHeight: 260, isVisible: true }
+    const { container } = render(
+      <MobileShellWrapper>
+        <div>typing</div>
+      </MobileShellWrapper>
+    )
+    const inner = container.querySelector(
+      "[data-testid='mobile-shell-wrapper'] > div"
+    ) as HTMLElement
+    expect(inner.style.paddingBottom).toBe("260px")
+  })
+
+  it("adds no overlap padding when native resize already handled the keyboard", () => {
+    // resize:"native" worked: keyboard open but zero overlap.
+    keyboardRef.value = { keyboardHeight: 0, isVisible: true }
+    const { container } = render(
+      <MobileShellWrapper>
+        <div>typing</div>
+      </MobileShellWrapper>
+    )
+    const inner = container.querySelector(
+      "[data-testid='mobile-shell-wrapper'] > div"
+    ) as HTMLElement
+    expect(inner.style.paddingBottom).toBe("")
+  })
+
+  it("restores the tab bar and bottom reserve when the keyboard closes", () => {
+    keyboardRef.value = { keyboardHeight: 320, isVisible: true }
+    const { container, rerender } = render(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    keyboardRef.value = { keyboardHeight: 0, isVisible: false }
+    rerender(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    const bar = screen.getByTestId("mobile-tab-bar")
+    expect(bar).toHaveAttribute("data-keyboard-hidden", "false")
+    expect(bar.className).not.toContain("translate-y-full")
+    const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
+    expect(inner?.className).toContain("pb-[calc(theme(spacing.14)")
   })
 
   it("sets data-tab-bar-visible attribute correctly", () => {

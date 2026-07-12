@@ -53,6 +53,7 @@ jest.mock("next-intl", () => ({
       "fingerprintMismatch.title": "Fingerprint changed",
       "fingerprintMismatch.description": `${(vars?.count as number) ?? 0} server(s) returned a fingerprint that doesn't match the paired record.`,
       "fingerprintMismatch.dismiss": "Dismiss",
+      rescan: "Scan again",
       // mobile.pair.discover (ServerCard)
       viaPaired: "Paired",
       viaMdns: "mDNS",
@@ -97,6 +98,17 @@ describe("MobileServerScanSheet", () => {
   it("renders empty state when scan returns no servers", async () => {
     render(<MobileServerScanSheet open onOpenChange={() => {}} />)
     await waitFor(() => expect(screen.getByText("No servers yet")).toBeInTheDocument())
+  })
+
+  it("re-runs the scan when the rescan button is clicked", async () => {
+    let scanCalls = 0
+    scanLanImpl = async () => {
+      scanCalls += 1
+    }
+    render(<MobileServerScanSheet open onOpenChange={() => {}} />)
+    await waitFor(() => expect(scanCalls).toBe(1))
+    await userEvent.click(await screen.findByTestId("scan-rescan"))
+    await waitFor(() => expect(scanCalls).toBe(2))
   })
 
   it("threads the active CompanionConfig into scanLan as paired summary", async () => {
