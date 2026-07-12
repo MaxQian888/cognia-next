@@ -163,6 +163,13 @@ export interface PlatformAdapter {
   streamReply?(req: StreamReplyRequest): Promise<void>
   edit?(messageId: string, patch: OutboundRequest): Promise<OutboundResult>
   delete?(messageId: string): Promise<void>
+  /**
+   * Add an emoji reaction to an existing platform message. `emojiType` is
+   * the platform's reaction code (Lark reaction type like "THUMBSUP") or a
+   * unicode emoji, adapter-interpreted. Optional — only platforms with a
+   * reaction API implement it; callers treat absence as unsupported.
+   */
+  addReaction?(messageId: string, emojiType: string): Promise<void>
   setTyping?(conversationKey: string, on: boolean): Promise<void>
   uploadFile?(file: AttachmentDescriptor): Promise<AdapterAttachmentRef>
   fetchHistory?(

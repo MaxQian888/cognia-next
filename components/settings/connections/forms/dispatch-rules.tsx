@@ -43,6 +43,7 @@ import type { Character } from "@/lib/claude/types"
 /** Radix Select forbids `""` item values — sentinels for the "any"/"none" entries. */
 const ANY_CHANNEL = "__any__"
 const NO_CHARACTER = "__none__"
+const SAME_BOT = "__same__"
 
 const CHANNEL_KINDS = ["private", "group", "channel", "thread"] as const
 type ChannelKindOption = (typeof CHANNEL_KINDS)[number]
@@ -81,6 +82,8 @@ interface DispatchRuleRowProps {
   index: number
   total: number
   characters: Character[]
+  /** Enabled same-platform sibling bots — respond-via targets. */
+  siblings: AdapterInstanceRow[]
   onChange: (patch: Partial<DispatchRule>) => void
   onMove: (direction: -1 | 1) => void
   onDelete: () => void
@@ -91,6 +94,7 @@ function DispatchRuleRow({
   index,
   total,
   characters,
+  siblings,
   onChange,
   onMove,
   onDelete,
@@ -247,7 +251,8 @@ function DispatchRuleRow({
               setPickedType(v as ActionType)
               // Switching axis clears the previous target — the rule stays
               // inert (skipped by the matcher) until a new value is picked.
-              onChange({ action: {} })
+              // The respond-via bot is an orthogonal axis and survives.
+              onChange({ action: { respondViaAdapterId: rule.action.respondViaAdapterId } })
             }}
           >
             <SelectTrigger
@@ -272,7 +277,12 @@ function DispatchRuleRow({
                 characterKnown ? (rule.action.characterId ?? NO_CHARACTER) : rule.action.characterId
               }
               onValueChange={(v) =>
-                onChange({ action: { characterId: v === NO_CHARACTER ? undefined : v } })
+                onChange({
+                  action: {
+                    characterId: v === NO_CHARACTER ? undefined : v,
+                    respondViaAdapterId: rule.action.respondViaAdapterId,
+                  },
+                })
               }
             >
               <SelectTrigger
@@ -305,7 +315,11 @@ function DispatchRuleRow({
             <TeamPicker
               id={`dispatch-rule-target-${rule.id}`}
               value={rule.action.teamId || undefined}
-              onChange={(teamId) => onChange({ action: { teamId } })}
+              onChange={(teamId) =>
+                onChange({
+                  action: { teamId, respondViaAdapterId: rule.action.respondViaAdapterId },
+                })
+              }
             />
           )}
           {actionType === "workflow" && (
@@ -315,11 +329,54 @@ function DispatchRuleRow({
               defaultValue={rule.action.workflowId ?? ""}
               placeholder={t("workflowPlaceholder")}
               onChange={(e) =>
-                onChange({ action: { workflowId: e.target.value.trim() || undefined } })
+                onChange({
+                  action: {
+                    workflowId: e.target.value.trim() || undefined,
+                    respondViaAdapterId: rule.action.respondViaAdapterId,
+                  },
+                })
               }
               data-testid={`dispatch-rule-workflow-${rule.id}`}
             />
           )}
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`dispatch-rule-respond-via-${rule.id}`}>{t("respondViaLabel")}</Label>
+          <Select
+            value={rule.action.respondViaAdapterId ?? SAME_BOT}
+            onValueChange={(v) =>
+              onChange({
+                action: { ...rule.action, respondViaAdapterId: v === SAME_BOT ? undefined : v },
+              })
+            }
+          >
+            <SelectTrigger
+              id={`dispatch-rule-respond-via-${rule.id}`}
+              className="h-8"
+              data-testid={`dispatch-rule-respond-via-${rule.id}`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={SAME_BOT}>{t("respondViaSameBot")}</SelectItem>
+              {rule.action.respondViaAdapterId &&
+                !siblings.some((s) => s.id === rule.action.respondViaAdapterId) && (
+                  <SelectItem
+                    value={rule.action.respondViaAdapterId}
+                    className="text-destructive"
+                    data-testid={`dispatch-rule-respond-via-missing-${rule.id}`}
+                  >
+                    {t("respondViaMissing", { id: rule.action.respondViaAdapterId.slice(0, 12) })}
+                  </SelectItem>
+                )}
+              {siblings.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.displayName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">{t("respondViaHelp")}</p>
         </div>
       </div>
     </div>
@@ -344,6 +401,16 @@ export function DispatchRules({ adapterId }: DispatchRulesProps) {
     () => (typeof window === "undefined" ? Promise.resolve([]) : getDb().characters.toArray()),
     []
   )
+  // Respond-via targets: enabled sibling bots of the SAME platform (the
+  // runtime rejects cross-platform targets, so don't offer them).
+  const siblings = useLiveQuery<AdapterInstanceRow[]>(
+    () =>
+      typeof window === "undefined" || !row?.type
+        ? Promise.resolve([])
+        : getDb().adapterInstances.where("type").equals(row.type).toArray(),
+    [row?.type]
+  )
+  const respondViaTargets = (siblings ?? []).filter((s) => s.id !== adapterId && s.enabled)
 
   const rules = row?.dispatchRules ?? []
 
@@ -388,6 +455,7 @@ export function DispatchRules({ adapterId }: DispatchRulesProps) {
             index={index}
             total={rules.length}
             characters={characters ?? []}
+            siblings={respondViaTargets}
             onChange={(patch) => changeRule(index, patch)}
             onMove={(direction) => moveRule(index, direction)}
             onDelete={() => deleteRule(index)}

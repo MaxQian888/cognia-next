@@ -19,13 +19,16 @@ jest.mock("@/lib/db/adapter-instances", () => ({
   updateAdapterInstance: (...a: unknown[]) => mockUpdate(...a),
 }))
 
-// The component issues TWO useLiveQuery reads (adapter row, characters).
-// Dispatch on the querier's source so each returns its fixture.
+// The component issues THREE useLiveQuery reads (adapter row, characters,
+// same-platform siblings). Dispatch on the querier's source so each returns
+// its fixture — the siblings querier is the only one using `where("type")`.
 let fixtureRow: AdapterInstanceRow | undefined
 let fixtureCharacters: Character[]
+let fixtureSiblings: AdapterInstanceRow[]
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: (fn: () => unknown) => {
     const src = String(fn)
+    if (src.includes('where("type")')) return fixtureSiblings
     if (src.includes("adapterInstances")) return fixtureRow
     return fixtureCharacters
   },
@@ -128,6 +131,17 @@ function setup(rules?: DispatchRule[]): void {
   fixtureCharacters = [
     { id: "c1", name: "Researcher" } as Character,
     { id: "c2", name: "Writer" } as Character,
+  ]
+  fixtureSiblings = [
+    // Self must be filtered out; disabled siblings must not be offered.
+    fixtureRow,
+    { id: "a2", type: "telegram", displayName: "Bot B", enabled: true } as AdapterInstanceRow,
+    {
+      id: "a3",
+      type: "telegram",
+      displayName: "Bot C (off)",
+      enabled: false,
+    } as AdapterInstanceRow,
   ]
   mockUpdate.mockClear()
   render(<DispatchRules adapterId="a1" />)
@@ -284,5 +298,41 @@ describe("DispatchRules — add / edit / delete / reorder persistence", () => {
     setup([TEAM_RULE, CHAR_RULE])
     expect(screen.getByTestId("dispatch-rule-up-r1")).toBeDisabled()
     expect(screen.getByTestId("dispatch-rule-down-r2")).toBeDisabled()
+  })
+})
+
+describe("DispatchRules — respond-via bot (multi-bot cross-account send)", () => {
+  it("persists respondViaAdapterId alongside the existing action axis", () => {
+    setup([CHAR_RULE])
+    // Row selects in DOM order: channel, action-type, character target,
+    // respond-via (always last).
+    const selects = rowSelects("r2")
+    fireEvent.change(selects[selects.length - 1], { target: { value: "a2" } })
+    expect(lastPersisted()[0].action).toEqual({ characterId: "c1", respondViaAdapterId: "a2" })
+  })
+
+  it("only offers enabled, non-self same-platform siblings", () => {
+    setup([CHAR_RULE])
+    const selects = rowSelects("r2")
+    const values = Array.from(selects[selects.length - 1].querySelectorAll("option")).map(
+      (o) => o.value
+    )
+    expect(values).toContain("a2")
+    expect(values).not.toContain("a1") // self
+    expect(values).not.toContain("a3") // disabled sibling
+  })
+
+  it("switching the action axis preserves the respond-via bot", () => {
+    setup([{ id: "r5", match: {}, action: { characterId: "c1", respondViaAdapterId: "a2" } }])
+    const [, actionType] = rowSelects("r5")
+    fireEvent.change(actionType, { target: { value: "team" } })
+    expect(lastPersisted()[0].action).toEqual({ respondViaAdapterId: "a2" })
+  })
+
+  it("clearing back to 'this bot' drops the respondViaAdapterId", () => {
+    setup([{ id: "r6", match: {}, action: { characterId: "c1", respondViaAdapterId: "a2" } }])
+    const selects = rowSelects("r6")
+    fireEvent.change(selects[selects.length - 1], { target: { value: "__same__" } })
+    expect(lastPersisted()[0].action).toEqual({ characterId: "c1" })
   })
 })

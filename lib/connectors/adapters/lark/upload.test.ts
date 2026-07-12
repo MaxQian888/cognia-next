@@ -177,3 +177,79 @@ describe("resolveLarkMediaKeys", () => {
     ).rejects.toThrow(/HTTP 500/)
   })
 })
+
+describe("resolveLarkMediaKeys — A2UI card images", () => {
+  function a2uiSegment(src: string): MessageSegment {
+    return {
+      type: "a2ui",
+      surfaceId: "sfc_1",
+      plainTextMirror: "[image]",
+      content: {
+        rootId: "root",
+        dataModel: {},
+        components: {
+          root: { component: "Card", children: ["img1"] },
+          img1: { component: "Image", src, alt: "diagram" },
+        },
+      },
+    }
+  }
+
+  beforeEach(() => {
+    ;(invoke as jest.Mock).mockReset()
+  })
+
+  it("uploads remote card images and swaps src for the image_key (clone, no mutation)", async () => {
+    ;(invoke as jest.Mock).mockResolvedValueOnce("img_v3_card_1")
+    const seg = a2uiSegment("https://cdn.example.com/diagram.png")
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+
+    const outSeg = out[0] as Extract<MessageSegment, { type: "a2ui" }>
+    expect((outSeg.content.components.img1 as { src?: string }).src).toBe("img_v3_card_1")
+    // The original segment is untouched — retries re-serialize from the
+    // persisted request.
+    expect(
+      (
+        (seg as Extract<MessageSegment, { type: "a2ui" }>).content.components.img1 as {
+          src?: string
+        }
+      ).src
+    ).toBe("https://cdn.example.com/diagram.png")
+    expect(invoke).toHaveBeenCalledWith("connectors_lark_upload_image", {
+      accessToken: "t-token",
+      sourceUrl: "https://cdn.example.com/diagram.png",
+      imageType: undefined,
+    })
+  })
+
+  it("leaves already-resolved image keys untouched (no upload)", async () => {
+    const seg = a2uiSegment("img_v3_already")
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    expect(out[0]).toBe(seg)
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it("degrades per-URL on upload failure (URL kept → card falls back to a link)", async () => {
+    ;(invoke as jest.Mock).mockRejectedValueOnce(new Error("upload boom"))
+    const seg = a2uiSegment("https://cdn.example.com/broken.png")
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    const outSeg = out[0] as Extract<MessageSegment, { type: "a2ui" }>
+    expect((outSeg.content.components.img1 as { src?: string }).src).toBe(
+      "https://cdn.example.com/broken.png"
+    )
+  })
+
+  it("reuses the uploadCache across calls for the same URL", async () => {
+    const cache = new Map<string, string>([
+      ["https://cdn.example.com/diagram.png", "img_v3_cached"],
+    ])
+    const seg = a2uiSegment("https://cdn.example.com/diagram.png")
+    const out = await resolveLarkMediaKeys([seg], {
+      getAccessToken: async () => "t-token",
+      uploadCache: cache,
+    })
+    const outSeg = out[0] as Extract<MessageSegment, { type: "a2ui" }>
+    expect((outSeg.content.components.img1 as { src?: string }).src).toBe("img_v3_cached")
+    expect(invoke).not.toHaveBeenCalled()
+  })
+})

@@ -23,6 +23,8 @@
  */
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import { parseConversationKey, buildConversationKey } from "@/types/connectors/event"
+import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-a2ui-dispatch"
 import type { RouteDecision } from "./mode-router"
@@ -61,6 +63,92 @@ import { resolveActivityI18n } from "./activity/i18n"
  * resolves before the turn times out, while still bounding a stuck sidecar.
  */
 const CONNECTOR_TURN_TIMEOUT_MS = 15 * 60 * 1000
+
+/** Resolved outbound target for one ai-run reply — see `resolveRespondViaTarget`. */
+export interface RespondViaTarget {
+  adapterId: string
+  conversationKey: string
+  conversationRef: NormalizedInboundEvent["conversationRef"]
+}
+
+/**
+ * Resolve the outbound target for an ai-run reply when a dispatch rule set
+ * `action.respondViaAdapterId` (multi-bot cross-account send).
+ *
+ * Fallback-first: any invalid target (unset, self, missing row, disabled,
+ * muted, cross-platform, malformed conversation key) returns the receiving
+ * bot unchanged, so a stale rule can never drop the reply. Every respond-via
+ * decision — applied or not — writes a `dispatch.respond_via` audit row on
+ * the RECEIVING adapter so the operator can trace which bot actually spoke.
+ */
+export async function resolveRespondViaTarget(
+  respondViaAdapterId: string | undefined,
+  event: Pick<NormalizedInboundEvent, "adapterId" | "conversationKey" | "conversationRef">,
+  adapterRow: Pick<AdapterInstanceRow, "type">
+): Promise<RespondViaTarget> {
+  const fallback: RespondViaTarget = {
+    adapterId: event.adapterId,
+    conversationKey: event.conversationKey,
+    conversationRef: event.conversationRef,
+  }
+  if (!respondViaAdapterId || respondViaAdapterId === event.adapterId) return fallback
+
+  const auditDecision = async (
+    applied: boolean,
+    extra?: Record<string, unknown>
+  ): Promise<void> => {
+    await appendAudit({
+      adapterId: event.adapterId,
+      kind: "dispatch.respond_via",
+      at: Date.now(),
+      conversationKey: event.conversationKey,
+      fields: { targetAdapterId: respondViaAdapterId, applied, ...extra },
+    }).catch(() => undefined)
+  }
+
+  let targetRow: AdapterInstanceRow | undefined
+  try {
+    targetRow = await getAdapterInstance(respondViaAdapterId)
+  } catch {
+    targetRow = undefined
+  }
+  if (!targetRow) {
+    await auditDecision(false, { reason: "not_found" })
+    return fallback
+  }
+  if (!targetRow.enabled) {
+    await auditDecision(false, { reason: "disabled" })
+    return fallback
+  }
+  if (targetRow.muted === true) {
+    await auditDecision(false, { reason: "muted" })
+    return fallback
+  }
+  if (targetRow.type !== adapterRow.type) {
+    await auditDecision(false, { reason: "cross_platform" })
+    return fallback
+  }
+
+  let parsed: ReturnType<typeof parseConversationKey>
+  try {
+    parsed = parseConversationKey(event.conversationKey)
+  } catch {
+    await auditDecision(false, { reason: "malformed_conversation_key" })
+    return fallback
+  }
+
+  await auditDecision(true)
+  return {
+    adapterId: targetRow.id,
+    conversationKey: buildConversationKey(
+      parsed.platform,
+      targetRow.id,
+      parsed.remoteChatId,
+      parsed.threadId
+    ),
+    conversationRef: { ...event.conversationRef, adapterId: targetRow.id },
+  }
+}
 
 /**
  * PII red-line gate for the inbound text a team / workflow dispatch forwards to
@@ -860,11 +948,22 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           a2uiSurfaceOrder: captured.a2uiSurfaceOrder,
         })
         const idempotencyKey = `airun:${captured.messageId}`
+        // ── Respond-via bot (multi-bot cross-account send) ──
+        // A matched dispatch rule may ask for the reply to be delivered
+        // through ANOTHER of our own bot instances. Validate the target at
+        // dispatch time (exists, enabled, not muted, same platform) and fall
+        // back to the receiving bot — with an audit trail either way — so a
+        // stale rule can never silently drop the reply.
+        const outboundTarget = await resolveRespondViaTarget(
+          routing.respondViaAdapterId,
+          event,
+          adapterRow
+        )
         await enqueueOutbound({
-          adapterId: event.adapterId,
-          conversationKey: event.conversationKey,
+          adapterId: outboundTarget.adapterId,
+          conversationKey: outboundTarget.conversationKey,
           request: {
-            conversationRef: event.conversationRef,
+            conversationRef: outboundTarget.conversationRef,
             segments: outboundSegments,
             metadata: {
               idempotencyKey,
@@ -884,6 +983,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           fields: {
             assistantMessageId: captured.messageId,
             sourceMessageId: storedMsg.id,
+            ...(outboundTarget.adapterId !== event.adapterId
+              ? { respondViaAdapterId: outboundTarget.adapterId }
+              : {}),
           },
         })
 

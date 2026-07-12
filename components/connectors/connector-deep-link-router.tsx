@@ -11,14 +11,22 @@
  *   2. Look up the OAuth handler in oauthRegistry.
  *   3. Invoke the handler; toast success / error.
  *
- * No-op in web mode.
+ * Listens on the Tauri deep-link plugin on desktop and on Capacitor's
+ * `appUrlOpen` (incl. cold-start launch URL) on the mobile shell — the
+ * URL format and handler pipeline are identical. No-op in web mode.
  */
 
 import { useEffect } from "react"
 import { toast } from "sonner"
 import { isTauri } from "@/lib/tauri"
+import { isCapacitor } from "@/lib/platform/detect"
 import { onDeepLink } from "@/lib/tauri/deep-link"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
+import {
+  getLaunchRoute as getCapacitorLaunchRoute,
+  subscribe as subscribeCapacitorDeeplink,
+} from "@/lib/capacitor/deeplink"
+import { close as closeCapacitorBrowser } from "@/lib/capacitor/browser"
 import { oauthRegistry } from "@/lib/connectors/oauth-registry"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { isPlatformKind } from "@/types/connectors/platform-kind"
@@ -89,27 +97,63 @@ async function handleOAuthUrl(raw: string): Promise<void> {
 
 export function ConnectorDeepLinkRouter({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    if (!isTauri()) return
+    if (isTauri()) {
+      let unlisten: (() => void) | null = null
+      let cancelled = false
 
-    let unlisten: (() => void) | null = null
-    let cancelled = false
-
-    void (async () => {
-      unlisten = await onDeepLink((urls: string[]) => {
-        for (const url of urls) {
-          void handleOAuthUrl(url)
+      void (async () => {
+        unlisten = await onDeepLink((urls: string[]) => {
+          for (const url of urls) {
+            void handleOAuthUrl(url)
+          }
+        })
+        if (cancelled && unlisten) {
+          safeUnlisten(unlisten)
+          unlisten = null
         }
-      })
-      if (cancelled && unlisten) {
-        safeUnlisten(unlisten)
-        unlisten = null
-      }
-    })()
+      })()
 
-    return () => {
-      cancelled = true
-      safeUnlisten(unlisten)
+      return () => {
+        cancelled = true
+        safeUnlisten(unlisten)
+      }
     }
+
+    if (isCapacitor()) {
+      // Mobile shell: `cognia://connector/oauth/...` arrives via appUrlOpen.
+      // The capacitor deeplink parser types it "unknown" (it's not one of
+      // its declarative routes) — match on the raw URL instead, same as the
+      // Tauri path. Cold-start launch URLs are replayed once, deduped.
+      let unsub: (() => void) | null = null
+      let cancelled = false
+      const seen = new Set<string>()
+      const dispatch = (raw: string) => {
+        if (!OAUTH_PATH_RE.test(raw) || seen.has(raw)) return
+        seen.add(raw)
+        // The authorize page was opened in the in-app browser sheet
+        // (lib/native/opener); dismiss it so the exchange toast is visible.
+        void closeCapacitorBrowser()
+        void handleOAuthUrl(raw)
+      }
+
+      void (async () => {
+        const u = await subscribeCapacitorDeeplink((route) => dispatch(route.raw))
+        if (cancelled) {
+          u()
+          return
+        }
+        unsub = u
+        const launch = await getCapacitorLaunchRoute()
+        if (launch && !cancelled) dispatch(launch.raw)
+      })()
+
+      return () => {
+        cancelled = true
+        unsub?.()
+      }
+    }
+
+    return
   }, [])
 
   return <>{children}</>

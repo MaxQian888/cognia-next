@@ -379,7 +379,9 @@ describe("Lark adapter contract suite", () => {
   // -------------------------------------------------------------------------
 
   describe("edit capability", () => {
-    it("edit() PATCHes /im/v1/messages/<id> with msg_type and content", async () => {
+    // Lark's edit-message endpoint (text/post) is PUT; PATCH is reserved
+    // for interactive-card updates and rejects text bodies.
+    it("edit() PUTs /im/v1/messages/<id> with msg_type and content for text", async () => {
       mockInvoke.mockResolvedValueOnce(makeTatOkResp()).mockResolvedValueOnce(makeSendOkResp())
 
       const adapter = makeAdapter()
@@ -398,7 +400,7 @@ describe("Lark adapter contract suite", () => {
 
       const call = lastSendCall()
       expect(call.url).toContain("om_msg_001")
-      expect(call.method).toBe("PATCH")
+      expect(call.method).toBe("PUT")
       expect(call.body["msg_type"]).toBe("text")
     })
   })
@@ -503,14 +505,16 @@ describe("Lark adapter contract suite", () => {
               code: 0,
               data: {
                 items: [
+                  // REAL history-item shape (verified live): flat sender
+                  // `{id, id_type}`, `msg_type`, content under `body.content`.
                   {
                     message_id: "om_contract_hist",
                     chat_id: "oc_chat_001",
-                    chat_type: "group",
-                    message_type: "text",
-                    content: '{"text":"contract history"}',
+                    msg_type: "text",
+                    body: { content: '{"text":"contract history"}' },
                     create_time: "1714900001000",
-                    sender: { sender_id: { open_id: "ou_contract_hist" } },
+                    deleted: false,
+                    sender: { id: "ou_contract_hist", id_type: "open_id", sender_type: "user" },
                   },
                 ],
                 has_more: false,

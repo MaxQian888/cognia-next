@@ -13,10 +13,10 @@ const mockListen = listen as jest.Mock
 // Inbound rich-media enrichment is exercised in its own suite
 // (inbound-media.test.ts). Here we only assert the adapter WIRES it into the
 // dispatch path — mock it to a no-op spy so no real download is attempted.
-const mockEnrich = jest.fn(async () => undefined)
+const mockEnrich = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("./inbound-media", () => ({
   __esModule: true,
-  enrichLarkInboundMedia: (...args: unknown[]) => mockEnrich(...(args as [])),
+  enrichLarkInboundMedia: (...args: unknown[]) => mockEnrich(...args),
 }))
 
 // ---------------------------------------------------------------------------
@@ -355,7 +355,7 @@ describe("createLarkAdapter", () => {
 
     // Enrichment ran on the parsed event before it was emitted to the bus.
     expect(mockEnrich).toHaveBeenCalledTimes(1)
-    const enrichedEvent = mockEnrich.mock.calls[0][0] as NormalizedInboundEvent
+    const enrichedEvent = mockEnrich.mock.calls[0][0] as unknown as NormalizedInboundEvent
     expect(enrichedEvent.messageId).toBe("om_img_1")
     expect(enrichedEvent.segments[0]).toMatchObject({ type: "image", url: "img_v3_xyz" })
     expect(emitted.length).toBeGreaterThanOrEqual(1)
@@ -425,6 +425,9 @@ describe("createLarkAdapter", () => {
 
     const result = await adapter.send(req)
     expect(result.ok).toBe(true)
+    // Delivery feedback: the REAL Lark message id must surface so the
+    // outbound runner persists it (workflow send output, edit chains).
+    expect(result.platformMessageId).toBe("om_resp_001")
 
     const httpCalls = mockInvoke.mock.calls.filter(
       ([cmd]: [string]) => cmd === "connectors_http_request"
@@ -590,6 +593,9 @@ describe("createLarkAdapter", () => {
   })
 
   it("fetchHistory() calls /im/v1/messages and yields parsed messages", async () => {
+    // Fixture uses the REAL history-item shape (verified live against the
+    // Feishu API): flat `sender.{id,id_type}` (not nested `sender_id`),
+    // `msg_type` (not `message_type`) and content under `body.content`.
     mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd !== "connectors_http_request") return undefined
       const req = (args as { req: { url: string } }).req
@@ -604,11 +610,39 @@ describe("createLarkAdapter", () => {
                 {
                   message_id: "om_hist_001",
                   chat_id: "oc_chat_001",
-                  chat_type: "group",
-                  message_type: "text",
-                  content: '{"text":"history from lark"}',
+                  msg_type: "text",
+                  body: { content: '{"text":"history from lark"}' },
                   create_time: "1714900000000",
-                  sender: { sender_id: { open_id: "ou_hist_001" } },
+                  deleted: false,
+                  sender: { id: "ou_hist_001", id_type: "open_id", sender_type: "user" },
+                },
+                // Bot/app sender — history reports app_id, must still parse.
+                {
+                  message_id: "om_hist_002",
+                  chat_id: "oc_chat_001",
+                  msg_type: "text",
+                  body: { content: '{"text":"from our own bot"}' },
+                  create_time: "1714900001000",
+                  deleted: false,
+                  sender: { id: "cli_app_1", id_type: "app_id", sender_type: "app" },
+                },
+                // Recalled — no recoverable content, must be skipped.
+                {
+                  message_id: "om_hist_003",
+                  chat_id: "oc_chat_001",
+                  msg_type: "text",
+                  body: { content: "This message was recalled" },
+                  deleted: true,
+                  sender: { id: "ou_hist_001", id_type: "open_id", sender_type: "user" },
+                },
+                // System notice (join/invite banner) — skipped.
+                {
+                  message_id: "om_hist_004",
+                  chat_id: "oc_chat_001",
+                  msg_type: "system",
+                  body: { content: '{"template":"{from_user} invited {to_chatters}."}' },
+                  deleted: false,
+                  sender: { id: "", id_type: "", sender_type: "" },
                 },
               ],
               has_more: false,
@@ -627,9 +661,13 @@ describe("createLarkAdapter", () => {
     })) {
       events.push(evt)
     }
-    expect(events).toHaveLength(1)
+    expect(events).toHaveLength(2)
     expect(events[0].messageId).toBe("om_hist_001")
     expect(events[0].plainText).toBe("history from lark")
+    expect(events[0].sender.remoteUserId).toBe("ou_hist_001")
+    expect(events[1].messageId).toBe("om_hist_002")
+    expect(events[1].plainText).toBe("from our own bot")
+    expect(events[1].sender.remoteUserId).toBe("cli_app_1")
 
     const historyCall = mockInvoke.mock.calls.find(
       ([cmd, args]: [string, { req?: { url?: string } }]) =>

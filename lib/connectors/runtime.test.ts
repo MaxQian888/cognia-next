@@ -69,6 +69,18 @@ jest.mock("@/lib/workflow/runtime/start-from-im", () => ({
   startWorkflowFromIM: (...args: unknown[]) => mockStartWorkflowFromIM(...(args as [])),
 }))
 
+// The capture-failure path fire-and-forgets a dynamic import of the
+// notifications runtime (`notifyConversationOverIM`). Left real, that chain
+// settles AFTER its test ends and the Dexie write lands while the NEXT
+// test's beforeEach is deleting the DB — jest then attributes the stray
+// rejection to whichever test happens to be running (observed as an
+// empty-body failure a couple of tests downstream). Stub it so the chain
+// settles immediately and never touches Dexie.
+jest.mock("@/lib/notifications/conversation-notify", () => ({
+  __esModule: true,
+  notifyConversationOverIM: jest.fn(async () => undefined),
+}))
+
 // Plugin IM rate-source gate is mocked so the rate-block branch can be probed.
 // Default: null (no block) so every other ai-run test is unaffected.
 const mockEvaluateImRate = jest.fn(async () => null as unknown)
@@ -1594,5 +1606,74 @@ describe("installRuntime — ai-run (agent-trace root span)", () => {
         errorMessage: "boom",
       })
     )
+    // Drain the capture-failure path's fire-and-forget tail (notification
+    // import chain, telemetry writes) INSIDE this test, while the Dexie
+    // instance is still alive. Without this, the tail settles during the
+    // NEXT test — right as its beforeEach deletes the DB — and jest
+    // attributes the stray rejection to whichever test is running then
+    // (observed as a deterministic empty-body failure downstream).
+    await new Promise((r) => setTimeout(r, 250))
+  })
+})
+
+// ── respond-via bot (multi-bot cross-account send) ───────────────────────────
+
+/** Put an adapterInstances row with an explicit id (no id-rewrite races). */
+async function putInstance(id: string, patch: Partial<AdapterInstanceRow> = {}): Promise<void> {
+  await getDb().adapterInstances.put({
+    id,
+    type: "telegram",
+    displayName: `Instance ${id}`,
+    enabled: true,
+    transportMode: "long-poll",
+    settings: {},
+    credentialsRef: { keyringService: "test", accounts: [] },
+    trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+    defaultMode: "auto",
+    createdAt: 0,
+    updatedAt: 0,
+    ...patch,
+  } as AdapterInstanceRow)
+}
+
+// NOTE: unit coverage for `resolveRespondViaTarget` lives in
+// `runtime.respond-via.test.ts` — a light suite that doesn't stand up the
+// full installRuntime harness. Only the end-to-end ai-run wiring is here.
+
+describe("installRuntime — ai-run respond-via rule", () => {
+  it("delivers the reply through the rule's respondViaAdapterId sibling", async () => {
+    await seedAdapter("adapter_1", {
+      dispatchRules: [{ id: "r_via", match: {}, action: { respondViaAdapterId: "adapter_2" } }],
+    })
+    await putInstance("adapter_2")
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_42" })
+    await callHandler(event, "ai-run")
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].adapterId).toBe("adapter_2")
+    expect(jobs[0].conversationKey).toBe("telegram:adapter_2:chat_42")
+    expect(jobs[0].request.conversationRef.adapterId).toBe("adapter_2")
+    // The enqueue audit stays on the RECEIVING adapter and carries the hop.
+    const audits = await getDb().connectorAudit.toArray()
+    const enq = audits.find((a) => a.kind === "outbound.ai_run_enqueued")
+    expect(enq!.adapterId).toBe("adapter_1")
+    expect(enq!.fields).toMatchObject({ respondViaAdapterId: "adapter_2" })
+  })
+
+  it("falls back to the receiving bot when the rule's target is invalid", async () => {
+    await seedAdapter("adapter_1", {
+      dispatchRules: [{ id: "r_via", match: {}, action: { respondViaAdapterId: "ghost" } }],
+    })
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_42" })
+    await callHandler(event, "ai-run")
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].adapterId).toBe("adapter_1")
+    expect(jobs[0].conversationKey).toBe("telegram:adapter_1:chat_42")
+    const audits = await getDb().connectorAudit.toArray()
+    const decision = audits.find((a) => a.kind === "dispatch.respond_via")
+    expect(decision!.fields).toMatchObject({ applied: false, reason: "not_found" })
   })
 })

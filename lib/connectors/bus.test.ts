@@ -240,6 +240,23 @@ describe("ConnectorBus — adapter-operation wrappers", () => {
     expect((await bus.deleteOutbound("a1", "m")).error?.code).toBe("unsupported")
   })
 
+  it("addReactionOutbound delegates and reports ok:true", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { addReaction: jest.Mock }
+    a.addReaction = jest.fn().mockResolvedValue(undefined)
+    bus.registerAdapter(a)
+    const res = await bus.addReactionOutbound("a1", "pm_1", "THUMBSUP")
+    expect(res.ok).toBe(true)
+    expect(a.addReaction).toHaveBeenCalledWith("pm_1", "THUMBSUP")
+  })
+
+  it("addReactionOutbound reports adapter_not_found / unsupported", async () => {
+    const bus = getBus()
+    expect((await bus.addReactionOutbound("nope", "m", "OK")).error?.code).toBe("adapter_not_found")
+    bus.registerAdapter(makeAdapter("a1")) // no addReaction method
+    expect((await bus.addReactionOutbound("a1", "m", "OK")).error?.code).toBe("unsupported")
+  })
+
   it("setTypingOutbound delegates (true) and no-ops (false) when missing/unsupported", async () => {
     const bus = getBus()
     const a = makeAdapter("a1") as PlatformAdapter & { setTyping: jest.Mock }

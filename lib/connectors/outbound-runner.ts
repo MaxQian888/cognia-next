@@ -32,10 +32,16 @@ import {
   markSent,
   markFailed,
   markDeadlettered,
+  enqueueOutbound,
 } from "@/lib/db/outbound-jobs"
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
-import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
+import type {
+  AdapterInstanceRow,
+  ConversationOverrideRow,
+  OutboundJobRow,
+  OutboundTuningConfig,
+} from "@/lib/db/connector-types"
 import {
   markResponded,
   readForResolution,
@@ -45,7 +51,7 @@ import { appendAudit } from "./audit"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
-import { parseConversationKey } from "@/types/connectors/event"
+import { parseConversationKey, buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import {
   createCircuitBreaker,
@@ -157,6 +163,53 @@ const IDEMPOTENCY_LRU_CAP = 1_000
  */
 const DEFAULT_IDLE_CAP_MS = 60_000
 
+// ── Per-bot outbound tuning ──────────────────────────────────────────────────
+
+/**
+ * Runner defaults for the per-adapter token bucket + circuit breaker. Any
+ * knob an operator leaves unset on `AdapterInstanceRow.outboundTuning`
+ * falls back to these values (they match the pre-tuning hardcoded ones, so
+ * rows without tuning behave exactly as before).
+ */
+export const DEFAULT_OUTBOUND_TUNING: Required<OutboundTuningConfig> = {
+  rateCapacity: 20,
+  rateRefillPerSec: 5,
+  breakerWindowMs: 30_000,
+  breakerMinEvents: 5,
+  breakerFailureThresholdPct: 50,
+  breakerCooldownMs: 30_000,
+}
+
+/**
+ * Fold an operator-supplied tuning block over the defaults, rejecting
+ * non-finite / out-of-range knobs individually (a bad knob degrades to its
+ * default rather than poisoning the whole block). Exported for the settings
+ * UI so form placeholders and the runner agree on the effective values.
+ */
+export function sanitizeOutboundTuning(
+  tuning: OutboundTuningConfig | undefined
+): Required<OutboundTuningConfig> {
+  const pick = (value: number | undefined, fallback: number, opts?: { max?: number }): number => {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return fallback
+    if (opts?.max !== undefined && value > opts.max) return fallback
+    return value
+  }
+  return {
+    rateCapacity: pick(tuning?.rateCapacity, DEFAULT_OUTBOUND_TUNING.rateCapacity),
+    rateRefillPerSec: pick(tuning?.rateRefillPerSec, DEFAULT_OUTBOUND_TUNING.rateRefillPerSec),
+    breakerWindowMs: pick(tuning?.breakerWindowMs, DEFAULT_OUTBOUND_TUNING.breakerWindowMs),
+    breakerMinEvents: Math.round(
+      pick(tuning?.breakerMinEvents, DEFAULT_OUTBOUND_TUNING.breakerMinEvents)
+    ),
+    breakerFailureThresholdPct: pick(
+      tuning?.breakerFailureThresholdPct,
+      DEFAULT_OUTBOUND_TUNING.breakerFailureThresholdPct,
+      { max: 100 }
+    ),
+    breakerCooldownMs: pick(tuning?.breakerCooldownMs, DEFAULT_OUTBOUND_TUNING.breakerCooldownMs),
+  }
+}
+
 // ── LRU map (insertion-order, capped) ────────────────────────────────────────
 
 class LruMap<K, V> {
@@ -251,6 +304,13 @@ export interface OutboundRunnerOptions {
 interface AdapterState {
   breaker: CircuitBreaker
   bucket: TokenBucket
+  /**
+   * Serialized effective tuning this state was built with. When the
+   * adapter row's tuning changes mid-run, the runner rebuilds the
+   * bucket/breaker pair (dropping their in-flight window — acceptable:
+   * a tuning edit is an explicit operator action).
+   */
+  tuningFingerprint: string
 }
 
 // ── Runtime-state registry (heartbeat read-side) ─────────────────────────────
@@ -323,34 +383,52 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
   // id in a `finally`.
   const inFlight = new Set<string>()
 
-  function getAdapterState(adapterId: string): AdapterState {
-    if (!adapterState.has(adapterId)) {
-      adapterState.set(adapterId, {
-        breaker: createCircuitBreaker({
-          now: clock,
-          // v49 breadcrumb — emit on every state transition so the
-          // operator can see breaker history in the inbox telemetry
-          // export.
-          onStateChange: (from, to, at) => {
-            if (to === "open") {
-              void trackInboxEvent("breaker.open", {
-                adapterId,
-                fields: { from },
-                at,
-              })
-            } else if (to === "closed") {
-              void trackInboxEvent("breaker.close", {
-                adapterId,
-                fields: { from },
-                at,
-              })
-            }
-          },
-        }),
-        bucket: createTokenBucket({ capacity: 20, refillPerSec: 5, now: clock }),
-      })
+  function getAdapterState(adapterId: string, row?: AdapterInstanceRow): AdapterState {
+    const tuning = sanitizeOutboundTuning(row?.outboundTuning)
+    const fingerprint = JSON.stringify(tuning)
+    const existing = adapterState.get(adapterId)
+    // Rebuild when the per-bot tuning changed since this state was built,
+    // so an operator edit applies on the next delivery without a restart.
+    // Callers that pass no row (heartbeat-less paths) reuse whatever state
+    // exists rather than resetting it to defaults.
+    if (existing && (row === undefined || existing.tuningFingerprint === fingerprint)) {
+      return existing
     }
-    return adapterState.get(adapterId)!
+    const state: AdapterState = {
+      breaker: createCircuitBreaker({
+        windowMs: tuning.breakerWindowMs,
+        minEvents: tuning.breakerMinEvents,
+        failureThresholdPct: tuning.breakerFailureThresholdPct,
+        cooldownMs: tuning.breakerCooldownMs,
+        now: clock,
+        // v49 breadcrumb — emit on every state transition so the
+        // operator can see breaker history in the inbox telemetry
+        // export.
+        onStateChange: (from, to, at) => {
+          if (to === "open") {
+            void trackInboxEvent("breaker.open", {
+              adapterId,
+              fields: { from },
+              at,
+            })
+          } else if (to === "closed") {
+            void trackInboxEvent("breaker.close", {
+              adapterId,
+              fields: { from },
+              at,
+            })
+          }
+        },
+      }),
+      bucket: createTokenBucket({
+        capacity: tuning.rateCapacity,
+        refillPerSec: tuning.rateRefillPerSec,
+        now: clock,
+      }),
+      tuningFingerprint: fingerprint,
+    }
+    adapterState.set(adapterId, state)
+    return state
   }
 
   function getLane(conversationKey: string): ConversationLane {
@@ -358,6 +436,122 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       lanes.set(conversationKey, new ConversationLane())
     }
     return lanes.get(conversationKey)!
+  }
+
+  /**
+   * Re-enqueue `job` through the first eligible sibling of `fromRow` for
+   * one of the two multi-bot reroute mechanisms:
+   *
+   *   - `"failover"` — this adapter's circuit is open (hard failure).
+   *     Candidates come from `failoverAdapterIds`; a sibling qualifies when
+   *     its breaker can pass.
+   *   - `"balanced"` — this adapter's token bucket is exhausted (throughput
+   *     pressure). Candidates come from `balanceAdapterIds`; a sibling
+   *     qualifies when its breaker can pass AND its bucket still has send
+   *     capacity (an untracked sibling counts as fresh = full bucket).
+   *
+   * Returns the new job id, or `null` when no sibling qualifies — the
+   * caller then falls back to its normal path (dead-letter / defer).
+   *
+   * The re-enqueued job carries a derived idempotency key (`…:fo:<id>` /
+   * `…:lb:<id>`) so it can never collide with the original in the runner's
+   * idempotency cache, plus the mechanism's `*FromAdapterId` marker as the
+   * shared single-hop guard.
+   */
+  async function rerouteJob(
+    job: OutboundJobRow,
+    fromRow: AdapterInstanceRow,
+    mechanism: "failover" | "balanced",
+    adapterCache?: Map<string, AdapterInstanceRow | undefined>
+  ): Promise<string | null> {
+    const candidates =
+      (mechanism === "failover" ? fromRow.failoverAdapterIds : fromRow.balanceAdapterIds) ?? []
+    if (candidates.length === 0) return null
+    const now = clock()
+
+    let parsedKey: ReturnType<typeof parseConversationKey>
+    try {
+      parsedKey = parseConversationKey(job.conversationKey)
+    } catch {
+      // Malformed key — fall through to the caller's normal path.
+      return null
+    }
+
+    for (const targetId of candidates) {
+      if (!targetId || targetId === job.adapterId) continue
+      let targetRow: AdapterInstanceRow | undefined
+      if (adapterCache?.has(targetId)) {
+        targetRow = adapterCache.get(targetId)
+      } else {
+        targetRow = await getAdapterInstance(targetId).catch(() => undefined)
+        adapterCache?.set(targetId, targetRow)
+      }
+      if (!targetRow || !targetRow.enabled || targetRow.muted === true) continue
+      if (targetRow.type !== fromRow.type) continue
+      // Skip a sibling whose own breaker is already open in this runner.
+      const knownState = adapterState.get(targetId)
+      if (knownState && !knownState.breaker.canPass()) continue
+      // Balance additionally requires spare send capacity on the sibling:
+      // spilling onto an equally-exhausted bot would just move the queue.
+      // An untracked sibling has produced no outbound activity this run —
+      // its bucket would initialise full, so it counts as capacity.
+      if (mechanism === "balanced" && knownState && knownState.bucket.snapshot().available < 1) {
+        continue
+      }
+
+      const keySuffix = mechanism === "failover" ? "fo" : "lb"
+      const newConversationKey = buildConversationKey(
+        parsedKey.platform,
+        targetId,
+        parsedKey.remoteChatId,
+        parsedKey.threadId
+      )
+      const newJob = await enqueueOutbound({
+        adapterId: targetId,
+        conversationKey: newConversationKey,
+        request: {
+          ...job.request,
+          conversationRef: { ...job.request.conversationRef, adapterId: targetId },
+          metadata: {
+            ...job.request.metadata,
+            idempotencyKey: `${job.request.metadata.idempotencyKey}:${keySuffix}:${targetId}`,
+            ...(mechanism === "failover"
+              ? { failoverFromAdapterId: job.adapterId }
+              : { balancedFromAdapterId: job.adapterId }),
+          },
+        },
+        source: job.source,
+        ...(job.source === "workflow" && job.sourceWorkflow
+          ? { sourceWorkflow: job.sourceWorkflow }
+          : {}),
+      })
+      const reasonText = mechanism === "failover" ? "circuit open" : "rate limited"
+      await markDeadlettered(
+        job.id,
+        mechanism,
+        `${mechanism === "failover" ? "Failed over" : "Balanced"} to ${targetId} (${reasonText})`
+      )
+      await appendAudit({
+        adapterId: job.adapterId,
+        kind: mechanism === "failover" ? "delivery.failover" : "delivery.balanced",
+        at: now,
+        conversationKey: job.conversationKey,
+        idempotencyKey: job.request.metadata.idempotencyKey,
+        message: `${reasonText} — re-enqueued via ${targetId}`,
+        fields:
+          mechanism === "failover"
+            ? { failoverToAdapterId: targetId, newJobId: newJob.id }
+            : { balancedToAdapterId: targetId, newJobId: newJob.id },
+      })
+      void trackInboxEvent(mechanism === "failover" ? "outbound.failover" : "outbound.balanced", {
+        adapterId: job.adapterId,
+        conversationKey: job.conversationKey,
+        fields: { toAdapterId: targetId, newJobId: newJob.id },
+        at: now,
+      })
+      return newJob.id
+    }
+    return null
   }
 
   /**
@@ -377,7 +571,6 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     overrideCache?: Map<string, ConversationOverrideRow | null>
   ): Promise<void> {
     const now = clock()
-    const { breaker, bucket } = getAdapterState(adapterId)
 
     // Re-fetch the job by id to get the latest state (attempts may have been
     // incremented by a prior lane execution for this same job).
@@ -422,6 +615,23 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         convOverride = (await readForResolution(conversationKey).catch(() => null)) ?? null
         overrideCache?.set(conversationKey, convOverride)
       }
+      // Per-conversation mute: same defer-not-fail semantics as the adapter
+      // level mute above, scoped to one conversation — the bot keeps
+      // delivering everywhere else.
+      if (convOverride?.muted === true) {
+        await markFailed(job.id, "muted", "Conversation is muted", now + 60_000)
+        await appendAudit({
+          adapterId,
+          kind: "delivery.error",
+          at: now,
+          conversationKey,
+          idempotencyKey,
+          reason: "muted",
+          message: "Conversation is muted — delivery deferred",
+        })
+        return
+      }
+
       const effectiveQuietHours = convOverride?.quietHours ?? adapterRow.quietHours
       if (effectiveQuietHours) {
         const { from, to, tz } = effectiveQuietHours
@@ -448,6 +658,10 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         }
       }
     }
+
+    // Per-adapter breaker + bucket, built with (and live-rebuilt on changes
+    // to) this bot's `outboundTuning` — the row was just read above.
+    const { breaker, bucket } = getAdapterState(adapterId, adapterRow)
 
     // ── Idempotency short-circuit ─────────────────────────────────────────
     if (idempotencyCache.has(idempotencyKey)) {
@@ -536,6 +750,19 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
 
     // ── Circuit breaker ───────────────────────────────────────────────────
     if (!breaker.canPass()) {
+      // Multi-bot failover: before dead-lettering, try to re-enqueue the
+      // payload through an enabled same-platform sibling from this bot's
+      // `failoverAdapterIds`. Single hop only — a job that already failed
+      // over once (metadata guard) is dead-lettered like before so two
+      // open-circuit bots can't ping-pong it forever.
+      if (
+        adapterRow &&
+        request.metadata.failoverFromAdapterId === undefined &&
+        request.metadata.balancedFromAdapterId === undefined
+      ) {
+        const newJobId = await rerouteJob(job, adapterRow, "failover", adapterCache)
+        if (newJobId !== null) return
+      }
       await markDeadlettered(job.id, "circuit_open", "Circuit breaker is open")
       await appendAudit({
         adapterId,
@@ -550,6 +777,18 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
 
     // ── Rate limit ────────────────────────────────────────────────────────
     if (!bucket.tryAcquire()) {
+      // Multi-bot load balancing: before deferring behind the exhausted
+      // bucket, try to spill the job onto a same-platform sibling from this
+      // bot's `balanceAdapterIds` that still has send capacity. Single hop
+      // only (shared guard with failover) so saturated bots can't ping-pong.
+      if (
+        adapterRow &&
+        request.metadata.failoverFromAdapterId === undefined &&
+        request.metadata.balancedFromAdapterId === undefined
+      ) {
+        const newJobId = await rerouteJob(job, adapterRow, "balanced", adapterCache)
+        if (newJobId !== null) return
+      }
       // Defer retry by 1 second (the lane-completion wake re-tightens the
       // loop's sleep so the runner re-picks once the deferral elapses).
       const nextAt = now + 1_000

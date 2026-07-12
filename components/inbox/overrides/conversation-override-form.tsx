@@ -106,6 +106,9 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   const [modelOverride, setModelOverride] = useState(initialRow?.modelOverride ?? "")
   const [pinned, setPinned] = useState(initialRow?.pinned ?? false)
   const [archived, setArchived] = useState(initialRow?.archived ?? false)
+  // Per-conversation outbound mute (fine-grained control) — consulted by the
+  // outbound runner with the same defer semantics as the adapter-level mute.
+  const [muted, setMuted] = useState(initialRow?.muted ?? false)
   // Response-SLA target in minutes (CRM, schema v83). Empty string = no SLA.
   const [slaMinutes, setSlaMinutes] = useState<string>(
     initialRow?.slaResponseMinutes != null ? String(initialRow.slaResponseMinutes) : ""
@@ -195,6 +198,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         modelOverride: modelOverride.trim() || undefined,
         pinned: pinned ? true : undefined,
         archived: archived ? true : undefined,
+        muted: muted ? true : undefined,
         trigger: initialRow?.trigger,
         allowedBuiltInSkillIds: resolvedAllowed,
         // The HITL flag defaults true at the read site; only persist when
@@ -288,6 +292,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           modelOverride: modelOverride.trim() || undefined,
           pinned: pinned ? true : undefined,
           archived: archived ? true : undefined,
+          muted: muted ? true : undefined,
           allowedBuiltInSkillIds: resolvedAllowed,
           requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
           quietHours: resolvedQuietHours,
@@ -519,6 +524,25 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         </div>
       </div>
 
+      {/* Per-conversation outbound mute — same defer semantics as the
+       * adapter-level mute, scoped to this conversation only. */}
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="conv-override-muted" className="cursor-pointer">
+              {t("fields.muted")}
+            </Label>
+            <Switch
+              id="conv-override-muted"
+              checked={muted}
+              onCheckedChange={setMuted}
+              data-testid="conv-override-muted"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">{t("fields.mutedHint")}</p>
+        </div>
+      </div>
+
       {/* Quiet hours — per-conversation override that beats the adapter
        * default in `outbound-runner`. */}
       <div className="space-y-2 rounded-md border bg-muted/20 p-3">
@@ -567,6 +591,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
                 id="conv-override-quiet-tz"
                 value={quietHours.tz}
                 onChange={(e) => setQuietHours((prev) => ({ ...prev, tz: e.target.value }))}
+                // i18n-exempt: example IANA timezone id, not translatable UI copy
                 placeholder="Asia/Shanghai"
                 data-testid="conv-override-quiet-tz"
               />

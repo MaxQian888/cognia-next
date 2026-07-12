@@ -225,10 +225,10 @@ describe("resolveEffectiveRouting — precedence", () => {
     })
   })
 
-  it("a single rule can carry all three targets — each surfaces on its own axis", () => {
+  it("a single rule can carry all targets — each surfaces on its own axis", () => {
     const ruleHit = {
       ...HIT,
-      action: { teamId: "t", workflowId: "w", characterId: "c" },
+      action: { teamId: "t", workflowId: "w", characterId: "c", respondViaAdapterId: "bot_b" },
     }
     const routing = resolveEffectiveRouting({}, null, ruleHit)
     expect(routing).toEqual({
@@ -238,6 +238,40 @@ describe("resolveEffectiveRouting — precedence", () => {
       workflowSource: "rule",
       characterId: "c",
       characterSource: "rule",
+      respondViaAdapterId: "bot_b",
+      respondViaSource: "rule",
     })
+  })
+
+  it("respondViaAdapterId is rule-only: unset without a rule hit, trimmed when set", () => {
+    expect(resolveEffectiveRouting({}, null, null)).toMatchObject({
+      respondViaAdapterId: undefined,
+      respondViaSource: "none",
+    })
+    const ruleHit = { ...HIT, action: { respondViaAdapterId: "  bot_b  " } }
+    expect(resolveEffectiveRouting({}, null, ruleHit)).toMatchObject({
+      respondViaAdapterId: "bot_b",
+      respondViaSource: "rule",
+    })
+    // Whitespace-only → unset.
+    const blank = { ...HIT, action: { respondViaAdapterId: "   " } }
+    expect(resolveEffectiveRouting({}, null, blank)).toMatchObject({
+      respondViaAdapterId: undefined,
+      respondViaSource: "none",
+    })
+  })
+})
+
+describe("matchDispatchRule — respond-via-only rules", () => {
+  it("a rule carrying ONLY respondViaAdapterId is a valid routing target", () => {
+    const r = rule({ id: "via_only", action: { respondViaAdapterId: "bot_b" } })
+    const hit = matchDispatchRule([r], makeEvent())
+    expect(hit?.rule.id).toBe("via_only")
+    expect(hit?.action.respondViaAdapterId).toBe("bot_b")
+  })
+
+  it("a whitespace-only respondViaAdapterId keeps the action inert", () => {
+    const r = rule({ id: "blank_via", action: { respondViaAdapterId: "  " } })
+    expect(matchDispatchRule([r], makeEvent())).toBeNull()
   })
 })

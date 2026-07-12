@@ -52,7 +52,12 @@ function compilePattern(source: string): RegExp | null {
 /** True when the action routes somewhere — rules with an empty action are inert. */
 function actionHasTarget(action: DispatchRuleAction | undefined): boolean {
   if (!action) return false
-  return Boolean(action.teamId?.trim() || action.workflowId?.trim() || action.characterId?.trim())
+  return Boolean(
+    action.teamId?.trim() ||
+    action.workflowId?.trim() ||
+    action.characterId?.trim() ||
+    action.respondViaAdapterId?.trim()
+  )
 }
 
 /**
@@ -123,6 +128,15 @@ export interface EffectiveRouting {
    */
   characterId: string | undefined
   characterSource: "override" | "rule" | "none"
+  /**
+   * Bot instance the reply should be delivered through (multi-bot
+   * cross-account send). Only a rule can set this in v1 — there is no
+   * conversation-override or instance-default layer. `undefined` keeps
+   * the receiving bot as the sender. The runtime validates the target
+   * (exists, enabled, same platform) at dispatch time.
+   */
+  respondViaAdapterId: string | undefined
+  respondViaSource: "rule" | "none"
 }
 
 /**
@@ -193,5 +207,23 @@ export function resolveEffectiveRouting(
     characterSource = "rule"
   }
 
-  return { teamId, teamSource, workflowId, workflowSource, characterId, characterSource }
+  // ── respond-via bot (rule-only layer) ─────────────────────────────────────
+  let respondViaAdapterId: string | undefined
+  let respondViaSource: EffectiveRouting["respondViaSource"] = "none"
+  const ruleRespondVia = ruleHit?.action.respondViaAdapterId?.trim()
+  if (ruleRespondVia) {
+    respondViaAdapterId = ruleRespondVia
+    respondViaSource = "rule"
+  }
+
+  return {
+    teamId,
+    teamSource,
+    workflowId,
+    workflowSource,
+    characterId,
+    characterSource,
+    respondViaAdapterId,
+    respondViaSource,
+  }
 }

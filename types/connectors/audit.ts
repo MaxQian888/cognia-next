@@ -2,6 +2,20 @@ export type AuditKind =
   | "delivery.success"
   | "delivery.error"
   | "delivery.deadlettered"
+  // Circuit-open failover (multi-bot): the job's own adapter had an open
+  // breaker, so the runner re-enqueued the payload through an enabled
+  // same-platform sibling from `AdapterInstanceRow.failoverAdapterIds`.
+  // Emitted on the ORIGINAL adapter with `fields.failoverToAdapterId` +
+  // `fields.newJobId`; the original job row is dead-lettered with reason
+  // "failover" so the Outbound tab keeps the paper trail.
+  | "delivery.failover"
+  // Rate-limit spillover (multi-bot load balancing): the job's own adapter
+  // had an exhausted token bucket, so the runner re-enqueued the payload
+  // through a same-platform sibling from `AdapterInstanceRow.balanceAdapterIds`.
+  // Emitted on the ORIGINAL adapter with `fields.balancedToAdapterId` +
+  // `fields.newJobId`; the original job row is dead-lettered with reason
+  // "balanced" so the Outbound tab keeps the paper trail.
+  | "delivery.balanced"
   | "delivery.downgraded"
   | "inbound.received"
   | "inbound.deduped"
@@ -120,6 +134,12 @@ export type AuditKind =
   // `fields.teamId` / `fields.workflowId` / `fields.characterId` (the axis
   // the rule decided), and `fields.sourceMessageId`.
   | "dispatch.rule_matched"
+  // Multi-bot cross-account send: a dispatch rule asked for the reply to be
+  // delivered through another bot instance (`action.respondViaAdapterId`).
+  // Carries `fields.targetAdapterId`, `fields.applied` (false when the
+  // target was missing / disabled / muted / cross-platform and the runtime
+  // fell back to the receiving bot) and, when not applied, `fields.reason`.
+  | "dispatch.respond_via"
   // Visual Workflow dispatch from an inbound IM message (workflow⇄IM parity).
   // Fired when `overrideRow.workflowId` routed the turn to `startWorkflowFromIM`
   // (`lib/workflow/runtime/start-from-im.ts`) instead of the single-character

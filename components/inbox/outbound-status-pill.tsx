@@ -160,6 +160,19 @@ function OutboundSourceBadge({ job }: { job: OutboundJobRow }) {
     )
   }
 
+  if (job.source === "plugin") {
+    // ctx.connectors.enqueueSend — plugin-driven durable sends.
+    return (
+      <span
+        data-testid={`outbound-source-badge-${job.id}`}
+        data-source="plugin"
+        className="inline-flex items-center rounded border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-600 dark:text-rose-400"
+      >
+        {t("plugin")}
+      </span>
+    )
+  }
+
   if (job.source === "skill") {
     // im.* built-in skill sends (W2): new-chat first message / broadcast.
     return (

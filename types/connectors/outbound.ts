@@ -22,6 +22,22 @@ export interface OutboundRequest {
     sourceMessageId?: string
     /** When this comes from a scheduled task, the task id. */
     scheduledTaskId?: string
+    /**
+     * Set when the outbound runner re-enqueued this job through a failover
+     * sibling because the original adapter's circuit was open. Carries the
+     * ORIGINAL adapter id, both as an audit trail and as the single-hop
+     * guard: a job that already failed over once is dead-lettered (never
+     * re-failed-over) if the sibling's circuit is open too.
+     */
+    failoverFromAdapterId?: string
+    /**
+     * Set when the outbound runner re-enqueued this job through a
+     * load-balancing sibling because the original adapter's token bucket
+     * was exhausted. Carries the ORIGINAL adapter id; together with
+     * `failoverFromAdapterId` it forms the single-hop guard — a job that
+     * was rerouted once (either mechanism) is never rerouted again.
+     */
+    balancedFromAdapterId?: string
   }
 }
 

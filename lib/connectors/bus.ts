@@ -692,6 +692,12 @@ export class ConnectorBus {
       matches = findMatchingWorkflows("trigger.connector.inbound", {
         adapterId: event.adapterId,
         conversationKey: event.conversationKey,
+        // Fine-grained trigger filters (senderIds / channelKinds /
+        // keywords / requireMention on the trigger node) match on these.
+        senderId: event.sender.remoteUserId,
+        channelKind: event.channel.kind,
+        plainText: event.plainText,
+        selfMentioned: event.mentions.selfMentioned,
       })
     } catch {
       return
@@ -787,6 +793,34 @@ export class ConnectorBus {
       }
     }
     await a.delete(messageId)
+    return { ok: true }
+  }
+
+  /**
+   * Add an emoji reaction to an already-sent message through an adapter
+   * that supports it (`PlatformAdapter.addReaction`). Mirrors
+   * {@link deleteOutbound}: returns a uniform `{ ok }` result instead of
+   * throwing on a missing adapter / unsupported platform.
+   */
+  async addReactionOutbound(
+    adapterId: string,
+    messageId: string,
+    emojiType: string
+  ): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.addReaction) {
+      return {
+        ok: false,
+        error: { code: "unsupported", message: "adapter cannot add reactions", retryable: false },
+      }
+    }
+    await a.addReaction(messageId, emojiType)
     return { ok: true }
   }
 
@@ -1051,9 +1085,7 @@ export class ConnectorBus {
       const requestId = String(resolvedBinding.payload?.["requestId"] ?? "")
       const toolName = String(resolvedBinding.payload?.["toolName"] ?? "")
       const decision = String(resolvedBinding.payload?.["decision"] ?? "deny") as
-        | "allow"
-        | "deny"
-        | "allow_session"
+        "allow" | "deny" | "allow_session"
       try {
         const [{ applyToolApprovalCallback }, { resolveApproval }] = await Promise.all([
           import("@/lib/connectors/hitl/tool-approval"),

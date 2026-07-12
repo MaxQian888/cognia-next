@@ -17,7 +17,8 @@
  *     so repeated sends of the same URL don't re-upload
  */
 
-import type { MessageSegment } from "@/types/connectors/segment"
+import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
+import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import {
   connectorsLarkUploadFile,
   connectorsLarkUploadImage,
@@ -158,7 +159,75 @@ export async function resolveLarkMediaKeys(
       continue
     }
 
+    if (seg.type === "a2ui") {
+      // A2UI Image nodes with a remote src degrade to a markdown link in
+      // `card.ts` (Lark `img` elements only accept an uploaded image_key).
+      // Upload each remote image here so the card renders a real `img`.
+      // Per-URL failures degrade to today's link fallback instead of
+      // failing the whole card — a broken CDN image must not kill an
+      // otherwise deliverable interactive card.
+      const remoteUrls = collectA2UIRemoteImageUrls(seg.content)
+      if (remoteUrls.length === 0) {
+        out.push(seg)
+        continue
+      }
+      const mapping = new Map<string, string>()
+      for (const url of remoteUrls) {
+        const cached = cache?.get(url)
+        if (cached) {
+          mapping.set(url, cached)
+          continue
+        }
+        try {
+          const key = await uploadImage({ accessToken: await token(), sourceUrl: url })
+          cache?.set(url, key)
+          mapping.set(url, key)
+        } catch {
+          // Leave the URL in place — card.ts renders it as a link.
+        }
+      }
+      out.push(
+        mapping.size > 0 ? { ...seg, content: replaceA2UIImageUrls(seg.content, mapping) } : seg
+      )
+      continue
+    }
+
     out.push(seg)
   }
   return out
+}
+
+/** Collect every remote (http/https) Image `src`/`url` inside a surface. */
+export function collectA2UIRemoteImageUrls(surface: A2UISegmentContent): string[] {
+  const urls = new Set<string>()
+  walkA2UISurface(surface, (node) => {
+    if (node.component !== "Image") return
+    const src = node.raw.src ?? node.raw.url
+    if (typeof src === "string" && needsUpload(src)) urls.add(src)
+  })
+  return [...urls]
+}
+
+/**
+ * Return a deep-cloned surface whose Image nodes have their remote
+ * `src`/`url` swapped for the uploaded image_key. The original surface is
+ * never mutated — outbound requests are persisted rows and a retry must
+ * re-serialize from the same source of truth.
+ */
+export function replaceA2UIImageUrls(
+  surface: A2UISegmentContent,
+  mapping: Map<string, string>
+): A2UISegmentContent {
+  const clone = structuredClone(surface)
+  walkA2UISurface(clone, (node) => {
+    if (node.component !== "Image") return
+    for (const field of ["src", "url"] as const) {
+      const value = node.raw[field]
+      if (typeof value === "string") {
+        const key = mapping.get(value)
+        if (key) node.raw[field] = key
+      }
+    }
+  })
+  return clone
 }

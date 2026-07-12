@@ -44,6 +44,7 @@ import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
 import { AiBindingDefaults } from "../../forms/ai-binding-defaults"
 import { DispatchRules } from "../../forms/dispatch-rules"
+import { OutboundTuning } from "../../forms/outbound-tuning"
 import { UsagePresence } from "../../forms/usage-presence"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterTransportLabelKey } from "../platform-meta"
@@ -138,6 +139,10 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * keyword/regex/sender/channel → character|team|workflow routing;
        * self-managing, one mount covers every platform. */}
       <DispatchRules adapterId={row.id} />
+
+      {/* Per-bot outbound throttle/breaker tuning + circuit-open failover
+       * targets (multi-bot). Self-managing, one mount covers every platform. */}
+      <OutboundTuning adapterId={row.id} />
 
       {/* End-to-end verify: send a synthetic message through the same
        * bus path the runner uses. Lives here (not in the create dialog)

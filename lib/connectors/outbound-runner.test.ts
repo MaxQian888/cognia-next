@@ -22,11 +22,13 @@ import { listRecent } from "@/lib/db/connector-audit"
 import {
   __resetAdapterRuntimeStateForTesting,
   ConversationLane,
+  DEFAULT_OUTBOUND_TUNING,
   getAdapterRuntimeStateSnapshot,
+  sanitizeOutboundTuning,
   startOutboundRunner,
 } from "./outbound-runner"
 import type { PlatformAdapter, OutboundResult } from "@/types/connectors"
-import type { OutboundJobRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow, OutboundJobRow } from "@/lib/db/connector-types"
 
 // Plugin connector hook + PII gate mocked so the outbound block/transform path
 // is deterministic. Default: allow + PII-clean (so the Task 38/39 tests are
@@ -837,5 +839,407 @@ describe("outbound-runner — event-driven loop", () => {
     expect(send).toHaveBeenCalledTimes(1)
     controller.abort()
     await promise
+  })
+})
+
+// ── Per-bot outbound tuning + circuit-open failover (multi-bot) ──────────────
+
+/** Seed an adapterInstances row the runner can read tuning/failover off. */
+function seedInstance(id: string, overrides: Partial<AdapterInstanceRow> = {}): Promise<unknown> {
+  return getDb().adapterInstances.put({
+    id,
+    type: "telegram",
+    displayName: `Instance ${id}`,
+    enabled: true,
+    transportMode: "webhook",
+    settings: {},
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+    trigger: {
+      rules: [{ kind: "private-default" }],
+      blockers: [],
+      storeUnmatchedInDraftMode: false,
+    },
+    defaultMode: "auto",
+    createdAt: 0,
+    updatedAt: 0,
+    ...overrides,
+  } as AdapterInstanceRow)
+}
+
+/** Poll until `predicate` holds over the current queue rows (or time out). */
+async function waitForJobs(
+  predicate: (jobs: OutboundJobRow[]) => boolean
+): Promise<OutboundJobRow[]> {
+  let jobs: OutboundJobRow[] = []
+  for (let i = 0; i < 50; i++) {
+    jobs = await getDb().outboundQueue.toArray()
+    if (predicate(jobs)) break
+    await new Promise<void>((r) => setTimeout(r, 20))
+  }
+  return jobs
+}
+
+describe("sanitizeOutboundTuning", () => {
+  it("returns the runner defaults for an absent tuning block", () => {
+    expect(sanitizeOutboundTuning(undefined)).toEqual(DEFAULT_OUTBOUND_TUNING)
+    expect(sanitizeOutboundTuning({})).toEqual(DEFAULT_OUTBOUND_TUNING)
+  })
+
+  it("folds partial tuning over the defaults", () => {
+    const effective = sanitizeOutboundTuning({ rateCapacity: 3, breakerCooldownMs: 5_000 })
+    expect(effective.rateCapacity).toBe(3)
+    expect(effective.breakerCooldownMs).toBe(5_000)
+    expect(effective.rateRefillPerSec).toBe(DEFAULT_OUTBOUND_TUNING.rateRefillPerSec)
+    expect(effective.breakerWindowMs).toBe(DEFAULT_OUTBOUND_TUNING.breakerWindowMs)
+  })
+
+  it("degrades out-of-range knobs to their defaults individually", () => {
+    const effective = sanitizeOutboundTuning({
+      rateCapacity: 0,
+      rateRefillPerSec: -1,
+      breakerWindowMs: Number.NaN,
+      breakerFailureThresholdPct: 250, // > 100 — invalid percentage
+      breakerMinEvents: 2.6, // rounded, not rejected
+    })
+    expect(effective.rateCapacity).toBe(DEFAULT_OUTBOUND_TUNING.rateCapacity)
+    expect(effective.rateRefillPerSec).toBe(DEFAULT_OUTBOUND_TUNING.rateRefillPerSec)
+    expect(effective.breakerWindowMs).toBe(DEFAULT_OUTBOUND_TUNING.breakerWindowMs)
+    expect(effective.breakerFailureThresholdPct).toBe(
+      DEFAULT_OUTBOUND_TUNING.breakerFailureThresholdPct
+    )
+    expect(effective.breakerMinEvents).toBe(3)
+  })
+})
+
+describe("outbound-runner — per-bot outbound tuning", () => {
+  it("honours a per-bot rate capacity (capacity 1 → second job rate_limited)", async () => {
+    const adapterId = "a_tuned_rate"
+    await seedInstance(adapterId, {
+      outboundTuning: { rateCapacity: 1, rateRefillPerSec: 0.001 },
+    })
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm" }))
+    const adapters = new Map([[adapterId, adapter]])
+    // Same conversation → FIFO lane → deterministic order.
+    await enqueue(adapterId, `telegram:${adapterId}:chat`, "k_rate_1")
+    await enqueue(adapterId, `telegram:${adapterId}:chat`, "k_rate_2")
+
+    const { promise, stop } = createRunner(adapters)
+    const jobs = await waitForJobs(
+      (rows) => rows.length === 2 && rows.every((j) => j.status !== "pending")
+    )
+    stop()
+    await promise
+
+    const sent = jobs.filter((j) => j.status === "sent")
+    const limited = jobs.filter((j) => j.lastErrorCode === "rate_limited")
+    expect(sent).toHaveLength(1)
+    expect(limited).toHaveLength(1)
+    const audits = await listRecent(adapterId)
+    expect(audits.some((a) => a.kind === "rate_limit.tripped")).toBe(true)
+  })
+
+  it("honours per-bot breaker tuning (minEvents 1 → one failure opens the circuit)", async () => {
+    const adapterId = "a_tuned_brk"
+    await seedInstance(adapterId, { outboundTuning: { breakerMinEvents: 1 } })
+    const adapter = makeAdapter(adapterId, async () => ({
+      ok: false,
+      error: { code: "validation", message: "bad payload", retryable: false },
+    }))
+    const adapters = new Map([[adapterId, adapter]])
+    await enqueue(adapterId, `telegram:${adapterId}:chat`, "k_brk_1")
+    await enqueue(adapterId, `telegram:${adapterId}:chat`, "k_brk_2")
+
+    const { promise, stop } = createRunner(adapters)
+    const jobs = await waitForJobs(
+      (rows) => rows.length === 2 && rows.every((j) => j.status === "deadlettered")
+    )
+    stop()
+    await promise
+
+    // First failure trips the tuned breaker (default minEvents=5 would not),
+    // so the second job dead-letters on the circuit gate without a send.
+    expect(jobs.every((j) => j.status === "deadlettered")).toBe(true)
+    expect(jobs.some((j) => j.lastErrorCode === "circuit_open")).toBe(true)
+    expect(adapter.send).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("outbound-runner — circuit-open failover", () => {
+  it("re-enqueues via the failover sibling instead of dead-lettering (single hop)", async () => {
+    const primary = "a_fo"
+    const sibling = "b_fo"
+    await seedInstance(primary, {
+      outboundTuning: { breakerMinEvents: 1 },
+      failoverAdapterIds: [sibling],
+    })
+    await seedInstance(sibling)
+    const failing = makeAdapter(primary, async () => ({
+      ok: false,
+      error: { code: "platform_5xx", message: "boom", retryable: false },
+    }))
+    const healthy = makeAdapter(sibling, async () => ({ ok: true, platformMessageId: "pm_fo" }))
+    const adapters = new Map([
+      [primary, failing],
+      [sibling, healthy],
+    ])
+    await enqueue(primary, `telegram:${primary}:chat`, "k_fo_1")
+    await enqueue(primary, `telegram:${primary}:chat`, "k_fo_2")
+
+    const { promise, stop } = createRunner(adapters)
+    const jobs = await waitForJobs((rows) =>
+      rows.some((j) => j.adapterId === sibling && j.status === "sent")
+    )
+    stop()
+    await promise
+
+    const failedOver = jobs.find((j) => j.lastErrorCode === "failover")
+    expect(failedOver).toBeDefined()
+    const rerouted = jobs.find((j) => j.adapterId === sibling)
+    expect(rerouted).toBeDefined()
+    expect(rerouted!.status).toBe("sent")
+    expect(rerouted!.conversationKey).toBe(`telegram:${sibling}:chat`)
+    expect(rerouted!.request.conversationRef.adapterId).toBe(sibling)
+    expect(rerouted!.request.metadata.failoverFromAdapterId).toBe(primary)
+    // Derived idempotency key — never collides with the original.
+    expect(rerouted!.idempotencyKey).toBe(`k_fo_2:fo:${sibling}`)
+    const audits = await listRecent(primary)
+    expect(audits.some((a) => a.kind === "delivery.failover")).toBe(true)
+  })
+
+  it("never fails over twice: a job that already hopped dead-letters as circuit_open", async () => {
+    const primary = "a_fo_guard"
+    const sibling = "b_fo_guard"
+    await seedInstance(primary, {
+      outboundTuning: { breakerMinEvents: 1 },
+      failoverAdapterIds: [sibling],
+    })
+    await seedInstance(sibling)
+    const failing = makeAdapter(primary, async () => ({
+      ok: false,
+      error: { code: "platform_5xx", message: "boom", retryable: false },
+    }))
+    const adapters = new Map([
+      [primary, failing],
+      [sibling, makeAdapter(sibling, async () => ({ ok: true }))],
+    ])
+    // Trip the breaker with a first (failing, non-retryable) job.
+    await enqueue(primary, `telegram:${primary}:chat`, "k_guard_1")
+    // The second job pretends it ALREADY failed over from elsewhere.
+    await enqueueOutbound({
+      adapterId: primary,
+      conversationKey: `telegram:${primary}:chat`,
+      request: {
+        conversationRef: { platform: "telegram", adapterId: primary },
+        segments: [{ type: "text", text: "hello" }],
+        metadata: { idempotencyKey: "k_guard_2", failoverFromAdapterId: "somewhere_else" },
+      },
+      source: "ai-run",
+    })
+
+    const { promise, stop } = createRunner(adapters)
+    const jobs = await waitForJobs(
+      (rows) => rows.length === 2 && rows.every((j) => j.status === "deadlettered")
+    )
+    stop()
+    await promise
+
+    expect(jobs).toHaveLength(2)
+    expect(jobs.some((j) => j.lastErrorCode === "circuit_open")).toBe(true)
+    // No third job was minted on the sibling.
+    expect(jobs.every((j) => j.adapterId === primary)).toBe(true)
+  })
+
+  it("skips disabled/muted/cross-platform siblings when picking the failover target", async () => {
+    const primary = "a_fo_pick"
+    await seedInstance(primary, {
+      outboundTuning: { breakerMinEvents: 1 },
+      failoverAdapterIds: ["b_disabled", "b_muted", "b_other_platform", "b_ok"],
+    })
+    await seedInstance("b_disabled", { enabled: false })
+    await seedInstance("b_muted", { muted: true })
+    await seedInstance("b_other_platform", { type: "discord" })
+    await seedInstance("b_ok")
+    const failing = makeAdapter(primary, async () => ({
+      ok: false,
+      error: { code: "platform_5xx", message: "boom", retryable: false },
+    }))
+    const adapters = new Map([
+      [primary, failing],
+      ["b_ok", makeAdapter("b_ok", async () => ({ ok: true }))],
+    ])
+    await enqueue(primary, `telegram:${primary}:chat`, "k_pick_1")
+    await enqueue(primary, `telegram:${primary}:chat`, "k_pick_2")
+
+    const { promise, stop } = createRunner(adapters)
+    const jobs = await waitForJobs((rows) =>
+      rows.some((j) => j.adapterId === "b_ok" && j.status === "sent")
+    )
+    stop()
+    await promise
+
+    const rerouted = jobs.filter((j) => j.adapterId !== primary)
+    expect(rerouted).toHaveLength(1)
+    expect(rerouted[0].adapterId).toBe("b_ok")
+    expect(rerouted[0].status).toBe("sent")
+  })
+})
+
+describe("outbound-runner — rate-limit load balancing", () => {
+  it("spills the job onto a balance sibling when the bucket is exhausted (single hop)", async () => {
+    const primary = "a_lb"
+    const sibling = "b_lb"
+    await seedInstance(primary, {
+      // Capacity 1 with a negligible refill: the second job hits an empty bucket.
+      outboundTuning: { rateCapacity: 1, rateRefillPerSec: 0.001 },
+      balanceAdapterIds: [sibling],
+    })
+    await seedInstance(sibling)
+    const busy = makeAdapter(primary, async () => ({ ok: true, platformMessageId: "pm_a" }))
+    const spare = makeAdapter(sibling, async () => ({ ok: true, platformMessageId: "pm_b" }))
+    const adapters = new Map([
+      [primary, busy],
+      [sibling, spare],
+    ])
+    await enqueue(primary, `telegram:${primary}:chat`, "k_lb_1")
+    await enqueue(primary, `telegram:${primary}:chat`, "k_lb_2")
+
+    const { promise, stop } = createRunner(adapters)
+    const jobs = await waitForJobs((rows) =>
+      rows.some((j) => j.adapterId === sibling && j.status === "sent")
+    )
+    stop()
+    await promise
+
+    const balanced = jobs.find((j) => j.lastErrorCode === "balanced")
+    expect(balanced).toBeDefined()
+    expect(balanced!.status).toBe("deadlettered")
+    const rerouted = jobs.find((j) => j.adapterId === sibling)
+    expect(rerouted).toBeDefined()
+    expect(rerouted!.status).toBe("sent")
+    expect(rerouted!.conversationKey).toBe(`telegram:${sibling}:chat`)
+    expect(rerouted!.request.conversationRef.adapterId).toBe(sibling)
+    expect(rerouted!.request.metadata.balancedFromAdapterId).toBe(primary)
+    // Derived idempotency key — never collides with the original.
+    expect(rerouted!.idempotencyKey).toBe(`k_lb_2:lb:${sibling}`)
+    const audits = await listRecent(primary)
+    expect(audits.some((a) => a.kind === "delivery.balanced")).toBe(true)
+  })
+
+  it("defers behind the rate limit as before when the sibling has no capacity", async () => {
+    const primary = "a_lb_full"
+    const sibling = "b_lb_full"
+    await seedInstance(primary, {
+      outboundTuning: { rateCapacity: 1, rateRefillPerSec: 0.001 },
+      balanceAdapterIds: [sibling],
+    })
+    // Sibling is tracked by the runner AND has an exhausted bucket of its own.
+    await seedInstance(sibling, {
+      outboundTuning: { rateCapacity: 1, rateRefillPerSec: 0.001 },
+    })
+    const adapters = new Map([
+      [primary, makeAdapter(primary, async () => ({ ok: true }))],
+      [sibling, makeAdapter(sibling, async () => ({ ok: true }))],
+    ])
+    // Drain the sibling's single token with its own job first, then two on primary.
+    await enqueue(sibling, `telegram:${sibling}:chat`, "k_lbf_sib")
+    await enqueue(primary, `telegram:${primary}:chat`, "k_lbf_1")
+    await enqueue(primary, `telegram:${primary}:chat`, "k_lbf_2")
+
+    const { promise, stop } = createRunner(adapters)
+    const jobs = await waitForJobs(
+      (rows) =>
+        rows.filter((j) => j.status === "sent").length === 2 &&
+        rows.some((j) => j.lastErrorCode === "rate_limited")
+    )
+    stop()
+    await promise
+
+    // No spillover happened: exactly the original three jobs, the third
+    // deferred behind the primary's rate limit (not dead-lettered).
+    expect(jobs).toHaveLength(3)
+    expect(jobs.every((j) => j.adapterId === primary || j.adapterId === sibling)).toBe(true)
+    const deferred = jobs.find((j) => j.lastErrorCode === "rate_limited")
+    expect(deferred).toBeDefined()
+    expect(deferred!.adapterId).toBe(primary)
+    expect(deferred!.status).not.toBe("deadlettered")
+  })
+
+  it("never balances a job that already hopped (shared single-hop guard)", async () => {
+    const primary = "a_lb_guard"
+    const sibling = "b_lb_guard"
+    await seedInstance(primary, {
+      outboundTuning: { rateCapacity: 1, rateRefillPerSec: 0.001 },
+      balanceAdapterIds: [sibling],
+    })
+    await seedInstance(sibling)
+    const adapters = new Map([
+      [primary, makeAdapter(primary, async () => ({ ok: true }))],
+      [sibling, makeAdapter(sibling, async () => ({ ok: true }))],
+    ])
+    // Drain the primary's token.
+    await enqueue(primary, `telegram:${primary}:chat`, "k_lbg_1")
+    // Second job pretends it ALREADY failed over from elsewhere.
+    await enqueueOutbound({
+      adapterId: primary,
+      conversationKey: `telegram:${primary}:chat`,
+      request: {
+        conversationRef: { platform: "telegram", adapterId: primary },
+        segments: [{ type: "text", text: "hello" }],
+        metadata: { idempotencyKey: "k_lbg_2", failoverFromAdapterId: "somewhere_else" },
+      },
+      source: "ai-run",
+    })
+
+    const { promise, stop } = createRunner(adapters)
+    const jobs = await waitForJobs(
+      (rows) =>
+        rows.some((j) => j.status === "sent") &&
+        rows.some((j) => j.lastErrorCode === "rate_limited")
+    )
+    stop()
+    await promise
+
+    // The already-hopped job deferred behind the rate limit; no new job on
+    // the sibling was minted.
+    expect(jobs.every((j) => j.adapterId === primary)).toBe(true)
+  })
+})
+
+describe("outbound-runner — per-conversation mute", () => {
+  it("defers delivery on a muted conversation while the adapter keeps sending elsewhere", async () => {
+    const adapterId = "a_conv_mute"
+    await seedInstance(adapterId)
+    const mutedKey = `telegram:${adapterId}:muted_chat`
+    const openKey = `telegram:${adapterId}:open_chat`
+    await upsertByConversationKey({
+      conversationKey: mutedKey,
+      sessionId: "s_mute",
+      muted: true,
+    })
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm" }))
+    const adapters = new Map([[adapterId, adapter]])
+    await enqueue(adapterId, mutedKey, "k_mute_1")
+    await enqueue(adapterId, openKey, "k_open_1")
+
+    const { promise, stop } = createRunner(adapters)
+    const jobs = await waitForJobs(
+      (rows) =>
+        rows.some((j) => j.conversationKey === openKey && j.status === "sent") &&
+        rows.some((j) => j.conversationKey === mutedKey && j.lastErrorCode === "muted")
+    )
+    stop()
+    await promise
+
+    const mutedJob = jobs.find((j) => j.conversationKey === mutedKey)
+    expect(mutedJob).toBeDefined()
+    expect(mutedJob!.status).not.toBe("sent")
+    expect(mutedJob!.status).not.toBe("deadlettered")
+    expect(mutedJob!.lastErrorCode).toBe("muted")
+    const openJob = jobs.find((j) => j.conversationKey === openKey)
+    expect(openJob!.status).toBe("sent")
+    // Only the open conversation reached the platform.
+    expect(adapter.send).toHaveBeenCalledTimes(1)
+    const audits = await listRecent(adapterId)
+    expect(audits.some((a) => a.reason === "muted" && a.conversationKey === mutedKey)).toBe(true)
   })
 })

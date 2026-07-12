@@ -176,6 +176,13 @@ describe("OutboundStatusPill", () => {
       expect(badge).toHaveAttribute("data-source", "skill")
     })
 
+    it("renders Plugin badge when source=plugin (ctx.connectors.enqueueSend)", () => {
+      mockJob = { ...makeJob("pl", "sent"), source: "plugin" }
+      render(<OutboundStatusPill jobId="pl" />)
+      const badge = screen.getByTestId("outbound-source-badge-pl")
+      expect(badge).toHaveAttribute("data-source", "plugin")
+    })
+
     it("omits the workflow badge when source=workflow but sourceWorkflow is missing", () => {
       mockJob = { ...makeJob("wfo", "sent"), source: "workflow" }
       render(<OutboundStatusPill jobId="wfo" />)

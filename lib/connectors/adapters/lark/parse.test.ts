@@ -297,6 +297,63 @@ describe("parseLarkEventEnvelope", () => {
     })
   })
 
+  describe("im.message.reaction.{created,deleted}_v1 produce system reaction events", () => {
+    it("created_v1 emits kind=system / systemKind=reaction_added with the operator's open_id", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: "evt_react_add",
+          event_type: "im.message.reaction.created_v1",
+          app_id: "cli_app_001",
+        },
+        event: {
+          message_id: "om_reacted_msg",
+          reaction_type: { emoji_type: "THUMBSUP" },
+          operator_type: "user",
+          user_id: { open_id: "ou_reactor_001" },
+          action_time: "1714900300000",
+        },
+      }
+      const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+      expect(r).not.toBeNull()
+      expect(r!.kind).toBe("system")
+      expect(r!.systemKind).toBe("reaction_added")
+      expect(r!.sender.remoteUserId).toBe("ou_reactor_001")
+      expect(r!.messageId).toContain("THUMBSUP")
+      expect(r!.segments).toEqual([])
+    })
+
+    it("deleted_v1 emits systemKind=reaction_removed", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: "evt_react_del",
+          event_type: "im.message.reaction.deleted_v1",
+        },
+        event: {
+          message_id: "om_reacted_msg",
+          reaction_type: { emoji_type: "SMILE" },
+          operator_type: "user",
+          user_id: { open_id: "ou_reactor_002" },
+        },
+      }
+      const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+      expect(r!.systemKind).toBe("reaction_removed")
+    })
+
+    it("returns null when message_id is missing", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: "evt_react_bad",
+          event_type: "im.message.reaction.created_v1",
+        },
+        event: { reaction_type: { emoji_type: "SMILE" } },
+      }
+      expect(parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)).toBeNull()
+    })
+  })
+
   describe("im.message.recalled_v1 produces a delete event", () => {
     it("emits kind=delete with replacesMessageId set", () => {
       const envelope: LarkEventEnvelope = {
@@ -444,5 +501,47 @@ describe("parseLarkBotMenuEvent — application.bot.menu_v6", () => {
         QUICK_COMMANDS
       )
     ).toBeNull()
+  })
+})
+
+describe("history-list mentions (flat id + id_type) — fetchHistory reprojection", () => {
+  // `/im/v1/messages` list items flatten the mention identity to a plain
+  // string discriminated by `id_type` (live events nest `{ open_id }`).
+  // fetchHistory wraps raw list items in synthetic receive_v1 envelopes, so
+  // the parser must accept both shapes or history events lose mentions.
+  const envelope = {
+    schema: "2.0",
+    header: { event_id: "hist:om_hist_001", event_type: "im.message.receive_v1" },
+    event: {
+      sender: { sender_id: { open_id: "ou_user_001" } },
+      message: {
+        message_id: "om_hist_001",
+        chat_id: "oc_group_chat_001",
+        chat_type: "group",
+        message_type: "text",
+        content: JSON.stringify({ text: "@Bot please look at this" }),
+        create_time: "1714900000000",
+        mentions: [
+          { key: "@_user_1", id: "ou_bot_self_001", id_type: "open_id", name: "Bot" },
+          // user_id-typed mentions cannot be compared against the bot's
+          // open_id — they must be dropped, not misclassified.
+          { key: "@_user_2", id: "uid_someone", id_type: "user_id", name: "Someone" },
+        ],
+      },
+    },
+  } as unknown as LarkEventEnvelope
+  const result = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+
+  it("returns a non-null event", () => {
+    expect(result).not.toBeNull()
+  })
+
+  it("detects the bot self-mention from the flat open_id shape", () => {
+    expect(result!.mentions.selfMentioned).toBe(true)
+    expect(result!.mentions.users).toContain(SELF_BOT_OPEN_ID)
+  })
+
+  it("drops non-open_id-typed flat mentions instead of misclassifying them", () => {
+    expect(result!.mentions.users).not.toContain("uid_someone")
   })
 })

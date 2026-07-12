@@ -73,13 +73,15 @@ export const LARK_CAPS: readonly Capability[] = [
  *     platforms with native checkbox support. The user-visible UX is
  *     "tap the dropdown, pick ✓ or ✗" — single round-trip but two
  *     visible steps, hence simulated.
- *   - Dialog / Drawer / Sheet → Lark Interactive Card v2 `form_dialog`
- *     element (ADR-0026 Track B). The mapper emits a Button that, when
- *     clicked, opens a Lark `form_dialog` carrying the surface's
- *     TextField / Select / DatePicker children. Callback round-trips
- *     through the `connectorCallbackBindings` table with
- *     `kind: "modal_open"` so the bus knows to project the submit
- *     payload back as `actionType: "submit"`.
+ *   - Dialog / Drawer / Sheet → inline section projection. Lark v1
+ *     interactive cards have no modal/drawer runtime, so the mapper
+ *     renders the overlay as a divider + bold title followed by its
+ *     children inline (TextField / Select / DatePicker / Button all keep
+ *     their individual callback bindings). The overlay semantics degrade
+ *     to "titled form section in the same card" — functional but not an
+ *     actual overlay, hence simulated. Card 2.0 `form_value` submits are
+ *     understood on the inbound side (`parseLarkInteractiveCallback`
+ *     lifts them to `actionType: "submit"`).
  *
  * Fallback (renders via plain text mirror):
  *   - Slider / Table / Chart / Pagination.

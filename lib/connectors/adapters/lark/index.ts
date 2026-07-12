@@ -28,7 +28,7 @@ import { normalizeQuickCommandList } from "@/lib/connectors/quick-commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import {
   serializeOutboundAsync,
-  serializeEdit,
+  serializeEditAsync,
   serializeDelete,
   serializeReaction,
 } from "./serialize"
@@ -136,7 +136,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
 
   /** Issue one authenticated Lark API call with an explicit bearer token. */
   async function sendHttp(
-    method: "GET" | "POST" | "PATCH" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     urlPath: string,
     body: unknown,
     token: string
@@ -169,7 +169,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
   }
 
   async function doRequest(
-    method: "GET" | "POST" | "PATCH" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     urlPath: string,
     body?: unknown,
     reqOpts?: { asUser?: boolean }
@@ -249,6 +249,18 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     healthState = "running"
     healthReason = undefined
 
+    // An empty selfBotOpenId silently disables self-mention detection —
+    // under the default `mention_only` at-strategy every group message
+    // would be dropped with no trace. Warn loudly so the operator knows
+    // to run the whoami probe (which persists the bot's open_id).
+    if (!opts.selfBotOpenId) {
+      loggers.network.warn(
+        "[lark] selfBotOpenId is empty — @-mention detection is disabled; " +
+          "run the bot identity probe (whoami) so mention_only gating can work",
+        { id: opts.id }
+      )
+    }
+
     // Inbound observability — the long-conn path was previously silent on
     // success and swallowed failures, so a non-working bot left no trace.
     // These [lark] info logs surface to stdout + the in-app log panel.
@@ -268,8 +280,14 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         id: opts.id,
         eventType: envelope.header?.event_type,
       })
-      // Interactive card callbacks — route to the callback channel.
-      if (envelope.header?.event_type === "im.interactive_message.action_triggered_v1") {
+      // Interactive card callbacks — route to the callback channel. Both
+      // the legacy v1 event name and the Card 2.0 `card.action.trigger`
+      // callback are accepted; `parseLarkInteractiveCallback` normalises
+      // the two payload shapes.
+      if (
+        envelope.header?.event_type === "im.interactive_message.action_triggered_v1" ||
+        envelope.header?.event_type === "card.action.trigger"
+      ) {
         const callback = parseLarkInteractiveCallback(opts.id, opts.selfBotOpenId, envelope)
         if (callback) {
           lastActivityAt = Date.now()
@@ -316,7 +334,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       // Second pass: download inbound rich media (image / file bytes) so the
       // model + inbound OCR see actual content rather than a bare platform key.
       // Best-effort and self-contained — never blocks or fails the dispatch.
-      await enrichLarkInboundMedia(event, { adapterId: opts.id, getAccessToken: getTat })
+      await enrichLarkInboundMedia(event, { getAccessToken: getTat })
       await ctx.emit(event)
     }
 
@@ -404,8 +422,15 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       // Replies are the identity-bearing path — send as the connected user when
       // opted in. Edits / deletes / reactions stay on the bot identity (they act
       // on bot-owned messages such as live-activity / progress cards).
-      await doRequest(call.method, urlPath, call.payload, { asUser: opts.sendAsUser === true })
-      return { ok: true }
+      const resp = (await doRequest(call.method, urlPath, call.payload, {
+        asUser: opts.sendAsUser === true,
+      })) as { data?: { message_id?: string } } | null
+      // Surface the real platform message id so the outbound runner persists
+      // it on the job row — downstream consumers (workflow send node output,
+      // edit/reaction chains, delivery audit) need the `om_…` id, not the
+      // idempotency-key placeholder the runner falls back to.
+      const messageId = resp?.data?.message_id
+      return { ok: true, ...(messageId ? { platformMessageId: messageId } : {}) }
     } catch (err) {
       return {
         ok: false,
@@ -427,10 +452,17 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           uploadCache,
         })
       )
-      const call = serializeEdit(messageId, { ...patch, segments: resolvedSegments })
+      const call = await serializeEditAsync(
+        messageId,
+        { ...patch, segments: resolvedSegments },
+        opts.id
+      )
       const urlPath = call.url.replace(LARK_API_BASE, "")
       await doRequest(call.method, urlPath, call.payload)
-      return { ok: true }
+      // An edit keeps the platform message id — echo it back so callers
+      // (workflow send node with editTargetMessageId, runner audit) get the
+      // same feedback shape as a fresh send.
+      return { ok: true, platformMessageId: messageId }
     } catch (err) {
       return {
         ok: false,
@@ -497,15 +529,45 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       const items = response?.data?.items ?? []
       for (const item of items) {
         if (yielded >= overallCap) return
+        // History items differ from live push events in TWO shapes (proven
+        // against the real API): the type field is `msg_type` (live:
+        // `message_type`) and the content JSON lives under `body.content`
+        // (live: `content`). Normalise into the live shape so
+        // `parseLarkEventEnvelope` → `buildSegments` sees real content
+        // instead of silently yielding empty events. Recalled messages
+        // ("This message was recalled") and system notices carry no
+        // recoverable content — skip them.
+        const raw = item as {
+          message_id?: string
+          chat_id?: string
+          chat_type?: string
+          msg_type?: string
+          body?: { content?: string }
+          mentions?: unknown
+          create_time?: string
+          thread_id?: string | null
+          deleted?: boolean
+        }
+        if (raw.deleted === true || raw.msg_type === "system") continue
+        const normalizedMessage = {
+          message_id: raw.message_id ?? "",
+          chat_id: raw.chat_id ?? chatId,
+          chat_type: raw.chat_type ?? (chatId.startsWith("oc_") ? "group" : "p2p"),
+          message_type: raw.msg_type ?? "",
+          content: raw.body?.content ?? "",
+          mentions: raw.mentions,
+          create_time: raw.create_time,
+          thread_id: raw.thread_id ?? null,
+        }
         const envelope: LarkEventEnvelope = {
           schema: "2.0",
           header: {
-            event_id: `hist:${(item as { message_id?: string }).message_id ?? "?"}`,
+            event_id: `hist:${raw.message_id ?? "?"}`,
             event_type: "im.message.receive_v1",
           },
           event: {
             sender: (item as { sender?: LarkEventEnvelope["event"]["sender"] }).sender,
-            message: item as unknown as LarkEventEnvelope["event"]["message"],
+            message: normalizedMessage as unknown as LarkEventEnvelope["event"]["message"],
           },
         }
         const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)

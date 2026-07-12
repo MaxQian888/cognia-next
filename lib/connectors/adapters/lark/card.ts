@@ -485,6 +485,25 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
         })
         break
       }
+      case "Dialog":
+      case "Drawer":
+      case "Sheet": {
+        // Simulated overlay projection — Lark v1 interactive cards have
+        // no modal/drawer runtime, so the overlay's children (already
+        // visited by `walkA2UISurface` via `body` / `children`) render
+        // inline. Emit a divider + bold title so the section reads as a
+        // distinct form block instead of blending into the card body.
+        flushAction()
+        elements.push({ tag: "hr" })
+        const title = stringValue(node.raw.title)
+        if (title) {
+          elements.push({
+            tag: "div",
+            text: { tag: "lark_md", content: `**${escapeLarkMarkdown(title)}**` },
+          })
+        }
+        break
+      }
       case "Row":
       case "Column":
       case "List":
@@ -573,10 +592,20 @@ export async function segmentsToLarkBodyAsync(
       })
       continue
     }
-    // Other segments (image / file / etc.): fall through to a textual
-    // placeholder element. The richer projection lives in `card.ts`
-    // sync `segmentToLarkBody` but Lark cards can't host an image_key
-    // mid-card without first uploading bytes.
+    // Image segments whose upload pre-pass already resolved a Lark
+    // image_key render as a real `img` element inside the combined card
+    // instead of degrading to a `[image]` placeholder.
+    if (seg.type === "image" && !seg.url.includes("://")) {
+      combinedElements.push({
+        tag: "img",
+        img_key: seg.url,
+        alt: { tag: "plain_text", content: seg.alt || "image" },
+      })
+      continue
+    }
+    // Other segments (file / voice / etc.): fall through to a textual
+    // placeholder element — Lark cards can't host those media kinds
+    // mid-card.
     combinedElements.push({
       tag: "div",
       text: { tag: "lark_md", content: `[${seg.type}]` },

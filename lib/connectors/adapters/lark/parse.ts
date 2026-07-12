@@ -9,6 +9,8 @@
  *   - im.chat.member.bot.deleted_v1     → kind="system" / member_removed (bot)
  *   - im.chat.member.user.added_v1      → kind="system" / member_added
  *   - im.chat.member.user.deleted_v1    → kind="system" / member_removed
+ *   - im.message.reaction.created_v1    → kind="system" / reaction_added
+ *   - im.message.reaction.deleted_v1    → kind="system" / reaction_removed
  *
  * `im.message.receive_v1` carries the only payload that produces a
  * StoredMessage downstream; the system events feed the audit log.
@@ -38,7 +40,15 @@ export interface LarkMentionId {
 
 export interface LarkMention {
   key: string
-  id: LarkMentionId
+  /**
+   * Live `im.message.receive_v1` events nest the identity
+   * (`{ open_id, user_id }`); the `/im/v1/messages` history list flattens
+   * it to a plain string discriminated by `id_type`. Both shapes reach this
+   * parser because `fetchHistory` reprojects raw list items through it.
+   */
+  id: LarkMentionId | string
+  /** History-list shape only: "open_id" | "union_id" | "user_id". */
+  id_type?: string
   name?: string
 }
 
@@ -48,9 +58,18 @@ export interface LarkSenderId {
 }
 
 export interface LarkSender {
+  /** Live-event shape (`im.message.receive_v1` push): nested ids. */
   sender_id: LarkSenderId
   sender_type?: string
   tenant_key?: string
+  /**
+   * History shape (`GET /im/v1/messages` items, wrapped into synthetic
+   * envelopes by `fetchHistory`): a flat `id` + `id_type` pair instead of
+   * the nested `sender_id`. `id_type` is `open_id` for human senders and
+   * `app_id` for bot/app senders (including our own bot's past messages).
+   */
+  id?: string
+  id_type?: string
 }
 
 export interface LarkMessage {
@@ -89,6 +108,12 @@ export interface LarkEventBody {
   operator_id?: LarkSenderId
   external?: boolean
   users?: Array<{ user_id?: LarkSenderId; name?: string }>
+  // im.message.reaction.{created,deleted}_v1
+  reaction_type?: { emoji_type?: string }
+  operator_type?: string
+  user_id?: LarkSenderId
+  app_id?: string
+  action_time?: string
 }
 
 export interface LarkEventEnvelope {
@@ -112,13 +137,25 @@ function buildPlatformIdentity(adapterId: string, openId: string): PlatformIdent
   }
 }
 
+/**
+ * Extract the open_id from either mention shape. Flat (history-list) ids
+ * only count when typed as open_id — a union_id/user_id cannot be compared
+ * against the bot's open_id, so it is dropped rather than misclassified.
+ */
+function mentionOpenId(mention: LarkMention): string | undefined {
+  if (typeof mention.id === "string") {
+    return mention.id_type === undefined || mention.id_type === "open_id" ? mention.id : undefined
+  }
+  return mention.id?.open_id
+}
+
 function detectMentions(
   selfBotOpenId: string,
   message: LarkMessage
 ): { selfMentioned: boolean; users: string[] } {
   const acc = new MentionAccumulator(selfBotOpenId)
   for (const mention of message.mentions ?? []) {
-    acc.add(mention.id?.open_id)
+    acc.add(mentionOpenId(mention))
   }
   return acc.finalize()
 }
@@ -436,6 +473,29 @@ export function parseLarkEventEnvelope(
     }
   }
 
+  // ── Message reactions (emoji added / removed) ────────────────────────
+  const reactionKinds: Record<string, "reaction_added" | "reaction_removed"> = {
+    "im.message.reaction.created_v1": "reaction_added",
+    "im.message.reaction.deleted_v1": "reaction_removed",
+  }
+  if (eventType && eventType in reactionKinds) {
+    // The reaction payload carries no chat_id — anchor the audit row to
+    // the reacted message id (same convention as read indicators above).
+    const messageId = envelope.event.message_id
+    if (!messageId) return null
+    const operator = envelope.event.user_id?.open_id
+    const emoji = envelope.event.reaction_type?.emoji_type ?? ""
+    return buildSystemEvent(
+      adapterId,
+      selfBotOpenId,
+      envelope,
+      reactionKinds[eventType],
+      messageId,
+      operator,
+      `lark.reaction:${eventType}:${emoji}:${envelope.header.event_id}`
+    )
+  }
+
   // ── Member changes (user + bot variants) ─────────────────────────────
   const memberAddRemove: Record<string, "member_added" | "member_removed"> = {
     "im.chat.member.bot.added_v1": "member_added",
@@ -465,7 +525,18 @@ export function parseLarkEventEnvelope(
   const message = envelope.event.message
   if (!sender || !message) return null
 
-  const openId = sender.sender_id?.open_id
+  // Live push events nest the sender id (`sender_id.open_id`); history items
+  // flatten it to `{id, id_type}` — `open_id` for humans, `app_id` for bots
+  // (including this bot's own past messages). Accept both so `fetchHistory`
+  // doesn't silently drop every message (proven live: the history API never
+  // returns the nested shape).
+  const openId =
+    sender.sender_id?.open_id ??
+    (typeof sender.id === "string" &&
+    sender.id.length > 0 &&
+    (sender.id_type === "open_id" || sender.id_type === "app_id")
+      ? sender.id
+      : undefined)
   if (!openId) return null
 
   const chatId = message.chat_id
@@ -604,6 +675,10 @@ export interface LarkInteractiveAction {
   input_value?: string
   /** select_static — display label of the chosen option. */
   text?: { content?: string }
+  /** Card 2.0 form container submit — field name → submitted value. */
+  form_value?: Record<string, unknown>
+  /** Card 2.0 native checkbox / checker — checked state. */
+  checked?: boolean
 }
 
 export interface LarkInteractiveEvent {
@@ -611,6 +686,8 @@ export interface LarkInteractiveEvent {
   action?: LarkInteractiveAction
   open_message_id?: string
   open_chat_id?: string
+  /** Card 2.0 (`card.action.trigger`) nests the message/chat ids here. */
+  context?: { open_message_id?: string; open_chat_id?: string }
   tenant_key?: string
   /** Token Lark expects on the response when the bot updates the card. */
   token?: string
@@ -619,8 +696,13 @@ export interface LarkInteractiveEvent {
 }
 
 /**
- * Project an `im.interactive_message.action_triggered_v1` envelope into
- * a `ConnectorCallbackEvent` for the bus callback channel.
+ * Project an interactive-card callback envelope into a
+ * `ConnectorCallbackEvent` for the bus callback channel.
+ *
+ * Accepts both callback generations:
+ *   - `im.interactive_message.action_triggered_v1` (legacy card callback)
+ *   - `card.action.trigger` (Card 2.0 callback — nests the message/chat
+ *     ids under `event.context` and adds `form_value` / `checked`)
  *
  * The `action.value.actionId` we baked at outbound time becomes the
  * `triggerId` so `ConnectorBus.dispatchConnectorCallback` resolves the
@@ -633,7 +715,13 @@ export function parseLarkInteractiveCallback(
   selfBotOpenId: string,
   envelope: LarkEventEnvelope
 ): ConnectorCallbackEvent | null {
-  if (envelope.header?.event_type !== "im.interactive_message.action_triggered_v1") return null
+  const eventType = envelope.header?.event_type
+  if (
+    eventType !== "im.interactive_message.action_triggered_v1" &&
+    eventType !== "card.action.trigger"
+  ) {
+    return null
+  }
   const event = envelope.event as unknown as LarkInteractiveEvent
   const action = event.action
   if (!action) return null
@@ -645,7 +733,12 @@ export function parseLarkInteractiveCallback(
   let actionType: ConnectorCallbackActionType = "button"
   let value = ""
   let payload: Record<string, unknown> | undefined
-  if (action.tag === "select_static") {
+  if (action.form_value && typeof action.form_value === "object") {
+    // Card 2.0 form container submit — the whole form travels in one
+    // callback; the bridge consumes it as `actionType: "submit"`.
+    actionType = "submit"
+    payload = action.form_value
+  } else if (action.tag === "select_static") {
     actionType = "select"
     value = action.option ?? ""
     // B4 — simulated Checkbox (ADR-0009 v41). The mapper marks the wire
@@ -668,9 +761,10 @@ export function parseLarkInteractiveCallback(
   } else if (action.tag === "input") {
     actionType = "input"
     value = action.input_value ?? ""
-  } else if (action.tag === "checkbox") {
+  } else if (action.tag === "checkbox" || typeof action.checked === "boolean") {
+    // Legacy checkbox tag or a Card 2.0 native checker element.
     actionType = "checkbox"
-    value = action.option ?? ""
+    value = typeof action.checked === "boolean" ? String(action.checked) : (action.option ?? "")
   } else if (action.tag === "button") {
     actionType = "button"
     value =
@@ -680,7 +774,8 @@ export function parseLarkInteractiveCallback(
     payload = action.value
   }
 
-  const chatId = event.open_chat_id
+  const chatId = event.open_chat_id ?? event.context?.open_chat_id
+  const originatingMessageId = event.open_message_id ?? event.context?.open_message_id
   const conversationKey = chatId ? buildConversationKey("lark", adapterId, chatId) : undefined
   const user: PlatformIdentity = {
     id: `lark:${operator.open_id}`,
@@ -699,7 +794,7 @@ export function parseLarkInteractiveCallback(
     actionType,
     value,
     payload,
-    originatingMessageId: event.open_message_id,
+    originatingMessageId,
     conversationKey,
     user,
     timestamp: envelope.header.create_time ? parseInt(envelope.header.create_time, 10) : Date.now(),

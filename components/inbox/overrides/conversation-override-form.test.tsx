@@ -77,6 +77,49 @@ describe("ConversationOverrideForm", () => {
     expect(persisted?.quietHours).toBeUndefined()
   })
 
+  it("persists the per-conversation mute flag and clears it when toggled off", async () => {
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_mute"
+        sessionId="s_mute"
+        onDone={onDone}
+      />
+    )
+    fireEvent.click(screen.getByTestId("conv-override-muted"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_mute")
+      .first()
+    expect(persisted?.muted).toBe(true)
+
+    // Toggle back off from the persisted row → cleared (undefined, not false).
+    const onDone2 = jest.fn()
+    render(
+      <ConversationOverrideForm
+        key="second"
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_mute"
+        sessionId="s_mute"
+        initialRow={persisted}
+        onDone={onDone2}
+      />
+    )
+    const mutedSwitches = screen.getAllByTestId("conv-override-muted")
+    fireEvent.click(mutedSwitches[mutedSwitches.length - 1])
+    const saves = screen.getAllByTestId("conv-override-save")
+    fireEvent.click(saves[saves.length - 1])
+    await waitFor(() => expect(onDone2).toHaveBeenCalled())
+    const cleared = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_mute")
+      .first()
+    expect(cleared?.muted).toBeUndefined()
+  })
+
   it("persists whitelisted skill ids and clears them when toggling back to inherit", async () => {
     const onDone = jest.fn()
     render(

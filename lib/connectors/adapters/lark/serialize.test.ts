@@ -2,6 +2,7 @@ import {
   serializeSend,
   serializeOutboundAsync,
   serializeEdit,
+  serializeEditAsync,
   serializeDelete,
   serializeReaction,
 } from "./serialize"
@@ -52,6 +53,31 @@ describe("serializeSend", () => {
     const call = serializeSend(makeReq({ channelId: "oc_chat_001", text: "test text" }))
     const content = JSON.parse(call.payload["content"] as string) as { text: string }
     expect(content.text).toBe("test text")
+  })
+
+  // Reply anchor — Lark replies go through the dedicated
+  // POST /im/v1/messages/:id/reply endpoint (no receive_id). Verified live:
+  // the plain send endpoint has no reply parameter, so before this branch
+  // `replyTo` was silently dropped on Lark (every other adapter honours it).
+  it("routes replyTo through the dedicated /reply endpoint", () => {
+    const req = { ...makeReq({ channelId: "oc_chat_001" }), replyTo: { messageId: "om_parent_1" } }
+    const call = serializeSend(req)
+    expect(call.method).toBe("POST")
+    expect(call.url).toContain("/im/v1/messages/om_parent_1/reply")
+    expect(call.payload["receive_id"]).toBeUndefined()
+    expect(call.payload["msg_type"]).toBe("text")
+    expect(call.payload["reply_in_thread"]).toBeUndefined()
+  })
+
+  it("sets reply_in_thread on the /reply endpoint when a thread anchor is present", () => {
+    const req = {
+      ...makeReq({ channelId: "oc_chat_001", threadTs: "thr_1" }),
+      replyTo: { messageId: "om_parent_2" },
+    }
+    const call = serializeSend(req)
+    expect(call.url).toContain("/im/v1/messages/om_parent_2/reply")
+    expect(call.payload["reply_in_thread"]).toBe(true)
+    expect(call.payload["parent_id"]).toBeUndefined()
   })
 
   // A4 — Phase 2 marker closed: serializer now honours explicit
@@ -175,14 +201,49 @@ describe("serializeOutboundAsync (explicit recipient routing)", () => {
     expect(call.payload["reply_in_thread"]).toBe(true)
     expect(call.payload["parent_id"]).toBe("thr_root_001")
   })
+
+  it("routes replyTo through the dedicated /reply endpoint on the async path", async () => {
+    const call = await serializeOutboundAsync(
+      { ...makeReq({ channelId: "oc_chat_001" }), replyTo: { messageId: "om_parent_9" } },
+      ADAPTER
+    )
+    expect(call.method).toBe("POST")
+    expect(call.url).toContain("/im/v1/messages/om_parent_9/reply")
+    expect(call.payload["receive_id"]).toBeUndefined()
+  })
 })
 
 describe("serializeEdit", () => {
   const req = makeReq({ channelId: "oc_chat_001", text: "edited" })
 
-  it("uses PATCH method", () => {
+  // Lark splits editing across two endpoints: PUT /im/v1/messages/:id for
+  // text/post edits, PATCH for interactive-card updates. The old code sent
+  // every edit as PATCH {msg_type, content}, which the card-update endpoint
+  // rejects for text bodies.
+  it("uses PUT for text edits (Lark edit-message endpoint)", () => {
     const call = serializeEdit("om_msg_001", req)
+    expect(call.method).toBe("PUT")
+  })
+
+  it("uses PATCH with a content-only payload for interactive (card) bodies", () => {
+    const cardReq: OutboundRequest = {
+      ...makeReq({ channelId: "oc_chat_001" }),
+      segments: [{ type: "markdown", md: "**live** progress" }],
+    }
+    const call = serializeEdit("om_msg_001", cardReq)
     expect(call.method).toBe("PATCH")
+    expect(call.payload["msg_type"]).toBeUndefined()
+    expect(typeof call.payload["content"]).toBe("string")
+  })
+
+  it("degrades non-editable media bodies to a PUT text edit", () => {
+    const mediaReq: OutboundRequest = {
+      ...makeReq({ channelId: "oc_chat_001" }),
+      segments: [{ type: "image", url: "img_key_123", alt: "diagram" }],
+    }
+    const call = serializeEdit("om_msg_001", mediaReq)
+    expect(call.method).toBe("PUT")
+    expect(call.payload["msg_type"]).toBe("text")
   })
 
   it("url contains the message_id", () => {
@@ -202,6 +263,35 @@ describe("serializeEdit", () => {
     const call = serializeEdit("om/special:msg", req)
     expect(call.url).not.toContain("om/special:msg")
     expect(call.url).toContain("om%2Fspecial%3Amsg")
+  })
+})
+
+describe("serializeEditAsync", () => {
+  it("routes text edits through PUT like the sync path", async () => {
+    const call = await serializeEditAsync(
+      "om_msg_001",
+      makeReq({ channelId: "oc_chat_001", text: "edited" }),
+      "lark-1"
+    )
+    expect(call.method).toBe("PUT")
+    expect(call.payload["msg_type"]).toBe("text")
+  })
+
+  it("re-projects markdown bodies onto the card PATCH endpoint", async () => {
+    const call = await serializeEditAsync(
+      "om_msg_001",
+      {
+        ...makeReq({ channelId: "oc_chat_001" }),
+        segments: [{ type: "markdown", md: "**progress** 80%" }],
+      },
+      "lark-1"
+    )
+    expect(call.method).toBe("PATCH")
+    expect(call.payload["msg_type"]).toBeUndefined()
+    const content = JSON.parse(call.payload["content"] as string) as {
+      elements: Array<{ tag: string }>
+    }
+    expect(content.elements[0]?.tag).toBe("div")
   })
 })
 
