@@ -182,6 +182,14 @@ export interface BuiltinToolsConfig {
    * the agent can read library internals. Desktop only; off by default.
    */
   dependencyResearch?: boolean
+  /**
+   * Web page snapshot (web_clone / web_clone_convert): download a live page's
+   * HTML + all CSS/JS/image/font assets into a self-contained single file or a
+   * directory bundle, with optional component extraction + Vue/React/Angular/
+   * Svelte/jQuery codegen. Runs the vendored engine as an isolated child
+   * process. Desktop only; off by default. See `sidecar/webclone/`.
+   */
+  webclone?: boolean
 }
 
 /** Default values when the user hasn't customised the toggles. Mirrors `lib/db/settings.ts`. */
@@ -197,6 +205,7 @@ export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
   codeGraph: false,
   astGrep: false,
   dependencyResearch: false,
+  webclone: false,
 }
 
 export interface SendOptions {

@@ -123,6 +123,10 @@ import "./terminal-script"
 // the active workspace repo.
 import "./git"
 
+// Web-clone node (`io.webClone`) — snapshot a live page + assets into a
+// self-contained file/bundle via the vendored sidecar engine (desktop only).
+import "./web-clone"
+
 // ── AI structured-output helpers (shared by ai.prompt / ai.extract) ─────────
 // parseStructured / buildJsonInstruction moved to ./ai/structured so the
 // ai.prompt v2 module can share them without a circular import.
@@ -4289,13 +4293,7 @@ function stableKey(value: unknown): string {
 }
 
 export type AggregateOperation =
-  | "collect"
-  | "concat"
-  | "merge-objects"
-  | "group-by"
-  | "dedupe"
-  | "numeric"
-  | "custom"
+  "collect" | "concat" | "merge-objects" | "group-by" | "dedupe" | "numeric" | "custom"
 
 export interface AggregateParams {
   operation?: AggregateOperation

@@ -21,6 +21,7 @@ import { shellAdvancedTools } from "./shell-advanced.mjs"
 import { terminalReplTools } from "./terminal-repl-tool.mjs"
 import { astGrepTools } from "./ast-grep/index.mjs"
 import { clonedepsTools } from "./clonedeps/index.mjs"
+import { webcloneTools } from "./webclone/index.mjs"
 import { createLspTools } from "./lsp.mjs"
 import { createCodeGraphTools } from "./code/tools.mjs"
 import { createCoreTools } from "./core/core-tools.mjs"
@@ -62,6 +63,16 @@ const TOOLS_BY_CATEGORY = {
    * the agent can read library internals. Static category; uses git + fs.
    */
   dependencyResearch: clonedepsTools,
+  /**
+   * Web page snapshot + reverse-engineering (`web_clone` / `web_clone_convert`):
+   * download a live page's HTML + all CSS/JS/image/font assets into a
+   * self-contained single file or directory bundle, with optional component
+   * extraction + Vue/React/Angular/Svelte/jQuery codegen. The heavy Node-only
+   * engine (linkedom / @babel / node:http / node:fs) is vendored under
+   * `sidecar/webclone` and runs as an isolated child process. Static category;
+   * uses network + fs (approval-gated).
+   */
+  webclone: webcloneTools,
 }
 
 /**

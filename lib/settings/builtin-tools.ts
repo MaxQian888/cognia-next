@@ -21,6 +21,7 @@ export type BuiltinToolCategoryId =
   | "codeGraph"
   | "astGrep"
   | "dependencyResearch"
+  | "webclone"
 
 export type BuiltinToolRiskLevel = "low" | "medium" | "high"
 

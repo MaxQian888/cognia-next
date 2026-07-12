@@ -1435,6 +1435,23 @@ const HttpRequestParams = z.object({
   followRedirects: z.boolean().optional(),
 })
 
+const WebCloneParams = z.object({
+  url: requiredString("required").refine(isHttpUrlOrExpression, "invalidUrl"),
+  output: requiredString("required"),
+  mode: z.enum(["single", "bundle"]).optional(),
+  extractComponents: z.boolean().optional(),
+  framework: z.enum(["vue", "react", "angular", "svelte", "jquery"]).optional(),
+  frameworkHint: z.enum(["vue", "react", "svelte"]).optional(),
+  maxAssets: numberRange(1, 5000).optional(),
+  concurrency: numberRange(1, 32).optional(),
+  timeout: numberRange(1000, 120000).optional(),
+  maxFileSize: numberRange(0, 1024 * 1024 * 1024).optional(),
+  pretty: z.boolean().optional(),
+  allowPrivateHosts: z.boolean().optional(),
+  codegenGenerateDrafts: z.boolean().optional(),
+  codegenExtractShared: z.boolean().optional(),
+})
+
 const WebhookRespondParams = z.object({
   status: numberRange(100, 599).optional(),
   headersJson: optionalString,
@@ -1641,6 +1658,7 @@ export const PARAMS_SCHEMAS = {
   "io.http": HttpRequestParams,
   "io.webhook.respond": WebhookRespondParams,
   "io.output": OutputParams,
+  "io.webClone": WebCloneParams,
   // Annotation
   "annotation.note": NoteParams,
   "annotation.group": GroupAnnotationParams,

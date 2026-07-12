@@ -52,6 +52,7 @@ import {
   OcrExtractConfig,
 } from "./forms/git-ocr-forms"
 import { EvalRunConfig, EvalGateConfig } from "./forms/eval-forms"
+import { WebCloneConfig } from "./forms/web-clone-form"
 import {
   AgentTurnConfig,
   ApprovalRequestConfig,
@@ -326,6 +327,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "io.http": HttpRequestConfig,
   "io.webhook.respond": WebhookRespondConfig,
   "io.output": OutputConfig,
+  "io.webClone": WebCloneConfig,
   // Annotations
   "annotation.note": NoteConfig,
   "annotation.group": GroupAnnotationConfig,

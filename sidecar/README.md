@@ -9,6 +9,16 @@ Two Node-only hosts that ship as Tauri runtime resources. Each is intentionally
 | **Claude / A2UI** at `./` root                     | `cognia-claude-sidecar`   | pnpm    | `claude-host.mjs` (stdio JSON-lines), `a2ui-mcp.mjs` (stdio MCP) | Tauri (`src-tauri/src/claude/sidecar.rs::resolve_sidecar_script`); external agents for `a2ui-mcp.mjs`. |
 | **VS Code extension host** at `./vscode-ext-host/` | `@cognia/vscode-ext-host` | npm     | `dist/host.js` (compiled from `src/host.ts`)                     | Tauri per VS Code extension (`src-tauri/src/plugin_api/vscode/host.rs::Sidecar::spawn`).               |
 
+A third Node component, the **web-clone engine** at `./webclone/`
+(`@cognia/webclone`, npm, built with `tsc` → `dist/`), is not a persistent host:
+it is spawned on demand as a short child process (`dist/runner.js`) by the
+`web_clone_snapshot` Tauri command and by the `web_clone` builtin tool. It
+vendors the web-page snapshot engine (HTML + asset mirroring, component
+extraction, framework codegen) with its Node-only deps (linkedom / @babel /
+proxy-agents) kept out of the app bundle. See `webclone/VENDOR.md`. Build:
+`pnpm sidecar:webclone:build` (auto-runs on `prebuild`); test:
+`pnpm sidecar:webclone:test`.
+
 Requires Node.js **≥ 20**.
 
 ## Scripts (run from repo root)

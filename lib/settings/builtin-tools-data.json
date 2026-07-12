@@ -623,6 +623,30 @@
           "alwaysLoad": false
         }
       ]
+    },
+    {
+      "id": "webclone",
+      "nameKey": "webclone",
+      "descriptionKey": "webcloneDesc",
+      "riskLevel": "medium",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "web_clone",
+          "descriptionKey": "tools.webClone",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "web_clone_convert",
+          "descriptionKey": "tools.webCloneConvert",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        }
+      ]
     }
   ]
 }

@@ -1,0 +1,31 @@
+{
+  "name": "@cognia/webclone",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Vendored web-clone snapshot engine (full web page snapshot + component extraction + framework codegen), adapted for the cognia sidecar. Runs as an isolated child process via dist/runner.js.",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test tests/**/*.test.mjs"
+  },
+  "dependencies": {
+    "@babel/parser": "^8.0.4",
+    "@babel/traverse": "^8.0.4",
+    "@babel/types": "^8.0.4",
+    "css-tree": "^3.2.1",
+    "http-proxy-agent": "^9.1.0",
+    "https-proxy-agent": "^9.1.0",
+    "linkedom": "^0.18.13",
+    "postcss": "^8.5.16"
+  },
+  "devDependencies": {
+    "@types/babel__traverse": "^7.28.0",
+    "@types/css-tree": "^2.3.11",
+    "@types/node": "^25.9.5",
+    "typescript": "^6.0.3"
+  }
+}

@@ -29,6 +29,7 @@ test("TOOL_NAMES_BY_CATEGORY exposes every category bucket", () => {
     "process",
     "shellAdvanced",
     "terminalRepl",
+    "webclone",
   ])
 })
 
@@ -104,6 +105,7 @@ test("namesForDisabledCategories returns nothing when everything is enabled", ()
     codeGraph: true,
     astGrep: true,
     dependencyResearch: true,
+    webclone: true,
   })
   assert.deepEqual(out, [])
 })

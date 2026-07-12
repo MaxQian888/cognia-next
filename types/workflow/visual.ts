@@ -236,6 +236,7 @@ export type WorkflowNodeKind =
   | "io.http"
   | "io.webhook.respond"
   | "io.output"
+  | "io.webClone"
   // Annotation
   | "annotation.note"
   | "annotation.group"
@@ -251,13 +252,7 @@ export type WorkflowNodeKind =
   | "pattern.synthesize"
 
 export type WorkflowNodeCategory =
-  | "trigger"
-  | "action"
-  | "ai"
-  | "flow"
-  | "data"
-  | "io"
-  | "annotation"
+  "trigger" | "action" | "ai" | "flow" | "data" | "io" | "annotation"
 
 export function workflowNodeCategory(kind: WorkflowNodeKind): WorkflowNodeCategory {
   const head = kind.split(".")[0]
@@ -435,6 +430,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "io.http",
   "io.webhook.respond",
   "io.output",
+  "io.webClone",
   "annotation.note",
   "annotation.group",
   "pattern.multi-modal-sweep",
@@ -698,13 +694,7 @@ export interface WorkflowViewport {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type RunStatus =
-  | "pending"
-  | "running"
-  | "waiting"
-  | "paused"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
+  "pending" | "running" | "waiting" | "paused" | "succeeded" | "failed" | "cancelled"
 
 /**
  * Trigger envelope — produced by triggers (manual button, cron daemon, webhook
@@ -1130,13 +1120,7 @@ export interface NodeIoData {
 
 /** Primitive/structural type tag used by the Schema view + drag-to-map rows. */
 export type SchemaRowType =
-  | "string"
-  | "number"
-  | "boolean"
-  | "object"
-  | "array"
-  | "null"
-  | "undefined"
+  "string" | "number" | "boolean" | "object" | "array" | "null" | "undefined"
 
 /**
  * One row of the Schema view — a flattened path into a node's output object.

@@ -53,6 +53,7 @@ mod tts;
 mod twin;
 mod vector;
 mod wallpaper;
+mod webclone;
 mod workflow;
 
 mod webview_watchdog;
@@ -572,6 +573,7 @@ pub fn run() {
             terminal::complete::terminal_complete_paths,
             terminal::path_scan::terminal_list_path_executables,
             fonts::os_list_fonts,
+            webclone::web_clone_snapshot,
             terminal::headless::terminal_headless_exec,
             terminal::headless::terminal_headless_spawn,
             terminal::headless::terminal_headless_run,

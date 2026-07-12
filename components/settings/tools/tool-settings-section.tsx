@@ -50,6 +50,7 @@ const CATEGORY_ICONS: Record<BuiltinToolCategoryId, React.ReactNode> = {
   codeGraph: <CodeIcon className="h-4 w-4" />,
   astGrep: <FileSearchIcon className="h-4 w-4" />,
   dependencyResearch: <BoxIcon className="h-4 w-4" />,
+  webclone: <GlobeIcon className="h-4 w-4" />,
 }
 
 function riskLabelKey(level: BuiltinToolRiskLevel): string {

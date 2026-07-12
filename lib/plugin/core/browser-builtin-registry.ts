@@ -9,6 +9,7 @@ import clipboardToolsManifest from "@/plugins/clipboard-tools/plugin.json"
 import githubDeliveryManifest from "@/plugins/github-delivery/plugin.json"
 import promptTemplatesManifest from "@/plugins/prompt-templates/plugin.json"
 import screenshotManifest from "@/plugins/screenshot/plugin.json"
+import webCloneManifest from "@/plugins/web-clone/plugin.json"
 import ocrManifest from "@/plugins/ocr/plugin.json"
 import evalManifest from "@/plugins/eval/plugin.json"
 import webToolsManifest from "@/plugins/web-tools/plugin.json"
@@ -41,6 +42,7 @@ import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
 import workspaceToolsModule from "@/plugins/workspace-tools/src/index"
 import webToolsModule from "@/plugins/web-tools/src/index"
 import screenshotModule from "@/plugins/screenshot/src/index"
+import webCloneModule from "@/plugins/web-clone/src/index"
 import ocrModule from "@/plugins/ocr/src/index"
 import evalModule from "@/plugins/eval/src/index"
 import promptTemplatesModule from "@/plugins/prompt-templates/src/index"
@@ -143,6 +145,12 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-screenshot",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(screenshotModule),
+  },
+  {
+    manifest: builtinManifest(webCloneManifest, webCloneModule),
+    path: "builtin://cognia-web-clone",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(webCloneModule),
   },
   {
     manifest: builtinManifest(ocrManifest, ocrModule),

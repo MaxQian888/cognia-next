@@ -50,6 +50,7 @@ describe("builtin-tools metadata", () => {
         "process",
         "shellAdvanced",
         "terminalRepl",
+        "webclone",
       ].sort()
     )
   })

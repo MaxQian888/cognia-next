@@ -1088,6 +1088,25 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "FileOutput",
     keywords: ["output", "result", "return", "interface", "publish", "end"],
   },
+  "io.webClone": {
+    label: "Web clone",
+    description:
+      "Snapshot a live web page (HTML + all CSS/JS/image/font assets) into a self-contained file or bundle, with optional component extraction + framework codegen.",
+    iconName: "Globe",
+    keywords: [
+      "web",
+      "clone",
+      "snapshot",
+      "scrape",
+      "mirror",
+      "download",
+      "page",
+      "assets",
+      "codegen",
+    ],
+    desktopOnly: true,
+    requires: ["shell"],
+  },
   // ── Annotation ────────────────────────────────────────────────────────────
   "annotation.note": {
     label: "Sticky note",
