@@ -1747,6 +1747,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-instrument"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "once_cell",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "cognia-next"
 version = "0.1.0"
 dependencies = [
@@ -1765,6 +1777,7 @@ dependencies = [
  "cbc 0.2.1",
  "chrono",
  "clap",
+ "cognia-instrument",
  "cognia-signaling-core",
  "core-foundation 0.10.1",
  "core-foundation 0.9.4",

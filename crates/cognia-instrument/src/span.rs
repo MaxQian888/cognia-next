@@ -92,14 +92,6 @@ where
     out
 }
 
-/// Convenience macro: `perf_span!("name");` drops a [`Guard`] at scope end.
-#[macro_export]
-macro_rules! perf_span {
-    ($name:expr) => {
-        let _perf_guard = $crate::perf::guard($name);
-    };
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
