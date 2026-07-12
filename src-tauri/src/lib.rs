@@ -12,7 +12,9 @@ mod capture;
 mod ccswitch;
 mod claude;
 mod cli_bridge;
-mod command_error;
+// ADR-0067 Phase 6 — extracted to cognia-core; re-aliased so `crate::command_error`
+// (claude, logging, plugin_api/vscode, top-level) resolves unchanged.
+pub use cognia_core::command_error;
 mod commands;
 pub mod companion_api;
 mod connectors;
@@ -47,7 +49,9 @@ mod plugins;
 mod proxy_config;
 mod remote_control;
 pub use cognia_automation::sandbox;
-mod scheduler;
+// ADR-0067 Phase 6 — scheduler/workflow/timing extracted to the
+// cognia-scheduling cluster; re-aliased so all three module paths resolve.
+pub use cognia_scheduling::scheduler;
 mod secret_store;
 mod session_import;
 mod session_import_watch;
@@ -57,7 +61,7 @@ mod skills;
 mod subscription;
 mod supervision_backoff;
 mod terminal;
-mod timing;
+pub use cognia_scheduling::timing;
 mod tts;
 mod twin;
 // ADR-0067 Phase 4 — extracted to `crates/cognia-vector`; re-aliased so
@@ -65,7 +69,7 @@ mod twin;
 pub use cognia_vector as vector;
 mod wallpaper;
 mod webclone;
-mod workflow;
+pub use cognia_scheduling::workflow;
 
 mod webview_watchdog;
 mod window_behavior;

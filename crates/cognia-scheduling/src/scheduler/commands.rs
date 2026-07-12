@@ -5,7 +5,7 @@
 use log::{debug, error, info};
 use tauri::State;
 
-use crate::command_error::CommandError;
+use cognia_core::command_error::CommandError;
 use crate::scheduler::{
     ArmTaskInput, CreateSystemTaskInput, SchedulerCapabilities, SchedulerState, SystemTask,
     SystemTaskId, TaskConfirmationRequest, TaskRunResult,

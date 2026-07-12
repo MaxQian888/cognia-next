@@ -7,4 +7,5 @@
 //! sites — in fleet, ccswitch, automation and the top-level modules — are
 //! unchanged.
 
+pub mod command_error;
 pub mod fs_atomic;

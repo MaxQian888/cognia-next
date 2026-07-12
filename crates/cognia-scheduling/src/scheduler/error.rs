@@ -174,3 +174,59 @@ mod tests {
         assert_eq!(json, "\"Security violation: bad name\"");
     }
 }
+
+// ADR-0067 Phase 6 — moved here from command_error.rs so the `cognia-core`
+// foundation crate has no upward edge into the scheduler. Orphan-rule OK:
+// `SchedulerError` is local to this crate. Uses the `CommandError` constructors
+// (which truncate the message) instead of the crate-private `truncate_message`.
+impl From<SchedulerError> for cognia_core::command_error::CommandError {
+    fn from(err: SchedulerError) -> Self {
+        use cognia_core::command_error::CommandError;
+        use SchedulerError as E;
+        // Honest retryability audit: only genuinely transient failures retry.
+        let (code, retryable) = match &err {
+            E::NotAvailable(_) => ("not_available", false),
+            E::TaskNotFound(_) => ("task_not_found", false),
+            E::TaskAlreadyExists(_) => ("task_already_exists", false),
+            E::InvalidConfig(_) => ("invalid_config", false),
+            E::PermissionDenied(_) => ("permission_denied", false),
+            E::AdminRequired(_) => ("admin_required", false),
+            E::ConfirmationRequired => ("confirmation_required", false),
+            E::ExecutionFailed(_) => ("execution_failed", true),
+            E::Timeout(_) => ("timeout", true),
+            E::InvalidCron(_) => ("invalid_cron", false),
+            E::ScriptValidation(_) => ("script_validation", false),
+            E::SecurityViolation(_) => ("security_violation", false),
+            E::Platform(_) => ("platform", false),
+            E::Io(_) => ("io", true),
+            E::Serialization(_) => ("serialization", false),
+            E::Internal(_) => ("internal", false),
+        };
+        let message = err.to_string();
+        if retryable {
+            CommandError::retryable(code, message)
+        } else {
+            CommandError::new(code, message)
+        }
+    }
+}
+
+#[cfg(test)]
+mod command_error_conv_tests {
+    use super::SchedulerError;
+    use cognia_core::command_error::CommandError;
+
+    #[test]
+    fn scheduler_error_maps_to_code_and_retryability() {
+        let timeout = CommandError::from(SchedulerError::Timeout("op".into()));
+        assert_eq!(timeout.code, "timeout");
+        assert!(timeout.retryable);
+
+        let denied = CommandError::from(SchedulerError::PermissionDenied("nope".into()));
+        assert_eq!(denied.code, "permission_denied");
+        assert!(!denied.retryable);
+
+        let confirm = CommandError::from(SchedulerError::ConfirmationRequired);
+        assert_eq!(confirm.code, "confirmation_required");
+    }
+}

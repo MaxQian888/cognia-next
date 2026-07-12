@@ -16,3 +16,8 @@ name = "cognia_core"
 path = "src/lib.rs"
 
 [dependencies]
+# command_error serializes as a 3-key object for the renderer.
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1.0"

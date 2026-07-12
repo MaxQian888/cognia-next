@@ -34,6 +34,7 @@ members = [
   "crates/cognia-ocr",
   "crates/cognia-vector",
   "crates/cognia-automation",
+  "crates/cognia-scheduling",
 ]
 exclude = [
   "services/signaling-server",

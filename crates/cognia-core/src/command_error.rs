@@ -70,40 +70,13 @@ fn truncate_message(message: String) -> String {
     format!("{truncated}{TRUNCATED_SUFFIX}")
 }
 
-impl From<crate::scheduler::SchedulerError> for CommandError {
-    fn from(err: crate::scheduler::SchedulerError) -> Self {
-        use crate::scheduler::SchedulerError as E;
-        // Honest retryability audit: only genuinely transient failures retry.
-        let (code, retryable) = match &err {
-            E::NotAvailable(_) => ("not_available", false),
-            E::TaskNotFound(_) => ("task_not_found", false),
-            E::TaskAlreadyExists(_) => ("task_already_exists", false),
-            E::InvalidConfig(_) => ("invalid_config", false),
-            E::PermissionDenied(_) => ("permission_denied", false),
-            E::AdminRequired(_) => ("admin_required", false),
-            E::ConfirmationRequired => ("confirmation_required", false),
-            E::ExecutionFailed(_) => ("execution_failed", true),
-            E::Timeout(_) => ("timeout", true),
-            E::InvalidCron(_) => ("invalid_cron", false),
-            E::ScriptValidation(_) => ("script_validation", false),
-            E::SecurityViolation(_) => ("security_violation", false),
-            E::Platform(_) => ("platform", false),
-            E::Io(_) => ("io", true),
-            E::Serialization(_) => ("serialization", false),
-            E::Internal(_) => ("internal", false),
-        };
-        Self {
-            code: code.to_string(),
-            message: truncate_message(err.to_string()),
-            retryable,
-        }
-    }
-}
+// ADR-0067 Phase 6 — `impl From<scheduler::SchedulerError> for CommandError`
+// lives in `cognia-scheduling` (which owns SchedulerError) to keep this
+// foundation crate free of any upward edge into the scheduler.
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduler::SchedulerError;
 
     #[test]
     fn serializes_as_a_three_key_object() {
@@ -141,19 +114,5 @@ mod tests {
         let err = CommandError::new("internal", "x".repeat(2000));
         assert!(err.message.len() < 600);
         assert!(err.message.ends_with("... (truncated)"));
-    }
-
-    #[test]
-    fn scheduler_error_maps_to_code_and_retryability() {
-        let timeout = CommandError::from(SchedulerError::Timeout("op".into()));
-        assert_eq!(timeout.code, "timeout");
-        assert!(timeout.retryable);
-
-        let denied = CommandError::from(SchedulerError::PermissionDenied("nope".into()));
-        assert_eq!(denied.code, "permission_denied");
-        assert!(!denied.retryable);
-
-        let confirm = CommandError::from(SchedulerError::ConfirmationRequired);
-        assert_eq!(confirm.code, "confirmation_required");
     }
 }
