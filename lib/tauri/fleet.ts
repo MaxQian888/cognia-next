@@ -9,6 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
+import { revealInExplorer } from "@/lib/tauri/opener"
 import type { FleetMonitorStatus, FleetSnapshot, PermissionBehavior } from "@/lib/fleet/types"
 
 const STOPPED: FleetMonitorStatus = { enabled: false, port: null, configPath: null }
@@ -169,6 +170,24 @@ export async function fleetFocusTerminal(agent: string, sessionId: string): Prom
     return true
   } catch (err) {
     console.warn("fleetFocusTerminal failed", err)
+    return false
+  }
+}
+
+/**
+ * Reveal a monitored session's transcript file in the OS file manager (Finder /
+ * Explorer / the Linux default), surfacing the session's `openTranscript`
+ * capability. Cross-platform via the shared reveal helper; a benign `false`
+ * off Tauri, on an empty path, or on any failure so the row action can never
+ * throw into the island renderer.
+ */
+export async function fleetRevealTranscript(path: string | null | undefined): Promise<boolean> {
+  if (!isTauri() || !path) return false
+  try {
+    await revealInExplorer(path)
+    return true
+  } catch (err) {
+    console.warn("fleetRevealTranscript failed", err)
     return false
   }
 }

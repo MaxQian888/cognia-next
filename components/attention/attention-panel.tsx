@@ -14,7 +14,7 @@
  */
 
 import { useRouter } from "next/navigation"
-import { BellRingIcon, ExternalLinkIcon, XIcon } from "lucide-react"
+import { BellRingIcon, ExternalLinkIcon, FileTextIcon, TerminalIcon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { useAttentionItems, useAttentionCount } from "@/hooks/attention/use-attention"
@@ -23,6 +23,7 @@ import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { IslandPermissionActions } from "@/components/fleet/island-permission-actions"
 import { activityLine } from "@/lib/fleet/format"
+import { fleetFocusTerminal, fleetRevealTranscript } from "@/lib/tauri/fleet"
 import type { AttentionItem } from "@/lib/attention/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -121,6 +122,41 @@ function AttentionRow({ item, onNavigated }: { item: AttentionItem; onNavigated:
             <ExternalLinkIcon className="size-3.5" />
           </Button>
         )}
+        {!item.stale &&
+          item.source === "fleet" &&
+          item.fleetSession?.capabilities.openTranscript &&
+          item.fleetSession?.transcriptPath && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              aria-label={t("revealTranscript")}
+              data-testid={`attention-reveal-transcript-${item.id}`}
+              onClick={() => {
+                const path = item.fleetSession?.transcriptPath
+                if (path) void fleetRevealTranscript(path)
+              }}
+            >
+              <FileTextIcon className="size-3.5" />
+            </Button>
+          )}
+        {!item.stale &&
+          item.source === "fleet" &&
+          item.fleetSession?.capabilities.focusTerminal && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              aria-label={t("focusTerminal")}
+              data-testid={`attention-focus-terminal-${item.id}`}
+              onClick={() => {
+                const s = item.fleetSession
+                if (s) void fleetFocusTerminal(s.agent, s.sessionId)
+              }}
+            >
+              <TerminalIcon className="size-3.5" />
+            </Button>
+          )}
         {item.stale && (
           <Button
             variant="ghost"

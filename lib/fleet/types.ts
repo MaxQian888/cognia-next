@@ -72,6 +72,21 @@ export interface FleetSubagent {
   startedAt: number
 }
 
+/** Whether an error came from a single tool call or a failed turn. */
+export type FleetErrorKind = "tool" | "turn"
+
+/**
+ * Most recent error observed on a session. Orthogonal to `status` (a failed
+ * tool doesn't change what the user must do); the island paints a separate
+ * banner. Mirrors Rust `FleetError`.
+ */
+export interface FleetError {
+  kind: FleetErrorKind
+  detail?: string | null
+  /** Epoch ms when the error was observed. */
+  at: number
+}
+
 export interface FleetSession {
   agent: FleetAgent
   sessionId: string
@@ -96,6 +111,16 @@ export interface FleetSession {
   startedAt: number
   lastEventAt: number
   endedAt?: number
+  /** Most recent tool/turn error; cleared on a new turn or a later success. */
+  lastError?: FleetError | null
+  /** Tool invocations seen this session. Always present (0 default). */
+  toolUseCount: number
+  /** User turns seen this session. Always present (0 default). */
+  turnCount: number
+  /** How the session began: `startup` | `resume` | `clear` | `compact`. */
+  startSource?: string | null
+  /** Current git branch of `cwd`, captured once per turn by the runtime. */
+  gitBranch?: string | null
 }
 
 export interface FleetSnapshot {

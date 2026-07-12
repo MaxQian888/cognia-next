@@ -27,6 +27,20 @@ export function truncateLine(text: string, max: number): string {
   return `${flat.slice(0, Math.max(0, max - 1)).trimEnd()}…`
 }
 
+/**
+ * Middle-ellipsis a filesystem path so a long cwd fits the detail row while
+ * keeping the informative ends — the leading root and the trailing folder:
+ * `/Users/x/very/deep/proj` → `/Users/x/…/proj`. Pure.
+ */
+export function formatCwdMiddle(cwd: string, max = 44): string {
+  const flat = cwd.trim()
+  if (flat.length <= max) return flat
+  const keep = Math.max(1, max - 1) // room for the ellipsis
+  const head = Math.ceil(keep / 2)
+  const tail = Math.floor(keep / 2)
+  return `${flat.slice(0, head)}…${flat.slice(flat.length - tail)}`
+}
+
 /** "Bash: pnpm test" — tool name plus its compact detail when present. */
 export function activityLine(session: FleetSession): string | null {
   const activity = session.activity
@@ -66,6 +80,24 @@ export function attentionCount(sessions: readonly FleetSession[]): number {
       s.status === "plan-pending" ||
       s.status === "waiting-input"
   ).length
+}
+
+/** Severity of the fleet's attention need, for the island's breathing ring. */
+export type AttentionSeverity = "none" | "input" | "permission"
+
+/**
+ * Highest attention severity across the fleet: a parked permission
+ * (`permission`, the red ring) outranks a plan/input wait (`input`, amber);
+ * `none` when nothing needs the user. Pure — permission always wins, so the
+ * scan can return early. Mirrors `attentionCount`'s "needs you" set.
+ */
+export function attentionSeverity(sessions: readonly FleetSession[]): AttentionSeverity {
+  let hasInput = false
+  for (const s of sessions) {
+    if (s.status === "waiting-permission" || s.pendingPermission) return "permission"
+    if (s.status === "plan-pending" || s.status === "waiting-input") hasInput = true
+  }
+  return hasInput ? "input" : "none"
 }
 
 /**

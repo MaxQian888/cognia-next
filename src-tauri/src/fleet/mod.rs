@@ -14,6 +14,7 @@
 
 pub mod codex;
 pub mod control;
+pub mod gitinfo;
 pub mod install;
 pub mod island_window;
 pub mod opencode;
@@ -64,6 +65,22 @@ pub fn permission_wait_ms() -> u64 {
 #[cfg(test)]
 pub fn set_permission_wait_override_ms(ms: Option<u64>) {
     PERMISSION_WAIT_OVERRIDE_MS.store(ms.unwrap_or(0), Ordering::SeqCst);
+}
+
+/// Test seam: disables the synchronous `git` shell-out in
+/// [`FleetRuntime::ingest`] so unit/route tests never spawn a subprocess.
+/// Enabled by default in production, and OFF in `cfg(test)` builds so existing
+/// `ingest`/route tests stay subprocess-free — the git-path test opts in
+/// explicitly under [`TEST_RUNTIME_LOCK`].
+static GIT_CAPTURE_ENABLED: AtomicBool = AtomicBool::new(!cfg!(test));
+
+pub fn git_capture_enabled() -> bool {
+    GIT_CAPTURE_ENABLED.load(Ordering::SeqCst)
+}
+
+#[cfg(test)]
+pub fn set_git_capture_enabled(enabled: bool) {
+    GIT_CAPTURE_ENABLED.store(enabled, Ordering::SeqCst);
 }
 
 /// How long an OpenCode command poll parks before returning empty. Kept short
@@ -222,6 +239,45 @@ impl FleetRuntime {
             registry::RegistryEffect::Ignored => {}
         }
         effect
+    }
+
+    /// Capture the working directory's git branch once per turn, OFF the async
+    /// runtime: the `git rev-parse` shell-out runs on a blocking pool via
+    /// `spawn_blocking`, so it never blocks a tokio worker (unlike the pure
+    /// [`ingest`], which is synchronous). Guarded by `needs_git_capture` so it
+    /// runs at most once per turn; re-emits the snapshot when the branch
+    /// changed. No-op when the test seam disables capture.
+    pub async fn capture_git_branch(&self, event: &registry::FleetEvent) {
+        if !git_capture_enabled() {
+            return;
+        }
+        let Some(session_id) = event
+            .payload
+            .get("session_id")
+            .or_else(|| event.payload.get("session-id"))
+            .and_then(|v| v.as_str())
+        else {
+            return;
+        };
+        // Lock only to read the cwd; the guard drops before the shell-out.
+        let cwd = self
+            .registry
+            .lock()
+            .needs_git_capture(event.agent, session_id);
+        let Some(cwd) = cwd else {
+            return;
+        };
+        let branch = tauri::async_runtime::spawn_blocking(move || gitinfo::current_branch(&cwd))
+            .await
+            .ok()
+            .flatten();
+        if self
+            .registry
+            .lock()
+            .set_git_branch(event.agent, session_id, branch)
+        {
+            self.emit_update();
+        }
     }
 
     /// Park a permission long-poll and await the island's decision. `None`
@@ -572,6 +628,42 @@ mod tests {
             .sessions
             .iter()
             .any(|s| s.session_id == "mod-test-ingest"));
+    }
+
+    #[tokio::test]
+    async fn capture_git_branch_runs_off_the_worker_and_marks_the_turn() {
+        let _guard = TEST_RUNTIME_LOCK.lock().await;
+        set_git_capture_enabled(true);
+        let rt = runtime();
+        // Unique session id + pid so the process-global registry can't collide
+        // with another (unlocked) test's ingest.
+        let sid = "mod-git-capture-001";
+        let event = registry::FleetEvent {
+            agent: registry::FleetAgent::ClaudeCode,
+            event: "SessionStart".into(),
+            pid: None,
+            ppid: Some(31_337),
+            env: Default::default(),
+            // The crate dir lives inside this repo, so rev-parse resolves.
+            payload: serde_json::json!({ "session_id": sid, "cwd": env!("CARGO_MANIFEST_DIR") }),
+        };
+        rt.ingest(&event);
+        assert!(rt
+            .registry
+            .lock()
+            .needs_git_capture(registry::FleetAgent::ClaudeCode, sid)
+            .is_some());
+
+        rt.capture_git_branch(&event).await;
+
+        // The shell-out ran (off the async worker) and marked the turn checked;
+        // the branch itself may be Some or None (detached CI checkout).
+        assert!(rt
+            .registry
+            .lock()
+            .needs_git_capture(registry::FleetAgent::ClaudeCode, sid)
+            .is_none());
+        set_git_capture_enabled(false);
     }
 
     #[tokio::test]

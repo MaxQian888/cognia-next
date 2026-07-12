@@ -85,6 +85,16 @@ export async function clearFleetHistory(): Promise<void> {
   await getDb().fleetSessions.clear()
 }
 
+/** Remove one history row by its composite id. */
+export async function deleteFleetHistory(id: string): Promise<void> {
+  await getDb().fleetSessions.delete(id)
+}
+
+/** Remove every ended row, keeping the still-active ones. Returns rows removed. */
+export async function clearEndedFleetHistory(): Promise<number> {
+  return getDb().fleetSessions.where("outcome").equals("ended").delete()
+}
+
 /** Prune history older than `cutoff` (epoch ms). Returns rows removed. */
 export async function pruneFleetHistory(cutoff: number): Promise<number> {
   return getDb().fleetSessions.where("startedAt").below(cutoff).delete()

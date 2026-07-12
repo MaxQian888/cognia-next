@@ -91,7 +91,13 @@ async fn hook_handler(
     }
 
     let agent = event.agent;
-    match runtime.ingest(&event) {
+    let effect = runtime.ingest(&event);
+    // Capture the git branch off the async worker (bounded, once-per-turn) —
+    // it's live subprocess I/O, so it can't live in the pure fold.
+    if !matches!(effect, RegistryEffect::Ignored) {
+        runtime.capture_git_branch(&event).await;
+    }
+    match effect {
         RegistryEffect::Ignored => StatusCode::UNPROCESSABLE_ENTITY.into_response(),
         RegistryEffect::Updated => StatusCode::NO_CONTENT.into_response(),
         RegistryEffect::PermissionRequested { request_id } => {

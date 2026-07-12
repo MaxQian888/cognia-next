@@ -17,7 +17,11 @@ import type { FleetSession } from "@/lib/fleet/types"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
+  useFormatter: () => ({ dateTime: () => "TIME" }),
 }))
+
+// The expanded row detail reads OS reduced-motion; pin it for determinism.
+jest.mock("motion/react", () => ({ useReducedMotion: () => true }))
 
 const resizeMock = jest.fn()
 jest.mock("@/lib/tauri/fleet", () => ({
@@ -70,6 +74,8 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     },
     startedAt: 0,
     lastEventAt: 0,
+    toolUseCount: 0,
+    turnCount: 0,
     ...overrides,
   }
 }
@@ -180,6 +186,69 @@ describe("IslandShell", () => {
     })
     expect(resizeMock).toHaveBeenLastCalledWith(ISLAND_COLLAPSED_WIDTH, expect.any(Number))
     jest.useRealTimers()
+  })
+
+  it("expands one row's detail panel independently", () => {
+    streamState.snapshot = {
+      generatedAt: 1,
+      sessions: [session(), session({ sessionId: "s2" })],
+    }
+    render(<IslandShell />)
+    fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+    expect(screen.queryByTestId("session-detail")).toBeNull()
+
+    const toggles = screen.getAllByTestId("session-detail-toggle")
+    fireEvent.click(toggles[0])
+    // Only the toggled row reveals its detail.
+    expect(screen.getAllByTestId("session-detail")).toHaveLength(1)
+  })
+
+  it("uses a red attention ring for a parked permission and amber for an input wait", () => {
+    streamState.snapshot = {
+      generatedAt: 1,
+      sessions: [
+        session({
+          status: "waiting-permission",
+          pendingPermission: { requestId: "r", toolName: "Bash", detail: null, requestedAt: 0 },
+        }),
+      ],
+    }
+    const { rerender } = render(<IslandShell />)
+    const ring = screen.getByTestId("island-attention-ring")
+    expect(ring).toHaveAttribute("data-severity", "permission")
+    expect(ring.className).toContain("island-attention-ring--danger")
+
+    streamState.snapshot = { generatedAt: 2, sessions: [session({ status: "waiting-input" })] }
+    rerender(<IslandShell />)
+    const ring2 = screen.getByTestId("island-attention-ring")
+    expect(ring2).toHaveAttribute("data-severity", "input")
+    expect(ring2.className).toContain("island-attention-ring")
+    expect(ring2.className).not.toContain("island-attention-ring--danger")
+  })
+
+  it("re-reports a grown window size when a row detail expands (no clip)", () => {
+    streamState.snapshot = { generatedAt: 1, sessions: [session()] }
+    // jsdom does no layout, so fake the card growing once the detail mounts.
+    const orig = Element.prototype.getBoundingClientRect
+    const spy = jest.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: Element
+    ) {
+      const base = orig.call(this) as DOMRect
+      const grown = this.querySelector('[data-testid="session-detail"]') ? 240 : 80
+      return { ...base, height: grown } as DOMRect
+    })
+    try {
+      render(<IslandShell />)
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+      resizeMock.mockClear()
+      fireEvent.click(screen.getByTestId("session-detail-toggle"))
+      // Grow-now: the taller card is reported before paint so it isn't clipped.
+      expect(resizeMock).toHaveBeenCalled()
+      const lastHeight = resizeMock.mock.calls.at(-1)?.[1] as number
+      expect(lastHeight).toBeGreaterThanOrEqual(240)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   describe("auto-tuck (Dock-style hide when idle)", () => {

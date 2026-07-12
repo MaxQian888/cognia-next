@@ -13,6 +13,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-inner-size",
     "core:window:allow-set-size",
-    "core:window:allow-set-resizable"
+    "core:window:allow-set-resizable",
+    "opener:allow-reveal-item-in-dir"
   ]
 }

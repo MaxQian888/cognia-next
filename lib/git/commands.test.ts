@@ -1,6 +1,17 @@
 const isTauriMock = jest.fn()
+const isCapacitorMock = jest.fn()
+const hasWebCompanionTargetMock = jest.fn()
 const callMock = jest.fn()
 const subscribeMock = jest.fn()
+
+jest.mock("@/lib/platform/detect", () => ({
+  isTauri: () => isTauriMock(),
+  isCapacitor: () => isCapacitorMock(),
+}))
+
+jest.mock("@/lib/platform/web-companion", () => ({
+  hasWebCompanionTarget: () => hasWebCompanionTargetMock(),
+}))
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriMock(),
@@ -51,16 +62,21 @@ import {
   gitWorktreeList,
   gitWorktreePrune,
   gitWorktreeRemove,
+  hasGitBridge,
 } from "./commands"
 import { EMPTY_REPO_STATE, EMPTY_STATUS } from "@/types/git"
 
 beforeEach(() => {
   isTauriMock.mockReset()
+  isCapacitorMock.mockReset()
+  hasWebCompanionTargetMock.mockReset()
+  isCapacitorMock.mockReturnValue(false)
+  hasWebCompanionTargetMock.mockReturnValue(false)
   callMock.mockReset()
   subscribeMock.mockReset()
 })
 
-describe("when not in Tauri", () => {
+describe("when no git bridge is available (plain unpaired browser)", () => {
   beforeEach(() => isTauriMock.mockReturnValue(false))
 
   it("returns inert values without calling transport", async () => {
@@ -87,6 +103,40 @@ describe("when not in Tauri", () => {
     await gitWorktreeRemove("/r", "/wt", true, "agent/x")
     await gitWorktreePrune("/r")
     expect(callMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("when on a companion transport (Capacitor / paired web)", () => {
+  beforeEach(() => {
+    isTauriMock.mockReturnValue(false)
+    isCapacitorMock.mockReturnValue(true)
+    callMock.mockResolvedValue(undefined)
+  })
+
+  it("reads and writes go through the transport", async () => {
+    callMock.mockResolvedValueOnce(true)
+    expect(await gitIsRepo("/r")).toBe(true)
+    expect(callMock).toHaveBeenCalledWith("git_is_repo", { repoPath: "/r" })
+
+    await gitStage("/r", ["a.ts"])
+    expect(callMock).toHaveBeenCalledWith("git_stage", {
+      repoPath: "/r",
+      paths: ["a.ts"],
+      hunkPatch: null,
+    })
+  })
+
+  it("the fs watcher stays Tauri-only", async () => {
+    await gitWatchStart("/r")
+    await gitWatchStop("/r")
+    expect(callMock).not.toHaveBeenCalled()
+  })
+
+  it("hasGitBridge reflects the web-companion pairing too", () => {
+    isCapacitorMock.mockReturnValue(false)
+    expect(hasGitBridge()).toBe(false)
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    expect(hasGitBridge()).toBe(true)
   })
 })
 

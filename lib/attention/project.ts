@@ -7,7 +7,7 @@
 import type { PendingApproval } from "@/lib/claude/types"
 import type { PendingGate } from "@/stores/agent/pending-gates-store"
 import type { PersistedApproval } from "@/stores/agent/approval-journal-store"
-import type { FleetSnapshot } from "@/lib/fleet/types"
+import type { FleetSession, FleetSnapshot } from "@/lib/fleet/types"
 import type { AttentionItem, AttentionKind } from "./types"
 
 export interface AttentionInputs {
@@ -29,6 +29,20 @@ function approvalTitle(approval: PendingApproval): string {
   return approval.origin === "subagent" && approval.subagentId
     ? `${approval.subagentId} · ${tool}`
     : tool
+}
+
+/**
+ * Detail line for a waiting fleet session: the parked question beats the plan
+ * headline beats the last prompt — the most specific "what it wants from you".
+ */
+function fleetWaitingDetail(session: FleetSession): string | undefined {
+  const question = session.pendingQuestions?.[0]?.question
+  if (question) return question
+  if (session.status === "plan-pending" && session.pendingPlan) {
+    const headline = session.pendingPlan.split("\n").find((line) => line.trim().length > 0)
+    if (headline) return headline.trim()
+  }
+  return session.lastPrompt ?? undefined
 }
 
 /** Ascending priority rank — live permission-blocking items first, stale last. */
@@ -114,7 +128,7 @@ export function projectAttention(inputs: AttentionInputs): AttentionItem[] {
         source: "fleet",
         kind: "fleet-waiting",
         title: session.projectName ?? session.agent,
-        detail: session.lastPrompt ?? undefined,
+        detail: fleetWaitingDetail(session),
         openedAt: session.lastEventAt,
         stale: false,
         fleetSession: session,

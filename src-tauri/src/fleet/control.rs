@@ -11,11 +11,19 @@
 //! image name that owns a main window, via PowerShell `AppActivate`
 //! (best-effort, mirrors the macOS app-level granularity).
 //!
-//! Linux focus strategy: raise the first window whose WM_CLASS matches the
-//! terminal's known class, via `wmctrl -x -a`, falling back to `xdotool`
-//! when wmctrl is absent (both are X11 tools; on pure Wayland neither can
-//! drive foreign windows and the action fails with a descriptive error —
-//! best-effort, same contract as the other platforms).
+//! Linux focus strategy: resolve a per-session backend (`decide_linux_backend`)
+//! from the session type + available tools, then raise the window matching the
+//! terminal's known class. X11 uses `wmctrl -x -a` (falling back to `xdotool`);
+//! Sway/wlroots Wayland uses `swaymsg [app_id=…] focus`; KDE Plasma Wayland uses
+//! `kdotool`. GNOME Wayland forbids external window activation, so it resolves to
+//! NO backend — and `can_focus` returns false there, so the island never renders
+//! a dead focus affordance.
+//!
+//! tmux is intentionally never focusable on any platform: it nests inside an
+//! outer terminal the classifier does not currently capture, so a focus action
+//! would raise nothing. A real tmux focus would need the outer terminal plus a
+//! `tmux select-pane -t <session_ref>` compound; deferred rather than shipping a
+//! half-focus that no-ops.
 
 use super::terminal::TerminalApp;
 
@@ -111,18 +119,108 @@ pub fn linux_wm_class(app: TerminalApp) -> Option<&'static str> {
     }
 }
 
+/// Which mechanism the current Linux session uses to raise a foreign window.
+/// Resolved once from the session type + available tools; `None` means the
+/// compositor won't let us (notably GNOME Wayland), which keeps `can_focus`
+/// false so no dead focus affordance is rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // constructed only on Linux; the type is shared for testing.
+enum LinuxFocusBackend {
+    /// X11: `wmctrl` (preferred) or `xdotool` — both drive foreign windows.
+    X11,
+    /// wlroots/Sway Wayland: `swaymsg [app_id=…] focus`.
+    Sway,
+    /// KDE Plasma Wayland: `kdotool` (an xdotool-alike for KWin).
+    Kde,
+}
+
+/// Pure backend decision from session facts, separated from the env/PATH probe
+/// so it can be unit-tested on any host. GNOME Wayland (and any Wayland session
+/// with no Sway/KDE tool) resolves to `None`: the compositor forbids external
+/// window activation, so advertising focus there would be a dead button.
+#[allow(dead_code)] // used by the Linux probe + the cross-platform tests.
+fn decide_linux_backend(
+    wayland: bool,
+    has_swaysock: bool,
+    has_kde_session: bool,
+    has_wmctrl: bool,
+    has_xdotool: bool,
+    has_swaymsg: bool,
+    has_kdotool: bool,
+) -> Option<LinuxFocusBackend> {
+    if !wayland {
+        return (has_wmctrl || has_xdotool).then_some(LinuxFocusBackend::X11);
+    }
+    if has_swaysock && has_swaymsg {
+        return Some(LinuxFocusBackend::Sway);
+    }
+    if has_kde_session && has_kdotool {
+        return Some(LinuxFocusBackend::Kde);
+    }
+    None
+}
+
+/// Sway/wlroots focus criteria for a WM `app_id`. Pure (testable everywhere).
+#[allow(dead_code)]
+fn sway_focus_criteria(app_id: &str) -> String {
+    format!("[app_id=\"{app_id}\"] focus")
+}
+
+/// Whether the given tool resolves on `PATH` (presence, not exit code).
+#[cfg(target_os = "linux")]
+fn tool_exists(name: &str) -> bool {
+    use std::process::Stdio;
+    std::process::Command::new(name)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok()
+}
+
+/// The resolved Linux focus backend, memoized (an env + PATH probe, not per
+/// event — `can_focus` runs in the registry fold).
+#[cfg(target_os = "linux")]
+fn linux_focus_backend() -> Option<LinuxFocusBackend> {
+    use once_cell::sync::Lazy;
+    static BACKEND: Lazy<Option<LinuxFocusBackend>> = Lazy::new(|| {
+        let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
+        let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some() || session_type == "wayland";
+        decide_linux_backend(
+            wayland,
+            std::env::var_os("SWAYSOCK").is_some(),
+            std::env::var_os("KDE_FULL_SESSION").is_some(),
+            tool_exists("wmctrl"),
+            tool_exists("xdotool"),
+            tool_exists("swaymsg"),
+            tool_exists("kdotool"),
+        )
+    });
+    *BACKEND
+}
+
 /// Whether the CURRENT platform knows how to bring this terminal to the
 /// foreground. Drives the session's `focus_terminal` capability so the island
 /// never renders a focus affordance that would silently fail (e.g. a kitty
-/// session observed on Windows).
+/// session observed on Windows, or any terminal on GNOME Wayland).
 pub fn can_focus(app: TerminalApp) -> bool {
-    if cfg!(target_os = "macos") {
+    #[cfg(target_os = "macos")]
+    {
         macos_app_name(app).is_some()
-    } else if cfg!(target_os = "windows") {
+    }
+    #[cfg(target_os = "windows")]
+    {
         windows_process_name(app).is_some()
-    } else if cfg!(target_os = "linux") {
-        linux_wm_class(app).is_some()
-    } else {
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // A window class we recognize AND a compositor we can actually drive.
+        linux_wm_class(app).is_some() && linux_focus_backend().is_some()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        let _ = app;
         false
     }
 }
@@ -154,10 +252,23 @@ pub fn focus_terminal_app(app: TerminalApp) -> Result<(), String> {
 pub fn focus_terminal_app(app: TerminalApp) -> Result<(), String> {
     let class =
         linux_wm_class(app).ok_or_else(|| "no focusable app for this terminal".to_string())?;
-    // `wmctrl -x -a` matches WM_CLASS and raises + focuses the first hit.
-    // The class is a compile-time constant from the table above — no
-    // injection surface. A missing binary (io error) falls through to
-    // xdotool; a non-zero exit (no matching window) is a real miss.
+    // The class is a compile-time constant from the table above — no injection
+    // surface on any of the backends below.
+    match linux_focus_backend() {
+        Some(LinuxFocusBackend::X11) => focus_x11(class),
+        Some(LinuxFocusBackend::Sway) => focus_sway(class),
+        Some(LinuxFocusBackend::Kde) => focus_kde(class),
+        None => Err(
+            "no window-focus backend for this session (GNOME Wayland forbids external \
+             window activation)"
+                .to_string(),
+        ),
+    }
+}
+
+/// X11: `wmctrl -x -a` (raise + focus by WM_CLASS), falling back to `xdotool`.
+#[cfg(target_os = "linux")]
+fn focus_x11(class: &str) -> Result<(), String> {
     match std::process::Command::new("wmctrl")
         .args(["-x", "-a", class])
         .status()
@@ -177,24 +288,59 @@ pub fn focus_terminal_app(app: TerminalApp) -> Result<(), String> {
     }
 }
 
+/// Sway/wlroots: focus the window whose Wayland `app_id` matches the class.
+#[cfg(target_os = "linux")]
+fn focus_sway(class: &str) -> Result<(), String> {
+    let status = std::process::Command::new("swaymsg")
+        .arg(sway_focus_criteria(class))
+        .status()
+        .map_err(|e| format!("swaymsg unavailable: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("swaymsg exited with {status}"))
+    }
+}
+
+/// KDE Plasma Wayland: `kdotool` mirrors xdotool's search+activate on KWin.
+#[cfg(target_os = "linux")]
+fn focus_kde(class: &str) -> Result<(), String> {
+    let status = std::process::Command::new("kdotool")
+        .args(["search", "--class", class, "windowactivate"])
+        .status()
+        .map_err(|e| format!("kdotool unavailable: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("kdotool exited with {status}"))
+    }
+}
+
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub fn focus_terminal_app(_app: TerminalApp) -> Result<(), String> {
     Err("focus-terminal is not supported on this platform yet".to_string())
 }
 
-/// Tauri command: focus the terminal behind a session (looked up by agent +
-/// session id so the frontend never passes raw app identifiers).
-#[tauri::command]
-pub async fn fleet_focus_terminal(agent: String, session_id: String) -> Result<(), String> {
-    let agent = super::registry::FleetAgent::parse(&agent).ok_or("unknown agent")?;
+/// Resolve a session's terminal (by agent + session id) and bring it to the
+/// foreground. Shared by the `fleet_focus_terminal` Tauri command and the
+/// companion RPC arm so the two transports can never drift.
+pub async fn focus_session_terminal(agent: &str, session_id: &str) -> Result<(), String> {
+    let agent = super::registry::FleetAgent::parse(agent).ok_or("unknown agent")?;
     let terminal = super::runtime()
-        .session_terminal(agent, &session_id)
+        .session_terminal(agent, session_id)
         .ok_or("session has no known terminal")?;
     // Blocking process spawn — hop off the async runtime like other commands
     // that shell out.
     tauri::async_runtime::spawn_blocking(move || focus_terminal_app(terminal.app))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Tauri command: focus the terminal behind a session (looked up by agent +
+/// session id so the frontend never passes raw app identifiers).
+#[tauri::command]
+pub async fn fleet_focus_terminal(agent: String, session_id: String) -> Result<(), String> {
+    focus_session_terminal(&agent, &session_id).await
 }
 
 #[cfg(test)]
@@ -255,14 +401,22 @@ mod tests {
     fn can_focus_follows_the_current_platform_table() {
         // The capability must mirror exactly the table the focus action will
         // consult, so a rendered focus affordance can never silently no-op.
-        let expected = |app: TerminalApp| {
-            if cfg!(target_os = "macos") {
+        let expected = |app: TerminalApp| -> bool {
+            #[cfg(target_os = "macos")]
+            {
                 macos_app_name(app).is_some()
-            } else if cfg!(target_os = "windows") {
+            }
+            #[cfg(target_os = "windows")]
+            {
                 windows_process_name(app).is_some()
-            } else if cfg!(target_os = "linux") {
-                linux_wm_class(app).is_some()
-            } else {
+            }
+            #[cfg(target_os = "linux")]
+            {
+                linux_wm_class(app).is_some() && linux_focus_backend().is_some()
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+            {
+                let _ = app;
                 false
             }
         };
@@ -286,5 +440,62 @@ mod tests {
         // Unknown and tmux are never focusable on any platform.
         assert!(!can_focus(TerminalApp::Unknown));
         assert!(!can_focus(TerminalApp::Tmux));
+    }
+
+    #[test]
+    fn decides_x11_backend_when_not_wayland_with_a_tool() {
+        assert_eq!(
+            decide_linux_backend(false, false, false, true, false, false, false),
+            Some(LinuxFocusBackend::X11)
+        );
+        assert_eq!(
+            decide_linux_backend(false, false, false, false, true, false, false),
+            Some(LinuxFocusBackend::X11)
+        );
+        // X11 session but neither wmctrl nor xdotool installed → no backend.
+        assert_eq!(
+            decide_linux_backend(false, false, false, false, false, false, false),
+            None
+        );
+    }
+
+    #[test]
+    fn decides_sway_then_kde_on_wayland() {
+        assert_eq!(
+            decide_linux_backend(true, true, false, false, false, true, false),
+            Some(LinuxFocusBackend::Sway)
+        );
+        assert_eq!(
+            decide_linux_backend(true, false, true, false, false, false, true),
+            Some(LinuxFocusBackend::Kde)
+        );
+        // Sway socket present but swaymsg missing → falls through, not Sway.
+        assert_ne!(
+            decide_linux_backend(true, true, false, false, false, false, false),
+            Some(LinuxFocusBackend::Sway)
+        );
+    }
+
+    #[test]
+    fn gnome_wayland_resolves_to_no_backend() {
+        // Wayland with no Sway socket and no KDE session → None, so `can_focus`
+        // stays false and the island shows no dead focus button.
+        assert_eq!(
+            decide_linux_backend(true, false, false, true, true, true, true),
+            None
+        );
+    }
+
+    #[test]
+    fn sway_criteria_wraps_the_app_id() {
+        assert_eq!(sway_focus_criteria("kitty"), "[app_id=\"kitty\"] focus");
+    }
+
+    #[tokio::test]
+    async fn focus_session_terminal_rejects_an_unknown_agent() {
+        let err = focus_session_terminal("not-an-agent", "s1")
+            .await
+            .unwrap_err();
+        assert!(err.contains("unknown agent"));
     }
 }

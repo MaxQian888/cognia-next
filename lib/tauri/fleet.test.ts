@@ -15,6 +15,11 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriMock(),
 }))
 
+const revealMock = jest.fn()
+jest.mock("@/lib/tauri/opener", () => ({
+  revealInExplorer: (...args: unknown[]) => revealMock(...args),
+}))
+
 import {
   closeIslandWindow,
   fleetCodexInstall,
@@ -31,6 +36,7 @@ import {
   fleetMonitorStatus,
   fleetMonitorStop,
   fleetPermissionRespond,
+  fleetRevealTranscript,
   islandListMonitors,
   islandResize,
   islandSetMonitor,
@@ -42,6 +48,7 @@ const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
 
 beforeEach(() => {
   invokeMock.mockReset()
+  revealMock.mockReset()
   isTauriMock.mockReturnValue(true)
   warnSpy.mockClear()
 })
@@ -82,7 +89,30 @@ describe("off Tauri (web)", () => {
     expect(await closeIslandWindow()).toBe(false)
     expect(await isIslandWindowOpen()).toBe(false)
     expect(await islandResize(400, 44)).toBe(0)
+    expect(await fleetRevealTranscript("/x/t.jsonl")).toBe(false)
     expect(invokeMock).not.toHaveBeenCalled()
+    expect(revealMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("fleetRevealTranscript", () => {
+  it("reveals the transcript path via the shared reveal helper", async () => {
+    revealMock.mockResolvedValue(undefined)
+    expect(await fleetRevealTranscript("/x/proj/abc.jsonl")).toBe(true)
+    expect(revealMock).toHaveBeenCalledWith("/x/proj/abc.jsonl")
+  })
+
+  it("returns false for an empty path without revealing", async () => {
+    expect(await fleetRevealTranscript(null)).toBe(false)
+    expect(await fleetRevealTranscript("")).toBe(false)
+    expect(await fleetRevealTranscript(undefined)).toBe(false)
+    expect(revealMock).not.toHaveBeenCalled()
+  })
+
+  it("swallows a reveal failure (renderer-safe)", async () => {
+    revealMock.mockRejectedValue(new Error("no file manager"))
+    expect(await fleetRevealTranscript("/x/gone.jsonl")).toBe(false)
+    expect(warnSpy).toHaveBeenCalled()
   })
 })
 

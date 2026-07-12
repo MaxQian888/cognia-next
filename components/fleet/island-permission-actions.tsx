@@ -7,8 +7,9 @@
  * takes over), so the buttons disable rather than lie about control.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
 import { fleetPermissionRespond } from "@/lib/tauri/fleet"
 import { FLEET_PERMISSION_WAIT_MS, type PendingPermission } from "@/lib/fleet/types"
 import { cn } from "@/lib/utils"
@@ -21,14 +22,11 @@ export function IslandPermissionActions({
   className?: string
 }) {
   const t = useTranslations("fleet.permission")
-  const [nowMs, setNowMs] = useState(() => Date.now())
+  // Countdown ticks off the shared fleet ticker (one interval for the whole
+  // island + attention panel) rather than a per-card `setInterval`.
+  const nowMs = useNowTicker()
   const [answering, setAnswering] = useState(false)
   const [answered, setAnswered] = useState<"allow" | "deny" | null>(null)
-
-  useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
 
   const remainingSec = useMemo(() => {
     const deadline = pending.requestedAt + FLEET_PERMISSION_WAIT_MS

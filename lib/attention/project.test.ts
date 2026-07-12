@@ -169,6 +169,41 @@ describe("projectAttention", () => {
     expect(items.map((i) => i.kind)).toEqual(["fleet-permission", "fleet-waiting"])
   })
 
+  it("prefers the parked question, then the plan headline, as the waiting detail", () => {
+    const items = projectAttention({
+      chatSessions: {},
+      gates: [],
+      fleet: {
+        generatedAt: 1,
+        sessions: [
+          fleetSession({
+            sessionId: "q",
+            status: "waiting-input",
+            lastPrompt: "do the thing",
+            pendingQuestions: [
+              { question: "Which auth method?", options: ["OAuth"], multiSelect: false },
+            ],
+          }),
+          fleetSession({
+            sessionId: "pl",
+            status: "plan-pending",
+            lastPrompt: "plan it",
+            pendingPlan: "\n## Migration plan\n1. step",
+          }),
+          fleetSession({
+            sessionId: "fallback",
+            status: "waiting-input",
+            lastPrompt: "just a prompt",
+          }),
+        ],
+      },
+    })
+    const byId = new Map(items.map((i) => [i.id.split(":").at(-1), i.detail]))
+    expect(byId.get("q")).toBe("Which auth method?")
+    expect(byId.get("pl")).toBe("## Migration plan")
+    expect(byId.get("fallback")).toBe("just a prompt")
+  })
+
   it("ignores idle/working/ended fleet sessions", () => {
     const items = projectAttention({
       chatSessions: {},

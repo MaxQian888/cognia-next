@@ -8,15 +8,17 @@
  * the activity line for Approve/Deny controls.
  */
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { FileTextIcon } from "lucide-react"
+import { AlertTriangleIcon, ChevronDownIcon, FileTextIcon } from "lucide-react"
 import { AgentBadge } from "./agent-badge"
 import { TerminalBadge } from "./terminal-badge"
 import { IslandPermissionActions } from "./island-permission-actions"
 import { IslandReply } from "./island-reply"
 import { SessionMetaChips } from "./session-meta-chips"
+import { SessionDetail } from "./session-detail"
 import { activityLine, formatElapsed, truncateLine } from "@/lib/fleet/format"
+import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
 import { fleetFocusTerminal, fleetRevealTranscript } from "@/lib/tauri/fleet"
 import type { FleetSession, FleetStatus } from "@/lib/fleet/types"
 import { cn } from "@/lib/utils"
@@ -30,23 +32,46 @@ const STATUS_DOT: Record<FleetStatus, string> = {
   ended: "bg-white/15",
 }
 
+/** Statuses that pull the user in — the flash fires on a fresh entry into one. */
+const ATTENTION_STATUSES = new Set<FleetStatus>([
+  "waiting-permission",
+  "plan-pending",
+  "waiting-input",
+])
+
 export function IslandRow({
   session,
   enterDelayMs = 0,
+  detailExpanded = false,
+  onToggleDetail,
 }: {
   session: FleetSession
   /** Stagger offset for the entrance animation (list index × step). */
   enterDelayMs?: number
+  /** Whether this row's detail panel is expanded (state owned by the shell so
+   * the resize round-trip can key on it). */
+  detailExpanded?: boolean
+  /** Toggle the detail panel; when omitted the chevron affordance is hidden. */
+  onToggleDetail?: () => void
 }) {
   const t = useTranslations("fleet.row")
-  const [nowMs, setNowMs] = useState(() => Date.now())
+  // Live elapsed labels tick off the single shared fleet ticker (one interval
+  // for every row + permission card) rather than a per-row `setInterval`.
+  const nowMs = useNowTicker()
 
-  // Tick the elapsed label once a second — cheap, and only while expanded
-  // (collapsed islands don't mount rows).
-  useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+  // One-shot highlight when the row NEWLY needs the user (a status transition
+  // into an attention state). Uses the repo's "adjust state during render when
+  // a tracked value changed" pattern (see island-shell tuck reset) — tracked in
+  // state (not a ref, which the react-hooks lint forbids reading during render);
+  // `prevStatus` is set in the same render, so the branch can't loop.
+  const [flashing, setFlashing] = useState(false)
+  const [prevStatus, setPrevStatus] = useState(session.status)
+  if (prevStatus !== session.status) {
+    const enteringAttention =
+      ATTENTION_STATUSES.has(session.status) && !ATTENTION_STATUSES.has(prevStatus)
+    setPrevStatus(session.status)
+    if (enteringAttention) setFlashing(true)
+  }
 
   const activity = activityLine(session)
 
@@ -80,6 +105,9 @@ export function IslandRow({
   const firstQuestion = questions.length > 0 ? questions[0] : null
   const moreQuestions = Math.max(0, questions.length - 1)
   const subagents = session.subagents ?? []
+  const lastError = session.lastError ?? null
+  // Ended rows freeze their runtime at the end time; live rows keep ticking.
+  const elapsedReference = session.status === "ended" ? (session.endedAt ?? nowMs) : nowMs
 
   const statusLine = (() => {
     switch (session.status) {
@@ -105,7 +133,7 @@ export function IslandRow({
       data-testid={`island-row-${session.agent}-${session.sessionId}`}
       data-status={session.status}
       className={cn(
-        "flex flex-col gap-0.5 rounded-xl px-3 py-2 transition-colors duration-200 hover:bg-white/5",
+        "relative flex flex-col gap-0.5 rounded-xl px-3 py-2 transition-colors duration-200 hover:bg-white/5",
         "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200",
         canFocus && "cursor-pointer"
       )}
@@ -132,13 +160,23 @@ export function IslandRow({
           : undefined
       }
     >
+      {flashing ? (
+        <span
+          aria-hidden
+          data-testid="row-flash"
+          className="island-attention-flash pointer-events-none absolute inset-0 rounded-xl"
+          onAnimationEnd={() => setFlashing(false)}
+        />
+      ) : null}
       <div className="flex items-center gap-2">
         <span
           aria-hidden
           data-testid="status-dot"
           className={cn(
             "size-1.5 shrink-0 rounded-full transition-colors duration-300",
-            STATUS_DOT[session.status]
+            STATUS_DOT[session.status],
+            // Orthogonal error accent — a ring, so the status colour is kept.
+            lastError && "ring-1 ring-red-400/70"
           )}
         />
         <AgentBadge agent={session.agent} />
@@ -147,8 +185,30 @@ export function IslandRow({
         </span>
         {session.terminal ? <TerminalBadge terminal={session.terminal} /> : null}
         <span className="shrink-0 text-[10px] tabular-nums text-white/50" data-testid="elapsed">
-          {formatElapsed(session.startedAt, nowMs)}
+          {formatElapsed(session.startedAt, elapsedReference)}
         </span>
+        {onToggleDetail ? (
+          <button
+            type="button"
+            data-testid="session-detail-toggle"
+            aria-label={detailExpanded ? t("detail.toggleHide") : t("detail.toggleShow")}
+            aria-expanded={detailExpanded}
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleDetail()
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="shrink-0 rounded-md p-0.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white/80"
+          >
+            <ChevronDownIcon
+              className={cn(
+                "size-3 transition-transform duration-200",
+                detailExpanded && "rotate-180"
+              )}
+              aria-hidden
+            />
+          </button>
+        ) : null}
         {canRevealTranscript ? (
           <button
             type="button"
@@ -169,10 +229,29 @@ export function IslandRow({
 
       <SessionMetaChips session={session} className="pl-3.5" />
 
+      {detailExpanded ? <SessionDetail session={session} /> : null}
+
       {session.lastPrompt ? (
         <p className="truncate pl-3.5 text-[11px] text-white/60" data-testid="last-prompt">
           {t("you")} {truncateLine(session.lastPrompt, 140)}
         </p>
+      ) : null}
+
+      {lastError ? (
+        <div
+          data-testid="row-error"
+          className="ml-3.5 flex items-start gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] leading-snug text-red-200/90 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+        >
+          <AlertTriangleIcon className="mt-px size-3 shrink-0 text-red-400" aria-hidden />
+          <span className="min-w-0">
+            <span className="font-semibold" data-testid="row-error-kind">
+              {t(`error.${lastError.kind}`)}
+            </span>
+            {lastError.detail ? (
+              <span className="text-red-200/70"> · {truncateLine(lastError.detail, 120)}</span>
+            ) : null}
+          </span>
+        </div>
       ) : null}
 
       {session.pendingPermission ? (
@@ -206,6 +285,14 @@ export function IslandRow({
             {firstQuestion.header ? (
               <span className="mr-1.5 rounded bg-amber-400/20 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-200">
                 {firstQuestion.header}
+              </span>
+            ) : null}
+            {firstQuestion.multiSelect ? (
+              <span
+                data-testid="question-multiselect"
+                className="mr-1.5 rounded bg-amber-400/15 px-1 py-px text-[9px] font-medium text-amber-200/80"
+              >
+                {t("multiSelect")}
               </span>
             ) : null}
             {truncateLine(firstQuestion.question, 200)}
@@ -281,6 +368,12 @@ export function IslandRow({
                   {t("subagentBackground")}
                 </span>
               ) : null}
+              <span
+                className="shrink-0 tabular-nums text-white/40"
+                data-testid={`subagent-elapsed-${i}`}
+              >
+                {formatElapsed(subagent.startedAt, nowMs)}
+              </span>
             </span>
           ))}
           {subagents.length > 3 ? (

@@ -1,7 +1,9 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import {
+  clearEndedFleetHistory,
   clearFleetHistory,
+  deleteFleetHistory,
   fleetHistoryId,
   getFleetHistory,
   listFleetHistory,
@@ -111,6 +113,31 @@ describe("fleet-sessions persistence", () => {
     expect(list.map((r) => r.sessionId)).toEqual(["new", "old"])
     await clearFleetHistory()
     expect(await listFleetHistory()).toEqual([])
+  })
+
+  it("deletes a single row by id", async () => {
+    await recordFleetHistory(row({ id: "a", sessionId: "a" }))
+    await recordFleetHistory(row({ id: "b", sessionId: "b" }))
+    await deleteFleetHistory("a")
+    const list = await listFleetHistory()
+    expect(list.map((r) => r.id)).toEqual(["b"])
+    // Deleting a missing id is a harmless no-op.
+    await deleteFleetHistory("ghost")
+    expect((await listFleetHistory()).length).toBe(1)
+  })
+
+  it("clears ended rows and keeps active ones", async () => {
+    await recordFleetHistory(row({ id: "live", sessionId: "live", outcome: "active" }))
+    await recordFleetHistory(
+      row({ id: "done", sessionId: "done", outcome: "ended", endedAt: 2000 })
+    )
+    await recordFleetHistory(
+      row({ id: "done2", sessionId: "done2", outcome: "ended", endedAt: 3000 })
+    )
+    const removed = await clearEndedFleetHistory()
+    expect(removed).toBe(2)
+    const list = await listFleetHistory()
+    expect(list.map((r) => r.id)).toEqual(["live"])
   })
 
   it("prunes rows older than a cutoff", async () => {

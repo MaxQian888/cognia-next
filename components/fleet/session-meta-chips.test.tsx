@@ -34,6 +34,8 @@ function session(overrides: Partial<FleetSession>): FleetSession {
     },
     startedAt: 0,
     lastEventAt: 0,
+    toolUseCount: 0,
+    turnCount: 0,
     ...overrides,
   }
 }

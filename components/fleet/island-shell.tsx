@@ -34,7 +34,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useFleetStream } from "@/hooks/fleet/use-fleet-stream"
-import { attentionCount, fleetStatusSummary, sortForIsland } from "@/lib/fleet/format"
+import {
+  attentionCount,
+  attentionSeverity,
+  fleetStatusSummary,
+  sortForIsland,
+} from "@/lib/fleet/format"
 import { FLEET_ISLAND_GEOMETRY_EVENT, type IslandGeometry } from "@/lib/fleet/types"
 import { isTauri } from "@/lib/tauri"
 import { islandResize } from "@/lib/tauri/fleet"
@@ -63,6 +68,18 @@ export function IslandShell() {
   const [pinnedOpen, setPinnedOpen] = useState(false)
   const [tucked, setTucked] = useState(false)
   const [topInset, setTopInset] = useState(0)
+  // Which rows have their detail panel expanded (keyed by agent:sessionId).
+  // Owned here — not in the row — so the resize effect can key `contentKey` on
+  // it: an expanded row is taller, and the frameless window must re-hug it.
+  const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleDetail = useCallback((key: string) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
   const cardRef = useRef<HTMLDivElement | null>(null)
   const insetRef = useRef(0)
 
@@ -105,6 +122,8 @@ export function IslandShell() {
 
   const sessions = sortForIsland(snapshot.sessions)
   const waiting = attentionCount(snapshot.sessions)
+  // permission → red ring, plan/input → amber ring (a permission always wins).
+  const severity = attentionSeverity(snapshot.sessions)
   const empty = sessions.length === 0
 
   // Per-status counts for the expanded triage legend. Buckets with a zero
@@ -122,12 +141,16 @@ export function IslandShell() {
   // controls). The resize effect keys on it so content growing inside an
   // already-expanded island still re-reports the window size.
   const contentKey = sessions
-    .map(
-      (s) =>
-        `${s.agent}:${s.sessionId}:${s.status}:${s.pendingPermission ? 1 : 0}:` +
+    .map((s) => {
+      const key = `${s.agent}:${s.sessionId}`
+      return (
+        `${key}:${s.status}:${s.pendingPermission ? 1 : 0}:` +
         `${s.pendingPlan ? 1 : 0}:${s.pendingQuestions?.length ?? 0}:` +
-        `${s.subagents?.length ?? 0}:${s.lastPrompt ? 1 : 0}`
-    )
+        `${s.subagents?.length ?? 0}:${s.lastPrompt ? 1 : 0}:` +
+        // Expand state + an error banner both change the row's height.
+        `${expandedKeys.has(key) ? 1 : 0}:${s.lastError ? 1 : 0}`
+      )
+    })
     .join("|")
 
   // A pending permission forces the island open so its Approve/Deny controls
@@ -284,14 +307,19 @@ export function IslandShell() {
                 className="flex max-h-[420px] flex-col gap-0.5 overflow-y-auto px-1 pb-2 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200"
                 data-testid="island-list"
               >
-                {sessions.map((s, i) => (
-                  <IslandRow
-                    key={`${s.agent}:${s.sessionId}`}
-                    session={s}
-                    // Gentle stagger, capped so a long list doesn't feel sluggish.
-                    enterDelayMs={Math.min(i, 6) * ISLAND_ROW_STAGGER_MS}
-                  />
-                ))}
+                {sessions.map((s, i) => {
+                  const key = `${s.agent}:${s.sessionId}`
+                  return (
+                    <IslandRow
+                      key={key}
+                      session={s}
+                      // Gentle stagger, capped so a long list doesn't feel sluggish.
+                      enterDelayMs={Math.min(i, 6) * ISLAND_ROW_STAGGER_MS}
+                      detailExpanded={expandedKeys.has(key)}
+                      onToggleDetail={() => toggleDetail(key)}
+                    />
+                  )
+                })}
               </div>
             </>
           ) : null}
@@ -306,7 +334,13 @@ export function IslandShell() {
             <span
               aria-hidden
               data-testid="island-attention-ring"
-              className="island-attention-ring pointer-events-none absolute inset-0 rounded-2xl"
+              data-severity={severity}
+              className={cn(
+                "pointer-events-none absolute inset-0 rounded-2xl",
+                severity === "permission"
+                  ? "island-attention-ring--danger"
+                  : "island-attention-ring"
+              )}
             />
           ) : null}
         </div>

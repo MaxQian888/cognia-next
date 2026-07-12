@@ -8,9 +8,13 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriMock(),
 }))
 
+const focusTerminalMock = jest.fn().mockResolvedValue(true)
+const revealTranscriptMock = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/tauri/fleet", () => ({
   fleetGetSnapshot: () => Promise.resolve({ sessions: [], generatedAt: 0 }),
   fleetPermissionRespond: jest.fn().mockResolvedValue(true),
+  fleetFocusTerminal: (...args: unknown[]) => focusTerminalMock(...args),
+  fleetRevealTranscript: (...args: unknown[]) => revealTranscriptMock(...args),
 }))
 
 type Handler = (e: { payload: unknown }) => void
@@ -147,6 +151,119 @@ describe("AttentionPanel", () => {
     expect(screen.getByTestId("attention-row-fleet:claude-code:f1")).toBeInTheDocument()
     // IslandPermissionActions mounts its Approve/Deny buttons inline.
     expect(screen.getAllByRole("button").length).toBeGreaterThan(1)
+  })
+
+  it("fleet row offers focus-terminal when the session is focusable", async () => {
+    renderPanel()
+    await flush()
+    act(() => {
+      handlers.get(FLEET_UPDATE_EVENT)!({
+        payload: {
+          generatedAt: 9,
+          sessions: [
+            {
+              agent: "claude-code",
+              sessionId: "f2",
+              status: "waiting-input",
+              pendingPermission: null,
+              projectName: "proj",
+              terminal: { app: "windows-terminal", label: "Windows Terminal" },
+              capabilities: { focusTerminal: true },
+              startedAt: 1,
+              lastEventAt: 2,
+            },
+          ],
+        },
+      })
+    })
+    fireEvent.click(screen.getByTestId("attention-trigger"))
+    fireEvent.click(screen.getByTestId("attention-focus-terminal-fleet:claude-code:f2"))
+    expect(focusTerminalMock).toHaveBeenCalledWith("claude-code", "f2")
+  })
+
+  it("fleet row reveals the transcript when the capability and a path are present", async () => {
+    renderPanel()
+    await flush()
+    act(() => {
+      handlers.get(FLEET_UPDATE_EVENT)!({
+        payload: {
+          generatedAt: 9,
+          sessions: [
+            {
+              agent: "claude-code",
+              sessionId: "f4",
+              status: "waiting-input",
+              pendingPermission: null,
+              projectName: "proj",
+              terminal: null,
+              transcriptPath: "/x/proj/f4.jsonl",
+              capabilities: { focusTerminal: false, openTranscript: true },
+              startedAt: 1,
+              lastEventAt: 2,
+            },
+          ],
+        },
+      })
+    })
+    fireEvent.click(screen.getByTestId("attention-trigger"))
+    fireEvent.click(screen.getByTestId("attention-reveal-transcript-fleet:claude-code:f4"))
+    expect(revealTranscriptMock).toHaveBeenCalledWith("/x/proj/f4.jsonl")
+  })
+
+  it("fleet row hides reveal-transcript without a known transcript path", async () => {
+    renderPanel()
+    await flush()
+    act(() => {
+      handlers.get(FLEET_UPDATE_EVENT)!({
+        payload: {
+          generatedAt: 9,
+          sessions: [
+            {
+              agent: "claude-code",
+              sessionId: "f5",
+              status: "waiting-input",
+              pendingPermission: null,
+              projectName: "proj",
+              terminal: null,
+              transcriptPath: null,
+              capabilities: { focusTerminal: false, openTranscript: true },
+              startedAt: 1,
+              lastEventAt: 2,
+            },
+          ],
+        },
+      })
+    })
+    fireEvent.click(screen.getByTestId("attention-trigger"))
+    expect(screen.queryByTestId("attention-reveal-transcript-fleet:claude-code:f5")).toBeNull()
+  })
+
+  it("fleet row hides focus-terminal without the capability", async () => {
+    renderPanel()
+    await flush()
+    act(() => {
+      handlers.get(FLEET_UPDATE_EVENT)!({
+        payload: {
+          generatedAt: 9,
+          sessions: [
+            {
+              agent: "claude-code",
+              sessionId: "f3",
+              status: "waiting-input",
+              pendingPermission: null,
+              projectName: "proj",
+              terminal: null,
+              capabilities: { focusTerminal: false },
+              startedAt: 1,
+              lastEventAt: 2,
+            },
+          ],
+        },
+      })
+    })
+    fireEvent.click(screen.getByTestId("attention-trigger"))
+    expect(screen.getByTestId("attention-row-fleet:claude-code:f3")).toBeInTheDocument()
+    expect(screen.queryByTestId("attention-focus-terminal-fleet:claude-code:f3")).toBeNull()
   })
 
   it("stale rows are muted and Dismiss clears them", async () => {

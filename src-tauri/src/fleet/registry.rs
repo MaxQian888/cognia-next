@@ -121,6 +121,29 @@ pub struct FleetSubagent {
     pub started_at: u64,
 }
 
+/// Whether a captured error came from a single tool call or from the turn
+/// ending in failure (Claude's `StopFailure`). Serialized on `FleetError`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FleetErrorKind {
+    Tool,
+    Turn,
+}
+
+/// The most recent error observed on a session. Orthogonal to `FleetStatus`
+/// (a failed tool doesn't change what the user must *do*), so the island keeps
+/// its status colour and paints a separate error banner. A later successful
+/// tool clears a `Tool` error; a new turn clears any error.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FleetError {
+    pub kind: FleetErrorKind,
+    /// Compact human-readable summary (tool error text / turn failure reason).
+    pub detail: Option<String>,
+    /// Epoch ms when the error was observed.
+    pub at: u64,
+}
+
 /// One monitored external session — the island row DTO.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,6 +177,24 @@ pub struct FleetSession {
     /// Set when the session transitions to `Ended`; used for linger cleanup.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<u64>,
+    /// Most recent tool/turn error, cleared on a new turn or a later success.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<FleetError>,
+    /// Tool invocations seen this session (incremented on `PreToolUse`).
+    pub tool_use_count: u32,
+    /// User turns seen this session (`UserPromptSubmit` / Codex turn-complete).
+    pub turn_count: u32,
+    /// How the session began: `startup` | `resume` | `clear` | `compact`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_source: Option<String>,
+    /// Current git branch of `cwd`, captured once per turn in the runtime
+    /// (never in the pure fold — see `FleetRuntime::ingest`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    /// Internal guard: has the branch been captured for the current turn?
+    /// Never serialized — the frontend has no use for it.
+    #[serde(skip)]
+    pub git_checked: bool,
 }
 
 /// Full snapshot emitted to the frontend on every change.
@@ -274,6 +315,12 @@ impl FleetRegistry {
             "SessionStart" => {
                 entry.status = FleetStatus::Idle;
                 entry.ended_at = None;
+                // `startup` | `resume` | `clear` | `compact` — distinguishes a
+                // fresh run from a resumed/cleared one on the detail panel.
+                if let Some(source) = payload_str(&ev.payload, "source") {
+                    entry.start_source = Some(source);
+                }
+                entry.last_error = None;
             }
             "UserPromptSubmit" => {
                 entry.status = FleetStatus::Working;
@@ -281,13 +328,21 @@ impl FleetRegistry {
                     entry.last_prompt = Some(prompt);
                 }
                 entry.activity = None;
+                entry.turn_count = entry.turn_count.saturating_add(1);
                 // A new turn supersedes anything parked for the previous one;
                 // background subagents keep running across turns.
                 entry.pending_plan = None;
                 entry.pending_questions.clear();
                 entry.subagents.retain(|s| s.background);
+                // A new turn clears a stale error and re-arms the per-turn git
+                // branch refresh (catches a mid-session checkout).
+                entry.last_error = None;
+                entry.git_checked = false;
             }
             "PreToolUse" => {
+                // Count on Pre (not Post) so a tool that never returns still
+                // counts once; PostToolUse handles error/success bookkeeping.
+                entry.tool_use_count = entry.tool_use_count.saturating_add(1);
                 let tool = payload_str(&ev.payload, "tool_name");
                 if tool.as_deref().is_some_and(is_exit_plan_tool) {
                     entry.status = FleetStatus::PlanPending;
@@ -321,6 +376,28 @@ impl FleetRegistry {
                 // answered in the terminal.
                 entry.pending_plan = None;
                 entry.pending_questions.clear();
+                // Surface a failed tool as a `Tool` error; a clean result
+                // clears a prior tool error but leaves a turn error standing.
+                match extract_tool_error(&ev.payload) {
+                    Some(detail) => {
+                        entry.last_error = Some(FleetError {
+                            kind: FleetErrorKind::Tool,
+                            detail,
+                            at: now_ms,
+                        });
+                    }
+                    None => {
+                        if matches!(
+                            entry.last_error,
+                            Some(FleetError {
+                                kind: FleetErrorKind::Tool,
+                                ..
+                            })
+                        ) {
+                            entry.last_error = None;
+                        }
+                    }
+                }
                 if payload_str(&ev.payload, "tool_name")
                     .as_deref()
                     .is_some_and(is_task_tool)
@@ -356,16 +433,34 @@ impl FleetRegistry {
                 entry.capabilities.approve_permission = true;
                 return RegistryEffect::PermissionRequested { request_id };
             }
-            // A clean turn end and an API-error turn end both return the row to
-            // idle and clear any in-flight activity / parked permission.
-            // Background subagents survive the turn; foreground ones can't.
-            "Stop" | "StopFailure" => {
+            // A clean turn end returns the row to idle, clears in-flight
+            // activity / parked permission, and clears any error. Background
+            // subagents survive the turn; foreground ones can't.
+            "Stop" => {
                 entry.status = FleetStatus::Idle;
                 entry.activity = None;
                 entry.pending_permission = None;
                 entry.pending_plan = None;
                 entry.pending_questions.clear();
                 entry.subagents.retain(|s| s.background);
+                entry.last_error = None;
+            }
+            // Same idle transition as `Stop`, but the turn ended in an API
+            // error — stamp a `Turn` error so the row can flag it (previously
+            // this signal was collapsed into `Stop` and silently discarded).
+            "StopFailure" => {
+                entry.status = FleetStatus::Idle;
+                entry.activity = None;
+                entry.pending_permission = None;
+                entry.pending_plan = None;
+                entry.pending_questions.clear();
+                entry.subagents.retain(|s| s.background);
+                entry.last_error = Some(FleetError {
+                    kind: FleetErrorKind::Turn,
+                    detail: payload_str(&ev.payload, "reason")
+                        .or_else(|| payload_str(&ev.payload, "error")),
+                    at: now_ms,
+                });
             }
             // A subagent finished. The payload carries no correlation id, so
             // retire the oldest foreground entry (its PostToolUse follows and
@@ -408,6 +503,9 @@ impl FleetRegistry {
                 // assistant reply as the trailing activity line.
                 entry.status = FleetStatus::Idle;
                 entry.pending_permission = None;
+                // The notify program's per-turn signal — the only turn marker
+                // on the Codex path.
+                entry.turn_count = entry.turn_count.saturating_add(1);
                 if let Some(prompt) = ev
                     .payload
                     .get("input-messages")
@@ -495,6 +593,34 @@ impl FleetRegistry {
         session.agent_pid
     }
 
+    /// `Some(cwd)` when this session still needs its git branch captured for the
+    /// current turn. The pure fold never shells out — the runtime calls this,
+    /// runs `git`, then hands the result back via `set_git_branch`.
+    pub fn needs_git_capture(&self, agent: FleetAgent, session_id: &str) -> Option<String> {
+        let session = self.sessions.get(&(agent, session_id.to_string()))?;
+        if session.git_checked {
+            return None;
+        }
+        session.cwd.clone()
+    }
+
+    /// Record the captured branch (or its absence) and mark the turn checked.
+    /// Returns true when the snapshot changed.
+    pub fn set_git_branch(
+        &mut self,
+        agent: FleetAgent,
+        session_id: &str,
+        branch: Option<String>,
+    ) -> bool {
+        let Some(session) = self.sessions.get_mut(&(agent, session_id.to_string())) else {
+            return false;
+        };
+        let changed = session.git_branch != branch || !session.git_checked;
+        session.git_branch = branch;
+        session.git_checked = true;
+        changed
+    }
+
     /// Clear a parked permission (answered or timed out). Returns true when
     /// the snapshot changed.
     pub fn resolve_permission(&mut self, request_id: &str) -> bool {
@@ -568,6 +694,12 @@ fn new_session(
         started_at: now_ms,
         last_event_at: now_ms,
         ended_at: None,
+        last_error: None,
+        tool_use_count: 0,
+        turn_count: 0,
+        start_source: None,
+        git_branch: None,
+        git_checked: false,
     }
 }
 
@@ -775,6 +907,43 @@ fn tool_detail(payload: &serde_json::Value, tool_name: &str) -> Option<String> {
     if detail.len() < text.len() {
         detail.push('…');
     }
+    Some(detail)
+}
+
+/// Detect a failed `PostToolUse` result. Returns `None` when the tool
+/// succeeded (or carried no result), and `Some(detail)` when it errored — the
+/// inner `Option` is the best compact message available.
+///
+/// Claude's `tool_response` is normally an object (`{is_error, content}` or an
+/// `error` field); some bridged variants send a bare string. A top-level
+/// `is_error` flag is also honored. A plain string result without any error
+/// flag is normal output, not an error.
+fn extract_tool_error(payload: &serde_json::Value) -> Option<Option<String>> {
+    let response = payload.get("tool_response");
+    let flagged = response
+        .and_then(|r| r.get("is_error"))
+        .and_then(|v| v.as_bool())
+        .or_else(|| payload.get("is_error").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    // An `error` field on the response is itself a failure signal.
+    let error_msg = response
+        .and_then(|r| r.get("error"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
+    if !flagged && error_msg.is_none() {
+        return None;
+    }
+    // Best available detail: explicit error, else stringified content, else a
+    // bare-string response body.
+    let detail = error_msg
+        .or_else(|| {
+            response
+                .and_then(|r| r.get("content"))
+                .and_then(|c| c.as_str())
+        })
+        .or_else(|| response.and_then(|r| r.as_str()))
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| truncate_chars(s.trim(), 160));
     Some(detail)
 }
 
@@ -1137,31 +1306,162 @@ mod tests {
     }
 
     #[test]
-    fn stop_returns_to_idle_and_clears_activity() {
+    fn stop_returns_to_idle_and_clears_activity_and_error() {
         let mut reg = FleetRegistry::new();
         let mut payload = base_payload();
         payload["tool_name"] = serde_json::json!("Bash");
         payload["tool_input"] = serde_json::json!({"command": "ls"});
         reg.apply(&claude_ev("PreToolUse", payload), 0);
-        reg.apply(&claude_ev("Stop", base_payload()), 1);
+        // A failed tool parks an error; a clean Stop clears it.
+        let mut post = base_payload();
+        post["tool_name"] = serde_json::json!("Bash");
+        post["tool_response"] = serde_json::json!({"is_error": true, "error": "boom"});
+        reg.apply(&claude_ev("PostToolUse", post), 1);
+        assert!(only_session(&reg).last_error.is_some());
+        reg.apply(&claude_ev("Stop", base_payload()), 2);
         let s = only_session(&reg);
         assert_eq!(s.status, FleetStatus::Idle);
         assert!(s.activity.is_none());
+        assert!(s.last_error.is_none());
     }
 
     #[test]
-    fn stop_failure_also_returns_to_idle() {
-        // An API-error turn end must clear "working" like a clean Stop, else the
-        // row is stranded working forever.
+    fn stop_failure_returns_to_idle_and_stamps_turn_error() {
+        // An API-error turn end must clear "working" like a clean Stop (else the
+        // row is stranded working forever) BUT stamp a turn error so the island
+        // can flag the failure — previously this signal was silently discarded.
         let mut reg = FleetRegistry::new();
         let mut payload = base_payload();
         payload["tool_name"] = serde_json::json!("Bash");
         payload["tool_input"] = serde_json::json!({"command": "ls"});
         reg.apply(&claude_ev("PreToolUse", payload), 0);
-        reg.apply(&claude_ev("StopFailure", base_payload()), 1);
+        let mut fail = base_payload();
+        fail["reason"] = serde_json::json!("API overloaded");
+        reg.apply(&claude_ev("StopFailure", fail), 1);
         let s = only_session(&reg);
         assert_eq!(s.status, FleetStatus::Idle);
         assert!(s.activity.is_none());
+        let err = s.last_error.expect("turn error");
+        assert_eq!(err.kind, FleetErrorKind::Turn);
+        assert_eq!(err.detail.as_deref(), Some("API overloaded"));
+        assert_eq!(err.at, 1);
+    }
+
+    #[test]
+    fn post_tool_use_error_sets_then_success_clears_tool_error() {
+        let mut reg = FleetRegistry::new();
+        let mut fail = base_payload();
+        fail["tool_name"] = serde_json::json!("Bash");
+        fail["tool_response"] = serde_json::json!({"is_error": true, "content": "exit 1"});
+        reg.apply(&claude_ev("PostToolUse", fail), 10);
+        let err = only_session(&reg).last_error.expect("tool error");
+        assert_eq!(err.kind, FleetErrorKind::Tool);
+        assert_eq!(err.detail.as_deref(), Some("exit 1"));
+        assert_eq!(err.at, 10);
+
+        // A later clean tool clears the tool error.
+        let mut ok = base_payload();
+        ok["tool_name"] = serde_json::json!("Read");
+        ok["tool_response"] = serde_json::json!({"content": "file body"});
+        reg.apply(&claude_ev("PostToolUse", ok), 11);
+        assert!(only_session(&reg).last_error.is_none());
+    }
+
+    #[test]
+    fn post_tool_use_success_does_not_clear_a_turn_error() {
+        let mut reg = FleetRegistry::new();
+        reg.apply(&claude_ev("StopFailure", base_payload()), 0);
+        assert_eq!(
+            only_session(&reg).last_error.map(|e| e.kind),
+            Some(FleetErrorKind::Turn)
+        );
+        // A clean tool result must NOT clear a turn-level error.
+        let mut ok = base_payload();
+        ok["tool_name"] = serde_json::json!("Read");
+        reg.apply(&claude_ev("PostToolUse", ok), 1);
+        assert_eq!(
+            only_session(&reg).last_error.map(|e| e.kind),
+            Some(FleetErrorKind::Turn)
+        );
+    }
+
+    #[test]
+    fn tool_and_turn_counts_increment() {
+        let mut reg = FleetRegistry::new();
+        reg.apply(&claude_ev("UserPromptSubmit", base_payload()), 0);
+        reg.apply(&claude_ev("UserPromptSubmit", base_payload()), 1);
+        let mut tool = base_payload();
+        tool["tool_name"] = serde_json::json!("Bash");
+        reg.apply(&claude_ev("PreToolUse", tool), 2);
+        let s = only_session(&reg);
+        assert_eq!(s.turn_count, 2);
+        assert_eq!(s.tool_use_count, 1);
+    }
+
+    #[test]
+    fn session_start_source_captured_and_new_turn_clears_error() {
+        let mut reg = FleetRegistry::new();
+        reg.apply(&claude_ev("StopFailure", base_payload()), 0);
+        assert!(only_session(&reg).last_error.is_some());
+        // A new turn clears the error and re-arms git capture.
+        reg.apply(&claude_ev("UserPromptSubmit", base_payload()), 1);
+        assert!(only_session(&reg).last_error.is_none());
+
+        let mut start = base_payload();
+        start["source"] = serde_json::json!("resume");
+        reg.apply(&claude_ev("SessionStart", start), 2);
+        assert_eq!(only_session(&reg).start_source.as_deref(), Some("resume"));
+    }
+
+    #[test]
+    fn extract_tool_error_recognizes_each_shape() {
+        // Object with is_error + explicit error message.
+        assert_eq!(
+            extract_tool_error(&serde_json::json!({
+                "tool_response": {"is_error": true, "error": "boom"}
+            })),
+            Some(Some("boom".to_string()))
+        );
+        // Object with only an `error` field (no explicit flag).
+        assert_eq!(
+            extract_tool_error(&serde_json::json!({"tool_response": {"error": "nope"}})),
+            Some(Some("nope".to_string()))
+        );
+        // Top-level is_error with a bare-string response body.
+        assert_eq!(
+            extract_tool_error(&serde_json::json!({
+                "is_error": true, "tool_response": "raw failure"
+            })),
+            Some(Some("raw failure".to_string()))
+        );
+        // Flagged but no message → error with no detail.
+        assert_eq!(
+            extract_tool_error(&serde_json::json!({"is_error": true})),
+            Some(None)
+        );
+        // Clean result (string body, no flag) → not an error.
+        assert_eq!(
+            extract_tool_error(&serde_json::json!({"tool_response": "all good"})),
+            None
+        );
+        assert_eq!(extract_tool_error(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn git_seam_captures_branch_once_per_turn() {
+        let mut reg = FleetRegistry::new();
+        reg.apply(&claude_ev("SessionStart", base_payload()), 0);
+        // needs_git_capture yields the cwd until a branch is recorded.
+        assert_eq!(
+            reg.needs_git_capture(FleetAgent::ClaudeCode, SID).as_deref(),
+            Some("/Users/x/proj/cognia-next")
+        );
+        assert!(reg.set_git_branch(FleetAgent::ClaudeCode, SID, Some("main".into())));
+        assert_eq!(only_session(&reg).git_branch.as_deref(), Some("main"));
+        // Once checked, no re-capture until a new turn re-arms it.
+        assert!(reg.needs_git_capture(FleetAgent::ClaudeCode, SID).is_none());
+        reg.apply(&claude_ev("UserPromptSubmit", base_payload()), 1);
+        assert!(reg.needs_git_capture(FleetAgent::ClaudeCode, SID).is_some());
     }
 
     #[test]

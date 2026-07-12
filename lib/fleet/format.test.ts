@@ -1,7 +1,9 @@
 import {
   activityLine,
   attentionCount,
+  attentionSeverity,
   fleetStatusSummary,
+  formatCwdMiddle,
   formatElapsed,
   formatModelLabel,
   sortForIsland,
@@ -32,6 +34,8 @@ function session(overrides: Partial<FleetSession>): FleetSession {
     },
     startedAt: 0,
     lastEventAt: 0,
+    toolUseCount: 0,
+    turnCount: 0,
     ...overrides,
   }
 }
@@ -155,5 +159,55 @@ describe("fleetStatusSummary", () => {
       ended: 0,
       total: 0,
     })
+  })
+})
+
+describe("attentionSeverity", () => {
+  it("is none when nothing needs the user", () => {
+    expect(attentionSeverity([session({ status: "working" }), session({ status: "idle" })])).toBe(
+      "none"
+    )
+  })
+
+  it("is input for a plan or input wait", () => {
+    expect(
+      attentionSeverity([session({ status: "working" }), session({ status: "waiting-input" })])
+    ).toBe("input")
+    expect(attentionSeverity([session({ status: "plan-pending" })])).toBe("input")
+  })
+
+  it("prioritizes a permission over an input wait regardless of order", () => {
+    expect(
+      attentionSeverity([
+        session({ status: "waiting-input" }),
+        session({ status: "waiting-permission" }),
+      ])
+    ).toBe("permission")
+  })
+
+  it("treats a parked pendingPermission as permission even without the status", () => {
+    expect(
+      attentionSeverity([
+        session({
+          status: "working",
+          pendingPermission: { requestId: "r", toolName: null, detail: null, requestedAt: 0 },
+        }),
+      ])
+    ).toBe("permission")
+  })
+})
+
+describe("formatCwdMiddle", () => {
+  it("returns a path shorter than the cap unchanged", () => {
+    expect(formatCwdMiddle("/a/b/c", 44)).toBe("/a/b/c")
+  })
+
+  it("middle-ellipsizes a long path, keeping both ends within the cap", () => {
+    const p = "/Users/someone/very/deeply/nested/path/to/the/project/x"
+    const out = formatCwdMiddle(p, 20)
+    expect(out).toContain("…")
+    expect(out.startsWith("/Users")).toBe(true)
+    expect(out.endsWith("x")).toBe(true)
+    expect(out.length).toBeLessThanOrEqual(20)
   })
 })

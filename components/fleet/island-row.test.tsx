@@ -9,7 +9,11 @@ import type { FleetSession } from "@/lib/fleet/types"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
+  useFormatter: () => ({ dateTime: () => "TIME" }),
 }))
+
+// The expanded detail panel reads OS reduced-motion; pin it so counts are instant.
+jest.mock("motion/react", () => ({ useReducedMotion: () => true }))
 
 const focusMock = jest.fn()
 const sendMock = jest.fn()
@@ -44,6 +48,8 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     },
     startedAt: Date.now() - 134_000, // 2m14s ago
     lastEventAt: Date.now(),
+    toolUseCount: 0,
+    turnCount: 0,
     ...overrides,
   }
 }
@@ -381,5 +387,100 @@ describe("IslandRow", () => {
       />
     )
     expect(screen.getByTestId("question-waited").textContent).toContain("waitingFor")
+  })
+
+  it("paints an error banner (and dot accent) when the session has a last error", () => {
+    const { rerender } = render(<IslandRow session={session()} />)
+    expect(screen.queryByTestId("row-error")).toBeNull()
+
+    rerender(
+      <IslandRow
+        session={session({ lastError: { kind: "turn", detail: "API overloaded", at: 0 } })}
+      />
+    )
+    const banner = screen.getByTestId("row-error")
+    expect(screen.getByTestId("row-error-kind")).toHaveTextContent("error.turn")
+    expect(banner.textContent).toContain("API overloaded")
+  })
+
+  it("freezes an ended row's runtime at its end time", () => {
+    render(<IslandRow session={session({ status: "ended", startedAt: 1_000, endedAt: 61_000 })} />)
+    // 60s between start and end — does not tick past that regardless of `now`.
+    expect(screen.getByTestId("elapsed")).toHaveTextContent("1m00s")
+  })
+
+  it("flags a multi-select question", () => {
+    const { rerender } = render(
+      <IslandRow
+        session={session({
+          status: "waiting-input",
+          activity: null,
+          pendingQuestions: [{ question: "Pick", options: ["a"], multiSelect: false }],
+        })}
+      />
+    )
+    expect(screen.queryByTestId("question-multiselect")).toBeNull()
+
+    rerender(
+      <IslandRow
+        session={session({
+          status: "waiting-input",
+          activity: null,
+          pendingQuestions: [{ question: "Pick", options: ["a", "b"], multiSelect: true }],
+        })}
+      />
+    )
+    expect(screen.getByTestId("question-multiselect")).toBeInTheDocument()
+  })
+
+  it("shows a per-subagent elapsed label", () => {
+    render(
+      <IslandRow
+        session={session({
+          subagents: [
+            { description: "explore repo", background: false, startedAt: Date.now() - 5_000 },
+          ],
+        })}
+      />
+    )
+    expect(screen.getByTestId("subagent-elapsed-0").textContent).toMatch(/\ds/)
+  })
+
+  it("toggles the detail panel without also focusing the terminal", () => {
+    const onToggle = jest.fn()
+    render(<IslandRow session={session()} detailExpanded={false} onToggleDetail={onToggle} />)
+    // Detail hidden until the parent flips the flag.
+    expect(screen.queryByTestId("session-detail")).toBeNull()
+    fireEvent.click(screen.getByTestId("session-detail-toggle"))
+    expect(onToggle).toHaveBeenCalledTimes(1)
+    // The row is a focus-terminal button, but the toggle stops propagation.
+    expect(focusMock).not.toHaveBeenCalled()
+  })
+
+  it("renders the detail panel when expanded and hides the toggle without a handler", () => {
+    const { rerender } = render(<IslandRow session={session()} />)
+    // No handler → no chevron affordance.
+    expect(screen.queryByTestId("session-detail-toggle")).toBeNull()
+
+    rerender(<IslandRow session={session()} detailExpanded onToggleDetail={jest.fn()} />)
+    expect(screen.getByTestId("session-detail")).toBeInTheDocument()
+  })
+
+  it("flashes once when the row newly needs the user, then clears on animation end", () => {
+    const { rerender } = render(<IslandRow session={session({ status: "working" })} />)
+    expect(screen.queryByTestId("row-flash")).toBeNull()
+
+    rerender(<IslandRow session={session({ status: "waiting-permission" })} />)
+    const flash = screen.getByTestId("row-flash")
+    fireEvent.animationEnd(flash)
+    expect(screen.queryByTestId("row-flash")).toBeNull()
+  })
+
+  it("does not flash on mount, nor when moving between two attention states", () => {
+    const { rerender } = render(<IslandRow session={session({ status: "plan-pending" })} />)
+    // Mounting straight into an attention state has no prior status to flash from.
+    expect(screen.queryByTestId("row-flash")).toBeNull()
+    rerender(<IslandRow session={session({ status: "waiting-permission" })} />)
+    expect(screen.queryByTestId("row-flash")).toBeNull()
   })
 })
