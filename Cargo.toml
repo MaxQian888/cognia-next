@@ -28,6 +28,7 @@ members = [
   # ADR-0067 Tier-A decomposition — subsystem library crates extracted from the
   # monolithic `app_lib` so an edit recompiles ~2–15k LOC + a relink instead of
   # the whole 170k-LOC tree.
+  "crates/cognia-core",
   "crates/cognia-instrument",
   "crates/cognia-git",
   "crates/cognia-ocr",

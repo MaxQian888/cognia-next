@@ -64,6 +64,8 @@ serde = { version = "1.0", features = ["derive"] }
 # its Cloudflare Worker. The desktop peer (companion_api::signaling) keeps its
 # own HMAC/replay logic but reuses these structs to prevent wire-format drift.
 cognia-signaling-core = { path = "../services/signaling-server/core" }
+# ADR-0067 — foundation utilities (fs_atomic). Re-aliased as `crate::fs_atomic`.
+cognia-core = { path = "../crates/cognia-core" }
 # ADR-0067 Phase 1 — process-global span instrumentation registry, extracted
 # from `perf/{span,registry}.rs` so the Tier-A leaf crates (cognia-git,
 # cognia-vector, cognia-ocr) can instrument without depending on the whole app.

@@ -1,0 +1,18 @@
+# ADR-0067 — foundation utilities shared across the extracted subsystem crates.
+# Starts with `fs_atomic` (pure std, no deps) which the automation cluster needs;
+# more foundation modules (secret_store, command_error) may land here in later
+# phases. `app_lib` re-aliases each module so `crate::fs_atomic::…` is unchanged.
+[package]
+name = "cognia-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Foundation utilities shared across cognia subsystem crates."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_core"
+path = "src/lib.rs"
+
+[dependencies]
