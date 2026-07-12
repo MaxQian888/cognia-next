@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, memo, useCallback } from "react"
+import { useState, memo, useCallback, useRef } from "react"
 import { useTranslations } from "next-intl"
 import {
   ZoomIn,
@@ -27,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadFromUrl } from "@/lib/files/download"
+import { openExternal } from "@/lib/tauri/opener"
 import { loggers } from "@/lib/logging"
 
 interface ImageBlockProps {
@@ -81,6 +82,50 @@ export const ImageBlock = memo(function ImageBlock({
     setRotation(0)
   }, [])
 
+  // ── Touch gestures (fullscreen viewer) ────────────────────────────────
+  // Pinch-to-zoom via pointer events: while two pointers are down, zoom
+  // scales with the distance ratio from gesture start. The container's
+  // `touch-action: pan-x pan-y` keeps one-finger scroll-panning native
+  // while claiming two-finger moves for us. Double-tap (and double-click)
+  // toggles 100% ↔ 200%.
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>())
+  const pinchRef = useRef<{ startDist: number; startZoom: number } | null>(null)
+
+  const pinchDistance = () => {
+    const pts = [...pointersRef.current.values()]
+    if (pts.length < 2) return 0
+    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+  }
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (pointersRef.current.size === 2) {
+        pinchRef.current = { startDist: pinchDistance(), startZoom: zoom }
+      }
+    },
+    [zoom]
+  )
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!pointersRef.current.has(e.pointerId)) return
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const pinch = pinchRef.current
+    if (pinch && pointersRef.current.size === 2 && pinch.startDist > 0) {
+      const ratio = pinchDistance() / pinch.startDist
+      setZoom(Math.min(3, Math.max(0.5, pinch.startZoom * ratio)))
+    }
+  }, [])
+
+  const handlePointerEnd = useCallback((e: React.PointerEvent) => {
+    pointersRef.current.delete(e.pointerId)
+    if (pointersRef.current.size < 2) pinchRef.current = null
+  }, [])
+
+  const handleDoubleTap = useCallback(() => {
+    setZoom((prev) => (prev === 1 ? 2 : 1))
+  }, [])
+
   const handleDownload = useCallback(async () => {
     const filename = src.split("/").pop() || t("defaultFilename")
     try {
@@ -90,7 +135,7 @@ export const ImageBlock = memo(function ImageBlock({
         err: err instanceof Error ? err.message : String(err),
         src,
       })
-      window.open(src, "_blank")
+      void openExternal(src)
     }
   }, [src, t])
 
@@ -99,7 +144,8 @@ export const ImageBlock = memo(function ImageBlock({
   }, [copy, src])
 
   const handleOpenExternal = useCallback(() => {
-    window.open(src, "_blank")
+    // Capacitor WebView can't rely on window.open — route via openExternal.
+    void openExternal(src)
   }, [src])
 
   if (hasError) {
@@ -277,12 +323,24 @@ export const ImageBlock = memo(function ImageBlock({
 
           <div
             className="flex items-center justify-center bg-black/90 overflow-auto"
-            style={{ height: "calc(95vh - 60px)" } as React.CSSProperties}
+            data-testid="image-fullscreen-stage"
+            style={
+              {
+                height: "calc(95vh - 60px)",
+                // pan-x/pan-y keeps one-finger scroll native while routing
+                // two-finger moves to the pinch handlers above.
+                touchAction: "pan-x pan-y",
+              } as React.CSSProperties
+            }
             onClick={(e) => {
               if (e.target === e.currentTarget) {
                 handleResetView()
               }
             }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerEnd}
+            onPointerCancel={handlePointerEnd}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -295,6 +353,7 @@ export const ImageBlock = memo(function ImageBlock({
                 } as React.CSSProperties
               }
               draggable={false}
+              onDoubleClick={handleDoubleTap}
             />
           </div>
         </DialogContent>

@@ -73,7 +73,7 @@ export function AttachmentPreview(props: AttachmentPreviewProps = {}) {
               </>
             )}
             {showOcr ? (
-              <div className="absolute right-7 top-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="absolute right-7 top-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
                 <OcrMenu
                   attachmentId={f.id}
                   mediaType={f.mediaType ?? ""}
@@ -85,7 +85,9 @@ export function AttachmentPreview(props: AttachmentPreviewProps = {}) {
             <TooltipIconButton
               type="button"
               onClick={() => attachments.remove(f.id)}
-              className="absolute top-0.5 right-0.5 size-5 rounded bg-background/80 p-0.5 opacity-0 transition-opacity group-hover:opacity-100"
+              // Touch has no hover: without pointer-coarse the remove-X is
+              // invisible on mobile and a staged attachment can't be removed.
+              className="absolute top-0.5 right-0.5 size-5 rounded bg-background/80 p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100"
               aria-label={t("removeAria", { filename: displayName })}
               tooltip={t("removeAria", { filename: displayName })}
             >

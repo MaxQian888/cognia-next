@@ -21,6 +21,7 @@ import Image from "next/image"
 import { useState } from "react"
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ExternalLink } from "@/components/shared/external-link"
 import { Badge } from "@/components/ui/badge"
 import type {
   InboundA2UIBlock,
@@ -113,15 +114,13 @@ function NodeRenderer({ node }: { node: InboundA2UINode }) {
       )
     case "link":
       return (
-        <a
+        <ExternalLink
           href={node.href}
-          target="_blank"
-          rel="noopener noreferrer"
           className="inline-flex items-center gap-1 rounded-sm text-xs text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           {node.label}
           <ExternalLinkIcon className="h-3 w-3" aria-hidden />
-        </a>
+        </ExternalLink>
       )
     case "button":
       return (

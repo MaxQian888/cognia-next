@@ -95,9 +95,16 @@ jest.mock("@/components/artifacts/artifact-create-button", () => ({
   ArtifactCreateButton: () => null,
 }))
 
-import { render, screen } from "@testing-library/react"
+jest.mock("@/lib/tauri/opener", () => ({
+  openExternal: jest.fn(async () => undefined),
+}))
+
+import { render, screen, fireEvent } from "@testing-library/react"
 import React from "react"
 import { MarkdownRenderer, parseTaskListItem } from "./markdown-renderer"
+import { openExternal } from "@/lib/tauri/opener"
+
+const mockOpenExternal = openExternal as jest.Mock
 
 describe("MarkdownRenderer", () => {
   // ── basic text ──────────────────────────────────────────────────────────────
@@ -110,6 +117,28 @@ describe("MarkdownRenderer", () => {
   it("wraps output in prose container", () => {
     const { container } = render(<MarkdownRenderer content="test" />)
     expect(container.querySelector(".markdown-renderer")).toBeTruthy()
+  })
+
+  // ── external links ──────────────────────────────────────────────────────────
+
+  it("routes http(s) link clicks through openExternal on native shells", () => {
+    const w = window as unknown as Record<string, unknown>
+    w.Capacitor = { isNativePlatform: () => true }
+    try {
+      mockOpenExternal.mockClear()
+      render(<MarkdownRenderer content="[site](https://example.com)" />)
+      fireEvent.click(screen.getByText("site"))
+      expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com")
+    } finally {
+      delete w.Capacitor
+    }
+  })
+
+  it("leaves link clicks to the default anchor on plain web", () => {
+    mockOpenExternal.mockClear()
+    render(<MarkdownRenderer content="[site](https://example.com)" />)
+    fireEvent.click(screen.getByText("site"))
+    expect(mockOpenExternal).not.toHaveBeenCalled()
   })
 
   // ── code blocks ─────────────────────────────────────────────────────────────

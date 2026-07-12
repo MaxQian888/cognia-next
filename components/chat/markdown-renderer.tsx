@@ -28,6 +28,7 @@ import { KbdInline } from "@/components/chat/renderers/kbd-inline"
 import { TaskListItem } from "@/components/chat/renderers/task-list"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
 import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
+import { ExternalLink } from "@/components/shared/external-link"
 
 // Heavy block renderers are code-split via next/dynamic so the initial
 // chat-tab bundle drops their parse cost. Mermaid is ~200KB minified,
@@ -422,15 +423,14 @@ function buildComponents(
       return <td className="border border-border px-4 py-2">{children}</td>
     },
     a({ href, children }) {
+      // `ExternalLink` keeps `target="_blank"` on web but routes http(s) clicks
+      // through `openExternal` on Capacitor/Tauri (the WebView can't rely on
+      // `target="_blank"` — Android blocks new-window creation, WKWebView is
+      // inconsistent). Non-http hrefs (anchors, mailto:) pass through untouched.
       return (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-primary hover:underline"
-        >
+        <ExternalLink href={href ?? ""} className="text-primary hover:underline">
           {children}
-        </a>
+        </ExternalLink>
       )
     },
     blockquote({ children }) {

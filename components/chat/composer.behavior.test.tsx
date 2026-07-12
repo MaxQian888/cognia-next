@@ -110,13 +110,16 @@ function renderComposer(session: ChatSession, onSend = jest.fn(async () => undef
   return { ta, onSend }
 }
 
+// Cold-open Dexie (delete + reopen + migrate the full schema) can exceed the
+// default 5s hook budget on the first test of the file — repo convention is a
+// 30s hook timeout for suites that reset the DB per test.
 beforeEach(async () => {
   useChatStore.getState().clear()
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-})
+}, 30_000)
 
 afterEach(() => {
   useSettingsStore.setState({ settings: undefined as never })

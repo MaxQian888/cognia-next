@@ -41,6 +41,15 @@ describe("CodeBlock", () => {
     expect(container.querySelector(".code-scroll-x")).toBeTruthy()
   })
 
+  it("keeps the header toolbar reachable on coarse pointers (no hover on touch)", () => {
+    const { container } = renderInProvider(<CodeBlock code="x = 1" language="python" />)
+    // The toolbar is hover-revealed on desktop; `pointer-coarse:opacity-100`
+    // keeps copy/download/fullscreen reachable on touch, where group-hover
+    // never fires.
+    const toolbar = container.querySelector(".pointer-coarse\\:opacity-100")
+    expect(toolbar).toBeTruthy()
+  })
+
   describe("isStreaming short-circuit (Stage 4)", () => {
     it("renders without crashing when isStreaming is true", () => {
       const { container } = renderInProvider(

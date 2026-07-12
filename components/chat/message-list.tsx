@@ -189,9 +189,18 @@ export function MessageList({
 
   // Switching sessions invalidates every cached row height — left over
   // measurements from the prior session leave gaps / overlaps in the
-  // virtual list.
+  // virtual list. It also invalidates the scroll state: a freshly opened
+  // conversation starts at its latest message, and carrying the previous
+  // session's `isAtBottom=false` over would disarm stick-to-bottom for the
+  // whole new thread (short lists never emit a scroll event to correct it).
   useEffect(() => {
     rowVirtualizer.measure()
+    const raf = requestAnimationFrame(() => {
+      const el = scrollParentRef.current
+      if (el) el.scrollTop = el.scrollHeight
+      setIsAtBottom(true)
+    })
+    return () => cancelAnimationFrame(raf)
   }, [sessionId, rowVirtualizer])
 
   const virtualItems = rowVirtualizer.getVirtualItems()
@@ -393,6 +402,13 @@ export function MessageList({
         {isMobile ? (
           <MessageActionSheet
             message={actionMessage}
+            // Same speaker resolution as message-renderer: team sender first,
+            // then the session's 1:1 character — drives the Read-aloud voice.
+            character={(() => {
+              const senderId = (actionMessage as { metadata?: { senderId?: string } } | null)
+                ?.metadata?.senderId
+              return (senderId ? characterById?.get(senderId) : null) ?? directCharacter ?? null
+            })()}
             onOpenChange={(next) => {
               if (!next) setActionMessage(null)
             }}
@@ -408,6 +424,15 @@ export function MessageList({
                 : undefined
             }
             onDelete={status === "idle" || status === "error" ? handleDeleteMessage : undefined}
+            // Touch path for the hover-only pencil: user's own messages,
+            // no turn in flight (mirrors message-renderer's gate).
+            onEditResend={
+              onEditResend &&
+              actionMessage?.role === "user" &&
+              (status === "idle" || status === "error")
+                ? (msg, newText) => onEditResend(msg.id, newText)
+                : undefined
+            }
           />
         ) : null}
       </div>

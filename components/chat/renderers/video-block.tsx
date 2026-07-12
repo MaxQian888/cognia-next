@@ -16,6 +16,7 @@ import { cn, formatVideoTime } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { downloadFromUrl } from "@/lib/files/download"
+import { openExternal } from "@/lib/tauri/opener"
 import { loggers } from "@/lib/logging"
 
 interface VideoBlockProps {
@@ -133,7 +134,9 @@ export const VideoBlock = memo(function VideoBlock({
   }, [src, title, t])
 
   const handleOpenExternal = useCallback(() => {
-    window.open(src, "_blank")
+    // `window.open` is unreliable in the Capacitor WebView; openExternal routes
+    // through the in-app browser (mobile) / OS browser (desktop).
+    void openExternal(src)
   }, [src])
 
   if (hasError) {
@@ -247,7 +250,10 @@ export const VideoBlock = memo(function VideoBlock({
         )}
 
         {controls && !isLoading && (
-          <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+          // Hover-revealed on fine pointers; always visible on touch (no hover
+          // exists there, so play/seek/mute/fullscreen/download would otherwise
+          // be completely unreachable — the video is unplayable on mobile).
+          <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
             <div className="px-3">
               <input
                 type="range"

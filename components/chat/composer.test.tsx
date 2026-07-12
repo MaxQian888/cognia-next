@@ -17,6 +17,39 @@ jest.mock("@/lib/shell/exec", () => ({
   executeShell: jest.fn(),
   formatShellResult: jest.fn(),
 }))
+// Interactive `!command` routing: control the desktop gate and stub the dock
+// spawn so a routed command doesn't hit the real terminal orchestrator.
+jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
+  isTauri: jest.fn(() => false),
+}))
+jest.mock("@/lib/terminal/run-in-dock", () => ({
+  runInTerminalDock: jest.fn(async () => undefined),
+  runInDockTab: jest.fn(async () => ({ kind: "ok" })),
+}))
+// Desktop-only SDK context-usage hook: with isTauri() flipped on it would fire
+// a Tauri IPC that doesn't exist in jsdom. Stub it — it's a display leaf,
+// irrelevant to composer logic.
+jest.mock("@/hooks/chat/use-sdk-context-usage", () => ({
+  useSdkContextUsage: () => ({ snapshot: null, refresh: () => undefined }),
+}))
+// With isTauri() flipped on, the composer's plugin-quick-actions-menu mounts
+// desktop tray hooks that hit Tauri event/subscription IPC absent in jsdom.
+// Stub them to static values — they're status leaves, irrelevant here.
+jest.mock("@/lib/tray/state-snapshot", () => ({
+  useTrayStateSnapshot: () => jest.requireActual("@/lib/tray/sync").defaultSnapshot(),
+}))
+jest.mock("@/lib/tray/usage", () => ({
+  useTrayUsage: () => null,
+}))
+jest.mock("@tauri-apps/api/event", () => ({
+  listen: jest.fn(async () => () => undefined),
+  once: jest.fn(async () => () => undefined),
+  emit: jest.fn(async () => undefined),
+}))
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: jest.fn(async () => null),
+}))
 jest.mock("@/lib/files/memory", () => ({
   appendMemory: jest.fn(),
 }))
@@ -47,6 +80,22 @@ jest.mock("./composer/voice-controls", () => ({
 // Platform is the gate for the mobile (Capacitor) Claude-style layout. Default
 // to "web" so the existing tests keep the desktop/web responsive layout.
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
+// Capacitor wrappers consumed by the mobile send path (haptic on send,
+// keyboard dismiss after send). Mocked so the mobile tests can assert calls;
+// `subscribeKeyboard` is included because use-keyboard-insets (via
+// MentionPopover) imports from the same module.
+jest.mock("@/lib/capacitor/haptics", () => ({
+  __esModule: true,
+  impact: jest.fn(),
+  notify: jest.fn(),
+  selectionFeedback: jest.fn(),
+}))
+jest.mock("@/lib/capacitor/keyboard", () => ({
+  __esModule: true,
+  hideKeyboard: jest.fn(async () => undefined),
+  showKeyboard: jest.fn(async () => undefined),
+  subscribeKeyboard: jest.fn(() => null),
+}))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { act } from "react"
@@ -59,6 +108,8 @@ import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { usePlatform } from "@/hooks/use-platform"
 import { executeShell } from "@/lib/shell/exec"
+import { isTauri } from "@/lib/tauri"
+import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
 import type { ChatSession } from "@/lib/claude/types"
 import type { Project } from "@/types"
 
@@ -102,6 +153,9 @@ beforeEach(() => {
   useChatStore.getState().clear()
   useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   mockUsePlatform.mockReturnValue("web")
+  // Default to non-desktop so `!command` uses the capture path unless a test
+  // opts into desktop.
+  ;(isTauri as jest.Mock).mockReturnValue(false)
 })
 
 describe("Composer — data-hooks integration", () => {
@@ -298,6 +352,60 @@ describe("Composer — mobile (Claude-style) layout", () => {
     expect(taWrapper?.className ?? "").not.toContain("@sm/composer:flex-1")
   })
 
+  it("mounts the plus menu instead of the paperclip button on mobile", () => {
+    mockUsePlatform.mockReturnValue("mobile")
+    renderComposer()
+    expect(screen.getByTestId("composer-plus-toggle")).toBeInTheDocument()
+  })
+
+  it("fires a light haptic and dismisses the keyboard after a mobile send", async () => {
+    mockUsePlatform.mockReturnValue("mobile")
+    const { impact } = jest.requireMock("@/lib/capacitor/haptics") as { impact: jest.Mock }
+    const { hideKeyboard } = jest.requireMock("@/lib/capacitor/keyboard") as {
+      hideKeyboard: jest.Mock
+    }
+    impact.mockClear()
+    hideKeyboard.mockClear()
+    renderComposer()
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "hello" } })
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(hideKeyboard).toHaveBeenCalled())
+    expect(impact).toHaveBeenCalledWith("light")
+    // Mobile must NOT refocus the textarea (that would reopen the keyboard).
+    expect(document.activeElement).not.toBe(ta)
+  })
+
+  it("does not touch the keyboard wrapper on web sends", async () => {
+    mockUsePlatform.mockReturnValue("web")
+    const { hideKeyboard } = jest.requireMock("@/lib/capacitor/keyboard") as {
+      hideKeyboard: jest.Mock
+    }
+    hideKeyboard.mockClear()
+    renderComposer()
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "hello" } })
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(ta.value).toBe(""))
+    expect(hideKeyboard).not.toHaveBeenCalled()
+  })
+
+  it("keeps the paperclip button (no plus menu) on web/desktop", () => {
+    mockUsePlatform.mockReturnValue("web")
+    renderComposer()
+    expect(screen.queryByTestId("composer-plus-toggle")).toBeNull()
+  })
+
   it("wraps into the two-row stack below @sm and restores the row layout via container queries on web/desktop", () => {
     mockUsePlatform.mockReturnValue("web")
     renderComposer()
@@ -468,6 +576,71 @@ describe("Composer — effective cwd (workspace fallback)", () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(executeShellMock).toHaveBeenCalledWith("echo hi", "/ws/root"))
+  })
+
+  it("routes an interactive ! command to the integrated terminal (not capture) on desktop", async () => {
+    seedActiveWorkspace("/ws/root")
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const executeShellMock = executeShell as jest.Mock
+    executeShellMock.mockClear()
+    const routeMock = runInTerminalDock as jest.Mock
+    routeMock.mockClear()
+    const ta = renderComposer()
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "!ssh example.com" } })
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(routeMock).toHaveBeenCalledWith("ssh example.com", "/ws/root", expect.any(String))
+    )
+    expect(executeShellMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps a non-interactive ! command on the capture path even on desktop", async () => {
+    seedActiveWorkspace("/ws/root")
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const executeShellMock = executeShell as jest.Mock
+    executeShellMock.mockResolvedValue({ stdout: "ok", stderr: "", code: 0 })
+    const routeMock = runInTerminalDock as jest.Mock
+    routeMock.mockClear()
+    const ta = renderComposer()
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "!echo hi" } })
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(executeShellMock).toHaveBeenCalledWith("echo hi", "/ws/root"))
+    expect(routeMock).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a failure system message when interactive routing throws", async () => {
+    seedActiveWorkspace("/ws/root")
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const routeMock = runInTerminalDock as jest.Mock
+    routeMock.mockClear()
+    routeMock.mockRejectedValueOnce(new Error("dock boom"))
+    const executeShellMock = executeShell as jest.Mock
+    executeShellMock.mockClear()
+    const ta = renderComposer()
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "!ssh example.com" } })
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(routeMock).toHaveBeenCalled())
+    // The catch handled it: no fall-through to capture, and a system message
+    // was appended.
+    expect(executeShellMock).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(useChatStore.getState().messages.some((m) => m.role === "system")).toBe(true)
+    )
   })
 
   it("still prefers a per-session workingDir over the workspace root", () => {

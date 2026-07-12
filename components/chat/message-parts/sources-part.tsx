@@ -29,6 +29,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { ExternalLink } from "@/components/shared/external-link"
 import {
   AlertTriangleIcon,
   BookIcon,
@@ -299,14 +300,12 @@ const SourceRow = memo(function SourceRow({ source }: { source: SourcesPartItem 
 
   if (source.url) {
     return (
-      <a
+      <ExternalLink
         className="block rounded px-1 py-0.5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         href={source.url}
-        target="_blank"
-        rel="noopener noreferrer"
       >
         {body}
-      </a>
+      </ExternalLink>
     )
   }
   return <div className="rounded px-1 py-0.5">{body}</div>

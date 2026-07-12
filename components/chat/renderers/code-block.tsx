@@ -214,10 +214,15 @@ export const CodeBlock = memo(function CodeBlock({
           <div className="flex items-center gap-2 text-muted-foreground">
             {language && <span className="font-mono font-medium">{language}</span>}
             {filename && <span className="text-muted-foreground/60">{filename}</span>}
-            {!language && !filename && <span className="font-mono">code</span>}
+            {!language && !filename && (
+              <span className="font-mono">{/* i18n-exempt: generic fallback label */}code</span>
+            )}
           </div>
 
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {/* Hover-revealed on fine pointers; always visible on touch, where
+              there is no hover to reveal it (copy/download/fullscreen would
+              otherwise be unreachable on mobile). */}
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
             <TooltipIconButton
               variant="ghost"
               size="icon"

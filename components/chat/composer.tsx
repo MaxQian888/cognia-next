@@ -135,10 +135,20 @@ import { useComposerGhostText } from "@/hooks/chat/use-composer-ghost-text"
 import { useInputHistory } from "./composer/hooks/use-input-history"
 import { CommandParamForm } from "./composer/command-param-form"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
+import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
+import { detectInteractiveCommand } from "@/lib/claude/permissions/interactive-command"
+import { isTauri } from "@/lib/tauri"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
 import { useUpdateSession } from "@/lib/data-hooks/context"
 import { loggers } from "@/lib/logging"
+import { impact, notify } from "@/lib/capacitor/haptics"
+import { hideKeyboard } from "@/lib/capacitor/keyboard"
 import { MentionPopover } from "@/components/mobile/chat/mention-popover"
+import {
+  ComposerPlusMenu,
+  attachmentToFiles,
+  type ComposerAttachment,
+} from "@/components/mobile/chat/composer-plus-menu"
 import {
   clearDraft as clearChatDraft,
   getDraft as getChatDraft,
@@ -161,7 +171,6 @@ import { CharCounter } from "./composer/char-counter"
 import { DragOverlay } from "./composer/drag-overlay"
 import { HelperHints } from "./composer/helper-hints"
 import { ScreenshotButton } from "./composer/screenshot-button"
-import { CameraCaptureButton } from "./composer/camera-capture-button"
 import { VoiceControls } from "./composer/voice-controls"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { InboxComposerActionsHost } from "@/components/inbox/inbox-composer-actions-host"
@@ -746,6 +755,22 @@ function ComposerInner(props: InnerProps) {
     isSendingRef.current = true
     setIsSending(true)
 
+    // Tactile confirmation for the most frequent chat action. The wrapper
+    // no-ops off the Capacitor shell, so this is safe unconditionally.
+    if (isMobile) void impact("light")
+
+    // Post-send focus policy: desktop refocuses the textarea for rapid
+    // follow-ups; mobile blurs it and collapses the soft keyboard so the
+    // streaming reply isn't hidden behind it (ChatGPT-app behavior).
+    const settleFocusAfterSend = () => {
+      if (isMobile) {
+        textareaRef.current?.blur()
+        void hideKeyboard()
+      } else {
+        textareaRef.current?.focus()
+      }
+    }
+
     // Snapshot the attachments BEFORE the optimistic clear so the actual send
     // still has them (and so a failed send can restore the composer).
     const snapshotFiles = [...attachments.files]
@@ -829,19 +854,26 @@ function ComposerInner(props: InnerProps) {
           restoreInputAfterFailure()
           return
         }
-        if (sent) textareaRef.current?.focus()
-        else restoreInputAfterFailure()
+        if (sent) settleFocusAfterSend()
+        else {
+          restoreInputAfterFailure()
+          if (isMobile) void notify("error")
+        }
         return
       }
 
       const sent = await props.onSubmit(expandPastes(text, pasteMap), filesToSend)
-      if (sent) textareaRef.current?.focus()
-      else restoreInputAfterFailure()
+      if (sent) settleFocusAfterSend()
+      else {
+        restoreInputAfterFailure()
+        if (isMobile) void notify("error")
+      }
     } catch (err) {
       // A thrown send must not leave the user's text lost — restore the
       // optimistically-cleared input and surface the failure (don't rethrow
       // into the fire-and-forget click handler).
       restoreInputAfterFailure()
+      if (isMobile) void notify("error")
       loggers.chat.error("composer send failed", err)
     } finally {
       // Always release the guard. On a successful send the store has already
@@ -862,6 +894,7 @@ function ComposerInner(props: InnerProps) {
     clearAfterSendEnabled,
     pastedBlocks,
     noteCommandUsed,
+    isMobile,
   ])
 
   // Accept the inline ghost-text suggestion: write the completed value back
@@ -1093,6 +1126,25 @@ function ComposerInner(props: InnerProps) {
       if (take.length > 0) attachments.add(take)
     },
     [attachments, tAttach]
+  )
+
+  // Mobile "+" menu → fold every pick (camera / album multi-pick / files)
+  // into the same acceptFiles gate the paperclip input uses, so the size /
+  // count / type limits and their toasts stay single-source.
+  const onPlusAttach = useCallback(
+    (attachment: ComposerAttachment) => {
+      void attachmentToFiles(attachment)
+        .then((files) => {
+          if (files.length > 0) acceptFiles(files)
+        })
+        .catch((err: unknown) => {
+          loggers.chat.warn("plus-menu attach failed", {
+            err: err instanceof Error ? err.message : String(err),
+          })
+          toast.error(err instanceof Error ? err.message : String(err))
+        })
+    },
+    [acceptFiles]
   )
 
   const onPaste = useCallback(
@@ -1458,35 +1510,40 @@ function ComposerInner(props: InnerProps) {
             !isMobile && "@sm/composer:order-none"
           )}
         >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label={t("ariaAttachImage")}
-                className={cn(
-                  "size-9 text-muted-foreground hover:text-foreground",
-                  // Mobile: expand the tap target to the 44px minimum without
-                  // changing the icon. Desktop keeps the compact 36px button.
-                  isMobile && "touch-target"
-                )}
-                disabled={props.disabled}
-                onClick={openFileDialog}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <PaperclipIcon className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("attachImageTooltip")}</TooltipContent>
-          </Tooltip>
+          {isMobile ? (
+            // Mobile: one WeChat-style "+" menu (camera / album multi-pick /
+            // files) replaces the paperclip + camera button pair — fewer
+            // 44px targets competing for composer width. Voice stays with
+            // the transcription bridge below (speech → text), so the menu's
+            // record-as-attachment branch is hidden.
+            <ComposerPlusMenu
+              showVoice={false}
+              fileAccept={ATTACHMENT_ACCEPT}
+              onAttach={onPlusAttach}
+              onError={(_code, message) => toast.error(message)}
+            />
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={t("ariaAttachImage")}
+                  className="size-9 text-muted-foreground hover:text-foreground"
+                  disabled={props.disabled}
+                  onClick={openFileDialog}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <PaperclipIcon className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("attachImageTooltip")}</TooltipContent>
+            </Tooltip>
+          )}
 
           <FolderPickerButton disabled={props.disabled} />
 
-          {isDesktop ? (
-            <ScreenshotButton disabled={props.disabled} />
-          ) : isMobile ? (
-            <CameraCaptureButton disabled={props.disabled} />
-          ) : null}
+          {isDesktop ? <ScreenshotButton disabled={props.disabled} /> : null}
 
           <VoiceTranscriptionBridge disabled={props.disabled} />
           <ComposerAppendBridge />
@@ -1867,6 +1924,25 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         toast.error(tShell("needsCwd"))
         return false
       }
+      // An interactive command (ssh, a REPL, a login flow, `git rebase -i`, …)
+      // needs a TTY the capture path lacks — it would hang or read EOF. Route it
+      // to the real integrated terminal instead (desktop only; on web the
+      // capture path below already surfaces the desktop-only error).
+      if (isTauri() && detectInteractiveCommand(cmd).interactive) {
+        try {
+          await runInTerminalDock(cmd, cwd, session?.id ?? "")
+          pushSystemMessage(tShell("interactiveRoutedToTerminal", { cmd }))
+        } catch (err) {
+          loggers.chat.error("interactive shell routing failed", err, { cmd, cwd })
+          pushSystemMessage(
+            tShell("failed", {
+              cmd,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          )
+        }
+        return true
+      }
       pushSystemMessage(tShell("runningHint", { cmd, cwd }))
       try {
         const result = await executeShell(cmd, cwd)
@@ -1882,7 +1958,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       }
       return true
     },
-    [cwd, pushSystemMessage, tShell]
+    [cwd, pushSystemMessage, tShell, session]
   )
 
   const handleMemorySubmit = useCallback(

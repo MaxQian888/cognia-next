@@ -76,6 +76,7 @@ import {
 } from "lucide-react"
 import type { ToolUIPart, UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import { UsageBreakdown } from "@/components/chat/usage-breakdown"
 import type { Character } from "@/lib/claude/types"
 import React, { memo, useCallback, useMemo, useState, type KeyboardEvent } from "react"
 import { useTranslations } from "next-intl"
@@ -153,6 +154,7 @@ class PluginPartErrorBoundary extends React.Component<
           className="my-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
           role="alert"
         >
+          {/* i18n-exempt: plugin-crash diagnostic; class ErrorBoundary cannot use i18n hooks */}
           Plugin renderer for &quot;{this.props.type}&quot; crashed: {this.state.error.message}
         </div>
       )
@@ -566,28 +568,6 @@ export const MessageRenderer = memo(
 )
 
 MessageRenderer.displayName = "MessageRenderer"
-
-function UsageBreakdown({ usage }: { usage: UsageInfo }) {
-  const t = useTranslations("chat.message")
-  return (
-    <div className="space-y-0.5 font-mono text-xs">
-      <div>{t("usageInput", { n: usage.inputTokens ?? 0 })}</div>
-      <div>{t("usageOutput", { n: usage.outputTokens ?? 0 })}</div>
-      {usage.reasoningTokens !== undefined && usage.reasoningTokens > 0 && (
-        <div>{t("usageReasoning", { n: usage.reasoningTokens })}</div>
-      )}
-      {usage.cacheReadInputTokens !== undefined && usage.cacheReadInputTokens > 0 && (
-        <div>{t("usageCacheHit", { n: usage.cacheReadInputTokens })}</div>
-      )}
-      {usage.cacheCreationInputTokens !== undefined && usage.cacheCreationInputTokens > 0 && (
-        <div>{t("usageCacheWrite", { n: usage.cacheCreationInputTokens })}</div>
-      )}
-      {usage.totalCostUsd !== undefined && (
-        <div>{t("usageCost", { cost: usage.totalCostUsd.toFixed(4) })}</div>
-      )}
-    </div>
-  )
-}
 
 function highlightMentions(
   text: string,

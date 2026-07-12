@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { GlobeIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { McpCardShell, hostOf, useParsedOutput } from "./common"
+import { ExternalLink } from "@/components/shared/external-link"
 
 interface WebFetchInput {
   url?: string
@@ -41,19 +42,21 @@ export function WebFetchCard({ part }: { part: ToolUIPart }) {
   if (!input.url) return null
 
   return (
-    <McpCardShell title="WebFetch" badge={hostOf(input.url)} testId="mcp-webfetch-card">
+    <McpCardShell
+      title={/* i18n-exempt: tool name */ "WebFetch"}
+      badge={hostOf(input.url)}
+      testId="mcp-webfetch-card"
+    >
       <div className="flex items-start gap-2">
         <GlobeIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
-          <a
+          <ExternalLink
             href={input.url}
-            target="_blank"
-            rel="noopener noreferrer"
             className="break-all font-mono text-[11px] text-primary hover:underline"
             data-testid="mcp-webfetch-url"
           >
             {input.url}
-          </a>
+          </ExternalLink>
           {input.prompt && (
             <p className="mt-0.5 text-[11px] text-muted-foreground">{input.prompt}</p>
           )}

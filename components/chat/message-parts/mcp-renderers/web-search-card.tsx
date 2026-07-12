@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl"
 import { SearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { McpCardShell, hostOf, useParsedOutput } from "./common"
+import { ExternalLink } from "@/components/shared/external-link"
 
 interface WebSearchInput {
   query?: string
@@ -36,7 +37,7 @@ export function WebSearchCard({ part }: { part: ToolUIPart }) {
 
   return (
     <McpCardShell
-      title="WebSearch"
+      title={/* i18n-exempt: tool name */ "WebSearch"}
       badge={input.query ?? `${results.length} results`}
       testId="mcp-websearch-card"
     >
@@ -55,14 +56,12 @@ export function WebSearchCard({ part }: { part: ToolUIPart }) {
               {results.map((r, i) => (
                 <li key={i} data-testid="mcp-websearch-result" className="min-w-0">
                   {r.url ? (
-                    <a
+                    <ExternalLink
                       href={r.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="block truncate text-[12px] text-primary hover:underline"
                     >
                       {r.title ?? r.url}
-                    </a>
+                    </ExternalLink>
                   ) : (
                     <span className="block truncate text-[12px]">{r.title}</span>
                   )}

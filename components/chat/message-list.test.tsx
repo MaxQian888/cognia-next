@@ -92,10 +92,12 @@ jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
     message,
     onRegenerate,
     onDelete,
+    onEditResend,
   }: {
     message: unknown
     onRegenerate?: () => void
     onDelete?: (m: unknown) => void
+    onEditResend?: (m: unknown, newText: string) => void
   }) =>
     ReactForMocks.createElement(
       "div",
@@ -103,6 +105,7 @@ jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
         "data-test": "action-sheet",
         "data-message": message ? "open" : "closed",
         "data-can-regenerate": String(Boolean(onRegenerate)),
+        "data-can-edit": String(Boolean(onEditResend)),
       },
       message && onDelete
         ? ReactForMocks.createElement("button", {
@@ -318,6 +321,59 @@ describe("MessageList", () => {
     ;(usePlatform as jest.Mock).mockReturnValue("desktop")
   })
 
+  it("only offers Edit for the user's own messages when idle", () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    const Wrapper = withAdapter(makeAdapter())
+    const assistant: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "reply" }],
+    }
+    render(
+      <Wrapper>
+        <MessageList
+          messages={[userMsg("m1", "hello"), assistant]}
+          status="idle"
+          onEditResend={jest.fn()}
+        />
+      </Wrapper>
+    )
+    const rows = document.querySelectorAll("[data-test='long-press']")
+    // Arm the sheet with the USER message → edit offered.
+    fireEvent.click(rows[0]!)
+    expect(document.querySelector("[data-test='action-sheet']")).toHaveAttribute(
+      "data-can-edit",
+      "true"
+    )
+    // Arm with the assistant message → no edit.
+    fireEvent.click(rows[1]!)
+    expect(document.querySelector("[data-test='action-sheet']")).toHaveAttribute(
+      "data-can-edit",
+      "false"
+    )
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+
+  it("withholds Edit while a turn is streaming", () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList
+          messages={[userMsg("m1", "hello")]}
+          status="streaming"
+          onEditResend={jest.fn()}
+        />
+      </Wrapper>
+    )
+    fireEvent.click(document.querySelector("[data-test='long-press']")!)
+    expect(document.querySelector("[data-test='action-sheet']")).toHaveAttribute(
+      "data-can-edit",
+      "false"
+    )
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+
   it("fires a selection haptic and opens the action sheet on long-press", () => {
     ;(usePlatform as jest.Mock).mockReturnValue("mobile")
     const Wrapper = withAdapter(makeAdapter())
@@ -487,6 +543,43 @@ describe("MessageList", () => {
         useChatStore.getState().setActiveSession("ses_2")
       })
       expect(measureSpy).toHaveBeenCalled()
+    })
+  })
+
+  it("re-pins to the bottom when switching sessions after scrolling up", async () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hello")]} status="idle" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true })
+    Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true })
+    let scrollTop = 0
+    Object.defineProperty(scrollEl, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (v: number) => {
+        scrollTop = v
+      },
+    })
+    // Scroll up in session 1 → the scroll-to-bottom button appears.
+    await act(async () => {
+      fireEvent.scroll(scrollEl)
+    })
+    expect(scrollEl.querySelector('button[type="button"]')).toBeTruthy()
+
+    // Switching sessions must reset to the latest message and re-arm
+    // stick-to-bottom (isAtBottom), not inherit the old scroll state.
+    await act(async () => {
+      useChatStore.getState().setActiveSession("ses_2")
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+    })
+    expect(scrollTop).toBe(1000)
+    expect(scrollEl.querySelector('button[type="button"]')).toBeFalsy()
+    act(() => {
+      useChatStore.getState().setActiveSession("ses_1")
     })
   })
 
