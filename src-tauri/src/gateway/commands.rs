@@ -61,7 +61,13 @@ pub async fn gateway_create_key(
     quota_tokens: Option<i64>,
 ) -> Result<GatewayApiKey, String> {
     state
-        .create_key(name, model_allowlist, expires_at_ms, rate_limit_per_min, quota_tokens)
+        .create_key(
+            name,
+            model_allowlist,
+            expires_at_ms,
+            rate_limit_per_min,
+            quota_tokens,
+        )
         .map_err(Into::into)
 }
 
@@ -140,7 +146,9 @@ mod tests {
         let state = GatewayState::new();
         state.keys.write().clear();
         state.refresh_key_presence();
-        let key = state.create_key("cli".into(), vec![], None, None, None).unwrap();
+        let key = state
+            .create_key("cli".into(), vec![], None, None, None)
+            .unwrap();
         assert!(state.list_keys().iter().any(|k| k.id == key.id));
         state.delete_key(&key.id).unwrap();
         assert!(!state.list_keys().iter().any(|k| k.id == key.id));

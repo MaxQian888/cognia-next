@@ -39,11 +39,7 @@ pub type KeyRotationMap = Mutex<HashMap<String, ProviderKeyRotation>>;
 /// round-robin this advances (and persists) the per-provider cursor; random
 /// picks a fresh start; least-used picks the account with the fewest recorded
 /// successes.
-fn rotation_start(
-    strategy: &str,
-    pool: &[String],
-    st: &mut ProviderKeyRotation,
-) -> usize {
+fn rotation_start(strategy: &str, pool: &[String], st: &mut ProviderKeyRotation) -> usize {
     match strategy {
         "random" => {
             use rand::Rng;
@@ -96,7 +92,11 @@ pub fn expand_key_pools(candidates: Vec<Candidate>, rotation: &KeyRotationMap) -
             continue;
         }
         let start = if pool.len() >= 2 {
-            let strategy = candidate.provider.rotation_strategy.as_deref().unwrap_or("round-robin");
+            let strategy = candidate
+                .provider
+                .rotation_strategy
+                .as_deref()
+                .unwrap_or("round-robin");
             let mut guard = rotation.lock();
             let st = guard.entry(candidate.provider.id.clone()).or_default();
             rotation_start(strategy, &pool, st)
@@ -413,14 +413,20 @@ mod tests {
             "rotationStrategy": strategy,
         }))
         .unwrap();
-        Candidate { provider, model_id: "m".into() }
+        Candidate {
+            provider,
+            model_id: "m".into(),
+        }
     }
 
     #[test]
     fn expand_passes_through_without_a_pool() {
         let rotation = KeyRotationMap::default();
         // rotation disabled → single key preserved, one candidate.
-        let out = expand_key_pools(vec![pooled_candidate(&["sk-a", "sk-b"], false, None)], &rotation);
+        let out = expand_key_pools(
+            vec![pooled_candidate(&["sk-a", "sk-b"], false, None)],
+            &rotation,
+        );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].provider.api_key.as_deref(), Some("sk-single"));
     }
@@ -429,11 +435,18 @@ mod tests {
     fn expand_produces_one_candidate_per_pooled_key() {
         let rotation = KeyRotationMap::default();
         let out = expand_key_pools(
-            vec![pooled_candidate(&["sk-a", "sk-b", "sk-c"], true, Some("round-robin"))],
+            vec![pooled_candidate(
+                &["sk-a", "sk-b", "sk-c"],
+                true,
+                Some("round-robin"),
+            )],
             &rotation,
         );
         assert_eq!(out.len(), 3);
-        let keys: Vec<&str> = out.iter().filter_map(|c| c.provider.api_key.as_deref()).collect();
+        let keys: Vec<&str> = out
+            .iter()
+            .filter_map(|c| c.provider.api_key.as_deref())
+            .collect();
         // Every pool key appears exactly once (the failover fallback chain).
         assert!(keys.contains(&"sk-a") && keys.contains(&"sk-b") && keys.contains(&"sk-c"));
     }
@@ -464,7 +477,11 @@ mod tests {
         record_key_success(&rotation, "groq", Some("sk-a"));
         record_key_success(&rotation, "groq", Some("sk-b"));
         let out = expand_key_pools(
-            vec![pooled_candidate(&["sk-a", "sk-b", "sk-c"], true, Some("least-used"))],
+            vec![pooled_candidate(
+                &["sk-a", "sk-b", "sk-c"],
+                true,
+                Some("least-used"),
+            )],
             &rotation,
         );
         assert_eq!(out[0].provider.api_key.as_deref(), Some("sk-c"));

@@ -118,11 +118,17 @@ impl GatewayState {
             return;
         };
         let Ok(mut loaded) = serde_json::from_str::<GatewayConfig>(&raw) else {
-            log::warn!("gateway config at {} is corrupt; using defaults", path.display());
+            log::warn!(
+                "gateway config at {} is corrupt; using defaults",
+                path.display()
+            );
             return;
         };
         if loaded.validate().is_err() {
-            log::warn!("gateway config at {} failed validation; using defaults", path.display());
+            log::warn!(
+                "gateway config at {} failed validation; using defaults",
+                path.display()
+            );
             return;
         }
         // Never auto-start without a usable key even if the file says enabled.
@@ -184,7 +190,11 @@ impl GatewayState {
     // ---- API key management -------------------------------------------------
 
     pub fn list_keys(&self) -> Vec<RedactedApiKey> {
-        self.keys.read().iter().map(GatewayApiKey::redacted).collect()
+        self.keys
+            .read()
+            .iter()
+            .map(GatewayApiKey::redacted)
+            .collect()
     }
 
     fn refresh_key_presence(&self) {
@@ -255,7 +265,11 @@ impl GatewayState {
     }
 
     pub fn reveal_key(&self, id: &str) -> Option<String> {
-        self.keys.read().iter().find(|k| k.id == id).map(|k| k.secret.clone())
+        self.keys
+            .read()
+            .iter()
+            .find(|k| k.id == id)
+            .map(|k| k.secret.clone())
     }
 
     /// Mirror the old token-clear safety: a running listener with no usable key
@@ -430,8 +444,9 @@ mod tests {
 
     #[test]
     fn key_lifecycle_toggles_presence() {
-        let _guard =
-            api_keys::STORE_TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = api_keys::STORE_TEST_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let state = GatewayState::new();
         // Isolate from any keys other parallel tests left in the shared
         // cfg(test) secret store; this state's Arc is independent memory.
@@ -444,9 +459,14 @@ mod tests {
         // list is redacted (no secret)
         let listed = state.list_keys();
         assert!(listed.iter().any(|k| k.id == created.id));
-        assert!(!serde_json::to_string(&listed).unwrap().contains(&created.secret));
+        assert!(!serde_json::to_string(&listed)
+            .unwrap()
+            .contains(&created.secret));
         // reveal returns the full secret
-        assert_eq!(state.reveal_key(&created.id).as_deref(), Some(created.secret.as_str()));
+        assert_eq!(
+            state.reveal_key(&created.id).as_deref(),
+            Some(created.secret.as_str())
+        );
         // disabling the only key clears presence
         let patch: ApiKeyPatch =
             serde_json::from_value(serde_json::json!({ "enabled": false })).unwrap();
@@ -459,8 +479,9 @@ mod tests {
 
     #[test]
     fn create_key_with_quota_and_reset() {
-        let _guard =
-            api_keys::STORE_TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = api_keys::STORE_TEST_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let state = GatewayState::new();
         state.keys.write().clear();
         state.refresh_key_presence();
@@ -472,12 +493,22 @@ mod tests {
         // Simulate consumption, then reset.
         api_keys::add_quota_usage(&mut state.keys.write(), &created.id, 400);
         assert_eq!(
-            state.list_keys().iter().find(|k| k.id == created.id).unwrap().quota_used_tokens,
+            state
+                .list_keys()
+                .iter()
+                .find(|k| k.id == created.id)
+                .unwrap()
+                .quota_used_tokens,
             400
         );
         state.reset_key_quota(&created.id).unwrap();
         assert_eq!(
-            state.list_keys().iter().find(|k| k.id == created.id).unwrap().quota_used_tokens,
+            state
+                .list_keys()
+                .iter()
+                .find(|k| k.id == created.id)
+                .unwrap()
+                .quota_used_tokens,
             0
         );
         assert!(state.reset_key_quota("missing").is_err());
@@ -485,13 +516,16 @@ mod tests {
 
     #[test]
     fn hydrate_from_disk_loads_persisted_config() {
-        let _guard =
-            api_keys::STORE_TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = api_keys::STORE_TEST_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let state = GatewayState::new();
         state.keys.write().clear();
         state.refresh_key_presence();
         // Ensure a usable key so `enabled` survives hydrate.
-        let _ = state.create_key("k".into(), vec![], None, None, None).unwrap();
+        let _ = state
+            .create_key("k".into(), vec![], None, None, None)
+            .unwrap();
         let dir = std::env::temp_dir().join(format!("cognia-gw-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("gateway-config.json");

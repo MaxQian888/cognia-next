@@ -69,7 +69,10 @@ pub fn request_to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
         }
         Some(Value::Array(items)) => {
             for item in items {
-                let item_type = item.get("type").and_then(Value::as_str).unwrap_or("message");
+                let item_type = item
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("message");
                 if item_type != "message" {
                     return Err(NotTranslatable::new(format!(
                         "input item type \"{item_type}\" is not supported on /v1/responses"
@@ -230,7 +233,9 @@ mod tests {
         // Supported request → None.
         assert!(unsupported_feature(&json!({ "model": "m", "input": "hi" })).is_none());
         // Null / absent unsupported fields are fine.
-        assert!(unsupported_feature(&json!({ "tools": null, "previous_response_id": null })).is_none());
+        assert!(
+            unsupported_feature(&json!({ "tools": null, "previous_response_id": null })).is_none()
+        );
     }
 
     #[test]
@@ -239,7 +244,10 @@ mod tests {
         assert_eq!(ir.model, "gpt");
         assert_eq!(ir.messages.len(), 1);
         assert_eq!(ir.messages[0].role, IrRole::User);
-        assert_eq!(ir.messages[0].content, vec![IrContent::Text("hello".into())]);
+        assert_eq!(
+            ir.messages[0].content,
+            vec![IrContent::Text("hello".into())]
+        );
         assert!(ir.system.is_none());
         assert!(!ir.stream);
     }
@@ -278,7 +286,10 @@ mod tests {
         assert_eq!(ir.system.as_deref(), Some("sys rule"));
         assert_eq!(ir.messages.len(), 2);
         assert_eq!(ir.messages[0].role, IrRole::User);
-        assert_eq!(ir.messages[0].content[0], IrContent::Text("look at this".into()));
+        assert_eq!(
+            ir.messages[0].content[0],
+            IrContent::Text("look at this".into())
+        );
         assert_eq!(
             ir.messages[0].content[1],
             IrContent::Image(IrImage::Url("https://x/y.png".into()))

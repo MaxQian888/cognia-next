@@ -60,7 +60,7 @@ mod tests {
         assert!(rl.try_acquire("a", 2));
         assert!(rl.try_acquire("a", 2));
         assert!(!rl.try_acquire("a", 2)); // "a" exhausted
-        // "b" has its own budget.
+                                          // "b" has its own budget.
         assert!(rl.try_acquire("b", 2));
         assert!(rl.try_acquire("b", 2));
         assert!(!rl.try_acquire("b", 2));

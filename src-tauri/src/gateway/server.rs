@@ -139,13 +139,12 @@ pub async fn spawn_server(
         BindInterface::Lan => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
     };
     let bind_addr = SocketAddr::new(bind_ip, port);
-    let listener =
-        tokio::net::TcpListener::bind(bind_addr)
-            .await
-            .map_err(|source| GatewayError::Bind {
-                addr: bind_addr.to_string(),
-                source,
-            })?;
+    let listener = tokio::net::TcpListener::bind(bind_addr)
+        .await
+        .map_err(|source| GatewayError::Bind {
+            addr: bind_addr.to_string(),
+            source,
+        })?;
     let bound_port = listener
         .local_addr()
         .map_err(|source| GatewayError::Bind {
@@ -396,7 +395,9 @@ async fn middleware(
     });
 
     let response = next.run(request).await;
-    state.on_request.on_call(&route, response.status(), remote_ip);
+    state
+        .on_request
+        .on_call(&route, response.status(), remote_ip);
     response
 }
 
@@ -411,9 +412,7 @@ async fn list_models(State(state): State<AppState>, Extension(ctx): Extension<Re
 
     // A model is listed only if the gateway exposes it AND the calling key may
     // use it.
-    let visible = |model: &str| -> bool {
-        cfg.model_is_exposed(model) && ctx_allows(&ctx, model)
-    };
+    let visible = |model: &str| -> bool { cfg.model_is_exposed(model) && ctx_allows(&ctx, model) };
 
     let mut data: Vec<Value> = Vec::new();
     for alias in &snapshot.aliases {
@@ -478,14 +477,38 @@ async fn openai_embeddings(
     let cfg = state.config.read().clone();
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
-        return logged_error(&state, &ctx, format, StatusCode::SERVICE_UNAVAILABLE, "overloaded_error", "no routing snapshot yet — open the Cognia window once so it can publish providers", None);
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "overloaded_error",
+            "no routing snapshot yet — open the Cognia window once so it can publish providers",
+            None,
+        );
     };
 
     let Some(model) = body["model"].as_str().map(|s| s.to_string()) else {
-        return logged_error(&state, &ctx, format, StatusCode::BAD_REQUEST, "invalid_request_error", "model is required", None);
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "model is required",
+            None,
+        );
     };
     if body.get("input").map(Value::is_null).unwrap_or(true) {
-        return logged_error(&state, &ctx, format, StatusCode::BAD_REQUEST, "invalid_request_error", "input is required", Some(&model));
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "input is required",
+            Some(&model),
+        );
     }
     if let Some(resp) = exposure_guard(&state, &ctx, format, &cfg, &model) {
         return resp;
@@ -495,11 +518,21 @@ async fn openai_embeddings(
     // provider's upstream key pool so a rate-limited account fails over.
     let all = resolve_candidates(&snapshot, &model);
     let candidates: Vec<Candidate> = expand_key_pools(
-        all.into_iter().filter(|c| c.provider.protocol == "openai").collect(),
+        all.into_iter()
+            .filter(|c| c.provider.protocol == "openai")
+            .collect(),
         &state.key_rotation,
     );
     if candidates.is_empty() {
-        return logged_error(&state, &ctx, format, StatusCode::NOT_FOUND, "invalid_request_error", &format!("embeddings model \"{model}\" matches no enabled OpenAI-compatible provider"), Some(&model));
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::NOT_FOUND,
+            "invalid_request_error",
+            &format!("embeddings model \"{model}\" matches no enabled OpenAI-compatible provider"),
+            Some(&model),
+        );
     }
 
     let mut failures: Vec<String> = Vec::new();
@@ -524,25 +557,53 @@ async fn openai_embeddings(
         let status = resp.status().as_u16();
         if status >= 400 {
             let text = resp.text().await.unwrap_or_default();
-            let message = format!("HTTP {status}: {}", text.chars().take(500).collect::<String>());
+            let message = format!(
+                "HTTP {status}: {}",
+                text.chars().take(500).collect::<String>()
+            );
             if cfg.should_retry(status) {
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
-            return logged_error(&state, &ctx, format, StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST), "invalid_request_error", &message, Some(&model));
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
+                "invalid_request_error",
+                &message,
+                Some(&model),
+            );
         }
 
         let upstream: Value = match resp.json().await {
             Ok(value) => value,
             Err(err) => {
-                return logged_error(&state, &ctx, format, StatusCode::BAD_GATEWAY, "api_error", &format!("invalid upstream JSON: {err}"), Some(&model));
+                return logged_error(
+                    &state,
+                    &ctx,
+                    format,
+                    StatusCode::BAD_GATEWAY,
+                    "api_error",
+                    &format!("invalid upstream JSON: {err}"),
+                    Some(&model),
+                );
             }
         };
         // Embeddings report only prompt tokens (no completion side).
         let input_tokens = upstream["usage"]["prompt_tokens"]
             .as_u64()
             .or_else(|| upstream["usage"]["total_tokens"].as_u64());
-        log_success(&state, &ctx, &model, candidate, started.elapsed().as_millis() as u64, input_tokens, None, false);
+        log_success(
+            &state,
+            &ctx,
+            &model,
+            candidate,
+            started.elapsed().as_millis() as u64,
+            input_tokens,
+            None,
+            false,
+        );
         return Json(upstream).into_response();
     }
 
@@ -561,17 +622,43 @@ async fn openai_responses(
     let cfg = state.config.read().clone();
 
     if let Some(reason) = responses_translate::unsupported_feature(&body) {
-        return logged_error(&state, &ctx, format, StatusCode::BAD_REQUEST, "invalid_request_error", &reason, None);
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            &reason,
+            None,
+        );
     }
 
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
-        return logged_error(&state, &ctx, format, StatusCode::SERVICE_UNAVAILABLE, "overloaded_error", "no routing snapshot yet — open the Cognia window once so it can publish providers", None);
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "overloaded_error",
+            "no routing snapshot yet — open the Cognia window once so it can publish providers",
+            None,
+        );
     };
 
     let ir = match responses_translate::request_to_ir(&body) {
         Ok(ir) => ir,
-        Err(err) => return logged_error(&state, &ctx, format, StatusCode::BAD_REQUEST, "invalid_request_error", &err.reason, None),
+        Err(err) => {
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                &err.reason,
+                None,
+            )
+        }
     };
     let model = ir.model.clone();
     if let Some(resp) = exposure_guard(&state, &ctx, format, &cfg, &model) {
@@ -580,7 +667,17 @@ async fn openai_responses(
 
     let candidates = expand_key_pools(resolve_candidates(&snapshot, &model), &state.key_rotation);
     if candidates.is_empty() {
-        return logged_error(&state, &ctx, format, StatusCode::NOT_FOUND, "invalid_request_error", &format!("model \"{model}\" matches no alias, provider:model, or enabled provider model"), Some(&model));
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::NOT_FOUND,
+            "invalid_request_error",
+            &format!(
+                "model \"{model}\" matches no alias, provider:model, or enabled provider model"
+            ),
+            Some(&model),
+        );
     }
 
     let mut failures: Vec<String> = Vec::new();
@@ -599,9 +696,10 @@ async fn openai_responses(
         let url = upstream_url(&candidate.provider.protocol, &candidate.provider.base_url);
         let mut req = state.http.post(&url).json(&upstream_body);
         req = apply_timeout(req, &cfg);
-        for (name, value) in
-            upstream_headers(&candidate.provider.protocol, candidate.provider.api_key.as_deref())
-        {
+        for (name, value) in upstream_headers(
+            &candidate.provider.protocol,
+            candidate.provider.api_key.as_deref(),
+        ) {
             req = req.header(name, value);
         }
 
@@ -616,26 +714,67 @@ async fn openai_responses(
         let status = resp.status().as_u16();
         if status >= 400 {
             let text = resp.text().await.unwrap_or_default();
-            let message = format!("HTTP {status}: {}", text.chars().take(500).collect::<String>());
+            let message = format!(
+                "HTTP {status}: {}",
+                text.chars().take(500).collect::<String>()
+            );
             if cfg.should_retry(status) {
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
-            return logged_error(&state, &ctx, format, StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST), "invalid_request_error", &message, Some(&model));
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
+                "invalid_request_error",
+                &message,
+                Some(&model),
+            );
         }
 
         let upstream: Value = match resp.json().await {
             Ok(value) => value,
             Err(err) => {
-                return logged_error(&state, &ctx, format, StatusCode::BAD_GATEWAY, "api_error", &format!("invalid upstream JSON: {err}"), Some(&model));
+                return logged_error(
+                    &state,
+                    &ctx,
+                    format,
+                    StatusCode::BAD_GATEWAY,
+                    "api_error",
+                    &format!("invalid upstream JSON: {err}"),
+                    Some(&model),
+                );
             }
         };
         match response_to_ir(&candidate.provider.protocol, &upstream) {
             Ok(ir_resp) => {
-                emit_outcome(&state.app_handle, candidate, true, started, Some((Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens))), None);
-                log_success(&state, &ctx, &model, candidate, started.elapsed().as_millis() as u64, Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens), false);
+                emit_outcome(
+                    &state.app_handle,
+                    candidate,
+                    true,
+                    started,
+                    Some((
+                        Some(ir_resp.usage.input_tokens),
+                        Some(ir_resp.usage.output_tokens),
+                    )),
+                    None,
+                );
+                log_success(
+                    &state,
+                    &ctx,
+                    &model,
+                    candidate,
+                    started.elapsed().as_millis() as u64,
+                    Some(ir_resp.usage.input_tokens),
+                    Some(ir_resp.usage.output_tokens),
+                    false,
+                );
                 let created = chrono::Utc::now().timestamp();
-                return Json(responses_translate::response_from_ir(&ir_resp, &model, created)).into_response();
+                return Json(responses_translate::response_from_ir(
+                    &ir_resp, &model, created,
+                ))
+                .into_response();
             }
             Err(err) => {
                 failures.push(format!("{}: {}", candidate.provider.id, err.reason));
@@ -671,7 +810,18 @@ fn logged_error(
     message: &str,
     model: Option<&str>,
 ) -> Response {
-    emit_request_log_ctx(&state.app_handle, ctx, model, None, status.as_u16(), 0, None, None, Some(message), false);
+    emit_request_log_ctx(
+        &state.app_handle,
+        ctx,
+        model,
+        None,
+        status.as_u16(),
+        0,
+        None,
+        None,
+        Some(message),
+        false,
+    );
     (status, Json(error_body(format, err_code, message))).into_response()
 }
 
@@ -684,7 +834,18 @@ fn all_failed(
     failures: &[String],
 ) -> Response {
     let message = format!("every candidate failed: {}", failures.join(" | "));
-    emit_request_log_ctx(&state.app_handle, ctx, Some(model), None, StatusCode::BAD_GATEWAY.as_u16(), 0, None, None, Some(&message), false);
+    emit_request_log_ctx(
+        &state.app_handle,
+        ctx,
+        Some(model),
+        None,
+        StatusCode::BAD_GATEWAY.as_u16(),
+        0,
+        None,
+        None,
+        Some(&message),
+        false,
+    );
     (
         StatusCode::BAD_GATEWAY,
         Json(error_body(format, "api_error", &message)),
@@ -702,10 +863,26 @@ fn exposure_guard(
     model: &str,
 ) -> Option<Response> {
     if !cfg.model_is_exposed(model) {
-        return Some(logged_error(state, ctx, format, StatusCode::NOT_FOUND, "invalid_request_error", &format!("model \"{model}\" is not exposed by this gateway"), Some(model)));
+        return Some(logged_error(
+            state,
+            ctx,
+            format,
+            StatusCode::NOT_FOUND,
+            "invalid_request_error",
+            &format!("model \"{model}\" is not exposed by this gateway"),
+            Some(model),
+        ));
     }
     if !ctx_allows(ctx, model) {
-        return Some(logged_error(state, ctx, format, StatusCode::FORBIDDEN, "invalid_request_error", &format!("this key is not permitted to use model \"{model}\""), Some(model)));
+        return Some(logged_error(
+            state,
+            ctx,
+            format,
+            StatusCode::FORBIDDEN,
+            "invalid_request_error",
+            &format!("this key is not permitted to use model \"{model}\""),
+            Some(model),
+        ));
     }
     None
 }
@@ -754,14 +931,13 @@ async fn live_decision(
         return None;
     }
 
-    let entries =
-        match tokio::time::timeout(Duration::from_millis(DECIDE_TIMEOUT_MS), rx).await {
-            Ok(Ok(entries)) if !entries.is_empty() => entries,
-            _ => {
-                state.decisions.lock().remove(&request_id);
-                return None;
-            }
-        };
+    let entries = match tokio::time::timeout(Duration::from_millis(DECIDE_TIMEOUT_MS), rx).await {
+        Ok(Ok(entries)) if !entries.is_empty() => entries,
+        _ => {
+            state.decisions.lock().remove(&request_id);
+            return None;
+        }
+    };
     let candidates = candidates_from_entries(snapshot, &entries);
     if candidates.is_empty() {
         None
@@ -770,21 +946,32 @@ async fn live_decision(
     }
 }
 
-async fn handle_chat(
-    state: AppState,
-    ctx: ReqCtx,
-    format: InboundFormat,
-    body: Value,
-) -> Response {
+async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: Value) -> Response {
     let _perf = crate::perf::guard("gateway.chat");
     let cfg = state.config.read().clone();
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
-        return logged_error(&state, &ctx, format, StatusCode::SERVICE_UNAVAILABLE, "overloaded_error", "no routing snapshot yet — open the Cognia window once so it can publish providers", None);
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "overloaded_error",
+            "no routing snapshot yet — open the Cognia window once so it can publish providers",
+            None,
+        );
     };
 
     let Some(model) = body["model"].as_str().map(|s| s.to_string()) else {
-        return logged_error(&state, &ctx, format, StatusCode::BAD_REQUEST, "invalid_request_error", "model is required", None);
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "model is required",
+            None,
+        );
     };
     if let Some(resp) = exposure_guard(&state, &ctx, format, &cfg, &model) {
         return resp;
@@ -799,7 +986,17 @@ async fn handle_chat(
         &state.key_rotation,
     );
     if candidates.is_empty() {
-        return logged_error(&state, &ctx, format, StatusCode::NOT_FOUND, "invalid_request_error", &format!("model \"{model}\" matches no alias, provider:model, or enabled provider model"), Some(&model));
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::NOT_FOUND,
+            "invalid_request_error",
+            &format!(
+                "model \"{model}\" matches no alias, provider:model, or enabled provider model"
+            ),
+            Some(&model),
+        );
     }
 
     let needs_translation = candidates
@@ -808,7 +1005,17 @@ async fn handle_chat(
     let ir = if needs_translation {
         match request_to_ir(format, &body) {
             Ok(ir) => Some(ir),
-            Err(err) => return logged_error(&state, &ctx, format, StatusCode::BAD_REQUEST, "invalid_request_error", &err.reason, Some(&model)),
+            Err(err) => {
+                return logged_error(
+                    &state,
+                    &ctx,
+                    format,
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request_error",
+                    &err.reason,
+                    Some(&model),
+                )
+            }
         }
     } else {
         None
@@ -837,9 +1044,10 @@ async fn handle_chat(
         if !stream {
             req = apply_timeout(req, &cfg);
         }
-        for (name, value) in
-            upstream_headers(&candidate.provider.protocol, candidate.provider.api_key.as_deref())
-        {
+        for (name, value) in upstream_headers(
+            &candidate.provider.protocol,
+            candidate.provider.api_key.as_deref(),
+        ) {
             req = req.header(name, value);
         }
 
@@ -847,7 +1055,14 @@ async fn handle_chat(
             Ok(resp) => resp,
             Err(err) => {
                 let message = format!("connect error: {err}");
-                emit_outcome(&state.app_handle, candidate, false, started, None, Some(&message));
+                emit_outcome(
+                    &state.app_handle,
+                    candidate,
+                    false,
+                    started,
+                    None,
+                    Some(&message),
+                );
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
@@ -866,18 +1081,43 @@ async fn handle_chat(
                 message.push_str(&format!(" retry-after: {ra}"));
             }
             message.push_str(&format!(": {}", text.chars().take(500).collect::<String>()));
-            emit_outcome(&state.app_handle, candidate, false, started, None, Some(&message));
+            emit_outcome(
+                &state.app_handle,
+                candidate,
+                false,
+                started,
+                None,
+                Some(&message),
+            );
             if cfg.should_retry(status) {
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
-            return logged_error(&state, &ctx, format, StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST), "invalid_request_error", &message, Some(&model));
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
+                "invalid_request_error",
+                &message,
+                Some(&model),
+            );
         }
 
         if stream {
             return stream_response(state, ctx, format, candidate, resp, started, &model).await;
         }
-        return buffered_response(state, ctx, format, candidate, resp, started, passthrough, &model).await;
+        return buffered_response(
+            state,
+            ctx,
+            format,
+            candidate,
+            resp,
+            started,
+            passthrough,
+            &model,
+        )
+        .await;
     }
 
     all_failed(&state, &ctx, format, &model, &failures)
@@ -898,8 +1138,23 @@ async fn buffered_response(
         Ok(v) => v,
         Err(err) => {
             let message = format!("invalid upstream JSON: {err}");
-            emit_outcome(&state.app_handle, candidate, false, started, None, Some(&message));
-            return logged_error(&state, &ctx, format, StatusCode::BAD_GATEWAY, "api_error", &message, Some(model));
+            emit_outcome(
+                &state.app_handle,
+                candidate,
+                false,
+                started,
+                None,
+                Some(&message),
+            );
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::BAD_GATEWAY,
+                "api_error",
+                &message,
+                Some(model),
+            );
         }
     };
 
@@ -914,21 +1169,71 @@ async fn buffered_response(
                 upstream["usage"]["output_tokens"].as_u64(),
             ),
         };
-        emit_outcome(&state.app_handle, candidate, true, started, Some(usage), None);
-        log_success(&state, &ctx, model, candidate, started.elapsed().as_millis() as u64, usage.0, usage.1, false);
+        emit_outcome(
+            &state.app_handle,
+            candidate,
+            true,
+            started,
+            Some(usage),
+            None,
+        );
+        log_success(
+            &state,
+            &ctx,
+            model,
+            candidate,
+            started.elapsed().as_millis() as u64,
+            usage.0,
+            usage.1,
+            false,
+        );
         return Json(upstream).into_response();
     }
 
     match response_to_ir(&candidate.provider.protocol, &upstream) {
         Ok(ir_resp) => {
-            emit_outcome(&state.app_handle, candidate, true, started, Some((Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens))), None);
-            log_success(&state, &ctx, model, candidate, started.elapsed().as_millis() as u64, Some(ir_resp.usage.input_tokens), Some(ir_resp.usage.output_tokens), false);
+            emit_outcome(
+                &state.app_handle,
+                candidate,
+                true,
+                started,
+                Some((
+                    Some(ir_resp.usage.input_tokens),
+                    Some(ir_resp.usage.output_tokens),
+                )),
+                None,
+            );
+            log_success(
+                &state,
+                &ctx,
+                model,
+                candidate,
+                started.elapsed().as_millis() as u64,
+                Some(ir_resp.usage.input_tokens),
+                Some(ir_resp.usage.output_tokens),
+                false,
+            );
             let created = chrono::Utc::now().timestamp();
             Json(response_from_ir(format, &ir_resp, created)).into_response()
         }
         Err(err) => {
-            emit_outcome(&state.app_handle, candidate, false, started, None, Some(&err.reason));
-            logged_error(&state, &ctx, format, StatusCode::BAD_GATEWAY, "api_error", &err.reason, Some(model))
+            emit_outcome(
+                &state.app_handle,
+                candidate,
+                false,
+                started,
+                None,
+                Some(&err.reason),
+            );
+            logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::BAD_GATEWAY,
+                "api_error",
+                &err.reason,
+                Some(model),
+            )
         }
     }
 }
@@ -977,8 +1282,24 @@ async fn stream_response(
                     sniff_passthrough_usage(format, &value, &mut input, &mut output);
                 }
             }
-            emit_outcome(&task_state.app_handle, &candidate, true, started, Some((input, output)), None);
-            log_success(&task_state, &ctx, &model, &candidate, started.elapsed().as_millis() as u64, input, output, true);
+            emit_outcome(
+                &task_state.app_handle,
+                &candidate,
+                true,
+                started,
+                Some((input, output)),
+                None,
+            );
+            log_success(
+                &task_state,
+                &ctx,
+                &model,
+                &candidate,
+                started.elapsed().as_millis() as u64,
+                input,
+                output,
+                true,
+            );
         });
         let stream = futures_util::stream::unfold(rx, |mut rx| async move {
             rx.recv().await.map(|item| (item, rx))
@@ -1018,8 +1339,24 @@ async fn stream_response(
             }
         }
         let usage = transcoder.usage();
-        emit_outcome(&task_state.app_handle, &candidate, true, started, Some((Some(usage.input_tokens), Some(usage.output_tokens))), None);
-        log_success(&task_state, &ctx, &model, &candidate, started.elapsed().as_millis() as u64, Some(usage.input_tokens), Some(usage.output_tokens), true);
+        emit_outcome(
+            &task_state.app_handle,
+            &candidate,
+            true,
+            started,
+            Some((Some(usage.input_tokens), Some(usage.output_tokens))),
+            None,
+        );
+        log_success(
+            &task_state,
+            &ctx,
+            &model,
+            &candidate,
+            started.elapsed().as_millis() as u64,
+            Some(usage.input_tokens),
+            Some(usage.output_tokens),
+            true,
+        );
     });
 
     let stream = futures_util::stream::unfold(rx, |mut rx| async move {
@@ -1158,7 +1495,9 @@ fn log_success(
         stream,
     );
     // Draw the consumed tokens down against the calling key's quota.
-    let consumed = input_tokens.unwrap_or(0).saturating_add(output_tokens.unwrap_or(0)) as i64;
+    let consumed = input_tokens
+        .unwrap_or(0)
+        .saturating_add(output_tokens.unwrap_or(0)) as i64;
     if consumed > 0 {
         if let Some(key_id) = ctx.key_id.as_deref() {
             let _ = api_keys::add_quota_usage(&mut state.keys.write(), key_id, consumed);
@@ -1274,7 +1613,10 @@ mod tests {
     #[test]
     fn supplied_token_reads_both_header_families() {
         let mut bearer = HeaderMap::new();
-        bearer.insert(axum::http::header::AUTHORIZATION, "Bearer tok-1".parse().unwrap());
+        bearer.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer tok-1".parse().unwrap(),
+        );
         assert_eq!(supplied_token(&bearer), Some("tok-1"));
 
         let mut anthropic_style = HeaderMap::new();
@@ -1282,7 +1624,10 @@ mod tests {
         assert_eq!(supplied_token(&anthropic_style), Some("tok-2"));
 
         let mut both = HeaderMap::new();
-        both.insert(axum::http::header::AUTHORIZATION, "Bearer tok-1".parse().unwrap());
+        both.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer tok-1".parse().unwrap(),
+        );
         both.insert("x-api-key", "tok-2".parse().unwrap());
         assert_eq!(supplied_token(&both), Some("tok-1"));
 
@@ -1367,7 +1712,12 @@ mod tests {
         let mut transcoder =
             StreamTranscoder::new(Direction::OpenAiToAnthropic, "client-model", "msg_tail");
 
-        assert!(transcode_upstream_sse_bytes(&mut deframer, &mut transcoder, upstream_bytes.as_bytes()).is_empty());
+        assert!(transcode_upstream_sse_bytes(
+            &mut deframer,
+            &mut transcoder,
+            upstream_bytes.as_bytes()
+        )
+        .is_empty());
 
         let frames = finish_upstream_sse_stream(&mut deframer, &mut transcoder);
         assert!(frames.iter().any(|frame| {

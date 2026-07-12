@@ -148,7 +148,10 @@ mod tests {
             "rotationStrategy": "least-used"
         }))
         .unwrap();
-        assert_eq!(pooled.api_keys, vec!["sk-a".to_string(), "sk-b".to_string()]);
+        assert_eq!(
+            pooled.api_keys,
+            vec!["sk-a".to_string(), "sk-b".to_string()]
+        );
         assert!(pooled.rotation_enabled);
         assert_eq!(pooled.rotation_strategy.as_deref(), Some("least-used"));
     }

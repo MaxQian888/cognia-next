@@ -127,7 +127,14 @@ impl GatewayApiKey {
 
 /// Short non-reversible preview: the human-readable prefix + last 4 chars.
 fn preview_secret(secret: &str) -> String {
-    let last4: String = secret.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    let last4: String = secret
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     let prefix: String = secret.chars().take(10).collect();
     format!("{prefix}…{last4}")
 }
@@ -148,8 +155,8 @@ fn now_ms() -> i64 {
 /// blob is absent but an old single token exists.
 pub fn load_keys() -> Result<Vec<GatewayApiKey>, String> {
     if let Some(raw) = secret_store::get(SERVICE, KEYS_ACCOUNT)? {
-        let keys: Vec<GatewayApiKey> = serde_json::from_str(&raw)
-            .map_err(|e| format!("corrupt gateway key store: {e}"))?;
+        let keys: Vec<GatewayApiKey> =
+            serde_json::from_str(&raw).map_err(|e| format!("corrupt gateway key store: {e}"))?;
         return Ok(keys);
     }
     // No keys blob yet — migrate a legacy single token if present.
@@ -237,11 +244,7 @@ where
     Ok(Some(Option::deserialize(deserializer)?))
 }
 
-pub fn apply_patch(
-    keys: &mut [GatewayApiKey],
-    id: &str,
-    patch: ApiKeyPatch,
-) -> Result<(), String> {
+pub fn apply_patch(keys: &mut [GatewayApiKey], id: &str, patch: ApiKeyPatch) -> Result<(), String> {
     let key = keys
         .iter_mut()
         .find(|k| k.id == id)
@@ -306,9 +309,7 @@ pub fn match_index(keys: &[GatewayApiKey], supplied: &str, now_ms: i64) -> Optio
             continue;
         }
         let secret = key.secret.as_bytes();
-        if secret.len() == supplied_bytes.len()
-            && secret.ct_eq(supplied_bytes).unwrap_u8() == 1
-        {
+        if secret.len() == supplied_bytes.len() && secret.ct_eq(supplied_bytes).unwrap_u8() == 1 {
             matched = Some(i);
         }
     }
@@ -388,8 +389,15 @@ mod tests {
         let _guard = STORE_TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let mut keys = load_keys().unwrap();
         let start = keys.len();
-        let made = create_key(&mut keys, "Tool".into(), vec!["fast".into()], Some(999), Some(60), None)
-            .unwrap();
+        let made = create_key(
+            &mut keys,
+            "Tool".into(),
+            vec!["fast".into()],
+            Some(999),
+            Some(60),
+            None,
+        )
+        .unwrap();
         assert_eq!(keys.len(), start + 1);
         assert!(made.secret.starts_with("sk-cognia-"));
         assert_eq!(made.model_allowlist, vec!["fast".to_string()]);
