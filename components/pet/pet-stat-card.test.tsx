@@ -87,4 +87,22 @@ describe("PetStatCard", () => {
     // unhatched label key resolves (mock returns key path when message missing)
     expect(screen.getByText(/unhatched|statCard\.unhatched/i)).toBeInTheDocument()
   })
+
+  it("shows the evolution-flavor badge for radiant/plain and hides it for normal", () => {
+    const { container, rerender } = render(
+      <PetStatCard bones={makeBones()} soul={soul} stage="adult" flavor="radiant" />
+    )
+    const badge = container.querySelector('[data-testid="pet-flavor-badge"]')
+    expect(badge).not.toBeNull()
+    expect(badge).toHaveAttribute("data-flavor", "radiant")
+
+    rerender(<PetStatCard bones={makeBones()} soul={soul} stage="adult" flavor="plain" />)
+    expect(container.querySelector('[data-flavor="plain"]')).not.toBeNull()
+
+    rerender(<PetStatCard bones={makeBones()} soul={soul} stage="adult" flavor="normal" />)
+    expect(container.querySelector('[data-testid="pet-flavor-badge"]')).toBeNull()
+
+    rerender(<PetStatCard bones={makeBones()} soul={soul} stage="adult" />)
+    expect(container.querySelector('[data-testid="pet-flavor-badge"]')).toBeNull()
+  })
 })

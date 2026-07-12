@@ -5,12 +5,26 @@ import type { PetOneShot, PetVisualState } from "@/types/pet"
 
 function makeModel() {
   const stopAllMotions = jest.fn()
+  const handlers = new Set<() => void>()
   const model: Live2dModelLike = {
     motion: jest.fn(),
     expression: jest.fn(),
-    internalModel: { motionManager: { stopAllMotions } },
+    internalModel: {
+      motionManager: {
+        stopAllMotions,
+        on: (event: string, handler: () => void) => {
+          if (event === "motionFinish") handlers.add(handler)
+        },
+        off: (_event: string, handler: () => void) => {
+          handlers.delete(handler)
+        },
+      },
+    },
   }
-  return { model, stopAllMotions }
+  const finishMotion = () => {
+    for (const h of [...handlers]) h()
+  }
+  return { model, stopAllMotions, finishMotion, handlers }
 }
 
 // Hiyori-like capabilities: Idle/Tap/TapBody motions + a happy expression.
@@ -62,6 +76,42 @@ describe("useLive2dMotion", () => {
     ;(model.motion as jest.Mock).mockClear()
     view.rerender({ model, state: "idle", oneShot: null, caps, reducedMotion: false })
     expect(model.motion).not.toHaveBeenCalled()
+  })
+
+  it("replays a non-Idle resting plan when its motion finishes (loop)", () => {
+    const { model, finishMotion } = makeModel()
+    const view = setup({ model, state: "idle", oneShot: null, caps, reducedMotion: false })
+    view.rerender({ model, state: "greeting", oneShot: null, caps, reducedMotion: false })
+    ;(model.motion as jest.Mock).mockClear()
+    finishMotion()
+    // greeting mapped to the Tap group → re-fires on finish so the persistent
+    // state keeps animating instead of degrading to Idle after one play.
+    expect(model.motion).toHaveBeenCalledWith("Tap", 0, 2)
+  })
+
+  it("hands Idle-group plans to the engine's own idle loop (no replay)", () => {
+    const { model, finishMotion } = makeModel()
+    setup({ model, state: "idle", oneShot: null, caps, reducedMotion: false })
+    ;(model.motion as jest.Mock).mockClear()
+    finishMotion()
+    expect(model.motion).not.toHaveBeenCalled()
+  })
+
+  it("suspends loop replay while a one-shot plays", () => {
+    const { model, finishMotion } = makeModel()
+    const view = setup({ model, state: "greeting", oneShot: null, caps, reducedMotion: false })
+    view.rerender({ model, state: "greeting", oneShot: "wave", caps, reducedMotion: false })
+    ;(model.motion as jest.Mock).mockClear()
+    finishMotion()
+    expect(model.motion).not.toHaveBeenCalled()
+  })
+
+  it("unsubscribes the finish handler on unmount", () => {
+    const { model, handlers } = makeModel()
+    const view = setup({ model, state: "idle", oneShot: null, caps, reducedMotion: false })
+    expect(handlers.size).toBe(1)
+    view.unmount()
+    expect(handlers.size).toBe(0)
   })
 
   it("edge-triggers a one-shot at force priority exactly once", () => {

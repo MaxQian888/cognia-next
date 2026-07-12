@@ -21,7 +21,7 @@ import {
 import { generateBones } from "@/lib/pet/bones/generate"
 import { reducePetVisualState, restingWithCare } from "@/lib/pet/state/reducer"
 import { applyPetEvent, INTERACTION_KINDS } from "@/lib/pet/runtime/apply-event"
-import { computeStreakFromLedger } from "@/lib/pet/economy/streak"
+import { coinMultiplier, computeStreakFromLedger } from "@/lib/pet/economy/streak"
 import { CHAOS_BURST_COUNT } from "@/lib/pet/stats/growth-table"
 import { xpForEvent } from "@/lib/pet/xp/award-table"
 import { checkAchievements } from "@/lib/pet/achievements/check"
@@ -47,7 +47,7 @@ const PASSIVE_KINDS = new Set<PetEventKind>([
 ])
 
 /** Lifecycle kinds the controller re-emits — never re-emit while handling one. */
-const LIFECYCLE_EMIT_KINDS = new Set<PetEventKind>(["levelUp", "evolved", "unwell"])
+const LIFECYCLE_EMIT_KINDS = new Set<PetEventKind>(["levelUp", "evolved", "unwell", "streakDay"])
 
 /** Last processed event kind — drives the error→success "recovered" signal. */
 let lastEventKind: PetEventKind | null = null
@@ -80,6 +80,7 @@ async function process(event: PetEvent): Promise<void> {
     recovered,
     leveledUpTo,
     evolvedTo,
+    streakAdvancedTo,
   } = applyPetEvent(profile, event, now, {
     recentEventTs: recent.map((r) => r.ts),
     recoveredFromError,
@@ -180,6 +181,19 @@ async function process(event: PetEvent): Promise<void> {
     }
     if (becameUnwell) {
       bus.emit({ source: "system", kind: "unwell", at: now })
+    }
+    // Streak ceremony: day 1 is just "you showed up" (no fanfare); day ≥ 2
+    // celebrates the run and surfaces the coin multiplier in the bubble.
+    if (streakAdvancedTo !== null && streakAdvancedTo >= 2) {
+      bus.emit({
+        source: "system",
+        kind: "streakDay",
+        at: now,
+        meta: {
+          days: streakAdvancedTo,
+          multiplier: coinMultiplier(streakAdvancedTo),
+        },
+      })
     }
   }
 }

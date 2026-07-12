@@ -57,6 +57,11 @@ export type PetEventKind =
   | "greeting"
   // care transition (controller-emitted on well → unwell; 0 XP)
   | "unwell"
+  // daily-care streak advanced to a new day (controller-emitted, ceremony
+  // only — 0 XP/coins; meta carries { days, multiplier })
+  | "streakDay"
+  // hatch anniversary (birthday-source, once per birthday local-day)
+  | "birthday"
 
 export interface PetEvent {
   source: PetEventSource

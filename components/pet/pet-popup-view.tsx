@@ -15,7 +15,7 @@
 
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { useSettingsStore } from "@/stores/settings"
@@ -28,6 +28,7 @@ import { schedulePetWindowReveal } from "@/lib/pet/reveal"
 import {
   closePetPopup,
   closePetWindow,
+  onPetPopupHidden,
   resizePetPopup,
   setPetClickThrough,
   showMainWindow,
@@ -94,6 +95,13 @@ export function PetPopupView() {
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
+  // Native blur-hide (`pet-popup://hidden`): the window survives for cheap
+  // re-show, but the panel's transient UI (expanded talk composer) must not —
+  // remount it so the next open starts from the collapsed baseline instead of
+  // whatever mid-interaction state the blur froze.
+  const [panelSession, setPanelSession] = useState(0)
+  useEffect(() => onPetPopupHidden(() => setPanelSession((k) => k + 1)), [])
+
   // Fit the window to the card's natural size — SIZE ONLY, never reposition, so
   // the popup stays put (the whole reason for the separate window). The talk
   // composer toggling open/closed changes the card height; the observer grows
@@ -142,6 +150,7 @@ export function PetPopupView() {
       >
         {profile && view ? (
           <PetInteractionPanel
+            key={panelSession}
             profile={profile}
             view={view}
             onFeed={() => send("fed")}

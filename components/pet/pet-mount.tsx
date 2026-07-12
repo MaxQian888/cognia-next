@@ -8,7 +8,7 @@
 import { useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { useSettingsStore } from "@/stores/settings"
-import { DEFAULT_PET_SETTINGS } from "@/types/pet"
+import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePetEventBus } from "@/hooks/pet/use-pet-event-bus"
 import { useActiveCharacterId } from "@/hooks/pet/use-active-character-id"
 import { useActivityTracker } from "@/hooks/pet/use-activity-tracker"
@@ -17,6 +17,7 @@ import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
 import { registerPetInteractionCommands, registerPetWindowCommand } from "@/lib/pet/commands"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
+import { onPetNativeStateChanged } from "@/lib/tauri/pet-window"
 import { isTauri } from "@/lib/platform/detect"
 import { usePlatform } from "@/hooks/use-platform"
 import { startMainPetBridge } from "@/lib/pet/events/cross-window-bridge"
@@ -90,6 +91,33 @@ export function PetMount() {
   useEffect(() => {
     if (!isMainDesktopWindow) return
     return registerPetWindowCommand()
+  }, [isMainDesktopWindow])
+
+  // Keep PetSettings in sync with NATIVE window mutations the renderer didn't
+  // initiate (tray toggle, tray click-through recovery): the Rust side
+  // broadcasts `pet://state-changed` on every open/close/click-through change;
+  // patch only on real drift so renderer-initiated changes (which already
+  // persisted) don't loop. Independent of `enabled` — a tray open must land in
+  // settings even while the widget is off.
+  useEffect(() => {
+    if (!isMainDesktopWindow) return
+    return onPetNativeStateChanged((native) => {
+      const store = useSettingsStore.getState()
+      const latest = store.settings?.petSettings
+      if (!latest) return
+      const desktop = latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
+      if (desktop.enabled === native.open && desktop.clickThrough === native.clickThrough) return
+      void store.save({
+        petSettings: {
+          ...latest,
+          desktopPet: {
+            ...desktop,
+            enabled: native.open,
+            clickThrough: native.clickThrough,
+          },
+        },
+      })
+    })
   }, [isMainDesktopWindow])
 
   // Feed/play/pet need the running controller, so gate them on the widget.

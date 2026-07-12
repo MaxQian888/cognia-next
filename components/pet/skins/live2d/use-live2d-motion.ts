@@ -20,6 +20,8 @@ export interface Live2dModelLike {
   internalModel?: {
     motionManager?: {
       stopAllMotions?: () => void
+      on?(event: string, handler: () => void): unknown
+      off?(event: string, handler: () => void): unknown
     }
   }
 }
@@ -58,6 +60,11 @@ function applyPlan(
   }
 }
 
+/** True when a plan's motion group is the model's own auto-looping Idle. */
+function isIdleGroup(plan: MotionPlan): boolean {
+  return (plan.motionGroup ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase() === "idle"
+}
+
 /**
  * Reactively map (state, oneShot) onto motions/expressions of a loaded model.
  *
@@ -66,6 +73,10 @@ function applyPlan(
  *   non-null shot (so a re-render with the same active shot doesn't replay it).
  * - `walking` (overlay wandering) plays the model's walk-ish group at idle
  *   priority while it lasts; one-shots and reduced motion still win.
+ * - Resting/walk plans on a NON-Idle group re-fire when the motion finishes
+ *   (`motionFinish`): a persistent happy/greeting/interacting state — and a
+ *   whole walk — previously played their Tap/Walk motion exactly once and then
+ *   degraded to Idle while the state (or the sliding window) carried on.
  * - `reducedMotion` stops all motions once on entering reduced mode, then no
  *   further motions are applied while it stays on.
  */
@@ -82,6 +93,24 @@ export function useLive2dMotion(
   const prevOneShot = useRef<PetOneShot | null>(null)
   const prevReduced = useRef<boolean | null>(null)
   const prevWalking = useRef<boolean>(false)
+  // The plan to replay when the current motion finishes (null = let the
+  // engine's own Idle loop take over). Held in a ref so the motionFinish
+  // subscription below never re-binds per plan.
+  const loopPlanRef = useRef<{ plan: MotionPlan; caps: Live2dCapabilities } | null>(null)
+
+  // Re-fire looping resting/walk plans when their motion finishes.
+  useEffect(() => {
+    const manager = model?.internalModel?.motionManager
+    if (!model || !manager?.on || !manager.off) return
+    const handler = () => {
+      const entry = loopPlanRef.current
+      if (entry) applyPlan(model, entry.plan, entry.caps)
+    }
+    manager.on("motionFinish", handler)
+    return () => {
+      manager.off!("motionFinish", handler)
+    }
+  }, [model])
 
   useEffect(() => {
     if (!model) {
@@ -101,6 +130,7 @@ export function useLive2dMotion(
         model.internalModel?.motionManager?.stopAllMotions?.()
       }
       // Hold the resting frame; refresh diff refs so leaving reduced re-applies.
+      loopPlanRef.current = null
       prevState.current = state
       prevOneShot.current = oneShot
       prevWalking.current = walking
@@ -118,6 +148,9 @@ export function useLive2dMotion(
     prevWalking.current = walking
 
     if (oneShotEntered) {
+      // One-shots play once by definition — suspend any loop replay while the
+      // shot runs (the state-machine reverting to rest re-arms it below).
+      loopPlanRef.current = null
       applyPlan(model, resolveLive2dPlan(state, oneShot, caps, false, overrides), caps)
       return
     }
@@ -125,7 +158,9 @@ export function useLive2dMotion(
     // same way); a finished one-shot falls back into the walk loop too.
     if (walking && oneShot === null) {
       if (walkingChanged || stateChanged || leftReduced) {
-        applyPlan(model, resolveLive2dWalkPlan(caps, false), caps)
+        const plan = resolveLive2dWalkPlan(caps, false)
+        loopPlanRef.current = !plan.parameterFallback && !isIdleGroup(plan) ? { plan, caps } : null
+        applyPlan(model, plan, caps)
       }
       return
     }
@@ -133,7 +168,12 @@ export function useLive2dMotion(
     // left reduced mode / stopped walking) — avoids replaying the same idle
     // motion every render.
     if (oneShot === null && (stateChanged || leftReduced || walkingChanged)) {
-      applyPlan(model, resolveLive2dPlan(state, null, caps, false, overrides), caps)
+      const plan = resolveLive2dPlan(state, null, caps, false, overrides)
+      // Non-Idle resting plans (happy → Tap, greeting → Tap, …) replay on
+      // motionFinish so the state keeps its expression; Idle-group plans hand
+      // off to the engine's own idle loop.
+      loopPlanRef.current = !plan.parameterFallback && !isIdleGroup(plan) ? { plan, caps } : null
+      applyPlan(model, plan, caps)
     }
   }, [model, state, oneShot, caps, reducedMotion, walking, overrides])
 }

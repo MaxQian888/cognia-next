@@ -23,11 +23,24 @@ describe("PetRenderer", () => {
     expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
   })
 
-  it("passes an explicit reducedMotion flag through (suppresses vfx)", () => {
+  it("passes an explicit reducedMotion flag through (animation off, identity kept)", () => {
     const { container } = render(
       <PetRenderer bones={makeBones({ shiny: true })} stage="adult" state="idle" reducedMotion />
     )
-    expect(container.querySelector('[data-pet-part="vfx"]')).toBeNull()
+    // Epic rarity keeps a fully static aura (identity); animated effects
+    // (shiny shimmer) are suppressed.
+    expect(container.querySelector('[data-vfx-static="true"]')).not.toBeNull()
+    expect(container.querySelector('[data-pet-vfx="shiny"]')).toBeNull()
+    // Common rarity renders no VFX at all under reduced motion.
+    const common = render(
+      <PetRenderer
+        bones={makeBones({ rarity: "common" })}
+        stage="adult"
+        state="idle"
+        reducedMotion
+      />
+    )
+    expect(common.container.querySelector('[data-pet-part="vfx"]')).toBeNull()
   })
 
   it("falls back to the svg skin for an unknown skin id", () => {

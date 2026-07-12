@@ -73,6 +73,10 @@ const ONE_SHOT_INTENT: Record<PetOneShot, Intent> = {
   surprised: { groups: ["Flick", "FlickUp", "Tap"], expressions: ["surprised", "f02"] },
   love: { groups: ["TapHead", "TapBody", "Tap"], expressions: ["love", "heart", "happy", "f01"] },
   sleepy: { groups: ["Idle"], expressions: ["sleepy", "blank"] },
+  // Impact squash after a throw/fall settles — flick-ish reaction reads best.
+  land: { groups: ["Flick", "Flick@Body", "Shake", "TapBody"], expressions: ["surprised", "f02"] },
+  // Shell-crack celebration on hatch.
+  hatch: { groups: ["Special", "Tap", "TapBody"], expressions: ["happy", "smile", "f01"] },
 }
 
 /** Resting states that should play at idle priority rather than normal. */

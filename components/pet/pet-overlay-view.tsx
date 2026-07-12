@@ -39,10 +39,13 @@ import { schedulePetWindowReveal } from "@/lib/pet/reveal"
 import {
   getPetWindowPosition,
   getPetWorkArea,
+  onPetResume,
+  onPetSuspend,
   openPetPopup,
   setPetWindowPosition,
 } from "@/lib/tauri/pet-window"
 import { MIN_THROW_SPEED, overlayWindowSize } from "@/lib/pet/overlay-geometry"
+import { LIVE2D_ONE_SHOT_HOLD_MS } from "@/lib/pet/live2d/constants"
 import {
   POPUP_INITIAL_HEIGHT,
   POPUP_INITIAL_WIDTH,
@@ -75,10 +78,26 @@ export function PetOverlayView() {
   const reduced = pet.motion === "reduced" || (pet.motion === "auto" && Boolean(osReduced))
 
   const { profile, view } = usePet(undefined)
-  const { state, oneShot } = usePetAnimationState(reduced)
+  const { state, oneShot } = usePetAnimationState(
+    reduced,
+    // Cubism motions run longer than the SVG specs — hold shots so they finish.
+    skinId === "live2d" ? { holdFloorMs: LIVE2D_ONE_SHOT_HOLD_MS } : {}
+  )
   const bubble = usePetStore((s) => s.bubble)
   const hidden = useDocumentHidden()
   const [dragging, setDragging] = useState(false)
+  // Native hide/show signal from Rust (`pet://suspend` / `pet://resume`): a
+  // hidden Tauri window does NOT reliably flip `document.hidden`, so without
+  // this the ticker/rAF loops kept burning CPU behind a hidden overlay.
+  const [nativeSuspended, setNativeSuspended] = useState(false)
+  useEffect(() => {
+    const offSuspend = onPetSuspend(() => setNativeSuspended(true))
+    const offResume = onPetResume(() => setNativeSuspended(false))
+    return () => {
+      offSuspend()
+      offResume()
+    }
+  }, [])
 
   // Last user-interaction timestamp (perf clock — same one the locomotion io
   // uses) feeding the "only move after interaction" wander gate. Stamped by
@@ -177,7 +196,8 @@ export function PetOverlayView() {
   // the quick menu is open, a bubble is showing, the window is hidden, or
   // click-through is on (a wandering pet you cannot grab is disorienting).
   const wander = desktopPet.wander ?? DEFAULT_PET_WANDER
-  const locomotionPaused = dragging || Boolean(bubble) || hidden || desktopPet.clickThrough
+  const locomotionPaused =
+    dragging || Boolean(bubble) || hidden || nativeSuspended || desktopPet.clickThrough
   const { locomotion, scaleFactor, beginThrow } = usePetLocomotion({
     enabled: !reduced,
     paused: locomotionPaused,
@@ -187,6 +207,8 @@ export function PetOverlayView() {
     petSize: size,
     lastInteractionAtMs: () => lastInteractionRef.current,
     onSettle: (x, y) => void persistRef.current(x, y),
+    // A fall/throw settling plays the impact squash + dust locally.
+    onLand: () => usePetStore.getState().enqueueOneShot("land"),
   })
 
   // Drag the OS window: the click-vs-drag threshold and release-velocity
@@ -318,9 +340,13 @@ export function PetOverlayView() {
             size={size}
             skinId={skinId}
             locomotion={locomotion}
-            // Pause idle micro-motion while hidden OR click-through (a pet the
-            // user can't interact with doesn't need to keep breathing).
-            paused={hidden || desktopPet.clickThrough}
+            mood={view.mood}
+            speaking={Boolean(bubble)}
+            held={dragging}
+            // Pause idle micro-motion while hidden (document OR native window),
+            // or click-through (a pet the user can't interact with doesn't
+            // need to keep breathing).
+            paused={hidden || nativeSuspended || desktopPet.clickThrough}
           />
         </div>
       ) : null}

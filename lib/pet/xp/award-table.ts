@@ -38,6 +38,9 @@ export const XP_AWARD: Partial<Record<PetEventKind, number>> = {
   levelUp: 0,
   evolved: 0,
   achievementUnlocked: 0, // celebration only; the unlocking event already paid XP
+  // XP-bearing so the ledger records it — the row IS the once-per-day dedup
+  // marker for the birthday source AND the "first birthday" counter.
+  birthday: 10,
 }
 
 /** Resolve XP for an event: explicit value wins, else the table, else 0. */

@@ -1,4 +1,4 @@
-import { PET_ITEMS, getPetItem } from "./item-catalog"
+import { PET_ITEMS, getPetItem, petHatItem } from "./item-catalog"
 
 describe("PET_ITEMS catalog invariants", () => {
   it("has unique ids and getPetItem resolves them", () => {
@@ -29,9 +29,37 @@ describe("PET_ITEMS catalog invariants", () => {
     }
   })
 
-  it("covers the food and toy categories", () => {
+  it("covers the food, toy, care, and decor categories", () => {
     const categories = new Set(PET_ITEMS.map((i) => i.category))
     expect(categories).toContain("food")
     expect(categories).toContain("toy")
+    expect(categories).toContain("care")
+    expect(categories).toContain("decor")
+  })
+
+  it("care items map to the sleep/clean/treat interactions", () => {
+    const care = PET_ITEMS.filter((i) => i.category === "care")
+    expect(care.length).toBeGreaterThanOrEqual(3)
+    const kinds = new Set(care.map((i) => i.interactionKind))
+    expect(kinds).toContain("slept")
+    expect(kinds).toContain("cleaned")
+    expect(kinds).toContain("treated")
+  })
+
+  it("petHatItem resolves every purchasable hat and skips free/genetic ones", () => {
+    // Each shop hat resolves to its own decor item.
+    for (const hat of ["crown", "tophat", "wizard", "halo", "propeller", "beanie"]) {
+      const item = petHatItem(hat)
+      expect(item?.cosmetic?.hat).toBe(hat)
+      expect(item?.category).toBe("decor")
+    }
+    // Bare-headed and the legendary genetics-only hat have no shop item.
+    expect(petHatItem("none")).toBeUndefined()
+    expect(petHatItem("tinyduck")).toBeUndefined()
+  })
+
+  it("keeps hat-granting decor items one-per-hat", () => {
+    const hats = PET_ITEMS.filter((i) => i.cosmetic?.hat).map((i) => i.cosmetic!.hat)
+    expect(new Set(hats).size).toBe(hats.length)
   })
 })

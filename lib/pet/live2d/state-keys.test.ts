@@ -8,10 +8,12 @@ import {
 } from "./state-keys"
 
 describe("state-keys", () => {
-  it("covers all 12 states and 10 one-shots", () => {
+  it("covers all 12 states and 12 one-shots", () => {
     expect(STATE_KEYS).toHaveLength(12)
-    expect(ONE_SHOT_KEYS).toHaveLength(10)
-    expect(ALL_MAPPING_ROWS).toHaveLength(22)
+    expect(ONE_SHOT_KEYS).toHaveLength(12)
+    expect(ALL_MAPPING_ROWS).toHaveLength(24)
+    expect(ONE_SHOT_KEYS).toContain("land")
+    expect(ONE_SHOT_KEYS).toContain("hatch")
   })
 
   it("includes the unwell care state so its motion is authorable", () => {

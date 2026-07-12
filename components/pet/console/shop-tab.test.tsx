@@ -19,12 +19,20 @@ jest.mock("@/lib/pet/economy/shop", () => ({
 }))
 
 import { ShopTab } from "./shop-tab"
+import {
+  registerPetItem,
+  __resetPetItemsForTesting,
+} from "@/lib/plugin/registries/pet-item-registry"
 
 beforeEach(() => {
   purchaseItem.mockClear()
   consumeItem.mockClear()
   profileValue = { coins: 30, streak: { days: 5, lastDay: "2026-07-02" } }
   inventoryValue = []
+})
+
+afterEach(() => {
+  __resetPetItemsForTesting()
 })
 
 describe("ShopTab", () => {
@@ -64,6 +72,31 @@ describe("ShopTab", () => {
     expect(item.textContent).toContain("×2")
     fireEvent.click(document.querySelector('[data-action="use-berry"]') as Element)
     expect(consumeItem).toHaveBeenCalledWith("berry")
+  })
+
+  it("renders plugin-contributed items with their plain locale labels", () => {
+    registerPetItem(
+      "star-cookie",
+      {
+        id: "star-cookie",
+        labels: { en: "Star Cookie" },
+        descriptions: { en: "A crunchy star-shaped snack." },
+        category: "food",
+        price: 10,
+        consumable: true,
+        interactionKind: "fed",
+      },
+      { pluginId: "p1" }
+    )
+    render(<ShopTab />)
+    const item = document.querySelector(
+      '[data-shop-item="plugin:p1:star-cookie"]'
+    ) as HTMLElement | null
+    expect(item).not.toBeNull()
+    expect(item!.textContent).toContain("Star Cookie")
+    expect(item!.textContent).toContain("A crunchy star-shaped snack.")
+    fireEvent.click(document.querySelector('[data-action="buy-plugin:p1:star-cookie"]') as Element)
+    expect(purchaseItem).toHaveBeenCalledWith("plugin:p1:star-cookie", undefined)
   })
 
   it("labels decor use as apply", () => {

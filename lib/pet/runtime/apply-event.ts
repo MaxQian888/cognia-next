@@ -41,6 +41,14 @@ export const INTERACTION_KINDS: ReadonlySet<string> = new Set<string>([
   "treated",
 ])
 
+/**
+ * Coins minted per level gained at level-up (`newLevel × rate`) so leveling
+ * pays a visible dividend instead of the animation being the entire payoff.
+ * Kept modest relative to the interaction faucet (a level-10 up mints 50 —
+ * about a day of active care).
+ */
+export const LEVEL_UP_COIN_RATE = 5
+
 const INTERACTION_ONE_SHOT: Record<string, PetOneShot | null> = {
   fed: "fed",
   petted: "petted",
@@ -80,6 +88,12 @@ export interface ApplyEventResult {
   recovered: boolean
   /** Coins minted by this event (already added into `profile.coins`). */
   coinsEarned: number
+  /**
+   * New streak day-count when this event advanced the daily-care streak
+   * (first counted interaction of a new local day), else null. The controller
+   * turns day ≥ 2 into a `streakDay` ceremony event.
+   */
+  streakAdvancedTo: number | null
 }
 
 export function applyPetEvent(
@@ -114,19 +128,23 @@ export function applyPetEvent(
   const xp = profile.xp + xpForEvent(event.kind, event.xp)
   const level = levelForXp(xp)
   const stage: PetStage = profile.soul ? stageForLevel(level) : "egg"
+  const leveledUpTo = level > profile.level ? level : null
 
   // 2a) Coins + streak. Only direct user interactions advance the streak;
   // everything coin-bearing still mints (with the streak multiplier applied),
-  // and an explicit `meta.coins` (plugin rewards, pre-clamped) wins the table.
+  // an explicit `meta.coins` (plugin rewards, pre-clamped) wins the table, and
+  // a level-up mints its dividend on top (outside the multiplier — the level
+  // is the achievement, not the day's care).
   const prevStreak: PetStreak = normalizeStreak(profile.streak)
   const streak =
     INTERACTION_KINDS.has(event.kind) && event.source === "user"
       ? advanceStreak(prevStreak, now)
       : prevStreak
+  const streakAdvancedTo = streak.days > prevStreak.days ? streak.days : null
   const explicitCoins = typeof event.meta?.coins === "number" ? event.meta.coins : undefined
-  const coinsEarned = Math.floor(
-    coinsForEvent(event.kind, explicitCoins) * coinMultiplier(streak.days)
-  )
+  const coinsEarned =
+    Math.floor(coinsForEvent(event.kind, explicitCoins) * coinMultiplier(streak.days)) +
+    (leveledUpTo ? leveledUpTo * LEVEL_UP_COIN_RATE : 0)
   const coins = normalizeCoins(profile.coins) + coinsEarned
 
   // 2b) Stat growth (additive on top of the deterministic base bones stats).
@@ -143,8 +161,9 @@ export function applyPetEvent(
   const interactionShot = INTERACTION_ONE_SHOT[event.kind]
   if (interactionShot) oneShots.push(interactionShot)
   if (event.kind === "success" || event.kind === "goalComplete") oneShots.push("happy")
+  if (event.kind === "birthday") oneShots.push("love")
+  if (event.kind === "hatched") oneShots.push("hatch")
 
-  const leveledUpTo = level > profile.level ? level : null
   if (leveledUpTo) oneShots.push("levelUp")
 
   let evolvedTo: PetStage | null = null
@@ -180,5 +199,6 @@ export function applyPetEvent(
     becameUnwell,
     recovered,
     coinsEarned,
+    streakAdvancedTo,
   }
 }

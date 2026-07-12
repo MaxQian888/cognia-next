@@ -16,6 +16,7 @@ import {
   getPetSurfaces,
   getPetWindowPosition,
   getPetWorkArea,
+  onPetWorkAreaChanged,
   setPetWindowPosition,
 } from "@/lib/tauri/pet-window"
 import {
@@ -27,6 +28,7 @@ import {
 import {
   beginThrow as fsmBeginThrow,
   createLocomotionState,
+  resolveWalkSpeedFactor,
   stepLocomotion,
   type LocomotionFsmState,
   type LocomotionInput,
@@ -40,6 +42,8 @@ export interface PetLocomotionIo {
   getPosition: typeof getPetWindowPosition
   setPosition: typeof setPetWindowPosition
   getSurfaces: typeof getPetSurfaces
+  /** Native monitor-change signal (`pet://work-area-changed`); returns a disposer. */
+  onWorkAreaChanged: (handler: () => void) => () => void
   now: () => number
   raf: (cb: () => void) => number
   caf: (id: number) => void
@@ -66,6 +70,8 @@ export interface UsePetLocomotionArgs {
   lastInteractionAtMs: () => number | null
   /** Called with the resting window position after a walk/fall settles. */
   onSettle?: (x: number, y: number) => void
+  /** Called once when a fall/throw settles — the view plays the landing squash. */
+  onLand?: () => void
   io?: Partial<PetLocomotionIo>
 }
 
@@ -85,6 +91,7 @@ const DEFAULT_IO: PetLocomotionIo = {
   getPosition: getPetWindowPosition,
   setPosition: setPetWindowPosition,
   getSurfaces: getPetSurfaces,
+  onWorkAreaChanged: onPetWorkAreaChanged,
   now: () => performance.now(),
   raf: (cb) => requestAnimationFrame(() => cb()),
   caf: (id) => cancelAnimationFrame(id),
@@ -150,11 +157,29 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
       }
     }
 
-    const publish = (state: LocomotionFsmState) => {
+    const publish = (state: LocomotionFsmState, nowMs: number) => {
+      // Publish the effective ground speed while walking (quantized to 4 px/s
+      // so React state doesn't churn every frame) — the skin syncs its walk-bob
+      // cadence to it.
+      let speed: number | undefined
+      if (state.mode === "walking" && state.targetX != null) {
+        const a = argsRef.current
+        const tuning = resolveWanderTuning(a.wander.frequency, a.lowPower, a.statsChaos ?? 0)
+        const factor = resolveWalkSpeedFactor(
+          state.walkStartMs,
+          nowMs,
+          Math.abs(state.targetX - state.x)
+        )
+        speed = Math.round((tuning.walkSpeedPxPerSec * scaleRef.current * factor) / 4) * 4
+      }
       setLocomotion((prev) =>
-        prev.mode === state.mode && prev.facing === state.facing
+        prev.mode === state.mode && prev.facing === state.facing && prev.speedPxPerSec === speed
           ? prev
-          : { mode: state.mode, facing: state.facing }
+          : {
+              mode: state.mode,
+              facing: state.facing,
+              ...(speed !== undefined ? { speedPxPerSec: speed } : {}),
+            }
       )
     }
 
@@ -218,7 +243,7 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
       const prevMode = state.mode
       const next = stepLocomotion(state, input, dtMs)
       stateRef.current = next
-      publish(next)
+      publish(next, nowMs)
       if (next.x !== state.x || next.y !== state.y) sendPosition(next)
 
       if (next.mode === "resting") {
@@ -226,6 +251,9 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
         // monitor (the user may have moved the window across screens).
         if (prevMode !== "resting") {
           argsRef.current.onSettle?.(Math.round(next.x), Math.round(next.y))
+          // Impact feedback: only a FALL earns the landing squash + dust
+          // (walk arrivals and climb top-outs settle gently).
+          if (prevMode === "falling") argsRef.current.onLand?.()
           refreshArea()
         }
         lastFrameMsRef.current = null
@@ -310,9 +338,19 @@ export function usePetLocomotion(args: UsePetLocomotionArgs): UsePetLocomotionRe
 
     engineRef.current = { kick, refreshArea, startSurfacesPoll, stopSurfacesPoll }
 
+    // Monitor topology / DPI changes: re-read the work area immediately (the
+    // loop otherwise only refreshes on landings) and wake a resting loop so
+    // stale bounds never strand the pet against a vanished monitor edge.
+    const offWorkArea = io.onWorkAreaChanged(() => {
+      if (disposedRef.current) return
+      refreshArea()
+      kick()
+    })
+
     return () => {
       disposedRef.current = true
       engineRef.current = null
+      offWorkArea()
       stopRaf()
       stopTimer()
       stopSurfacesPoll()

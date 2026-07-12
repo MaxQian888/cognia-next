@@ -295,5 +295,46 @@ describe("applyPetEvent", () => {
       expect(res.profile.coins).toBe(0)
       expect(res.profile.streak).toEqual({ days: 0, lastDay: null })
     })
+
+    it("reports streakAdvancedTo only when the day count actually grows", () => {
+      // First-ever interaction → day 1.
+      expect(applyPetEvent(profile(), event("fed"), DAY).streakAdvancedTo).toBe(1)
+      // Next-day continuation → day 4.
+      const cont = applyPetEvent(
+        profile({ streak: { days: 3, lastDay: YESTERDAY_KEY } }),
+        event("fed"),
+        DAY
+      )
+      expect(cont.streakAdvancedTo).toBe(4)
+      // Same-day repeat → no advance.
+      const repeat = applyPetEvent(
+        profile({ streak: { days: 3, lastDay: "2026-07-02" } }),
+        event("fed"),
+        DAY
+      )
+      expect(repeat.streakAdvancedTo).toBeNull()
+      // A gap resets to day 1 — NOT an advance past the previous count.
+      const lapsed = applyPetEvent(
+        profile({ streak: { days: 5, lastDay: "2026-06-20" } }),
+        event("fed"),
+        DAY
+      )
+      expect(lapsed.profile.streak).toEqual({ days: 1, lastDay: "2026-07-02" })
+      expect(lapsed.streakAdvancedTo).toBeNull()
+      // Non-interaction events never advance.
+      expect(applyPetEvent(profile(), event("idle"), DAY).streakAdvancedTo).toBeNull()
+    })
+
+    it("mints a level-up dividend of newLevel × 5 on top of the event's coins", () => {
+      // 90 + 25 xp → level 2: dividend 10 on top of goalComplete's 12.
+      const res = applyPetEvent(profile({ xp: 90 }), event("goalComplete"), DAY)
+      expect(res.leveledUpTo).toBe(2)
+      expect(res.coinsEarned).toBe(12 + 10)
+      expect(res.profile.coins).toBe(22)
+      // No level-up → no dividend.
+      const flat = applyPetEvent(profile(), event("fed"), DAY)
+      expect(flat.leveledUpTo).toBeNull()
+      expect(flat.coinsEarned).toBe(2)
+    })
   })
 })

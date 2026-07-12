@@ -307,10 +307,10 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
         }
         "pet-disable-click-through" => {
             // Click-through recovery path — re-enable cursor events so a
-            // pointer-trapped overlay becomes interactive again.
-            if let Some(window) = app.get_webview_window("pet") {
-                let _ = window.set_ignore_cursor_events(false);
-            }
+            // pointer-trapped overlay becomes interactive again. Routed
+            // through the shared helper so the renderer hears the
+            // `pet://state-changed` broadcast and its settings store resyncs.
+            let _ = crate::pet_window::set_pet_click_through_inner(app.app_handle(), false);
         }
         "island-toggle" => {
             // Toggle the fleet agent-monitor island (hide if visible, else

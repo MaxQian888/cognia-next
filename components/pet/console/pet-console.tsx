@@ -32,6 +32,7 @@ import { ChatTab } from "./chat-tab"
 import { ShopTab } from "./shop-tab"
 import { CustomizeTab } from "./customize-tab"
 import { DexTab } from "./dex-tab"
+import { JournalTab } from "./journal-tab"
 import { AchievementsTab } from "./achievements-tab"
 import { BindingTab } from "./binding-tab"
 import { RadarPanel } from "./radar-panel"
@@ -177,6 +178,7 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
             <CaptureSettingsCard />
           </div>
         )}
+        {tab === "journal" && <JournalTab />}
         {tab === "dex" && <DexTab bones={view.bones} />}
         {tab === "achievements" && <AchievementsTab />}
         {tab === "binding" && <BindingTab />}

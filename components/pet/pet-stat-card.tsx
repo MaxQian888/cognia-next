@@ -5,10 +5,11 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { StarIcon, SparklesIcon, TrendingUpIcon } from "lucide-react"
+import { StarIcon, SparklesIcon, SunIcon, TrendingUpIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type {
   PetBones,
+  PetEvolutionFlavor,
   PetSoul,
   PetStage,
   PetStatKey,
@@ -37,6 +38,13 @@ export interface PetStatCardProps {
   /** Stat keys that grew on the most recent event (shows a "grew" marker). */
   grew?: PetStatKey[]
   /**
+   * Care-quality evolution flavor stamped at the last evolution
+   * (`profile.evolutionFlavor`). `radiant` earns a badge; `plain` a muted
+   * hint (its tooltip explains care quality drives it); absent/normal shows
+   * nothing.
+   */
+  flavor?: PetEvolutionFlavor
+  /**
    * Skin for the live preview avatar. Defaults to the SVG mascot; callers that
    * know the resolved live skin (the widget click panel + the desktop popup)
    * pass the EFFECTIVE skin so the card matches the floating pet instead of
@@ -52,6 +60,7 @@ export function PetStatCard({
   stage,
   progress,
   grew,
+  flavor,
   skinId,
   className,
 }: PetStatCardProps) {
@@ -84,6 +93,22 @@ export function PetStatCard({
               >
                 <SparklesIcon className="size-3" />
                 {t("statCard.shiny")}
+              </span>
+            )}
+            {flavor && flavor !== "normal" && (
+              <span
+                data-testid="pet-flavor-badge"
+                data-flavor={flavor}
+                title={t(`statCard.flavorHint.${flavor}`)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+                  flavor === "radiant"
+                    ? "bg-sky-400/20 text-sky-600 dark:text-sky-300"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                <SunIcon className="size-3" />
+                {t(`statCard.flavor.${flavor}`)}
               </span>
             )}
           </div>

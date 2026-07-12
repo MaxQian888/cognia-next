@@ -34,9 +34,13 @@ describe("COIN_AWARD", () => {
     }
   })
 
-  it("keeps goalComplete the biggest single mint", () => {
-    const max = Math.max(...Object.values(COIN_AWARD))
+  it("keeps goalComplete the biggest recurring mint", () => {
+    // `birthday` fires once a year, so it may out-mint everything; among the
+    // kinds a user can earn repeatedly, goalComplete stays the top reward.
+    const { birthday: _birthday, ...recurring } = COIN_AWARD
+    const max = Math.max(...Object.values(recurring))
     expect(COIN_AWARD.goalComplete).toBe(max)
+    expect(COIN_AWARD.birthday ?? 0).toBeGreaterThan(0)
   })
 })
 

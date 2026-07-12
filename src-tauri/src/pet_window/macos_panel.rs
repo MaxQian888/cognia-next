@@ -17,9 +17,13 @@
 //! call, with a no-op shim off macOS so the call sites stay `cfg`-free.
 #![allow(dead_code)]
 
-// `Manager` is required in scope: the `tauri_panel!`-generated `from_window`
-// calls `window.app_handle()` (a `Manager` method) when it reclasses the window.
-use tauri::{Manager, Runtime, WebviewWindow};
+// `Manager` is required in scope on macOS only: the `tauri_panel!`-generated
+// `from_window` calls `window.app_handle()` (a `Manager` method) when it
+// reclasses the window. The off-macOS shim never touches it — cfg-gate the
+// import so non-mac builds don't warn.
+#[cfg(target_os = "macos")]
+use tauri::Manager;
+use tauri::{Runtime, WebviewWindow};
 
 /// Which overlay window is being converted — decides the key-window policy
 /// and the window level.

@@ -49,40 +49,96 @@ pub(crate) struct WindowCandidate {
     pub minimized: bool,
     pub cloaked: bool,
     pub tool_window: bool,
-    pub title: String,
     pub hwnd_id: u64,
+}
+
+/// Subtract `holes` from the interval `[start, end)`, returning the remaining
+/// sub-intervals in ascending order. Holes may overlap each other and extend
+/// past the interval; empty/inverted holes are ignored.
+pub(crate) fn subtract_intervals(start: i32, end: i32, holes: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    let mut sorted: Vec<(i32, i32)> = holes.iter().copied().filter(|(s, e)| e > s).collect();
+    sorted.sort_by_key(|h| h.0);
+    let mut out = Vec::new();
+    let mut cursor = start;
+    for (hs, he) in sorted {
+        if he <= cursor {
+            continue;
+        }
+        if hs >= end {
+            break;
+        }
+        if hs > cursor {
+            out.push((cursor, hs.min(end)));
+        }
+        cursor = cursor.max(he);
+        if cursor >= end {
+            break;
+        }
+    }
+    if cursor < end {
+        out.push((cursor, end));
+    }
+    out
 }
 
 /// Pure filter + sort: turn raw candidates into perchable surfaces. Rejects
 /// hidden / minimized / cloaked / tool / undersized / off-monitor / maximized
-/// windows and our own windows, then sorts by `(y, x)` for deterministic perch
-/// selection.
+/// windows and our own windows, subtracts the horizontal spans of windows in
+/// front that cover each surviving top edge (candidates arrive z-ordered,
+/// front-most first — both `EnumWindows` and `CGWindowListCopyWindowInfo`
+/// enumerate that way — so a fully covered window contributes no surface and a
+/// partially covered one contributes only its visible segments, instead of the
+/// pet perching "mid-air" on a hidden edge), then sorts by `(y, x)` for
+/// deterministic perch selection.
 pub(crate) fn filter_and_sort_surfaces(
     candidates: &[WindowCandidate],
-    self_titles: &[&str],
     self_hwnds: &[u64],
     monitor_bounds: (i32, i32, i32, i32),
     min_width: i32,
     min_top_gap: i32,
 ) -> Vec<PetSurface> {
     let (mx, my, mw, mh) = monitor_bounds;
-    let mut out: Vec<PetSurface> = candidates
-        .iter()
-        .filter(|c| c.visible && !c.minimized && !c.cloaked && !c.tool_window)
-        .filter(|c| c.right - c.left >= min_width)
-        .filter(|c| c.bottom > c.top) // positive height
-        .filter(|c| !self_hwnds.contains(&c.hwnd_id))
-        .filter(|c| !self_titles.iter().any(|t| *t == c.title))
+    let mut out: Vec<PetSurface> = Vec::new();
+    for (idx, c) in candidates.iter().enumerate() {
+        if !c.visible || c.minimized || c.cloaked || c.tool_window {
+            continue;
+        }
+        if c.right - c.left < min_width || c.bottom <= c.top {
+            continue;
+        }
+        if self_hwnds.contains(&c.hwnd_id) {
+            continue;
+        }
         // Fully off the monitor → skip.
-        .filter(|c| c.right > mx && c.left < mx + mw && c.bottom > my && c.top < my + mh)
+        if !(c.right > mx && c.left < mx + mw && c.bottom > my && c.top < my + mh) {
+            continue;
+        }
         // Top edge at/above the monitor top (maximized / fullscreen) → skip.
-        .filter(|c| c.top > my + min_top_gap)
-        .map(|c| PetSurface {
-            x: c.left as f64,
-            y: c.top as f64,
-            width: (c.right - c.left) as f64,
-        })
-        .collect();
+        if c.top <= my + min_top_gap {
+            continue;
+        }
+        // Windows IN FRONT (earlier in the z-ordered list) that intersect this
+        // window's top-edge line occlude it. Tool windows count as occluders
+        // (an always-on-top toolbar visually hides the edge even though it is
+        // never itself a perch); our own overlay windows do not (the pet
+        // sprite/popup float wherever the pet is).
+        let holes: Vec<(i32, i32)> = candidates[..idx]
+            .iter()
+            .filter(|o| o.visible && !o.minimized && !o.cloaked)
+            .filter(|o| !self_hwnds.contains(&o.hwnd_id))
+            .filter(|o| o.top <= c.top && o.bottom > c.top)
+            .map(|o| (o.left.max(c.left), o.right.min(c.right)))
+            .collect();
+        for (seg_start, seg_end) in subtract_intervals(c.left, c.right, &holes) {
+            if seg_end - seg_start >= min_width {
+                out.push(PetSurface {
+                    x: seg_start as f64,
+                    y: c.top as f64,
+                    width: (seg_end - seg_start) as f64,
+                });
+            }
+        }
+    }
     out.sort_by(|a, b| {
         a.y.partial_cmp(&b.y)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -96,10 +152,12 @@ mod platform {
     use super::WindowCandidate;
     use windows::core::BOOL;
     use windows::Win32::Foundation::{HWND, LPARAM, RECT};
-    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    use windows::Win32::Graphics::Dwm::{
+        DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsIconic,
-        IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
+        EnumWindows, GetWindowLongW, GetWindowRect, IsIconic, IsWindowVisible, GWL_EXSTYLE,
+        WS_EX_TOOLWINDOW,
     };
 
     /// Collect every top-level window's facts. SAFETY: all calls are read-only
@@ -119,8 +177,19 @@ mod platform {
     unsafe extern "system" fn enum_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let out = &mut *(lparam.0 as *mut Vec<WindowCandidate>);
 
+        // Prefer the DWM extended frame bounds — `GetWindowRect` includes the
+        // invisible resize borders, so the pet perched a few px above the
+        // visually true top edge. Fall back to `GetWindowRect` when DWM has no
+        // answer (e.g. non-DWM legacy windows).
         let mut rect = RECT::default();
-        if GetWindowRect(hwnd, &mut rect).is_err() {
+        let frame_ok = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut rect as *mut RECT as *mut _,
+            std::mem::size_of::<RECT>() as u32,
+        )
+        .is_ok();
+        if !frame_ok && GetWindowRect(hwnd, &mut rect).is_err() {
             return BOOL(1); // keep enumerating
         }
 
@@ -140,8 +209,6 @@ mod platform {
         .map(|_| cloaked_flag != 0)
         .unwrap_or(false);
 
-        let title = window_title(hwnd);
-
         out.push(WindowCandidate {
             left: rect.left,
             top: rect.top,
@@ -151,23 +218,9 @@ mod platform {
             minimized,
             cloaked,
             tool_window,
-            title,
             hwnd_id: hwnd.0 as u64,
         });
         BOOL(1)
-    }
-
-    unsafe fn window_title(hwnd: HWND) -> String {
-        let len = GetWindowTextLengthW(hwnd);
-        if len <= 0 {
-            return String::new();
-        }
-        let mut buf = vec![0u16; len as usize + 1];
-        let n = GetWindowTextW(hwnd, &mut buf);
-        if n <= 0 {
-            return String::new();
-        }
-        String::from_utf16_lossy(&buf[..n as usize])
     }
 }
 
@@ -191,7 +244,7 @@ mod platform {
     use core_graphics::window::{
         create_description_from_array, create_window_list, kCGNullWindowID, kCGWindowBounds,
         kCGWindowLayer, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly,
-        kCGWindowName, kCGWindowNumber, kCGWindowOwnerName, kCGWindowOwnerPID,
+        kCGWindowNumber, kCGWindowOwnerPID,
     };
 
     fn cf_key(raw: CFStringRef) -> CFString {
@@ -204,13 +257,6 @@ mod platform {
 
     fn dict_i64(dict: &CFDictionary<CFString, CFType>, key: CFStringRef) -> Option<i64> {
         dict.find(&cf_key(key))?.downcast::<CFNumber>()?.to_i64()
-    }
-
-    fn dict_string(dict: &CFDictionary<CFString, CFType>, key: CFStringRef) -> String {
-        dict.find(&cf_key(key))
-            .and_then(|v| v.downcast::<CFString>())
-            .map(|s| s.to_string())
-            .unwrap_or_default()
     }
 
     /// `kCGWindowBounds`'s value is itself a dictionary in the standard
@@ -236,14 +282,12 @@ mod platform {
         // `CFStringRef` constants exported by CoreGraphics; reading them is
         // always sound. rustc now requires the read of an extern `static` to
         // sit in an `unsafe` block, so bind them once up front.
-        let (owner_pid_key, bounds_key, layer_key, number_key, name_key, owner_name_key) = unsafe {
+        let (owner_pid_key, bounds_key, layer_key, number_key) = unsafe {
             (
                 kCGWindowOwnerPID,
                 kCGWindowBounds,
                 kCGWindowLayer,
                 kCGWindowNumber,
-                kCGWindowName,
-                kCGWindowOwnerName,
             )
         };
         if dict_i64(dict, owner_pid_key) == Some(own_pid) {
@@ -252,12 +296,6 @@ mod platform {
         let rect = dict_rect(dict, bounds_key)?;
         let layer = dict_i64(dict, layer_key).unwrap_or(0);
         let window_id = dict_i64(dict, number_key).unwrap_or(0);
-        let name = dict_string(dict, name_key);
-        let title = if !name.is_empty() {
-            name
-        } else {
-            dict_string(dict, owner_name_key)
-        };
         Some(WindowCandidate {
             left: rect.origin.x as i32,
             top: rect.origin.y as i32,
@@ -273,7 +311,6 @@ mod platform {
             // same "don't perch here" cases Windows' tool-window check does.
             cloaked: false,
             tool_window: layer != 0,
-            title,
             hwnd_id: window_id as u64,
         })
     }
@@ -367,7 +404,7 @@ mod platform {
         // native constants.
 
         #[test]
-        fn maps_a_normal_window_including_bounds_and_title_fallback() {
+        fn maps_a_normal_window_including_bounds() {
             let dict = window_dict(
                 999,
                 0,
@@ -382,22 +419,7 @@ mod platform {
             assert_eq!(candidate.right, 310);
             assert_eq!(candidate.bottom, 420);
             assert_eq!(candidate.hwnd_id, 42);
-            assert_eq!(candidate.title, "Finder"); // empty kCGWindowName → owner name
             assert!(!candidate.tool_window);
-        }
-
-        #[test]
-        fn prefers_the_window_name_over_the_owner_name() {
-            let dict = window_dict(
-                999,
-                0,
-                1,
-                "Untitled Document",
-                "TextEdit",
-                bounds_dict(0.0, 0.0, 200.0, 200.0),
-            );
-            let candidate = candidate_from_dict(&dict, 1).expect("should map");
-            assert_eq!(candidate.title, "Untitled Document");
         }
 
         #[test]
@@ -444,8 +466,8 @@ mod platform {
 use tauri::{AppHandle, Manager, Runtime};
 
 /// Physical-pixel bounds of the monitor the pet window sits on (falls back to
-/// primary, then a sane default).
-fn pet_monitor_bounds<R: Runtime>(app: &AppHandle<R>) -> (i32, i32, i32, i32) {
+/// primary, then a sane default), plus its scale factor.
+fn pet_monitor_bounds<R: Runtime>(app: &AppHandle<R>) -> (i32, i32, i32, i32, f64) {
     let monitor = app
         .get_webview_window("pet")
         .and_then(|w| w.current_monitor().ok().flatten())
@@ -453,17 +475,52 @@ fn pet_monitor_bounds<R: Runtime>(app: &AppHandle<R>) -> (i32, i32, i32, i32) {
     if let Some(m) = monitor {
         let pos = m.position();
         let size = m.size();
-        (pos.x, pos.y, size.width as i32, size.height as i32)
+        (
+            pos.x,
+            pos.y,
+            size.width as i32,
+            size.height as i32,
+            m.scale_factor(),
+        )
     } else {
-        (0, 0, 1920, 1080)
+        (0, 0, 1920, 1080, 1.0)
     }
 }
 
-/// Our own windows' HWND ids, so the pet never tries to perch on itself or the
-/// main app window.
+/// Scale candidate rects from logical points to physical pixels. macOS
+/// `CGWindowBounds` is in logical points, but the `PetSurface` contract — and
+/// the Tauri monitor geometry candidates are filtered against — is physical
+/// pixels; on any Retina display an unscaled candidate landed the pet mid-air
+/// at 1/scale of the target. Scaling by the pet monitor's factor is exact for
+/// candidates on the pet's own monitor — the only ones that survive the
+/// monitor-bounds filter (mixed-DPI setups may mis-scale windows on *other*
+/// monitors, which are rejected anyway).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn scale_candidates(
+    candidates: Vec<WindowCandidate>,
+    scale: f64,
+) -> Vec<WindowCandidate> {
+    if scale == 1.0 {
+        return candidates;
+    }
+    candidates
+        .into_iter()
+        .map(|c| WindowCandidate {
+            left: (c.left as f64 * scale).round() as i32,
+            top: (c.top as f64 * scale).round() as i32,
+            right: (c.right as f64 * scale).round() as i32,
+            bottom: (c.bottom as f64 * scale).round() as i32,
+            ..c
+        })
+        .collect()
+}
+
+/// Our own windows' HWND ids, so the pet never tries to perch on itself, its
+/// own popup, the fleet island strip, or the main app window (and so none of
+/// them count as occluders of other windows' edges).
 #[cfg(target_os = "windows")]
 fn self_hwnds<R: Runtime>(app: &AppHandle<R>) -> Vec<u64> {
-    ["pet", "main"]
+    ["pet", "pet-popup", "island", "main"]
         .iter()
         .filter_map(|label| app.get_webview_window(label))
         .filter_map(|w| w.hwnd().ok())
@@ -479,14 +536,17 @@ fn self_hwnds<R: Runtime>(_app: &AppHandle<R>) -> Vec<u64> {
 /// Enumerate perchable window-top surfaces on the pet's monitor.
 #[tauri::command]
 pub async fn pet_window_get_surfaces(app: AppHandle) -> Result<PetSurfaces, String> {
-    let bounds = pet_monitor_bounds(&app);
+    let (mx, my, mw, mh, _scale) = pet_monitor_bounds(&app);
     let hwnds = self_hwnds(&app);
     let candidates = platform::enumerate();
+    // macOS reports window bounds in logical points; convert to the physical
+    // pixel space everything downstream (monitor bounds, wander loop) uses.
+    #[cfg(target_os = "macos")]
+    let candidates = scale_candidates(candidates, _scale);
     let surfaces = filter_and_sort_surfaces(
         &candidates,
-        &["pet", "main"],
         &hwnds,
-        bounds,
+        (mx, my, mw, mh),
         MIN_SURFACE_WIDTH,
         MIN_TOP_GAP,
     );
@@ -509,20 +569,12 @@ mod tests {
             minimized: false,
             cloaked: false,
             tool_window: false,
-            title: "Editor".into(),
             hwnd_id: 1,
         }
     }
 
     fn run(c: WindowCandidate) -> Vec<PetSurface> {
-        filter_and_sort_surfaces(
-            &[c],
-            &["pet", "main"],
-            &[],
-            MONITOR,
-            MIN_SURFACE_WIDTH,
-            MIN_TOP_GAP,
-        )
+        filter_and_sort_surfaces(&[c], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP)
     }
 
     #[test]
@@ -564,22 +616,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_self_by_hwnd_and_title() {
+    fn rejects_self_by_hwnd() {
         let mut by_id = candidate();
         by_id.hwnd_id = 9;
-        assert!(filter_and_sort_surfaces(
-            &[by_id],
-            &["pet", "main"],
-            &[9],
-            MONITOR,
-            MIN_SURFACE_WIDTH,
-            MIN_TOP_GAP
-        )
-        .is_empty());
-
-        let mut by_title = candidate();
-        by_title.title = "pet".into();
-        assert!(run(by_title).is_empty());
+        assert!(
+            filter_and_sort_surfaces(&[by_id], &[9], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -611,26 +654,204 @@ mod tests {
         c.left = 600;
         c.right = 1000;
         c.hwnd_id = 3;
-        let out = filter_and_sort_surfaces(
-            &[a, b, c],
-            &["pet", "main"],
-            &[],
-            MONITOR,
-            MIN_SURFACE_WIDTH,
-            MIN_TOP_GAP,
-        );
+        // b/c are in front of a in z-order but do not overlap its top edge
+        // (their bottoms are above a.top only if bottom <= a.top — here they
+        // span past it, so place a's edge outside their horizontal span).
+        a.left = 1300;
+        a.right = 1700;
+        let out =
+            filter_and_sort_surfaces(&[a, b, c], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP);
         let ys: Vec<f64> = out.iter().map(|s| s.y).collect();
         let xs: Vec<f64> = out.iter().map(|s| s.x).collect();
         assert_eq!(ys, vec![200.0, 200.0, 400.0]);
-        assert_eq!(xs, vec![100.0, 600.0, 800.0]);
+        assert_eq!(xs, vec![100.0, 600.0, 1300.0]);
     }
 
     #[test]
     fn empty_candidates_yield_empty() {
         assert!(
-            filter_and_sort_surfaces(&[], &[], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP)
-                .is_empty()
+            filter_and_sort_surfaces(&[], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP).is_empty()
         );
+    }
+
+    #[test]
+    fn fully_covered_window_contributes_no_surface() {
+        // Occluder is IN FRONT (earlier in the list) and spans the whole top
+        // edge of the candidate behind it.
+        let mut front = candidate();
+        front.left = 100;
+        front.right = 700;
+        front.top = 250;
+        front.bottom = 900;
+        front.hwnd_id = 2;
+        let back = candidate(); // 200..600 at top=300, inside front's rect
+        let out = filter_and_sort_surfaces(
+            &[front, back],
+            &[],
+            MONITOR,
+            MIN_SURFACE_WIDTH,
+            MIN_TOP_GAP,
+        );
+        // Only the front window's own edge survives.
+        assert_eq!(
+            out,
+            vec![PetSurface {
+                x: 100.0,
+                y: 250.0,
+                width: 600.0
+            }]
+        );
+    }
+
+    #[test]
+    fn partially_covered_edge_is_trimmed_to_visible_segments() {
+        // Front window covers x 300..500 across the back window's top edge.
+        let mut front = candidate();
+        front.left = 300;
+        front.right = 500;
+        front.top = 250;
+        front.bottom = 900;
+        front.hwnd_id = 2;
+        let mut back = candidate(); // 200..600 at top=300
+        back.left = 80;
+        back.right = 900;
+        let out = filter_and_sort_surfaces(
+            &[front, back],
+            &[],
+            MONITOR,
+            MIN_SURFACE_WIDTH,
+            MIN_TOP_GAP,
+        );
+        // Back edge splits into [80, 300) and [500, 900); front's own edge at 250.
+        assert_eq!(
+            out,
+            vec![
+                PetSurface {
+                    x: 300.0,
+                    y: 250.0,
+                    width: 200.0
+                },
+                PetSurface {
+                    x: 80.0,
+                    y: 300.0,
+                    width: 220.0
+                },
+                PetSurface {
+                    x: 500.0,
+                    y: 300.0,
+                    width: 400.0
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn occluder_below_the_edge_does_not_trim() {
+        // A front window whose top is BELOW the back window's top edge does
+        // not cover that edge line.
+        let mut front = candidate();
+        front.top = 400; // back.top is 300 → front does not span y=300
+        front.bottom = 900;
+        front.hwnd_id = 2;
+        let back = candidate();
+        let out = filter_and_sort_surfaces(
+            &[front, back],
+            &[],
+            MONITOR,
+            MIN_SURFACE_WIDTH,
+            MIN_TOP_GAP,
+        );
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn windows_behind_do_not_occlude() {
+        // Same geometry as fully_covered_window_contributes_no_surface but the
+        // large window is BEHIND (later in the list) — the small front window's
+        // edge survives untouched.
+        let small = candidate(); // 200..600 top=300, hwnd 1 (front)
+        let mut big = candidate();
+        big.left = 100;
+        big.right = 700;
+        big.top = 250;
+        big.bottom = 900;
+        big.hwnd_id = 2;
+        let out =
+            filter_and_sort_surfaces(&[small, big], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP);
+        // big's edge (250) gets trimmed by small only where small spans y=250?
+        // small.top=300 > 250, so small does NOT cover big's edge line.
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn tool_windows_occlude_but_never_perch() {
+        // An always-on-top toolbar in front hides the edge below it even
+        // though it is not itself a perch target.
+        let mut toolbar = candidate();
+        toolbar.tool_window = true;
+        toolbar.left = 100;
+        toolbar.right = 700;
+        toolbar.top = 250;
+        toolbar.bottom = 900;
+        toolbar.hwnd_id = 2;
+        let back = candidate();
+        let out = filter_and_sort_surfaces(
+            &[toolbar, back],
+            &[],
+            MONITOR,
+            MIN_SURFACE_WIDTH,
+            MIN_TOP_GAP,
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn segments_narrower_than_min_width_are_dropped() {
+        // Front window leaves a 60px sliver on each side of the back edge.
+        let mut front = candidate();
+        front.left = 260;
+        front.right = 540;
+        front.top = 250;
+        front.bottom = 900;
+        front.hwnd_id = 2;
+        let back = candidate(); // 200..600 → slivers 200..260 and 540..600
+        let out = filter_and_sort_surfaces(
+            &[front, back],
+            &[],
+            MONITOR,
+            MIN_SURFACE_WIDTH,
+            MIN_TOP_GAP,
+        );
+        // Only the front window's own (wide) edge remains.
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].y, 250.0);
+    }
+
+    #[test]
+    fn subtract_intervals_handles_overlapping_and_out_of_range_holes() {
+        // Overlapping holes merge; holes outside the interval are ignored.
+        assert_eq!(
+            subtract_intervals(0, 100, &[(10, 30), (20, 40), (-50, -10), (150, 200)]),
+            vec![(0, 10), (40, 100)]
+        );
+        // Hole covering everything → nothing left.
+        assert_eq!(subtract_intervals(0, 100, &[(-10, 110)]), vec![]);
+        // No holes → whole interval.
+        assert_eq!(subtract_intervals(5, 9, &[]), vec![(5, 9)]);
+        // Inverted/empty holes are ignored.
+        assert_eq!(subtract_intervals(0, 10, &[(7, 3)]), vec![(0, 10)]);
+    }
+
+    #[test]
+    fn scale_candidates_converts_points_to_physical_pixels() {
+        let scaled = scale_candidates(vec![candidate()], 2.0);
+        assert_eq!(scaled[0].left, 400);
+        assert_eq!(scaled[0].top, 600);
+        assert_eq!(scaled[0].right, 1200);
+        assert_eq!(scaled[0].bottom, 1600);
+        // 1.0 scale is an identity pass-through.
+        let same = scale_candidates(vec![candidate()], 1.0);
+        assert_eq!(same[0].left, 200);
     }
 
     #[test]

@@ -31,6 +31,10 @@ export type PetOneShot =
   | "surprised"
   | "love"
   | "sleepy"
+  // impact squash + dust after a throw/fall settles (overlay locomotion)
+  | "land"
+  // shell-crack flourish when the egg hatches
+  | "hatch"
 
 /** Coarse mood bucket derived from needs — picks idle flavour + bubble tone. */
 export type PetMood = "content" | "happy" | "tired" | "lonely" | "grumpy"

@@ -31,6 +31,7 @@ import { toggleDesktopPetWindow } from "@/lib/pet/commands"
 import type { PetAnchor, PetSettings } from "@/types/pet"
 import { withCareCondition } from "@/lib/pet/state/reducer"
 import { resolveEffectiveSkin } from "./skins/resolve-effective-skin"
+import { LIVE2D_ONE_SHOT_HOLD_MS } from "@/lib/pet/live2d/constants"
 import { PetRenderer } from "./pet-renderer"
 import { PetBubbleView } from "./pet-bubble"
 import { PetInteractionPanel } from "./pet-interaction-panel"
@@ -65,7 +66,19 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
 
   const { profile, view, feed, play, petStroke, talk, sleep, clean, treat } =
     usePet(activeCharacterId)
-  const { state, oneShot } = usePetAnimationState(reduced)
+  // Resolve which skin actually renders — live2d only when picked, the Cubism
+  // runtime is ready, and an active model exists; otherwise the SVG mascot.
+  // Resolved BEFORE the animation state so the one-shot queue can hold shots
+  // long enough for Cubism motions to finish.
+  const { modelId, coreReady } = useActiveLive2dModel(settings)
+  const effectiveSkin = resolveEffectiveSkin(settings.skinId, {
+    coreReady,
+    hasActiveModel: Boolean(modelId),
+  })
+  const { state, oneShot } = usePetAnimationState(
+    reduced,
+    effectiveSkin === "live2d" ? { holdFloorMs: LIVE2D_ONE_SHOT_HOLD_MS } : {}
+  )
   usePetBubbles(settings.enabled && !settings.mutedBubbles, view?.effectiveStats.snark ?? 0)
   // Owns every `talked` bubble (LLM side channel + template fallback). Main
   // window only — overlay talk replays here through the cross-window bridge.
@@ -83,14 +96,6 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   // is due. Gated only on `enabled` — a reminder is real, not idle chatter.
   usePetScheduledReminder(settings.enabled)
 
-  // Resolve which skin actually renders — live2d only when picked, the Cubism
-  // runtime is ready, and an active model exists; otherwise the SVG mascot.
-  const { modelId, coreReady } = useActiveLive2dModel(settings)
-  const effectiveSkin = resolveEffectiveSkin(settings.skinId, {
-    coreReady,
-    hasActiveModel: Boolean(modelId),
-  })
-
   const bubble = usePetStore((s) => s.bubble)
   const minimized = usePetStore((s) => s.minimized)
   const setMinimized = usePetStore((s) => s.setMinimized)
@@ -106,21 +111,28 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   // stays a stable reference for the on-screen bounds.
   const anchorRef = useRef<HTMLDivElement | null>(null)
   const dragStartOffsetRef = useRef({ x: 0, y: 0 })
+  const [holding, setHolding] = useState(false)
   const throwPhysics = usePetWidgetThrow({
     anchorRef,
     petSize: settings.size,
     initialOffset: usePetStore.getState().position,
-    onSettle: (x, y) => usePetStore.getState().setPosition({ x, y }),
+    onSettle: (x, y) => {
+      usePetStore.getState().setPosition({ x, y })
+      // A throw settling plays the impact squash + dust (same as the overlay).
+      usePetStore.getState().enqueueOneShot("land")
+    },
   })
   const dragGesture = usePetDragGesture({
     onDragStart: () => {
       dragStartOffsetRef.current = throwPhysics.offset
+      setHolding(true)
     },
     onDragMove: (dx, dy) => {
       const base = dragStartOffsetRef.current
       throwPhysics.setOffsetImmediate(base.x + dx, base.y + dy)
     },
     onRelease: ({ wasDrag, dx, dy, vx, vy, event }) => {
+      setHolding(false)
       if (wasDrag) {
         const base = dragStartOffsetRef.current
         const x = base.x + dx
@@ -144,6 +156,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
       usePetStore.getState().enqueueOneShot(reactionForZone(zone))
       setOpen((o) => !o)
     },
+    onCancel: () => setHolding(false),
   })
 
   // Quick-menu wiring. Navigation reuses the app router (settings live at
@@ -260,6 +273,9 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
               reducedMotion={reduced}
               size={settings.size}
               skinId={effectiveSkin}
+              mood={view.mood}
+              speaking={Boolean(bubble)}
+              held={holding}
               paused={docHidden}
             />
           </button>

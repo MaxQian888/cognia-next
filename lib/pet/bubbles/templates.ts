@@ -30,6 +30,9 @@ const VARIANTS: Partial<Record<PetEventKind, number>> = {
   achievementUnlocked: 2,
   twinBusy: 2,
   twinMilestone: 2,
+  // Interpolates {days} — the bubble hook passes the event's meta.days through.
+  streakDay: 2,
+  birthday: 2,
 }
 
 /** Mood-flavoured idle phrases (shown on idle ticks, keyed by mood). */

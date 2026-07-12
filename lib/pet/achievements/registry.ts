@@ -114,6 +114,68 @@ export const PET_ACHIEVEMENTS: PetAchievement[] = [
     icon: "CalendarHeart",
     isUnlocked: (ctx) => (ctx.profile.streak?.days ?? 0) >= 30,
   },
+  // ── Wave 2: long-tail care, economy, and companionship milestones ─────────
+  {
+    id: "streak-century",
+    i18nKey: "streakCentury",
+    icon: "Trophy",
+    isUnlocked: (ctx) => (ctx.profile.streak?.days ?? 0) >= 100,
+  },
+  {
+    id: "chatterbox",
+    i18nKey: "chatterbox",
+    icon: "MessageCircle",
+    isUnlocked: (ctx) => (ctx.counters.talked ?? 0) >= 100,
+  },
+  {
+    id: "squeaky-clean",
+    i18nKey: "squeakyClean",
+    icon: "Droplets",
+    isUnlocked: (ctx) => (ctx.counters.cleaned ?? 0) >= 30,
+  },
+  {
+    id: "spoiled",
+    i18nKey: "spoiled",
+    icon: "Candy",
+    isUnlocked: (ctx) => (ctx.counters.treated ?? 0) >= 30,
+  },
+  {
+    id: "dragon-hoard",
+    i18nKey: "dragonHoard",
+    icon: "Coins",
+    isUnlocked: (ctx) => (ctx.profile.coins ?? 0) >= 500,
+  },
+  {
+    id: "well-rounded",
+    i18nKey: "wellRounded",
+    icon: "Shapes",
+    isUnlocked: (ctx) =>
+      Object.values(ctx.effectiveStats).every((v) => typeof v === "number" && v >= 50),
+  },
+  {
+    id: "automation-buff",
+    i18nKey: "automationBuff",
+    icon: "Workflow",
+    isUnlocked: (ctx) => (ctx.counters.workflowRun ?? 0) >= 50,
+  },
+  {
+    id: "squad-leader",
+    i18nKey: "squadLeader",
+    icon: "Users",
+    isUnlocked: (ctx) => (ctx.counters.teamRun ?? 0) >= 50,
+  },
+  {
+    id: "first-birthday",
+    i18nKey: "firstBirthday",
+    icon: "Cake",
+    isUnlocked: (ctx) => (ctx.counters.birthday ?? 0) >= 1,
+  },
+  {
+    id: "transcendent",
+    i18nKey: "transcendent",
+    icon: "Sparkle",
+    isUnlocked: (ctx) => ctx.profile.level >= 30,
+  },
 ]
 
 export function getAchievement(id: string): PetAchievement | undefined {

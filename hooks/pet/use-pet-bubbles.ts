@@ -37,7 +37,10 @@ export function usePetBubbles(enabled: boolean, snark = 0): void {
       if (!key) return
       // A user catchphrase sprinkles in over the template ~1/3 of the time.
       const custom = pickCustomBubble(customBubbles, event.at)
-      setBubble({ text: custom ?? t(key), origin: "template" })
+      // Numeric meta rides into the template ({days} in streakDay pools);
+      // next-intl ignores values a template doesn't reference.
+      const days = typeof event.meta?.days === "number" ? event.meta.days : 0
+      setBubble({ text: custom ?? t(key, { days }), origin: "template" })
       if (timer.current) clearTimeout(timer.current)
       timer.current = setTimeout(() => setBubble(null), BUBBLE_VISIBLE_MS)
     })

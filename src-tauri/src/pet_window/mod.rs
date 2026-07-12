@@ -18,7 +18,8 @@
 //! window ops are smoke-tested via `pnpm tauri dev`.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, PhysicalPosition, Runtime};
+use std::sync::atomic::{AtomicU64, Ordering};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime};
 
 mod macos_panel;
 mod popup;
@@ -115,27 +116,86 @@ fn physical_overlay_size(logical: (f64, f64), scale: f64) -> (f64, f64) {
     (logical.0 * scale, logical.1 * scale)
 }
 
-/// Primary-monitor work area in physical pixels plus its scale factor, or a
-/// sane fallback when the monitor can't be resolved (headless / during
+/// Work area (taskbar/dock excluded, physical pixels) plus scale factor of the
+/// monitor that should host the pet: the monitor containing the saved position
+/// when one contains it (so a pet dragged to a secondary monitor reopens
+/// there), else the primary monitor, else a sane fallback (headless / during
 /// shutdown). The scale factor is needed because the renderer-supplied overlay
 /// size is logical while the monitor geometry — and the persisted drag
 /// position — are physical; mixing the two placed the window at `scale`× the
 /// intended spot on Retina (it landed fully off-screen on macOS).
-fn primary_work_area<R: Runtime>(app: &AppHandle<R>) -> (f64, f64, f64, f64, f64) {
-    if let Ok(Some(monitor)) = app.primary_monitor() {
-        let pos = monitor.position();
-        let size = monitor.size();
+///
+/// Uses `Monitor::work_area()` — NOT full `position()`/`size()` bounds — so the
+/// bottom-right fallback and saved-position clamping never tuck the pet under
+/// the taskbar (`pet_window_get_work_area` already used the work area; the
+/// placement math previously disagreed with it).
+fn work_area_for<R: Runtime>(
+    app: &AppHandle<R>,
+    saved: Option<(f64, f64)>,
+) -> (f64, f64, f64, f64, f64) {
+    let monitor = saved
+        .and_then(|(x, y)| app.monitor_from_point(x, y).ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten());
+    if let Some(monitor) = monitor {
+        let rect = monitor.work_area();
         (
-            pos.x as f64,
-            pos.y as f64,
-            size.width as f64,
-            size.height as f64,
+            rect.position.x as f64,
+            rect.position.y as f64,
+            rect.size.width as f64,
+            rect.size.height as f64,
             monitor.scale_factor(),
         )
     } else {
         // Conservative default desktop size; keeps the fallback corner sane.
         (0.0, 0.0, 1920.0, 1080.0, 1.0)
     }
+}
+
+/// Payload of the `pet://state-changed` event — lets the renderer's settings
+/// store track native window mutations (tray toggle, click-through recovery,
+/// blur-hide) it did not itself initiate, instead of silently desyncing.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PetStateChanged {
+    pub open: bool,
+    pub click_through: bool,
+}
+
+/// Broadcast a native pet-window state change to every webview.
+fn emit_pet_state<R: Runtime>(app: &AppHandle<R>, open: bool, click_through: bool) {
+    let _ = app.emit(
+        "pet://state-changed",
+        PetStateChanged {
+            open,
+            click_through,
+        },
+    );
+}
+
+/// Generation token for the force-show safety net: every open bumps it and the
+/// spawned net only fires when the token still matches, so a `close` (or a
+/// newer open) issued within the grace period cancels the pending force-show —
+/// previously the net re-showed a pet the user had just closed.
+static PET_OPEN_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Apply click-through, tolerating failure on Linux: Wayland has no
+/// cursor-passthrough API, and a failed toggle must degrade to a solid
+/// (interactive) overlay instead of aborting the whole open and stranding a
+/// hidden half-configured window.
+fn apply_click_through<R: Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    ignore: bool,
+) -> Result<(), String> {
+    if let Err(e) = window.set_ignore_cursor_events(ignore) {
+        if cfg!(target_os = "linux") {
+            log::warn!(
+                "pet: set_ignore_cursor_events failed (compositor likely unsupported); continuing without click-through: {e}"
+            );
+        } else {
+            return Err(e.to_string());
+        }
+    }
+    Ok(())
 }
 
 /// Core "open or re-show" logic shared by the `open_pet_window` command and
@@ -146,15 +206,38 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     opts: PetWindowOpts,
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("pet") {
+        // Re-validate the position before revealing: monitors may have been
+        // unplugged / rearranged / DPI-changed while the window sat hidden
+        // (the window-state plugin is denylisted for "pet", so nothing else
+        // ever rescues stale physical coordinates). Clamp against the work
+        // area of whichever monitor now contains the point.
+        if let Ok(pos) = window.outer_position() {
+            let saved = (pos.x as f64, pos.y as f64);
+            let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, Some(saved));
+            let size = window
+                .outer_size()
+                .map(|s| (s.width as f64, s.height as f64))
+                .unwrap_or_else(|_| physical_overlay_size((opts.width, opts.height), scale));
+            let (x, y) = resolve_initial_position(
+                Some(saved),
+                (area_x, area_y, area_w, area_h),
+                size,
+            );
+            if x != saved.0 || y != saved.1 {
+                let _ = window.set_position(PhysicalPosition::new(x, y));
+            }
+        }
+        PET_OPEN_GENERATION.fetch_add(1, Ordering::SeqCst);
         window.show().map_err(|e| e.to_string())?;
         let _ = window.set_focus();
-        window
-            .set_ignore_cursor_events(opts.click_through)
-            .map_err(|e| e.to_string())?;
+        apply_click_through(&window, opts.click_through)?;
+        // The renderer paused its animation loops on `pet://suspend`; wake it.
+        let _ = app.emit("pet://resume", serde_json::Value::Null);
+        emit_pet_state(app, true, opts.click_through);
         return Ok(());
     }
 
-    let (area_x, area_y, area_w, area_h, scale) = primary_work_area(app);
+    let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, opts.x.zip(opts.y));
     // The monitor work area and any persisted drag position are PHYSICAL pixels,
     // but `inner_size` (and `opts.width/height`) are LOGICAL. Resolve placement
     // entirely in physical pixels — converting the logical overlay size up by
@@ -188,34 +271,36 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
             .build()
             .map_err(|e| e.to_string())?;
 
-    // The app-wide menu bar (`menu.rs` `app.set_menu`) attaches to every newly
-    // created window on Windows/Linux — including this frameless transparent
-    // overlay, where it painted a File/Edit menubar strip while the pet was
-    // focused or dragged. Detach it from this window only, before the first
-    // reveal. No-op on macOS (the menu there is app-global, never per-window).
-    let _ = window.remove_menu();
+    // Configure the freshly built (still hidden) window. Any failure here
+    // closes the window before propagating: a half-configured hidden window
+    // must never survive, or the next `open` call blindly re-shows it with a
+    // wrong position / click-through / panel state.
+    let configure = || -> Result<(), String> {
+        // The app-wide menu bar (`menu.rs` `app.set_menu`) attaches to every newly
+        // created window on Windows/Linux — including this frameless transparent
+        // overlay, where it painted a File/Edit menubar strip while the pet was
+        // focused or dragged. Detach it from this window only, before the first
+        // reveal. No-op on macOS (the menu there is app-global, never per-window).
+        let _ = window.remove_menu();
 
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())?;
+        window
+            .set_position(PhysicalPosition::new(x, y))
+            .map_err(|e| e.to_string())?;
 
-    // Apply click-through before the first paint.
-    window
-        .set_ignore_cursor_events(opts.click_through)
-        .map_err(|e| e.to_string())?;
+        // Apply click-through before the first paint (Linux-tolerant).
+        apply_click_through(&window, opts.click_through)?;
 
-    // macOS: reclass to a non-activating NSPanel so the pet floats over every
-    // Space + full-screen apps and never steals the foreground app's focus.
-    // No-op on Windows/Linux (the builder flags already suffice there). Runs
-    // while the window is still hidden — converting a hidden window is fine.
-    //
-    // MUST run on the main thread: `to_panel` issues raw AppKit calls
-    // (`-[NSPanel setFloatingPanel:]`) that trap (EXC_BREAKPOINT) off-main,
-    // and the `open_pet_window` command is async → tokio worker (the island
-    // crashed exactly this way; see fleet/island_window.rs). Fire-and-forget
-    // is safe: the window is created hidden and only revealed by the renderer
-    // after first paint, well after this closure has run.
-    {
+        // macOS: reclass to a non-activating NSPanel so the pet floats over every
+        // Space + full-screen apps and never steals the foreground app's focus.
+        // No-op on Windows/Linux (the builder flags already suffice there). Runs
+        // while the window is still hidden — converting a hidden window is fine.
+        //
+        // MUST run on the main thread: `to_panel` issues raw AppKit calls
+        // (`-[NSPanel setFloatingPanel:]`) that trap (EXC_BREAKPOINT) off-main,
+        // and the `open_pet_window` command is async → tokio worker (the island
+        // crashed exactly this way; see fleet/island_window.rs). Fire-and-forget
+        // is safe: the window is created hidden and only revealed by the renderer
+        // after first paint, well after this closure has run.
         let win = window.clone();
         app.run_on_main_thread(move || {
             if let Err(e) =
@@ -225,6 +310,24 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
             }
         })
         .map_err(|e| e.to_string())?;
+        Ok(())
+    };
+    if let Err(e) = configure() {
+        let _ = window.close();
+        return Err(e);
+    }
+
+    // Monitor topology / DPI changes: nudge the renderer to re-read its work
+    // area immediately (the wander loop otherwise only notices on its next
+    // poll, leaving the pet wandering against stale bounds after a display
+    // change).
+    {
+        let app_handle = app.clone();
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::ScaleFactorChanged { .. }) {
+                let _ = app_handle.emit("pet://work-area-changed", serde_json::Value::Null);
+            }
+        });
     }
 
     // Intentionally do NOT `show()` here. On Windows a `transparent(true)` window
@@ -241,23 +344,31 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     // throws (JS crash, hung hydrate), the pet would stay invisible forever with
     // no way back except a manual re-toggle. Force it visible after a grace
     // period so a reveal failure can never strand an alive-but-invisible pet.
-    // Only fires when still hidden, so the normal first-paint reveal is
-    // unaffected and the transparent black-frame bug is not reintroduced.
+    // Guarded twice: the generation token cancels the net when a close (or a
+    // newer open) intervened during the grace period — `!is_visible` alone
+    // can't distinguish "reveal never ran" from "user just hid it" — and the
+    // reveal uses a bare `show()` (never `set_focus`) so a late force-show
+    // can't yank focus from whatever the user is typing in.
     {
         let handle = app.clone();
+        let generation = PET_OPEN_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+            if PET_OPEN_GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
             if let Some(window) = handle.get_webview_window("pet") {
                 if !window.is_visible().unwrap_or(true) {
                     log::warn!(
                         "pet window still hidden 8s after open; force-showing (renderer never signaled first paint)"
                     );
-                    crate::window_utils::bring_window_to_front(&window);
+                    let _ = window.show();
                 }
             }
         });
     }
 
+    emit_pet_state(app, true, opts.click_through);
     Ok(())
 }
 
@@ -265,14 +376,19 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
 /// Resets click-through to false first so a hidden window can never strand the
 /// pointer; reopening is cheap so we hide rather than destroy.
 pub(crate) fn close_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    // Invalidate any pending force-show safety net from a recent open — a
+    // close inside the grace period must win over the net.
+    PET_OPEN_GENERATION.fetch_add(1, Ordering::SeqCst);
     if let Some(window) = app.get_webview_window("pet") {
-        window
-            .set_ignore_cursor_events(false)
-            .map_err(|e| e.to_string())?;
+        apply_click_through(&window, false)?;
         window.hide().map_err(|e| e.to_string())?;
     }
     // Never strand the click popup over the desktop once the sprite is hidden.
     let _ = popup::close_pet_popup_inner(app);
+    // A hidden webview keeps burning CPU on its animation timers (Live2D
+    // ticker / rAF walk loop) — tell the renderer to pause them.
+    let _ = app.emit("pet://suspend", serde_json::Value::Null);
+    emit_pet_state(app, false, false);
     Ok(())
 }
 
@@ -299,6 +415,8 @@ pub async fn close_pet_window(app: AppHandle) -> Result<(), String> {
 /// overlay is gone (not merely hidden) until re-enabled.
 #[tauri::command]
 pub async fn destroy_pet_window(app: AppHandle) -> Result<(), String> {
+    // Invalidate any pending force-show safety net from a recent open.
+    PET_OPEN_GENERATION.fetch_add(1, Ordering::SeqCst);
     // Tear the click popup down with the sprite so disabling the pet leaves no
     // orphan window behind.
     if let Some(popup) = app.get_webview_window(popup::PET_POPUP_LABEL) {
@@ -310,6 +428,21 @@ pub async fn destroy_pet_window(app: AppHandle) -> Result<(), String> {
         let _ = window.set_ignore_cursor_events(false);
         window.close().map_err(|e| e.to_string())?;
     }
+    emit_pet_state(&app, false, false);
+    Ok(())
+}
+
+/// Core click-through toggle shared by the command and the tray recovery
+/// action, so both paths broadcast the same `pet://state-changed` event.
+pub(crate) fn set_pet_click_through_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    ignore: bool,
+) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("pet") {
+        apply_click_through(&window, ignore)?;
+        let open = window.is_visible().unwrap_or(false);
+        emit_pet_state(app, open, ignore);
+    }
     Ok(())
 }
 
@@ -319,12 +452,7 @@ pub async fn pet_window_set_ignore_cursor_events(
     app: AppHandle,
     ignore: bool,
 ) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("pet") {
-        window
-            .set_ignore_cursor_events(ignore)
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    set_pet_click_through_inner(&app, ignore)
 }
 
 /// Move the pet window to an absolute physical position (drag persistence).

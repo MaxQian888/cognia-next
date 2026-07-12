@@ -43,7 +43,10 @@ export interface PetInventoryRow {
   updatedAt: number
 }
 
-export type PetItemCategory = "food" | "toy" | "decor"
+/** Shop grouping. Plugin manifests stay restricted to the original three
+ *  (`types/plugin/plugin-pet.ts`); `care` is host-catalog-only for the
+ *  sleep/clean/treat consumables. */
+export type PetItemCategory = "food" | "toy" | "care" | "decor"
 
 /** A purchasable catalog item. Consumables emit their `interactionKind` event
  *  with `meta.itemId` on use so the whole progression path (XP, one-shots,

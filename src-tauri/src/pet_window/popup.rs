@@ -20,7 +20,7 @@
 //! here; the live window ops are smoke-tested via `pnpm tauri dev`.
 
 use serde::Deserialize;
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, Runtime, WindowEvent};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Runtime, WindowEvent};
 
 /// Window label of the click popup. Kept in sync with `lib/pet/window-role.ts`
 /// (`PET_POPUP_WINDOW_LABEL`) so the popup webview resolves the "popup" role and
@@ -45,6 +45,9 @@ pub struct PetPopupOpts {
 pub(crate) fn close_pet_popup_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(PET_POPUP_LABEL) {
         window.hide().map_err(|e| e.to_string())?;
+        // Tell the renderer the popup is gone so its open/expanded state can't
+        // desync from a native hide it didn't initiate.
+        let _ = app.emit("pet-popup://hidden", serde_json::Value::Null);
     }
     Ok(())
 }
@@ -102,6 +105,9 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
         if matches!(event, WindowEvent::Focused(false)) {
             if let Some(w) = app_handle.get_webview_window(PET_POPUP_LABEL) {
                 let _ = w.hide();
+                // Broadcast the native blur-hide so the renderer's popup state
+                // (open flag, expanded composer) never believes it is open.
+                let _ = app_handle.emit("pet-popup://hidden", serde_json::Value::Null);
             }
         }
     });

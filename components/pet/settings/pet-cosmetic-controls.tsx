@@ -3,16 +3,23 @@
 // Persists to `profile.cosmetic` via `patchPetProfile`; the live preview reads
 // the same reactive profile, so changes show immediately. A "default" choice
 // per field clears that override and falls back to genetics.
+//
+// Premium hats are shop rewards: a hat backed by a decor item stays locked
+// until that item is owned (`petInventory`), so decor purchases actually gate
+// something. The genetic hat and `none` are always free; genetics-only hats
+// (tinyduck) never unlock through the shop.
 
 "use client"
 
 import { useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { usePet } from "@/hooks/pet/use-pet"
-import { patchPetProfile } from "@/lib/db/pet"
+import { listPetInventory, patchPetProfile } from "@/lib/db/pet"
 import { PALETTE_PRESETS, matchPalettePreset } from "@/lib/pet/bones/palettes"
+import { petHatItem } from "@/lib/pet/economy/item-catalog"
 import type { PetBodyType, PetCosmeticOverride, PetEyes, PetHat } from "@/types/pet"
 import { PetRenderer } from "../pet-renderer"
 
@@ -47,6 +54,7 @@ export interface PetCosmeticControlsProps {
 export function PetCosmeticControls({ skinId }: PetCosmeticControlsProps) {
   const t = useTranslations("pet.customize.cosmetic")
   const { profile, view } = usePet()
+  const inventory = useLiveQuery(() => listPetInventory(), [])
 
   if (!profile || !view) return null
   if (!profile.soul) {
@@ -58,6 +66,18 @@ export function PetCosmeticControls({ skinId }: PetCosmeticControlsProps) {
     void patchPetProfile({ cosmetic: cleanCosmetic({ ...cosmetic, ...next }) })
   const activePalette = matchPalettePreset(cosmetic.palette)
   const hasOverride = !!profile.cosmetic && Object.keys(profile.cosmetic).length > 0
+
+  const ownedIds = new Set((inventory ?? []).map((row) => row.id))
+  const geneticHat = view.bones.hat
+  const hatLocked = (hat: PetHat): boolean => {
+    // The genetic hat and bare-headed are always free; a currently applied
+    // override stays selectable so a pre-gating profile can never get stuck.
+    if (hat === "none" || hat === geneticHat || hat === cosmetic.hat) return false
+    const item = petHatItem(hat)
+    // Shop-backed hats need their decor item owned; hats with no shop item
+    // (tinyduck) are genetics-only and never unlock here.
+    return item ? !ownedIds.has(item.id) : true
+  }
 
   return (
     <div className="flex flex-col gap-4 sm:flex-row" data-testid="pet-cosmetic-controls">
@@ -110,7 +130,16 @@ export function PetCosmeticControls({ skinId }: PetCosmeticControlsProps) {
           label={t("hat")}
           defaultLabel={t("default")}
           value={cosmetic.hat ?? ""}
-          options={HATS.map((h) => ({ value: h, label: t(`hatOptions.${h}`) }))}
+          options={HATS.map((h) => {
+            const locked = hatLocked(h)
+            return {
+              value: h,
+              label: locked
+                ? t("lockedOption", { name: t(`hatOptions.${h}`) })
+                : t(`hatOptions.${h}`),
+              disabled: locked,
+            }
+          })}
           onChange={(v) => set({ hat: (v || undefined) as PetHat | undefined })}
         />
         <CosmeticSelect
@@ -157,7 +186,7 @@ function CosmeticSelect({
   label: string
   defaultLabel: string
   value: string
-  options: { value: string; label: string }[]
+  options: { value: string; label: string; disabled?: boolean }[]
   onChange: (value: string) => void
 }) {
   return (
@@ -171,7 +200,7 @@ function CosmeticSelect({
       >
         <option value="">{defaultLabel}</option>
         {options.map((o) => (
-          <option key={o.value} value={o.value}>
+          <option key={o.value} value={o.value} disabled={o.disabled}>
             {o.label}
           </option>
         ))}

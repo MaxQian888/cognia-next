@@ -5,7 +5,7 @@
 import type { ReactNode } from "react"
 import type { PetBones } from "./bones"
 import type { PetEvolutionFlavor, PetStage } from "./profile"
-import type { PetOneShot, PetVisualState } from "./visual-state"
+import type { PetMood, PetOneShot, PetVisualState } from "./visual-state"
 
 /** Horizontal facing of the pet while it moves (or after its last walk). */
 export type PetFacing = "left" | "right"
@@ -18,6 +18,12 @@ export type PetFacing = "left" | "right"
 export interface PetLocomotion {
   mode: "resting" | "walking" | "falling" | "climbing"
   facing: PetFacing
+  /**
+   * Current horizontal speed while walking (physical px/s, after any
+   * accel/decel shaping). Skins sync the walk-bob cadence to it; absent
+   * reads as the default cadence.
+   */
+  speedPxPerSec?: number
 }
 
 export interface PetSkinRenderProps {
@@ -36,6 +42,12 @@ export interface PetSkinRenderProps {
   paused?: boolean
   /** Care-quality evolution flavor (cosmetic accent). Absent = normal. */
   flavor?: PetEvolutionFlavor
+  /** Coarse mood — flavors the idle loop (lonely slows, happy quickens). */
+  mood?: PetMood
+  /** A speech bubble is showing — skins may animate the mouth (lip flap). */
+  speaking?: boolean
+  /** The user is holding/dragging the pet — dangle pose overrides resting. */
+  held?: boolean
 }
 
 export interface PetSkin {

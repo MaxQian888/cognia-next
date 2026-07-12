@@ -72,13 +72,17 @@ describe("svgSkin", () => {
     expect(container.querySelector('[data-pet-part="egg"]')).toBeNull()
   })
 
-  it("still renders statically under reduced motion", () => {
+  it("still renders statically under reduced motion (identity kept, motion dropped)", () => {
     const { container } = render(
       <>{svgSkin.render(props({ reducedMotion: true, state: "happy" }))}</>
     )
     expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
-    // VFX layer is suppressed under reduced motion
-    expect(container.querySelector('[data-pet-part="vfx"]')).toBeNull()
+    // The VFX layer keeps rarity identity as a fully static aura, but every
+    // animated effect (shiny shimmer, one-shot particles) is suppressed.
+    expect(container.querySelector('[data-vfx-static="true"]')).not.toBeNull()
+    expect(container.querySelector('[data-pet-vfx="shiny"]')).toBeNull()
+    // Blink is suppressed on still frames.
+    expect(container.querySelector('[data-pet-blink="off"]')).not.toBeNull()
   })
 
   it("reflects the active one-shot", () => {
@@ -91,23 +95,27 @@ describe("svgSkin", () => {
     const root = container.querySelector('[data-pet-skin-root="svg"]') as SVGElement
     expect(root.getAttribute("data-pet-facing")).toBe("right")
     expect(root.getAttribute("data-pet-locomotion")).toBe("resting")
-    expect(root.style.transform).toBe("")
   })
 
-  it("mirrors the svg and tags the walk while walking left", () => {
+  it("tags the walk and animates the facing group while walking left", () => {
     const { container } = render(
       <>{svgSkin.render(props({ locomotion: { mode: "walking", facing: "left" } }))}</>
     )
     const root = container.querySelector('[data-pet-skin-root="svg"]') as SVGElement
     expect(root.getAttribute("data-pet-facing")).toBe("left")
     expect(root.getAttribute("data-pet-locomotion")).toBe("walking")
-    expect(root.style.transform).toBe("scaleX(-1)")
+    // The mirror is a ~150ms motion tween on a dedicated group (a cartoon
+    // turn), not an instant style flip on the root.
+    expect(container.querySelector("[data-pet-facing-group]")).not.toBeNull()
+    expect(root.style.transform).toBe("")
   })
 
-  it("renders a still frame when paused (vfx suppressed like reduced motion)", () => {
+  it("renders a still frame when paused (motion suppressed like reduced motion)", () => {
     const { container } = render(<>{svgSkin.render(props({ paused: true, state: "happy" }))}</>)
     expect(container.querySelector('[data-pet-skin-root="svg"]')).not.toBeNull()
-    expect(container.querySelector('[data-pet-part="vfx"]')).toBeNull()
+    // Identity-only static VFX; no animated shimmer.
+    expect(container.querySelector('[data-vfx-static="true"]')).not.toBeNull()
+    expect(container.querySelector('[data-pet-vfx="shiny"]')).toBeNull()
   })
 
   it("one-shots take precedence over the walking overlay", () => {

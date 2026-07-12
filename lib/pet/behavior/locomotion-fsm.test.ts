@@ -140,12 +140,35 @@ describe("walking", () => {
     return { state: s, inp }
   }
 
-  it("advances toward the target at the tuned speed and stays on the ground", () => {
+  it("advances at the tuned speed once past the accel ramp (far from target)", () => {
     const { state: s, inp } = walking()
-    const next = stepLocomotion(s, inp, 1000)
+    // Well past the 300ms accel ramp, and (by construction of the drawn
+    // target) far outside the 48px braking zone.
+    const dist = Math.abs(s.targetX! - s.x)
+    expect(dist).toBeGreaterThan(100)
+    const cruise = { ...inp, nowMs: s.walkStartMs! + 5000 }
+    const next = stepLocomotion(s, cruise, 1000)
     const moved = Math.abs(next.x - s.x)
     expect(moved).toBeCloseTo(inp.tuning.walkSpeedPxPerSec, 0)
     expect(next.y).toBe(GROUND)
+  })
+
+  it("ramps up from standstill and brakes near the target", () => {
+    const { state: s, inp } = walking()
+    // First frame of the walk: the accel ramp caps the step well below cruise.
+    const first = stepLocomotion(s, { ...inp, nowMs: s.walkStartMs! + 16 }, 1000)
+    const rampMoved = Math.abs(first.x - s.x)
+    expect(rampMoved).toBeLessThan(inp.tuning.walkSpeedPxPerSec * 0.6)
+
+    // Inside the braking zone (dist < 48px) at cruise time: slower than cruise.
+    const nearTarget: LocomotionFsmState = {
+      ...s,
+      x: s.targetX! - 20,
+      facing: "right",
+    }
+    const braking = stepLocomotion(nearTarget, { ...inp, nowMs: s.walkStartMs! + 5000 }, 100)
+    const brakeMoved = Math.abs(braking.x - nearTarget.x)
+    expect(brakeMoved).toBeLessThan((inp.tuning.walkSpeedPxPerSec * 100) / 1000)
   })
 
   it("arrives exactly on the target and returns to resting", () => {

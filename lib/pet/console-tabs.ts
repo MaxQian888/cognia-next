@@ -9,6 +9,7 @@ export const PET_CONSOLE_TABS = [
   "shop",
   "customize",
   "insights",
+  "journal",
   "dex",
   "achievements",
   "binding",

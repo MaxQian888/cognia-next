@@ -35,6 +35,8 @@ afterEach(() => {
   dispatchPetUnwell.mockClear()
 })
 
+// Cold fake-indexeddb open of the full (v100+) schema can exceed jest's 5s
+// default on the first test — same allowance as the other Dexie-cold suites.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -46,7 +48,7 @@ beforeEach(async () => {
     getDb().petAchievements.clear(),
   ])
   usePetStore.setState({ visualState: "idle", oneShotQueue: [] })
-})
+}, 30_000)
 
 function event(kind: PetEvent["kind"], xp?: number): PetEvent {
   return { source: "user", kind, xp, at: 1000 }
@@ -306,6 +308,49 @@ describe("handlePetEvent", () => {
     // Replaying a lifecycle event never re-fires its own transition.
     seen.length = 0
     await handlePetEvent({ source: "system", kind: "levelUp", at: 1001 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(0)
+  })
+
+  it("emits a streakDay ceremony on day ≥ 2 advances only", async () => {
+    const DAY2 = new Date("2026-07-02T12:00:00").getTime()
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+      streak: { days: 1, lastDay: "2026-07-01" },
+    })
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => {
+      if (e.kind === "streakDay") seen.push(e)
+    })
+
+    // Next-day interaction advances 1 → 2: ceremony fires with days+multiplier.
+    await handlePetEvent({ source: "user", kind: "fed", at: DAY2 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(1)
+    expect(seen[0].source).toBe("system")
+    expect(seen[0].meta?.days).toBe(2)
+    expect(typeof seen[0].meta?.multiplier).toBe("number")
+
+    // Same-day repeat — no advance, no ceremony.
+    await handlePetEvent({ source: "user", kind: "played", at: DAY2 + 60_000 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(1)
+  })
+
+  it("stays silent on the day-1 streak start", async () => {
+    const DAY = new Date("2026-07-02T12:00:00").getTime()
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => {
+      if (e.kind === "streakDay") seen.push(e)
+    })
+    await handlePetEvent({ source: "user", kind: "fed", at: DAY })
     await whenPetEventsSettled()
     expect(seen).toHaveLength(0)
   })

@@ -13,10 +13,18 @@ jest.mock("@/lib/pet/economy/shop", () => ({
 }))
 
 import { PetInventoryStrip } from "./pet-inventory-strip"
+import {
+  registerPetItem,
+  __resetPetItemsForTesting,
+} from "@/lib/plugin/registries/pet-item-registry"
 
 beforeEach(() => {
   consumeItem.mockClear()
   inventoryValue = []
+})
+
+afterEach(() => {
+  __resetPetItemsForTesting()
 })
 
 describe("PetInventoryStrip", () => {
@@ -52,5 +60,29 @@ describe("PetInventoryStrip", () => {
     render(<PetInventoryStrip />)
     fireEvent.click(document.querySelector('[data-action="use-berry"]') as Element)
     expect(consumeItem).toHaveBeenCalledWith("berry")
+  })
+
+  it("shows owned plugin consumables with their plain labels", () => {
+    registerPetItem(
+      "star-cookie",
+      {
+        id: "star-cookie",
+        labels: { en: "Star Cookie" },
+        category: "food",
+        price: 10,
+        consumable: true,
+        interactionKind: "fed",
+      },
+      { pluginId: "p1" }
+    )
+    inventoryValue = [{ id: "plugin:p1:star-cookie", qty: 2 }]
+    render(<PetInventoryStrip />)
+    const btn = document.querySelector(
+      '[data-action="use-plugin:p1:star-cookie"]'
+    ) as HTMLButtonElement | null
+    expect(btn).not.toBeNull()
+    expect(btn!.getAttribute("aria-label")).toBe("Star Cookie")
+    fireEvent.click(btn!)
+    expect(consumeItem).toHaveBeenCalledWith("plugin:p1:star-cookie")
   })
 })

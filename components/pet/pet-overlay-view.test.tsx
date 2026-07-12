@@ -68,12 +68,22 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   setPetWindowPosition: (x: number, y: number) => setPetWindowPosition(x, y),
   getPetWorkArea: () => Promise.resolve(workAreaValue),
   openPetPopup: (opts: unknown) => openPetPopup(opts),
+  // Native event subscriptions — inert disposers in jsdom.
+  onPetSuspend: () => () => {},
+  onPetResume: () => () => {},
+  onPetWorkAreaChanged: () => () => {},
 }))
 
 // Platform probe — the post-paint window reveal is Tauri-only. Default false so
 // the existing suite (which asserts no window ops fire on mount) is unchanged;
 // the reveal test flips it. Preserve the module's other exports.
-let mockIsTauri = false
+//
+// MUST be `var`, not `let`: `lib/tauri/transport-instance.ts` calls the mocked
+// `isTauri()` at MODULE LOAD (import time), before this file's body runs — a
+// `let` binding is in its temporal dead zone then and throws; `var` hoists to
+// `undefined`, which reads as the intended "not tauri" default.
+// eslint-disable-next-line no-var
+var mockIsTauri = false
 jest.mock("@/lib/platform/detect", () => ({
   ...jest.requireActual("@/lib/platform/detect"),
   isTauri: () => mockIsTauri,

@@ -1,8 +1,11 @@
 import { resolveRarityVfx, resolveShinyVfx } from "./rarity-vfx"
 
 describe("resolveRarityVfx", () => {
-  it("returns null under reduced motion regardless of rarity", () => {
-    expect(resolveRarityVfx("legendary", { reducedMotion: true, lowPower: false })).toBeNull()
+  it("keeps identity under reduced motion as a fully static descriptor", () => {
+    const d = resolveRarityVfx("legendary", { reducedMotion: true, lowPower: false })
+    expect(d).toMatchObject({ aura: true, orbit: false, static: true, particleCount: 5 })
+    // Common still earns nothing even under reduced motion.
+    expect(resolveRarityVfx("common", { reducedMotion: true, lowPower: false })).toBeNull()
   })
 
   it("returns null for common and uncommon", () => {

@@ -13,6 +13,8 @@ afterEach(() => {
   __resetPetEventBusForTesting()
 })
 
+// Cold fake-indexeddb open of the full schema can exceed jest's 5s default
+// under parallel suite load — same allowance as the other Dexie-cold suites.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -24,7 +26,7 @@ beforeEach(async () => {
     getDb().petAchievements.clear(),
     getDb().petInventory.clear(),
   ])
-})
+}, 30_000)
 
 async function seedProfile(coins: number): Promise<PetProfile> {
   const profile: PetProfile = {

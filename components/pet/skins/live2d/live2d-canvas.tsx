@@ -24,8 +24,10 @@ import {
   type PetSkinRenderProps,
 } from "@/types/pet"
 import { ensureLive2dPluginRegistered } from "@/lib/pet/live2d/register-plugin"
+import { useIdleQuiescence } from "@/hooks/pet/use-idle-quiescence"
 import { useLive2dMotion, type Live2dModelLike } from "./use-live2d-motion"
 import { useLive2dLipSync, type Live2dLipSyncModel } from "./use-live2d-lip-sync"
+import { useLive2dParamEmotion } from "./use-live2d-param-emotion"
 
 export interface Live2dCanvasProps extends PetSkinRenderProps {
   modelId: string
@@ -69,6 +71,10 @@ interface PixiAppLike {
 /** Ticker caps: 60fps default, 30fps in low-power mode. */
 const MAX_FPS_DEFAULT = 60
 const MAX_FPS_LOW_POWER = 30
+/** Deep-idle cap: after a quiet stretch of plain idle, breathing still reads
+ * as alive at 12fps while the SVG skin's quiescence has long since hit zero
+ * rAF — this is the Live2D equivalent (the ticker never quiesced before). */
+const MAX_FPS_QUIESCENT = 12
 
 /**
  * Cap the render resolution: past 2x the extra pixels are invisible on a
@@ -350,12 +356,19 @@ export default function Live2dCanvas({
     else app.ticker.start()
   }, [reducedMotion, paused, model])
 
-  // FPS cap follows the low-power setting live (unlike antialias).
+  // FPS cap follows the low-power setting live (unlike antialias), dropping
+  // further after a quiet idle stretch (same trigger as the SVG skin's
+  // quiescence) — the Cubism update + render both ride this ticker.
+  const quiescent = useIdleQuiescence(state, oneShot, lowPower)
   useEffect(() => {
     const app = appRef.current
     if (!app) return
-    app.ticker.maxFPS = lowPower ? MAX_FPS_LOW_POWER : MAX_FPS_DEFAULT
-  }, [lowPower, model])
+    app.ticker.maxFPS = quiescent
+      ? MAX_FPS_QUIESCENT
+      : lowPower
+        ? MAX_FPS_LOW_POWER
+        : MAX_FPS_DEFAULT
+  }, [lowPower, quiescent, model])
 
   useLive2dMotion(
     model,
@@ -366,6 +379,10 @@ export default function Live2dCanvas({
     locomotion?.mode === "walking",
     motionOverrides
   )
+
+  // Ambient head/eye envelopes for the idle-collapsed AI states
+  // (thinking/waiting/review) — skipped while paused (no frames fire).
+  useLive2dParamEmotion(model, state, oneShot, reducedMotion || Boolean(paused))
 
   // Mouth flap while a bubble is up. Skip when paused (ticker stopped → no frames)
   // so we don't register a handler that can never fire.

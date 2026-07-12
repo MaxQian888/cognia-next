@@ -87,6 +87,8 @@ export function reducePetVisualState(event: PetEvent, needs: PetNeeds): PetVisua
     case "twinBusy":
       return "thinking"
     case "twinMilestone":
+    case "streakDay":
+    case "birthday":
       return "happy"
     case "inboundMessage":
     case "scheduledRun":

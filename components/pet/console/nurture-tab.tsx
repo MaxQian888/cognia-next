@@ -65,6 +65,7 @@ export function NurtureTab({
           stage={profile.stage}
           progress={profile.statProgress}
           grew={grewStats}
+          flavor={profile.evolutionFlavor}
           skinId={skinId}
         />
 

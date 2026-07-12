@@ -16,6 +16,7 @@ import { wireWorkflowSource } from "./sources/workflow-source"
 import { wireSchedulerSource } from "./sources/scheduler-source"
 import { wireSchedulerDueSource } from "./sources/scheduler-due-source"
 import { wireHeartbeatSource } from "./sources/heartbeat-source"
+import { wireBirthdaySource } from "./sources/birthday-source"
 
 export type PetSourceWire = (emit: PetEmit) => () => void
 
@@ -32,6 +33,8 @@ export const DEFAULT_PET_SOURCES: PetSourceWire[] = [
   // Wall-clock self-tick: closes the neglect → unwell → notify loop on elapsed
   // time when no subsystem activity is nudging the pet.
   wireHeartbeatSource,
+  // Hatch-anniversary celebration (once per birthday local-day).
+  wireBirthdaySource,
 ]
 
 export function wirePetSources(

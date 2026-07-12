@@ -2,9 +2,15 @@ import { render, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("../pet-renderer", () => ({ PetRenderer: () => <div data-testid="pet-preview" /> }))
 const patchPetProfile = jest.fn()
-jest.mock("@/lib/db/pet", () => ({ patchPetProfile: (p: unknown) => patchPetProfile(p) }))
+jest.mock("@/lib/db/pet", () => ({
+  patchPetProfile: (p: unknown) => patchPetProfile(p),
+  listPetInventory: () => Promise.resolve([]),
+}))
 const mockUsePet = jest.fn()
 jest.mock("@/hooks/pet/use-pet", () => ({ usePet: () => mockUsePet() }))
+// Controllable owned-inventory snapshot for the hat-gating reads.
+let inventoryValue: unknown[]
+jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => inventoryValue }))
 
 import { PetCosmeticControls } from "./pet-cosmetic-controls"
 import { PALETTE_PRESETS } from "@/lib/pet/bones/palettes"
@@ -25,6 +31,16 @@ function petResult(over: Partial<PetProfile> = {}) {
 beforeEach(() => {
   patchPetProfile.mockClear()
   mockUsePet.mockReset()
+  // Own every purchasable hat by default so pre-gating interaction tests keep
+  // exercising the select; the gating test overrides this with an empty list.
+  inventoryValue = [
+    { id: "star-charm", qty: 1 },
+    { id: "tophat-box", qty: 1 },
+    { id: "wizard-hat", qty: 1 },
+    { id: "halo-ring", qty: 1 },
+    { id: "propeller-cap", qty: 1 },
+    { id: "beanie", qty: 1 },
+  ]
 })
 
 describe("PetCosmeticControls", () => {
@@ -71,6 +87,36 @@ describe("PetCosmeticControls", () => {
     mockUsePet.mockReturnValue(petResult())
     render(<PetCosmeticControls />)
     expect(screen.getByRole("button", { name: /reset to genetics/i })).toBeDisabled()
+  })
+
+  it("locks purchasable hats until their decor item is owned", () => {
+    inventoryValue = []
+    const result = petResult()
+    mockUsePet.mockReturnValue(result)
+    render(<PetCosmeticControls />)
+    const select = document.getElementById("pet-cosmetic-hat") as HTMLSelectElement
+    const option = (value: string) =>
+      select.querySelector(`option[value="${value}"]`) as HTMLOptionElement
+    const geneticHat = result.view.bones.hat
+    // Every shop-backed hat is disabled with an empty inventory — except the
+    // pet's own genetic hat, which is always free.
+    for (const hat of ["crown", "tophat", "wizard", "halo", "propeller", "beanie"]) {
+      expect(option(hat).disabled).toBe(hat !== geneticHat)
+    }
+    // Genetics-only legendary hat never unlocks via the shop.
+    expect(option("tinyduck").disabled).toBe(geneticHat !== "tinyduck")
+    // Bare-headed stays free.
+    expect(option("none").disabled).toBe(false)
+  })
+
+  it("keeps an already-applied locked hat selectable so profiles can't get stuck", () => {
+    inventoryValue = []
+    const result = petResult({ cosmetic: { hat: "wizard" } })
+    mockUsePet.mockReturnValue(result)
+    render(<PetCosmeticControls />)
+    const select = document.getElementById("pet-cosmetic-hat") as HTMLSelectElement
+    const wizard = select.querySelector('option[value="wizard"]') as HTMLOptionElement
+    expect(wizard.disabled).toBe(false)
   })
 
   it("clearing a field's override drops it; reset wipes the whole cosmetic", () => {

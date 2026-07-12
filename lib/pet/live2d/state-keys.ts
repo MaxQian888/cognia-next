@@ -31,6 +31,8 @@ export const ONE_SHOT_KEYS: readonly PetOneShot[] = [
   "surprised",
   "love",
   "sleepy",
+  "land",
+  "hatch",
 ] as const
 
 // Compile-time exhaustiveness guards. The `readonly PetVisualState[]` annotation

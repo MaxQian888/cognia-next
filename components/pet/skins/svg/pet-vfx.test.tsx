@@ -18,7 +18,7 @@ function renderVfx(props: Partial<Parameters<typeof PetVfx>[0]>) {
 }
 
 describe("PetVfx", () => {
-  it("renders nothing under reduced motion", () => {
+  it("keeps rarity identity (static, unanimated) under reduced motion", () => {
     const { container } = renderVfx({
       state: "error",
       oneShot: "petted",
@@ -26,20 +26,62 @@ describe("PetVfx", () => {
       rarity: "legendary",
       reducedMotion: true,
     })
+    // A static aura + motes render; every animated effect stays off.
+    expect(container.querySelector('[data-vfx-static="true"]')).not.toBeNull()
+    expect(container.querySelector('[data-pet-vfx="aura"][data-static="true"]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-pet-vfx="mote"]').length).toBe(5)
+    expect(container.querySelector('[data-pet-vfx="heart"]')).toBeNull()
+    expect(container.querySelector('[data-pet-vfx="shiny"]')).toBeNull()
+    expect(container.querySelector('[data-pet-vfx="sweat"]')).toBeNull()
+  })
+
+  it("renders nothing under reduced motion for a common pet", () => {
+    const { container } = renderVfx({ rarity: "common", reducedMotion: true })
     expect(container.querySelector('[data-pet-part="vfx"]')).toBeNull()
   })
 
-  it("renders hearts on the petted one-shot", () => {
-    const { container } = renderVfx({ state: "interacting", oneShot: "petted" })
-    expect(container.querySelectorAll('[data-pet-vfx="heart"]').length).toBeGreaterThan(0)
+  it("renders hearts on the petted and love one-shots", () => {
+    const petted = renderVfx({ state: "interacting", oneShot: "petted" })
+    expect(petted.container.querySelectorAll('[data-pet-vfx="heart"]').length).toBe(2)
+    petted.unmount()
+    const love = renderVfx({ state: "interacting", oneShot: "love" })
+    expect(love.container.querySelectorAll('[data-pet-vfx="heart"]').length).toBe(3)
   })
 
-  it("renders sparkles on level-up and evolving", () => {
-    for (const oneShot of ["levelUp", "evolving"] as const) {
-      const { container, unmount } = renderVfx({ oneShot })
-      expect(container.querySelectorAll('[data-pet-vfx="sparkle"]').length).toBeGreaterThan(0)
-      unmount()
-    }
+  it("renders a gold ring burst on level-up and sparkles on evolving", () => {
+    const levelUp = renderVfx({ oneShot: "levelUp" })
+    expect(levelUp.container.querySelectorAll('[data-pet-vfx="levelup-ring"]').length).toBe(2)
+    expect(levelUp.container.querySelector('[data-pet-vfx="sparkle"]')).toBeNull()
+    levelUp.unmount()
+    const evolving = renderVfx({ oneShot: "evolving" })
+    expect(evolving.container.querySelectorAll('[data-pet-vfx="sparkle"]').length).toBe(5)
+    expect(evolving.container.querySelector('[data-pet-vfx="levelup-ring"]')).toBeNull()
+  })
+
+  it("renders crumbs while eating and an exclamation when surprised", () => {
+    const fed = renderVfx({ oneShot: "fed" })
+    expect(fed.container.querySelectorAll('[data-pet-vfx="crumb"]').length).toBe(3)
+    fed.unmount()
+    const surprised = renderVfx({ oneShot: "surprised" })
+    expect(surprised.container.querySelector('[data-pet-vfx="exclaim"]')).not.toBeNull()
+  })
+
+  it("renders drifting Zzz while sleeping (state or one-shot)", () => {
+    const sleeping = renderVfx({ state: "sleeping" })
+    expect(sleeping.container.querySelectorAll('[data-pet-vfx="zzz"]').length).toBe(2)
+    sleeping.unmount()
+    const sleepy = renderVfx({ oneShot: "sleepy" })
+    expect(sleepy.container.querySelectorAll('[data-pet-vfx="zzz"]').length).toBe(2)
+  })
+
+  it("renders dust puffs on the land one-shot", () => {
+    const { container } = renderVfx({ oneShot: "land" })
+    expect(container.querySelectorAll('[data-pet-vfx="dust"]').length).toBe(4)
+  })
+
+  it("renders hatch sparkles on the hatch one-shot", () => {
+    const { container } = renderVfx({ oneShot: "hatch" })
+    expect(container.querySelectorAll('[data-pet-vfx="sparkle"]').length).toBe(3)
   })
 
   it("renders a shiny shimmer when shiny", () => {

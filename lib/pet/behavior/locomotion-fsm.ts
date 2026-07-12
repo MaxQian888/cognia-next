@@ -27,12 +27,46 @@ import {
 
 export type LocomotionMode = "resting" | "walking" | "falling" | "climbing"
 
-/** Duration of the hop-up climb tween, ms. */
-export const CLIMB_MS = 420
+/** Base duration of the hop-up climb tween, ms (short rises). */
+export const CLIMB_MS_BASE = 280
+/** Extra climb time per physical px of rise (taller hops take longer). */
+export const CLIMB_MS_PER_PX = 1.2
+/** Climb duration ceiling, ms. */
+export const CLIMB_MS_MAX = 700
 /** Max vertical rise the pet will hop up to perch on a platform, physical px. */
 export const HOP_RISE_PX = 160
 /** Chance per rest cycle (floor only) of attempting a climb when one is reachable. */
 export const CLIMB_PROBABILITY = 0.35
+
+/** Rise-scaled climb duration: a 20px hop is quick, a 160px scramble isn't. */
+export function climbDurationMs(risePx: number): number {
+  const raw = CLIMB_MS_BASE + Math.abs(risePx) * CLIMB_MS_PER_PX
+  return Math.min(CLIMB_MS_MAX, Math.max(CLIMB_MS_BASE, raw))
+}
+
+function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - t, 3)
+}
+
+/** Walk speed shaping: ramp up over the first stretch, brake near the target. */
+const WALK_ACCEL_MS = 300
+const WALK_DECEL_ZONE_PX = 48
+const WALK_MIN_FACTOR = 0.35
+
+/**
+ * Current walk-speed factor (0–1] from the accel ramp + arrival braking.
+ * Pure and exported so the render hook publishes the same effective speed
+ * the FSM steps with (the skin syncs its bob cadence to it).
+ */
+export function resolveWalkSpeedFactor(
+  walkStartMs: number | null,
+  nowMs: number,
+  distToTargetPx: number
+): number {
+  const rampUp = walkStartMs != null ? Math.min(1, (nowMs - walkStartMs) / WALK_ACCEL_MS) : 1
+  const brake = Math.min(1, distToTargetPx / WALK_DECEL_ZONE_PX)
+  return Math.max(WALK_MIN_FACTOR, Math.min(rampUp, brake))
+}
 
 export interface LocomotionFsmState {
   mode: LocomotionMode
@@ -45,6 +79,8 @@ export interface LocomotionFsmState {
   vy: number
   /** Walk destination (window X), or null outside walking. */
   targetX: number | null
+  /** When the current walk began (accel ramp), or null outside walking. */
+  walkStartMs: number | null
   /** Earliest time the next walk may start; null = not yet scheduled. */
   restUntilMs: number | null
   /** Platform currently perched on / climbing to, or null when on the floor. */
@@ -94,6 +130,7 @@ export function createLocomotionState(
     vx: 0,
     vy: 0,
     targetX: null,
+    walkStartMs: null,
     restUntilMs: null,
     platform: null,
     climbFromY: null,
@@ -109,6 +146,7 @@ export function beginThrow(state: LocomotionFsmState, vx: number, vy: number): L
     vx,
     vy,
     targetX: null,
+    walkStartMs: null,
     restUntilMs: null,
     platform: null, // a throw leaves any perch
     climbFromY: null,
@@ -143,6 +181,7 @@ function dropOff(state: LocomotionFsmState): LocomotionFsmState {
     vx: 0,
     vy: 0,
     targetX: null,
+    walkStartMs: null,
     restUntilMs: null,
     climbFromY: null,
     climbStartMs: null,
@@ -233,7 +272,15 @@ function stepResting(state: LocomotionFsmState, input: LocomotionInput): Locomot
   // landing re-enters resting and the next walk starts from there.
   const groundY = supportTop(state, input)
   if (state.y < groundY - 1) {
-    return { ...state, mode: "falling", vx: 0, vy: 0, targetX: null, restUntilMs: null }
+    return {
+      ...state,
+      mode: "falling",
+      vx: 0,
+      vy: 0,
+      targetX: null,
+      walkStartMs: null,
+      restUntilMs: null,
+    }
   }
 
   // Climb attempt — floor only, opt-in, when a window top is hop-reachable.
@@ -273,6 +320,7 @@ function stepResting(state: LocomotionFsmState, input: LocomotionInput): Locomot
     ...state,
     mode: "walking",
     targetX,
+    walkStartMs: input.nowMs,
     restUntilMs: null,
     facing: targetX < state.x ? "left" : "right",
     y: groundY,
@@ -286,13 +334,20 @@ function stepWalking(
 ): LocomotionFsmState {
   // Interruptions stop the walk in place; the next rest gets rescheduled.
   if (input.paused || !input.wanderEnabled || state.targetX == null) {
-    return { ...state, mode: "resting", targetX: null, restUntilMs: null }
+    return { ...state, mode: "resting", targetX: null, walkStartMs: null, restUntilMs: null }
   }
   // A perch that moved/vanished mid-walk → drop.
   if (state.platform && !activePlatform(state, input)) return dropOff(state)
   const groundY = supportTop(state, input)
   const dir = state.targetX < state.x ? -1 : 1
-  const stepPx = (input.tuning.walkSpeedPxPerSec * dtMs) / 1000
+  // Accel/decel shaping: ramp up from standstill, brake into the target —
+  // kills both the constant-velocity glide and the arrival snap.
+  const factor = resolveWalkSpeedFactor(
+    state.walkStartMs,
+    input.nowMs,
+    Math.abs(state.targetX - state.x)
+  )
+  const stepPx = (input.tuning.walkSpeedPxPerSec * factor * dtMs) / 1000
   const nextX = state.x + dir * stepPx
   const arrived = dir === 1 ? nextX >= state.targetX : nextX <= state.targetX
   if (arrived) {
@@ -302,6 +357,7 @@ function stepWalking(
       x: state.targetX,
       y: groundY,
       targetX: null,
+      walkStartMs: null,
       restUntilMs: null,
     }
   }
@@ -320,7 +376,9 @@ function stepWalking(
   }
 }
 
-/** Tween the window up onto its target platform top over `CLIMB_MS`. */
+/** Tween the window up onto its target platform top — rise-scaled duration,
+ *  ease-out so the hop launches fast and settles gently (the linear constant-
+ *  duration version read as a slow elevator). */
 function stepClimbing(state: LocomotionFsmState, input: LocomotionInput): LocomotionFsmState {
   // Target platform vanished mid-climb → abandon and drop.
   if (!state.platform || !input.platforms.some((p) => samePlatform(p, state.platform))) {
@@ -329,8 +387,9 @@ function stepClimbing(state: LocomotionFsmState, input: LocomotionInput): Locomo
   const targetTop = resolvePlatformTop(state.platform, input.windowHeight)
   const from = state.climbFromY ?? state.y
   const start = state.climbStartMs ?? input.nowMs
-  const t = CLIMB_MS > 0 ? Math.min(1, Math.max(0, (input.nowMs - start) / CLIMB_MS)) : 1
-  const y = from + (targetTop - from) * t
+  const durationMs = climbDurationMs(targetTop - from)
+  const t = durationMs > 0 ? Math.min(1, Math.max(0, (input.nowMs - start) / durationMs)) : 1
+  const y = from + (targetTop - from) * easeOutCubic(t)
   if (t >= 1) {
     return {
       ...state,

@@ -13,6 +13,16 @@ export const CUBISM_CORE_PUBLIC_PATH = "/live2d/live2dcubismcore.min.js"
 /** Hard ceiling on a single model bundle's total bytes (50 MB). */
 export const MAX_MODEL_BYTES = 50 * 1024 * 1024
 
+/**
+ * Minimum hold before the one-shot queue may advance while the Live2D skin is
+ * active. The queue's natural durations come from the SVG specs (0.5–1.8s),
+ * but a typical Cubism Tap/Special motion runs 1.5–3s — advancing on the SVG
+ * clock force-cut motions mid-play. A conservative floor (not a per-motion
+ * read: the engine surface doesn't expose durations pre-play) lets most
+ * motions finish while keeping the queue responsive.
+ */
+export const LIVE2D_ONE_SHOT_HOLD_MS = 1600
+
 /** A one-click downloadable sample model. */
 export interface SampleModelEntry {
   /** Stable catalog id (also the persisted model id seed). */

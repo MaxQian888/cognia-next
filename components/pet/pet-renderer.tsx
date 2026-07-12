@@ -10,6 +10,7 @@ import type {
   PetBones,
   PetEvolutionFlavor,
   PetLocomotion,
+  PetMood,
   PetOneShot,
   PetStage,
   PetVisualState,
@@ -31,6 +32,12 @@ export interface PetRendererProps {
   paused?: boolean
   /** Care-quality evolution flavor (cosmetic accent). Absent = normal. */
   flavor?: PetEvolutionFlavor
+  /** Coarse mood — flavors the idle loop. */
+  mood?: PetMood
+  /** A speech bubble is showing — skins may lip-flap. */
+  speaking?: boolean
+  /** The user is holding/dragging the pet — dangle pose. */
+  held?: boolean
 }
 
 export function PetRenderer({
@@ -44,6 +51,9 @@ export function PetRenderer({
   locomotion,
   paused,
   flavor,
+  mood,
+  speaking,
+  held,
 }: PetRendererProps) {
   const osReduced = useReducedMotion()
   const reduced = reducedMotion ?? osReduced ?? false
@@ -60,6 +70,9 @@ export function PetRenderer({
         locomotion: locomotion ?? undefined,
         paused,
         flavor,
+        mood,
+        speaking,
+        held,
       })}
     </>
   )

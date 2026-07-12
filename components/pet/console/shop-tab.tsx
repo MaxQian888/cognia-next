@@ -1,27 +1,32 @@
-// Shop tab: coin balance + streak header, then the static item catalog grouped
-// by category. Buying deducts coins into the inventory; using a consumable
-// emits its interaction event (the controller owns the restore/XP), and decor
-// applies its cosmetic override. Balance/inventory are read reactively.
+// Shop tab: coin balance + streak header, then the full item catalog (static
+// + plugin contributions) grouped by category. Buying deducts coins into the
+// inventory; using a consumable emits its interaction event (the controller
+// owns the restore/XP), and decor applies its cosmetic override.
+// Balance/inventory are read reactively. Plugin items carry plain per-locale
+// labels instead of host i18n keys — resolved via `pluginItemText`.
 
 "use client"
 
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CoinsIcon, FlameIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { getPetProfile, listPetInventory } from "@/lib/db/pet"
-import { PET_ITEMS } from "@/lib/pet/economy/item-catalog"
+import { listAllPetItems } from "@/lib/pet/economy/item-catalog"
+import { isPluginPetId, pluginItemText } from "@/lib/pet/plugin-display"
 import { canAfford, consumeItem, purchaseItem } from "@/lib/pet/economy/shop"
 import { normalizeCoins, normalizeStreak, type PetItemCategory } from "@/types/pet"
 import { petItemIcon } from "../item-icons"
 
-const CATEGORIES: PetItemCategory[] = ["food", "toy", "decor"]
+const CATEGORIES: PetItemCategory[] = ["food", "toy", "care", "decor"]
 
 export function ShopTab() {
   const t = useTranslations("pet")
+  const locale = useLocale()
   const profile = useLiveQuery(() => getPetProfile(), [])
   const inventory = useLiveQuery(() => listPetInventory(), [])
+  const catalog = listAllPetItems()
 
   const coins = normalizeCoins(profile?.coins)
   const streak = normalizeStreak(profile?.streak)
@@ -46,7 +51,7 @@ export function ShopTab() {
       </div>
 
       {CATEGORIES.map((category) => {
-        const items = PET_ITEMS.filter((i) => i.category === category)
+        const items = catalog.filter((i) => i.category === category)
         if (items.length === 0) return null
         return (
           <section key={category} className="flex flex-col gap-2">
@@ -58,6 +63,13 @@ export function ShopTab() {
                 const Icon = petItemIcon(item.icon)
                 const owned = ownedQty.get(item.id) ?? 0
                 const affordable = canAfford(coins, item)
+                const pluginText = isPluginPetId(item.id)
+                  ? pluginItemText(item.id, locale)
+                  : undefined
+                const title = pluginText?.title ?? t(`shop.items.${item.i18nKey}.title`)
+                const description = pluginText
+                  ? pluginText.description
+                  : t(`shop.items.${item.i18nKey}.description`)
                 return (
                   <div
                     key={item.id}
@@ -67,16 +79,16 @@ export function ShopTab() {
                     <Icon className="size-5 shrink-0 text-primary" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-sm font-medium">
-                        <span className="truncate">{t(`shop.items.${item.i18nKey}.title`)}</span>
+                        <span className="truncate">{title}</span>
                         {owned > 0 && (
                           <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums">
                             {t("shop.owned", { qty: owned })}
                           </span>
                         )}
                       </div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        {t(`shop.items.${item.i18nKey}.description`)}
-                      </div>
+                      {description && (
+                        <div className="truncate text-xs text-muted-foreground">{description}</div>
+                      )}
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">
                       <Button
