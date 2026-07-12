@@ -14,10 +14,10 @@
 
 use serde_json::Value;
 
+use super::super::acp::translate::TurnState;
 use super::super::acp::translate::{translate_frame, AcpOutbound};
 use super::super::acp::types::SessionUpdate;
 use super::wire::{self, TaskState};
-use super::super::acp::translate::TurnState;
 
 /// Terminal result of an A2A turn.
 #[derive(Debug, Clone, PartialEq)]

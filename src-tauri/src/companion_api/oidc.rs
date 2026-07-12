@@ -153,8 +153,8 @@ pub fn verify_access_token(
     // ── 3. Pin the algorithm to the JWKS entry, NOT the token header ────────
     // Trusting the header's `alg` would allow an algorithm-confusion attack;
     // the key's declared algorithm is authoritative.
-    let alg =
-        algorithm_for_jwk(jwk).ok_or_else(|| OidcError::UnsupportedKeyAlgorithm { kid: kid.clone() })?;
+    let alg = algorithm_for_jwk(jwk)
+        .ok_or_else(|| OidcError::UnsupportedKeyAlgorithm { kid: kid.clone() })?;
 
     let key = DecodingKey::from_jwk(jwk).map_err(|source| OidcError::Jwk {
         kid: kid.clone(),
@@ -364,8 +364,11 @@ impl OidcAuthenticator {
             .and_then(|s| s.trim().parse::<u64>().ok())
             .map(Duration::from_secs)
             .unwrap_or_else(|| Duration::from_secs(DEFAULT_JWKS_TTL_SECS));
-        let config =
-            OidcVerifierConfig::new(issuer.trim().to_owned(), audience.trim().to_owned(), required_scopes);
+        let config = OidcVerifierConfig::new(
+            issuer.trim().to_owned(),
+            audience.trim().to_owned(),
+            required_scopes,
+        );
         Some(Self::new(config, ttl))
     }
 
@@ -577,7 +580,10 @@ mod tests {
     fn unknown_kid_is_rejected() {
         let token = mint(valid_claims(), Some("some-other-kid"), Algorithm::ES384);
         let err = verify_access_token(&test_jwks(), &token, &cfg(&["brain:rpc"])).unwrap_err();
-        assert!(matches!(err, OidcError::UnknownKid(ref k) if k == "some-other-kid"), "got {err:?}");
+        assert!(
+            matches!(err, OidcError::UnknownKid(ref k) if k == "some-other-kid"),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -615,7 +621,10 @@ mod tests {
         c["scope"] = json!("brain:read");
         let token = mint(c, Some(TEST_KID), Algorithm::ES384);
         let err = verify_access_token(&test_jwks(), &token, &cfg(&["brain:admin"])).unwrap_err();
-        assert!(matches!(err, OidcError::MissingScope(ref s) if s == "brain:admin"), "got {err:?}");
+        assert!(
+            matches!(err, OidcError::MissingScope(ref s) if s == "brain:admin"),
+            "got {err:?}"
+        );
     }
 
     #[test]

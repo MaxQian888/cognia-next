@@ -57,8 +57,7 @@ pub async fn healthz_handler(State(state): State<SharedState>) -> Response {
             "brain".to_string(),
             match crate::headless::brain::brain_status() {
                 Some(status) => {
-                    let mut b = serde_json::to_value(status)
-                        .unwrap_or_else(|_| json!({}));
+                    let mut b = serde_json::to_value(status).unwrap_or_else(|_| json!({}));
                     if let Some(map) = b.as_object_mut() {
                         map.insert("configured".to_string(), json!(true));
                     }

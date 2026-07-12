@@ -44,7 +44,13 @@ pub fn ws_client_disconnected() {
     WS_CLIENTS_ACTIVE.fetch_sub(1, Ordering::Relaxed);
 }
 
-fn push_metric(out: &mut String, name: &str, kind: &str, help: &str, value: impl std::fmt::Display) {
+fn push_metric(
+    out: &mut String,
+    name: &str,
+    kind: &str,
+    help: &str,
+    value: impl std::fmt::Display,
+) {
     out.push_str(&format!("# HELP {name} {help}\n"));
     out.push_str(&format!("# TYPE {name} {kind}\n"));
     out.push_str(&format!("{name} {value}\n"));
@@ -129,7 +135,10 @@ pub fn render_prometheus() -> String {
 /// `GET /metrics` — Prometheus text format v0.0.4.
 pub async fn metrics_handler() -> Response {
     (
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
         render_prometheus(),
     )
         .into_response()
@@ -161,7 +170,9 @@ mod tests {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0)
         };
-        assert!(value(&after, "cognia_rpc_calls_total") >= value(&before, "cognia_rpc_calls_total") + 2);
+        assert!(
+            value(&after, "cognia_rpc_calls_total") >= value(&before, "cognia_rpc_calls_total") + 2
+        );
         assert!(value(&after, "cognia_rpc_errors_total") >= 1);
         assert!(value(&after, "cognia_auth_failures_total") >= 1);
         ws_client_disconnected();

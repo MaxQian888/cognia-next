@@ -172,8 +172,14 @@ mod tests {
         let t = Arc::clone(&transport);
         let b = Arc::clone(&bridge);
         let handle = tokio::spawn(async move {
-            b.pull(t.as_ref(), "sessions".into(), 7, "local_acct_a".into(), DEFAULT_TIMEOUT)
-                .await
+            b.pull(
+                t.as_ref(),
+                "sessions".into(),
+                7,
+                "local_acct_a".into(),
+                DEFAULT_TIMEOUT,
+            )
+            .await
         });
 
         // Wait for the emit to land, then resolve so the pull completes.
@@ -203,7 +209,13 @@ mod tests {
         let bridge = SyncBridge::new();
         let transport = RecordingBridgeTransport::failing();
         let err = Arc::clone(&bridge)
-            .pull(transport.as_ref(), "sessions".into(), 0, "a".into(), DEFAULT_TIMEOUT)
+            .pull(
+                transport.as_ref(),
+                "sessions".into(),
+                0,
+                "a".into(),
+                DEFAULT_TIMEOUT,
+            )
             .await
             .expect_err("emit fails");
         assert!(err.contains("forced failure"));

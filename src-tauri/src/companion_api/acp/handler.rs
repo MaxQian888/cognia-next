@@ -222,7 +222,10 @@ impl AcpConnection {
                 sdk_session_id: None,
             },
         );
-        vec![types::rpc_response(id, types::session_new_result(&session_id))]
+        vec![types::rpc_response(
+            id,
+            types::session_new_result(&session_id),
+        )]
     }
 
     fn handle_session_set_mode(&mut self, id: &Value, params: &Value) -> Vec<Value> {
@@ -338,7 +341,11 @@ impl AcpConnection {
         let send_content = match types::prompt_blocks_to_send_content(&prompt) {
             Ok(content) => content,
             Err(reason) => {
-                return vec![types::rpc_error(id, rpc_error_code::INVALID_PARAMS, &reason)];
+                return vec![types::rpc_error(
+                    id,
+                    rpc_error_code::INVALID_PARAMS,
+                    &reason,
+                )];
             }
         };
 
@@ -739,7 +746,12 @@ mod tests {
     }
 
     fn test_conn() -> AcpConnection {
-        AcpConnection::new(test_state(), "dev-1".to_string(), None, Some("device".into()))
+        AcpConnection::new(
+            test_state(),
+            "dev-1".to_string(),
+            None,
+            Some("device".into()),
+        )
     }
 
     async fn initialize(conn: &mut AcpConnection) {
@@ -823,7 +835,10 @@ mod tests {
         let result = &out[0]["result"];
         assert!(result["sessionId"].as_str().is_some());
         assert_eq!(result["modes"]["currentModeId"], types::DEFAULT_MODE_ID);
-        assert!(!result["modes"]["availableModes"].as_array().unwrap().is_empty());
+        assert!(!result["modes"]["availableModes"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         assert_eq!(result["models"]["currentModelId"], types::DEFAULT_MODEL_ID);
         assert!(!result["models"]["availableModels"]
             .as_array()
@@ -883,7 +898,10 @@ mod tests {
         let out = conn.handle_message(&msg).await;
         assert!(out[0].get("result").is_some());
         assert_eq!(
-            conn.sessions.get_mut(&session_id).unwrap().selected_model_id,
+            conn.sessions
+                .get_mut(&session_id)
+                .unwrap()
+                .selected_model_id,
             Some("claude-opus-4-8".to_string())
         );
 
@@ -1024,14 +1042,15 @@ mod tests {
         );
         let out = conn.handle_message(&msg).await;
         assert!(out.is_empty(), "cancel is a notification — no response");
-        assert!(conn
-            .sessions
-            .get_mut(&session_id)
-            .unwrap()
-            .pending_prompt
-            .as_ref()
-            .unwrap()
-            .cancelled);
+        assert!(
+            conn.sessions
+                .get_mut(&session_id)
+                .unwrap()
+                .pending_prompt
+                .as_ref()
+                .unwrap()
+                .cancelled
+        );
     }
 
     #[tokio::test]

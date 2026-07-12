@@ -332,8 +332,10 @@ mod tests {
         let transport = RecordingBridgeTransport::new();
         let t = Arc::clone(&transport);
         let b = Arc::clone(&bridge);
-        let handle =
-            tokio::spawn(async move { b.list_sessions(t.as_ref(), 10, 0, None, DEFAULT_TIMEOUT).await });
+        let handle = tokio::spawn(async move {
+            b.list_sessions(t.as_ref(), 10, 0, None, DEFAULT_TIMEOUT)
+                .await
+        });
         let (channel, payload) = loop {
             if let Some(entry) = transport.last() {
                 break entry;
@@ -357,7 +359,13 @@ mod tests {
         let bridge = DesktopMessagesBridge::new();
         let transport = RecordingBridgeTransport::failing();
         let err = Arc::clone(&bridge)
-            .send_message(transport.as_ref(), "s1".into(), "hi".into(), None, DEFAULT_TIMEOUT)
+            .send_message(
+                transport.as_ref(),
+                "s1".into(),
+                "hi".into(),
+                None,
+                DEFAULT_TIMEOUT,
+            )
             .await
             .expect_err("emit fails");
         assert!(err.contains("forced failure"));

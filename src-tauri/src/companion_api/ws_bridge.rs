@@ -126,7 +126,11 @@ pub enum BridgeFrame {
     },
     /// server → brain: a bridge request. `event` is the Tauri channel name;
     /// `payload` is byte-identical to the desktop event payload.
-    Event { v: u32, event: String, payload: Value },
+    Event {
+        v: u32,
+        event: String,
+        payload: Value,
+    },
     /// brain → server: the response-command args verbatim, routed by
     /// `command` to the matching bridge's `resolve()`.
     Respond {
@@ -270,7 +274,10 @@ fn clear_socket_bridge_if(conn_id: u64) {
 
 /// The connected brain's transport, if any.
 pub fn socket_bridge_transport() -> Option<Arc<SocketBridgeTransport>> {
-    SOCKET_BRIDGE.read().as_ref().map(|s| Arc::clone(&s.transport))
+    SOCKET_BRIDGE
+        .read()
+        .as_ref()
+        .map(|s| Arc::clone(&s.transport))
 }
 
 /// Whether a brain is currently connected and helloed.
@@ -389,12 +396,7 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
         Ok(Some(hello)) => hello,
         Ok(None) => return, // socket closed / transport error mid-handshake
         Err(_) => {
-            close_with(
-                &mut socket,
-                CLOSE_PROTOCOL_ERROR,
-                "no hello within timeout",
-            )
-            .await;
+            close_with(&mut socket, CLOSE_PROTOCOL_ERROR, "no hello within timeout").await;
             return;
         }
     };
@@ -414,7 +416,9 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
         close_with(
             &mut socket,
             CLOSE_PROTOCOL_ERROR,
-            &format!("unsupported bridge protocol {protocol} (server speaks {BRIDGE_PROTOCOL_VERSION})"),
+            &format!(
+                "unsupported bridge protocol {protocol} (server speaks {BRIDGE_PROTOCOL_VERSION})"
+            ),
         )
         .await;
         return;
@@ -688,10 +692,15 @@ mod tests {
     use super::test_support::lock_slot;
     use super::*;
     use crate::companion_api::{
-        deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
+        deny_list::DenyList,
+        event_bus::EventBus,
+        idempotency::IdempotencyCache,
         jwt::{issue_device_jwt, issue_service_jwt},
-        middleware, push, rate_limit, redemption_lru::RedemptionLru,
-        sync_bridge::SyncBridge, sync_registry::SyncTableRegistry, CompanionState,
+        middleware, push, rate_limit,
+        redemption_lru::RedemptionLru,
+        sync_bridge::SyncBridge,
+        sync_registry::SyncTableRegistry,
+        CompanionState,
     };
     use futures_util::{SinkExt, StreamExt};
     use serde_json::json;
@@ -876,7 +885,10 @@ mod tests {
         let device = issue_device_jwt(SECRET, "phone-1", ACCOUNT_ID).expect("device jwt");
         let url = format!("ws://{addr}/ws/v1/bridge?token={device}");
         let result = tokio_tungstenite::connect_async(&url).await;
-        assert!(result.is_err(), "device-scope token must not open the bridge");
+        assert!(
+            result.is_err(),
+            "device-scope token must not open the bridge"
+        );
     }
 
     #[tokio::test]
@@ -1072,12 +1084,18 @@ mod tests {
                 Err(_) => break,
             }
         }
-        assert!(a_closed, "old brain connection must be closed on replacement");
+        assert!(
+            a_closed,
+            "old brain connection must be closed on replacement"
+        );
 
         // The slot now belongs to B (different connection id).
         assert!(bridge_connected());
         let second = socket_bridge_transport().expect("second transport");
-        assert_ne!(first.conn_id, second.conn_id, "slot must belong to the new connection");
+        assert_ne!(
+            first.conn_id, second.conn_id,
+            "slot must belong to the new connection"
+        );
 
         // B disconnecting clears the slot.
         brain_b.close(None).await.ok();
@@ -1149,7 +1167,11 @@ mod tests {
         // Unknown command — no panic.
         route_respond(&state, "companion_unknown_response", json!({}));
         // Known command, malformed payload — no panic.
-        route_respond(&state, "companion_sync_pull_response", json!("not-an-object"));
+        route_respond(
+            &state,
+            "companion_sync_pull_response",
+            json!("not-an-object"),
+        );
         // Known command, unknown request id — resolver no-ops.
         route_respond(
             &state,
@@ -1173,7 +1195,10 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
         let transport = SocketBridgeTransport::new(tx, 42);
         transport
-            .emit("companion://sync-pull-request", json!({ "request_id": "r1" }))
+            .emit(
+                "companion://sync-pull-request",
+                json!({ "request_id": "r1" }),
+            )
             .expect("emit");
         let Message::Text(text) = rx.try_recv().expect("frame queued") else {
             panic!("expected text frame");

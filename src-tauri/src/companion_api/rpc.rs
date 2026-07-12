@@ -325,6 +325,41 @@ const KNOWN_COMMANDS: &[&str] = &[
     "git_stash_drop",
     "git_resolve_conflict",
     "git_merge_abort",
+    // Full-surface parity with the desktop panel: ref/blame/tag reads, ref-vs-
+    // ref diffs, worktrees, remote/tag CRUD, reset/restore, the sequencer
+    // family (rebase / cherry-pick / revert / interactive rebase), init,
+    // .gitignore append, and merge. Reads are ungated; every mutation is
+    // control-gated (see CONTROL_COMMANDS). `git_watch_start/stop` stay
+    // desktop-only — they need the Tauri watcher state; remote clients get the
+    // forwarded `git://status-changed` WS event instead.
+    "git_diff_refs_files",
+    "git_diff_refs_file",
+    "git_diff_staged_all",
+    "git_refs",
+    "git_blame",
+    "git_tags",
+    "git_worktree_list",
+    "git_rebase_commits",
+    "git_worktree_add",
+    "git_worktree_remove",
+    "git_worktree_commit",
+    "git_worktree_prune",
+    "git_remote_add",
+    "git_remote_remove",
+    "git_create_tag",
+    "git_delete_tag",
+    "git_push_tag",
+    "git_reset",
+    "git_restore",
+    "git_rebase",
+    "git_cherry_pick",
+    "git_revert",
+    "git_sequencer_continue",
+    "git_sequencer_abort",
+    "git_interactive_rebase",
+    "git_init",
+    "git_ignore_add",
+    "git_merge",
     // ── Filesystem ──────────────────────────────────────────────────────────
     // Both the raw absolute-path ops (no sandbox — writes are control-gated and
     // the OpenAPI description flags the unrestricted-FS risk) and the sandboxed
@@ -354,6 +389,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "terminal_list_for_project",
     "terminal_kill",
     "terminal_exec",
+    // Path completion for a remote client's terminal autocomplete, and the
+    // "free a busy port" quick fix — both mirror the local Tauri commands.
+    "terminal_complete_paths",
+    "terminal_kill_port",
     // ── Plugins ─────────────────────────────────────────────────────────────
     // Native install/uninstall manage the on-disk plugin dir + Rust snapshot.
     // A remote install takes effect on the next renderer reload (it does not
@@ -423,6 +462,16 @@ const KNOWN_COMMANDS: &[&str] = &[
     // desktop logs. Pure reads; parsing is best-effort (see logging::query).
     "logs_query",
     "logs_list_files",
+    // ── Agent Fleet (ADR-0009): view/act on the desktop's live agent fleet ──
+    // A phone / companion browser can watch the island snapshot and answer a
+    // parked permission remotely. `fleet_get_snapshot` is a pure read; the three
+    // control ops (answer permission, inject an OpenCode prompt, focus a
+    // terminal) are control-gated. All reach the process-global runtime directly
+    // (no AppHandle), so they also work on a headless server.
+    "fleet_get_snapshot",
+    "fleet_permission_respond",
+    "fleet_opencode_send_message",
+    "fleet_focus_terminal",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -480,6 +529,14 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "git_remotes",
     "git_stash_list",
     "git_conflicts",
+    "git_diff_refs_files",
+    "git_diff_refs_file",
+    "git_diff_staged_all",
+    "git_refs",
+    "git_blame",
+    "git_tags",
+    "git_worktree_list",
+    "git_rebase_commits",
     // Filesystem reads.
     "read_text_file",
     "default_export_dir",
@@ -492,6 +549,10 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Terminal session listings.
     "terminal_list_all",
     "terminal_list_for_project",
+    // Path completion is a pure directory read (same cwd+fragment → same
+    // candidates). Like `read_text_file` it is simultaneously read-only
+    // (idempotency axis) and control-gated (capability axis) — see below.
+    "terminal_complete_paths",
     // Plugin registry reads.
     "plugin_list",
     "plugin_runtime_snapshot",
@@ -508,6 +569,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Native log read-back — bounded tail reads over on-disk log files.
     "logs_query",
     "logs_list_files",
+    // Fleet snapshot — same call always returns the current live snapshot.
+    "fleet_get_snapshot",
 ];
 
 // ---------------------------------------------------------------------------
@@ -564,6 +627,28 @@ const CONTROL_COMMANDS: &[&str] = &[
     "git_stash_drop",
     "git_resolve_conflict",
     "git_merge_abort",
+    // Worktree / remote / tag CRUD, reset/restore, sequencer family, init,
+    // .gitignore append, merge — all mutate the repo or its refs.
+    "git_worktree_add",
+    "git_worktree_remove",
+    "git_worktree_commit",
+    "git_worktree_prune",
+    "git_remote_add",
+    "git_remote_remove",
+    "git_create_tag",
+    "git_delete_tag",
+    "git_push_tag",
+    "git_reset",
+    "git_restore",
+    "git_rebase",
+    "git_cherry_pick",
+    "git_revert",
+    "git_sequencer_continue",
+    "git_sequencer_abort",
+    "git_interactive_rebase",
+    "git_init",
+    "git_ignore_add",
+    "git_merge",
     // Filesystem writes (raw absolute + sandboxed).
     "write_text_file",
     "write_text_file_confined",
@@ -586,6 +671,14 @@ const CONTROL_COMMANDS: &[&str] = &[
     // Terminal mutations — arbitrary code execution / session teardown.
     "terminal_kill",
     "terminal_exec",
+    // Kills whatever process listens on a port — same elevation as exec.
+    "terminal_kill_port",
+    // Raw absolute-path *directory listing* — `cwd` is unconfined, so a
+    // chat-only paired device could enumerate the whole filesystem. Same
+    // asymmetry-closing rationale as `read_text_file` above; the devices
+    // that need it (remote terminal autocomplete) already hold the
+    // remote-control capability required to open the PTY itself.
+    "terminal_complete_paths",
     // Plugin install/uninstall/backup-restore — modify the on-disk plugin set.
     "plugin_install",
     "plugin_install_from_github",
@@ -611,6 +704,12 @@ const CONTROL_COMMANDS: &[&str] = &[
     "goal_update",
     // App-data restore overwrites local state.
     "backup_import",
+    // Fleet control — answering a parked permission, injecting an OpenCode
+    // prompt, and focusing a terminal all steer a host-owned agent session,
+    // the same elevation as the session-attach / goal controls above.
+    "fleet_permission_respond",
+    "fleet_opencode_send_message",
+    "fleet_focus_terminal",
 ];
 
 /// O(1) membership mirrors of the command allowlists above. The `&[&str]`
@@ -1039,9 +1138,12 @@ fn required_aliased<T: DeserializeOwned>(
     primary: &str,
     alias: &str,
 ) -> Result<T, (StatusCode, Json<RpcError>)> {
-    let v = args.get(primary).or_else(|| args.get(alias)).ok_or_else(|| {
-        RpcError::malformed(format!("missing required field: {primary} (or {alias})"))
-    })?;
+    let v = args
+        .get(primary)
+        .or_else(|| args.get(alias))
+        .ok_or_else(|| {
+            RpcError::malformed(format!("missing required field: {primary} (or {alias})"))
+        })?;
     serde_json::from_value(v.clone())
         .map_err(|e| RpcError::malformed(format!("field '{primary}': {e}")))
 }
@@ -2237,6 +2339,238 @@ pub(super) async fn dispatch(
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
+        "git_diff_refs_files" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let base: String = required(&args, "base")?;
+            let target: String = required(&args, "target")?;
+            crate::git::commands::git_diff_refs_files(repo_path, base, target)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_diff_refs_file" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let base: String = required(&args, "base")?;
+            let target: String = required(&args, "target")?;
+            let path: String = required(&args, "path")?;
+            crate::git::commands::git_diff_refs_file(repo_path, base, target, path)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_diff_staged_all" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            crate::git::commands::git_diff_staged_all(repo_path)
+                .await
+                .map(Value::String)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_refs" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            crate::git::commands::git_refs(repo_path)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_blame" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let path: String = required(&args, "path")?;
+            let rev: Option<String> = optional(&args, "rev")?;
+            crate::git::commands::git_blame(repo_path, path, rev)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_tags" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            crate::git::commands::git_tags(repo_path)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_worktree_list" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            crate::git::commands::git_worktree_list(repo_path)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_rebase_commits" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let base: String = required(&args, "base")?;
+            crate::git::commands::git_rebase_commits(repo_path, base)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_worktree_add" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let path: String = required(&args, "path")?;
+            let branch: String = required(&args, "branch")?;
+            let base_ref: Option<String> = optional(&args, "baseRef")?;
+            crate::git::commands::git_worktree_add(repo_path, path, branch, base_ref)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_worktree_remove" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let path: String = required(&args, "path")?;
+            let force: bool = required(&args, "force")?;
+            let delete_branch: Option<String> = optional(&args, "deleteBranch")?;
+            crate::git::commands::git_worktree_remove(repo_path, path, force, delete_branch)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_worktree_commit" => {
+            let worktree_path: String = required(&args, "worktreePath")?;
+            let message: String = required(&args, "message")?;
+            crate::git::commands::git_worktree_commit(worktree_path, message)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_worktree_prune" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            crate::git::commands::git_worktree_prune(repo_path)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_remote_add" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let name: String = required(&args, "name")?;
+            let url: String = required(&args, "url")?;
+            crate::git::commands::git_remote_add(repo_path, name, url)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_remote_remove" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let name: String = required(&args, "name")?;
+            crate::git::commands::git_remote_remove(repo_path, name)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_create_tag" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let name: String = required(&args, "name")?;
+            let message: Option<String> = optional(&args, "message")?;
+            let target: Option<String> = optional(&args, "target")?;
+            crate::git::commands::git_create_tag(repo_path, name, message, target)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_delete_tag" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let name: String = required(&args, "name")?;
+            crate::git::commands::git_delete_tag(repo_path, name)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_push_tag" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let remote: String = required(&args, "remote")?;
+            let name: String = required(&args, "name")?;
+            crate::git::commands::git_push_tag(repo_path, remote, name)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_reset" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let mode: String = required(&args, "mode")?;
+            let target: String = required(&args, "target")?;
+            crate::git::commands::git_reset(repo_path, mode, target)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_restore" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let paths: Vec<String> = required(&args, "paths")?;
+            let staged: bool = required(&args, "staged")?;
+            let source: Option<String> = optional(&args, "source")?;
+            crate::git::commands::git_restore(repo_path, paths, staged, source)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_rebase" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let onto: String = required(&args, "onto")?;
+            crate::git::commands::git_rebase(repo_path, onto)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_cherry_pick" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let sha: String = required(&args, "sha")?;
+            crate::git::commands::git_cherry_pick(repo_path, sha)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_revert" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let sha: String = required(&args, "sha")?;
+            crate::git::commands::git_revert(repo_path, sha)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_sequencer_continue" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            crate::git::commands::git_sequencer_continue(repo_path)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_sequencer_abort" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            crate::git::commands::git_sequencer_abort(repo_path)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_interactive_rebase" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let base: String = required(&args, "base")?;
+            let entries: Vec<crate::git::types::RebaseTodoEntry> = required(&args, "entries")?;
+            crate::git::commands::git_interactive_rebase(repo_path, base, entries)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_init" => {
+            let path: String = required(&args, "path")?;
+            crate::git::commands::git_init(path)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_ignore_add" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let pattern: String = required(&args, "pattern")?;
+            crate::git::commands::git_ignore_add(repo_path, pattern)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_merge" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let branch: String = required(&args, "branch")?;
+            crate::git::commands::git_merge(repo_path, branch)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
 
         // ── Filesystem ───────────────────────────────────────────────────────
         // Raw absolute-path ops have NO sandbox (desktop relied on a file-dialog
@@ -2468,10 +2802,45 @@ pub(super) async fn dispatch(
             let cwd: Option<String> = optional(&args, "cwd")?;
             let env: Option<std::collections::HashMap<String, String>> = optional(&args, "env")?;
             let timeout_ms: Option<u64> = optional(&args, "timeoutMs")?;
+            // `shell: true` runs `command` as a full shell line (cmd /C, sh -c)
+            // — what a remote client needs to replay history-style commands.
+            let shell: Option<bool> = optional(&args, "shell")?;
+            let (command, exec_args) =
+                crate::terminal::exec::resolve_shell_mode(command, exec_args, shell.unwrap_or(false))
+                    .map_err(RpcError::validation_failed)?;
             crate::terminal::exec::terminal_exec_inner(cwd, command, exec_args, env, timeout_ms, None)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
+        }
+        "terminal_complete_paths" => {
+            let cwd: String = required(&args, "cwd")?;
+            let fragment: String = required(&args, "fragment")?;
+            let show_hidden: Option<bool> = optional(&args, "showHidden")?;
+            let limit: Option<usize> = optional(&args, "limit")?;
+            tokio::task::spawn_blocking(move || {
+                crate::terminal::complete::complete_paths_inner(
+                    &cwd,
+                    &fragment,
+                    show_hidden.unwrap_or(false),
+                    limit.unwrap_or(50),
+                )
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "terminal_kill_port" => {
+            let port: u16 = required(&args, "port")?;
+            // netstat/lsof + kill shell out — keep them off the async runtime.
+            tokio::task::spawn_blocking(move || {
+                crate::terminal::commands::terminal_kill_port(port)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
         }
 
         // ── Plugins ──────────────────────────────────────────────────────────
@@ -2580,6 +2949,36 @@ pub(super) async fn dispatch(
         "logs_list_files" => crate::logging::query::list_native_log_files()
             .map_err(RpcError::internal)
             .and_then(to_json),
+
+        // ── Agent Fleet (ADR-0009) ──────────────────────────────────────────
+        // Host-generic: these reach the process-global fleet runtime directly
+        // (no AppHandle / desktop_writes_bridge), so they also serve a headless
+        // server (which returns an empty snapshot). camelCase arg keys mirror
+        // the TS wrappers in `lib/fleet/fleet-remote-actions.ts`.
+        "fleet_get_snapshot" => to_json(crate::fleet::runtime().snapshot()),
+        "fleet_permission_respond" => {
+            let request_id: String = required(&args, "requestId")?;
+            let behavior: crate::fleet::PermissionBehavior = required(&args, "behavior")?;
+            to_json(
+                crate::fleet::runtime().respond_permission(&request_id, behavior),
+            )
+        }
+        "fleet_opencode_send_message" => {
+            let session_id: String = required(&args, "sessionId")?;
+            let text: String = required(&args, "text")?;
+            if text.trim().is_empty() {
+                return Err(RpcError::malformed("text must not be empty".to_string()));
+            }
+            to_json(crate::fleet::runtime().queue_opencode_command(session_id, text))
+        }
+        "fleet_focus_terminal" => {
+            let agent: String = required(&args, "agent")?;
+            let session_id: String = required(&args, "sessionId")?;
+            crate::fleet::control::focus_session_terminal(&agent, &session_id)
+                .await
+                .map(|()| Value::Null)
+                .map_err(RpcError::internal)
+        }
 
         unknown => Err(RpcError::unknown_command(unknown)),
     }
@@ -2791,6 +3190,92 @@ mod tests {
         assert_ne!(resp.status().as_u16(), 403);
     }
 
+    // ── Agent Fleet remote commands ───────────────────────────────────────────
+
+    #[test]
+    fn fleet_reads_are_read_only_and_ungated() {
+        assert!(READ_ONLY_COMMANDS_SET.contains("fleet_get_snapshot"));
+        assert!(!CONTROL_COMMANDS_SET.contains("fleet_get_snapshot"));
+        assert!(KNOWN_COMMANDS_SET.contains("fleet_get_snapshot"));
+    }
+
+    #[test]
+    fn fleet_writes_are_control_gated() {
+        for cmd in [
+            "fleet_permission_respond",
+            "fleet_opencode_send_message",
+            "fleet_focus_terminal",
+        ] {
+            assert!(CONTROL_COMMANDS_SET.contains(cmd), "{cmd} must be control-gated");
+            assert!(KNOWN_COMMANDS_SET.contains(cmd), "{cmd} must be a known command");
+        }
+    }
+
+    #[tokio::test]
+    async fn fleet_permission_respond_is_forbidden_without_the_grant() {
+        let device = "dev-fleet-gate-denied-001";
+        super::super::control_allow_list::global().disallow(device);
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt(device);
+        let resp = rpc_post(
+            router,
+            "fleet_permission_respond",
+            json!({ "requestId": "r", "behavior": "allow" }),
+            &jwt,
+            None,
+        )
+        .await;
+        assert_eq!(resp.status().as_u16(), 403);
+        assert_eq!(body_json(resp).await["code"], "remote_control_forbidden");
+    }
+
+    #[tokio::test]
+    async fn fleet_get_snapshot_read_is_not_control_gated() {
+        let device = "dev-fleet-read-ungated-001";
+        super::super::control_allow_list::global().disallow(device);
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt(device);
+        let resp = rpc_post(router, "fleet_get_snapshot", json!({}), &jwt, None).await;
+        // Neither 404 (unwired) nor 403 (gated); 503 in test mode is fine.
+        assert_ne!(resp.status().as_u16(), 404);
+        assert_ne!(resp.status().as_u16(), 403);
+    }
+
+    #[tokio::test]
+    async fn fleet_get_snapshot_dispatch_returns_the_runtime_snapshot() {
+        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        // Ingest a uniquely-identified session into the process-global runtime.
+        // A unique ppid too: the registry evicts same-pid/new-session rows, and
+        // another (unlocked) test ingesting with a shared pid would drop ours.
+        let sid = "rpc-fleet-snapshot-001";
+        crate::fleet::runtime().ingest(&crate::fleet::registry::FleetEvent {
+            agent: crate::fleet::registry::FleetAgent::ClaudeCode,
+            event: "SessionStart".into(),
+            pid: None,
+            ppid: Some(918_273),
+            env: Default::default(),
+            payload: json!({ "session_id": sid }),
+        });
+
+        let state = test_state();
+        // Host-generic (reaches the runtime directly): works on a headless host.
+        let result = dispatch(
+            "fleet_get_snapshot",
+            json!({}),
+            &state,
+            &headless_host(),
+            "dev-fleet-snap",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("fleet_get_snapshot must dispatch host-generically");
+        let sessions = result["sessions"].as_array().expect("sessions array");
+        assert!(sessions.iter().any(|s| s["sessionId"] == sid));
+    }
+
     // ── Missing Authorization → 401 (middleware) ──────────────────────────────
 
     #[tokio::test]
@@ -2840,8 +3325,7 @@ mod tests {
         use crate::companion_api::store::AppStore;
         let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
         crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
-        let store =
-            crate::companion_api::store::sqlite::SqliteAppStore::in_memory().expect("open");
+        let store = crate::companion_api::store::sqlite::SqliteAppStore::in_memory().expect("open");
         crate::companion_api::data_plane::install_headless_store(Some(
             store.clone() as Arc<dyn AppStore>
         ));
@@ -4021,6 +4505,7 @@ mod tests {
             "read_text_file",
             "fs_read_workspace_file",
             "terminal_list_all",
+            "terminal_complete_paths",
             "plugin_list",
             "workflow_run_list",
             "twin_source_list",
@@ -4037,6 +4522,7 @@ mod tests {
             "write_text_file",
             "fs_write_workspace_file",
             "terminal_exec",
+            "terminal_kill_port",
             "plugin_install",
             "workflow_delete",
             "twin_delete",
@@ -4059,6 +4545,10 @@ mod tests {
             "fs_write_workspace_file",
             "terminal_exec",
             "terminal_kill",
+            "terminal_kill_port",
+            // Unconfined directory listing — read-only AND control-gated,
+            // same dual-axis treatment as read_text_file below.
+            "terminal_complete_paths",
             "plugin_install",
             "plugin_uninstall",
             "workflow_delete",

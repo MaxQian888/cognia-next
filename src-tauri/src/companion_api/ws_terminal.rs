@@ -788,7 +788,10 @@ mod tests {
             TerminalEvent::Data { bytes: vec![b'x'] },
         ));
         assert!(
-            matches!(overflow, Err(tokio::sync::mpsc::error::TrySendError::Full(_))),
+            matches!(
+                overflow,
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_))
+            ),
             "channel should be full at capacity (bounded)"
         );
     }

@@ -244,8 +244,7 @@ mod tests {
 
     fn test_state() -> SharedState {
         use crate::companion_api::{
-            deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
-            CompanionState,
+            deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache, CompanionState,
         };
         Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),

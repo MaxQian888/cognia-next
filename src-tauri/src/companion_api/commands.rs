@@ -366,6 +366,17 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // re-pulls exactly when data changed instead of waiting for the next
     // foreground/resume/network trigger.
     register_tauri_event(app, Arc::clone(&bus), "sync://invalidate");
+    // ADR-0038 — repo change signal from the native git watcher
+    // (`git/watcher.rs`). Remote source-control clients can't run
+    // `git_watch_start` (it needs the Tauri watcher state), so this forwarded
+    // frame is their only push-based refresh trigger; the desktop StatusBar
+    // owns the watcher lifecycle.
+    register_tauri_event(app, Arc::clone(&bus), "git://status-changed");
+    // ADR-0009 — live agent-fleet snapshot. A phone / companion browser watching
+    // the fleet subscribes to this to mirror the desktop island in real time
+    // (backfill via the `fleet_get_snapshot` RPC). Full-snapshot semantics, so
+    // no push trigger — it fires on every tool call and would spam notifications.
+    register_tauri_event(app, Arc::clone(&bus), crate::fleet::UPDATE_EVENT);
     // Heartbeat / presence signal emitted by the JWT middleware on each request.
     register_tauri_event(app, bus, "companion://device-seen");
     // Phase B4 — push fan-out for events worth notifying about while the
@@ -986,9 +997,18 @@ mod tests {
 
     #[test]
     fn push_body_strips_any_scheme_prefix() {
-        assert_eq!(push_body_for_channel("claude://message-added"), "message-added");
-        assert_eq!(push_body_for_channel("companion://needs-input"), "needs-input");
-        assert_eq!(push_body_for_channel("workflow://run-terminal"), "run-terminal");
+        assert_eq!(
+            push_body_for_channel("claude://message-added"),
+            "message-added"
+        );
+        assert_eq!(
+            push_body_for_channel("companion://needs-input"),
+            "needs-input"
+        );
+        assert_eq!(
+            push_body_for_channel("workflow://run-terminal"),
+            "run-terminal"
+        );
         assert_eq!(push_body_for_channel("no-scheme"), "no-scheme");
     }
 

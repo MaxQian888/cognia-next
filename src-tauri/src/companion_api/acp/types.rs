@@ -183,7 +183,9 @@ pub fn map_acp_mode_to_send(mode_id: &str) -> &str {
 pub fn session_new_result(session_id: &str) -> Value {
     let available_modes: Vec<Value> = ACP_SESSION_MODES
         .iter()
-        .map(|(id, name, description)| json!({ "id": id, "name": name, "description": description }))
+        .map(
+            |(id, name, description)| json!({ "id": id, "name": name, "description": description }),
+        )
         .collect();
     let available_models: Vec<Value> = ACP_SESSION_MODELS
         .iter()
@@ -533,7 +535,10 @@ mod tests {
         assert!(!is_valid_model("gpt-4"));
         // Mode → send-options mapping is identity for the advertised ids.
         assert_eq!(map_acp_mode_to_send("plan"), "plan");
-        assert_eq!(map_acp_mode_to_send("bypassPermissions"), "bypassPermissions");
+        assert_eq!(
+            map_acp_mode_to_send("bypassPermissions"),
+            "bypassPermissions"
+        );
     }
 
     #[test]

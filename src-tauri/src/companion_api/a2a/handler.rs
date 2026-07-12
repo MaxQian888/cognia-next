@@ -384,9 +384,7 @@ mod tests {
 
         let driver = tokio::spawn({
             let state = Arc::clone(&state);
-            async move {
-                drive_turn(&state, None, &test_ctx(), receiver, "ctx-1", "task-1").await
-            }
+            async move { drive_turn(&state, None, &test_ctx(), receiver, "ctx-1", "task-1").await }
         });
 
         // Give the driver a moment to start awaiting, then publish frames.

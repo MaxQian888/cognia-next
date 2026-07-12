@@ -163,8 +163,13 @@ mod tests {
         let t = Arc::clone(&transport);
         let b = Arc::clone(&bridge);
         let handle = tokio::spawn(async move {
-            b.dispatch(t.as_ref(), "character_upsert", json!({ "id": "c1" }), DEFAULT_TIMEOUT)
-                .await
+            b.dispatch(
+                t.as_ref(),
+                "character_upsert",
+                json!({ "id": "c1" }),
+                DEFAULT_TIMEOUT,
+            )
+            .await
         });
         let (channel, payload) = loop {
             if let Some(entry) = transport.last() {
@@ -190,7 +195,12 @@ mod tests {
         let bridge = DesktopWritesBridge::new();
         let transport = RecordingBridgeTransport::failing();
         let err = Arc::clone(&bridge)
-            .dispatch(transport.as_ref(), "character_upsert", json!({}), DEFAULT_TIMEOUT)
+            .dispatch(
+                transport.as_ref(),
+                "character_upsert",
+                json!({}),
+                DEFAULT_TIMEOUT,
+            )
             .await
             .expect_err("emit fails");
         assert!(err.contains("forced failure"));

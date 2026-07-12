@@ -52,11 +52,17 @@ mod tests {
         reset_task_store_for_tests();
         assert!(lookup_task("nope").is_none());
 
-        record_task("t1", json!({ "id": "t1", "status": { "state": "completed" } }));
+        record_task(
+            "t1",
+            json!({ "id": "t1", "status": { "state": "completed" } }),
+        );
         assert_eq!(lookup_task("t1").unwrap()["status"]["state"], "completed");
 
         // Replace in place — no duplicate.
-        record_task("t1", json!({ "id": "t1", "status": { "state": "canceled" } }));
+        record_task(
+            "t1",
+            json!({ "id": "t1", "status": { "state": "canceled" } }),
+        );
         assert_eq!(lookup_task("t1").unwrap()["status"]["state"], "canceled");
         reset_task_store_for_tests();
     }

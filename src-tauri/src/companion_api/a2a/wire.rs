@@ -128,10 +128,7 @@ pub fn message_parts_to_send_content(message: &Value) -> Result<Value, String> {
                     .get("file")
                     .ok_or_else(|| "file part missing `file`".to_string())?;
                 let name = file.get("name").and_then(Value::as_str).unwrap_or("file");
-                let mime = file
-                    .get("mimeType")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
+                let mime = file.get("mimeType").and_then(Value::as_str).unwrap_or("");
                 if let Some(bytes) = file.get("bytes").and_then(Value::as_str) {
                     if mime.starts_with("image/") {
                         out.push(json!({
@@ -245,10 +242,10 @@ mod tests {
         assert!(message_parts_to_send_content(&json!({ "parts": [{ "kind": "text" }] })).is_err());
         assert!(message_parts_to_send_content(&json!({ "parts": [{ "kind": "audio" }] })).is_err());
         assert!(message_parts_to_send_content(&json!({ "parts": [{ "kind": "file" }] })).is_err());
-        assert!(
-            message_parts_to_send_content(&json!({ "parts": [{ "kind": "file", "file": {} }] }))
-                .is_err()
-        );
+        assert!(message_parts_to_send_content(
+            &json!({ "parts": [{ "kind": "file", "file": {} }] })
+        )
+        .is_err());
         assert!(message_parts_to_send_content(&json!({ "parts": [{ "text": "x" }] })).is_err());
     }
 }

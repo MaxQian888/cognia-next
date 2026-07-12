@@ -145,7 +145,13 @@ mod tests {
         // Rotation: blow past the cap, then append — the old file moves to
         // `.log.1` and a fresh line starts the new file.
         std::fs::write(&path, vec![b'x'; (MAX_LOG_BYTES + 1) as usize]).unwrap();
-        record("external_agent_kill", "brain-local", "service", "allow", json!({}));
+        record(
+            "external_agent_kill",
+            "brain-local",
+            "service",
+            "allow",
+            json!({}),
+        );
         let rotated = path.with_extension("log.1");
         assert!(rotated.exists(), "previous generation preserved");
         let fresh = std::fs::read_to_string(&path).unwrap();

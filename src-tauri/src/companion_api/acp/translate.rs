@@ -78,7 +78,11 @@ pub fn tool_kind(tool_name: &str) -> &'static str {
 /// Frames for other sessions (the bus is global) and event types with no ACP
 /// projection (`log`, `ready`, `usage_headers`, `control_response`,
 /// `plugin_tool_exec`, `system` frames, …) return an empty vec.
-pub fn translate_frame(session_id: &str, payload: &Value, turn: &mut TurnState) -> Vec<AcpOutbound> {
+pub fn translate_frame(
+    session_id: &str,
+    payload: &Value,
+    turn: &mut TurnState,
+) -> Vec<AcpOutbound> {
     let frame_session = payload
         .get("sessionId")
         .and_then(Value::as_str)
@@ -238,10 +242,7 @@ fn tool_use_to_update(block: &Value, turn: &mut TurnState, status: &str) -> Opti
     if !turn.seen_tool_calls.insert(id.to_string()) {
         return None;
     }
-    let name = block
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("tool");
+    let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
     Some(SessionUpdate::ToolCall {
         tool_call_id: id.to_string(),
         title: name.to_string(),

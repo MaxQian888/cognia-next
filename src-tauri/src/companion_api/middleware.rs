@@ -661,7 +661,9 @@ mod tests {
     // ── Service-scope token (ADR-0059 W4) ────────────────────────────────────
 
     fn service_request_from(ip: Option<&str>) -> Request<Body> {
-        let jwt = issue_service_jwt(SECRET, ACCOUNT_ID).expect("issue service jwt").0;
+        let jwt = issue_service_jwt(SECRET, ACCOUNT_ID)
+            .expect("issue service jwt")
+            .0;
         let mut req = Request::builder()
             .uri("/protected")
             .header("Authorization", format!("Bearer {jwt}"))
@@ -677,16 +679,25 @@ mod tests {
     #[tokio::test]
     async fn service_jwt_from_loopback_is_accepted() {
         let router = build_router(test_state());
-        let resp = router.oneshot(service_request_from(Some("127.0.0.1"))).await.unwrap();
+        let resp = router
+            .oneshot(service_request_from(Some("127.0.0.1")))
+            .await
+            .unwrap();
         assert_eq!(resp.status().as_u16(), 200);
         let body = body_json(resp).await;
-        assert_eq!(body["device_id"], crate::companion_api::jwt::SERVICE_DEVICE_ID);
+        assert_eq!(
+            body["device_id"],
+            crate::companion_api::jwt::SERVICE_DEVICE_ID
+        );
     }
 
     #[tokio::test]
     async fn service_jwt_from_remote_peer_is_rejected() {
         let router = build_router(test_state());
-        let resp = router.oneshot(service_request_from(Some("192.0.2.50"))).await.unwrap();
+        let resp = router
+            .oneshot(service_request_from(Some("192.0.2.50")))
+            .await
+            .unwrap();
         assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
         assert_eq!(body["code"], "service_token_remote");

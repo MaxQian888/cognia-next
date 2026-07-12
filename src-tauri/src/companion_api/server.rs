@@ -485,10 +485,7 @@ mod tests {
         // The pre-auth rate limiter requires a peer address; oneshot has no
         // TCP connection, so inject ConnectInfo the way the make-service
         // would.
-        let peer = axum::extract::ConnectInfo(std::net::SocketAddr::from((
-            [127, 0, 0, 1],
-            34567,
-        )));
+        let peer = axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 34567)));
 
         crate::headless::install_headless_services(Some(
             crate::headless::HeadlessServices::stub_for_tests(),
@@ -592,7 +589,10 @@ mod tests {
         // Guard against regressing back into the Clash/V2Ray default range —
         // every entry in proxy_config's known-port probe list is off-limits.
         for (port, _, _) in crate::proxy_config::detect::KNOWN_PORTS {
-            assert_ne!(DEFAULT_PORT, *port, "DEFAULT_PORT collides with a known proxy port");
+            assert_ne!(
+                DEFAULT_PORT, *port,
+                "DEFAULT_PORT collides with a known proxy port"
+            );
         }
     }
 }
