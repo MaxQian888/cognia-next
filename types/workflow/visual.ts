@@ -69,6 +69,13 @@ export type WorkflowNodeKind =
   | "action.team.update"
   | "action.team.task.dispatch"
   | "action.team.reconcile"
+  // Agent-team surface exposure (multi-bot orchestration): auto-compose a
+  // team from an objective, query team state/results mid-workflow, delegate
+  // to twin/background/external/team, and post into the team blackboard.
+  | "action.team.compose"
+  | "action.team.status"
+  | "action.team.delegate"
+  | "action.team.message"
   // User-placeable plan lifecycle actions (ADR-0045). These expose the
   // AgentPlan runtime and DB readers without going through the synthesized
   // per-step dispatch node below.
@@ -319,6 +326,10 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.plan.events",
   "action.plan.updateDraft",
   "action.plan.approve",
+  "action.team.compose",
+  "action.team.status",
+  "action.team.delegate",
+  "action.team.message",
   "action.plan.reject",
   "action.plan.refine",
   "action.plan.pause",

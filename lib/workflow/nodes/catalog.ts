@@ -322,6 +322,34 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Users",
     keywords: ["team", "update", "roster"],
   },
+  "action.team.compose": {
+    label: "Compose team from objective",
+    description:
+      "Auto-orchestrates an agent team from a single objective: routing assessment, roster composition, and task decomposition (PII-gated). Optionally starts the team immediately.",
+    iconName: "Wand2",
+    keywords: ["team", "auto", "compose", "orchestrate", "roster", "objective", "multi", "agents"],
+  },
+  "action.team.status": {
+    label: "Get team status",
+    description:
+      "Reads an agent team's live state mid-workflow: status, final result, and optionally its tasks, teammates, and delegations.",
+    iconName: "Users",
+    keywords: ["team", "status", "result", "tasks", "query", "agents"],
+  },
+  "action.team.delegate": {
+    label: "Delegate from team",
+    description:
+      "Delegates a sub-problem on behalf of a team to a digital twin, a background agent, an external agent (Claude Code / Codex), or another team — optionally awaiting the result.",
+    iconName: "Share2",
+    keywords: ["team", "delegate", "twin", "background", "external", "handoff", "agents"],
+  },
+  "action.team.message": {
+    label: "Post team message",
+    description:
+      "Posts a message into an agent team's shared chat/blackboard, optionally addressed to a specific teammate or attached to a task.",
+    iconName: "MessageSquare",
+    keywords: ["team", "message", "blackboard", "chat", "broadcast", "agents"],
+  },
   "action.plan.create": {
     label: "Create plan",
     description: "Create an AgentPlan for a session through the PlanRuntime lifecycle.",

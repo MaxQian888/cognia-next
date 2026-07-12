@@ -289,6 +289,64 @@ const TeamUpdateParams = z.object({
   patch: z.record(z.string(), z.unknown()).optional(),
 })
 
+// action.team.compose — auto-orchestrate a team from a single objective
+// (planAutoOrchestration → materializeProposal). `autoStart` optionally kicks
+// off the lifecycle immediately after materialization.
+const TeamComposeParams = z.object({
+  objective: requiredString("required"),
+  name: optionalString,
+  maxRoster: numberRange(1, 16).optional(),
+  preferredPattern: z
+    .enum([
+      "manager_worker",
+      "parallel_specialists",
+      "background_handoff",
+      "external_handoff",
+      "single_agent_recommended",
+      "ultracode_orchestration",
+    ])
+    .optional(),
+  autoStart: z.boolean().optional(),
+  ultracode: z.boolean().optional(),
+})
+
+// action.team.status — read-only snapshot of an agent team (status,
+// finalResult, tasks/teammates/delegations on demand).
+const TeamStatusParams = z.object({
+  teamId: requiredString("required"),
+  includeTasks: z.boolean().optional(),
+  includeTeammates: z.boolean().optional(),
+  includeDelegations: z.boolean().optional(),
+})
+
+// action.team.delegate — hand a sub-problem to another agent system on
+// behalf of a team. Target-specific requirements (twinId / targetTeamId /
+// targetAgentId / prompt) are enforced at runtime in the executor because
+// they depend on `target`.
+const TeamDelegateParams = z.object({
+  teamId: requiredString("required"),
+  target: z.enum(["twin", "background", "external", "team"]),
+  taskId: optionalString,
+  prompt: optionalString,
+  systemPrompt: optionalString,
+  reason: optionalString,
+  twinId: optionalString,
+  targetTeamId: optionalString,
+  targetAgentId: optionalString,
+  awaitCompletion: z.boolean().optional(),
+  force: z.boolean().optional(),
+  ultracode: z.boolean().optional(),
+})
+
+// action.team.message — post into the team blackboard / chat.
+const TeamMessageParams = z.object({
+  teamId: requiredString("required"),
+  content: requiredString("required"),
+  senderId: optionalString,
+  recipientId: optionalString,
+  taskId: optionalString,
+})
+
 // Synthesizer-emitted dispatch node. `requiredString` MUST be called — passing
 // the bare function reference made every field validate as a Zod function type
 // instead of a non-empty string, silently disabling validation here.
@@ -1534,6 +1592,10 @@ export const PARAMS_SCHEMAS = {
   "action.team.run": TeamRunParams,
   "action.team.task.dispatch": TeamTaskDispatchParams,
   "action.team.reconcile": TeamReconcileParams,
+  "action.team.compose": TeamComposeParams,
+  "action.team.status": TeamStatusParams,
+  "action.team.delegate": TeamDelegateParams,
+  "action.team.message": TeamMessageParams,
   "action.plan.create": PlanCreateParams,
   "action.plan.get": PlanIdParams,
   "action.plan.list": PlanListParams,

@@ -17,6 +17,9 @@ import { httpRetryFallbackTemplate } from "./templates/http-retry-fallback"
 import { parallelAnalystsTemplate } from "./templates/parallel-analysts"
 import { inboxTriageTwinTemplate } from "./templates/inbox-triage-twin"
 import { githubIssueToPrTemplate } from "./templates/github-issue-to-pr"
+import { autoTeamObjectiveTemplate } from "./templates/auto-team-objective"
+import { teamDelegationHubTemplate } from "./templates/team-delegation-hub"
+import { teamLifecycleReviewTemplate } from "./templates/team-lifecycle-review"
 
 const NOW = 1_730_000_000_000 // Stable timestamp so re-seeds don't change row hashes.
 
@@ -743,6 +746,10 @@ export function buildBuiltInWorkflowTemplates(): VisualWorkflow[] {
     parallelAnalystsTemplate(),
     inboxTriageTwinTemplate(),
     githubIssueToPrTemplate(),
+    // Phase C — agent-team surface templates (compose / status / delegate / message).
+    autoTeamObjectiveTemplate(),
+    teamDelegationHubTemplate(),
+    teamLifecycleReviewTemplate(),
     ...buildGithubDeliveryTemplates(),
   ]
 }

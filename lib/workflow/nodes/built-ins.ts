@@ -3031,6 +3031,37 @@ registerNodeExecutor({
   },
 })
 
+// ── action.team.compose / status / delegate / message ────────────────────
+// Agent-team surface exposure (multi-bot orchestration) — logic in
+// ./actions/team-ops so this registry stays thin. Compose can run a whole
+// team lifecycle (autoStart) and delegate can await a full background /
+// external / team run — both are single-shot side effects, so no retry.
+registerNodeExecutor({
+  kind: "action.team.compose",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/team-ops")).runTeamCompose(ctx),
+})
+
+registerNodeExecutor({
+  kind: "action.team.status",
+  typeVersion: 1,
+  execute: async (ctx) => (await import("./actions/team-ops")).runTeamStatus(ctx),
+})
+
+registerNodeExecutor({
+  kind: "action.team.delegate",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/team-ops")).runTeamDelegate(ctx),
+})
+
+registerNodeExecutor({
+  kind: "action.team.message",
+  typeVersion: 1,
+  execute: async (ctx) => (await import("./actions/team-ops")).runTeamMessage(ctx),
+})
+
 // ── action.plan.step.dispatch ─────────────────────────────────────────────
 // Per ADR-0045 P2. Synthesizer-emitted node: one per PlanStep. Looks up the
 // per-run PlanRunContext (registered by `runPlan` before runWorkflow) and
