@@ -23,6 +23,7 @@ import {
   applyNonInteractiveEnv,
   bashToolDescription,
 } from "../shared/shell-detect.mjs"
+import { detectInteractiveCommand } from "../shared/interactive-detect.mjs"
 import { resolveToolPath } from "./read.mjs"
 
 // Re-exported for back-compat: the canonical implementation now lives in
@@ -131,6 +132,20 @@ export function createBashTool({ cwd, bgShells, shell }) {
   const descriptor = shell ?? activeShellDescriptor()
   async function execBash(args) {
     try {
+      // A one-shot capture shell has no TTY: an interactive program (REPL,
+      // editor, ssh, login flow, `git rebase -i`, `psql`, `top`, …) would hang
+      // or read EOF here. Reject it early — before any spawn — and point at the
+      // PTY escape hatch. Background mode is exempt (a user may intentionally
+      // detach a long-running process).
+      if (!args.run_in_background) {
+        const interactive = detectInteractiveCommand(args.command)
+        if (interactive.interactive) {
+          const head = interactive.head ?? "command"
+          return toolError(
+            `command "${head}" is interactive and needs a TTY; the bash tool runs without one, so it would hang or read EOF. Run it through terminal_repl_spawn (a PTY): terminal_repl_spawn({ shell: "${head}", ... }) → terminal_repl_write (append "\\n" to submit) → terminal_repl_read. For git/*-i style, pass a non-interactive flag instead (e.g. git rebase without -i, git commit -m "...").`
+          )
+        }
+      }
       for (const pattern of DANGEROUS_PATTERNS) {
         if (pattern.test(args.command)) {
           return toolError(

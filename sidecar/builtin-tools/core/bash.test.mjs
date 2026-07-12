@@ -74,6 +74,42 @@ test("bash hard-rejects destructive chaining patterns", async () => {
   assert.match(textOf(res), /rejected/)
 })
 
+test("bash redirects an interactive command to a PTY and never spawns it", async () => {
+  // The interactive guard returns before any spawn: assert the PTY-redirect
+  // message (only the early guard can produce it) and that no spill file is
+  // created — a structural proof that execution never reached `spawn`.
+  const tmp = os.tmpdir()
+  const countSpills = async () =>
+    (await fsp.readdir(tmp)).filter((f) => f.startsWith("cognia-bash-")).length
+  const before = await countSpills()
+  const tool = createBashTool({ cwd: tmp, shell: legacyShell })
+  for (const command of ["vim notes.txt", "python", "ssh example.com", "git rebase -i main"]) {
+    const res = await tool.handler({ command }, {})
+    assert.equal(res.isError, true, command)
+    assert.match(textOf(res), /interactive and needs a TTY/, command)
+    assert.match(textOf(res), /terminal_repl_spawn/, command)
+  }
+  assert.equal(await countSpills(), before, "interactive commands must never spawn (no spill)")
+})
+
+test("bash does NOT intercept an interactive command in background mode", async () => {
+  // run_in_background is exempt from the interactive guard. With no background
+  // registry the call falls through to the background branch (not the guard),
+  // proving the guard was bypassed.
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const res = await tool.handler({ command: "python", run_in_background: true }, {})
+  assert.equal(res.isError, true)
+  assert.match(textOf(res), /background execution is not available/)
+  assert.doesNotMatch(textOf(res), /interactive and needs a TTY/)
+})
+
+test("bash still runs a normal command whose argument merely mentions an editor", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const res = await tool.handler({ command: "echo vim" }, {})
+  assert.ok(!res.isError, textOf(res))
+  assert.match(textOf(res), /vim/)
+})
+
 test("bash respects workdir", async () => {
   const tool = createBashTool({ cwd: os.homedir(), shell: legacyShell })
   const printCwd = process.platform === "win32" ? "cd" : "pwd"

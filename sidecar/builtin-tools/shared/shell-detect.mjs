@@ -220,6 +220,7 @@ export function bashToolDescription(descriptor = activeShellDescriptor()) {
   const hint = descriptor.syntaxHint ? ` ${descriptor.syntaxHint}` : ` Runs ${descriptor.label}.`
   const tail =
     "Long output keeps the tail. Set run_in_background to start a long-running command and poll it " +
-    "with bash_output. Each call is approval-gated unless a permission rule allows it."
+    "with bash_output. Each call is approval-gated unless a permission rule allows it. " +
+    "Interactive programs (REPLs, editors, ssh, login flows) do NOT work here — use terminal_repl_* for those."
   return `${base}${hint} ${tail}`
 }

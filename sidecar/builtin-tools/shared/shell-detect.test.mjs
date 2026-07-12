@@ -165,6 +165,11 @@ test("bashToolDescription falls back to a 'Runs <label>' note for sh", () => {
   assert.match(desc, /Runs POSIX sh/)
 })
 
+test("bashToolDescription steers interactive programs to terminal_repl_*", () => {
+  const desc = bashToolDescription(resolveShellDescriptor({ platform: "linux" }))
+  assert.match(desc, /Interactive programs.*terminal_repl/)
+})
+
 // --- caching --------------------------------------------------------------
 
 test("activeShellDescriptor caches and __reset clears it", () => {
