@@ -65,6 +65,49 @@ describe("trigger-subscriptions", () => {
     expect(tg.map((m) => m.workflowId)).not.toContain("wf_disc")
   })
 
+  it("matches connector.inbound fine-grained filters (senderIds / channelKinds / keywords / requireMention)", () => {
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_sender", [
+        trigger("n", "trigger.connector.inbound", { adapterId: "tg", senderIds: ["u1", "u2"] }),
+      ]),
+      wf("wf_group", [
+        trigger("n", "trigger.connector.inbound", { adapterId: "tg", channelKinds: ["group"] }),
+      ]),
+      wf("wf_kw", [
+        trigger("n", "trigger.connector.inbound", { adapterId: "tg", keywords: ["Deploy"] }),
+      ]),
+      wf("wf_mention", [
+        trigger("n", "trigger.connector.inbound", { adapterId: "tg", requireMention: true }),
+      ]),
+      wf("wf_any", [trigger("n", "trigger.connector.inbound", { adapterId: "tg" })]),
+    ])
+
+    const base = {
+      adapterId: "tg",
+      senderId: "u1",
+      channelKind: "group",
+      plainText: "please deploy now",
+      selfMentioned: false,
+    }
+    const hit = findMatchingWorkflows("trigger.connector.inbound", base).map((m) => m.workflowId)
+    // sender u1 matches senderIds; group matches channelKinds; "deploy"
+    // matches keywords case-insensitively; requireMention fails (false).
+    expect(hit).toEqual(expect.arrayContaining(["wf_sender", "wf_group", "wf_kw", "wf_any"]))
+    expect(hit).not.toContain("wf_mention")
+
+    const other = findMatchingWorkflows("trigger.connector.inbound", {
+      ...base,
+      senderId: "u9",
+      channelKind: "private",
+      plainText: "hello",
+      selfMentioned: true,
+    }).map((m) => m.workflowId)
+    expect(other).toEqual(expect.arrayContaining(["wf_mention", "wf_any"]))
+    expect(other).not.toContain("wf_sender")
+    expect(other).not.toContain("wf_group")
+    expect(other).not.toContain("wf_kw")
+  })
+
   it("matches chat.message by characterId and optionally by sessionId", () => {
     _seedTriggerSubscriptionsForTest([
       wf("wf_global", [trigger("n", "trigger.chat.message", { characterId: "char_a" })]),

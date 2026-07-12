@@ -592,6 +592,32 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "PencilLine",
     keywords: ["draft", "review", "inbox"],
   },
+  "action.connector.reaction": {
+    label: "React to message",
+    description: "Adds an emoji reaction to a platform message via a connected adapter.",
+    iconName: "SmilePlus",
+    keywords: ["reaction", "emoji", "react", "lark", "acknowledge"],
+  },
+  "action.connector.delete": {
+    label: "Delete message",
+    description: "Recalls / deletes an already-sent platform message via a connected adapter.",
+    iconName: "Trash2",
+    keywords: ["delete", "recall", "withdraw", "message", "outbound"],
+  },
+  "action.connector.forward": {
+    label: "Forward message",
+    description:
+      "Forwards a message (or merge-forwards several) to another conversation via a connected adapter.",
+    iconName: "Forward",
+    keywords: ["forward", "merge", "relay", "share", "message", "lark"],
+  },
+  "action.connector.waitReply": {
+    label: "Wait for reply",
+    description:
+      "Pauses the run until a matching inbound message arrives in the conversation (or the wait times out). Routes the reply text downstream.",
+    iconName: "MessageCircleReply",
+    keywords: ["wait", "reply", "inbound", "listen", "response", "feedback"],
+  },
   "action.approval.request": {
     label: "Request approval",
     description:

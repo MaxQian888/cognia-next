@@ -12,6 +12,10 @@ import type {
   AdapterContext,
   AdapterHealth,
   AdapterHealthState,
+  ReactionRef,
+  ReadReceipt,
+  ForwardMessageInput,
+  UrgentChannel,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
@@ -31,6 +35,11 @@ import {
   serializeEditAsync,
   serializeDelete,
   serializeReaction,
+  serializeRemoveReaction,
+  serializeForward,
+  serializeMergeForward,
+  serializeUrgent,
+  sniffReceiveId,
 } from "./serialize"
 import { getTenantAccessToken, getUserAccessToken } from "./auth"
 import { LarkApiError, withTatRefresh, withUserTokenRefresh } from "./auth-retry"
@@ -613,10 +622,90 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     },
   })
 
-  async function addReaction(messageId: string, emojiType: string): Promise<void> {
+  async function addReaction(messageId: string, emojiType: string): Promise<ReactionRef> {
     const call = serializeReaction(messageId, emojiType)
     const urlPath = call.url.replace(LARK_API_BASE, "")
+    // Surface the platform reaction_id so callers can later `removeReaction`
+    // exactly this reaction (Lark keys removals by reaction_id, not emoji).
+    const resp = (await doRequest(call.method, urlPath, call.payload)) as {
+      data?: { reaction_id?: string }
+    } | null
+    return { ...(resp?.data?.reaction_id ? { reactionId: resp.data.reaction_id } : {}) }
+  }
+
+  async function removeReaction(messageId: string, reactionId: string): Promise<void> {
+    const call = serializeRemoveReaction(messageId, reactionId)
+    const urlPath = call.url.replace(LARK_API_BASE, "")
     await doRequest(call.method, urlPath, call.payload)
+  }
+
+  /**
+   * Forward a single message, or merge-forward several as one card, to another
+   * conversation. `input.target` is a conversation key
+   * (`lark:adapterId:channelId`) or a bare Lark receive id.
+   */
+  async function forwardMessage(input: ForwardMessageInput): Promise<OutboundResult> {
+    try {
+      const channelId = input.target.includes(":")
+        ? parseConversationKey(input.target).remoteChatId
+        : input.target
+      const { receiveIdType, receiveId } = sniffReceiveId(channelId)
+      const ids = (input.messageIds ?? []).filter(Boolean)
+      const call =
+        ids.length > 1
+          ? serializeMergeForward(ids, receiveIdType, receiveId)
+          : serializeForward(input.messageId ?? ids[0] ?? "", receiveIdType, receiveId)
+      const urlPath = call.url.replace(LARK_API_BASE, "")
+      const resp = (await doRequest(call.method, urlPath, call.payload)) as {
+        data?: { message_id?: string }
+      } | null
+      const messageId = resp?.data?.message_id
+      return { ok: true, ...(messageId ? { platformMessageId: messageId } : {}) }
+    } catch (err) {
+      return {
+        ok: false,
+        error: {
+          code: "platform_5xx",
+          message: err instanceof Error ? err.message : String(err),
+          retryable: true,
+        },
+      }
+    }
+  }
+
+  /**
+   * Escalate an already-sent message to `userIds` (open_ids) via an urgent
+   * channel (加急). Requires the elevated `im:message.urgent*` scope — a bot
+   * without it throws a Lark scope error, which the caller surfaces.
+   */
+  async function sendUrgent(
+    messageId: string,
+    userIds: string[],
+    via: UrgentChannel = "app"
+  ): Promise<void> {
+    const call = serializeUrgent(messageId, userIds, via)
+    const urlPath = call.url.replace(LARK_API_BASE, "")
+    await doRequest(call.method, urlPath, call.payload)
+  }
+
+  /** Query who has read a message (feedback). Bot needs `im:message` readonly. */
+  async function getReadReceipt(messageId: string): Promise<ReadReceipt> {
+    const resp = (await doRequest(
+      "GET",
+      `/im/v1/messages/${encodeURIComponent(messageId)}/read_users?user_id_type=open_id&page_size=50`
+    )) as {
+      data?: { items?: Array<{ user_id?: string; timestamp?: string }>; has_more?: boolean }
+    } | null
+    const items = resp?.data?.items ?? []
+    return {
+      readers: items
+        .map((it) => ({
+          userId: String(it.user_id ?? ""),
+          ...(it.timestamp ? { readAt: Number(it.timestamp) } : {}),
+        }))
+        .filter((r) => r.userId.length > 0),
+      hasMore: resp?.data?.has_more === true,
+    }
   }
 
   // Chat management (W2 multi-bot): five optional PlatformAdapter methods,
@@ -647,6 +736,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     refreshCredentials,
     setPresenceStatus: presence.setPresenceStatus,
     pinMessage: presence.pinMessage,
+    unpinMessage: presence.unpinMessage,
     createChat: chatMgmt.createChat,
     addChatMembers: chatMgmt.addChatMembers,
     removeChatMembers: chatMgmt.removeChatMembers,
@@ -666,6 +756,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       return summariseSkillCapabilities("lark")
     },
     addReaction,
+    removeReaction,
+    forwardMessage,
+    sendUrgent,
+    getReadReceipt,
   }
 
   return adapter

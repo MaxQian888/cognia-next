@@ -15,6 +15,7 @@ import {
   markFailed,
   markDeadlettered,
   replayDeadlettered,
+  waitForOutboundTerminal,
   type EnqueueInput,
 } from "./outbound-jobs"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -559,5 +560,78 @@ describe("outbound-jobs", () => {
       })
       expect(job.projectId).toBe("proj-active")
     })
+  })
+
+  // F1 — truthful feedback across failover / load-balance reroute.
+  describe("waitForOutboundTerminal — reroute following", () => {
+    it("resolves immediately for an already-sent job", async () => {
+      const job = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "c1",
+        request: makeRequest(),
+      })
+      await markSent(job.id, "om_direct")
+      const term = await waitForOutboundTerminal(job.id, 5_000)
+      expect(term?.status).toBe("sent")
+      expect(term?.platformMessageId).toBe("om_direct")
+    }, 30_000)
+
+    it("returns undefined for an unknown job id", async () => {
+      expect(await waitForOutboundTerminal("oqj_nope", 200)).toBeUndefined()
+    }, 30_000)
+
+    it("markDeadlettered stamps the reroute pointer + mechanism", async () => {
+      const job = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "c1",
+        request: makeRequest(),
+      })
+      await markDeadlettered(job.id, "balanced", "Balanced to adp_2", {
+        toJobId: "oqj_sibling",
+        mechanism: "balanced",
+      })
+      const row = await getDb().outboundQueue.get(job.id)
+      expect(row?.status).toBe("deadlettered")
+      expect(row?.reroutedToJobId).toBe("oqj_sibling")
+      expect(row?.reroutedMechanism).toBe("balanced")
+    }, 30_000)
+
+    it("follows a rerouted-deadlettered job to the sibling's real terminal status", async () => {
+      const original = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "c1",
+        request: makeRequest("orig"),
+      })
+      const sibling = await enqueue({
+        adapterId: "adp_2",
+        conversationKey: "c1",
+        request: makeRequest("sib"),
+      })
+      // Sibling actually delivered; original was dead-lettered as a reroute.
+      await markSent(sibling.id, "om_sibling")
+      await markDeadlettered(original.id, "failover", "Failed over to adp_2", {
+        toJobId: sibling.id,
+        mechanism: "failover",
+      })
+      // A caller awaiting the ORIGINAL must see the sibling's real delivery,
+      // not the reroute dead-letter (the F1 bug).
+      const term = await waitForOutboundTerminal(original.id, 5_000)
+      expect(term?.id).toBe(sibling.id)
+      expect(term?.status).toBe("sent")
+      expect(term?.platformMessageId).toBe("om_sibling")
+    }, 30_000)
+
+    it("returns a plain deadlettered job as-is when there is no reroute pointer", async () => {
+      const job = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "c1",
+        request: makeRequest(),
+      })
+      await markDeadlettered(job.id, "max_attempts", "gave up")
+      const term = await waitForOutboundTerminal(job.id, 5_000)
+      expect(term?.id).toBe(job.id)
+      expect(term?.status).toBe("deadlettered")
+      expect(term?.reroutedToJobId).toBeUndefined()
+    }, 30_000)
   })
 })

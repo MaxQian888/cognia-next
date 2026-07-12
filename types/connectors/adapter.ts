@@ -136,6 +136,45 @@ export interface TauriWsHandle {
   close: () => Promise<void>
 }
 
+/**
+ * Reference to a platform reaction, returned by `addReaction` so the same
+ * reaction can later be removed. `reactionId` is absent when the platform's
+ * reaction API doesn't surface a handle.
+ */
+export interface ReactionRef {
+  reactionId?: string
+}
+
+/** One reader of a message, from `getReadReceipt`. */
+export interface MessageReader {
+  /** Platform user id (open_id on Lark). */
+  userId: string
+  /** Unix ms when the user read the message, when the platform reports it. */
+  readAt?: number
+}
+
+/** Read-receipt snapshot for a single message. */
+export interface ReadReceipt {
+  readers: MessageReader[]
+  /** True when the platform paginated and more readers exist beyond this page. */
+  hasMore: boolean
+}
+
+/** Urgent (加急) escalation channel for {@link PlatformAdapter.sendUrgent}. */
+export type UrgentChannel = "app" | "sms" | "phone"
+
+/**
+ * Input for {@link PlatformAdapter.forwardMessage}. Provide EITHER a single
+ * `messageId` (plain forward) OR `messageIds` (merge-forward several messages
+ * into one combined card). `target` is a conversation key
+ * (`platform:adapterId:channelId`) or a raw platform receive id.
+ */
+export interface ForwardMessageInput {
+  messageId?: string
+  messageIds?: string[]
+  target: string
+}
+
 export interface PlatformAdapter {
   readonly meta: AdapterMeta
   readonly id: string
@@ -168,8 +207,41 @@ export interface PlatformAdapter {
    * the platform's reaction code (Lark reaction type like "THUMBSUP") or a
    * unicode emoji, adapter-interpreted. Optional — only platforms with a
    * reaction API implement it; callers treat absence as unsupported.
+   *
+   * Returns a {@link ReactionRef} carrying the platform reaction id (when the
+   * platform surfaces one) so the same reaction can later be removed via
+   * {@link removeReaction}. Legacy callers that ignore the return value are
+   * unaffected.
    */
-  addReaction?(messageId: string, emojiType: string): Promise<void>
+  addReaction?(messageId: string, emojiType: string): Promise<ReactionRef | void>
+  /**
+   * Remove a previously added reaction by its platform reaction id (obtained
+   * from {@link addReaction}). Optional; paired with the same `send.reaction`
+   * capability. Callers treat absence as unsupported.
+   */
+  removeReaction?(messageId: string, reactionId: string): Promise<void>
+  /**
+   * Forward an existing message (`input.messageId`) — or merge-forward several
+   * (`input.messageIds`) as one combined card — into another conversation.
+   * Optional; declared alongside the `forward` capability. Returns the same
+   * `{ ok, platformMessageId, error }` shape as {@link send}.
+   */
+  forwardMessage?(input: ForwardMessageInput): Promise<OutboundResult>
+  /**
+   * Escalate an already-sent message to the given users via an urgent channel
+   * (Feishu 加急: in-app / SMS / phone). Optional; declared alongside the
+   * `urgent` capability. NOTE: requires an elevated platform scope
+   * (`im:message.urgent*` on Lark) that many bots lack — callers surface a
+   * scope error to the operator.
+   */
+  sendUrgent?(messageId: string, userIds: string[], via?: UrgentChannel): Promise<void>
+  /**
+   * Query who has read an already-sent message (read receipts). Optional
+   * feedback surface — only platforms with a read-user API implement it
+   * (Feishu `GET /im/v1/messages/:id/read_users`). Callers treat absence as
+   * "read state unknown".
+   */
+  getReadReceipt?(messageId: string): Promise<ReadReceipt>
   setTyping?(conversationKey: string, on: boolean): Promise<void>
   uploadFile?(file: AttachmentDescriptor): Promise<AdapterAttachmentRef>
   fetchHistory?(
@@ -191,6 +263,11 @@ export interface PlatformAdapter {
    * the top of a conversation. Optional; paired with the `pin` capability.
    */
   pinMessage?(conversationKey: string, messageId: string): Promise<void>
+  /**
+   * Remove a previously pinned message. Optional; paired with the same `pin`
+   * capability. Callers treat absence as unsupported.
+   */
+  unpinMessage?(messageId: string): Promise<void>
   /**
    * Chat management (W2 multi-bot) — all optional, each paired with a
    * capability flag the adapter must also declare:

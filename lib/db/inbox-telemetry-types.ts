@@ -27,6 +27,12 @@ export type InboxTelemetryKind =
   | "inbound.received"
   | "outbound.sent"
   | "outbound.failed"
+  // Circuit-open failover: `outbound-runner` re-enqueued a job through a
+  // sibling bot. `fields` carries `toAdapterId` + `newJobId`.
+  | "outbound.failover"
+  // Rate-limit spillover: `outbound-runner` re-enqueued a job through a
+  // less-loaded sibling bot. `fields` carries `toAdapterId` + `newJobId`.
+  | "outbound.balanced"
   | "breaker.open"
   | "breaker.close"
   | "quiet.deferred"

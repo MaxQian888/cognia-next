@@ -99,6 +99,12 @@ export async function updateAdapterInstance(
       // W5 (multi-bot same-group) — sibling-bot inbound guard.
       | "siblingBotPolicy"
       | "botInterplayBudget"
+      // Multi-bot outbound: per-bot throttle/breaker tuning + circuit-open
+      // failover targets (settings OutboundTuning card).
+      | "outboundTuning"
+      | "failoverAdapterIds"
+      // Multi-bot outbound: rate-limit spillover targets (load balancing).
+      | "balanceAdapterIds"
     >
   >
 ): Promise<void> {

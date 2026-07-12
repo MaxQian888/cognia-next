@@ -686,4 +686,76 @@ describe("createLarkAdapter", () => {
     const adapter = makeAdapter()
     await expect(adapter.refreshCredentials!()).resolves.toBeUndefined()
   })
+
+  // ── forward / merge-forward / urgent / read-receipt / reaction removal ──
+  function mockHttp(dataByUrl: (url: string) => unknown) {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd === "connectors_http_request") {
+        const url = (args as { req: { url: string } }).req.url
+        if (url.includes("tenant_access_token")) return makeTatOkResp("t-x")
+        return { status: 200, headers: {}, body: JSON.stringify(dataByUrl(url)) }
+      }
+      return undefined
+    })
+  }
+  const httpCallTo = (substr: string) =>
+    mockInvoke.mock.calls.find(
+      ([cmd, args]: [string, unknown]) =>
+        cmd === "connectors_http_request" &&
+        (args as { req: { url: string } }).req.url.includes(substr)
+    )?.[1] as { req: { url: string; method: string; body?: string } } | undefined
+
+  it("forwardMessage() POSTs to /forward and surfaces the new message id", async () => {
+    mockHttp(() => ({ code: 0, data: { message_id: "om_fwd" } }))
+    const res = await makeAdapter().forwardMessage!({ messageId: "om_1", target: "oc_dest" })
+    expect(res.ok).toBe(true)
+    expect(res.platformMessageId).toBe("om_fwd")
+    const call = httpCallTo("/forward")
+    expect(call?.req.method).toBe("POST")
+    expect(call?.req.url).toContain("receive_id_type=chat_id")
+    expect(JSON.parse(call!.req.body!).receive_id).toBe("oc_dest")
+  })
+
+  it("forwardMessage() merge-forwards multiple ids", async () => {
+    mockHttp(() => ({ code: 0, data: { message_id: "om_merged" } }))
+    const res = await makeAdapter().forwardMessage!({
+      messageIds: ["om_1", "om_2"],
+      target: "oc_dest",
+    })
+    expect(res.ok).toBe(true)
+    const call = httpCallTo("merge_forward")
+    expect(call?.req.method).toBe("POST")
+    expect(JSON.parse(call!.req.body!).message_id_list).toEqual(["om_1", "om_2"])
+  })
+
+  it("addReaction() surfaces the reaction_id and removeReaction() DELETEs it", async () => {
+    mockHttp((url) =>
+      url.includes("/reactions") ? { code: 0, data: { reaction_id: "rx_9" } } : { code: 0 }
+    )
+    const adapter = makeAdapter()
+    const ref = await adapter.addReaction!("om_1", "THUMBSUP")
+    expect((ref as { reactionId?: string }).reactionId).toBe("rx_9")
+    await adapter.removeReaction!("om_1", "rx_9")
+    expect(httpCallTo("/reactions/rx_9")?.req.method).toBe("DELETE")
+  })
+
+  it("getReadReceipt() GETs read_users and parses readers", async () => {
+    mockHttp(() => ({
+      code: 0,
+      data: { items: [{ user_id: "ou_a", timestamp: "1700000000" }], has_more: false },
+    }))
+    const rr = await makeAdapter().getReadReceipt!("om_1")
+    expect(rr.readers).toEqual([{ userId: "ou_a", readAt: 1700000000 }])
+    expect(rr.hasMore).toBe(false)
+    expect(httpCallTo("read_users")?.req.method).toBe("GET")
+  })
+
+  it("sendUrgent() PATCHes urgent_app with the user_id_list", async () => {
+    mockHttp(() => ({ code: 0, data: {} }))
+    await makeAdapter().sendUrgent!("om_1", ["ou_a"], "app")
+    const call = httpCallTo("urgent_app")
+    expect(call?.req.method).toBe("PATCH")
+    expect(JSON.parse(call!.req.body!).user_id_list).toEqual(["ou_a"])
+  })
 })

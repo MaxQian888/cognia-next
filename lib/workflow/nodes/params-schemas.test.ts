@@ -512,6 +512,23 @@ describe("action: twin / connector / mcp / plugin", () => {
     expect(s.safeParse({ adapterId: "tg", conversationKey: "k", content: "hi" }).success).toBe(true)
   })
 
+  it("action.connector.send fine-grain: edit target + delivery-wait bounds", () => {
+    const s = PARAMS_SCHEMAS["action.connector.send"]
+    const base = { adapterId: "tg", conversationKey: "k", content: "hi" }
+    expect(
+      s.safeParse({
+        ...base,
+        editTargetMessageId: "om_1",
+        waitForDelivery: true,
+        waitTimeoutMs: 5_000,
+      }).success
+    ).toBe(true)
+    // Wait budget is bounded to [100, 300000] at the schema layer.
+    expect(s.safeParse({ ...base, waitTimeoutMs: 50 }).success).toBe(false)
+    expect(s.safeParse({ ...base, waitTimeoutMs: 600_000 }).success).toBe(false)
+    expect(s.safeParse({ ...base, waitForDelivery: "yes" }).success).toBe(false)
+  })
+
   it("action.connector.draft requires conversationKey, sessionId, content", () => {
     const s = PARAMS_SCHEMAS["action.connector.draft"]
     expect(s.safeParse({}).success).toBe(false)

@@ -83,6 +83,16 @@ export interface DispatchRuleAction {
   characterId?: string
   teamId?: string
   workflowId?: string
+  /**
+   * Deliver the reply through ANOTHER of our own bot instances (multi-bot
+   * cross-account send). Must reference an enabled adapter instance of the
+   * SAME platform; the runtime validates at dispatch time and falls back
+   * to the receiving bot (with an audit trail) when the target is missing,
+   * disabled, or cross-platform. A rule carrying ONLY this field is a
+   * valid routing target — it keeps the default character/team handling
+   * but swaps the sending bot.
+   */
+  respondViaAdapterId?: string
 }
 
 /** One declarative inbound dispatch rule — see `AdapterInstanceRow.dispatchRules`. */
@@ -95,6 +105,30 @@ export interface DispatchRule {
   match: DispatchRuleMatch
   /** at least one field; teamId wins over workflowId wins over characterId at dispatch */
   action: DispatchRuleAction
+}
+
+/**
+ * Per-bot outbound throttle / circuit-breaker tuning. Every knob is
+ * optional — omitted knobs keep the runner's built-in defaults (token
+ * bucket 20 capacity / 5 refill per second; breaker 30 s window / 5 min
+ * events / 50 % failure threshold / 30 s cooldown). Values are validated
+ * at the consumption site (`sanitizeOutboundTuning`) so a hand-edited row
+ * with a zero/negative/NaN knob degrades to the default instead of
+ * stalling deliveries.
+ */
+export interface OutboundTuningConfig {
+  /** Token-bucket capacity (max burst size). */
+  rateCapacity?: number
+  /** Token-bucket refill rate, tokens per second (fractional allowed). */
+  rateRefillPerSec?: number
+  /** Circuit-breaker sliding window, ms. */
+  breakerWindowMs?: number
+  /** Minimum events inside the window before the threshold is evaluated. */
+  breakerMinEvents?: number
+  /** Failure percentage (0–100) that trips the breaker. */
+  breakerFailureThresholdPct?: number
+  /** How long the breaker stays open before probing again, ms. */
+  breakerCooldownMs?: number
 }
 
 /**
@@ -123,6 +157,35 @@ export interface AdapterInstanceRow {
   quietHours?: { from: string; to: string; tz: string }
   /** Adapter is muted globally (drops outbound). */
   muted?: boolean
+  /**
+   * Per-bot outbound throttle / circuit-breaker tuning. Overrides the
+   * runner's built-in defaults for THIS adapter instance only. Consumed by
+   * `lib/connectors/outbound-runner.ts:getAdapterState`, which rebuilds the
+   * live bucket/breaker when the tuning fingerprint changes, so edits apply
+   * on the next delivery without restarting the runner.
+   */
+  outboundTuning?: OutboundTuningConfig
+  /**
+   * Ordered failover targets (multi-bot): when THIS adapter's circuit
+   * breaker is open at delivery time, the outbound runner re-enqueues the
+   * job through the first enabled same-platform sibling listed here instead
+   * of dead-lettering it. Single hop only — a failed-over job never fails
+   * over again (`request.metadata.failoverFromAdapterId` guard), so two
+   * bots cannot ping-pong a job between their open circuits.
+   */
+  failoverAdapterIds?: string[]
+  /**
+   * Ordered load-balancing spillover targets (multi-bot). When THIS
+   * adapter's outbound token bucket is exhausted at delivery time, the
+   * runner re-enqueues the job through the first enabled same-platform
+   * sibling listed here that still has send capacity, instead of deferring
+   * it behind the rate limit. Complements `failoverAdapterIds` (hard
+   * failure → failover; throughput pressure → balance). Single hop only —
+   * a rerouted job (either mechanism) is never rerouted again
+   * (`request.metadata.balancedFromAdapterId` / `failoverFromAdapterId`
+   * guards), so two saturated bots cannot ping-pong a job.
+   */
+  balanceAdapterIds?: string[]
   /**
    * Cache of `PlatformAdapter.a2uiCapability()` written at adapter start.
    * `lib/claude/build-options.ts:resolveSendOptions` reads this to inject
@@ -419,11 +482,15 @@ export type OutboundJobStatus = "pending" | "sending" | "sent" | "failed" | "dea
  *                          chat, or an `im.broadcast` fan-out target)
  *                          enqueued the send after passing its own PII gate
  *                          and HITL confirmation.
+ *   - `"plugin"`         — a plugin called `ctx.connectors.enqueueSend`
+ *                          (gated `connectors:send` + the enqueue-side PII
+ *                          gate) to ride the durable queue.
  *
  * Rows persisted before v41 backfill to `"ai-run"` because that's the
  * only path that existed when they were created.
  */
-export type OutboundJobSource = "ai-run" | "manual" | "workflow" | "draft-approved" | "skill"
+export type OutboundJobSource =
+  "ai-run" | "manual" | "workflow" | "draft-approved" | "skill" | "plugin"
 
 /**
  * Cross-reference back to the Visual Workflow node that produced a
@@ -480,6 +547,18 @@ export interface OutboundJobRow {
    * transparently.
    */
   platformMessageId?: string
+  /**
+   * When the runner reroutes this job to a sibling bot (circuit-open
+   * failover or rate-limit load-balance), the ORIGINAL job is dead-lettered
+   * (reason `failover`/`balanced`) and this points at the NEW job on the
+   * sibling that actually carries the delivery. A caller awaiting the
+   * original follows this pointer (`waitForOutboundTerminal`) to the
+   * sibling's true terminal status instead of misreading the reroute as a
+   * failure. Non-indexed JSON column — no schema version bump.
+   */
+  reroutedToJobId?: string
+  /** How the reroute happened, set alongside {@link reroutedToJobId}. */
+  reroutedMechanism?: "failover" | "balanced"
 }
 
 /**
@@ -700,6 +779,15 @@ export interface ConversationOverrideRow {
    * "UTC", etc.). Cleared by leaving the form's quiet-hours toggle off.
    */
   quietHours?: { from: string; to: string; tz: string }
+  /**
+   * Per-conversation outbound mute (fine-grained control). When `true`,
+   * the outbound runner defers every delivery on THIS conversation exactly
+   * like the adapter-level `AdapterInstanceRow.muted` (60 s re-check, not a
+   * failure), while the bot keeps talking in its other conversations.
+   * Precedence: adapter-level mute is checked first (global wins), then
+   * this flag. Non-indexed additive — no Dexie bump.
+   */
+  muted?: boolean
   /**
    * Conversation lifecycle status (CRM maturation, schema v83). Chatwoot-style:
    * absent / "open" (active) | "pending" (waiting on someone) | "snoozed"

@@ -127,6 +127,14 @@ export type WorkflowNodeKind =
   | "action.memory.store"
   | "action.connector.send"
   | "action.connector.draft"
+  // Fine-grained connector feedback ops (multi-bot round 3): react to /
+  // delete a platform message by id, and block until a reply arrives in a
+  // conversation (the workflow-side feedback loop for IM sends).
+  | "action.connector.reaction"
+  | "action.connector.delete"
+  // Forward / merge-forward an existing message to another conversation.
+  | "action.connector.forward"
+  | "action.connector.waitReply"
   // Human-in-the-loop gate (ADR 0061 P2): blocks until a human approves or
   // rejects — desktop notification action, or a paired device via the
   // `workflow_approval_respond` RPC. Routes downstream via decision handles.
@@ -371,6 +379,10 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.mobile.location",
   "action.mobile.share",
   "action.mobile.notify",
+  "action.connector.reaction",
+  "action.connector.delete",
+  "action.connector.forward",
+  "action.connector.waitReply",
   "action.mcp.invokeTool",
   "action.plugin.invoke",
   "action.github.openPr",

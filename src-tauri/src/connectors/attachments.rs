@@ -279,8 +279,7 @@ mod tests {
         let unique_ref = format!("test-err-img-{}", uuid::Uuid::new_v4());
         let url = format!("{}/forbidden.png", mock_server.uri());
 
-        let result =
-            fetch_attachment("test-adapter".into(), unique_ref.clone(), url, None).await;
+        let result = fetch_attachment("test-adapter".into(), unique_ref.clone(), url, None).await;
         assert!(result.is_err(), "non-2xx must be an error, got {result:?}");
 
         // Nothing may have landed in the cache — a later fetch with a fixed
@@ -322,7 +321,9 @@ mod tests {
             .unwrap()
             .expect("cached attachment must be readable");
         assert_eq!(
-            base64::engine::general_purpose::STANDARD.decode(b64).unwrap(),
+            base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .unwrap(),
             vec![5u8, 6, 7, 8]
         );
         // Over cap → None.
@@ -352,9 +353,14 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("Authorization".to_string(), "Bearer tok".to_string());
 
-        let fetched = fetch_attachment("test-adapter".into(), unique_ref.clone(), url, Some(headers))
-            .await
-            .unwrap();
+        let fetched = fetch_attachment(
+            "test-adapter".into(),
+            unique_ref.clone(),
+            url,
+            Some(headers),
+        )
+        .await
+        .unwrap();
         assert_eq!(fetched.remote_ref, unique_ref);
         mock_server.verify().await;
     }

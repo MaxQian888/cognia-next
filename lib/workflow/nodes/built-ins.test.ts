@@ -3,6 +3,7 @@
  */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { markSent } from "@/lib/db/outbound-jobs"
 // Importing built-ins triggers their side-effecting registrations.
 import "./built-ins"
 import { getExecutor } from "./registry"
@@ -27,6 +28,44 @@ const respondToWebhookMock = respondToWebhook as jest.Mock
 jest.mock("@/lib/ai/renderer-llm-client", () => ({
   buildRendererLlmClient: jest.fn(),
 }))
+
+// Connector bus — the reaction/delete/waitReply executors reach the live
+// adapters through it. Inline jest.fn()s (TDZ-safe) with per-test overrides.
+jest.mock("@/lib/connectors/bus", () => ({
+  getBus: () => ({
+    addReactionOutbound: (...args: unknown[]) => mockAddReaction(...args),
+    removeReactionOutbound: (...args: unknown[]) => mockRemoveReaction(...args),
+    forwardOutbound: (...args: unknown[]) => mockForward(...args),
+    deleteOutbound: (...args: unknown[]) => mockDeleteOutbound(...args),
+    subscribeInbound: (observer: (event: unknown) => void) => mockSubscribeInbound(observer),
+  }),
+}))
+type MockOutboundResult = {
+  ok: boolean
+  error?: { code: string; message: string; retryable: boolean }
+  reactionId?: string
+  platformMessageId?: string
+}
+const mockAddReaction = jest.fn(async (..._args: unknown[]): Promise<MockOutboundResult> => ({
+  ok: true,
+}))
+const mockRemoveReaction = jest.fn(async (..._args: unknown[]): Promise<MockOutboundResult> => ({
+  ok: true,
+}))
+const mockForward = jest.fn(async (..._args: unknown[]): Promise<MockOutboundResult> => ({
+  ok: true,
+}))
+const mockDeleteOutbound = jest.fn(async (..._args: unknown[]): Promise<MockOutboundResult> => ({
+  ok: true,
+}))
+const inboundObservers: Array<(event: unknown) => void> = []
+const mockSubscribeInbound = jest.fn((observer: (event: unknown) => void) => {
+  inboundObservers.push(observer)
+  return () => {
+    const i = inboundObservers.indexOf(observer)
+    if (i >= 0) inboundObservers.splice(i, 1)
+  }
+})
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 const buildRendererLlmClientMock = buildRendererLlmClient as jest.Mock
 import { __resetPlanRuntimeForTesting } from "@/lib/agent/plan/runtime"
@@ -55,6 +94,12 @@ beforeEach(async () => {
   unregisterTaskExecutor("custom")
   __resetPlanRuntimeForTesting()
   buildRendererLlmClientMock.mockReset()
+  mockAddReaction.mockReset()
+  mockAddReaction.mockResolvedValue({ ok: true })
+  mockDeleteOutbound.mockReset()
+  mockDeleteOutbound.mockResolvedValue({ ok: true })
+  mockSubscribeInbound.mockClear()
+  inboundObservers.length = 0
 })
 
 function makeCtx<T extends Record<string, unknown>>(
@@ -1620,6 +1665,53 @@ describe("action.connector.send", () => {
     const queued = await getDb().outboundQueue.get(out.jobId)
     expect(queued?.status).toBe("pending")
     expect(queued?.conversationKey).toBe("tg:chat:42")
+    // The ref is derived from the composite key so adapters can resolve
+    // the platform recipient (they read channelId, not the key).
+    const ref = queued?.request.conversationRef as unknown as {
+      platform: string
+      channelId: string
+    }
+    expect(ref.platform).toBe("tg")
+    expect(ref.channelId).toBe("42")
+  })
+
+  it("honours replyToMessageId / threadId / explicit idempotencyKey", async () => {
+    const r = await exec(
+      "action.connector.send",
+      makeCtx("action.connector.send", {
+        adapterId: "lark_main",
+        conversationKey: "lark:lark_main:oc_chat_1",
+        content: "threaded reply",
+        replyToMessageId: "om_parent",
+        threadId: "thr_9",
+        idempotencyKey: "custom-key-1",
+      })
+    )
+    const out = r.output as { jobId: string; conversationKey: string; idempotencyKey: string }
+    // Thread id extends the FIFO lane key so threads get their own lane.
+    expect(out.conversationKey).toBe("lark:lark_main:oc_chat_1:thr_9")
+    expect(out.idempotencyKey).toBe("custom-key-1")
+    const queued = await getDb().outboundQueue.get(out.jobId)
+    expect(queued?.request.replyTo?.messageId).toBe("om_parent")
+    const ref = queued?.request.conversationRef as unknown as {
+      channelId: string
+      threadTs?: string
+    }
+    expect(ref.channelId).toBe("oc_chat_1")
+    expect(ref.threadTs).toBe("thr_9")
+  })
+
+  it("rejects a malformed conversationKey", async () => {
+    await expect(
+      exec(
+        "action.connector.send",
+        makeCtx("action.connector.send", {
+          adapterId: "x",
+          conversationKey: "not-a-composite-key",
+          content: "y",
+        })
+      )
+    ).rejects.toThrow(/malformed conversationKey/)
   })
 
   it("rejects empty adapter / conversation / content", async () => {
@@ -1641,6 +1733,368 @@ describe("action.connector.send", () => {
         makeCtx("action.connector.send", { adapterId: "x", conversationKey: "y" })
       )
     ).rejects.toThrow(/content/)
+  })
+
+  it("threads editTargetMessageId into the queued request (edit-in-place)", async () => {
+    const r = await exec(
+      "action.connector.send",
+      makeCtx("action.connector.send", {
+        adapterId: "lark_main",
+        conversationKey: "lark:lark_main:oc_chat_1",
+        content: "updated body",
+        editTargetMessageId: "om_existing_1",
+      })
+    )
+    const out = r.output as { jobId: string }
+    const queued = await getDb().outboundQueue.get(out.jobId)
+    expect(queued?.request.editTargetMessageId).toBe("om_existing_1")
+  })
+
+  it("waitForDelivery resolves with the terminal state when the job settles", async () => {
+    const execPromise = exec(
+      "action.connector.send",
+      makeCtx("action.connector.send", {
+        adapterId: "tg_wait",
+        conversationKey: "tg:tg_wait:chat_1",
+        content: "await me",
+        idempotencyKey: "wait-key-1",
+        waitForDelivery: true,
+        waitTimeoutMs: 10_000,
+      })
+    )
+    // Settle the job from the outside once it appears (the runner would do
+    // this in production) so the liveQuery wait resolves with `sent`.
+    let jobId: string | undefined
+    for (let i = 0; i < 100 && !jobId; i++) {
+      const rows = await getDb().outboundQueue.toArray()
+      jobId = rows.find((row) => row.idempotencyKey === "wait-key-1")?.id
+      if (!jobId) await new Promise<void>((res) => setTimeout(res, 20))
+    }
+    expect(jobId).toBeDefined()
+    await markSent(jobId!, "pm_settled_1")
+
+    const r = await execPromise
+    const out = r.output as {
+      delivered: boolean
+      status: string
+      platformMessageId?: string
+    }
+    expect(out.delivered).toBe(true)
+    expect(out.status).toBe("sent")
+    expect(out.platformMessageId).toBe("pm_settled_1")
+  })
+
+  it("waitForDelivery times out with the latest snapshot (still pending)", async () => {
+    const r = await exec(
+      "action.connector.send",
+      makeCtx("action.connector.send", {
+        adapterId: "tg_wait2",
+        conversationKey: "tg:tg_wait2:chat_1",
+        content: "nobody delivers me",
+        waitForDelivery: true,
+        waitTimeoutMs: 100,
+      })
+    )
+    const out = r.output as { delivered: boolean; status: string; platformMessageId?: string }
+    expect(out.delivered).toBe(false)
+    expect(out.status).toBe("pending")
+    expect(out.platformMessageId).toBeUndefined()
+  })
+
+  it("sends an A2UI card segment when cardJson is set (content = plain-text mirror)", async () => {
+    const surface = {
+      components: { root: { id: "root", component: "Card", title: "Hi" } },
+      dataModel: {},
+      rootId: "root",
+    }
+    const r = await exec(
+      "action.connector.send",
+      makeCtx("action.connector.send", {
+        adapterId: "lark_main",
+        conversationKey: "lark:lark_main:oc_chat_1",
+        content: "Hi (fallback)",
+        cardJson: JSON.stringify(surface),
+      })
+    )
+    const out = r.output as { jobId: string }
+    const queued = await getDb().outboundQueue.get(out.jobId)
+    const seg = queued?.request.segments[0] as unknown as {
+      type: string
+      surfaceId: string
+      content: { rootId: string }
+      plainTextMirror: string
+    }
+    expect(seg.type).toBe("a2ui")
+    expect(seg.surfaceId).toBe("wf:run_test:n_test")
+    expect(seg.content.rootId).toBe("root")
+    expect(seg.plainTextMirror).toBe("Hi (fallback)")
+  })
+
+  it("rejects a cardJson that is not valid JSON or not an A2UI surface", async () => {
+    await expect(
+      exec(
+        "action.connector.send",
+        makeCtx("action.connector.send", {
+          adapterId: "x",
+          conversationKey: "tg:x:1",
+          content: "y",
+          cardJson: "{not json",
+        })
+      )
+    ).rejects.toThrow(/not valid JSON/)
+    await expect(
+      exec(
+        "action.connector.send",
+        makeCtx("action.connector.send", {
+          adapterId: "x",
+          conversationKey: "tg:x:1",
+          content: "y",
+          cardJson: JSON.stringify({ nope: true }),
+        })
+      )
+    ).rejects.toThrow(/components/)
+  })
+})
+
+describe("action.connector.reaction", () => {
+  it("adds a reaction through bus.addReactionOutbound", async () => {
+    const r = await exec(
+      "action.connector.reaction",
+      makeCtx("action.connector.reaction", {
+        adapterId: "lark_main",
+        messageId: "om_1",
+        emoji: "THUMBSUP",
+      })
+    )
+    expect(mockAddReaction).toHaveBeenCalledWith("lark_main", "om_1", "THUMBSUP")
+    expect((r.output as { reacted: boolean }).reacted).toBe(true)
+  })
+
+  it("fails non-retryably on unsupported adapters", async () => {
+    mockAddReaction.mockResolvedValue({
+      ok: false,
+      error: { code: "unsupported", message: "no reactions", retryable: false },
+    })
+    await expect(
+      exec(
+        "action.connector.reaction",
+        makeCtx("action.connector.reaction", { adapterId: "a", messageId: "m", emoji: "OK" })
+      )
+    ).rejects.toThrow(/unsupported/)
+  })
+
+  it("rejects missing params", async () => {
+    await expect(
+      exec(
+        "action.connector.reaction",
+        makeCtx("action.connector.reaction", { adapterId: "a", messageId: "m" })
+      )
+    ).rejects.toThrow(/emoji/)
+  })
+
+  it("surfaces the platform reactionId from add on the output", async () => {
+    mockAddReaction.mockResolvedValue({ ok: true, reactionId: "rx_9" })
+    const r = await exec(
+      "action.connector.reaction",
+      makeCtx("action.connector.reaction", {
+        adapterId: "lark_main",
+        messageId: "om_1",
+        emoji: "OK",
+      })
+    )
+    expect((r.output as { reactionId?: string }).reactionId).toBe("rx_9")
+  })
+
+  it("removes a reaction through bus.removeReactionOutbound when op=remove", async () => {
+    const r = await exec(
+      "action.connector.reaction",
+      makeCtx("action.connector.reaction", {
+        adapterId: "lark_main",
+        messageId: "om_1",
+        op: "remove",
+        reactionId: "rx_9",
+      })
+    )
+    expect(mockRemoveReaction).toHaveBeenCalledWith("lark_main", "om_1", "rx_9")
+    expect((r.output as { reacted: boolean }).reacted).toBe(false)
+  })
+
+  it("rejects op=remove without a reactionId", async () => {
+    await expect(
+      exec(
+        "action.connector.reaction",
+        makeCtx("action.connector.reaction", {
+          adapterId: "a",
+          messageId: "m",
+          op: "remove",
+        })
+      )
+    ).rejects.toThrow(/reactionId/)
+  })
+})
+
+describe("action.connector.forward", () => {
+  it("forwards a single message through bus.forwardOutbound", async () => {
+    mockForward.mockResolvedValue({ ok: true, platformMessageId: "om_fwd" })
+    const r = await exec(
+      "action.connector.forward",
+      makeCtx("action.connector.forward", {
+        adapterId: "lark_main",
+        messageId: "om_1",
+        targetConversationKey: "lark:lark_main:oc_dest",
+      })
+    )
+    expect(mockForward).toHaveBeenCalledWith("lark_main", {
+      messageId: "om_1",
+      target: "lark:lark_main:oc_dest",
+    })
+    expect((r.output as { forwarded: boolean; platformMessageId?: string }).forwarded).toBe(true)
+    expect((r.output as { platformMessageId?: string }).platformMessageId).toBe("om_fwd")
+  })
+
+  it("merge-forwards multiple message ids", async () => {
+    mockForward.mockResolvedValue({ ok: true })
+    await exec(
+      "action.connector.forward",
+      makeCtx("action.connector.forward", {
+        adapterId: "lark_main",
+        messageIds: ["om_1", "om_2"],
+        targetConversationKey: "oc_dest",
+      })
+    )
+    expect(mockForward).toHaveBeenCalledWith("lark_main", {
+      messageIds: ["om_1", "om_2"],
+      target: "oc_dest",
+    })
+  })
+
+  it("rejects when neither messageId nor messageIds is provided", async () => {
+    await expect(
+      exec(
+        "action.connector.forward",
+        makeCtx("action.connector.forward", {
+          adapterId: "a",
+          targetConversationKey: "oc_dest",
+        })
+      )
+    ).rejects.toThrow(/messageId/)
+  })
+
+  it("fails non-retryably on unsupported adapters", async () => {
+    mockForward.mockResolvedValue({
+      ok: false,
+      error: { code: "unsupported", message: "no forward", retryable: false },
+    })
+    await expect(
+      exec(
+        "action.connector.forward",
+        makeCtx("action.connector.forward", {
+          adapterId: "a",
+          messageId: "m",
+          targetConversationKey: "oc_dest",
+        })
+      )
+    ).rejects.toThrow(/unsupported/)
+  })
+})
+
+describe("action.connector.delete", () => {
+  it("deletes through bus.deleteOutbound", async () => {
+    const r = await exec(
+      "action.connector.delete",
+      makeCtx("action.connector.delete", { adapterId: "lark_main", messageId: "om_2" })
+    )
+    expect(mockDeleteOutbound).toHaveBeenCalledWith("lark_main", "om_2")
+    expect((r.output as { deleted: boolean }).deleted).toBe(true)
+  })
+
+  it("fails non-retryably when the adapter is not registered", async () => {
+    mockDeleteOutbound.mockResolvedValue({
+      ok: false,
+      error: { code: "adapter_not_found", message: "gone", retryable: false },
+    })
+    await expect(
+      exec(
+        "action.connector.delete",
+        makeCtx("action.connector.delete", { adapterId: "gone", messageId: "om_x" })
+      )
+    ).rejects.toThrow(/adapter_not_found/)
+  })
+})
+
+describe("action.connector.waitReply", () => {
+  const makeInbound = (overrides: Record<string, unknown> = {}) => ({
+    conversationKey: "lark:lark_main:oc_chat_1",
+    messageId: "om_reply_1",
+    plainText: "approve please",
+    sender: { id: "lark:u1", remoteUserId: "ou_u1" },
+    mentions: { selfMentioned: false, users: [] },
+    ...overrides,
+  })
+
+  it("resolves with the first matching inbound reply", async () => {
+    const p = exec(
+      "action.connector.waitReply",
+      makeCtx("action.connector.waitReply", {
+        conversationKey: "lark:lark_main:oc_chat_1",
+        keywords: ["approve"],
+        timeoutMs: 5_000,
+      })
+    )
+    // Wait for the subscription, then fire a non-matching + a matching event.
+    for (let i = 0; i < 50 && inboundObservers.length === 0; i++) {
+      await new Promise<void>((res) => setTimeout(res, 10))
+    }
+    expect(inboundObservers.length).toBeGreaterThan(0)
+    inboundObservers[0](makeInbound({ conversationKey: "lark:other:oc_x" })) // wrong convo
+    inboundObservers[0](makeInbound({ plainText: "nothing relevant" })) // no keyword
+    inboundObservers[0](makeInbound()) // matches
+    const r = await p
+    const out = r.output as { replied: boolean; messageId: string; senderId: string; text: string }
+    expect(out.replied).toBe(true)
+    expect(out.messageId).toBe("om_reply_1")
+    expect(out.senderId).toBe("ou_u1")
+    expect(out.text).toBe("approve please")
+  })
+
+  it("filters by senderIds and requireMention", async () => {
+    const p = exec(
+      "action.connector.waitReply",
+      makeCtx("action.connector.waitReply", {
+        conversationKey: "lark:lark_main:oc_chat_1",
+        senderIds: ["ou_boss"],
+        requireMention: true,
+        timeoutMs: 5_000,
+      })
+    )
+    for (let i = 0; i < 50 && inboundObservers.length === 0; i++) {
+      await new Promise<void>((res) => setTimeout(res, 10))
+    }
+    inboundObservers[0](makeInbound()) // wrong sender
+    inboundObservers[0](makeInbound({ sender: { id: "lark:boss", remoteUserId: "ou_boss" } })) // right sender, no mention
+    inboundObservers[0](
+      makeInbound({
+        sender: { id: "lark:boss", remoteUserId: "ou_boss" },
+        mentions: { selfMentioned: true, users: [] },
+        messageId: "om_boss_ok",
+      })
+    )
+    const r = await p
+    expect((r.output as { messageId: string }).messageId).toBe("om_boss_ok")
+  })
+
+  it("resolves replied=false on timeout (not an error) and unsubscribes", async () => {
+    const r = await exec(
+      "action.connector.waitReply",
+      makeCtx("action.connector.waitReply", {
+        conversationKey: "lark:lark_main:oc_quiet",
+        timeoutMs: 1_000,
+      })
+    )
+    const out = r.output as { replied: boolean; timedOut: boolean }
+    expect(out.replied).toBe(false)
+    expect(out.timedOut).toBe(true)
+    expect(inboundObservers).toHaveLength(0) // disposer ran
   })
 })
 

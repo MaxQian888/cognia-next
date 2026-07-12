@@ -244,6 +244,81 @@ export function serializeReaction(messageId: string, emojiType: string): Seriali
 }
 
 /**
+ * Build a DELETE /im/v1/messages/<message_id>/reactions/<reaction_id> call.
+ * The reaction_id comes from the `data.reaction_id` of a prior add.
+ */
+export function serializeRemoveReaction(messageId: string, reactionId: string): SerializedLarkCall {
+  return {
+    method: "DELETE",
+    url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(reactionId)}`,
+    payload: {},
+  }
+}
+
+/**
+ * Sniff the Lark `receive_id_type` + `receive_id` for a bare channel id
+ * (forward / merge-forward targets that carry only the destination id). Mirrors
+ * the prefix rule in `buildReceiveIdParams`: `ou_`/`on_` → open_id, else chat_id.
+ */
+export function sniffReceiveId(channelId: string): {
+  receiveIdType: string
+  receiveId: string
+} {
+  if (channelId.startsWith("ou_") || channelId.startsWith("on_")) {
+    return { receiveIdType: "open_id", receiveId: channelId }
+  }
+  return { receiveIdType: "chat_id", receiveId: channelId }
+}
+
+/**
+ * Build a POST /im/v1/messages/<message_id>/forward call — forward a single
+ * message verbatim to another conversation.
+ */
+export function serializeForward(
+  messageId: string,
+  receiveIdType: string,
+  receiveId: string
+): SerializedLarkCall {
+  return {
+    method: "POST",
+    url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(messageId)}/forward?receive_id_type=${encodeURIComponent(receiveIdType)}`,
+    payload: { receive_id: receiveId },
+  }
+}
+
+/**
+ * Build a POST /im/v1/messages/merge_forward call — merge several messages
+ * into one combined card and forward to another conversation.
+ */
+export function serializeMergeForward(
+  messageIds: readonly string[],
+  receiveIdType: string,
+  receiveId: string
+): SerializedLarkCall {
+  return {
+    method: "POST",
+    url: `${LARK_API_BASE}/im/v1/messages/merge_forward?receive_id_type=${encodeURIComponent(receiveIdType)}`,
+    payload: { receive_id: receiveId, message_id_list: [...messageIds] },
+  }
+}
+
+/**
+ * Build a PATCH /im/v1/messages/<message_id>/urgent_<via> call (加急).
+ * Requires the elevated `im:message.urgent*` scope; user ids are open_ids.
+ */
+export function serializeUrgent(
+  messageId: string,
+  userIds: readonly string[],
+  via: "app" | "sms" | "phone"
+): SerializedLarkCall {
+  return {
+    method: "PATCH",
+    url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(messageId)}/urgent_${via}?user_id_type=open_id`,
+    payload: { user_id_list: [...userIds] },
+  }
+}
+
+/**
  * Project an OutboundRequest into a send SerializedLarkCall (primary entry point).
  */
 export function serializeOutbound(req: OutboundRequest): SerializedLarkCall {

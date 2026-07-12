@@ -12,14 +12,14 @@ use matrix_sdk_crypto::{
 };
 use matrix_sdk_sqlite::SqliteCryptoStore;
 use parking_lot::Mutex;
-use rand::{RngCore, rngs::OsRng};
-use ruma::api::IncomingResponse;
+use rand::{rngs::OsRng, RngCore};
 use ruma::api::client::sync::sync_events::DeviceLists;
+use ruma::api::IncomingResponse;
 use ruma::events::{AnyMessageLikeEventContent, AnyToDeviceEvent, MessageLikeEventContent};
 use ruma::serde::Raw;
 use ruma::{DeviceId, OneTimeKeyAlgorithm, RoomId, TransactionId, UInt, UserId};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -197,9 +197,19 @@ fn crypto_store_passphrase(adapter_id: &str, device_id: &str) -> Result<String, 
 fn device_path_segment(device_id: &str) -> String {
     let seg: String = device_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    if seg.is_empty() { "_".to_string() } else { seg }
+    if seg.is_empty() {
+        "_".to_string()
+    } else {
+        seg
+    }
 }
 
 fn default_store_dir(adapter_id: &str, device_id: &str) -> PathBuf {
@@ -341,7 +351,11 @@ pub async fn matrix_crypto_share_room_key(
     let users = parse_user_ids(&req.user_ids)?;
     let user_refs: Vec<&UserId> = users.iter().map(AsRef::as_ref).collect();
     let requests = machine
-        .share_room_key(&room_id, user_refs.into_iter(), EncryptionSettings::default())
+        .share_room_key(
+            &room_id,
+            user_refs.into_iter(),
+            EncryptionSettings::default(),
+        )
         .await
         .map_err(|err| format!("Matrix share room key failed: {err}"))?;
 
@@ -421,8 +435,7 @@ pub async fn matrix_crypto_mark_request_sent(
 
     match req.kind.as_str() {
         "toDevice" => {
-            let response =
-                ruma::api::client::to_device::send_event_to_device::v3::Response::new();
+            let response = ruma::api::client::to_device::send_event_to_device::v3::Response::new();
             machine
                 .mark_request_as_sent(txn_id, &response)
                 .await
@@ -779,11 +792,9 @@ mod tests {
 
         // Resetting one adapter must leave the other's session intact.
         matrix_crypto_reset_for_test("mx-drop");
-        assert!(
-            matrix_crypto_outgoing_requests("mx-keep".to_string())
-                .await
-                .is_ok()
-        );
+        assert!(matrix_crypto_outgoing_requests("mx-keep".to_string())
+            .await
+            .is_ok());
         assert!(get_machine("mx-drop").is_err());
     }
 }

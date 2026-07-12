@@ -55,6 +55,7 @@ function chunk<T>(list: readonly T[], size: number): T[][] {
 export function createLarkPresence(deps: LarkPresenceDeps): {
   setPresenceStatus: (input: PresenceStatusInput) => Promise<void>
   pinMessage: (conversationKey: string, messageId: string) => Promise<void>
+  unpinMessage: (messageId: string) => Promise<void>
 } {
   async function ensureStatusId(title: string): Promise<string> {
     const existing = await deps.getStatusId()
@@ -63,6 +64,11 @@ export function createLarkPresence(deps: LarkPresenceDeps): {
       title,
       i18n_title: { zh_cn: title, en_us: title },
       color: "BLUE",
+      // Feishu now rejects a status create without an icon_key (99992402
+      // "icon_key is required"); it must be one of the platform's fixed set.
+      // `GeneralWorkFromHome` is a neutral badge that fits a live usage/status
+      // indicator. Verified against the live API's options list.
+      icon_key: "GeneralWorkFromHome",
     })) as LarkStatusEnvelope | null
     const id = created?.data?.system_status?.system_status_id ?? created?.data?.system_status?.id
     if (!id) {
@@ -114,5 +120,9 @@ export function createLarkPresence(deps: LarkPresenceDeps): {
     await deps.request("POST", "/im/v1/pins", { message_id: messageId })
   }
 
-  return { setPresenceStatus, pinMessage }
+  async function unpinMessage(messageId: string): Promise<void> {
+    await deps.request("DELETE", `/im/v1/pins/${encodeURIComponent(messageId)}`)
+  }
+
+  return { setPresenceStatus, pinMessage, unpinMessage }
 }

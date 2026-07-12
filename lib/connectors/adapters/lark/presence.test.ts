@@ -118,3 +118,22 @@ describe("createLarkPresence.pinMessage", () => {
     ])
   })
 })
+
+describe("createLarkPresence.unpinMessage", () => {
+  it("DELETEs /im/v1/pins/<message_id>", async () => {
+    const { presence, calls } = harness()
+    await presence.unpinMessage("om_123")
+    expect(calls).toEqual([{ method: "DELETE", urlPath: "/im/v1/pins/om_123", body: undefined }])
+  })
+})
+
+describe("createLarkPresence create payload", () => {
+  it("includes a valid icon_key (Feishu now requires it)", async () => {
+    const { presence, calls } = harness()
+    await presence.setPresenceStatus({ text: "AI", targetUserIds: [] })
+    const create = calls.find(
+      (c) => c.method === "POST" && c.urlPath === "/personal_settings/v1/system_statuses"
+    )
+    expect((create?.body as { icon_key?: string }).icon_key).toBe("GeneralWorkFromHome")
+  })
+})

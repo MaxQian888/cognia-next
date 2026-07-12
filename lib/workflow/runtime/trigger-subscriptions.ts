@@ -148,6 +148,27 @@ export interface TriggerMatchContext {
    * an empty string only matches nodes without a `commandContains` filter.
    */
   command?: string
+  /**
+   * Platform sender id (connector.inbound) — matched against the node's
+   * `senderIds` array param (OR). A node without the filter matches any
+   * sender.
+   */
+  senderId?: string
+  /**
+   * Channel kind (connector.inbound) — private / group / channel / thread,
+   * matched against the node's `channelKinds` array param.
+   */
+  channelKind?: string
+  /**
+   * Message plain text (connector.inbound) — matched case-insensitively as
+   * a substring against the node's `keywords` array param (OR).
+   */
+  plainText?: string
+  /**
+   * Whether the bot itself was @-mentioned (connector.inbound) — a node
+   * with `requireMention: true` only fires when this is true.
+   */
+  selfMentioned?: boolean
 }
 
 /**
@@ -201,6 +222,23 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
   if (typeof p.commandContains === "string" && p.commandContains.length > 0) {
     if (typeof ctx.command !== "string" || !ctx.command.includes(p.commandContains)) return false
   }
+  // connector.inbound fine-grained filters (all optional).
+  if (Array.isArray(p.senderIds) && p.senderIds.length > 0) {
+    if (typeof ctx.senderId !== "string" || !p.senderIds.includes(ctx.senderId)) return false
+  }
+  if (Array.isArray(p.channelKinds) && p.channelKinds.length > 0) {
+    if (typeof ctx.channelKind !== "string" || !p.channelKinds.includes(ctx.channelKind)) {
+      return false
+    }
+  }
+  if (Array.isArray(p.keywords) && p.keywords.length > 0) {
+    const text = (ctx.plainText ?? "").toLowerCase()
+    const hit = p.keywords.some(
+      (k) => typeof k === "string" && k.length > 0 && text.includes(k.toLowerCase())
+    )
+    if (!hit) return false
+  }
+  if (p.requireMention === true && ctx.selfMentioned !== true) return false
   return true
 }
 

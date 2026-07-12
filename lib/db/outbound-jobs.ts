@@ -14,6 +14,7 @@
  * ai-run reply.
  */
 
+import { liveQuery } from "dexie"
 import type {
   OutboundJobRow,
   OutboundJobSource,
@@ -134,6 +135,101 @@ export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobR
   // immediately actionable unless the caller scheduled it for the future.
   emitOutboundEnqueued()
   return row
+}
+
+/** Terminal outbound statuses — the job will never transition again. */
+export function isOutboundTerminal(status: OutboundJobRow["status"]): boolean {
+  return status === "sent" || status === "deadlettered"
+}
+
+/**
+ * Max reroute hops `waitForOutboundTerminal` will follow before giving up and
+ * returning the last row as-is. The runner's single-hop reroute guard already
+ * bounds real chains to depth 1; this is a defensive loop cap.
+ */
+const MAX_REROUTE_HOPS = 3
+
+/**
+ * Resolve with the job row once it reaches a terminal state (`sent` /
+ * `deadlettered`), or with the LATEST snapshot when `timeoutMs` elapses
+ * first — callers distinguish "still retrying" from "failed terminally" by
+ * inspecting `status`. Resolves `undefined` when the job id is unknown.
+ *
+ * **Reroute-aware:** when a terminal row is `deadlettered` with a
+ * `reroutedToJobId` (the runner moved the delivery to a sibling bot via
+ * failover / load-balance), this FOLLOWS the pointer and waits on the sibling
+ * with the remaining timeout — so a caller awaiting the original job learns
+ * the delivery's TRUE outcome (the sibling's `sent` + real `platformMessageId`)
+ * instead of misreading the reroute as a failure.
+ *
+ * Event-driven via Dexie `liveQuery` (no polling). Shared by the plugin
+ * delivery-feedback API (`ctx.connectors.waitForDelivery`) and the
+ * `action.connector.send` workflow node's `waitForDelivery` param.
+ */
+export async function waitForOutboundTerminal(
+  jobId: string,
+  timeoutMs: number
+): Promise<OutboundJobRow | undefined> {
+  const deadline = Date.now() + timeoutMs
+  let currentId = jobId
+  for (let hop = 0; hop <= MAX_REROUTE_HOPS; hop++) {
+    const remaining = Math.max(0, deadline - Date.now())
+    const row = await waitForTerminalRaw(currentId, remaining)
+    if (!row) return undefined
+    if (
+      row.status === "deadlettered" &&
+      row.reroutedToJobId &&
+      row.reroutedToJobId !== currentId &&
+      hop < MAX_REROUTE_HOPS
+    ) {
+      currentId = row.reroutedToJobId
+      continue
+    }
+    return row
+  }
+  return getDb().outboundQueue.get(currentId)
+}
+
+/**
+ * Single-job terminal wait (no reroute following). The public
+ * {@link waitForOutboundTerminal} wraps this to walk reroute chains.
+ */
+async function waitForTerminalRaw(
+  jobId: string,
+  timeoutMs: number
+): Promise<OutboundJobRow | undefined> {
+  const initial = await getDb().outboundQueue.get(jobId)
+  if (!initial) return undefined
+  if (isOutboundTerminal(initial.status)) return initial
+  return new Promise<OutboundJobRow>((resolve) => {
+    let latest = initial
+    const subscription = liveQuery(() => getDb().outboundQueue.get(jobId)).subscribe({
+      next: (row) => {
+        if (!row) return
+        latest = row
+        if (isOutboundTerminal(row.status)) {
+          cleanup()
+          resolve(row)
+        }
+      },
+      error: () => {
+        cleanup()
+        resolve(latest)
+      },
+    })
+    const timer = setTimeout(() => {
+      cleanup()
+      resolve(latest)
+    }, timeoutMs)
+    const cleanup = () => {
+      clearTimeout(timer)
+      try {
+        subscription.unsubscribe()
+      } catch {
+        // best-effort
+      }
+    }
+  })
 }
 
 /**
@@ -299,16 +395,25 @@ export async function markFailed(
   })
 }
 
-/** Transition a job to "deadlettered" — no more retries. */
+/**
+ * Transition a job to "deadlettered" — no more retries. When the dead-letter
+ * is a reroute (the runner moved the delivery to a sibling bot), pass
+ * `reroute` so the row points at the sibling job that actually carries the
+ * delivery; `waitForOutboundTerminal` follows that pointer so a caller
+ * awaiting THIS job sees the sibling's real terminal status, not a false
+ * failure.
+ */
 export async function markDeadlettered(
   jobId: string,
   errorCode: string,
-  message: string
+  message: string,
+  reroute?: { toJobId: string; mechanism: "failover" | "balanced" }
 ): Promise<void> {
   await getDb().outboundQueue.update(jobId, {
     status: "deadlettered",
     lastErrorCode: errorCode,
     lastError: message,
+    ...(reroute ? { reroutedToJobId: reroute.toJobId, reroutedMechanism: reroute.mechanism } : {}),
   })
 }
 

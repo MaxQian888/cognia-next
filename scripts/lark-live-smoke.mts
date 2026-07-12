@@ -334,11 +334,19 @@ if (textMsgId) {
   })
 }
 
-// 8. Reaction add.
+// 8. Reaction add → capture reaction_id → remove.
+let reactionId = ""
 if (textMsgId && adapter.addReaction) {
   await step("addReaction THUMBSUP", async () => {
-    await adapter.addReaction!(textMsgId, "THUMBSUP")
-    return "reacted"
+    const ref = await adapter.addReaction!(textMsgId, "THUMBSUP")
+    reactionId = (ref && typeof ref === "object" && "reactionId" in ref ? ref.reactionId : "") ?? ""
+    return reactionId ? `reacted (reaction_id ${reactionId})` : "reacted (no id surfaced)"
+  })
+}
+if (textMsgId && reactionId && adapter.removeReaction) {
+  await step("removeReaction", async () => {
+    await adapter.removeReaction!(textMsgId, reactionId)
+    return "removed"
   })
 }
 
@@ -417,6 +425,87 @@ await step("send image segment (upload pre-pass)", async () => {
   return res.platformMessageId ?? "(sent)"
 })
 
+// 10b. File segment (upload pre-pass → file card). Exercises the
+// connectors_lark_upload_file invoker path, unreached by the image step.
+await step("send file segment (upload pre-pass)", async () => {
+  const res = await adapter.send(
+    mkReq([
+      {
+        type: "file",
+        url: "https://raw.githubusercontent.com/github/gitignore/main/Node.gitignore",
+        fileName: "smoke.gitignore",
+      } as never,
+    ])
+  )
+  if (!res.ok) throw new Error(res.error?.message ?? "file send failed")
+  if (res.platformMessageId) sentIds.push(res.platformMessageId)
+  return res.platformMessageId ?? "(sent)"
+})
+
+// 10c. Forward the text message to the same chat.
+if (textMsgId && adapter.forwardMessage) {
+  await step("forwardMessage → same chat", async () => {
+    const res = await adapter.forwardMessage!({ messageId: textMsgId, target: chatId })
+    if (!res.ok) throw new Error(res.error?.message ?? "forward failed")
+    if (res.platformMessageId) sentIds.push(res.platformMessageId)
+    return res.platformMessageId ?? "(forwarded)"
+  })
+}
+
+// 10d. Merge-forward the text + card messages into one combined card.
+const mergeIds = [textMsgId, cardMsgId].filter(Boolean)
+if (mergeIds.length >= 2 && adapter.forwardMessage) {
+  await step("mergeForward (text + card)", async () => {
+    const res = await adapter.forwardMessage!({ messageIds: mergeIds, target: chatId })
+    if (!res.ok) throw new Error(res.error?.message ?? "merge-forward failed")
+    if (res.platformMessageId) sentIds.push(res.platformMessageId)
+    return res.platformMessageId ?? "(merged)"
+  })
+}
+
+// 10e. Pin then unpin the text message.
+if (textMsgId && adapter.pinMessage && adapter.unpinMessage) {
+  const convKey = eventMod.buildConversationKey("lark", ADAPTER_ID, chatId)
+  await step("pinMessage", async () => {
+    await adapter.pinMessage!(convKey, textMsgId)
+    return "pinned"
+  })
+  await step("unpinMessage", async () => {
+    await adapter.unpinMessage!(textMsgId)
+    return "unpinned"
+  })
+}
+
+// 10f. Read-receipt query — who has read our text message (feedback).
+if (textMsgId && adapter.getReadReceipt) {
+  await step("getReadReceipt", async () => {
+    const rr = await adapter.getReadReceipt!(textMsgId)
+    if (!Array.isArray(rr.readers)) throw new Error("read receipt shape invalid")
+    return `${rr.readers.length} reader(s), hasMore=${rr.hasMore}`
+  })
+}
+
+// 10g. Presence 系统状态 badge (scope-tolerant — needs personal_settings scope).
+if (adapter.setPresenceStatus) {
+  try {
+    await adapter.setPresenceStatus({
+      text: "[smoke] live",
+      targetUserIds: selfBotOpenId ? [selfBotOpenId] : [],
+      expiresAt: Date.now() + 5 * 60_000,
+    } as never)
+    record("setPresenceStatus", "PASS", "status set")
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // 曼波 lacks personal_settings:status:system_status_update — a valid
+    // icon_key + title reaches the permission check and returns 99991672.
+    if (/scope|permission|99991672|99992402|no id/i.test(msg)) {
+      record("setPresenceStatus", "SKIP", `needs personal_settings scope: ${msg.slice(0, 90)}`)
+    } else {
+      record("setPresenceStatus", "FAIL", msg)
+    }
+  }
+}
+
 // 11. fetchHistory round-trip — our own sends must come back parsed.
 await step("fetchHistory parses live messages", async () => {
   if (!adapter.fetchHistory) throw new Error("adapter.fetchHistory missing")
@@ -444,6 +533,110 @@ try {
   } else {
     record("resolveContacts", "FAIL", msg)
   }
+}
+
+// ── V2: outbound-runner dispatch + F1 truthful-failover proof ────────────────
+// Wire the REAL ConnectorBus outbound runner in Node against live Feishu: the
+// direct adapter.send() steps above never exercise the dispatch mechanism
+// (queue → runner → adapter → live). Here we enqueue and drive it end-to-end,
+// then prove F1 — a balanced reroute to a sibling bot is reported as the
+// sibling's real delivery, not a false failure.
+{
+  const { startOutboundRunner } = await import("../lib/connectors/outbound-runner")
+  const { enqueueOutbound, waitForOutboundTerminal } = await import("../lib/db/outbound-jobs")
+
+  const runnerAbort = new AbortController()
+  const adapters = new Map<string, typeof adapter>([[ADAPTER_ID, adapter]])
+  void startOutboundRunner({ adapters, signal: runnerAbort.signal, pollIntervalMs: 500 })
+  const convKey = eventMod.buildConversationKey("lark", ADAPTER_ID, chatId)
+
+  // 14a. Single dispatch through the durable queue → live send → terminal.
+  await step("runner dispatch → sent", async () => {
+    const job = await enqueueOutbound({
+      adapterId: ADAPTER_ID,
+      conversationKey: convKey,
+      request: mkReq([{ type: "text", text: "[smoke] via outbound runner" }]),
+      source: "manual",
+    })
+    const terminal = await waitForOutboundTerminal(job.id, 25_000)
+    if (!terminal) throw new Error("job vanished")
+    if (terminal.status !== "sent") {
+      throw new Error(`expected sent, got ${terminal.status} (${terminal.lastErrorCode ?? "?"})`)
+    }
+    if (terminal.platformMessageId) sentIds.push(terminal.platformMessageId)
+    return `sent via runner (${terminal.platformMessageId})`
+  })
+
+  // 14b. F1 — register a second lark instance sharing 曼波's creds, force the
+  // primary's rate bucket to spill onto it, and assert the ORIGINAL job's
+  // waitForOutboundTerminal follows the reroute pointer to the sibling's
+  // real `sent` (the bug: it used to read `deadlettered` = false failure).
+  const SIBLING_ID = "lark-live-smoke-sibling"
+  keyring.set(`${SIBLING_ID}:appId`, APP_ID)
+  keyring.set(`${SIBLING_ID}:appSecret`, APP_SECRET)
+  const sibling = createLarkAdapter({
+    id: SIBLING_ID,
+    displayName: "Lark Live Smoke Sibling",
+    appId: async () => APP_ID,
+    appSecret: async () => APP_SECRET,
+    verificationToken: async () => "",
+    selfBotOpenId,
+    transport: "long-connection",
+  })
+  adapters.set(SIBLING_ID, sibling)
+  await getDb().adapterInstances.put({
+    id: SIBLING_ID,
+    type: "lark",
+    displayName: "Lark Live Smoke Sibling",
+    enabled: true,
+    transportMode: "gateway",
+    settings: {},
+    credentialsRef: { keyringService: "smoke", accounts: ["appId", "appSecret"] },
+    trigger: {} as never,
+    defaultMode: "manual",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  } as never)
+  // Primary: single-token bucket, negligible refill, sibling as balance target.
+  await getDb().adapterInstances.update(ADAPTER_ID, {
+    balanceAdapterIds: [SIBLING_ID],
+    outboundTuning: { rateCapacity: 1, rateRefillPerSec: 0.01 },
+  } as never)
+
+  await step("F1: reroute reports sibling delivery (not a false failure)", async () => {
+    // Two jobs on one lane: the first consumes the single token, the second
+    // finds the bucket empty and load-balances onto the sibling.
+    const jobA = await enqueueOutbound({
+      adapterId: ADAPTER_ID,
+      conversationKey: convKey,
+      request: mkReq([{ type: "text", text: "[smoke] reroute A (primary)" }]),
+      source: "manual",
+    })
+    const jobB = await enqueueOutbound({
+      adapterId: ADAPTER_ID,
+      conversationKey: convKey,
+      request: mkReq([{ type: "text", text: "[smoke] reroute B (should spill)" }]),
+      source: "manual",
+    })
+    const termA = await waitForOutboundTerminal(jobA.id, 25_000)
+    if (termA?.platformMessageId) sentIds.push(termA.platformMessageId)
+    const termB = await waitForOutboundTerminal(jobB.id, 25_000)
+    if (!termB) throw new Error("jobB vanished")
+    const rawB = await getDb().outboundQueue.get(jobB.id)
+    if (rawB?.status === "deadlettered" && rawB.reroutedToJobId) {
+      // Reroute happened — the followed terminal MUST be the sibling's real send.
+      if (termB.status !== "sent" || !termB.platformMessageId) {
+        throw new Error(`reroute followed but status=${termB.status} (F1 broken)`)
+      }
+      sentIds.push(termB.platformMessageId)
+      return `rerouted ${jobB.id}→${rawB.reroutedToJobId}; followed to sibling sent ${termB.platformMessageId}`
+    }
+    // Token refilled before jobB ran — no reroute this run (still a valid send).
+    if (termB.platformMessageId) sentIds.push(termB.platformMessageId)
+    return `no reroute this run (jobB ${termB.status} on primary directly)`
+  })
+
+  runnerAbort.abort()
 }
 
 // 13. Delete everything we sent (unless KEEP).

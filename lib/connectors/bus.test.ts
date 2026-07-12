@@ -257,6 +257,94 @@ describe("ConnectorBus — adapter-operation wrappers", () => {
     expect((await bus.addReactionOutbound("a1", "m", "OK")).error?.code).toBe("unsupported")
   })
 
+  it("addReactionOutbound surfaces the platform reactionId", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { addReaction: jest.Mock }
+    a.addReaction = jest.fn().mockResolvedValue({ reactionId: "rx_7" })
+    bus.registerAdapter(a)
+    const res = await bus.addReactionOutbound("a1", "pm_1", "OK")
+    expect(res.ok).toBe(true)
+    expect((res as { reactionId?: string }).reactionId).toBe("rx_7")
+  })
+
+  it("removeReactionOutbound delegates and reports adapter_not_found / unsupported", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { removeReaction: jest.Mock }
+    a.removeReaction = jest.fn().mockResolvedValue(undefined)
+    bus.registerAdapter(a)
+    expect((await bus.removeReactionOutbound("a1", "pm_1", "rx_7")).ok).toBe(true)
+    expect(a.removeReaction).toHaveBeenCalledWith("pm_1", "rx_7")
+    expect((await bus.removeReactionOutbound("nope", "m", "r")).error?.code).toBe(
+      "adapter_not_found"
+    )
+    bus.registerAdapter(makeAdapter("a2"))
+    expect((await bus.removeReactionOutbound("a2", "m", "r")).error?.code).toBe("unsupported")
+  })
+
+  it("forwardOutbound delegates the adapter result and reports not-found / unsupported", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { forwardMessage: jest.Mock }
+    a.forwardMessage = jest.fn().mockResolvedValue({ ok: true, platformMessageId: "om_fwd" })
+    bus.registerAdapter(a)
+    const res = await bus.forwardOutbound("a1", { messageId: "om_1", target: "oc_dest" })
+    expect(res.ok).toBe(true)
+    expect(res.platformMessageId).toBe("om_fwd")
+    expect(a.forwardMessage).toHaveBeenCalledWith({ messageId: "om_1", target: "oc_dest" })
+    expect((await bus.forwardOutbound("nope", { messageId: "m", target: "t" })).error?.code).toBe(
+      "adapter_not_found"
+    )
+    bus.registerAdapter(makeAdapter("a2"))
+    expect((await bus.forwardOutbound("a2", { messageId: "m", target: "t" })).error?.code).toBe(
+      "unsupported"
+    )
+  })
+
+  it("pinOutbound / unpinOutbound delegate and report not-found / unsupported", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & {
+      pinMessage: jest.Mock
+      unpinMessage: jest.Mock
+    }
+    a.pinMessage = jest.fn().mockResolvedValue(undefined)
+    a.unpinMessage = jest.fn().mockResolvedValue(undefined)
+    bus.registerAdapter(a)
+    expect((await bus.pinOutbound("a1", "k", "pm_1")).ok).toBe(true)
+    expect(a.pinMessage).toHaveBeenCalledWith("k", "pm_1")
+    expect((await bus.unpinOutbound("a1", "pm_1")).ok).toBe(true)
+    expect(a.unpinMessage).toHaveBeenCalledWith("pm_1")
+    expect((await bus.pinOutbound("nope", "k", "m")).error?.code).toBe("adapter_not_found")
+    bus.registerAdapter(makeAdapter("a2"))
+    expect((await bus.pinOutbound("a2", "k", "m")).error?.code).toBe("unsupported")
+    expect((await bus.unpinOutbound("a2", "m")).error?.code).toBe("unsupported")
+  })
+
+  it("sendUrgentOutbound delegates, maps a throw to platform_error, and reports unsupported", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { sendUrgent: jest.Mock }
+    a.sendUrgent = jest.fn().mockResolvedValue(undefined)
+    bus.registerAdapter(a)
+    expect((await bus.sendUrgentOutbound("a1", "pm_1", ["ou_x"], "app")).ok).toBe(true)
+    expect(a.sendUrgent).toHaveBeenCalledWith("pm_1", ["ou_x"], "app")
+    a.sendUrgent.mockRejectedValueOnce(new Error("no scope"))
+    expect((await bus.sendUrgentOutbound("a1", "pm_1", ["ou_x"])).error?.code).toBe(
+      "platform_error"
+    )
+    bus.registerAdapter(makeAdapter("a2"))
+    expect((await bus.sendUrgentOutbound("a2", "m", ["x"])).error?.code).toBe("unsupported")
+  })
+
+  it("getReadReceiptOutbound delegates and returns null when missing/unsupported", async () => {
+    const bus = getBus()
+    const receipt = { readers: [{ userId: "ou_x", readAt: 1 }], hasMore: false }
+    const a = makeAdapter("a1") as PlatformAdapter & { getReadReceipt: jest.Mock }
+    a.getReadReceipt = jest.fn().mockResolvedValue(receipt)
+    bus.registerAdapter(a)
+    expect(await bus.getReadReceiptOutbound("a1", "pm_1")).toEqual(receipt)
+    expect(await bus.getReadReceiptOutbound("missing", "m")).toBeNull()
+    bus.registerAdapter(makeAdapter("a2"))
+    expect(await bus.getReadReceiptOutbound("a2", "m")).toBeNull()
+  })
+
   it("setTypingOutbound delegates (true) and no-ops (false) when missing/unsupported", async () => {
     const bus = getBus()
     const a = makeAdapter("a1") as PlatformAdapter & { setTyping: jest.Mock }

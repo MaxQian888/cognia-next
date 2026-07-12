@@ -34,6 +34,7 @@ import { useInspectorExpressionCtx } from "./shared/inspector-context"
 import { getWebhookUrl } from "@/lib/workflow/runtime/webhook-bridge"
 import { listAdapterInstances } from "@/lib/db/adapter-instances"
 import {
+  AdapterInstancePicker,
   CharacterPicker,
   TeamPicker,
   SkillPicker,
@@ -161,11 +162,30 @@ export function CronConfig({ params, onChange }: ConfigProps) {
 }
 
 // ── trigger.connector.inbound ─────────────────────────────────────────────
+const CONNECTOR_CHANNEL_KINDS = ["private", "group", "channel", "thread"] as const
+
 export function ConnectorInboundConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.connectorInbound")
   const adapterId = readString(params, "adapterId")
   const conversationKey = readString(params, "conversationKey")
   const characterId = readString(params, "characterId")
+  const senderIds = Array.isArray(params.senderIds) ? (params.senderIds as string[]).join(", ") : ""
+  const keywords = Array.isArray(params.keywords) ? (params.keywords as string[]).join(", ") : ""
+  const channelKinds = Array.isArray(params.channelKinds) ? (params.channelKinds as string[]) : []
+  const requireMention = readBoolean(params, "requireMention", false)
+  const patchList = (key: string, raw: string) => {
+    const list = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+    onChange(patchParam(params, key, list.length > 0 ? list : undefined))
+  }
+  const toggleChannelKind = (kind: string) => {
+    const next = channelKinds.includes(kind)
+      ? channelKinds.filter((k) => k !== kind)
+      : [...channelKinds, kind]
+    onChange(patchParam(params, "channelKinds", next.length > 0 ? next : undefined))
+  }
   return (
     <FieldGroup>
       <Field
@@ -175,11 +195,10 @@ export function ConnectorInboundConfig({ params, onChange }: ConfigProps) {
         name="adapterId"
         required
       >
-        <Input
+        <AdapterInstancePicker
           id="ci-adapter"
           value={adapterId}
-          onChange={(e) => onChange(patchParam(params, "adapterId", e.target.value))}
-          placeholder={t("adapter.placeholder")}
+          onChange={(v) => onChange(patchParam(params, "adapterId", v))}
         />
       </Field>
       <Field
@@ -200,6 +219,61 @@ export function ConnectorInboundConfig({ params, onChange }: ConfigProps) {
           value={characterId}
           onChange={(v) => onChange(patchParam(params, "characterId", v))}
         />
+      </Field>
+      <Field
+        label={t("senderIds.label")}
+        htmlFor="ci-senders"
+        hint={t("senderIds.hint")}
+        name="senderIds"
+      >
+        <Input
+          id="ci-senders"
+          value={senderIds}
+          onChange={(e) => patchList("senderIds", e.target.value)}
+          placeholder={t("senderIds.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("keywords.label")}
+        htmlFor="ci-keywords"
+        hint={t("keywords.hint")}
+        name="keywords"
+      >
+        <Input
+          id="ci-keywords"
+          value={keywords}
+          onChange={(e) => patchList("keywords", e.target.value)}
+          placeholder={t("keywords.placeholder")}
+        />
+      </Field>
+      <Field label={t("channelKinds.label")} hint={t("channelKinds.hint")} name="channelKinds">
+        <div className="space-y-1.5">
+          {CONNECTOR_CHANNEL_KINDS.map((kind) => (
+            <label
+              key={kind}
+              className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-sm hover:bg-muted/40"
+            >
+              <Checkbox
+                checked={channelKinds.includes(kind)}
+                onCheckedChange={() => toggleChannelKind(kind)}
+                data-testid={`ci-channel-${kind}`}
+              />
+              <span>{t(`channelKinds.options.${kind}` as never)}</span>
+            </label>
+          ))}
+        </div>
+      </Field>
+      <Field label={t("requireMention.label")} name="requireMention">
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={requireMention}
+            onCheckedChange={(v) =>
+              onChange(patchParam(params, "requireMention", v === true ? true : undefined))
+            }
+            data-testid="ci-require-mention"
+          />
+          <span className="text-muted-foreground">{t("requireMention.hint")}</span>
+        </label>
       </Field>
     </FieldGroup>
   )
@@ -2587,6 +2661,369 @@ export function TeamRunConfig({ params, onChange }: ConfigProps) {
   )
 }
 
+// ── action.team.reconcile ─────────────────────────────────────────────────
+export function TeamReconcileConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.teamReconcile")
+  const mode = readString(params, "mode")
+  const selectStrategy = readString(params, "selectStrategy")
+  const retain = readString(params, "retain")
+  const enumField = (
+    key: "mode" | "selectStrategy" | "retain",
+    value: string,
+    options: string[]
+  ) => (
+    <Field key={key} label={t(`${key}.label`)} htmlFor={`trc-${key}`} name={key}>
+      <Select
+        value={value || "inherit"}
+        onValueChange={(v) => onChange(patchParam(params, key, v === "inherit" ? undefined : v))}
+      >
+        <SelectTrigger id={`trc-${key}`}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="inherit">{t("inherit")}</SelectItem>
+          {options.map((o) => (
+            <SelectItem key={o} value={o}>
+              {t(`${key}.options.${o}`)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  )
+  return (
+    <FieldGroup>
+      <p className="text-xs text-muted-foreground">{t("intro")}</p>
+      {enumField("mode", mode, ["manual", "merge-all", "select", "pipeline"])}
+      {enumField("selectStrategy", selectStrategy, ["manual", "first-success", "judge"])}
+      {enumField("retain", retain, ["all", "keep-winner", "prune-losers"])}
+    </FieldGroup>
+  )
+}
+
+// ── action.team.compose ───────────────────────────────────────────────────
+export function TeamComposeConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.teamCompose")
+  const objective = readString(params, "objective")
+  const name = readString(params, "name")
+  const preferredPattern = readString(params, "preferredPattern")
+  const maxRoster = readNumber(params, "maxRoster", 0)
+  const autoStart = readBoolean(params, "autoStart", false)
+  const ultracode = readBoolean(params, "ultracode", false)
+  return (
+    <FieldGroup>
+      <Field
+        label={t("objective.label")}
+        htmlFor="tco-objective"
+        hint={t("objective.hint")}
+        name="objective"
+        required
+      >
+        <ExpressionField
+          id="tco-objective"
+          value={objective}
+          onChange={(v) => onChange(patchParam(params, "objective", v))}
+          multiline
+        />
+      </Field>
+      <Field label={t("name.label")} htmlFor="tco-name" name="name">
+        <Input
+          id="tco-name"
+          value={name}
+          onChange={(e) => onChange(patchParam(params, "name", e.target.value))}
+        />
+      </Field>
+      <Field label={t("preferredPattern.label")} htmlFor="tco-pattern" name="preferredPattern">
+        <Select
+          value={preferredPattern || "auto"}
+          onValueChange={(v) =>
+            onChange(patchParam(params, "preferredPattern", v === "auto" ? undefined : v))
+          }
+        >
+          <SelectTrigger id="tco-pattern">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">{t("preferredPattern.options.auto")}</SelectItem>
+            <SelectItem value="manager_worker">
+              {t("preferredPattern.options.manager_worker")}
+            </SelectItem>
+            <SelectItem value="parallel_specialists">
+              {t("preferredPattern.options.parallel_specialists")}
+            </SelectItem>
+            <SelectItem value="background_handoff">
+              {t("preferredPattern.options.background_handoff")}
+            </SelectItem>
+            <SelectItem value="external_handoff">
+              {t("preferredPattern.options.external_handoff")}
+            </SelectItem>
+            <SelectItem value="single_agent_recommended">
+              {t("preferredPattern.options.single_agent_recommended")}
+            </SelectItem>
+            <SelectItem value="ultracode_orchestration">
+              {t("preferredPattern.options.ultracode_orchestration")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field label={t("maxRoster.label")} htmlFor="tco-roster" name="maxRoster">
+        <Input
+          id="tco-roster"
+          type="number"
+          min={1}
+          max={16}
+          value={maxRoster > 0 ? maxRoster : ""}
+          onChange={(e) => {
+            const raw = e.target.value.trim()
+            onChange(
+              patchParam(
+                params,
+                "maxRoster",
+                raw === "" ? undefined : clampNumberInput(raw, 1, 16, 6)
+              )
+            )
+          }}
+        />
+      </Field>
+      <Field
+        label={t("autoStart.label")}
+        htmlFor="tco-start"
+        hint={t("autoStart.hint")}
+        name="autoStart"
+      >
+        <Switch
+          id="tco-start"
+          checked={autoStart}
+          onCheckedChange={(v) => onChange(patchParam(params, "autoStart", v))}
+        />
+      </Field>
+      {autoStart ? (
+        <Field label={t("ultracode.label")} htmlFor="tco-ultra" name="ultracode">
+          <Switch
+            id="tco-ultra"
+            checked={ultracode}
+            onCheckedChange={(v) => onChange(patchParam(params, "ultracode", v))}
+          />
+        </Field>
+      ) : null}
+    </FieldGroup>
+  )
+}
+
+// ── action.team.status ────────────────────────────────────────────────────
+export function TeamStatusConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.teamStatus")
+  const teamId = readString(params, "teamId")
+  const includeTasks = readBoolean(params, "includeTasks", true)
+  const includeTeammates = readBoolean(params, "includeTeammates", true)
+  const includeDelegations = readBoolean(params, "includeDelegations", false)
+  return (
+    <FieldGroup>
+      <Field label={t("teamId.label")} htmlFor="tst-team" name="teamId" required>
+        <TeamPicker
+          id="tst-team"
+          value={teamId}
+          onChange={(v) => onChange(patchParam(params, "teamId", v))}
+        />
+      </Field>
+      <Field label={t("includeTasks.label")} htmlFor="tst-tasks" name="includeTasks">
+        <Switch
+          id="tst-tasks"
+          checked={includeTasks}
+          onCheckedChange={(v) => onChange(patchParam(params, "includeTasks", v))}
+        />
+      </Field>
+      <Field label={t("includeTeammates.label")} htmlFor="tst-mates" name="includeTeammates">
+        <Switch
+          id="tst-mates"
+          checked={includeTeammates}
+          onCheckedChange={(v) => onChange(patchParam(params, "includeTeammates", v))}
+        />
+      </Field>
+      <Field label={t("includeDelegations.label")} htmlFor="tst-dels" name="includeDelegations">
+        <Switch
+          id="tst-dels"
+          checked={includeDelegations}
+          onCheckedChange={(v) => onChange(patchParam(params, "includeDelegations", v))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.team.delegate ──────────────────────────────────────────────────
+export function TeamDelegateConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.teamDelegate")
+  const teamId = readString(params, "teamId")
+  const target = readString(params, "target", "background")
+  const prompt = readString(params, "prompt")
+  const systemPrompt = readString(params, "systemPrompt")
+  const reason = readString(params, "reason")
+  const twinId = readString(params, "twinId")
+  const targetTeamId = readString(params, "targetTeamId")
+  const targetAgentId = readString(params, "targetAgentId")
+  const awaitCompletion = readBoolean(params, "awaitCompletion", true)
+  const force = readBoolean(params, "force", false)
+  return (
+    <FieldGroup>
+      <Field label={t("teamId.label")} htmlFor="td-team" name="teamId" required>
+        <TeamPicker
+          id="td-team"
+          value={teamId}
+          onChange={(v) => onChange(patchParam(params, "teamId", v))}
+        />
+      </Field>
+      <Field label={t("target.label")} htmlFor="td-target" name="target" required>
+        <Select value={target} onValueChange={(v) => onChange(patchParam(params, "target", v))}>
+          <SelectTrigger id="td-target">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="twin">{t("target.options.twin")}</SelectItem>
+            <SelectItem value="background">{t("target.options.background")}</SelectItem>
+            <SelectItem value="external">{t("target.options.external")}</SelectItem>
+            <SelectItem value="team">{t("target.options.team")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      {target === "twin" ? (
+        <Field label={t("twinId.label")} htmlFor="td-twin" name="twinId" required>
+          <TwinPicker
+            id="td-twin"
+            value={twinId}
+            onChange={(v) => onChange(patchParam(params, "twinId", v))}
+          />
+        </Field>
+      ) : null}
+      {target === "team" ? (
+        <Field label={t("targetTeamId.label")} htmlFor="td-tteam" name="targetTeamId" required>
+          <TeamPicker
+            id="td-tteam"
+            value={targetTeamId}
+            onChange={(v) => onChange(patchParam(params, "targetTeamId", v))}
+          />
+        </Field>
+      ) : null}
+      {target === "external" ? (
+        <Field
+          label={t("targetAgentId.label")}
+          htmlFor="td-tagent"
+          hint={t("targetAgentId.hint")}
+          name="targetAgentId"
+          required
+        >
+          <Input
+            id="td-tagent"
+            value={targetAgentId}
+            onChange={(e) => onChange(patchParam(params, "targetAgentId", e.target.value))}
+          />
+        </Field>
+      ) : null}
+      {target !== "team" ? (
+        <Field label={t("prompt.label")} htmlFor="td-prompt" name="prompt" required>
+          <ExpressionField
+            id="td-prompt"
+            value={prompt}
+            onChange={(v) => onChange(patchParam(params, "prompt", v))}
+            multiline
+          />
+        </Field>
+      ) : null}
+      {target !== "team" ? (
+        <Field label={t("systemPrompt.label")} htmlFor="td-system" name="systemPrompt">
+          <Textarea
+            id="td-system"
+            value={systemPrompt}
+            onChange={(e) => onChange(patchParam(params, "systemPrompt", e.target.value))}
+            rows={3}
+          />
+        </Field>
+      ) : null}
+      <Field label={t("reason.label")} htmlFor="td-reason" name="reason">
+        <Input
+          id="td-reason"
+          value={reason}
+          onChange={(e) => onChange(patchParam(params, "reason", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("awaitCompletion.label")}
+        htmlFor="td-await"
+        hint={t("awaitCompletion.hint")}
+        name="awaitCompletion"
+      >
+        <Switch
+          id="td-await"
+          checked={awaitCompletion}
+          onCheckedChange={(v) => onChange(patchParam(params, "awaitCompletion", v))}
+        />
+      </Field>
+      <Field label={t("force.label")} htmlFor="td-force" hint={t("force.hint")} name="force">
+        <Switch
+          id="td-force"
+          checked={force}
+          onCheckedChange={(v) => onChange(patchParam(params, "force", v))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.team.message ───────────────────────────────────────────────────
+export function TeamMessageConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.teamMessage")
+  const teamId = readString(params, "teamId")
+  const content = readString(params, "content")
+  const senderId = readString(params, "senderId")
+  const recipientId = readString(params, "recipientId")
+  const taskId = readString(params, "taskId")
+  return (
+    <FieldGroup>
+      <Field label={t("teamId.label")} htmlFor="tm-team" name="teamId" required>
+        <TeamPicker
+          id="tm-team"
+          value={teamId}
+          onChange={(v) => onChange(patchParam(params, "teamId", v))}
+        />
+      </Field>
+      <Field label={t("content.label")} htmlFor="tm-content" name="content" required>
+        <ExpressionField
+          id="tm-content"
+          value={content}
+          onChange={(v) => onChange(patchParam(params, "content", v))}
+          multiline
+        />
+      </Field>
+      <Field
+        label={t("senderId.label")}
+        htmlFor="tm-sender"
+        hint={t("senderId.hint")}
+        name="senderId"
+      >
+        <Input
+          id="tm-sender"
+          value={senderId}
+          onChange={(e) => onChange(patchParam(params, "senderId", e.target.value))}
+        />
+      </Field>
+      <Field label={t("recipientId.label")} htmlFor="tm-recipient" name="recipientId">
+        <Input
+          id="tm-recipient"
+          value={recipientId}
+          onChange={(e) => onChange(patchParam(params, "recipientId", e.target.value))}
+        />
+      </Field>
+      <Field label={t("taskId.label")} htmlFor="tm-task" name="taskId">
+        <Input
+          id="tm-task"
+          value={taskId}
+          onChange={(e) => onChange(patchParam(params, "taskId", e.target.value))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
 // ── action.agent.turn ─────────────────────────────────────────────────────
 export function AgentTurnConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.agentTurn")
@@ -2794,17 +3231,23 @@ export function TwinRagConfig({ params, onChange }: ConfigProps) {
 // ── action.connector.send ─────────────────────────────────────────────────
 export function ConnectorSendConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.connectorSend")
+  const cardJson = readString(params, "cardJson")
+  const replyToMessageId = readString(params, "replyToMessageId")
+  const threadId = readString(params, "threadId")
+  const idempotencyKey = readString(params, "idempotencyKey")
+  const editTargetMessageId = readString(params, "editTargetMessageId")
+  const waitForDelivery = readBoolean(params, "waitForDelivery", false)
+  const waitTimeoutMs = readNumber(params, "waitTimeoutMs", 30000)
   const adapterId = readString(params, "adapterId")
   const conversationKey = readString(params, "conversationKey")
   const content = readString(params, "content")
   return (
     <FieldGroup>
       <Field label={t("adapter.label")} htmlFor="cs-adapter" name="adapterId" required>
-        <Input
+        <AdapterInstancePicker
           id="cs-adapter"
           value={adapterId}
-          onChange={(e) => onChange(patchParam(params, "adapterId", e.target.value))}
-          placeholder={t("adapter.placeholder")}
+          onChange={(v) => onChange(patchParam(params, "adapterId", v))}
         />
       </Field>
       <Field label={t("conversationKey.label")} htmlFor="cs-conv" name="conversationKey" required>
@@ -2820,6 +3263,357 @@ export function ConnectorSendConfig({ params, onChange }: ConfigProps) {
           value={content}
           onChange={(e) => onChange(patchParam(params, "content", e.target.value))}
           rows={4}
+        />
+      </Field>
+      <Field
+        label={t("cardJson.label")}
+        htmlFor="cs-card-json"
+        hint={t("cardJson.hint")}
+        name="cardJson"
+      >
+        <Textarea
+          id="cs-card-json"
+          value={cardJson}
+          onChange={(e) => onChange(patchParam(params, "cardJson", e.target.value))}
+          rows={4}
+          placeholder={t("cardJson.placeholder")}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field
+        label={t("replyTo.label")}
+        htmlFor="cs-reply-to"
+        hint={t("replyTo.hint")}
+        name="replyToMessageId"
+      >
+        <Input
+          id="cs-reply-to"
+          value={replyToMessageId}
+          onChange={(e) => onChange(patchParam(params, "replyToMessageId", e.target.value))}
+          placeholder={t("replyTo.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("threadId.label")}
+        htmlFor="cs-thread"
+        hint={t("threadId.hint")}
+        name="threadId"
+      >
+        <Input
+          id="cs-thread"
+          value={threadId}
+          onChange={(e) => onChange(patchParam(params, "threadId", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("editTarget.label")}
+        htmlFor="cs-edit-target"
+        hint={t("editTarget.hint")}
+        name="editTargetMessageId"
+      >
+        <Input
+          id="cs-edit-target"
+          value={editTargetMessageId}
+          onChange={(e) => onChange(patchParam(params, "editTargetMessageId", e.target.value))}
+          placeholder={t("editTarget.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("idempotencyKey.label")}
+        htmlFor="cs-idem"
+        hint={t("idempotencyKey.hint")}
+        name="idempotencyKey"
+      >
+        <Input
+          id="cs-idem"
+          value={idempotencyKey}
+          onChange={(e) => onChange(patchParam(params, "idempotencyKey", e.target.value))}
+        />
+      </Field>
+      <Field label={t("waitForDelivery.label")} name="waitForDelivery">
+        <div className="flex items-center gap-2 text-xs">
+          <Switch
+            checked={waitForDelivery}
+            onCheckedChange={(v) =>
+              onChange(patchParam(params, "waitForDelivery", v === true ? true : undefined))
+            }
+          />
+          <span className="text-muted-foreground">{t("waitForDelivery.hint")}</span>
+        </div>
+      </Field>
+      {waitForDelivery ? (
+        <Field
+          label={t("waitTimeoutMs.label")}
+          htmlFor="cs-wait-timeout"
+          hint={t("waitTimeoutMs.hint")}
+          name="waitTimeoutMs"
+        >
+          <Input
+            id="cs-wait-timeout"
+            type="number"
+            min={100}
+            max={300000}
+            value={waitTimeoutMs}
+            onChange={(e) =>
+              onChange(
+                patchParam(
+                  params,
+                  "waitTimeoutMs",
+                  clampNumberInput(e.target.value, 100, 300000, 30000)
+                )
+              )
+            }
+          />
+        </Field>
+      ) : null}
+    </FieldGroup>
+  )
+}
+
+// ── action.connector.reaction ─────────────────────────────────────────────
+export function ConnectorReactionConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.connectorReaction")
+  const adapterId = readString(params, "adapterId")
+  const messageId = readString(params, "messageId")
+  const emoji = readString(params, "emoji")
+  const op = readString(params, "op", "add")
+  const reactionId = readString(params, "reactionId")
+  return (
+    <FieldGroup>
+      <Field label={t("adapter.label")} htmlFor="cr-adapter" name="adapterId" required>
+        <AdapterInstancePicker
+          id="cr-adapter"
+          value={adapterId}
+          onChange={(v) => onChange(patchParam(params, "adapterId", v))}
+        />
+      </Field>
+      <Field label={t("op.label")} htmlFor="cr-op" name="op">
+        <Select value={op} onValueChange={(v) => onChange(patchParam(params, "op", v))}>
+          <SelectTrigger id="cr-op">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="add">{t("op.options.add")}</SelectItem>
+            <SelectItem value="remove">{t("op.options.remove")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label={t("messageId.label")}
+        htmlFor="cr-message"
+        hint={t("messageId.hint")}
+        name="messageId"
+        required
+      >
+        <Input
+          id="cr-message"
+          value={messageId}
+          onChange={(e) => onChange(patchParam(params, "messageId", e.target.value))}
+          placeholder={t("messageId.placeholder")}
+        />
+      </Field>
+      {op === "remove" ? (
+        <Field
+          label={t("reactionId.label")}
+          htmlFor="cr-reaction"
+          hint={t("reactionId.hint")}
+          name="reactionId"
+          required
+        >
+          <Input
+            id="cr-reaction"
+            value={reactionId}
+            onChange={(e) => onChange(patchParam(params, "reactionId", e.target.value))}
+            placeholder={t("reactionId.placeholder")}
+          />
+        </Field>
+      ) : (
+        <Field
+          label={t("emoji.label")}
+          htmlFor="cr-emoji"
+          hint={t("emoji.hint")}
+          name="emoji"
+          required
+        >
+          <Input
+            id="cr-emoji"
+            value={emoji}
+            onChange={(e) => onChange(patchParam(params, "emoji", e.target.value))}
+            placeholder={t("emoji.placeholder")}
+          />
+        </Field>
+      )}
+    </FieldGroup>
+  )
+}
+
+// ── action.connector.delete ───────────────────────────────────────────────
+export function ConnectorDeleteConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.connectorDelete")
+  const adapterId = readString(params, "adapterId")
+  const messageId = readString(params, "messageId")
+  return (
+    <FieldGroup>
+      <Field label={t("adapter.label")} htmlFor="cd-adapter" name="adapterId" required>
+        <AdapterInstancePicker
+          id="cd-adapter"
+          value={adapterId}
+          onChange={(v) => onChange(patchParam(params, "adapterId", v))}
+        />
+      </Field>
+      <Field
+        label={t("messageId.label")}
+        htmlFor="cd-message"
+        hint={t("messageId.hint")}
+        name="messageId"
+        required
+      >
+        <Input
+          id="cd-message"
+          value={messageId}
+          onChange={(e) => onChange(patchParam(params, "messageId", e.target.value))}
+          placeholder={t("messageId.placeholder")}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.connector.forward ──────────────────────────────────────────────
+export function ConnectorForwardConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.connectorForward")
+  const adapterId = readString(params, "adapterId")
+  const messageId = readString(params, "messageId")
+  const target = readString(params, "targetConversationKey")
+  return (
+    <FieldGroup>
+      <Field label={t("adapter.label")} htmlFor="cf-adapter" name="adapterId" required>
+        <AdapterInstancePicker
+          id="cf-adapter"
+          value={adapterId}
+          onChange={(v) => onChange(patchParam(params, "adapterId", v))}
+        />
+      </Field>
+      <Field
+        label={t("messageId.label")}
+        htmlFor="cf-message"
+        hint={t("messageId.hint")}
+        name="messageId"
+        required
+      >
+        <Input
+          id="cf-message"
+          value={messageId}
+          onChange={(e) => onChange(patchParam(params, "messageId", e.target.value))}
+          placeholder={t("messageId.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("target.label")}
+        htmlFor="cf-target"
+        hint={t("target.hint")}
+        name="targetConversationKey"
+        required
+      >
+        <Input
+          id="cf-target"
+          value={target}
+          onChange={(e) => onChange(patchParam(params, "targetConversationKey", e.target.value))}
+          placeholder={t("target.placeholder")}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.connector.waitReply ────────────────────────────────────────────
+export function ConnectorWaitReplyConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.connectorWaitReply")
+  const conversationKey = readString(params, "conversationKey")
+  const senderIds = Array.isArray(params.senderIds) ? (params.senderIds as string[]).join(", ") : ""
+  const keywords = Array.isArray(params.keywords) ? (params.keywords as string[]).join(", ") : ""
+  const requireMention = readBoolean(params, "requireMention", false)
+  const timeoutMs = readNumber(params, "timeoutMs", 120000)
+  const patchList = (key: string, raw: string) => {
+    const list = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+    onChange(patchParam(params, key, list.length > 0 ? list : undefined))
+  }
+  return (
+    <FieldGroup>
+      <Field
+        label={t("conversationKey.label")}
+        htmlFor="cw-conv"
+        hint={t("conversationKey.hint")}
+        name="conversationKey"
+        required
+      >
+        <Input
+          id="cw-conv"
+          value={conversationKey}
+          onChange={(e) => onChange(patchParam(params, "conversationKey", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("senderIds.label")}
+        htmlFor="cw-senders"
+        hint={t("senderIds.hint")}
+        name="senderIds"
+      >
+        <Input
+          id="cw-senders"
+          value={senderIds}
+          onChange={(e) => patchList("senderIds", e.target.value)}
+          placeholder={t("senderIds.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("keywords.label")}
+        htmlFor="cw-keywords"
+        hint={t("keywords.hint")}
+        name="keywords"
+      >
+        <Input
+          id="cw-keywords"
+          value={keywords}
+          onChange={(e) => patchList("keywords", e.target.value)}
+          placeholder={t("keywords.placeholder")}
+        />
+      </Field>
+      <Field label={t("requireMention.label")} name="requireMention">
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={requireMention}
+            onCheckedChange={(v) =>
+              onChange(patchParam(params, "requireMention", v === true ? true : undefined))
+            }
+          />
+          <span className="text-muted-foreground">{t("requireMention.hint")}</span>
+        </label>
+      </Field>
+      <Field
+        label={t("timeoutMs.label")}
+        htmlFor="cw-timeout"
+        hint={t("timeoutMs.hint")}
+        name="timeoutMs"
+      >
+        <Input
+          id="cw-timeout"
+          type="number"
+          min={1000}
+          max={3600000}
+          value={timeoutMs}
+          onChange={(e) =>
+            onChange(
+              patchParam(
+                params,
+                "timeoutMs",
+                clampNumberInput(e.target.value, 1000, 3600000, 120000)
+              )
+            )
+          }
         />
       </Field>
     </FieldGroup>
@@ -3138,8 +3932,7 @@ export function EnsembleConfig({ params, onChange }: ConfigProps) {
       ? (params.target as Record<string, unknown>)
       : {}
   const targetKind = (typeof target.kind === "string" ? target.kind : "agent.turn") as
-    | "agent.turn"
-    | "subworkflow"
+    "agent.turn" | "subworkflow"
   const setTarget = (key: string, value: unknown) =>
     onChange(patchParam(params, "target", { ...target, [key]: value }))
   const agg =
@@ -3545,10 +4338,15 @@ export function HttpRequestConfig({ params, onChange }: ConfigProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            {/* i18n-exempt: HTTP method name (protocol keyword), not UI prose */}
             <SelectItem value="GET">GET</SelectItem>
+            {/* i18n-exempt: HTTP method name (protocol keyword), not UI prose */}
             <SelectItem value="POST">POST</SelectItem>
+            {/* i18n-exempt: HTTP method name (protocol keyword), not UI prose */}
             <SelectItem value="PUT">PUT</SelectItem>
+            {/* i18n-exempt: HTTP method name (protocol keyword), not UI prose */}
             <SelectItem value="PATCH">PATCH</SelectItem>
+            {/* i18n-exempt: HTTP method name (protocol keyword), not UI prose */}
             <SelectItem value="DELETE">DELETE</SelectItem>
           </SelectContent>
         </Select>
@@ -3940,10 +4738,15 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              {/* i18n-exempt: HTTP method name (protocol keyword), not UI prose */}
               <SelectItem value="POST">POST</SelectItem>
+              {/* i18n-exempt: HTTP method name (protocol keyword), not UI prose */}
               <SelectItem value="GET">GET</SelectItem>
+              {/* i18n-exempt: HTTP method name (protocol keyword), not UI prose */}
               <SelectItem value="PUT">PUT</SelectItem>
+              {/* i18n-exempt: HTTP method name (protocol keyword), not UI prose */}
               <SelectItem value="PATCH">PATCH</SelectItem>
+              {/* i18n-exempt: HTTP method name (protocol keyword), not UI prose */}
               <SelectItem value="DELETE">DELETE</SelectItem>
               <SelectItem value="*">{t("method.options.any")}</SelectItem>
             </SelectContent>
@@ -5166,10 +5969,15 @@ export function AiEmbedConfig({ params, onChange }: ConfigProps) {
               <SelectValue placeholder={t("provider.placeholder")} />
             </SelectTrigger>
             <SelectContent>
+              {/* i18n-exempt: embedding provider brand name, not UI prose */}
               <SelectItem value="openai">OpenAI</SelectItem>
+              {/* i18n-exempt: embedding provider brand name, not UI prose */}
               <SelectItem value="google">Google</SelectItem>
+              {/* i18n-exempt: embedding provider brand name, not UI prose */}
               <SelectItem value="cohere">Cohere</SelectItem>
+              {/* i18n-exempt: embedding provider brand name, not UI prose */}
               <SelectItem value="mistral">Mistral</SelectItem>
+              {/* i18n-exempt: embedding provider brand name, not UI prose */}
               <SelectItem value="transformersjs">Transformers.js (local)</SelectItem>
             </SelectContent>
           </Select>

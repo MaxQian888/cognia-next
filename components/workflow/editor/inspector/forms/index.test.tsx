@@ -56,6 +56,16 @@ import {
   TerminalReadRecentConfig,
   TerminalWaitForExitConfig,
   TerminalCommandTriggerConfig,
+  TeamComposeConfig,
+  TeamStatusConfig,
+  TeamDelegateConfig,
+  TeamMessageConfig,
+  TeamReconcileConfig,
+  ConnectorSendConfig,
+  ConnectorReactionConfig,
+  ConnectorDeleteConfig,
+  ConnectorForwardConfig,
+  ConnectorWaitReplyConfig,
 } from "./index"
 
 jest.mock("scheduler", () => jest.requireActual("scheduler/unstable_mock"))
@@ -69,6 +79,9 @@ jest.mock("@/lib/db/mcp-servers", () => ({ listMcpServers: jest.fn(async () => [
 jest.mock("@/lib/db/plugins", () => ({ listPlugins: jest.fn(async () => []) }))
 jest.mock("@/lib/db/workflows", () => ({ listWorkflows: jest.fn(async () => []) }))
 jest.mock("@/lib/db/twins", () => ({ listTwins: jest.fn(async () => []) }))
+jest.mock("@/lib/db/adapter-instances", () => ({
+  listAdapterInstances: jest.fn(async () => []),
+}))
 
 const messages = {
   workflows: {
@@ -79,6 +92,28 @@ const messages = {
         useExpression: "Use expression",
         usePicker: "Pick from list",
         none: "None",
+      },
+      connectorSend: {
+        adapter: { label: "Adapter", placeholder: "telegram_main" },
+        content: { label: "Message content" },
+        conversationKey: { label: "Conversation key" },
+        editTarget: {
+          hint: "Edit this already-sent platform message in place.",
+          label: "Edit message id (optional)",
+          placeholder: "om_...",
+        },
+        idempotencyKey: { hint: "Dedup key.", label: "Idempotency key (optional)" },
+        replyTo: {
+          hint: "Quoted reply.",
+          label: "Reply to message id (optional)",
+          placeholder: "om_...",
+        },
+        threadId: { hint: "Thread anchor.", label: "Thread id (optional)" },
+        waitForDelivery: {
+          hint: "Block until delivered and expose the outcome.",
+          label: "Wait for delivery",
+        },
+        waitTimeoutMs: { hint: "Wait budget in ms.", label: "Delivery wait timeout (ms)" },
       },
       teamTrigger: {
         intro: "Fires when an agent-team run finishes.",
@@ -100,6 +135,83 @@ const messages = {
         title: { label: "Title", placeholder: "Title" },
         description: { label: "Description", placeholder: "Detail" },
         expectedOutput: { label: "Expected output", hint: "Used to validate" },
+      },
+      teamCompose: {
+        objective: { label: "Objective", hint: "One objective sentence." },
+        name: { label: "Team name (optional)" },
+        preferredPattern: {
+          label: "Execution pattern",
+          options: {
+            auto: "Auto (routing decides)",
+            manager_worker: "Manager / worker",
+            parallel_specialists: "Parallel specialists",
+            background_handoff: "Background handoff",
+            external_handoff: "External handoff",
+            single_agent_recommended: "Single agent",
+            ultracode_orchestration: "Ultracode orchestration",
+          },
+        },
+        maxRoster: { label: "Max roster size (incl. lead)" },
+        autoStart: { label: "Start immediately", hint: "Run right away." },
+        ultracode: { label: "Ultracode" },
+      },
+      teamStatus: {
+        teamId: { label: "Team" },
+        includeTasks: { label: "Include tasks" },
+        includeTeammates: { label: "Include teammates" },
+        includeDelegations: { label: "Include delegations" },
+      },
+      teamDelegate: {
+        teamId: { label: "Source team" },
+        target: {
+          label: "Delegate to",
+          options: {
+            twin: "Digital twin",
+            background: "Background agent",
+            external: "External agent",
+            team: "Another team",
+          },
+        },
+        twinId: { label: "Digital twin" },
+        targetTeamId: { label: "Target team" },
+        targetAgentId: { label: "External agent id", hint: "e.g. claude-code" },
+        prompt: { label: "Prompt" },
+        systemPrompt: { label: "System prompt (optional)" },
+        reason: { label: "Reason (audit log)" },
+        awaitCompletion: { label: "Await completion", hint: "Wait for terminal state." },
+        force: { label: "Override quiet hours", hint: "Launch during quiet hours." },
+      },
+      teamMessage: {
+        teamId: { label: "Team" },
+        content: { label: "Message" },
+        senderId: { label: "Sender teammate id (optional)", hint: "Defaults to the lead." },
+        recipientId: { label: "Recipient teammate id (optional)" },
+        taskId: { label: "Attach to task id (optional)" },
+      },
+      teamReconcile: {
+        inherit: "Inherit from team config",
+        intro: "Reconciles the per-dispatch agent branches produced so far in this run.",
+        mode: {
+          label: "Mode",
+          options: {
+            manual: "Manual",
+            "merge-all": "Merge all",
+            select: "Select winner",
+            pipeline: "Pipeline",
+          },
+        },
+        selectStrategy: {
+          label: "Selection strategy",
+          options: { manual: "Manual", "first-success": "First success", judge: "AI judge" },
+        },
+        retain: {
+          label: "Retain branches",
+          options: {
+            all: "Keep all",
+            "keep-winner": "Keep winner",
+            "prune-losers": "Prune losers",
+          },
+        },
       },
       desktopEventTrigger: {
         desktopOnly: "Desktop only.",
@@ -1255,5 +1367,233 @@ describe("TerminalCommandTriggerConfig", () => {
     )
     // The Select trigger renders — '' maps to the 'any' option internally.
     expect(fieldInput(container, "status")).toBeInTheDocument()
+  })
+})
+
+describe("TeamComposeConfig", () => {
+  it("renders objective + pattern controls and propagates edits", () => {
+    const onChange = jest.fn()
+    wrap(<TeamComposeConfig params={{}} onChange={onChange} />)
+    expect(screen.getAllByText(/Objective/i).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Auto \(routing decides\)/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/Team name/i), { target: { value: "Alpha" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ name: "Alpha" }))
+  })
+
+  it("shows the ultracode switch only when autoStart is on", () => {
+    const { rerender } = wrap(<TeamComposeConfig params={{}} onChange={jest.fn()} />)
+    expect(screen.queryByLabelText(/Ultracode/i)).not.toBeInTheDocument()
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
+        <TeamComposeConfig params={{ autoStart: true }} onChange={jest.fn()} />
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByLabelText(/Ultracode/i)).toBeInTheDocument()
+  })
+
+  it("clamps maxRoster into the 1-16 range", () => {
+    const onChange = jest.fn()
+    wrap(<TeamComposeConfig params={{}} onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText(/Max roster/i), { target: { value: "99" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ maxRoster: 16 }))
+  })
+})
+
+describe("TeamStatusConfig", () => {
+  it("renders the team picker and include switches with defaults", () => {
+    const onChange = jest.fn()
+    wrap(<TeamStatusConfig params={{}} onChange={onChange} />)
+    expect(screen.getByLabelText(/Include tasks/i)).toBeChecked()
+    expect(screen.getByLabelText(/Include teammates/i)).toBeChecked()
+    expect(screen.getByLabelText(/Include delegations/i)).not.toBeChecked()
+    fireEvent.click(screen.getByLabelText(/Include delegations/i))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ includeDelegations: true }))
+  })
+})
+
+describe("TeamDelegateConfig", () => {
+  it("shows target-specific fields per target", () => {
+    const { rerender } = wrap(
+      <TeamDelegateConfig params={{ target: "twin" }} onChange={jest.fn()} />
+    )
+    expect(screen.getAllByText(/Digital twin/i).length).toBeGreaterThan(0)
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
+        <TeamDelegateConfig params={{ target: "external" }} onChange={jest.fn()} />
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByLabelText(/External agent id/i)).toBeInTheDocument()
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
+        <TeamDelegateConfig params={{ target: "team" }} onChange={jest.fn()} />
+      </NextIntlClientProvider>
+    )
+    // team target hides the prompt fields
+    expect(screen.queryByText(/System prompt/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/Target team/i)).toBeInTheDocument()
+  })
+
+  it("propagates reason and awaitCompletion edits", () => {
+    const onChange = jest.fn()
+    wrap(<TeamDelegateConfig params={{ target: "background" }} onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText(/Reason/i), { target: { value: "audit" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ reason: "audit" }))
+    fireEvent.click(screen.getByLabelText(/Await completion/i))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ awaitCompletion: false }))
+  })
+})
+
+describe("TeamMessageConfig", () => {
+  it("renders the message fields and propagates edits", () => {
+    const onChange = jest.fn()
+    wrap(<TeamMessageConfig params={{}} onChange={onChange} />)
+    expect(screen.getByText(/Message/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/Recipient teammate id/i), {
+      target: { value: "tm_2" },
+    })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ recipientId: "tm_2" }))
+  })
+})
+
+describe("TeamReconcileConfig", () => {
+  it("renders the three enum selects defaulting to inherit", () => {
+    wrap(<TeamReconcileConfig params={{}} onChange={jest.fn()} />)
+    expect(screen.getByText(/Reconciles the per-dispatch/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/Inherit from team config/i)).toHaveLength(3)
+  })
+
+  it("shows persisted values", () => {
+    wrap(
+      <TeamReconcileConfig
+        params={{ mode: "merge-all", retain: "keep-winner" }}
+        onChange={jest.fn()}
+      />
+    )
+    expect(screen.getByText("Merge all")).toBeInTheDocument()
+    expect(screen.getByText("Keep winner")).toBeInTheDocument()
+  })
+})
+
+describe("ConnectorSendConfig — fine-grained delivery controls", () => {
+  it("renders the edit-target field and patches editTargetMessageId", () => {
+    const onChange = jest.fn()
+    wrap(<ConnectorSendConfig params={{}} onChange={onChange} />)
+    const input = screen.getByLabelText(/Edit message id/i)
+    fireEvent.change(input, { target: { value: "om_target_1" } })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ editTargetMessageId: "om_target_1" })
+    )
+  })
+
+  it("hides the wait-timeout field until waitForDelivery is on", () => {
+    wrap(<ConnectorSendConfig params={{}} onChange={jest.fn()} />)
+    expect(screen.queryByLabelText(/Delivery wait timeout/i)).toBeNull()
+  })
+
+  it("toggling wait-for-delivery patches the param and reveals the timeout field", () => {
+    const onChange = jest.fn()
+    const { rerender } = wrap(<ConnectorSendConfig params={{}} onChange={onChange} />)
+    fireEvent.click(screen.getByRole("switch"))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ waitForDelivery: true }))
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
+        <ConnectorSendConfig params={{ waitForDelivery: true }} onChange={onChange} />
+      </NextIntlClientProvider>
+    )
+    const timeout = screen.getByLabelText(/Delivery wait timeout/i)
+    fireEvent.change(timeout, { target: { value: "5000" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ waitTimeoutMs: 5000 }))
+  })
+
+  it("patches cardJson from the A2UI card field", () => {
+    const onChange = jest.fn()
+    wrap(<ConnectorSendConfig params={{}} onChange={onChange} />)
+    const input = screen.getByLabelText(/A2UI card JSON/i)
+    fireEvent.change(input, { target: { value: '{"rootId":"root"}' } })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ cardJson: '{"rootId":"root"}' })
+    )
+  })
+})
+
+describe("ConnectorReactionConfig / ConnectorDeleteConfig", () => {
+  it("reaction form patches messageId and emoji", () => {
+    const onChange = jest.fn()
+    wrap(<ConnectorReactionConfig params={{}} onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText(/Message id/i), { target: { value: "om_r1" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ messageId: "om_r1" }))
+    fireEvent.change(screen.getByLabelText(/Emoji/i), { target: { value: "THUMBSUP" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ emoji: "THUMBSUP" }))
+  })
+
+  it("delete form patches messageId", () => {
+    const onChange = jest.fn()
+    wrap(<ConnectorDeleteConfig params={{}} onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText(/Message id/i), { target: { value: "om_d1" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ messageId: "om_d1" }))
+  })
+
+  it("reaction form shows the reactionId field only for op=remove", () => {
+    const onChange = jest.fn()
+    const { rerender } = wrap(
+      <ConnectorReactionConfig params={{ op: "add" }} onChange={onChange} />
+    )
+    expect(screen.queryByLabelText(/Reaction id/i)).toBeNull()
+    rerender(<ConnectorReactionConfig params={{ op: "remove" }} onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText(/Reaction id/i), { target: { value: "rx_9" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ reactionId: "rx_9" }))
+  })
+})
+
+describe("ConnectorForwardConfig", () => {
+  it("patches messageId and target conversation", () => {
+    const onChange = jest.fn()
+    wrap(<ConnectorForwardConfig params={{}} onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText(/Message id/i), { target: { value: "om_f1" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ messageId: "om_f1" }))
+    fireEvent.change(screen.getByLabelText(/Target conversation/i), {
+      target: { value: "lark:a1:oc_2" },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ targetConversationKey: "lark:a1:oc_2" })
+    )
+  })
+})
+
+describe("ConnectorWaitReplyConfig", () => {
+  it("patches conversationKey, list filters and timeout", () => {
+    const onChange = jest.fn()
+    wrap(<ConnectorWaitReplyConfig params={{}} onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText(/Conversation key/i), {
+      target: { value: "lark:a1:oc_1" },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationKey: "lark:a1:oc_1" })
+    )
+    fireEvent.change(screen.getByLabelText(/Sender ids/i), {
+      target: { value: "ou_a, ou_b" },
+    })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ senderIds: ["ou_a", "ou_b"] }))
+    fireEvent.change(screen.getByLabelText(/Keywords/i), { target: { value: "approve" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ keywords: ["approve"] }))
+    fireEvent.change(screen.getByLabelText(/Timeout/i), { target: { value: "60000" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 60000 }))
+  })
+
+  it("requireMention checkbox patches true and clears on uncheck", () => {
+    const onChange = jest.fn()
+    const { rerender } = wrap(<ConnectorWaitReplyConfig params={{}} onChange={onChange} />)
+    fireEvent.click(screen.getByRole("checkbox"))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ requireMention: true }))
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
+        <ConnectorWaitReplyConfig params={{ requireMention: true }} onChange={onChange} />
+      </NextIntlClientProvider>
+    )
+    fireEvent.click(screen.getByRole("checkbox"))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.not.objectContaining({ requireMention: expect.anything() })
+    )
   })
 })

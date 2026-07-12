@@ -1,5 +1,13 @@
 /**
+ * @jest-environment jsdom
+ *
  * Tests for the Connectors Plugin API (`ctx.connectors`).
+ *
+ * jsdom (not node) because `connectors:send` / `connectors:manage` are
+ * DANGEROUS permissions registered at the "confirm" tier — the consent
+ * broker emits its request via `window.dispatchEvent`, and jest.setup.ts's
+ * auto-responder (which grants those prompts in tests) only attaches when a
+ * window exists.
  *
  * Covers the three permission tiers (connectors:read / connectors:send /
  * connectors:manage), the credential-free adapter + instance summary
@@ -16,6 +24,19 @@ import { PermissionError } from "@/lib/plugin/security/permission-guard"
 const sendOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true, platformMessageId: "m1" }))
 const editOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true, platformMessageId: "m2" }))
 const deleteOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true }))
+const addReactionOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true, reactionId: "rx_1" }))
+const removeReactionOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true }))
+const forwardOutbound = jest.fn(async (..._a: unknown[]) => ({
+  ok: true,
+  platformMessageId: "om_f",
+}))
+const pinOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true }))
+const unpinOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true }))
+const sendUrgentOutbound = jest.fn(async (..._a: unknown[]) => ({ ok: true }))
+const getReadReceiptOutbound = jest.fn(async (..._a: unknown[]) => ({
+  readers: [],
+  hasMore: false,
+}))
 const setTypingOutbound = jest.fn(async (..._a: unknown[]) => true)
 const uploadFileOutbound = jest.fn(async (..._a: unknown[]) => ({
   localUrl: "file://x",
@@ -80,6 +101,13 @@ jest.mock("@/lib/connectors/bus", () => ({
     sendOutbound: (...a: unknown[]) => sendOutbound(...a),
     editOutbound: (...a: unknown[]) => editOutbound(...a),
     deleteOutbound: (...a: unknown[]) => deleteOutbound(...a),
+    addReactionOutbound: (...a: unknown[]) => addReactionOutbound(...a),
+    removeReactionOutbound: (...a: unknown[]) => removeReactionOutbound(...a),
+    forwardOutbound: (...a: unknown[]) => forwardOutbound(...a),
+    pinOutbound: (...a: unknown[]) => pinOutbound(...a),
+    unpinOutbound: (...a: unknown[]) => unpinOutbound(...a),
+    sendUrgentOutbound: (...a: unknown[]) => sendUrgentOutbound(...a),
+    getReadReceiptOutbound: (...a: unknown[]) => getReadReceiptOutbound(...a),
     setTypingOutbound: (...a: unknown[]) => setTypingOutbound(...a),
     uploadFileOutbound: (...a: unknown[]) => uploadFileOutbound(...a),
     streamReplyOutbound: (...a: unknown[]) => streamReplyOutbound(...(a as [string, unknown])),
@@ -114,10 +142,18 @@ const createAdapterInstance = jest.fn(async (..._a: unknown[]) => ({
 }))
 const updateAdapterInstance = jest.fn(async (..._a: unknown[]) => undefined)
 const deleteAdapterInstance = jest.fn(async (..._a: unknown[]) => undefined)
+const RULE = {
+  id: "r1",
+  enabled: true,
+  match: { keywords: ["deploy"] },
+  action: { teamId: "team-1" },
+}
+const RULES_ROW = { ...INSTANCE_ROW, id: "cai_rules", dispatchRules: [RULE] }
+const DISABLED_ROW = { ...INSTANCE_ROW, id: "cai_off", type: "lark", enabled: false }
 const getAdapterInstance = jest.fn(async (id: string) =>
-  id === "cai_1" ? INSTANCE_ROW : undefined
+  id === "cai_1" ? INSTANCE_ROW : id === "cai_rules" ? RULES_ROW : undefined
 )
-const listAdapterInstances = jest.fn(async () => [INSTANCE_ROW])
+const listAdapterInstances = jest.fn(async () => [INSTANCE_ROW, DISABLED_ROW])
 jest.mock("@/lib/db/adapter-instances", () => ({
   createAdapterInstance: (...a: unknown[]) => createAdapterInstance(...(a as [never])),
   updateAdapterInstance: (...a: unknown[]) => updateAdapterInstance(...(a as [never, never])),
@@ -138,6 +174,127 @@ jest.mock("@/types/connectors/outbound", () => ({
   newIdempotencyKey: () => "idem-123",
 }))
 
+// ── multi-bot surface mocks ──────────────────────────────────────────────────
+const SESSION = {
+  id: "sess-1",
+  title: "Group chat",
+  kind: "direct",
+  characterId: "char-1",
+  platformConversationKey: "telegram:tg:42",
+  createdAt: 10,
+  updatedAt: 20,
+}
+const findSessionByConversationKey = jest.fn(async (key: string) =>
+  key === "telegram:tg:42" ? SESSION : undefined
+)
+const listSessionsByConversationKey = jest.fn(async (_key: string) => [SESSION])
+const listSiblingConversationsMock = jest.fn(async (_key: string) => [
+  { adapterId: "sl", conversationKey: "telegram:sl:42", sessionId: "sess-2" },
+])
+jest.mock("@/lib/connectors/session-bindings", () => ({
+  findSessionByConversationKey: (...a: unknown[]) =>
+    findSessionByConversationKey(...(a as [string])),
+  listSessionsByConversationKey: (...a: unknown[]) =>
+    listSessionsByConversationKey(...(a as [string])),
+  listSiblingConversations: (...a: unknown[]) => listSiblingConversationsMock(...(a as [string])),
+}))
+
+const bootstrapConversationMock = jest.fn(async (_input: unknown) => ({
+  conversationKey: "lark:cai_1:oc_1",
+  sessionId: "sess-boot",
+  created: true,
+}))
+jest.mock("@/lib/connectors/conversation-bootstrap", () => ({
+  bootstrapConversation: (...a: unknown[]) => bootstrapConversationMock(...(a as [never])),
+}))
+
+function makeChatAdapter(id: string, caps: string[], withMethods = true) {
+  return {
+    adapter: {
+      id,
+      meta: {
+        type: "lark",
+        displayName: `Chat ${id}`,
+        version: "1.0.0",
+        capabilities: caps,
+        transportModes: ["websocket"],
+      },
+      health: jest.fn(() => ({ state: "running" })),
+      send: jest.fn(),
+      ...(withMethods
+        ? {
+            createChat: jest.fn(async () => ({ chatId: "oc_new" })),
+            updateChat: jest.fn(async () => undefined),
+            addChatMembers: jest.fn(async () => ({ succeeded: ["u1"], failed: [] })),
+            removeChatMembers: jest.fn(async () => ({ succeeded: ["u1"], failed: [] })),
+            resolveContacts: jest.fn(async () => [
+              { memberId: "ou_1", displayName: "Ann", confidence: "exact" },
+            ]),
+          }
+        : {}),
+    },
+    abortController: new AbortController(),
+    restart: jest.fn(),
+  }
+}
+const runningEntries = new Map<string, ReturnType<typeof makeChatAdapter>>()
+jest.mock("@/lib/connectors/lifecycle", () => ({
+  getRunningAdapter: (id: string) => runningEntries.get(id),
+  listRunningAdapters: () => Array.from(runningEntries.values()),
+}))
+
+const matchDispatchRuleMock = jest.fn((..._a: unknown[]) => ({ rule: RULE, action: RULE.action }))
+jest.mock("@/lib/connectors/dispatch-rules", () => ({
+  matchDispatchRule: (...a: unknown[]) => matchDispatchRuleMock(...a),
+}))
+
+const shouldRespondToMessageMock = jest.fn((..._a: unknown[]) => ({
+  allowed: false,
+  reason: "chat_blocklist",
+}))
+jest.mock("@/lib/connectors/at-gate", () => ({
+  shouldRespondToMessage: (...a: unknown[]) => shouldRespondToMessageMock(...a),
+}))
+
+const enqueueOutbound = jest.fn(
+  async (input: { request: { metadata: { idempotencyKey: string } } }) => ({
+    id: "oqj_1",
+    adapterId: "tg",
+    projectId: null,
+    conversationKey: "telegram:tg:42",
+    request: input.request,
+    status: "pending",
+    attempts: 0,
+    createdAt: 100,
+    nextAttemptAt: 100,
+    idempotencyKey: input.request.metadata.idempotencyKey,
+    source: "plugin",
+  })
+)
+jest.mock("@/lib/db/outbound-jobs", () => ({
+  // Keep the real waitForOutboundTerminal (the shared delivery-feedback
+  // wait) — it reads through the getDb stub below, exactly like the old
+  // inline implementation this suite was written against.
+  ...jest.requireActual("@/lib/db/outbound-jobs"),
+  enqueueOutbound: (...a: unknown[]) => enqueueOutbound(...(a as [never])),
+}))
+
+// Delivery-feedback reads (`getOutboundJob` / `waitForDelivery`) hit the
+// outboundQueue table directly — stub just that surface of the Dexie db.
+const outboundQueueGet = jest.fn(async (_id: string): Promise<unknown> => undefined)
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({
+    outboundQueue: { get: (...a: unknown[]) => outboundQueueGet(...(a as [string])) },
+  }),
+}))
+
+const hasNoLeakingPiiDeep = jest.fn(
+  (value: unknown) => !JSON.stringify(value).includes("leak@pii.example")
+)
+jest.mock("@/lib/twin/ingest/redact", () => ({
+  hasNoLeakingPiiDeep: (...a: unknown[]) => hasNoLeakingPiiDeep(...(a as [unknown])),
+}))
+
 const PLUGIN = "conn-plugin"
 
 describe("createConnectorsAPI", () => {
@@ -147,6 +304,17 @@ describe("createConnectorsAPI", () => {
     jest.clearAllMocks()
     inboundObservers.clear()
     callbackObservers.clear()
+    runningEntries.clear()
+    runningEntries.set(
+      "lk",
+      makeChatAdapter("lk", [
+        "text",
+        "chat.create",
+        "chat.members",
+        "chat.update",
+        "contact.resolve",
+      ])
+    )
     resetPermissionGuard()
     guard = getPermissionGuard()
   })
@@ -257,10 +425,9 @@ describe("createConnectorsAPI", () => {
     it("listInstances strips the keyring pointer", async () => {
       const api = createConnectorsAPI(PLUGIN)
       const list = await api.listInstances()
-      expect(list).toHaveLength(1)
-      expect(list[0].id).toBe("cai_1")
+      expect(list.map((r) => r.id)).toEqual(["cai_1", "cai_off"])
       expect(list[0].displayName).toBe("My Bot")
-      expect(list[0]).not.toHaveProperty("credentialsRef")
+      for (const row of list) expect(row).not.toHaveProperty("credentialsRef")
     })
 
     it("getInstance returns one stripped row or null", async () => {
@@ -345,6 +512,28 @@ describe("createConnectorsAPI", () => {
       expect(deleteOutbound).toHaveBeenCalledWith("tg", "pm_1")
     })
 
+    it("reaction / forward / pin / unpin / urgent forward to the bus", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      expect((await api.addReaction("tg", "pm_1", "OK")).reactionId).toBe("rx_1")
+      expect(addReactionOutbound).toHaveBeenCalledWith("tg", "pm_1", "OK")
+      expect((await api.removeReaction("tg", "pm_1", "rx_1")).ok).toBe(true)
+      expect(removeReactionOutbound).toHaveBeenCalledWith("tg", "pm_1", "rx_1")
+      expect((await api.forwardMessage("tg", { messageId: "pm_1", target: "c2" })).ok).toBe(true)
+      expect(forwardOutbound).toHaveBeenCalledWith("tg", { messageId: "pm_1", target: "c2" })
+      expect((await api.pinMessage("tg", "c1", "pm_1")).ok).toBe(true)
+      expect(pinOutbound).toHaveBeenCalledWith("tg", "c1", "pm_1")
+      expect((await api.unpinMessage("tg", "pm_1")).ok).toBe(true)
+      expect(unpinOutbound).toHaveBeenCalledWith("tg", "pm_1")
+      expect((await api.sendUrgent("tg", "pm_1", ["ou_a"], "app")).ok).toBe(true)
+      expect(sendUrgentOutbound).toHaveBeenCalledWith("tg", "pm_1", ["ou_a"], "app")
+    })
+
+    it("getReadReceipt forwards to the bus (connectors:read)", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      expect(await api.getReadReceipt("tg", "pm_1")).toEqual({ readers: [], hasMore: false })
+      expect(getReadReceiptOutbound).toHaveBeenCalledWith("tg", "pm_1")
+    })
+
     it("setTyping / uploadFile forward to the bus", async () => {
       const api = createConnectorsAPI(PLUGIN)
       expect(await api.setTyping("tg", "telegram:tg:42", true)).toBe(true)
@@ -425,6 +614,304 @@ describe("createConnectorsAPI", () => {
       const api = createConnectorsAPI(PLUGIN)
       await api.deleteInstance("cai_1")
       expect(deleteAdapterInstance).toHaveBeenCalledWith("cai_1")
+    })
+  })
+
+  describe("multi-bot reads", () => {
+    beforeEach(() => guard.registerPlugin(PLUGIN, ["connectors:read"]))
+
+    it("gates the new read surfaces behind connectors:read", () => {
+      resetPermissionGuard()
+      guard = getPermissionGuard()
+      guard.registerPlugin(PLUGIN, [])
+      const api = createConnectorsAPI(PLUGIN)
+      expect(() => api.listRunningAdapters()).toThrow(PermissionError)
+      expect(() => api.findSessionByConversation("k")).toThrow(PermissionError)
+      expect(() => api.listSiblingConversations("k")).toThrow(PermissionError)
+      expect(() => api.getDispatchRules("cai_1")).toThrow(PermissionError)
+      expect(() => api.previewAtGate("cai_1", {} as never)).toThrow(PermissionError)
+    })
+
+    it("listRunningAdapters returns live credential-free summaries", () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const list = api.listRunningAdapters()
+      expect(list).toHaveLength(1)
+      expect(list[0]).toMatchObject({ id: "lk", type: "lark", displayName: "Chat lk" })
+      expect(list[0]).not.toHaveProperty("send")
+      expect(list[0]).not.toHaveProperty("createChat")
+    })
+
+    it("listEnabledInstances / listInstancesByType filter the stripped rows", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const enabled = await api.listEnabledInstances()
+      expect(enabled.map((r) => r.id)).toEqual(["cai_1"])
+      expect(enabled[0]).not.toHaveProperty("credentialsRef")
+      const larks = await api.listInstancesByType("lark" as never)
+      expect(larks.map((r) => r.id)).toEqual(["cai_off"])
+      expect(larks[0]).not.toHaveProperty("credentialsRef")
+    })
+
+    it("findSessionByConversation returns a trimmed binding or null", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      expect(await api.findSessionByConversation("telegram:tg:42")).toEqual({
+        sessionId: "sess-1",
+        title: "Group chat",
+        conversationKey: "telegram:tg:42",
+        characterId: "char-1",
+        createdAt: 10,
+        updatedAt: 20,
+      })
+      expect(await api.findSessionByConversation("missing")).toBeNull()
+    })
+
+    it("listSessionsByConversation trims every bound session", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const list = await api.listSessionsByConversation("telegram:tg:42")
+      expect(list).toHaveLength(1)
+      expect(list[0].sessionId).toBe("sess-1")
+      expect(list[0]).not.toHaveProperty("platformBinding")
+    })
+
+    it("listSiblingConversations forwards to the binding layer", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      expect(await api.listSiblingConversations("telegram:tg:42")).toEqual([
+        { adapterId: "sl", conversationKey: "telegram:sl:42", sessionId: "sess-2" },
+      ])
+      expect(listSiblingConversationsMock).toHaveBeenCalledWith("telegram:tg:42")
+    })
+
+    it("getDispatchRules reads the instance rule table (empty default)", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      expect(await api.getDispatchRules("cai_rules")).toEqual([RULE])
+      expect(await api.getDispatchRules("cai_1")).toEqual([])
+      await expect(api.getDispatchRules("missing")).rejects.toThrow(/not found/)
+    })
+
+    it("previewDispatchRules dry-runs the matcher against the instance rules", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const event = { plainText: "deploy now", sender: { id: "u" }, channel: { kind: "group" } }
+      const hit = await api.previewDispatchRules("cai_rules", event as never)
+      expect(hit).toEqual({ rule: RULE, action: RULE.action })
+      expect(matchDispatchRuleMock).toHaveBeenCalledWith([RULE], event)
+    })
+
+    it("previewAtGate dry-runs the guardrails against the instance row", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const event = { kind: "create" }
+      expect(await api.previewAtGate("cai_1", event as never)).toEqual({
+        allowed: false,
+        reason: "chat_blocklist",
+      })
+      expect(shouldRespondToMessageMock).toHaveBeenCalledWith(event, INSTANCE_ROW)
+      await expect(api.previewAtGate("missing", event as never)).rejects.toThrow(/not found/)
+    })
+  })
+
+  describe("enqueueSend (durable queue)", () => {
+    beforeEach(() => guard.registerPlugin(PLUGIN, ["connectors:send"]))
+
+    it("is gated by connectors:send", () => {
+      resetPermissionGuard()
+      guard = getPermissionGuard()
+      guard.registerPlugin(PLUGIN, ["connectors:read"])
+      const api = createConnectorsAPI(PLUGIN)
+      expect(() => api.enqueueSend("tg", "telegram:tg:42", {} as never)).toThrow(PermissionError)
+      expect(enqueueOutbound).not.toHaveBeenCalled()
+    })
+
+    it("PII-gates the segments, then enqueues with source plugin", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const req = {
+        conversationRef: { conv: "c1" },
+        segments: [{ type: "text", text: "release is out" }],
+        metadata: { idempotencyKey: "idem-9" },
+      }
+      const job = await api.enqueueSend("tg", "telegram:tg:42", req as never, {
+        nextAttemptAt: 555,
+      })
+      expect(hasNoLeakingPiiDeep).toHaveBeenCalledWith(req.segments)
+      expect(enqueueOutbound).toHaveBeenCalledWith({
+        adapterId: "tg",
+        conversationKey: "telegram:tg:42",
+        request: req,
+        source: "plugin",
+        nextAttemptAt: 555,
+      })
+      expect(job).toEqual({
+        jobId: "oqj_1",
+        adapterId: "tg",
+        conversationKey: "telegram:tg:42",
+        status: "pending",
+        nextAttemptAt: 100,
+        idempotencyKey: "idem-9",
+      })
+    })
+
+    it("rejects leaking payloads before anything reaches the queue", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const req = {
+        conversationRef: { conv: "c1" },
+        segments: [{ type: "text", text: "mail leak@pii.example" }],
+        metadata: { idempotencyKey: "idem-9" },
+      }
+      await expect(api.enqueueSend("tg", "telegram:tg:42", req as never)).rejects.toThrow(
+        /PII gate/
+      )
+      expect(enqueueOutbound).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("delivery feedback (getOutboundJob / waitForDelivery)", () => {
+    const row = (status: string, extra: Record<string, unknown> = {}) => ({
+      id: "oqj_9",
+      adapterId: "tg",
+      conversationKey: "telegram:tg:42",
+      status,
+      nextAttemptAt: 100,
+      idempotencyKey: "idem-9",
+      attempts: 1,
+      ...extra,
+    })
+
+    beforeEach(() => guard.registerPlugin(PLUGIN, ["connectors:read"]))
+
+    it("getOutboundJob returns null for an unknown id and a snapshot otherwise", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      outboundQueueGet.mockResolvedValueOnce(undefined)
+      expect(await api.getOutboundJob("nope")).toBeNull()
+
+      outboundQueueGet.mockResolvedValueOnce(
+        row("sent", { platformMessageId: "pm_1", lastError: undefined })
+      )
+      const snap = await api.getOutboundJob("oqj_9")
+      expect(snap).toMatchObject({
+        jobId: "oqj_9",
+        status: "sent",
+        attempts: 1,
+        platformMessageId: "pm_1",
+      })
+    })
+
+    it("getOutboundJob surfaces the reroute pointer (F1 feedback link)", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      outboundQueueGet.mockResolvedValueOnce(
+        row("deadlettered", { lastErrorCode: "balanced", reroutedToJobId: "oqj_sibling" })
+      )
+      const snap = await api.getOutboundJob("oqj_9")
+      expect(snap?.reroutedToJobId).toBe("oqj_sibling")
+    })
+
+    it("waitForDelivery resolves immediately on an already-terminal job", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      outboundQueueGet.mockResolvedValueOnce(row("deadlettered", { lastErrorCode: "circuit_open" }))
+      const snap = await api.waitForDelivery("oqj_9")
+      expect(snap.status).toBe("deadlettered")
+      expect(snap.lastErrorCode).toBe("circuit_open")
+    })
+
+    it("waitForDelivery rejects on an unknown job id", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      outboundQueueGet.mockResolvedValueOnce(undefined)
+      await expect(api.waitForDelivery("nope")).rejects.toThrow(/unknown job/)
+    })
+
+    it("waitForDelivery resolves with the latest snapshot when the timeout elapses", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      // Initial read + the liveQuery querier both see a pending row.
+      outboundQueueGet.mockResolvedValue(row("pending"))
+      const snap = await api.waitForDelivery("oqj_9", { timeoutMs: 100 })
+      expect(snap.status).toBe("pending")
+    })
+  })
+
+  describe("chat management + routing management", () => {
+    beforeEach(() => guard.registerPlugin(PLUGIN, ["connectors:manage"]))
+
+    it("is gated by connectors:manage (send is insufficient)", () => {
+      resetPermissionGuard()
+      guard = getPermissionGuard()
+      guard.registerPlugin(PLUGIN, ["connectors:read", "connectors:send"])
+      const api = createConnectorsAPI(PLUGIN)
+      expect(() => api.createChat("lk", {} as never)).toThrow(PermissionError)
+      expect(() => api.resolveContacts("lk", {})).toThrow(PermissionError)
+      expect(() => api.setDispatchRules("cai_1", [])).toThrow(PermissionError)
+      expect(() => api.bootstrapConversation({} as never)).toThrow(PermissionError)
+    })
+
+    it("setDispatchRules validates the instance then replaces the table", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      await api.setDispatchRules("cai_1", [RULE] as never)
+      expect(updateAdapterInstance).toHaveBeenCalledWith("cai_1", { dispatchRules: [RULE] })
+      await expect(api.setDispatchRules("missing", [])).rejects.toThrow(/not found/)
+      expect(updateAdapterInstance).toHaveBeenCalledTimes(1)
+    })
+
+    it("bootstrapConversation stamps plugin provenance", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const res = await api.bootstrapConversation({
+        platform: "lark" as never,
+        adapterId: "cai_1",
+        remoteChatId: "oc_1",
+        name: "Release war-room",
+      })
+      expect(res).toEqual({
+        conversationKey: "lark:cai_1:oc_1",
+        sessionId: "sess-boot",
+        created: true,
+      })
+      expect(bootstrapConversationMock).toHaveBeenCalledWith({
+        platform: "lark",
+        adapterId: "cai_1",
+        remoteChatId: "oc_1",
+        name: "Release war-room",
+        source: `plugin:${PLUGIN}`,
+      })
+    })
+
+    it("createChat / updateChat / members / resolveContacts call the running adapter", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const entry = runningEntries.get("lk")!
+      expect(await api.createChat("lk", { name: "N", memberIds: ["ou_1"] })).toEqual({
+        chatId: "oc_new",
+      })
+      expect(entry.adapter.createChat).toHaveBeenCalledWith({ name: "N", memberIds: ["ou_1"] })
+      await api.updateChat("lk", { chatId: "oc_new", name: "N2" })
+      expect(entry.adapter.updateChat).toHaveBeenCalledWith({ chatId: "oc_new", name: "N2" })
+      expect(await api.addChatMembers("lk", { chatId: "oc_new", memberIds: ["u1"] })).toEqual({
+        succeeded: ["u1"],
+        failed: [],
+      })
+      expect(await api.removeChatMembers("lk", { chatId: "oc_new", memberIds: ["u1"] })).toEqual({
+        succeeded: ["u1"],
+        failed: [],
+      })
+      expect(await api.resolveContacts("lk", { emails: ["a@b.c"] })).toEqual([
+        { memberId: "ou_1", displayName: "Ann", confidence: "exact" },
+      ])
+    })
+
+    it("rejects when the adapter is not running / unhealthy / incapable / method-less", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      await expect(api.createChat("ghost", { name: "N", memberIds: [] })).rejects.toThrow(
+        /not running/
+      )
+
+      const sick = makeChatAdapter("sick", ["chat.create"])
+      sick.adapter.health.mockReturnValue({ state: "error" } as never)
+      runningEntries.set("sick", sick)
+      await expect(api.createChat("sick", { name: "N", memberIds: [] })).rejects.toThrow(
+        /not healthy/
+      )
+
+      runningEntries.set("nocap", makeChatAdapter("nocap", ["text"]))
+      await expect(api.createChat("nocap", { name: "N", memberIds: [] })).rejects.toThrow(
+        /required capabilities: chat.create/
+      )
+
+      runningEntries.set("buggy", makeChatAdapter("buggy", ["chat.create"], false))
+      await expect(api.createChat("buggy", { name: "N", memberIds: [] })).rejects.toThrow(
+        /does not implement createChat/
+      )
     })
   })
 })

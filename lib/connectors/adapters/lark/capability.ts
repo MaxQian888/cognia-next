@@ -30,6 +30,9 @@ export const LARK_CAPS: readonly Capability[] = [
   "contact.resolve",
   "delete",
   "edit",
+  // forward + merge_forward via `POST /im/v1/messages/:id/forward` and
+  // `/im/v1/messages/merge_forward` (lark/index.ts `forwardMessage`).
+  "forward",
   "history.fetch",
   "pin",
   "presence.status",
@@ -46,6 +49,10 @@ export const LARK_CAPS: readonly Capability[] = [
   "send.thread",
   "send.video",
   "send.voice",
+  // 加急 (urgent) via `PATCH /im/v1/messages/:id/urgent_{app,sms,phone}`
+  // (lark/index.ts `sendUrgent`). Implemented but requires the elevated
+  // `im:message.urgent*` scope; a bot without it surfaces a scope error.
+  "urgent",
 ] as const
 
 /**

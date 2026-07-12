@@ -98,6 +98,15 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
         void drain()
       }
     })
+    // stop() ran while the subscribe was in flight — it saw a null unsub,
+    // so drop the just-created listener here.
+    if (stopped) {
+      try {
+        unsubNetwork()
+      } catch {
+        // Best effort.
+      }
+    }
   })()
 
   async function drain(): Promise<void> {

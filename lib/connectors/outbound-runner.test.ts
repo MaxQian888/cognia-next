@@ -391,6 +391,29 @@ describe("outbound-runner — circuit breaker open", () => {
     expect(audits.some((a) => a.kind === "delivery.deadlettered")).toBe(true)
     expect(jobs.every((j) => j.status === "deadlettered")).toBe(true)
   })
+
+  it("emits a circuit.opened audit when the breaker trips (F2 — Health dot grid)", async () => {
+    // 6 non-retryable failures > breaker minEvents (5) at 100% → the breaker
+    // transitions closed→open; onStateChange must now write a `circuit.opened`
+    // audit (previously only a telemetry breadcrumb the Health grid never read).
+    const adapterId = "a_circuit_audit"
+    const adapter = makeAdapter(adapterId, async () => ({
+      ok: false,
+      error: { code: "validation", message: "bad", retryable: false },
+    }))
+    const adapters = new Map([[adapterId, adapter]])
+    for (let i = 0; i < 6; i++) {
+      await enqueue(adapterId, `telegram:${adapterId}:chat_${i}`, `key_ca_${i}`)
+    }
+    await runOnce(adapters)
+
+    let audits = await listRecent(adapterId)
+    for (let i = 0; i < 50 && !audits.some((a) => a.kind === "circuit.opened"); i++) {
+      await new Promise<void>((r) => setTimeout(r, 20))
+      audits = await listRecent(adapterId)
+    }
+    expect(audits.some((a) => a.kind === "circuit.opened")).toBe(true)
+  })
 })
 
 describe("outbound-runner — rate limit tripped", () => {

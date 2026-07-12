@@ -5,6 +5,11 @@ import {
   serializeEditAsync,
   serializeDelete,
   serializeReaction,
+  serializeRemoveReaction,
+  serializeForward,
+  serializeMergeForward,
+  serializeUrgent,
+  sniffReceiveId,
 } from "./serialize"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 
@@ -329,5 +334,57 @@ describe("serializeReaction", () => {
     const call = serializeReaction("om_msg_003", "THUMBSUP")
     const reactionType = call.payload["reaction_type"] as { emoji_type: string }
     expect(reactionType.emoji_type).toBe("THUMBSUP")
+  })
+})
+
+describe("serializeRemoveReaction", () => {
+  it("is a DELETE on the reaction sub-path with the reaction id", () => {
+    const call = serializeRemoveReaction("om_msg_003", "rx_9")
+    expect(call.method).toBe("DELETE")
+    expect(call.url).toContain("/messages/om_msg_003/reactions/rx_9")
+  })
+})
+
+describe("sniffReceiveId", () => {
+  it("classifies oc_ / ou_ / on_ prefixes", () => {
+    expect(sniffReceiveId("oc_chat").receiveIdType).toBe("chat_id")
+    expect(sniffReceiveId("ou_user").receiveIdType).toBe("open_id")
+    expect(sniffReceiveId("on_user").receiveIdType).toBe("open_id")
+    expect(sniffReceiveId("ou_user").receiveId).toBe("ou_user")
+  })
+})
+
+describe("serializeForward", () => {
+  it("POSTs to the forward endpoint with receive_id_type + receive_id", () => {
+    const call = serializeForward("om_1", "chat_id", "oc_dest")
+    expect(call.method).toBe("POST")
+    expect(call.url).toContain("/messages/om_1/forward")
+    expect(call.url).toContain("receive_id_type=chat_id")
+    expect(call.payload["receive_id"]).toBe("oc_dest")
+  })
+})
+
+describe("serializeMergeForward", () => {
+  it("POSTs to merge_forward with the message_id_list", () => {
+    const call = serializeMergeForward(["om_1", "om_2"], "chat_id", "oc_dest")
+    expect(call.method).toBe("POST")
+    expect(call.url).toContain("/messages/merge_forward")
+    expect(call.payload["message_id_list"]).toEqual(["om_1", "om_2"])
+    expect(call.payload["receive_id"]).toBe("oc_dest")
+  })
+})
+
+describe("serializeUrgent", () => {
+  it("PATCHes the urgent_<via> endpoint with the user_id_list", () => {
+    const call = serializeUrgent("om_1", ["ou_a", "ou_b"], "app")
+    expect(call.method).toBe("PATCH")
+    expect(call.url).toContain("/messages/om_1/urgent_app")
+    expect(call.url).toContain("user_id_type=open_id")
+    expect(call.payload["user_id_list"]).toEqual(["ou_a", "ou_b"])
+  })
+
+  it("routes each channel to its own endpoint", () => {
+    expect(serializeUrgent("m", [], "sms").url).toContain("urgent_sms")
+    expect(serializeUrgent("m", [], "phone").url).toContain("urgent_phone")
   })
 })

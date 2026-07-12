@@ -60,8 +60,10 @@ pub struct BusEventEmitter(pub Arc<crate::companion_api::event_bus::EventBus>);
 
 impl EventEmitter for BusEventEmitter {
     fn emit_webhook(&self, adapter_id: &str, payload: &serde_json::Value) {
-        self.0
-            .publish(format!("connectors://webhook/{adapter_id}"), payload.clone());
+        self.0.publish(
+            format!("connectors://webhook/{adapter_id}"),
+            payload.clone(),
+        );
     }
 }
 

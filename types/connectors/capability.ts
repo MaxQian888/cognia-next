@@ -28,6 +28,13 @@ export const ALL_CAPABILITIES = [
   "delete",
   "typing",
   "history.fetch",
+  // The adapter can forward an existing message (or merge-forward several) to
+  // another conversation (`forwardMessage()`).
+  "forward",
+  // The adapter can escalate a sent message to users via an urgent channel
+  // (Feishu 加急: in-app / SMS / phone — `sendUrgent()`). Requires an elevated
+  // platform scope many bots lack.
+  "urgent",
   // presence — the adapter can surface a short, periodically refreshed
   // status text next to a user/bot identity (Lark 系统状态 badge, Slack
   // users.profile.set, Discord gateway presence). Declared when the

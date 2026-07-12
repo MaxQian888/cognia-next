@@ -7,6 +7,11 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listTemplateWorkflows } from "@/lib/db/workflows"
 import { validateWorkflow } from "./validate"
 
+// Dexie cold-open of the full schema (v100+) can exceed the default 5s hook
+// timeout on the first test of a fresh worker — same pattern as the other
+// DB-touching suites that raise the per-suite timeout.
+jest.setTimeout(30_000)
+
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()

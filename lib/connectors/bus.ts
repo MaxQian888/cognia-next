@@ -26,6 +26,9 @@ import type {
   HistoryFetchOpts,
   StreamReplyRequest,
   A2UICapabilityMatrix,
+  ForwardMessageInput,
+  ReadReceipt,
+  UrgentChannel,
 } from "@/types/connectors"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
 import type { StoredMessage } from "@/lib/claude/types"
@@ -806,7 +809,7 @@ export class ConnectorBus {
     adapterId: string,
     messageId: string,
     emojiType: string
-  ): Promise<OutboundResult> {
+  ): Promise<OutboundResult & { reactionId?: string }> {
     const a = this.adapters.get(adapterId)
     if (!a) {
       return {
@@ -820,8 +823,168 @@ export class ConnectorBus {
         error: { code: "unsupported", message: "adapter cannot add reactions", retryable: false },
       }
     }
-    await a.addReaction(messageId, emojiType)
+    const ref = await a.addReaction(messageId, emojiType)
+    // Surface the platform reaction id (when the adapter returns one) so a
+    // caller can later `removeReactionOutbound` exactly this reaction.
+    return { ok: true, ...(ref && ref.reactionId ? { reactionId: ref.reactionId } : {}) }
+  }
+
+  /**
+   * Remove a previously added reaction by its platform reaction id (from the
+   * `reactionId` of a prior {@link addReactionOutbound}). Mirrors
+   * {@link deleteOutbound}'s uniform `{ ok }` result.
+   */
+  async removeReactionOutbound(
+    adapterId: string,
+    messageId: string,
+    reactionId: string
+  ): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.removeReaction) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "adapter cannot remove reactions",
+          retryable: false,
+        },
+      }
+    }
+    await a.removeReaction(messageId, reactionId)
     return { ok: true }
+  }
+
+  /**
+   * Forward an existing message (or merge-forward several) to another
+   * conversation through an adapter that supports it
+   * (`PlatformAdapter.forwardMessage`). Returns the adapter's own
+   * `{ ok, platformMessageId, error }` result, or a uniform unsupported /
+   * not-found error.
+   */
+  async forwardOutbound(adapterId: string, input: ForwardMessageInput): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.forwardMessage) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "adapter cannot forward messages",
+          retryable: false,
+        },
+      }
+    }
+    return a.forwardMessage(input)
+  }
+
+  /**
+   * Pin a message through an adapter that supports it
+   * (`PlatformAdapter.pinMessage`). Mirrors {@link deleteOutbound}.
+   */
+  async pinOutbound(
+    adapterId: string,
+    conversationKey: string,
+    messageId: string
+  ): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.pinMessage) {
+      return {
+        ok: false,
+        error: { code: "unsupported", message: "adapter cannot pin messages", retryable: false },
+      }
+    }
+    await a.pinMessage(conversationKey, messageId)
+    return { ok: true }
+  }
+
+  /**
+   * Remove a previously pinned message through an adapter that supports it
+   * (`PlatformAdapter.unpinMessage`). Mirrors {@link deleteOutbound}.
+   */
+  async unpinOutbound(adapterId: string, messageId: string): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.unpinMessage) {
+      return {
+        ok: false,
+        error: { code: "unsupported", message: "adapter cannot unpin messages", retryable: false },
+      }
+    }
+    await a.unpinMessage(messageId)
+    return { ok: true }
+  }
+
+  /**
+   * Escalate a message to users via an urgent channel (加急) through an
+   * adapter that supports it (`PlatformAdapter.sendUrgent`). Mirrors
+   * {@link deleteOutbound}; a missing platform scope surfaces as a throw the
+   * caller maps to `platform_error`.
+   */
+  async sendUrgentOutbound(
+    adapterId: string,
+    messageId: string,
+    userIds: string[],
+    via?: UrgentChannel
+  ): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.sendUrgent) {
+      return {
+        ok: false,
+        error: { code: "unsupported", message: "adapter cannot send urgent", retryable: false },
+      }
+    }
+    try {
+      await a.sendUrgent(messageId, userIds, via)
+      return { ok: true }
+    } catch (err) {
+      return {
+        ok: false,
+        error: {
+          code: "platform_error",
+          message: err instanceof Error ? err.message : String(err),
+          retryable: false,
+        },
+      }
+    }
+  }
+
+  /**
+   * Query read receipts for a message through an adapter that supports it
+   * (`PlatformAdapter.getReadReceipt`). Returns `null` when the adapter is
+   * missing or the platform has no read-user surface (feature-detect).
+   */
+  async getReadReceiptOutbound(adapterId: string, messageId: string): Promise<ReadReceipt | null> {
+    const a = this.adapters.get(adapterId)
+    if (!a || !a.getReadReceipt) return null
+    return a.getReadReceipt(messageId)
   }
 
   /**

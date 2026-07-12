@@ -403,21 +403,23 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         now: clock,
         // v49 breadcrumb — emit on every state transition so the
         // operator can see breaker history in the inbox telemetry
-        // export.
+        // export. Also write the matching `circuit.*` audit kind so the
+        // Health 24h dot grid (derive-history.ts) actually colours breaker
+        // transitions — it reads the audit log, not the telemetry ring, so
+        // without this the declared `circuit.*` kinds stayed dead.
         onStateChange: (from, to, at) => {
           if (to === "open") {
-            void trackInboxEvent("breaker.open", {
-              adapterId,
-              fields: { from },
-              at,
-            })
+            void trackInboxEvent("breaker.open", { adapterId, fields: { from }, at })
           } else if (to === "closed") {
-            void trackInboxEvent("breaker.close", {
-              adapterId,
-              fields: { from },
-              at,
-            })
+            void trackInboxEvent("breaker.close", { adapterId, fields: { from }, at })
           }
+          const auditKind =
+            to === "open"
+              ? "circuit.opened"
+              : to === "half_open"
+                ? "circuit.half_opened"
+                : "circuit.closed"
+          void appendAudit({ adapterId, kind: auditKind, at, fields: { from, to } })
         },
       }),
       bucket: createTokenBucket({
@@ -526,10 +528,15 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
           : {}),
       })
       const reasonText = mechanism === "failover" ? "circuit open" : "rate limited"
+      // Point the dead-lettered original at the sibling job that now carries
+      // the delivery, so `waitForOutboundTerminal` (plugin waitForDelivery /
+      // the send node) follows the reroute to the sibling's true terminal
+      // status instead of misreading this reroute as a failure.
       await markDeadlettered(
         job.id,
         mechanism,
-        `${mechanism === "failover" ? "Failed over" : "Balanced"} to ${targetId} (${reasonText})`
+        `${mechanism === "failover" ? "Failed over" : "Balanced"} to ${targetId} (${reasonText})`,
+        { toJobId: newJob.id, mechanism }
       )
       await appendAudit({
         adapterId: job.adapterId,

@@ -55,8 +55,14 @@ mod tests {
 
     #[test]
     fn account_key_joins_adapter_and_credential() {
-        assert_eq!(account_key("tg-personal", "botToken"), "tg-personal:botToken");
-        assert_eq!(account_key("", "attachment-master-key"), ":attachment-master-key");
+        assert_eq!(
+            account_key("tg-personal", "botToken"),
+            "tg-personal:botToken"
+        );
+        assert_eq!(
+            account_key("", "attachment-master-key"),
+            ":attachment-master-key"
+        );
     }
 
     #[test]

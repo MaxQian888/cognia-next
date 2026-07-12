@@ -70,6 +70,17 @@ const ConnectorInboundParams = z.object({
   adapterId: requiredString("required"),
   conversationKey: optionalString,
   characterId: optionalString,
+  // Fine-grained event filters (all optional — an unscoped node keeps the
+  // legacy "every inbound on this adapter" behaviour). Matching happens in
+  // `lib/workflow/runtime/trigger-subscriptions.ts:matches`.
+  /** Only fire for these platform sender ids (OR). */
+  senderIds: z.array(z.string()).optional(),
+  /** Only fire for these channel kinds (private / group / channel / thread). */
+  channelKinds: z.array(z.enum(["private", "group", "channel", "thread"])).optional(),
+  /** Case-insensitive substring keywords (OR) against the message plain text. */
+  keywords: z.array(z.string()).optional(),
+  /** Only fire when the bot itself is @-mentioned. */
+  requireMention: z.boolean().optional(),
 })
 
 const ChatMessageTriggerParams = z.object({
@@ -746,6 +757,35 @@ const ConnectorSendParams = z.object({
   adapterId: requiredString("required"),
   conversationKey: requiredString("required"),
   content: requiredString("required"),
+  /**
+   * Optional A2UI surface JSON (`{components, dataModel, rootId, …}`).
+   * When set, the node sends an interactive card (projected per-platform by
+   * the a2ui-bridge — Lark interactive card, etc.) with `content` as the
+   * plain-text mirror for capability fallback. Must parse as JSON with
+   * `components` + `rootId`; validated at execution.
+   */
+  cardJson: optionalString,
+  /** Reply anchor — platforms that support replies quote this message. */
+  replyToMessageId: optionalString,
+  /** Thread anchor — posts into the thread instead of the main channel. */
+  threadId: optionalString,
+  /** Explicit dedup key; defaults to `${runId}:${stepId}` at execution. */
+  idempotencyKey: optionalString,
+  /**
+   * Edit-in-place: when set, the outbound runner routes to `adapter.edit()`
+   * on this platform message id instead of sending a new message (platforms
+   * without edit support fall back to a plain send, audited).
+   */
+  editTargetMessageId: optionalString,
+  /**
+   * Delivery feedback: block until the queued job reaches a terminal state
+   * (`sent` / `deadlettered`) — or `waitTimeoutMs` elapses — and surface
+   * `status` / `platformMessageId` / `errorCode` on the node output.
+   * Default false: enqueue-and-continue (previous behaviour).
+   */
+  waitForDelivery: z.boolean().optional(),
+  /** Wait budget for `waitForDelivery`, ms (default 30 000, max 5 min). */
+  waitTimeoutMs: numberRange(100, 300_000).optional(),
 })
 
 const ConnectorDraftParams = z.object({
@@ -754,6 +794,53 @@ const ConnectorDraftParams = z.object({
   content: requiredString("required"),
   sourceMessageId: optionalString,
   ttlMs: numberRange(0).optional(),
+})
+
+const ConnectorReactionParams = z.object({
+  adapterId: requiredString("required"),
+  /** Platform message id to react to (e.g. Lark `om_…`). */
+  messageId: requiredString("required"),
+  /** Platform emoji code (Lark reaction type like "THUMBSUP", or a unicode emoji). */
+  emoji: requiredString("required"),
+  /** Operation: add a reaction (default) or remove one by `reactionId`. */
+  op: z.enum(["add", "remove"]).optional(),
+  /**
+   * Platform reaction id — REQUIRED when `op="remove"` (from a prior add
+   * node's `reactionId` output). Ignored for `op="add"`.
+   */
+  reactionId: optionalString,
+})
+
+const ConnectorDeleteParams = z.object({
+  adapterId: requiredString("required"),
+  /** Platform message id to recall/delete. */
+  messageId: requiredString("required"),
+})
+
+const ConnectorForwardParams = z.object({
+  adapterId: requiredString("required"),
+  /** Single message id to forward. Use EITHER this or `messageIds`. */
+  messageId: optionalString,
+  /** Two or more message ids to merge-forward as one combined card. */
+  messageIds: z.array(z.string()).optional(),
+  /**
+   * Destination conversation key (`platform:adapterId:chatId`) or a raw
+   * platform receive id (Lark chat_id / open_id).
+   */
+  targetConversationKey: requiredString("required"),
+})
+
+const ConnectorWaitReplyParams = z.object({
+  /** Conversation to listen on (composite key `platform:adapterId:chatId[:thread]`). */
+  conversationKey: requiredString("required"),
+  /** Only accept replies from these platform user ids (any when empty). */
+  senderIds: z.array(z.string()).optional(),
+  /** Case-insensitive substrings; any match accepts the reply. */
+  keywords: z.array(z.string()).optional(),
+  /** Only accept replies that @-mention the bot. */
+  requireMention: z.boolean().optional(),
+  /** Wait budget in ms (default 120 000, max 1 h). */
+  timeoutMs: numberRange(1_000, 3_600_000).optional(),
 })
 
 const ApprovalRequestParams = z.object({
@@ -1643,6 +1730,10 @@ export const PARAMS_SCHEMAS = {
   // Actions: connectors
   "action.connector.send": ConnectorSendParams,
   "action.connector.draft": ConnectorDraftParams,
+  "action.connector.reaction": ConnectorReactionParams,
+  "action.connector.delete": ConnectorDeleteParams,
+  "action.connector.forward": ConnectorForwardParams,
+  "action.connector.waitReply": ConnectorWaitReplyParams,
   // Actions: human-in-the-loop (ADR 0061 P2)
   "action.approval.request": ApprovalRequestParams,
   // Actions: remote device steps (ADR 0061 P3)

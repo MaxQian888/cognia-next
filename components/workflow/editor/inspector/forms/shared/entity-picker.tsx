@@ -36,6 +36,7 @@ import { getMcpServer, listMcpServers } from "@/lib/db/mcp-servers"
 import { listPlugins } from "@/lib/db/plugins"
 import { listWorkflows } from "@/lib/db/workflows"
 import { listTwins } from "@/lib/db/twins"
+import { listAdapterInstances } from "@/lib/db/adapter-instances"
 import { testMcpServer, type McpTestRequest } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
 import type { McpServer } from "@/lib/claude/types"
@@ -95,7 +96,9 @@ export function EntityPicker({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           aria-label={placeholder}
-          placeholder="{{ $node['id'].out.field }}"
+          placeholder={
+            /* i18n-exempt: example node-output template, not UI prose */ "{{ $node['id'].out.field }}"
+          }
           className="font-mono"
         />
         {allowExpression ? (
@@ -351,6 +354,23 @@ export function SubworkflowPicker({ allowExpression = true, ...props }: WrapperP
       {...props}
       options={options}
       placeholder={t("subworkflow")}
+      allowExpression={allowExpression}
+    />
+  )
+}
+
+export function AdapterInstancePicker({ allowExpression = true, ...props }: WrapperProps) {
+  const t = useTranslations("workflows.forms.pickers")
+  const rows = useLiveQuery(() => listAdapterInstances(), [])
+  const options = useMemo(
+    () => rows?.map((a) => ({ value: a.id, label: `${a.displayName} (${a.type})` })) ?? [],
+    [rows]
+  )
+  return (
+    <EntityPicker
+      {...props}
+      options={options}
+      placeholder={t("adapterInstance")}
       allowExpression={allowExpression}
     />
   )
