@@ -37,69 +37,42 @@
       "label": "Enable tools"
     }
   },
-  "mobileCamera": {
-    "quality": {
-      "label": "JPEG quality (1–100)"
+  "aggregate": {
+    "keyExpression": {
+      "hint": "Per-item key. $item is the current item, e.g. $item.category",
+      "label": "Key expression"
     },
-    "width": {
-      "label": "Max width (px)"
-    }
-  },
-  "mobileLocation": {
-    "enableHighAccuracy": {
-      "label": "High accuracy (GPS)"
-    }
-  },
-  "mobileNotify": {
-    "body": {
-      "label": "Body"
+    "numericField": {
+      "hint": "Per-item number. Empty = the item itself.",
+      "label": "Value expression"
     },
-    "title": {
-      "label": "Title"
-    }
-  },
-  "mobileScanBarcode": {
-    "formats": {
-      "hint": "Comma-separated (e.g. QR_CODE, EAN_13). Empty = QR only.",
-      "label": "Formats"
-    }
-  },
-  "mobileShare": {
-    "text": {
-      "hint": "Text or URL is required.",
-      "label": "Text"
+    "numericOp": {
+      "label": "Function",
+      "options": {
+        "avg": "Average",
+        "count": "Count",
+        "max": "Max",
+        "min": "Min",
+        "sum": "Sum"
+      }
     },
-    "title": {
-      "label": "Title (optional)"
+    "operation": {
+      "hint": "How to reduce the input list into a single value.",
+      "label": "Operation",
+      "options": {
+        "collect": "Collect (into a list)",
+        "concat": "Concat (flatten one level)",
+        "custom": "Custom reducer",
+        "dedupe": "Deduplicate",
+        "groupBy": "Group by key",
+        "mergeObjects": "Merge objects",
+        "numeric": "Numeric (sum / avg / …)"
+      }
     },
-    "url": {
-      "label": "URL (optional)"
-    }
-  },
-  "mobileStep": {
-    "deviceId": {
-      "hint": "Empty = any capable paired device (freshest first).",
-      "label": "Device ID (optional)"
-    },
-    "timeoutMs": {
-      "label": "Timeout (ms)"
-    }
-  },
-  "approvalRequest": {
-    "message": {
-      "label": "Message (optional)"
-    },
-    "onTimeout": {
-      "fail": "Fail the step",
-      "label": "On timeout",
-      "reject": "Route as rejected"
-    },
-    "timeoutMs": {
-      "hint": "How long to wait for a decision. Default 1 hour.",
-      "label": "Timeout (ms)"
-    },
-    "title": {
-      "label": "Title"
+    "reducerExpression": {
+      "hint": "JS expression returning the next accumulator. acc, item, index in scope.",
+      "label": "Reducer expression (JS)",
+      "placeholder": "acc + item.value"
     }
   },
   "aiClassify": {
@@ -144,6 +117,47 @@
       "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
       "label": "Provider",
       "placeholder": "openrouter"
+    }
+  },
+  "aiCouncil": {
+    "councillorsJson": {
+      "hint": "Array of { name, modelAlias, systemPrompt? } objects. modelAlias uses Settings -> Routing aliases.",
+      "label": "Councillors JSON",
+      "placeholder": "[\n  { \"name\": \"Reviewer\", \"modelAlias\": \"smart\" },\n  { \"name\": \"Fast pass\", \"modelAlias\": \"fast\" }\n]"
+    },
+    "executionMode": {
+      "label": "Execution mode",
+      "options": {
+        "parallel": "Parallel",
+        "serial": "Serial"
+      }
+    },
+    "maxConcurrency": {
+      "hint": "Maximum councillor calls running at once in parallel mode.",
+      "label": "Max concurrency"
+    },
+    "piiGate": {
+      "block": "Block (fail the step)",
+      "hint": "Runs before the prompt egresses to every councillor and the synthesizer.",
+      "label": "PII gate",
+      "off": "Off",
+      "redact": "Redact"
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "synthesisInstructions": {
+      "hint": "Optional guidance for the final synthesis pass.",
+      "label": "Synthesis instructions"
+    },
+    "synthesizerAlias": {
+      "hint": "Routing alias for the model that merges councillor responses.",
+      "label": "Synthesizer alias",
+      "placeholder": "quality"
+    },
+    "timeoutMs": {
+      "hint": "Per-councillor timeout. Valid range: 1000-600000 ms.",
+      "label": "Timeout (ms)"
     }
   },
   "aiEmbed": {
@@ -233,15 +247,15 @@
       "label": "Base URL (optional)",
       "placeholder": "https://api.openai.com/v1"
     },
-    "jsonSchema": {
-      "hint": "A sample shape the model should match. Injected into the prompt.",
-      "label": "JSON shape (optional)",
-      "placeholder": "{\n  \"title\": \"string\",\n  \"score\": \"number\"\n}"
-    },
     "headersJson": {
       "hint": "Static provider headers as a JSON object. Values must be strings.",
       "label": "Headers JSON (optional)",
       "placeholder": "{ \"HTTP-Referer\": \"https://app.example\", \"X-Title\": \"Cognia\" }"
+    },
+    "jsonSchema": {
+      "hint": "A sample shape the model should match. Injected into the prompt.",
+      "label": "JSON shape (optional)",
+      "placeholder": "{\n  \"title\": \"string\",\n  \"score\": \"number\"\n}"
     },
     "mode": {
       "explicit": "Explicit provider",
@@ -288,45 +302,21 @@
       "label": "User prompt"
     }
   },
-  "aiCouncil": {
-    "councillorsJson": {
-      "hint": "Array of { name, modelAlias, systemPrompt? } objects. modelAlias uses Settings -> Routing aliases.",
-      "label": "Councillors JSON",
-      "placeholder": "[\n  { \"name\": \"Reviewer\", \"modelAlias\": \"smart\" },\n  { \"name\": \"Fast pass\", \"modelAlias\": \"fast\" }\n]"
+  "approvalRequest": {
+    "message": {
+      "label": "Message (optional)"
     },
-    "executionMode": {
-      "label": "Execution mode",
-      "options": {
-        "parallel": "Parallel",
-        "serial": "Serial"
-      }
-    },
-    "maxConcurrency": {
-      "hint": "Maximum councillor calls running at once in parallel mode.",
-      "label": "Max concurrency"
-    },
-    "piiGate": {
-      "block": "Block (fail the step)",
-      "hint": "Runs before the prompt egresses to every councillor and the synthesizer.",
-      "label": "PII gate",
-      "off": "Off",
-      "redact": "Redact"
-    },
-    "prompt": {
-      "label": "Prompt"
-    },
-    "synthesisInstructions": {
-      "hint": "Optional guidance for the final synthesis pass.",
-      "label": "Synthesis instructions"
-    },
-    "synthesizerAlias": {
-      "hint": "Routing alias for the model that merges councillor responses.",
-      "label": "Synthesizer alias",
-      "placeholder": "quality"
+    "onTimeout": {
+      "fail": "Fail the step",
+      "label": "On timeout",
+      "reject": "Route as rejected"
     },
     "timeoutMs": {
-      "hint": "Per-councillor timeout. Valid range: 1000-600000 ms.",
+      "hint": "How long to wait for a decision. Default 1 hour.",
       "label": "Timeout (ms)"
+    },
+    "title": {
+      "label": "Title"
     }
   },
   "branch": {
@@ -462,6 +452,16 @@
       "placeholder": "Upper bound"
     }
   },
+  "connectorDelete": {
+    "adapter": {
+      "label": "Adapter"
+    },
+    "messageId": {
+      "label": "Message id",
+      "hint": "Platform message id to recall / delete.",
+      "placeholder": "om_..."
+    }
+  },
   "connectorDraft": {
     "content": {
       "label": "Draft content"
@@ -486,12 +486,78 @@
       "label": "Adapter",
       "placeholder": "telegram_main"
     },
+    "channelKinds": {
+      "hint": "Fires only in the selected channel kinds; none selected means all.",
+      "label": "Channel kinds (optional)",
+      "options": {
+        "channel": "Channel",
+        "group": "Group",
+        "private": "Private chat",
+        "thread": "Thread"
+      }
+    },
     "characterId": {
       "label": "Character (optional)"
     },
     "conversationKey": {
       "hint": "Optional. Limit to a specific conversation; empty fires on any.",
       "label": "Conversation key"
+    },
+    "keywords": {
+      "hint": "Comma-separated, case-insensitive substrings; fires when any matches the message text.",
+      "label": "Keywords (optional)",
+      "placeholder": "deploy, release"
+    },
+    "requireMention": {
+      "hint": "Only fire when the bot itself is mentioned.",
+      "label": "Require @-mention"
+    },
+    "senderIds": {
+      "hint": "Comma-separated platform user ids; fires only for these senders.",
+      "label": "Sender ids (optional)",
+      "placeholder": "ou_abc, ou_def"
+    }
+  },
+  "connectorReaction": {
+    "adapter": {
+      "label": "Adapter"
+    },
+    "op": {
+      "label": "Operation",
+      "options": {
+        "add": "Add reaction",
+        "remove": "Remove reaction"
+      }
+    },
+    "messageId": {
+      "label": "Message id",
+      "hint": "Platform message id to react to.",
+      "placeholder": "om_..."
+    },
+    "emoji": {
+      "label": "Emoji",
+      "hint": "Platform reaction code (Lark: THUMBSUP, OK, …) or a unicode emoji.",
+      "placeholder": "THUMBSUP"
+    },
+    "reactionId": {
+      "label": "Reaction id",
+      "hint": "Id of the reaction to remove (from an earlier add node's output).",
+      "placeholder": "ZCaGnix..."
+    }
+  },
+  "connectorForward": {
+    "adapter": {
+      "label": "Adapter"
+    },
+    "messageId": {
+      "label": "Message id",
+      "hint": "Platform message id to forward.",
+      "placeholder": "om_..."
+    },
+    "target": {
+      "label": "Target conversation",
+      "hint": "Destination conversation key (platform:adapterId:chatId) or a raw receive id.",
+      "placeholder": "lark:bot:oc_..."
     }
   },
   "connectorSend": {
@@ -504,6 +570,61 @@
     },
     "conversationKey": {
       "label": "Conversation key"
+    },
+    "editTarget": {
+      "hint": "Edit this already-sent platform message in place instead of sending a new one. Platforms without edit support fall back to a new message.",
+      "label": "Edit message id (optional)",
+      "placeholder": "om_..."
+    },
+    "idempotencyKey": {
+      "hint": "Deduplication key; defaults to run id + step id.",
+      "label": "Idempotency key (optional)"
+    },
+    "replyTo": {
+      "hint": "Platforms that support replies quote this message.",
+      "label": "Reply to message id (optional)",
+      "placeholder": "om_..."
+    },
+    "threadId": {
+      "hint": "Post into this thread instead of the main channel.",
+      "label": "Thread id (optional)"
+    },
+    "waitForDelivery": {
+      "hint": "Block this step until the message is delivered (or dead-lettered) and expose delivered / status / platformMessageId / errorCode on the node output.",
+      "label": "Wait for delivery"
+    },
+    "waitTimeoutMs": {
+      "hint": "How long to wait for delivery before continuing with the latest status, in milliseconds (default 30000, max 300000).",
+      "label": "Delivery wait timeout (ms)"
+    },
+    "cardJson": {
+      "label": "A2UI card JSON (optional)",
+      "hint": "A2UI surface object ({components, dataModel, rootId, …}). When set, sends an interactive card with the message content as plain-text fallback.",
+      "placeholder": "{\"components\": {...}, \"dataModel\": {}, \"rootId\": \"root\"}"
+    }
+  },
+  "connectorWaitReply": {
+    "conversationKey": {
+      "label": "Conversation key",
+      "hint": "Composite key platform:adapterId:chatId — the conversation to listen on."
+    },
+    "senderIds": {
+      "label": "Sender ids (optional)",
+      "hint": "Comma-separated platform user ids; any sender when empty.",
+      "placeholder": "ou_abc, ou_def"
+    },
+    "keywords": {
+      "label": "Keywords (optional)",
+      "hint": "Comma-separated case-insensitive substrings; any match accepts the reply.",
+      "placeholder": "approve, done"
+    },
+    "requireMention": {
+      "label": "Require @-mention",
+      "hint": "Only accept replies that @-mention the bot."
+    },
+    "timeoutMs": {
+      "label": "Timeout (ms)",
+      "hint": "Wait budget before resolving with replied=false (default 120000, max 3600000)."
     }
   },
   "cron": {
@@ -699,6 +820,78 @@
     },
     "width": {
       "label": "Width (px)"
+    }
+  },
+  "ensemble": {
+    "aggField": {
+      "hint": "Object field to vote / count on. Empty = the whole result.",
+      "label": "Field"
+    },
+    "aggregation": {
+      "hint": "How to reduce the N samples into one result.",
+      "label": "Aggregation",
+      "options": {
+        "bestOf": "Best of (by score)",
+        "majority": "Majority vote on a field",
+        "synthesize": "Synthesize (final agent)",
+        "threshold": "Threshold count"
+      }
+    },
+    "iterationConcurrency": {
+      "hint": "Max samples running at once.",
+      "label": "Concurrency"
+    },
+    "lens": {
+      "hint": "One steering prompt per line; cycled across samples (e.g. adversarial verify).",
+      "label": "Lenses (optional)",
+      "placeholder": "Argue FOR the claim\nArgue AGAINST the claim"
+    },
+    "n": {
+      "hint": "How many times to run the target.",
+      "label": "Samples (N)"
+    },
+    "outputSchema": {
+      "hint": "Typed output enables field-based voting.",
+      "label": "Sample output schema"
+    },
+    "piiGate": {
+      "block": "Block (fail the step)",
+      "hint": "Runs before the prompt egresses to every sample.",
+      "label": "PII gate",
+      "off": "Off",
+      "redact": "Redact"
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "scoreField": {
+      "hint": "Numeric field to maximize.",
+      "label": "Score field"
+    },
+    "synthesizerAlias": {
+      "hint": "Routing alias for the final merge model.",
+      "label": "Synthesizer alias",
+      "placeholder": "e.g. quality"
+    },
+    "targetKind": {
+      "hint": "What to run N times.",
+      "label": "Target",
+      "options": {
+        "agentTurn": "Agent turn (inline)",
+        "subworkflow": "Sub-workflow"
+      }
+    },
+    "targetModel": {
+      "hint": "Model for each agent sample.",
+      "label": "Model (optional)"
+    },
+    "threshold": {
+      "hint": "Minimum matching samples to pass.",
+      "label": "Threshold"
+    },
+    "workflowId": {
+      "hint": "The workflow to run for each sample.",
+      "label": "Sub-workflow"
     }
   },
   "eval": {
@@ -1231,6 +1424,10 @@
     }
   },
   "join": {
+    "aggregate": {
+      "hint": "Reduce the joined branch outputs in one step.",
+      "label": "Aggregate gathered results"
+    },
     "joinPolicy": {
       "label": "Join policy",
       "options": {
@@ -1242,10 +1439,6 @@
     "timeoutMs": {
       "hint": "0 = wait forever. Otherwise abort the join after this long.",
       "label": "Timeout (ms, optional)"
-    },
-    "aggregate": {
-      "label": "Aggregate gathered results",
-      "hint": "Reduce the joined branch outputs in one step."
     }
   },
   "loop": {
@@ -1339,11 +1532,11 @@
     }
   },
   "manualTrigger": {
-    "intro": "Fires when you click the Run button in the editor. No additional configuration.",
     "inputSchema": {
-      "label": "Input schema (optional)",
-      "hint": "Declares the run payload ($trigger.payload) for publishing this workflow as a callable unit."
-    }
+      "hint": "Declares the run payload ($trigger.payload) for publishing this workflow as a callable unit.",
+      "label": "Input schema (optional)"
+    },
+    "intro": "Fires when you click the Run button in the editor. No additional configuration."
   },
   "mcpInvokeTool": {
     "argsJson": {
@@ -1399,6 +1592,54 @@
     "text": {
       "hint": "One self-contained statement. Deduped against existing memories via the consolidator.",
       "label": "Fact"
+    }
+  },
+  "mobileCamera": {
+    "quality": {
+      "label": "JPEG quality (1–100)"
+    },
+    "width": {
+      "label": "Max width (px)"
+    }
+  },
+  "mobileLocation": {
+    "enableHighAccuracy": {
+      "label": "High accuracy (GPS)"
+    }
+  },
+  "mobileNotify": {
+    "body": {
+      "label": "Body"
+    },
+    "title": {
+      "label": "Title"
+    }
+  },
+  "mobileScanBarcode": {
+    "formats": {
+      "hint": "Comma-separated (e.g. QR_CODE, EAN_13). Empty = QR only.",
+      "label": "Formats"
+    }
+  },
+  "mobileShare": {
+    "text": {
+      "hint": "Text or URL is required.",
+      "label": "Text"
+    },
+    "title": {
+      "label": "Title (optional)"
+    },
+    "url": {
+      "label": "URL (optional)"
+    }
+  },
+  "mobileStep": {
+    "deviceId": {
+      "hint": "Empty = any capable paired device (freshest first).",
+      "label": "Device ID (optional)"
+    },
+    "timeoutMs": {
+      "label": "Timeout (ms)"
     }
   },
   "note": {
@@ -1462,7 +1703,82 @@
       "placeholder": "https://example.com/scan.pdf"
     }
   },
+  "output": {
+    "onSchemaViolation": {
+      "fail": "Fail the run",
+      "hint": "What to do if the output value fails the schema.",
+      "label": "On schema violation",
+      "soft": "Pass through with a warning"
+    },
+    "outputSchema": {
+      "hint": "The published interface's output contract.",
+      "label": "Output schema"
+    },
+    "value": {
+      "hint": "Expression for the terminal output. Empty = the upstream value.",
+      "label": "Output value"
+    }
+  },
+  "outputSchema": {
+    "addField": "Add field",
+    "editFields": "Edit as fields",
+    "editRaw": "Edit as JSON",
+    "empty": "No fields yet — add one to enforce typed output.",
+    "fieldDescription": "Description",
+    "fieldDescriptionPlaceholder": "What this field means (helps the model)",
+    "fieldName": "Field name",
+    "fieldNamePlaceholder": "e.g. verdict",
+    "fieldType": "Type",
+    "hint": "Declare a JSON schema the reply must satisfy. Leave empty for free-form text.",
+    "onSchemaViolation": {
+      "fail": "Fail the step",
+      "hint": "What to do if the output still fails the schema after one auto-fix retry.",
+      "label": "On schema violation",
+      "soft": "Keep unvalidated output"
+    },
+    "rawLabel": "JSON Schema",
+    "removeField": "Remove field",
+    "required": "Required",
+    "sectionTitle": "Typed output"
+  },
+  "petEventTrigger": {
+    "cooldownMs": {
+      "hint": "Minimum time between fires for the same workflow. Prevents workflows from retriggering themselves.",
+      "label": "Cooldown (ms)"
+    },
+    "intro": "Fires when the desktop pet reaches a supported lifecycle event.",
+    "kinds": {
+      "hint": "Leave all off to fire on every supported pet lifecycle event.",
+      "label": "Pet events",
+      "options": {
+        "achievementUnlocked": "Achievement unlocked",
+        "evolved": "Evolved",
+        "levelUp": "Level up",
+        "unwell": "Unwell"
+      }
+    }
+  },
+  "petInteract": {
+    "itemId": {
+      "hint": "Optional shop item id consumed by the pet controller.",
+      "label": "Item id",
+      "placeholder": "pet_item_..."
+    },
+    "kind": {
+      "label": "Interaction",
+      "options": {
+        "cleaned": "Clean",
+        "fed": "Feed",
+        "petted": "Pet",
+        "played": "Play",
+        "slept": "Sleep",
+        "talked": "Talk",
+        "treated": "Treat"
+      }
+    }
+  },
   "pickers": {
+    "adapterInstance": "Select an adapter instance",
     "character": "Select a character",
     "mcpServer": "Select an MCP server",
     "noResults": "No matches",
@@ -2107,6 +2423,37 @@
       "label": "Timeout (seconds)"
     }
   },
+  "teamCompose": {
+    "autoStart": {
+      "hint": "Run the team lifecycle immediately after composition and wait for the terminal state.",
+      "label": "Start immediately"
+    },
+    "maxRoster": {
+      "label": "Max roster size (incl. lead)"
+    },
+    "name": {
+      "label": "Team name (optional)"
+    },
+    "objective": {
+      "hint": "One objective sentence. PII is redacted before any model call; composition fails closed if secrets remain.",
+      "label": "Objective"
+    },
+    "preferredPattern": {
+      "label": "Execution pattern",
+      "options": {
+        "auto": "Auto (routing decides)",
+        "background_handoff": "Background handoff",
+        "external_handoff": "External handoff",
+        "manager_worker": "Manager / worker",
+        "parallel_specialists": "Parallel specialists",
+        "single_agent_recommended": "Single agent",
+        "ultracode_orchestration": "Ultracode orchestration"
+      }
+    },
+    "ultracode": {
+      "label": "Ultracode"
+    }
+  },
   "teamCreate": {
     "description": {
       "label": "Description"
@@ -2130,6 +2477,94 @@
       "label": "Supervisor character"
     }
   },
+  "teamDelegate": {
+    "awaitCompletion": {
+      "hint": "Wait for the delegation to settle and surface its result. Off returns the launched record immediately.",
+      "label": "Await completion"
+    },
+    "force": {
+      "hint": "Launch even inside the team's quiet-hours window.",
+      "label": "Override quiet hours"
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "reason": {
+      "label": "Reason (audit log)"
+    },
+    "systemPrompt": {
+      "label": "System prompt (optional)"
+    },
+    "target": {
+      "label": "Delegate to",
+      "options": {
+        "background": "Background agent",
+        "external": "External agent",
+        "team": "Another team",
+        "twin": "Digital twin"
+      }
+    },
+    "targetAgentId": {
+      "hint": "External runtime id, e.g. claude-code or codex.",
+      "label": "External agent id"
+    },
+    "targetTeamId": {
+      "label": "Target team"
+    },
+    "teamId": {
+      "label": "Source team"
+    },
+    "twinId": {
+      "label": "Digital twin"
+    }
+  },
+  "teamMessage": {
+    "content": {
+      "label": "Message"
+    },
+    "recipientId": {
+      "label": "Recipient teammate id (optional)"
+    },
+    "senderId": {
+      "hint": "Defaults to the team lead.",
+      "label": "Sender teammate id (optional)"
+    },
+    "taskId": {
+      "label": "Attach to task id (optional)"
+    },
+    "teamId": {
+      "label": "Team"
+    }
+  },
+  "teamReconcile": {
+    "inherit": "Inherit from team config",
+    "intro": "Reconciles the per-dispatch agent branches produced so far in this run. Only meaningful inside a workspace-isolated team run.",
+    "mode": {
+      "label": "Mode",
+      "options": {
+        "manual": "Manual",
+        "merge-all": "Merge all",
+        "pipeline": "Pipeline",
+        "select": "Select winner"
+      }
+    },
+    "retain": {
+      "label": "Retain branches",
+      "options": {
+        "all": "Keep all",
+        "keep-winner": "Keep winner",
+        "prune-losers": "Prune losers"
+      }
+    },
+    "selectStrategy": {
+      "label": "Selection strategy",
+      "options": {
+        "first-success": "First success",
+        "judge": "AI judge",
+        "manual": "Manual"
+      }
+    }
+  },
   "teamRun": {
     "goal": {
       "hint": "What you want the team to accomplish. Forwarded to the lead's planning phase.",
@@ -2138,6 +2573,20 @@
     "teamId": {
       "label": "Team id",
       "placeholder": "team_..."
+    }
+  },
+  "teamStatus": {
+    "includeDelegations": {
+      "label": "Include delegations"
+    },
+    "includeTasks": {
+      "label": "Include tasks"
+    },
+    "includeTeammates": {
+      "label": "Include teammates"
+    },
+    "teamId": {
+      "label": "Team"
     }
   },
   "teamTaskDispatch": {
@@ -2434,6 +2883,76 @@
       }
     }
   },
+  "webClone": {
+    "allowPrivateHosts": {
+      "hint": "Permit private / loopback / link-local targets (SSRF opt-in). Leave off unless you trust the target.",
+      "label": "Allow private hosts"
+    },
+    "concurrency": {
+      "hint": "Number of concurrent downloads (1–32).",
+      "label": "Concurrency"
+    },
+    "extractComponents": {
+      "hint": "Also analyze the page into a component structure (template / style / logic).",
+      "label": "Extract components"
+    },
+    "framework": {
+      "hint": "Generate components in this framework from the extracted structure. Implies component extraction.",
+      "label": "Generate framework code",
+      "options": {
+        "angular": "Angular",
+        "jquery": "jQuery",
+        "none": "None",
+        "react": "React",
+        "svelte": "Svelte",
+        "vue": "Vue"
+      }
+    },
+    "frameworkHint": {
+      "hint": "Hint the extractor about the page's original framework to improve component boundaries.",
+      "label": "Framework hint",
+      "options": {
+        "none": "Auto-detect",
+        "react": "React",
+        "svelte": "Svelte",
+        "vue": "Vue"
+      }
+    },
+    "maxAssets": {
+      "hint": "Maximum number of assets to download (1–5000).",
+      "label": "Max assets"
+    },
+    "maxFileSize": {
+      "hint": "Hard per-file byte cap. Leave empty for the engine default; 0 disables the limit.",
+      "label": "Max file size (bytes)"
+    },
+    "mode": {
+      "hint": "'Bundle' writes a directory with separated assets; 'single' inlines everything into one self-contained HTML file.",
+      "label": "Mode",
+      "options": {
+        "bundle": "Directory bundle",
+        "single": "Single file"
+      }
+    },
+    "output": {
+      "hint": "Where to write the snapshot. Relative paths resolve under the open workspace; 'single' mode writes a .html file, 'bundle' a directory.",
+      "label": "Output path",
+      "placeholder": "./snapshots/site"
+    },
+    "pretty": {
+      "hint": "Format the output HTML for readability.",
+      "label": "Prettify HTML"
+    },
+    "timeout": {
+      "hint": "Per-resource timeout in milliseconds (1000–120000).",
+      "label": "Timeout (ms)"
+    },
+    "url": {
+      "hint": "Page to snapshot. Supports '{{ }}' expressions.",
+      "label": "URL",
+      "placeholder": "https://example.com/"
+    }
+  },
   "webhookBanner": {
     "desktopOnly": "Desktop only. The webhook receiver runs inside the Tauri sidecar.",
     "loading": "Loading webhook URL…",
@@ -2478,190 +2997,6 @@
       "hint": "Optional. Defaults to the workflow run id.",
       "label": "Response body template",
       "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
-    }
-  },
-  "outputSchema": {
-    "sectionTitle": "Typed output",
-    "hint": "Declare a JSON schema the reply must satisfy. Leave empty for free-form text.",
-    "editRaw": "Edit as JSON",
-    "editFields": "Edit as fields",
-    "rawLabel": "JSON Schema",
-    "empty": "No fields yet — add one to enforce typed output.",
-    "fieldName": "Field name",
-    "fieldNamePlaceholder": "e.g. verdict",
-    "fieldDescription": "Description",
-    "fieldDescriptionPlaceholder": "What this field means (helps the model)",
-    "fieldType": "Type",
-    "required": "Required",
-    "removeField": "Remove field",
-    "addField": "Add field",
-    "onSchemaViolation": {
-      "label": "On schema violation",
-      "hint": "What to do if the output still fails the schema after one auto-fix retry.",
-      "fail": "Fail the step",
-      "soft": "Keep unvalidated output"
-    }
-  },
-  "aggregate": {
-    "operation": {
-      "label": "Operation",
-      "hint": "How to reduce the input list into a single value.",
-      "options": {
-        "collect": "Collect (into a list)",
-        "concat": "Concat (flatten one level)",
-        "mergeObjects": "Merge objects",
-        "groupBy": "Group by key",
-        "dedupe": "Deduplicate",
-        "numeric": "Numeric (sum / avg / …)",
-        "custom": "Custom reducer"
-      }
-    },
-    "keyExpression": {
-      "label": "Key expression",
-      "hint": "Per-item key. $item is the current item, e.g. $item.category"
-    },
-    "numericOp": {
-      "label": "Function",
-      "options": {
-        "sum": "Sum",
-        "avg": "Average",
-        "min": "Min",
-        "max": "Max",
-        "count": "Count"
-      }
-    },
-    "numericField": {
-      "label": "Value expression",
-      "hint": "Per-item number. Empty = the item itself."
-    },
-    "reducerExpression": {
-      "label": "Reducer expression (JS)",
-      "hint": "JS expression returning the next accumulator. acc, item, index in scope.",
-      "placeholder": "acc + item.value"
-    }
-  },
-  "ensemble": {
-    "targetKind": {
-      "label": "Target",
-      "hint": "What to run N times.",
-      "options": {
-        "agentTurn": "Agent turn (inline)",
-        "subworkflow": "Sub-workflow"
-      }
-    },
-    "prompt": {
-      "label": "Prompt"
-    },
-    "targetModel": {
-      "label": "Model (optional)",
-      "hint": "Model for each agent sample."
-    },
-    "outputSchema": {
-      "label": "Sample output schema",
-      "hint": "Typed output enables field-based voting."
-    },
-    "workflowId": {
-      "label": "Sub-workflow",
-      "hint": "The workflow to run for each sample."
-    },
-    "n": {
-      "label": "Samples (N)",
-      "hint": "How many times to run the target."
-    },
-    "iterationConcurrency": {
-      "label": "Concurrency",
-      "hint": "Max samples running at once."
-    },
-    "lens": {
-      "label": "Lenses (optional)",
-      "hint": "One steering prompt per line; cycled across samples (e.g. adversarial verify).",
-      "placeholder": "Argue FOR the claim\nArgue AGAINST the claim"
-    },
-    "aggregation": {
-      "label": "Aggregation",
-      "hint": "How to reduce the N samples into one result.",
-      "options": {
-        "majority": "Majority vote on a field",
-        "threshold": "Threshold count",
-        "bestOf": "Best of (by score)",
-        "synthesize": "Synthesize (final agent)"
-      }
-    },
-    "aggField": {
-      "label": "Field",
-      "hint": "Object field to vote / count on. Empty = the whole result."
-    },
-    "threshold": {
-      "label": "Threshold",
-      "hint": "Minimum matching samples to pass."
-    },
-    "scoreField": {
-      "label": "Score field",
-      "hint": "Numeric field to maximize."
-    },
-    "synthesizerAlias": {
-      "label": "Synthesizer alias",
-      "hint": "Routing alias for the final merge model.",
-      "placeholder": "e.g. quality"
-    },
-    "piiGate": {
-      "label": "PII gate",
-      "hint": "Runs before the prompt egresses to every sample.",
-      "off": "Off",
-      "block": "Block (fail the step)",
-      "redact": "Redact"
-    }
-  },
-  "petEventTrigger": {
-    "cooldownMs": {
-      "hint": "Minimum time between fires for the same workflow. Prevents workflows from retriggering themselves.",
-      "label": "Cooldown (ms)"
-    },
-    "intro": "Fires when the desktop pet reaches a supported lifecycle event.",
-    "kinds": {
-      "hint": "Leave all off to fire on every supported pet lifecycle event.",
-      "label": "Pet events",
-      "options": {
-        "achievementUnlocked": "Achievement unlocked",
-        "evolved": "Evolved",
-        "levelUp": "Level up",
-        "unwell": "Unwell"
-      }
-    }
-  },
-  "petInteract": {
-    "itemId": {
-      "hint": "Optional shop item id consumed by the pet controller.",
-      "label": "Item id",
-      "placeholder": "pet_item_..."
-    },
-    "kind": {
-      "label": "Interaction",
-      "options": {
-        "cleaned": "Clean",
-        "fed": "Feed",
-        "petted": "Pet",
-        "played": "Play",
-        "slept": "Sleep",
-        "talked": "Talk",
-        "treated": "Treat"
-      }
-    }
-  },
-  "output": {
-    "value": {
-      "label": "Output value",
-      "hint": "Expression for the terminal output. Empty = the upstream value."
-    },
-    "outputSchema": {
-      "label": "Output schema",
-      "hint": "The published interface's output contract."
-    },
-    "onSchemaViolation": {
-      "label": "On schema violation",
-      "hint": "What to do if the output value fails the schema.",
-      "fail": "Fail the run",
-      "soft": "Pass through with a warning"
     }
   }
 }

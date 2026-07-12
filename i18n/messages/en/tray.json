@@ -54,5 +54,12 @@
     "placeholder": "Status",
     "streaming": "Responding…"
   },
-  "toggleWindow": "Show / hide window"
+  "toggleWindow": "Show / hide window",
+  "usage": {
+    "auto": "Auto (highest usage)",
+    "empty": "No usage data yet",
+    "openSettings": "Subscription settings…",
+    "refresh": "Refresh usage",
+    "title": "Subscription usage"
+  }
 }

@@ -147,37 +147,37 @@
     "webModeWarning": "Wiki rebuild requires the Tauri desktop app."
   },
   "wikiLint": {
-    "title": "Wiki Lint",
-    "description": "Check the compiled wiki for orphan pages and broken [[links]]. Runs locally, no LLM.",
-    "run": "Run lint",
-    "runAria": "Run the wiki lint check",
-    "never": "Never",
-    "lastRun": "Last run",
     "articleCount": "Articles",
-    "orphanCount": "Orphans",
     "brokenCount": "Broken links",
     "brokenListSummary": "{count, plural, one {# article with broken links} other {# articles with broken links}}",
+    "description": "Check the compiled wiki for orphan pages and broken [[links]]. Runs locally, no LLM.",
+    "lastRun": "Last run",
+    "never": "Never",
+    "orphanCount": "Orphans",
     "orphanListSummary": "{count, plural, one {# orphan page} other {# orphan pages}}",
-    "toastClean": "Wiki is clean — {count, plural, one {# article} other {# articles}}, no issues.",
-    "toastLinted": "Lint done: {orphans} orphans, {broken} broken.",
-    "toastLintFailed": "Lint failed: {message}",
-    "scheduleTitle": "Schedule",
-    "scheduleHelp": "Automatic lint runs via the scheduler. Daily runs at 03:00 local; Weekly runs Sunday 03:00. Custom takes a 5-field cron expression.",
-    "scheduleModeLabel": "Frequency",
-    "scheduleMode": {
-      "off": "Off",
-      "daily": "Daily",
-      "weekly": "Weekly",
-      "custom": "Custom"
-    },
-    "scheduleCustomCronLabel": "Cron expression",
-    "scheduleSave": "Save",
-    "scheduleSaveAria": "Save wiki lint schedule",
+    "run": "Run lint",
+    "runAria": "Run the wiki lint check",
     "scheduleAction": {
       "created": "Wiki lint schedule created.",
       "updated": "Wiki lint schedule updated."
     },
     "scheduleCleared": "Wiki lint schedule cleared.",
-    "scheduleInvalidCron": "Invalid cron expression: {expression}"
+    "scheduleCustomCronLabel": "Cron expression",
+    "scheduleHelp": "Automatic lint runs via the scheduler. Daily runs at 03:00 local; Weekly runs Sunday 03:00. Custom takes a 5-field cron expression.",
+    "scheduleInvalidCron": "Invalid cron expression: {expression}",
+    "scheduleMode": {
+      "custom": "Custom",
+      "daily": "Daily",
+      "off": "Off",
+      "weekly": "Weekly"
+    },
+    "scheduleModeLabel": "Frequency",
+    "scheduleSave": "Save",
+    "scheduleSaveAria": "Save wiki lint schedule",
+    "scheduleTitle": "Schedule",
+    "title": "Wiki Lint",
+    "toastClean": "Wiki is clean — {count, plural, one {# article} other {# articles}}, no issues.",
+    "toastLintFailed": "Lint failed: {message}",
+    "toastLinted": "Lint done: {orphans} orphans, {broken} broken."
   }
 }

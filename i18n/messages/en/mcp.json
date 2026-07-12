@@ -163,21 +163,21 @@
     "denied": "denied",
     "deniedOnly": "Denied only",
     "desktopOnly": "Bridge status and the audit log are only available in desktop mode.",
+    "logsSubtitle": "The latest log lines emitted by connected MCP servers.",
+    "logsTitle": "Recent logs",
     "openBridgeSettings": "Open External Bridge settings",
+    "outboundSubtitle": "Live sessions and recent logs for the MCP servers this app connects to.",
+    "outboundTitle": "MCP servers",
     "port": "Port {port}",
     "running": "Running",
+    "sectionInbound": "Inbound",
+    "sectionOutbound": "Outbound",
     "startedAt": "Started {time}",
+    "statErrors": "Errors",
+    "statLogs": "Log lines",
+    "statServers": "Servers",
     "stopped": "Stopped",
     "title": "Health & logs",
-    "sectionOutbound": "Outbound",
-    "outboundTitle": "MCP servers",
-    "outboundSubtitle": "Live sessions and recent logs for the MCP servers this app connects to.",
-    "statServers": "Servers",
-    "statLogs": "Log lines",
-    "statErrors": "Errors",
-    "logsTitle": "Recent logs",
-    "logsSubtitle": "The latest log lines emitted by connected MCP servers.",
-    "sectionInbound": "Inbound",
     "windowNote": "Showing the most recent log lines."
   },
   "import": {
@@ -226,6 +226,7 @@
     "disable": "Disable",
     "empty": "No MCP servers attached to this session.",
     "enable": "Enable",
+    "recentLogAt": "{time} · {message}",
     "reconnect": "Reconnect",
     "reconnectStarted": "Reconnecting {name}…",
     "refresh": "Refresh live MCP status",
@@ -240,8 +241,7 @@
     "title": "Live session servers",
     "toolsCount": "{count} tools",
     "viewLogs": "View logs",
-    "viewLogsFor": "View logs for {name}",
-    "recentLogAt": "{time} · {message}"
+    "viewLogsFor": "View logs for {name}"
   },
   "panel": {
     "searchPlaceholder": "Filter servers by name, command, or URL…"

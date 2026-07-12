@@ -2,6 +2,27 @@
   "addItem": "添加项目",
   "description": "自定义系统托盘菜单中显示的项目。",
   "desktopOnly": "系统托盘仅在桌面端可用。",
+  "display": {
+    "description": "选择订阅额度的展示位置，并自定义托盘图标外观。",
+    "iconColor": "托盘图标颜色",
+    "iconColorHint": "macOS 会自动为模板图标着色，此设置在 macOS 上无效。",
+    "pinnedAuto": "自动（用量最高）",
+    "pinnedSubscription": "显示的订阅",
+    "refreshEveryMinutes": "每 {minutes} 分钟",
+    "refreshInterval": "额度刷新间隔",
+    "refreshManual": "仅手动",
+    "showUsageInMenu": "在托盘菜单中显示订阅额度",
+    "showUsageInTooltip": "在托盘悬浮提示中显示额度",
+    "taskbarMode": "任务栏额度显示",
+    "taskbarModeHint": "图标角标把百分比绘制到托盘图标上；标题文字显示在图标旁（macOS / Linux）。",
+    "taskbarModes": {
+      "iconBadge": "图标角标",
+      "off": "关闭",
+      "title": "标题文字"
+    },
+    "title": "显示",
+    "tooltipBase": "悬浮提示文本"
+  },
   "emptyPicker": "暂无可用命令——请安装插件或开启对话。",
   "hide": "隐藏",
   "moveDown": "下移",

@@ -23,6 +23,20 @@
     "subheading": "Discovers FlClash, Clash Verge Rev, Mihomo, and v2rayN via running processes and config files, then probes the well-known loopback ports.",
     "webUnsupported": "Auto-detection requires the Tauri desktop app."
   },
+  "form": {
+    "addBypass": "Add",
+    "bypass": "Bypass list",
+    "bypassHint": "Hosts and domain suffixes that should skip the proxy. Add a leading dot to match a domain suffix (e.g. \".internal\").",
+    "host": "Host",
+    "optionalPlaceholder": "Optional",
+    "password": "Password",
+    "port": "Port",
+    "protocol": "Protocol",
+    "proxyWebsocketsHint": "Tunnel Discord Gateway, Slack Socket Mode, and other WSS connections through the proxy via HTTP CONNECT or SOCKS5.",
+    "proxyWebsocketsLabel": "Proxy WebSocket connections",
+    "removeBypass": "Remove {entry} from bypass list",
+    "username": "Username"
+  },
   "ipInfo": {
     "disabled": "IP lookup is off. Turn it on to fetch your current public IP and location from ipinfo.io.",
     "enableHint": "Fetch your current public IP and geolocation from the public ipinfo.io endpoint. Routes through the active proxy, so it reports the egress IP the proxy uses.",
@@ -41,20 +55,6 @@
     },
     "heading": "Current public IP",
     "refresh": "Refresh"
-  },
-  "form": {
-    "addBypass": "Add",
-    "bypass": "Bypass list",
-    "bypassHint": "Hosts and domain suffixes that should skip the proxy. Add a leading dot to match a domain suffix (e.g. \".internal\").",
-    "host": "Host",
-    "optionalPlaceholder": "Optional",
-    "password": "Password",
-    "port": "Port",
-    "protocol": "Protocol",
-    "proxyWebsocketsHint": "Tunnel Discord Gateway, Slack Socket Mode, and other WSS connections through the proxy via HTTP CONNECT or SOCKS5.",
-    "proxyWebsocketsLabel": "Proxy WebSocket connections",
-    "removeBypass": "Remove {entry} from bypass list",
-    "username": "Username"
   },
   "mode": {
     "auto": "Auto-detected",

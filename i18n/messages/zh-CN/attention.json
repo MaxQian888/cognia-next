@@ -4,6 +4,7 @@
   "dismiss": "关闭",
   "emptyDescription": "当前没有待审批、审批门或等待中的智能体。",
   "emptyTitle": "暂无待办",
+  "focusTerminal": "聚焦终端",
   "interrupted": "已中断——该请求已被拒绝。",
   "interruptedOnBoot": "{count, plural, other {有 # 个审批请求被中断}}",
   "kind": {
@@ -13,6 +14,7 @@
     "tool-approval": "工具调用待审批"
   },
   "openOwner": "打开",
+  "revealTranscript": "在文件管理器中显示会话记录",
   "source": {
     "chat": "聊天",
     "fleet": "舰队",

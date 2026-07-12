@@ -14,8 +14,12 @@
     "composerAria": "追问消息",
     "composerPlaceholder": "发送追问…",
     "empty": "还没有消息。",
+    "ended": "该会话已结束。",
+    "endedBadge": "已结束",
     "interruptAria": "打断当前回合",
+    "notFound": "会话不存在或已不可用。",
     "observeOnly": "仅观察",
+    "offlineHint": "桌面端已离线——重新连接后可继续跟随此会话。",
     "sendAria": "发送",
     "streaming": "流式输出中",
     "title": "实时会话"

@@ -1,9 +1,9 @@
 {
   "acceptance": {
-    "title": "Awaiting your acceptance",
-    "description": "The judge considers the objective met. Accept to complete the goal, or request changes to keep it running.",
     "accept": "Accept",
-    "requestChanges": "Request changes"
+    "description": "The judge considers the objective met. Accept to complete the goal, or request changes to keep it running.",
+    "requestChanges": "Request changes",
+    "title": "Awaiting your acceptance"
   },
   "activity": {
     "acceptance_accepted": "Result accepted — goal completed",
@@ -189,11 +189,11 @@
     "maxTokensHint": "Cap on the judge's reply. The judge answers in one line — 200 is plenty.",
     "model": "Judge model",
     "modelHint": "Model that decides whether the goal is done. Leave on the chat model unless you want a cheaper/faster judge.",
+    "promptOverride": "Judge prompt override",
+    "promptOverrideHint": "Replaces the built-in judge instructions. Must still ask for a one-line JSON verdict.",
     "provider": "Judge provider",
     "providerHint": "Provider id paired with the judge model. Leave blank to reuse the session / app provider.",
     "providerPlaceholder": "Session provider",
-    "promptOverride": "Judge prompt override",
-    "promptOverrideHint": "Replaces the built-in judge instructions. Must still ask for a one-line JSON verdict.",
     "temperature": "Judge temperature",
     "temperatureHint": "0 is deterministic (recommended). Higher loosens the verdict.",
     "useChatModel": "Use chat model"

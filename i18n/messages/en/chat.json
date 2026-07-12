@@ -121,21 +121,6 @@
     "undoFailed": "Couldn't restore the conversation",
     "undoSuccess": "Conversation restored"
   },
-  "opticalArchive": {
-    "coverage": "Coverage",
-    "description": "Older turns rendered as {count} image frame(s) a vision model reads back.",
-    "estimate": "Image / text tokens",
-    "frameAlt": "Optical frame {n}",
-    "hideText": "Hide original text",
-    "noText": "The original text wasn't captured (undo was off for this boundary).",
-    "notFound": "This archive is no longer available.",
-    "readability": "Readability",
-    "revealText": "Show original text",
-    "saved": "{pct}% saved",
-    "shape": "Shape",
-    "title": "Optical archive",
-    "tokens": "Tokens"
-  },
   "composer": {
     "ariaAttachImage": "Attach image",
     "ariaMessage": "Message",
@@ -270,6 +255,8 @@
       "selectPlaceholder": "Select…",
       "title": "Configure /{name}"
     },
+    "pasteReminder": "A large paste wasn't saved with the draft — re-paste it before sending ({count}).",
+    "pastedChip": "Pasted {count} lines",
     "placeholder": "Send a message — try /, @, !, or #",
     "placeholderDisabled": "Select a session to start chatting…",
     "popover": {
@@ -321,15 +308,10 @@
       "applied": "Applied preset \"{name}\".",
       "needsSession": "Start a chat first to apply a preset."
     },
-    "skills": {
-      "enabled": "Enabled skill \"{name}\"."
-    },
     "references": {
       "removeAria": "Remove reference to {path}"
     },
-    "workflowRefs": {
-      "removeAria": "Remove reference to {label}"
-    },
+    "removePastedChip": "Remove pasted text",
     "sandboxShield": {
       "label": {
         "microvm": "Sandbox active — microVM tier",
@@ -350,8 +332,12 @@
     "sendTooltip": "Send",
     "shell": {
       "failed": "`$ {cmd}` failed: {error}",
+      "interactiveRoutedToTerminal": "`$ {cmd}` needs a terminal — opened it in the integrated terminal.",
       "needsCwd": "Set a working directory before running shell commands.",
       "runningHint": "Running `$ {cmd}` in `{cwd}`…"
+    },
+    "skills": {
+      "enabled": "Enabled skill \"{name}\"."
     },
     "stopTooltip": "Stop",
     "toolbar": {
@@ -416,13 +402,9 @@
       "voiceSettings": "Voice settings"
     },
     "webLabel": "Web",
-    "pastedChip": "Pasted {count} lines",
-    "removePastedChip": "Remove pasted text",
-    "pasteReminder": "A large paste wasn't saved with the draft — re-paste it before sending ({count})."
-  },
-  "planMode": {
-    "banner": "Plan mode — read-only research; the agent will propose a plan before making changes.",
-    "hint": "Shift+Tab"
+    "workflowRefs": {
+      "removeAria": "Remove reference to {label}"
+    }
   },
   "concurrent": {
     "awaitingApproval": "Awaiting approval",
@@ -438,6 +420,34 @@
   },
   "copy": {
     "success": "Copied to clipboard"
+  },
+  "diagnostics": {
+    "cache": "Cache",
+    "cacheValue": "write {write} · read {read}",
+    "compactHint": "Run /compact to summarise older turns and free up the window.",
+    "contextTitle": "Context",
+    "cost": "Cost",
+    "costTitle": "Cost & usage",
+    "duration": "Duration",
+    "durationValue": "{seconds}s",
+    "estimated": "estimated",
+    "fallback": "Fallback",
+    "fiveHour": "5-hour window",
+    "freshWindow": "No usage metrics yet — the context window is fresh.",
+    "inputTokens": "Input (incl. cache)",
+    "messages": "Messages",
+    "messagesValue": "{user} user · {assistant} assistant",
+    "notReported": "not reported",
+    "outputTokens": "Output",
+    "overageDisabled": "Overage disabled",
+    "resetsIn": "resets in {hours}h {minutes}m",
+    "resetting": "resetting…",
+    "sevenDay": "7-day window",
+    "turns": "Turns",
+    "turnsValue": "{assistant} assistant ({metrics} with metrics)",
+    "usageFooter": "See Settings → Subscription → Usage for charts and history.",
+    "usageTitle": "Subscription usage",
+    "windowUsed": "{pct}% used"
   },
   "empty": {
     "brandAlt": "Cognia",
@@ -474,6 +484,10 @@
     "subtitle": "Ask anything, jump into a capability, or pick up where you left off.",
     "title": "What do you want to get done?"
   },
+  "filePreview": {
+    "loading": "Loading {name}…",
+    "pdfFallback": "PDF preview is unavailable."
+  },
   "header": {
     "accountSwitcher": {
       "active": "active",
@@ -485,12 +499,12 @@
     "bareMode": "Bare mode",
     "briefMode": "Brief output",
     "cancel": "Cancel",
+    "compactAria": "Compact",
+    "compactStarted": "Context compaction started",
+    "compactTooltip": "Compact the conversation context on the agent side",
     "cwdFallbackHint": "Falls back to: {path}",
     "cwdReset": "Reset",
     "debugMode": "Debug mode",
-    "insights": "Session insights",
-    "hideConversations": "Hide conversation list",
-    "showConversations": "Show conversation list",
     "description": "Override defaults for this chat. Empty = use global.",
     "flowDisplay": {
       "aria": "Agent flow display mode",
@@ -507,6 +521,8 @@
       "favorites": "Favorites",
       "other": "Other"
     },
+    "hideConversations": "Hide conversation list",
+    "insights": "Session insights",
     "noApiKey": "No API key",
     "permissionModeAppDefault": "Use app default",
     "permissionModeLabel": "Permission mode",
@@ -548,6 +564,7 @@
         "status": "Status"
       }
     },
+    "showConversations": "Show conversation list",
     "skills": {
       "aria": "Skills active in this session",
       "attachedInert": "Disabled for this session — won't be sent",
@@ -565,10 +582,7 @@
     "tokensLabel": "{input} in / {output} out",
     "untitledSession": "(untitled)",
     "workingDirLabel": "Working directory",
-    "workingDirPlaceholder": "/path/to/project",
-    "compactStarted": "Context compaction started",
-    "compactAria": "Compact",
-    "compactTooltip": "Compact the conversation context on the agent side"
+    "workingDirPlaceholder": "/path/to/project"
   },
   "history": {
     "loadError": "Couldn't load this conversation.",
@@ -646,29 +660,11 @@
       "truncated": "Preview truncated — full content is written to disk."
     }
   },
-  "filePreview": {
-    "loading": "Loading {name}…",
-    "pdfFallback": "PDF preview is unavailable."
-  },
   "mcpContent": {
     "embeddedResource": "Embedded resource: {uri}"
   },
-  "ocrResult": {
-    "title": "Text recognized",
-    "provider": "Provider: {id}",
-    "languages": "Languages: {langs}",
-    "confidence": "Confidence: {pct}%",
-    "cached": "Cached",
-    "duration": "{ms} ms",
-    "copy": "Copy text",
-    "copied": "Copied",
-    "askAbout": "Ask about this",
-    "noText": "No text recognized.",
-    "thumbnailAlt": "Source image"
-  },
   "message": {
     "attachmentAlt": "attachment",
-    "unknownPart": "Unknown content ({type})",
     "bookmarkLabel": "Toggle bookmark",
     "bookmarkRemoveTooltip": "Remove bookmark",
     "bookmarkTooltip": "Bookmark",
@@ -743,12 +739,41 @@
     "stopReading": "Stop reading",
     "todoPlanTitle": "Plan · {done}/{total} done",
     "toolCallFailed": "Tool call failed",
+    "unknownPart": "Unknown content ({type})",
     "usageCacheHit": "Cache hit: {n}",
     "usageCacheWrite": "Cache write: {n}",
     "usageCost": "Cost: ${cost}",
     "usageInput": "Input: {n}",
     "usageOutput": "Output: {n}",
     "usageReasoning": "Reasoning: {n}"
+  },
+  "ocrResult": {
+    "askAbout": "Ask about this",
+    "cached": "Cached",
+    "confidence": "Confidence: {pct}%",
+    "copied": "Copied",
+    "copy": "Copy text",
+    "duration": "{ms} ms",
+    "languages": "Languages: {langs}",
+    "noText": "No text recognized.",
+    "provider": "Provider: {id}",
+    "thumbnailAlt": "Source image",
+    "title": "Text recognized"
+  },
+  "opticalArchive": {
+    "coverage": "Coverage",
+    "description": "Older turns rendered as {count} image frame(s) a vision model reads back.",
+    "estimate": "Image / text tokens",
+    "frameAlt": "Optical frame {n}",
+    "hideText": "Hide original text",
+    "noText": "The original text wasn't captured (undo was off for this boundary).",
+    "notFound": "This archive is no longer available.",
+    "readability": "Readability",
+    "revealText": "Show original text",
+    "saved": "{pct}% saved",
+    "shape": "Shape",
+    "title": "Optical archive",
+    "tokens": "Tokens"
   },
   "permissionMode": {
     "acceptEdits": {
@@ -777,6 +802,10 @@
       "tooltip": "Read-only planning mode — Claude proposes changes without applying them."
     },
     "shiftTabHint": "Shift+Tab to cycle."
+  },
+  "planMode": {
+    "banner": "Plan mode — read-only research; the agent will propose a plan before making changes.",
+    "hint": "Shift+Tab"
   },
   "renderers": {
     "alert": {
@@ -892,40 +921,40 @@
       "youtubeTitle": "YouTube video"
     }
   },
-  "runStatus": {
-    "working": "Working",
-    "waitingApproval": "Waiting for approval",
-    "interruptHint": "Esc to interrupt",
-    "interruptHintTouch": "Tap to interrupt",
-    "queued": "{count} queued",
-    "steerNow": "Send now",
-    "ariaSteerNow": "Interrupt the current turn and send queued messages now",
-    "metricTokens": "{value} tok",
-    "metricSpeed": "{value} tok/s",
-    "metricContext": "context {pct}%"
-  },
   "runPanel": {
-    "expand": "Show run details",
-    "collapse": "Hide run details",
+    "ariaDiscardQueue": "Discard queued messages",
+    "ariaEditSteer": "Edit queued message",
     "ariaInterrupt": "Interrupt the current turn",
-    "ariaSubagent": "Sub-agent",
+    "ariaRemoveSteer": "Remove queued message",
+    "ariaSteerAttachments": "{count} attachments",
     "ariaSteerQueue": "Queued messages",
-    "sectionPlan": "Plan",
-    "sectionTools": "Tools",
-    "sectionSubagents": "Sub-agents",
-    "sectionSummary": "Summary",
-    "summaryTools": "{count, plural, one {# tool} other {# tools}}",
-    "summarySubagents": "{count, plural, one {# sub-agent} other {# sub-agents}}",
-    "summaryTodos": "{done}/{total} todos",
+    "ariaSubagent": "Sub-agent",
+    "collapse": "Hide run details",
+    "discardQueue": "Discard",
+    "emptySteer": "(empty)",
+    "expand": "Show run details",
     "lastRun": "Last run",
     "lastRunSummary": "{count, plural, one {# tool} other {# tools}} · {elapsed}",
     "runFailedQueued": "Run failed · {count} queued",
-    "discardQueue": "Discard",
-    "ariaDiscardQueue": "Discard queued messages",
-    "ariaEditSteer": "Edit queued message",
-    "ariaRemoveSteer": "Remove queued message",
-    "ariaSteerAttachments": "{count} attachments",
-    "emptySteer": "(empty)"
+    "sectionPlan": "Plan",
+    "sectionSubagents": "Sub-agents",
+    "sectionSummary": "Summary",
+    "sectionTools": "Tools",
+    "summarySubagents": "{count, plural, one {# sub-agent} other {# sub-agents}}",
+    "summaryTodos": "{done}/{total} todos",
+    "summaryTools": "{count, plural, one {# tool} other {# tools}}"
+  },
+  "runStatus": {
+    "ariaSteerNow": "Interrupt the current turn and send queued messages now",
+    "interruptHint": "Esc to interrupt",
+    "interruptHintTouch": "Tap to interrupt",
+    "metricContext": "context {pct}%",
+    "metricSpeed": "{value} tok/s",
+    "metricTokens": "{value} tok",
+    "queued": "{count} queued",
+    "steerNow": "Send now",
+    "waitingApproval": "Waiting for approval",
+    "working": "Working"
   },
   "sessionCost": {
     "byModelTitle": "By model",
@@ -1081,33 +1110,5 @@
     "title": "Trust this workspace?",
     "trust": "Trust workspace",
     "workspaceLabel": "Workspace"
-  },
-  "diagnostics": {
-    "contextTitle": "Context",
-    "usageTitle": "Subscription usage",
-    "costTitle": "Cost & usage",
-    "messages": "Messages",
-    "messagesValue": "{user} user · {assistant} assistant",
-    "freshWindow": "No usage metrics yet — the context window is fresh.",
-    "inputTokens": "Input (incl. cache)",
-    "outputTokens": "Output",
-    "cache": "Cache",
-    "cacheValue": "write {write} · read {read}",
-    "compactHint": "Run /compact to summarise older turns and free up the window.",
-    "turns": "Turns",
-    "turnsValue": "{assistant} assistant ({metrics} with metrics)",
-    "cost": "Cost",
-    "estimated": "estimated",
-    "duration": "Duration",
-    "durationValue": "{seconds}s",
-    "fiveHour": "5-hour window",
-    "sevenDay": "7-day window",
-    "windowUsed": "{pct}% used",
-    "resetsIn": "resets in {hours}h {minutes}m",
-    "resetting": "resetting…",
-    "notReported": "not reported",
-    "fallback": "Fallback",
-    "overageDisabled": "Overage disabled",
-    "usageFooter": "See Settings → Subscription → Usage for charts and history."
   }
 }

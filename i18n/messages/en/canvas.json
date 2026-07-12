@@ -228,11 +228,11 @@
   "participants": "Participants",
   "pin": "Pin",
   "pinned": "Pinned",
+  "pressKeys": "Press keys…",
   "preview": {
     "empty": "Nothing to preview yet — start writing.",
     "unsupported": "No live preview for {language} documents."
   },
-  "pressKeys": "Press keys…",
   "previewAction": "Preview",
   "readyToRun": "Ready to run",
   "reconnect": "Reconnect",

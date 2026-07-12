@@ -1,49 +1,49 @@
 {
-  "title": "Browser",
-  "url": {
-    "placeholder": "http://localhost:3000"
-  },
   "actions": {
     "back": "Back",
+    "cancelSelect": "Cancel selection",
     "forward": "Forward",
+    "openExternal": "Open in external browser",
     "reload": "Reload",
     "screenshot": "Send screenshot to chat",
-    "openExternal": "Open in external browser",
-    "selectElement": "Select element",
-    "cancelSelect": "Cancel selection"
-  },
-  "comment": {
-    "title": "Comment on this element",
-    "placeholder": "Describe the change you want…",
-    "send": "Send to chat",
-    "cancel": "Cancel",
-    "sent": "Sent to chat",
-    "noSession": "Open a chat session first",
-    "failed": "Could not send the comment",
-    "hint": "Esc to dismiss · Ctrl+Enter to send"
-  },
-  "screenshot": {
-    "sent": "Screenshot sent to chat",
-    "failed": "Could not capture the preview"
-  },
-  "selection": {
-    "selector": "Selector"
+    "selectElement": "Select element"
   },
   "agent": {
     "driving": "Agent driving",
     "human": "You're driving",
     "lastAction": "Last action: {action}"
   },
-  "empty": {
-    "title": "Preview a web page",
-    "hint": "Enter any web address or a localhost URL to render it here, then select an element to comment on it.",
-    "quickOpen": "Quick open:"
+  "comment": {
+    "cancel": "Cancel",
+    "failed": "Could not send the comment",
+    "hint": "Esc to dismiss · Ctrl+Enter to send",
+    "noSession": "Open a chat session first",
+    "placeholder": "Describe the change you want…",
+    "send": "Send to chat",
+    "sent": "Sent to chat",
+    "title": "Comment on this element"
   },
-  "loading": {
-    "title": "Loading {host}…",
-    "label": "Loading page"
+  "empty": {
+    "hint": "Enter any web address or a localhost URL to render it here, then select an element to comment on it.",
+    "quickOpen": "Quick open:",
+    "title": "Preview a web page"
   },
   "errors": {
     "navigate": "Could not navigate to that URL"
+  },
+  "loading": {
+    "label": "Loading page",
+    "title": "Loading {host}…"
+  },
+  "screenshot": {
+    "failed": "Could not capture the preview",
+    "sent": "Screenshot sent to chat"
+  },
+  "selection": {
+    "selector": "Selector"
+  },
+  "title": "Browser",
+  "url": {
+    "placeholder": "http://localhost:3000"
   }
 }

@@ -26,14 +26,14 @@
     "confirm": "执行切换",
     "noChange": "cognia-next 的 API 密钥与 base URL 已与该服务商一致 — 无需重启 sidecar。",
     "notYetSupported": "尚未支持",
-    "title": "切换服务商",
-    "willRestart": "将重启自带 SDK sidecar 以让新环境变量生效。",
-    "willWrite": "将写入 {count, plural, =1 {1 个代理文件} other {# 个代理文件}}。",
-    "useSubscription": "官方 provider——cognia 将复用你的 Anthropic 订阅（已登录的订阅账号，或本机 Claude Code 登录），而不是 API key。",
     "subscriptionActivated": "已从已登录账号激活 Anthropic 订阅。",
     "subscriptionAdopted": "已复用本机 Claude Code 登录并激活为 Anthropic 订阅。",
+    "subscriptionFailed": "无法激活 Anthropic 订阅：{error}",
     "subscriptionNoneFound": "未找到 Anthropic 订阅——请在 设置 → 订阅 中登录，或运行 `claude login` 后重新切换。",
-    "subscriptionFailed": "无法激活 Anthropic 订阅：{error}"
+    "title": "切换服务商",
+    "useSubscription": "官方 provider——cognia 将复用你的 Anthropic 订阅（已登录的订阅账号，或本机 Claude Code 登录），而不是 API key。",
+    "willRestart": "将重启自带 SDK sidecar 以让新环境变量生效。",
+    "willWrite": "将写入 {count, plural, =1 {1 个代理文件} other {# 个代理文件}}。"
   },
   "mcp": {
     "emptyBody": "CCSwitch 的 mcp_servers 表为空。",

@@ -163,21 +163,21 @@
     "denied": "拒绝",
     "deniedOnly": "仅看被拒",
     "desktopOnly": "桥接状态与审计日志仅在桌面端可用。",
+    "logsSubtitle": "已连接 MCP 服务器最新输出的日志行。",
+    "logsTitle": "近期日志",
     "openBridgeSettings": "打开 External Bridge 设置",
+    "outboundSubtitle": "本应用所连接 MCP 服务器的实时会话与近期日志。",
+    "outboundTitle": "MCP 服务器",
     "port": "端口 {port}",
     "running": "运行中",
+    "sectionInbound": "入站",
+    "sectionOutbound": "出站",
     "startedAt": "启动于 {time}",
+    "statErrors": "错误",
+    "statLogs": "日志行数",
+    "statServers": "服务器",
     "stopped": "已停止",
     "title": "健康与日志",
-    "sectionOutbound": "出站",
-    "outboundTitle": "MCP 服务器",
-    "outboundSubtitle": "本应用所连接 MCP 服务器的实时会话与近期日志。",
-    "statServers": "服务器",
-    "statLogs": "日志行数",
-    "statErrors": "错误",
-    "logsTitle": "近期日志",
-    "logsSubtitle": "已连接 MCP 服务器最新输出的日志行。",
-    "sectionInbound": "入站",
     "windowNote": "仅显示最近的日志行。"
   },
   "import": {
@@ -226,6 +226,7 @@
     "disable": "停用",
     "empty": "本会话未挂载任何 MCP 服务器。",
     "enable": "启用",
+    "recentLogAt": "{time} · {message}",
     "reconnect": "重连",
     "reconnectStarted": "正在重连 {name}…",
     "refresh": "刷新实时 MCP 状态",
@@ -240,8 +241,7 @@
     "title": "会话实时服务器",
     "toolsCount": "{count} 个工具",
     "viewLogs": "查看日志",
-    "viewLogsFor": "查看 {name} 的日志",
-    "recentLogAt": "{time} · {message}"
+    "viewLogsFor": "查看 {name} 的日志"
   },
   "panel": {
     "searchPlaceholder": "按名称、命令或 URL 过滤服务器…"

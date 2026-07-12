@@ -36,6 +36,7 @@
       "label": "Request Timeout"
     }
   },
+  "connectionSection": "Connection",
   "deepseek": {
     "enableReasoning": {
       "description": "Enable deep thinking for complex tasks.",
@@ -153,7 +154,6 @@
     "description": "Encourages new topics by penalizing tokens that already appeared.",
     "label": "Presence Penalty"
   },
-  "connectionSection": "Connection",
   "providerSpecific": "Provider-Specific",
   "resetAll": "Reset All to Defaults",
   "resetConfirm": "Reset all parameters to their default values?",

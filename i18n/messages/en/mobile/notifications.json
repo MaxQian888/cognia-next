@@ -7,18 +7,6 @@
     "settingsButton": "Open Settings",
     "title": "Enable background reminders"
   },
-  "queue": {
-    "cancel": "Cancel",
-    "cancelFailed": "Cancel failed: {message}",
-    "empty": "No notifications scheduled.",
-    "errorTitle": "Could not load notifications",
-    "loading": "Loading…",
-    "refresh": "Refresh",
-    "scheduledAt": "at {time}",
-    "title": "Scheduled notifications",
-    "unsupportedDescription": "Local notifications run on iOS and Android only.",
-    "unsupportedTitle": "Not supported on this platform"
-  },
   "preferences": {
     "badge": "Unread badge",
     "badgeHelp": "Show a count badge on the app icon and tab.",
@@ -76,6 +64,18 @@
       "workflow": "Workflows"
     },
     "sourceHelp": "Allow notifications from this source."
+  },
+  "queue": {
+    "cancel": "Cancel",
+    "cancelFailed": "Cancel failed: {message}",
+    "empty": "No notifications scheduled.",
+    "errorTitle": "Could not load notifications",
+    "loading": "Loading…",
+    "refresh": "Refresh",
+    "scheduledAt": "at {time}",
+    "title": "Scheduled notifications",
+    "unsupportedDescription": "Local notifications run on iOS and Android only.",
+    "unsupportedTitle": "Not supported on this platform"
   },
   "section": {
     "description": "Background reminders for scheduled backups and long-running tasks.",

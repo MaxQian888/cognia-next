@@ -1636,6 +1636,7 @@
     "dismiss": "关闭",
     "emptyDescription": "当前没有待审批、审批门或等待中的智能体。",
     "emptyTitle": "暂无待办",
+    "focusTerminal": "聚焦终端",
     "interrupted": "已中断——该请求已被拒绝。",
     "interruptedOnBoot": "{count, plural, other {有 # 个审批请求被中断}}",
     "kind": {
@@ -1645,6 +1646,7 @@
       "tool-approval": "工具调用待审批"
     },
     "openOwner": "打开",
+    "revealTranscript": "在文件管理器中显示会话记录",
     "source": {
       "chat": "聊天",
       "fleet": "舰队",
@@ -2806,6 +2808,7 @@
       "sendTooltip": "发送",
       "shell": {
         "failed": "`$ {cmd}` 执行失败：{error}",
+        "interactiveRoutedToTerminal": "`$ {cmd}` 需要终端 — 已在集成终端中打开。",
         "needsCwd": "运行 shell 命令前请先设置工作目录。",
         "runningHint": "在 `{cwd}` 中执行 `$ {cmd}`…"
       },
@@ -5165,6 +5168,8 @@
       "configureNewExternalAgentConnection": "配置一个新的外部代理连接。",
       "customConfiguration": "自定义配置",
       "customProtocolComingSoon": "自定义协议（即将支持）",
+      "defaultModel": "默认模型",
+      "defaultModelHint": "可选。每轮对话默认使用的 \"provider/model\" 标识（如 anthropic/claude-sonnet-4-5），可被单轮覆盖。",
       "diagnostics": {
         "adapter": "适配器：{name}",
         "authMethods": "认证方式：{methods}",
@@ -5237,9 +5242,11 @@
       "resume": "恢复",
       "resumeSessionFailed": "恢复会话失败。",
       "selectPresetOrConfigureManually": "选择一个预设，或手动配置",
+      "serverHostname": "服务器主机名",
       "serverPassword": "服务器密码",
       "serverPasswordHint": "可选。以 HTTP Basic Auth 发送，用于受密码保护的服务器（OPENCODE_SERVER_PASSWORD）。",
       "serverPort": "服务器端口",
+      "serverUsername": "服务器用户名",
       "sessions": "会话",
       "stdioDesktopRuntimeWarning": "stdio 传输需要 Cognia 桌面运行时。Web 预览模式下无法启动该代理。",
       "transportHttp": "HTTP",
@@ -5385,6 +5392,21 @@
       "maxRetryDelayMs": "最大重试间隔（毫秒）",
       "nameRequired": "代理名称不能为空",
       "noAgentsConfigured": "尚未配置任何外部代理",
+      "opencode": {
+        "agents": "智能体",
+        "commands": "命令",
+        "lspServers": "LSP 服务器",
+        "mcpServers": "MCP 服务器",
+        "noAgents": "未暴露智能体。",
+        "noCommands": "未暴露命令。",
+        "noMcpServers": "未配置 MCP 服务器。",
+        "noProviders": "未发现提供商。",
+        "notConnected": "连接该智能体以查看其 OpenCode 服务器状态。",
+        "project": "项目",
+        "providers": "提供商",
+        "refresh": "刷新状态",
+        "title": "OpenCode 服务器"
+      },
       "passBareFlag": "附加 --bare",
       "passBareFlagHint": "跳过磁盘自动发现（CLAUDE.md、hooks、插件、MCP）。会在启动时追加到 args 末尾。",
       "passDebugFlag": "附加 --debug",
@@ -5455,6 +5477,12 @@
     },
     "island": {
       "empty": "暂无活动 Agent",
+      "legend": {
+        "done": "{count} 个已结束",
+        "idle": "{count} 个空闲",
+        "needsYou": "{count} 个待处理",
+        "working": "{count} 个工作中"
+      },
       "summary": "{count} 个 Agent",
       "summaryWaiting": "{count} 个 Agent · {waiting} 个待处理",
       "toggle": "展开/收起 Agent 列表"
@@ -5475,7 +5503,37 @@
       "send": "发送"
     },
     "row": {
+      "detail": {
+        "branch": "分支",
+        "cwd": "路径",
+        "duration": "运行 {duration}",
+        "ended": "结束于",
+        "pid": "PID {pid}",
+        "sessionRef": "会话",
+        "source": {
+          "clear": "已清空",
+          "compact": "已压缩",
+          "resume": "已恢复",
+          "startup": "全新启动"
+        },
+        "started": "开始于",
+        "toggleHide": "隐藏详情",
+        "toggleShow": "显示详情",
+        "tools": "{count} 次工具调用",
+        "turns": "{count} 轮对话"
+      },
+      "error": {
+        "tool": "工具错误",
+        "turn": "本轮失败"
+      },
       "focusTerminal": "聚焦终端",
+      "meta": {
+        "model": "模型：{model}",
+        "permissionMode": "权限模式：{mode}"
+      },
+      "multiSelect": "可多选",
+      "openTranscript": "在文件管理器中显示会话记录",
+      "questionMore": "还有 {count} 个问题",
       "status": {
         "ended": "会话已结束",
         "idle": "空闲",
@@ -5484,6 +5542,9 @@
         "waitingPermission": "等待权限审批",
         "working": "工作中…"
       },
+      "subagentBackground": "后台",
+      "subagents": "{count} 个子代理",
+      "waitingFor": "已等待 {duration}",
       "you": "你："
     }
   },
@@ -5745,6 +5806,11 @@
       "templatePlaceholder": "选择一个模板…",
       "title": "新建目标",
       "trigger": "新建目标"
+    },
+    "remote": {
+      "applied": "已在桌面端执行。",
+      "failed": "无法连接桌面端——请重试。",
+      "notAllowed": "此设备没有远程控制权限。"
     },
     "status": {
       "active": "进行中",
@@ -6211,6 +6277,7 @@
         "modelOverride": "Model 覆盖",
         "modelOverridePlaceholder": "claude-opus-4-7",
         "muted": "静音 (不发出站消息)",
+        "mutedHint": "推迟此会话的全部出站投递（每分钟重新检查），机器人在其他会话中照常回复。语义与适配器级静音相同，但仅作用于本会话。",
         "pinned": "置顶",
         "proactivePush": "主动 IM 通知",
         "proactivePushHint": "允许助手将任务完成 / 出错 / 需输入等事件主动推送回此会话。默认关闭。",
@@ -6320,6 +6387,7 @@
     "outboundSource": {
       "draftApproved": "草稿已批准",
       "manual": "手动",
+      "plugin": "插件",
       "skill": "技能",
       "workflow": "工作流",
       "workflowTooltip": "由工作流节点 {nodeId} 发送 — 点击打开运行记录"
@@ -6565,6 +6633,22 @@
       "trace": "追踪",
       "warn": "警告"
     },
+    "nativeViewer": {
+      "empty": "扫描窗口内没有匹配的日志条目。",
+      "entryCount": "{count} 条",
+      "filePlain": "普通日志",
+      "fileSelectLabel": "日志文件",
+      "fileStructured": "结构化日志",
+      "levelAll": "全部级别",
+      "levelSelectLabel": "最低级别",
+      "refresh": "刷新",
+      "retry": "重试",
+      "searchLabel": "搜索原生日志",
+      "searchPlaceholder": "过滤消息…",
+      "truncatedBadge": "扫描窗口外还有更早的条目",
+      "unavailableDescription": "移动端需先与桌面端配对——原生日志读取自桌面应用。",
+      "unavailableTitle": "原生日志不可用"
+    },
     "panel": {
       "addBookmark": "收藏此日志",
       "agentTrace": {
@@ -6639,9 +6723,14 @@
       "back": "返回",
       "bookmarked": "已收藏",
       "clear": "清除日志",
+      "clearConfirmCancel": "取消",
+      "clearConfirmConfirm": "清空日志",
+      "clearConfirmDescription": "将永久删除本设备上所有已持久化的日志条目，被删除条目的导出与书签将失效。",
+      "clearConfirmTitle": "清空全部日志？",
       "clearSearchHistory": "清除历史",
       "clearSessionFocus": "清除会话聚焦",
       "clearTraceFocus": "清除追踪聚焦",
+      "clearedToast": "日志已清空",
       "closeDetails": "关闭详情面板",
       "closeTransportDetails": "关闭",
       "copied": "已复制！",
@@ -6698,6 +6787,10 @@
       "focusTraceMenu": "聚焦此追踪",
       "groupByTrace": "按追踪分组",
       "highSeverityOnly": "仅显示高严重级别",
+      "hintAllShortcuts": "全部快捷键",
+      "hintExpand": "展开",
+      "hintNextPrev": "上/下一条",
+      "hintRefresh": "刷新",
       "jumpToLatest": "跳到最新",
       "keyboardShortcuts": "键盘快捷键",
       "listView": "列表视图",
@@ -7650,9 +7743,23 @@
       "copyAria": "复制命令：{command}",
       "copyError": "当前环境无法访问剪贴板。",
       "empty": "已配对的桌面端尚未同步任何命令。",
-      "intro": "在已配对桌面端运行的终端命令，以只读方式同步到此处。点按命令即可复制。",
+      "intro": "来自已配对桌面端的终端命令。点按命令即可复制，或使用运行按钮在桌面端重新执行。",
       "noProject": "无项目",
       "noResults": "没有匹配的命令。",
+      "run": {
+        "cancel": "取消",
+        "close": "关闭",
+        "confirm": "运行",
+        "confirmBody": "将通过已配对桌面端的 shell 运行该命令，并在此显示捕获的输出。需要此设备已获得远程控制权限。",
+        "confirmTitle": "在桌面端运行？",
+        "exitCode": "退出码 {code}。",
+        "noOutput": "（无输出）",
+        "resultTitle": "命令输出",
+        "running": "正在桌面端运行…",
+        "timedOut": "命令超时，已被终止。"
+      },
+      "runAria": "在桌面端运行：{command}",
+      "runError": "命令运行失败：{message}",
       "searchAria": "搜索命令历史",
       "searchPlaceholder": "搜索命令",
       "title": "命令历史",
@@ -8017,6 +8124,7 @@
         "mdnsDenied": "本地网络权限被拒绝",
         "openSettings": "前往设置",
         "portLabel": "端口",
+        "rescan": "重新扫描",
         "scanning": "扫描中…",
         "source": {
           "history": "历史",
@@ -8030,6 +8138,8 @@
       "switch": {
         "daysAgo": "{n} 天",
         "empty": "尚无历史配对。",
+        "forget": "移除 {name}",
+        "forgot": "已从此设备移除 {name}。",
         "hoursAgo": "{n} 小时",
         "justNow": "刚刚",
         "lastSeen": "最近一次",
@@ -8054,6 +8164,7 @@
         "ws-tunnel": "WS 隧道"
       },
       "toasts": {
+        "noTier": "当前没有 WebRTC 链路，仍走 HTTPS+WS。",
         "reconnectStarted": "重新握手中…",
         "reconnectThrottled": "请稍等几秒再点重连。",
         "syncFailed": "同步失败（{message}）。",
@@ -8065,10 +8176,13 @@
       "defaultModeHelp": "Auto：AI 自动回复；Draft：起草草稿等你确认；Manual：完全手动。",
       "description": "选择此会话如何处理收到的消息。",
       "from": "起始",
+      "listDescription": "按连接器设置回复模式、静音与免打扰时段。",
+      "listTitle": "回复策略",
       "modeAuto": "自动",
       "modeDraft": "草稿",
       "modeManual": "手动",
       "muted": "静音此会话",
+      "mutedBadge": "已静音",
       "mutedHelp": "仍能收到消息，但不会自动回复。",
       "queueLabel": "已排队——桌面上线后会同步。",
       "quietHours": "免打扰时段",
@@ -8147,6 +8261,48 @@
       "toggleFailed": "无法将更改加入队列：{message}",
       "updateQueued": "更改已加入桌面端队列。"
     },
+    "fleet": {
+      "connectFirst": "连接到你的桌面以查看其智能体队列。",
+      "empty": "暂无活动 Agent。",
+      "permission": {
+        "allow": "允许",
+        "allowed": "已允许",
+        "controlLost": "远程控制权限已被撤销。",
+        "countdown": "{seconds} 秒",
+        "denied": "已拒绝",
+        "deny": "拒绝",
+        "expired": "已在桌面处理",
+        "failed": "发送失败——请重试。",
+        "request": "权限请求：{tool}",
+        "requestGeneric": "收到权限请求"
+      },
+      "reply": {
+        "failed": "发送失败——请重试。",
+        "open": "回复",
+        "placeholder": "发送消息…",
+        "send": "发送"
+      },
+      "row": {
+        "error": {
+          "tool": "工具错误",
+          "turn": "本轮失败"
+        },
+        "focus": "聚焦终端",
+        "focusFailed": "无法聚焦终端。",
+        "status": {
+          "ended": "会话已结束",
+          "idle": "空闲",
+          "planPending": "计划等待在桌面确认",
+          "waitingInput": "正在桌面等待输入",
+          "waitingPermission": "等待权限审批",
+          "working": "工作中…"
+        },
+        "you": "你："
+      },
+      "summary": "{total} 个 Agent",
+      "title": "智能体队列",
+      "waiting": "{count} 个待处理"
+    },
     "githubDelivery": {
       "backAria": "返回设置",
       "intro": "查看 GitHub Delivery 机器人的默认合并策略。仓库、凭据、审计日志和用量均在已配对的桌面端。",
@@ -8170,6 +8326,7 @@
       "actions": {
         "agentTeams": "智能体团队",
         "discover": "发现",
+        "fleet": "智能体队列",
         "inbox": "收件箱",
         "me": "我",
         "newChat": "新建会话",
@@ -8262,6 +8419,7 @@
       "title": "MCP 服务器"
     },
     "me": {
+      "a2uiRow": "迷你应用 (A2UI)",
       "aboutRow": "关于",
       "account": {
         "fiveHourLabel": "5 小时额度",
@@ -8270,11 +8428,13 @@
         "sevenDayLabel": "7 日额度"
       },
       "actionPair": "去配对",
+      "agentModesRow": "代理模式",
       "agentRow": "Agent 默认设置",
       "agentTeamsSettingsRow": "智能体团队",
       "appSecurity": "应用安全",
       "appearanceBackAria": "返回个人",
       "appearanceLink": "主题与壁纸",
+      "artifactsRow": "制品",
       "backupLink": "备份与同步",
       "backupReminder": {
         "bodyKnownLast": "上次成功备份是在 {days, plural, =1 {1 天前} other {# 天前}}。",
@@ -8286,6 +8446,8 @@
       "backupRow": "备份与恢复",
       "biometricToggle": "启用生物识别解锁",
       "biometricUnavailable": "本设备未注册生物识别。",
+      "canvasRow": "画布",
+      "charactersRow": "角色",
       "commandHistoryRow": "命令历史",
       "computerUse": {
         "masterStateOff": "移动端 Computer Use 已停用。",
@@ -8351,6 +8513,7 @@
       "deviceInfoRow": "设备信息",
       "devicesRow": "已配对设备",
       "dexieMaintenance": "Dexie 维护",
+      "diagnosticsRow": "诊断",
       "externalAgentsRow": "外部 Agent",
       "feedback": {
         "copyDescription": "应用版本、User Agent 和当前同步快照。",
@@ -8367,6 +8530,7 @@
       },
       "feedbackRow": "反馈与诊断",
       "githubDeliveryRow": "GitHub 投递",
+      "goalsRow": "目标",
       "help": {
         "docsDescription": "在系统浏览器中打开 cognia 文档。",
         "docsLabel": "文档站",
@@ -8380,8 +8544,10 @@
       "helpRow": "帮助与文档",
       "hooksRow": "钩子",
       "instructionsRow": "项目指令",
+      "logsRow": "日志",
       "mcpRow": "MCP 服务器",
       "memoryRow": "记忆",
+      "memorySettingsRow": "记忆设置",
       "networkRow": "网络",
       "notificationsRow": "通知",
       "ocrRow": "OCR 提供方",
@@ -8400,6 +8566,7 @@
       },
       "profileBackAria": "返回我的",
       "profileRow": "个人资料",
+      "providersRow": "模型提供商",
       "quickActions": {
         "computerUseAria": "切换移动端 Computer Use",
         "computerUseLabel": "Computer Use",
@@ -8416,11 +8583,13 @@
         "themeLight": "浅色"
       },
       "remoteSessionsRow": "远程会话",
+      "requiresDesktop": "需配对桌面端",
       "schedulerRow": "计划任务",
       "search": "搜索设置",
       "searchAria": "搜索设置",
       "searchEmpty": "没有匹配的设置。",
       "searchResults": "结果",
+      "searchRow": "联网提问",
       "sectionAbout": "关于",
       "sectionAccount": "账户",
       "sectionAdvanced": "高级",
@@ -8446,6 +8615,7 @@
         "pending": "正在退出…",
         "successToast": "已退出，配对已清除。"
       },
+      "skillsRow": "技能",
       "slashCommandsRow": "斜杠命令",
       "speechRow": "语音",
       "storage": {
@@ -8506,6 +8676,7 @@
         "toastTableSynced": "已同步 {table}"
       },
       "syncRow": "同步状态",
+      "teamsRow": "团队",
       "terminalRow": "终端",
       "title": "我",
       "todayStats": {
@@ -8538,17 +8709,33 @@
       "title": "提及队友"
     },
     "messageActions": {
+      "bookmark": "收藏",
+      "bookmarkRemove": "取消收藏",
       "branch": "分支对话",
+      "branchVariants": "回复版本",
       "copy": "复制文本",
       "copyFailed": "复制失败：{message}",
       "copySuccess": "已复制到剪贴板。",
+      "delete": "删除消息",
+      "deleteConfirm": "删除",
+      "deleteConfirmDescription": "将从所有设备的此会话中移除，且无法撤销。",
+      "deleteConfirmTitle": "删除这条消息？",
+      "deleteFailed": "删除失败：{message}",
+      "deleteSuccess": "已删除消息。",
       "description": "选择一项操作。",
+      "edit": "编辑并重发",
+      "editFailed": "重新发送失败：{message}",
+      "editInputAria": "编辑消息内容",
+      "editResend": "重新发送",
       "longPressHint": "长按消息查看操作",
       "quote": "引用",
+      "readAloud": "朗读",
+      "regenerate": "重新生成回复",
       "share": "分享…",
       "shareDialogTitle": "分享至",
       "shareFailed": "分享失败：{message}",
       "shareUnsupported": "此设备不支持分享。",
+      "stopReading": "停止朗读",
       "title": "消息"
     },
     "network": {
@@ -8732,7 +8919,7 @@
       },
       "errorTitle": "配对失败",
       "fingerprintHint": "今后重连时如果桌面签名密钥不一致，本机将自动拒绝。",
-      "fingerprintMismatch": "服务器身份不匹配（期望 {expected}…，实际 {reported}…），请重新扫描桌面端最新的二维码完成配对。",
+      "fingerprintMismatch": "服务器身份不匹配（期望 {expected}…，实际 {reported}…）。该配对码已被使用——请在桌面端重新生成二维码/配对码后再试。",
       "fingerprintPinned": "桌面身份已锁定",
       "formCardDescription": "扫码或手动粘贴均可——两条路径共用同一份 5 分钟令牌。",
       "formCardTitle": "配对手机",
@@ -8832,6 +9019,26 @@
       "toggleAria": "切换插件状态",
       "toggleFailed": "切换失败：{message}"
     },
+    "providers": {
+      "apiKey": "API 密钥",
+      "apiKeyHelp": "仅保存在本机——不会同步到其他设备。",
+      "apiKeyPlaceholder": "sk-…",
+      "backAria": "返回我的",
+      "baseUrl": "Base URL",
+      "baseUrlHelpCustom": "该提供商的接口地址（或 OpenAI 兼容网关）。",
+      "baseUrlHelpOfficial": "留空则使用官方接口地址。",
+      "baseUrlPlaceholder": "https://api.example.com/v1",
+      "provider": "提供商",
+      "providerHelp": "官方提供商可直接在浏览器内流式输出；其他可能需要网关。",
+      "saveCta": "保存并在本机使用",
+      "saveFailed": "保存失败（{message}）。",
+      "saveSuccess": "已保存，此设备将使用该提供商。",
+      "savedCta": "已保存",
+      "sectionDescription": "填入你自己的 API 密钥，让手机无需配对桌面端也能对话。",
+      "sectionTitle": "模型提供商（BYOK）",
+      "streamingBadge": "流式",
+      "title": "模型提供商"
+    },
     "remoteSessions": {
       "approval": {
         "allow": "允许一次",
@@ -8848,8 +9055,12 @@
         "composerAria": "追问消息",
         "composerPlaceholder": "发送追问…",
         "empty": "还没有消息。",
+        "ended": "该会话已结束。",
+        "endedBadge": "已结束",
         "interruptAria": "打断当前回合",
+        "notFound": "会话不存在或已不可用。",
         "observeOnly": "仅观察",
+        "offlineHint": "桌面端已离线——重新连接后可继续跟随此会话。",
         "sendAria": "发送",
         "streaming": "流式输出中",
         "title": "实时会话"
@@ -9154,6 +9365,7 @@
     },
     "webSearch": {
       "backAria": "返回个人",
+      "enableProviderAria": "启用 {name}",
       "enabled": "启用网络搜索",
       "enabledHelp": "允许助手从网络获取最新结果。",
       "fallback": "回退到免费搜索",
@@ -9162,10 +9374,24 @@
       "maxResultsHelp": "每次搜索调用拉取的结果数量。",
       "provider": "首选提供商",
       "providerHelp": "优先使用哪个搜索引擎。",
+      "providerKeyAria": "{name} API 密钥",
+      "providersDescription": "仅独立模式——密钥保存在本机，用于应用内网络搜索。",
+      "providersTitle": "搜索提供商密钥",
       "resultsCount": "{count, plural, other {# 条结果}}",
+      "revealKeyAria": "显示或隐藏 {name} API 密钥",
       "sectionDescription": "提供商 API 密钥在桌面端配置。",
       "sectionTitle": "网络搜索",
       "title": "网络搜索"
+    },
+    "welcome": {
+      "byokCta": "配置 API Key",
+      "byokDescription": "在手机上独立运行——聊天、搜索、文档都使用你自己的服务商密钥，无需桌面端。",
+      "byokTitle": "使用我自己的 API Key",
+      "pairCta": "与桌面端配对",
+      "pairDescription": "连接电脑上的 Cognia 桌面应用，同步会话并远程执行任务。",
+      "pairTitle": "与桌面端配对",
+      "subtitle": "选择这台手机的运行方式",
+      "title": "欢迎使用 Cognia"
     },
     "workflow": {
       "activeBadge": "活跃",
@@ -9179,6 +9405,12 @@
         "rejectedToast": "已拒绝。",
         "respondFailedToast": "无法连接桌面端——请重试。"
       },
+      "cancelRun": "取消运行",
+      "cancelRunConfirm": "取消运行",
+      "cancelRunDescription": "将请求桌面端停止此次运行，已完成的步骤会保留结果。",
+      "cancelRunFailed": "取消失败——桌面端可能不可达，或运行已结束。",
+      "cancelRunSuccess": "已取消运行。",
+      "cancelRunTitle": "取消此次运行？",
       "density": {
         "comfortable": "宽松行距",
         "compact": "紧凑行距"
@@ -9253,10 +9485,12 @@
         "delete": "删除",
         "favorite": "置顶",
         "graph": "查看图",
+        "graphSheetTitle": "{name} 的流程图",
         "pause": "暂停计划",
-        "pauseDeferred": "请暂时从桌面端暂停 / 恢复 —— 服务端镜像将在 Wave 5 上线。",
+        "pauseQueued": "正在暂停 {name} 的计划 — 已加入桌面端队列。",
         "pinned": "已置顶。",
         "resume": "恢复计划",
+        "resumeQueued": "正在恢复 {name} 的计划 — 已加入桌面端队列。",
         "run": "立即运行",
         "runQueued": "已触发 {name} — 已加入桌面端队列。",
         "title": "工作流操作",
@@ -9327,6 +9561,7 @@
       "markRead": "标为已读",
       "moreActions": "更多操作",
       "open": "打开",
+      "refresh": "刷新",
       "remove": "移除",
       "settings": "通知设置",
       "showDone": "显示已归档",
@@ -10187,6 +10422,10 @@
         "description": "达到 10 级。",
         "title": "成年"
       },
+      "automationBuff": {
+        "description": "一起围观了 50 次工作流运行。",
+        "title": "自动化爱好者"
+      },
       "bestFriends": {
         "description": "亲密度拉满。",
         "title": "挚友"
@@ -10195,13 +10434,25 @@
         "description": "在密集的工作冲刺中把混沌值练满。",
         "title": "混沌小妖"
       },
+      "chatterbox": {
+        "description": "和宠物聊天 100 次。",
+        "title": "话痨"
+      },
       "devotedCaretaker": {
         "description": "长期把宠物的照护质量保持在高位。",
         "title": "尽责饲主"
       },
+      "dragonHoard": {
+        "description": "一次性持有 500 金币。",
+        "title": "巨龙宝库"
+      },
       "elder": {
         "description": "达到 20 级。",
         "title": "长老"
+      },
+      "firstBirthday": {
+        "description": "庆祝了宠物的孵化纪念日。",
+        "title": "第一个生日"
       },
       "firstXp": {
         "description": "获得了第一点经验。",
@@ -10239,6 +10490,22 @@
         "description": "你拥有一只闪光宠物。",
         "title": "闪光！"
       },
+      "spoiled": {
+        "description": "给了 30 次奖励。",
+        "title": "宠上天"
+      },
+      "squadLeader": {
+        "description": "围观智能体团队运行 50 次。",
+        "title": "小队队长"
+      },
+      "squeakyClean": {
+        "description": "给宠物洗澡 30 次。",
+        "title": "干干净净"
+      },
+      "streakCentury": {
+        "description": "连续 100 天照顾你的宠物。",
+        "title": "百日守护"
+      },
       "streakMonth": {
         "description": "连续 30 天照顾你的宠物。",
         "title": "三十日守护"
@@ -10247,9 +10514,17 @@
         "description": "连续 7 天照顾你的宠物。",
         "title": "七日相伴"
       },
+      "transcendent": {
+        "description": "达到 30 级。",
+        "title": "超凡入圣"
+      },
       "wellFed": {
         "description": "喂食 50 次。",
         "title": "吃得好"
+      },
+      "wellRounded": {
+        "description": "把每项能力都练到 50 以上。",
+        "title": "全面发展"
       },
       "zenMaster": {
         "description": "把耐心值练到了顶峰。",
@@ -10276,6 +10551,10 @@
         "我们拿到徽章啦！",
         "成就达成！"
       ],
+      "birthday": {
+        "0": "今天是我的孵化日！🎂",
+        "1": "祝我生日快乐！谢谢你陪我又一年！"
+      },
       "cleaned": {
         "0": "干干净净！",
         "1": "好清爽！"
@@ -10388,6 +10667,10 @@
           "意料之中。"
         ]
       },
+      "streakDay": {
+        "0": "在一起第 {days} 天啦！金币滚滚来！",
+        "1": "连续 {days} 天——我们势头正旺！"
+      },
       "success": [
         "搞定！",
         "完成啦。",
@@ -10464,6 +10747,7 @@
         "customize": "自定义",
         "dex": "图鉴",
         "insights": "洞察",
+        "journal": "日记",
         "nurture": "养育",
         "plugins": "插件",
         "shop": "商店"
@@ -10508,6 +10792,7 @@
           "wizard": "巫师帽"
         },
         "hatchFirst": "先孵化宠物才能自定义外观。",
+        "lockedOption": "{name} — 🔒 商店",
         "palette": "颜色",
         "paletteOptions": {
           "amber": "琥珀",
@@ -10557,6 +10842,30 @@
     },
     "inventory": {
       "title": "道具"
+    },
+    "journal": {
+      "dayTotals": "{count} 条 · +{xp} XP",
+      "empty": "日记还是空的——照顾你的宠物，它的每一天都会记录在这里。",
+      "kinds": {
+        "cleaned": "洗得干干净净",
+        "fed": "吃了一顿饭",
+        "goalComplete": "庆祝目标完成",
+        "goalProgress": "为目标进展欢呼",
+        "inboundMessage": "注意到新消息",
+        "petted": "被摸了摸头",
+        "played": "一起玩耍",
+        "review": "查看了一些结果",
+        "scheduledRun": "围观定时任务",
+        "scheduledRunStarting": "看到任务启动",
+        "slept": "睡了个午觉",
+        "success": "庆祝一次成功",
+        "talked": "聊了聊天",
+        "teamRun": "围观智能体团队干活",
+        "treated": "收到小奖励",
+        "workflowRun": "围观工作流运行"
+      },
+      "loading": "正在翻开日记…",
+      "xp": "+{xp} XP"
     },
     "live2d": {
       "loadFailed": "无法加载 Live2D 模型，已改为显示 SVG 宠物。"
@@ -10619,15 +10928,60 @@
       "balance": "{coins} 金币",
       "buy": "购买",
       "categories": {
+        "care": "护理",
         "decor": "装饰",
         "food": "食物",
         "toy": "玩具"
       },
       "insufficient": "金币不足",
       "items": {
+        "beanie": {
+          "description": "一顶柔软针织帽，适合慵懒的日子。",
+          "title": "针织帽"
+        },
         "berry": {
           "description": "小零嘴——恢复少量精力。",
           "title": "浆果"
+        },
+        "bubbleBath": {
+          "description": "暖暖的泡泡浴，洗完闪闪发亮。",
+          "title": "泡泡浴"
+        },
+        "cookie": {
+          "description": "甜甜的小饼干，让心情变好。",
+          "title": "曲奇饼干"
+        },
+        "cozyBlanket": {
+          "description": "把宠物裹起来，睡个深沉的好觉。",
+          "title": "舒适毯子"
+        },
+        "energyDrink": {
+          "description": "精力大爆发——随后有点小低落。",
+          "title": "能量饮料"
+        },
+        "firstAidKit": {
+          "description": "全套护理装备——康复的最快捷径。",
+          "title": "急救箱"
+        },
+        "frisbee": {
+          "description": "运动量十足——羁绊拉满，玩完很累。",
+          "title": "飞盘"
+        },
+        "haloRing": {
+          "description": "轻轻发光的天使光环，圣洁气质。",
+          "title": "天使光环"
+        },
+        "herbalTea": {
+          "description": "安神的草本茶，抚平情绪。",
+          "title": "草本茶"
+        },
+        "plushie": {
+          "description": "柔软的玩偶伙伴，宠物的最爱。",
+          "title": "毛绒玩偶"
+        },
+        "propellerCap": {
+          "description": "带旋转螺旋桨的俏皮小帽。",
+          "title": "螺旋桨帽"
         },
         "puzzleCube": {
           "description": "安静的益智玩具，加深羁绊。",
@@ -10637,9 +10991,25 @@
           "description": "丰盛大餐——大幅恢复精力。",
           "title": "皇家盛宴"
         },
+        "squeakyDuck": {
+          "description": "吱吱——立刻开心起来。",
+          "title": "吱吱鸭"
+        },
         "starCharm": {
           "description": "一顶小小的王冠饰品，让宠物戴上。",
           "title": "星星挂饰"
+        },
+        "sushiSet": {
+          "description": "营养均衡的一餐，用心摆盘。",
+          "title": "寿司拼盘"
+        },
+        "tophatBox": {
+          "description": "潇洒的礼帽，正式场合必备。",
+          "title": "绅士礼帽"
+        },
+        "wizardHat": {
+          "description": "戴上尖顶帽，引导神秘能量。",
+          "title": "巫师帽"
         },
         "yarnBall": {
           "description": "弹跳毛线球，尽情玩耍。",
@@ -10678,6 +11048,14 @@
       "wisdom": "智慧"
     },
     "statCard": {
+      "flavor": {
+        "plain": "朴素",
+        "radiant": "光辉"
+      },
+      "flavorHint": {
+        "plain": "在低照护质量下进化——下次好好照顾就会不一样。",
+        "radiant": "在精心照护下进化——这是用心的印记。"
+      },
       "grew": "因和你一起工作而成长",
       "shiny": "闪光",
       "unhatched": "未孵化"
@@ -10711,6 +11089,23 @@
       "editStepsLabel": "步骤（每行一个）",
       "editTitleLabel": "标题",
       "feedbackPlaceholder": "继续规划、丢弃或优化的可选反馈…",
+      "interactive": {
+        "addStep": "添加步骤",
+        "deleteStep": "删除步骤",
+        "dragHint": "拖动以重新排序",
+        "empty": "还没有步骤——在下方添加一个。",
+        "frameTitle": "交互式计划编辑器",
+        "moveDown": "下移",
+        "moveUp": "上移",
+        "originalPlan": "原始计划（Markdown）",
+        "reset": "重置",
+        "save": "保存修改",
+        "stepPlaceholder": "描述这个步骤…",
+        "stepsLabel": "步骤",
+        "titleLabel": "标题",
+        "viewClassic": "切换到经典视图",
+        "viewInteractive": "切换到交互视图"
+      },
       "keepPlanning": "否，继续规划",
       "moreActions": "更多计划操作",
       "noSteps": "此计划没有步骤。",
@@ -14890,10 +15285,18 @@
         "permissionMode": "模式",
         "permissionTitle": "权限模式",
         "planDesc": "计划模式回合提出计划（ExitPlanMode）时应用的默认设置。",
+        "planInteractiveHtml": "交互式计划视图",
+        "planInteractiveHtmlHint": "增强计划模式：在可交互的 HTML 编辑器中审阅提议的计划——批准前可拖动排序、行内编辑、添加或删除步骤。",
+        "planInteractiveStyle": "交互视图样式",
+        "planInteractiveStyleHint": "交互式计划编辑器的内置视觉样式。",
         "planMaxAutoRefinements": "最大自动优化次数",
         "planMaxAutoRefinementsHint": "步骤失败后自动修复重规划的上限（0–10）。",
         "planRequireApproval": "计划需要审批",
         "planRequireApprovalHint": "实施前显示审批卡片。关闭后，捕获的计划将以自动接受编辑模式直接继续。",
+        "planStyleCards": "卡片",
+        "planStyleCompact": "紧凑",
+        "planStyleDefault": "默认",
+        "planStyleTimeline": "时间线",
         "planTitle": "计划模式",
         "routingDesc": "某次发送失败时，自动尝试别名回退链中的下一项。关闭后会保留原始错误，便于排查。",
         "routingTitle": "路由回退",
@@ -16888,6 +17291,10 @@
         "patternInvalid": "正则无效——该条件永远不会命中。",
         "patternLabel": "正则表达式",
         "patternPlaceholder": "^\\[紧急\\]",
+        "respondViaHelp": "由同平台的另一个机器人实例发送回复（跨账号应答）。目标失效时自动退回本机器人。",
+        "respondViaLabel": "应答机器人",
+        "respondViaMissing": "{id}…（不可用）",
+        "respondViaSameBot": "本机器人（默认）",
         "senderIdsLabel": "发送者 ID",
         "senderIdsPlaceholder": "u_12345, ou_abcdef",
         "targetLabel": "目标",
@@ -17216,6 +17623,24 @@
         "quietHoursResume": "约 {minutes} 分钟后恢复",
         "retry": "重试",
         "retryAria": "重试 {id}"
+      },
+      "outboundTuning": {
+        "balanceHelp": "当此机器人的出站限流耗尽时，消息按顺序溢出到下方第一个仍有余量的可用机器人。已转移的消息不会再次转移。",
+        "balanceLabel": "负载均衡机器人",
+        "balanceToggleAria": "切换经 {name} 负载均衡",
+        "breakerCooldownMsLabel": "熔断冷却（毫秒）",
+        "breakerFailureThresholdPctLabel": "熔断失败率阈值（%）",
+        "breakerMinEventsLabel": "熔断最少事件数",
+        "breakerWindowMsLabel": "熔断统计窗口（毫秒）",
+        "failoverHelp": "当此机器人的熔断器打开时，消息按顺序改由下方第一个可用机器人送达。已转移的消息不会再次转移。",
+        "failoverLabel": "故障转移机器人",
+        "failoverNoSiblings": "此平台暂无其他已启用的机器人——添加同平台机器人后可启用故障转移。",
+        "failoverOrder": "#{order}",
+        "failoverToggleAria": "切换经 {name} 故障转移",
+        "help": "按机器人配置的发送限流与熔断参数。留空使用运行器默认值（见占位符）；修改在下一次投递即生效，无需重启。",
+        "rateCapacityLabel": "限流突发容量",
+        "rateRefillPerSecLabel": "限流补充速率（每秒）",
+        "title": "出站限流与故障转移"
       },
       "overview": {
         "adapterCount": "已注册 {count} 个适配器",
@@ -18995,9 +19420,17 @@
         "history": {
           "activeFor": "已活动 {duration}",
           "clear": "清空",
+          "clearEnded": "清除已结束",
+          "count": "{count} 个会话",
+          "delete": "从历史中移除",
           "empty": "尚无会话记录。",
           "endedAgo": "{ago}前结束",
+          "filterAll": "全部",
+          "filterAria": "按 Agent 筛选",
           "import": "导入…",
+          "ranFor": "运行 {duration}",
+          "showLess": "收起",
+          "showMore": "显示全部 {count} 条",
           "title": "最近会话"
         },
         "island": {
@@ -19111,6 +19544,8 @@
       "linkCardDescription": "列表 / 仪表盘 / 追踪 三种视图，实时搜索、过滤、分组、导出与收藏日志。",
       "linkCardFooter": "关闭设置弹窗，跳转到 /logs。",
       "linkCardTitle": "打开完整日志面板",
+      "nativeCardDescription": "读取桌面应用磁盘上的日志文件（Rust tracing 与插件日志）。移动端展示已配对桌面的日志。",
+      "nativeCardTitle": "原生日志文件",
       "openPanel": "打开日志面板"
     },
     "lspServers": {
@@ -19536,6 +19971,8 @@
           "evolving": "进化",
           "fed": "进食",
           "happy": "欢呼",
+          "hatch": "破壳",
+          "land": "落地",
           "levelUp": "升级",
           "love": "爱心",
           "petted": "被抚摸",
@@ -20724,9 +21161,19 @@
           "label": "CLI 参数"
         }
       },
+      "bell": {
+        "both": "闪烁并响铃",
+        "helper": "终端如何响应程序发出的 BEL 字符（\\a）— 例如 shell 补全失败或长命令完成时的提示音。",
+        "label": "终端响铃",
+        "none": "关闭",
+        "sound": "声音",
+        "visual": "视觉闪烁"
+      },
       "colorScheme": {
         "auto": "自动（跟随应用主题）",
-        "label": "配色方案"
+        "darkGroup": "深色方案",
+        "label": "配色方案",
+        "lightGroup": "浅色方案"
       },
       "commandActions": {
         "helper": "让每条命令左侧的状态点可交互：点击即可重跑命令或复制命令与输出，并显示退出码与耗时。",
@@ -20803,9 +21250,13 @@
       },
       "profiles": {
         "add": "添加配置文件",
+        "argsLabel": "启动参数（每行一个）",
+        "argsPlaceholder": "-NoLogo",
         "cwdLabel": "工作目录",
         "cwdPlaceholder": "工作目录（可选）",
         "empty": "暂无配置文件。",
+        "envLabel": "环境变量（每行 KEY=VALUE）",
+        "envPlaceholder": "NODE_ENV=development",
         "helper": "命名的 Shell 预设（shell + 工作目录），新建标签菜单可直接启动。可将其中一个设为默认，供普通“+ 新建”按钮使用。",
         "isDefault": "默认",
         "nameLabel": "配置文件名称",
@@ -20892,6 +21343,27 @@
       "addItem": "添加项目",
       "description": "自定义系统托盘菜单中显示的项目。",
       "desktopOnly": "系统托盘仅在桌面端可用。",
+      "display": {
+        "description": "选择订阅额度的展示位置，并自定义托盘图标外观。",
+        "iconColor": "托盘图标颜色",
+        "iconColorHint": "macOS 会自动为模板图标着色，此设置在 macOS 上无效。",
+        "pinnedAuto": "自动（用量最高）",
+        "pinnedSubscription": "显示的订阅",
+        "refreshEveryMinutes": "每 {minutes} 分钟",
+        "refreshInterval": "额度刷新间隔",
+        "refreshManual": "仅手动",
+        "showUsageInMenu": "在托盘菜单中显示订阅额度",
+        "showUsageInTooltip": "在托盘悬浮提示中显示额度",
+        "taskbarMode": "任务栏额度显示",
+        "taskbarModeHint": "图标角标把百分比绘制到托盘图标上；标题文字显示在图标旁（macOS / Linux）。",
+        "taskbarModes": {
+          "iconBadge": "图标角标",
+          "off": "关闭",
+          "title": "标题文字"
+        },
+        "title": "显示",
+        "tooltipBase": "悬浮提示文本"
+      },
       "emptyPicker": "暂无可用命令——请安装插件或开启对话。",
       "hide": "隐藏",
       "moveDown": "下移",
@@ -20972,6 +21444,7 @@
         "chat-md": "对话（Markdown）",
         "chat-text": "对话（文本）",
         "discover-item": "发现条目",
+        "usage-card": "使用量卡片",
         "workflow-png": "工作流图片"
       },
       "never": "永久",
@@ -22315,6 +22788,9 @@
     "opencode": {
       "description": "从 `~/.local/share/opencode/auth.json` 读取已配置的凭证；OpenCode-Zen 订阅以「粘贴 API key」的方式接入。OpenCode 本身管理大量服务商，我们只展示白名单内的几项。",
       "discovery": {
+        "adopt": "采纳",
+        "adoptFailed": "凭据采纳失败：{error}",
+        "adoptSuccess": "已将 \"{subProvider}\" 采纳进保险库。",
         "description": "只读地扫描 OpenCode CLI 的 auth.json，从不写回。",
         "empty": "auth.json 中没有白名单内的条目。运行 opencode auth 配置 Anthropic / OpenAI / OpenCode Zen / OpenCode Go 之一。",
         "kindApiKey": "API key",
@@ -22328,6 +22804,8 @@
         "title": "OpenCode 中已配置的服务商",
         "whitelistLabel": "白名单"
       },
+      "quotaConsoleLink": "OpenCode 控制台",
+      "quotaConsoleOnly": "Zen/Go 的余额与配额无法通过 API key 查询——OpenCode 仅在其登录态控制台中展示。",
       "title": "OpenCode",
       "webModeBanner": "OpenCode 凭证存放在 OS 钥匙串中——仅在桌面版可用。",
       "zen": {
@@ -22468,6 +22946,18 @@
         "7d": "最近 7 天",
         "all": "全部时间",
         "label": "时间范围"
+      },
+      "shareCard": {
+        "action": "分享卡片",
+        "cardTitle": "Cognia 使用量档案",
+        "description": "把你的使用量统计生成风格化卡片，可下载为图片或发布加密分享链接。",
+        "downloadPng": "下载 PNG",
+        "downloading": "渲染中…",
+        "pngError": "图片渲染失败，请重试。",
+        "previewTitle": "卡片预览",
+        "shareLink": "以链接分享",
+        "styleLabel": "风格",
+        "title": "分享使用量卡片"
       },
       "surface": {
         "agentTeam": "智能体团队",
@@ -22810,7 +23300,9 @@
       "terminalReplSpawn": "打开持久化交互式 PTY（例如 python / sql REPL），返回 sessionId 供后续写入 / 读取。",
       "terminalReplWrite": "向 REPL 会话 stdin 写入字节。非阻塞 —— 配合 terminal_repl_read 使用。",
       "terminateProcess": "终止 PID（默认仅允许本会话启动的 PID）。",
-      "topMemoryProcesses": "按常驻内存排序取前 N 个进程。"
+      "topMemoryProcesses": "按常驻内存排序取前 N 个进程。",
+      "webClone": "对在线网页做快照——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与框架代码生成。产物写入工作区。",
+      "webCloneConvert": "对已有的本地快照（目录 bundle 或单 HTML 文件）做组件提取 + 框架代码生成，无需重新抓取。生成 Vue/React/Angular/Svelte/jQuery 组件。"
     },
     "webAllowPrivateDesc": "允许 web_fetch 访问 localhost 及内网主机（10.x、192.168.x、169.254.x 云元数据）。默认关闭以阻断 SSRF——仅在可信的本地开发时开启。",
     "webAllowPrivateTitle": "允许私有 / 本地地址",
@@ -22819,7 +23311,9 @@
     "webCardDesc": "网络搜索与抓取（web_search / web_fetch）。默认开启——浏览器与 CLI 均可用。web_search 需要在 设置 → 搜索 中配置 provider。",
     "webCardTitle": "网络",
     "webNativeAnthropicDesc": "在 Anthropic 链路下，改用 Claude 内置的 WebSearch / WebFetch（服务端抽取 + 引用），而非多 provider 工具。其他 provider 仍用多 provider 工具。",
-    "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具"
+    "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具",
+    "webclone": "网页快照",
+    "webcloneDesc": "对在线网页做快照（web_clone / web_clone_convert）——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与 Vue/React/Angular/Svelte/jQuery 代码生成。除非显式放行，私有/回环地址会被拦截。仅桌面端。"
   },
   "tools": {
     "alwaysAllowTool": "本会话内始终允许此工具",
@@ -22889,7 +23383,14 @@
       "placeholder": "状态",
       "streaming": "回复中…"
     },
-    "toggleWindow": "显示 / 隐藏窗口"
+    "toggleWindow": "显示 / 隐藏窗口",
+    "usage": {
+      "auto": "自动（用量最高）",
+      "empty": "暂无额度数据",
+      "openSettings": "订阅设置…",
+      "refresh": "刷新额度",
+      "title": "订阅额度"
+    }
   },
   "tts": {
     "nowPlaying": {
@@ -24574,6 +25075,16 @@
           "placeholder": "上界"
         }
       },
+      "connectorDelete": {
+        "adapter": {
+          "label": "适配器"
+        },
+        "messageId": {
+          "hint": "要撤回/删除的平台消息 ID。",
+          "label": "消息 ID",
+          "placeholder": "om_..."
+        }
+      },
       "connectorDraft": {
         "content": {
           "label": "草稿内容"
@@ -24592,11 +25103,36 @@
           "label": "TTL（毫秒，可选）"
         }
       },
+      "connectorForward": {
+        "adapter": {
+          "label": "适配器"
+        },
+        "messageId": {
+          "hint": "要转发的平台消息 ID。",
+          "label": "消息 ID",
+          "placeholder": "om_..."
+        },
+        "target": {
+          "hint": "目标会话键（platform:adapterId:chatId）或原始 receive id。",
+          "label": "目标会话",
+          "placeholder": "lark:bot:oc_..."
+        }
+      },
       "connectorInbound": {
         "adapter": {
           "hint": "适配器实例 id，例如某个 Telegram 机器人。",
           "label": "适配器",
           "placeholder": "telegram_main"
+        },
+        "channelKinds": {
+          "hint": "仅在选中的会话类型中触发；不选表示全部。",
+          "label": "会话类型（可选）",
+          "options": {
+            "channel": "频道",
+            "group": "群聊",
+            "private": "私聊",
+            "thread": "话题"
+          }
         },
         "characterId": {
           "label": "角色（可选）"
@@ -24604,6 +25140,47 @@
         "conversationKey": {
           "hint": "可选。限定特定会话；留空时任意会话都会触发。",
           "label": "会话标识"
+        },
+        "keywords": {
+          "hint": "逗号分隔、不区分大小写的子串；任一命中消息文本即触发。",
+          "label": "关键词（可选）",
+          "placeholder": "部署, 发布"
+        },
+        "requireMention": {
+          "hint": "仅当机器人被 @ 提及时触发。",
+          "label": "要求 @ 提及"
+        },
+        "senderIds": {
+          "hint": "逗号分隔的平台用户 ID；仅这些发送者的消息会触发。",
+          "label": "发送者 ID（可选）",
+          "placeholder": "ou_abc, ou_def"
+        }
+      },
+      "connectorReaction": {
+        "adapter": {
+          "label": "适配器"
+        },
+        "emoji": {
+          "hint": "平台回应代码（飞书：THUMBSUP、OK 等）或 Unicode 表情。",
+          "label": "表情",
+          "placeholder": "THUMBSUP"
+        },
+        "messageId": {
+          "hint": "要添加回应的平台消息 ID。",
+          "label": "消息 ID",
+          "placeholder": "om_..."
+        },
+        "op": {
+          "label": "操作",
+          "options": {
+            "add": "添加回应",
+            "remove": "移除回应"
+          }
+        },
+        "reactionId": {
+          "hint": "要移除的回应 ID（来自前置添加节点的输出）。",
+          "label": "回应 ID",
+          "placeholder": "ZCaGnix..."
         }
       },
       "connectorSend": {
@@ -24611,11 +25188,66 @@
           "label": "适配器",
           "placeholder": "telegram_main"
         },
+        "cardJson": {
+          "hint": "A2UI surface 对象（{components, dataModel, rootId, …}）。设置后发送交互卡片，消息内容作为纯文本降级。",
+          "label": "A2UI 卡片 JSON（可选）",
+          "placeholder": "{\"components\": {...}, \"dataModel\": {}, \"rootId\": \"root\"}"
+        },
         "content": {
           "label": "消息内容"
         },
         "conversationKey": {
           "label": "会话标识"
+        },
+        "editTarget": {
+          "hint": "原位编辑该条已发送的平台消息，而不是发送新消息。不支持编辑的平台会退回发送新消息。",
+          "label": "编辑消息 ID（可选）",
+          "placeholder": "om_..."
+        },
+        "idempotencyKey": {
+          "hint": "去重键；默认为运行 ID + 步骤 ID。",
+          "label": "幂等键（可选）"
+        },
+        "replyTo": {
+          "hint": "支持回复的平台会引用该消息。",
+          "label": "回复消息 ID（可选）",
+          "placeholder": "om_..."
+        },
+        "threadId": {
+          "hint": "发送到该话题而非主会话。",
+          "label": "话题 ID（可选）"
+        },
+        "waitForDelivery": {
+          "hint": "阻塞此步骤直到消息送达（或进入死信），并在节点输出中暴露 delivered / status / platformMessageId / errorCode。",
+          "label": "等待送达"
+        },
+        "waitTimeoutMs": {
+          "hint": "等待送达的最长时间（毫秒），超时后携带最新状态继续（默认 30000，最大 300000）。",
+          "label": "送达等待超时（毫秒）"
+        }
+      },
+      "connectorWaitReply": {
+        "conversationKey": {
+          "hint": "组合键 platform:adapterId:chatId——要监听的会话。",
+          "label": "会话键"
+        },
+        "keywords": {
+          "hint": "逗号分隔、不区分大小写的子串；任一匹配即接受回复。",
+          "label": "关键词（可选）",
+          "placeholder": "approve, done"
+        },
+        "requireMention": {
+          "hint": "只接受 @提及机器人的回复。",
+          "label": "要求 @提及"
+        },
+        "senderIds": {
+          "hint": "逗号分隔的平台用户 ID；留空则接受任何发送者。",
+          "label": "发送者 ID（可选）",
+          "placeholder": "ou_abc, ou_def"
+        },
+        "timeoutMs": {
+          "hint": "等待预算，超时后以 replied=false 继续（默认 120000，最大 3600000）。",
+          "label": "超时（毫秒）"
         }
       },
       "cron": {
@@ -25769,6 +26401,7 @@
         }
       },
       "pickers": {
+        "adapterInstance": "选择适配器实例",
         "character": "选择角色",
         "mcpServer": "选择 MCP 服务器",
         "noResults": "无匹配项",
@@ -26413,6 +27046,37 @@
           "label": "超时（秒）"
         }
       },
+      "teamCompose": {
+        "autoStart": {
+          "hint": "组建完成后立即运行团队生命周期并等待终态。",
+          "label": "立即启动"
+        },
+        "maxRoster": {
+          "label": "最大成员数（含队长）"
+        },
+        "name": {
+          "label": "团队名称（可选）"
+        },
+        "objective": {
+          "hint": "一句话目标。发送模型前会先做 PII 脱敏；若仍残留敏感信息则组建失败。",
+          "label": "目标"
+        },
+        "preferredPattern": {
+          "label": "执行模式",
+          "options": {
+            "auto": "自动（由路由决定）",
+            "background_handoff": "后台交接",
+            "external_handoff": "外部交接",
+            "manager_worker": "管理者 / 执行者",
+            "parallel_specialists": "并行专家",
+            "single_agent_recommended": "单智能体",
+            "ultracode_orchestration": "Ultracode 编排"
+          }
+        },
+        "ultracode": {
+          "label": "Ultracode"
+        }
+      },
       "teamCreate": {
         "description": {
           "label": "描述"
@@ -26436,6 +27100,94 @@
           "label": "Supervisor 角色"
         }
       },
+      "teamDelegate": {
+        "awaitCompletion": {
+          "hint": "等待委派结束并返回结果；关闭则立即返回已启动的记录。",
+          "label": "等待完成"
+        },
+        "force": {
+          "hint": "即使处于团队勿扰时段也立即启动。",
+          "label": "无视勿扰时段"
+        },
+        "prompt": {
+          "label": "提示词"
+        },
+        "reason": {
+          "label": "原因（审计日志）"
+        },
+        "systemPrompt": {
+          "label": "系统提示词（可选）"
+        },
+        "target": {
+          "label": "委派给",
+          "options": {
+            "background": "后台智能体",
+            "external": "外部智能体",
+            "team": "另一个团队",
+            "twin": "数字孪生"
+          }
+        },
+        "targetAgentId": {
+          "hint": "外部运行时 ID，例如 claude-code 或 codex。",
+          "label": "外部智能体 ID"
+        },
+        "targetTeamId": {
+          "label": "目标团队"
+        },
+        "teamId": {
+          "label": "来源团队"
+        },
+        "twinId": {
+          "label": "数字孪生"
+        }
+      },
+      "teamMessage": {
+        "content": {
+          "label": "消息内容"
+        },
+        "recipientId": {
+          "label": "接收成员 ID（可选）"
+        },
+        "senderId": {
+          "hint": "默认使用队长身份。",
+          "label": "发送成员 ID（可选）"
+        },
+        "taskId": {
+          "label": "关联任务 ID（可选）"
+        },
+        "teamId": {
+          "label": "团队"
+        }
+      },
+      "teamReconcile": {
+        "inherit": "继承团队配置",
+        "intro": "整合本次运行至今产生的各派发分支。仅在工作区隔离的团队运行中生效。",
+        "mode": {
+          "label": "模式",
+          "options": {
+            "manual": "手动",
+            "merge-all": "全部合并",
+            "pipeline": "流水线",
+            "select": "择优选取"
+          }
+        },
+        "retain": {
+          "label": "分支保留",
+          "options": {
+            "all": "全部保留",
+            "keep-winner": "仅保留胜者",
+            "prune-losers": "清理落选分支"
+          }
+        },
+        "selectStrategy": {
+          "label": "选取策略",
+          "options": {
+            "first-success": "首个成功",
+            "judge": "AI 评审",
+            "manual": "手动"
+          }
+        }
+      },
       "teamRun": {
         "goal": {
           "hint": "希望团队完成什么。会转交到 Lead 的规划阶段。",
@@ -26444,6 +27196,20 @@
         "teamId": {
           "label": "团队 ID",
           "placeholder": "team_..."
+        }
+      },
+      "teamStatus": {
+        "includeDelegations": {
+          "label": "包含委派记录"
+        },
+        "includeTasks": {
+          "label": "包含任务"
+        },
+        "includeTeammates": {
+          "label": "包含成员"
+        },
+        "teamId": {
+          "label": "团队"
         }
       },
       "teamTaskDispatch": {
@@ -26740,6 +27506,76 @@
           }
         }
       },
+      "webClone": {
+        "allowPrivateHosts": {
+          "hint": "放行私有 / 回环 / 链路本地地址（SSRF 放行）。除非信任目标，否则请保持关闭。",
+          "label": "允许私有地址"
+        },
+        "concurrency": {
+          "hint": "并发下载数（1–32）。",
+          "label": "并发数"
+        },
+        "extractComponents": {
+          "hint": "同时把页面分析成组件结构（模板 / 样式 / 逻辑）。",
+          "label": "提取组件"
+        },
+        "framework": {
+          "hint": "从提取的组件结构生成该框架的组件代码。会隐含开启组件提取。",
+          "label": "生成框架代码",
+          "options": {
+            "angular": "Angular",
+            "jquery": "jQuery",
+            "none": "无",
+            "react": "React",
+            "svelte": "Svelte",
+            "vue": "Vue"
+          }
+        },
+        "frameworkHint": {
+          "hint": "提示提取器页面原本的框架，以改善组件边界识别。",
+          "label": "框架提示",
+          "options": {
+            "none": "自动检测",
+            "react": "React",
+            "svelte": "Svelte",
+            "vue": "Vue"
+          }
+        },
+        "maxAssets": {
+          "hint": "最多下载的资源数（1–5000）。",
+          "label": "最大资源数"
+        },
+        "maxFileSize": {
+          "hint": "单个文件的硬字节上限。留空使用引擎默认值；填 0 关闭限制。",
+          "label": "单文件大小上限（字节）"
+        },
+        "mode": {
+          "hint": "'目录 bundle' 写入含分离资源的目录；'单文件' 把所有内容内联进一个自包含 HTML 文件。",
+          "label": "模式",
+          "options": {
+            "bundle": "目录 bundle",
+            "single": "单文件"
+          }
+        },
+        "output": {
+          "hint": "快照写入位置。相对路径基于已打开的工作区解析；'single' 模式写 .html 文件，'bundle' 模式写目录。",
+          "label": "输出路径",
+          "placeholder": "./snapshots/site"
+        },
+        "pretty": {
+          "hint": "格式化输出的 HTML 以便阅读。",
+          "label": "美化 HTML"
+        },
+        "timeout": {
+          "hint": "单个资源的超时时间，毫秒（1000–120000）。",
+          "label": "超时（毫秒）"
+        },
+        "url": {
+          "hint": "要快照的页面。支持 '{{ }}' 表达式。",
+          "label": "URL",
+          "placeholder": "https://example.com/"
+        }
+      },
       "webhookBanner": {
         "desktopOnly": "仅桌面端。Webhook 接收器运行在 Tauri sidecar 中。",
         "loading": "正在加载 Webhook URL…",
@@ -27015,13 +27851,29 @@
           }
         },
         "connector": {
+          "delete": {
+            "description": "通过已连接的适配器撤回/删除已发送的平台消息。",
+            "label": "删除消息"
+          },
           "draft": {
             "description": "把建议的回复保存为草稿，供人工在收件箱中审核。",
             "label": "保存为草稿"
           },
+          "forward": {
+            "description": "通过已连接的适配器把一条消息（或合并多条）转发到另一个会话。",
+            "label": "转发消息"
+          },
+          "reaction": {
+            "description": "通过已连接的适配器给平台消息添加表情回应。",
+            "label": "消息表情回应"
+          },
           "send": {
             "description": "通过连接器适配器的出站队列发送消息。",
             "label": "通过连接器发送"
+          },
+          "waitReply": {
+            "description": "暂停运行直到会话中出现匹配的入站消息（或等待超时），并把回复文本传给下游。",
+            "label": "等待回复"
           }
         },
         "desktop": {
@@ -27441,13 +28293,33 @@
           }
         },
         "team": {
+          "compose": {
+            "description": "从单条目标自动编排智能体团队：路由评估、成员组建与任务分解（经 PII 门控），可选择立即启动团队。",
+            "label": "按目标自动组建团队"
+          },
           "create": {
             "description": "新建一个智能体团队。",
             "label": "创建团队"
           },
+          "delegate": {
+            "description": "以团队名义把子问题委派给数字孪生、后台智能体、外部智能体或另一个团队，可选择等待结果。",
+            "label": "团队委派"
+          },
+          "message": {
+            "description": "向智能体团队的共享聊天/黑板发布消息，可指定接收成员或关联到某个任务。",
+            "label": "发布团队消息"
+          },
+          "reconcile": {
+            "description": "在工作区隔离下，对本次运行至今产生的各派发分支进行合并 / 择优 / 流水线整合。",
+            "label": "整合智能体工作树"
+          },
           "run": {
             "description": "启动智能体团队的生命周期并等待执行完成。",
             "label": "运行团队"
+          },
+          "status": {
+            "description": "在工作流中读取智能体团队的实时状态：状态、最终结果，可选包含任务、成员与委派记录。",
+            "label": "查询团队状态"
           },
           "task": {
             "dispatch": {
@@ -27617,6 +28489,10 @@
         "output": {
           "description": "声明工作流的类型化终端输出（发布接口）。",
           "label": "输出"
+        },
+        "webClone": {
+          "description": "对在线网页做快照（HTML + 全部 CSS/JS/图片/字体资源），打包成自包含文件或目录，可选做组件提取与框架代码生成。",
+          "label": "网页克隆"
         },
         "webhook": {
           "respond": {

@@ -294,6 +294,39 @@
     "emptyHint": "Add a description…",
     "saveAriaLabel": "Save"
   },
+  "editor": {
+    "action": {
+      "copyPath": "Copy Path",
+      "copyRelativePath": "Copy Relative Path",
+      "format": "Format Document",
+      "save": "Save",
+      "searchProject": "Search in Project"
+    },
+    "cancel": "Cancel",
+    "closeTab": "Close {name}",
+    "delete": "Delete",
+    "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
+    "emptyEditor": "Open a file from the tree to start editing.",
+    "externallyChanged": "Changed on disk",
+    "filesTab": "Files",
+    "newFile": "New File",
+    "newFolder": "New Folder",
+    "noWorkingDir": "This team has no working directory set.",
+    "refresh": "Refresh",
+    "rename": "Rename",
+    "rootLabel": "Project root",
+    "rootMain": "main (repository)",
+    "saveAll": "Save All ({count})",
+    "saveFailed": "Save failed: {error}",
+    "search": "Search",
+    "searchEmpty": "No matches",
+    "searchPlaceholder": "Search in project…",
+    "searchTab": "Search",
+    "treeAria": "Project files",
+    "treeEmpty": "No files",
+    "unavailableDesc": "The project editor needs a desktop app or a paired device to reach the project files.",
+    "unavailableTitle": "Editor unavailable"
+  },
   "listDescription": "Multi-agent teams that plan, divide work, and execute in parallel.",
   "listEmpty": "No teams yet. Create one from scratch or pick a template below.",
   "listTitle": "Agent Teams",
@@ -662,12 +695,12 @@
   "tabs": {
     "activity": "Activity",
     "chat": "Chat",
+    "editor": "Editor",
     "members": "Members",
     "overview": "Overview",
     "settings": "Settings",
     "tasks": "Tasks",
-    "worktrees": "Worktrees",
-    "editor": "Editor"
+    "worktrees": "Worktrees"
   },
   "tasks": {
     "addTask": "Add task",
@@ -784,38 +817,5 @@
     },
     "refresh": "Refresh",
     "title": "Agent branches"
-  },
-  "editor": {
-    "unavailableTitle": "Editor unavailable",
-    "unavailableDesc": "The project editor needs a desktop app or a paired device to reach the project files.",
-    "noWorkingDir": "This team has no working directory set.",
-    "filesTab": "Files",
-    "searchTab": "Search",
-    "emptyEditor": "Open a file from the tree to start editing.",
-    "treeAria": "Project files",
-    "treeEmpty": "No files",
-    "newFile": "New File",
-    "newFolder": "New Folder",
-    "refresh": "Refresh",
-    "rename": "Rename",
-    "delete": "Delete",
-    "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
-    "cancel": "Cancel",
-    "closeTab": "Close {name}",
-    "saveAll": "Save All ({count})",
-    "externallyChanged": "Changed on disk",
-    "rootLabel": "Project root",
-    "rootMain": "main (repository)",
-    "search": "Search",
-    "searchPlaceholder": "Search in project…",
-    "searchEmpty": "No matches",
-    "saveFailed": "Save failed: {error}",
-    "action": {
-      "save": "Save",
-      "format": "Format Document",
-      "copyPath": "Copy Path",
-      "copyRelativePath": "Copy Relative Path",
-      "searchProject": "Search in Project"
-    }
   }
 }

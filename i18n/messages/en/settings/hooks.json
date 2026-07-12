@@ -53,9 +53,17 @@
     "history": {
       "activeFor": "active {duration}",
       "clear": "Clear",
+      "clearEnded": "Clear ended",
+      "count": "{count, plural, one {# session} other {# sessions}}",
+      "delete": "Remove from history",
       "empty": "No sessions recorded yet.",
       "endedAgo": "ended {ago} ago",
+      "filterAll": "All",
+      "filterAria": "Filter by agent",
       "import": "Import…",
+      "ranFor": "ran {duration}",
+      "showLess": "Show fewer",
+      "showMore": "Show all {count}",
       "title": "Recent sessions"
     },
     "island": {

@@ -2,6 +2,7 @@
   "actions": {
     "agentTeams": "Agent teams",
     "discover": "Discover",
+    "fleet": "Agent fleet",
     "inbox": "Inbox",
     "me": "Me",
     "newChat": "New chat",
@@ -14,6 +15,11 @@
     "title": "{count, plural, =1 {1 workflow running} other {# workflows running}}",
     "viewRuns": "View runs"
   },
+  "bucketOlder": "Older",
+  "bucketPrev30": "Previous 30 Days",
+  "bucketPrev7": "Previous 7 Days",
+  "bucketToday": "Today",
+  "bucketYesterday": "Yesterday",
   "customize": {
     "active": "On your home",
     "activeEmpty": "No quick actions — add some below.",
@@ -28,11 +34,6 @@
     "title": "Customize home"
   },
   "edit": "Edit",
-  "bucketOlder": "Older",
-  "bucketPrev30": "Previous 30 Days",
-  "bucketPrev7": "Previous 7 Days",
-  "bucketToday": "Today",
-  "bucketYesterday": "Yesterday",
   "emptyArchived": "No archived chats.",
   "emptyChats": "No chats yet. Tap + to start one.",
   "emptyFiltered": "No chats match “{query}”.",

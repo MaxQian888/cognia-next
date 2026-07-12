@@ -9,9 +9,9 @@
     "off": "Off",
     "perDay": "{count} / day",
     "protectedBranches": "Protected branches",
-    "required": "Required",
     "requireGreenCi": "Require green CI",
     "requireHumanApproval": "Require human approval",
+    "required": "Required",
     "title": "Default policy"
   },
   "runtimeNote": "The delivery bot runs on the paired desktop. Audit decisions and rate-limit usage are visible there in real time.",

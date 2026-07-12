@@ -1636,6 +1636,7 @@
     "dismiss": "Dismiss",
     "emptyDescription": "No approvals, gates, or waiting agents right now.",
     "emptyTitle": "Nothing needs you",
+    "focusTerminal": "Focus terminal",
     "interrupted": "Interrupted — the request was already denied.",
     "interruptedOnBoot": "{count, plural, one {# approval was interrupted} other {# approvals were interrupted}}",
     "kind": {
@@ -1645,6 +1646,7 @@
       "tool-approval": "Tool call awaiting approval"
     },
     "openOwner": "Open",
+    "revealTranscript": "Reveal transcript",
     "source": {
       "chat": "Chat",
       "fleet": "Fleet",
@@ -2806,6 +2808,7 @@
       "sendTooltip": "Send",
       "shell": {
         "failed": "`$ {cmd}` failed: {error}",
+        "interactiveRoutedToTerminal": "`$ {cmd}` needs a terminal — opened it in the integrated terminal.",
         "needsCwd": "Set a working directory before running shell commands.",
         "runningHint": "Running `$ {cmd}` in `{cwd}`…"
       },
@@ -5165,6 +5168,8 @@
       "configureNewExternalAgentConnection": "Configure a new external agent connection.",
       "customConfiguration": "Custom configuration",
       "customProtocolComingSoon": "Custom (coming soon)",
+      "defaultModel": "Default model",
+      "defaultModelHint": "Optional. \"provider/model\" id used for every turn unless overridden (e.g. anthropic/claude-sonnet-4-5).",
       "diagnostics": {
         "adapter": "Adapter: {name}",
         "authMethods": "Auth methods: {methods}",
@@ -5237,9 +5242,11 @@
       "resume": "Resume",
       "resumeSessionFailed": "Failed to resume session.",
       "selectPresetOrConfigureManually": "Select a preset or configure manually",
+      "serverHostname": "Server hostname",
       "serverPassword": "Server password",
       "serverPasswordHint": "Optional. Sent as HTTP Basic Auth for password-protected servers (OPENCODE_SERVER_PASSWORD).",
       "serverPort": "Server port",
+      "serverUsername": "Server username",
       "sessions": "Sessions",
       "stdioDesktopRuntimeWarning": "Stdio transport requires the Cognia desktop runtime. The agent will not be able to launch from the web preview.",
       "transportHttp": "HTTP",
@@ -5385,6 +5392,21 @@
       "maxRetryDelayMs": "Max Retry Delay (ms)",
       "nameRequired": "Agent name is required",
       "noAgentsConfigured": "No external agents configured",
+      "opencode": {
+        "agents": "Agents",
+        "commands": "Commands",
+        "lspServers": "LSP servers",
+        "mcpServers": "MCP servers",
+        "noAgents": "No agents exposed.",
+        "noCommands": "No commands exposed.",
+        "noMcpServers": "No MCP servers configured.",
+        "noProviders": "No providers discovered.",
+        "notConnected": "Connect the agent to view its OpenCode server status.",
+        "project": "Project",
+        "providers": "Providers",
+        "refresh": "Refresh status",
+        "title": "OpenCode server"
+      },
       "passBareFlag": "Pass --bare",
       "passBareFlagHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Appended to args at spawn time.",
       "passDebugFlag": "Pass --debug",
@@ -5455,6 +5477,12 @@
     },
     "island": {
       "empty": "No active agents",
+      "legend": {
+        "done": "{count} done",
+        "idle": "{count} idle",
+        "needsYou": "{count} waiting",
+        "working": "{count} working"
+      },
       "summary": "{count, plural, one {# agent} other {# agents}}",
       "summaryWaiting": "{count, plural, one {# agent} other {# agents}} · {waiting} waiting",
       "toggle": "Toggle agent list"
@@ -5475,7 +5503,37 @@
       "send": "Send"
     },
     "row": {
+      "detail": {
+        "branch": "Branch",
+        "cwd": "Path",
+        "duration": "Ran {duration}",
+        "ended": "Ended",
+        "pid": "PID {pid}",
+        "sessionRef": "Session",
+        "source": {
+          "clear": "Cleared",
+          "compact": "Compacted",
+          "resume": "Resumed",
+          "startup": "Fresh start"
+        },
+        "started": "Started",
+        "toggleHide": "Hide details",
+        "toggleShow": "Show details",
+        "tools": "{count, plural, one {# tool call} other {# tool calls}}",
+        "turns": "{count, plural, one {# turn} other {# turns}}"
+      },
+      "error": {
+        "tool": "Tool error",
+        "turn": "Turn failed"
+      },
       "focusTerminal": "Focus terminal",
+      "meta": {
+        "model": "Model: {model}",
+        "permissionMode": "Permission mode: {mode}"
+      },
+      "multiSelect": "Select all that apply",
+      "openTranscript": "Reveal transcript",
+      "questionMore": "{count, plural, one {+# more question} other {+# more questions}}",
       "status": {
         "ended": "Session ended",
         "idle": "Idle",
@@ -5484,6 +5542,9 @@
         "waitingPermission": "Waiting for permission approval",
         "working": "Working…"
       },
+      "subagentBackground": "bg",
+      "subagents": "{count, plural, one {# subagent} other {# subagents}}",
+      "waitingFor": "waiting {duration}",
       "you": "You:"
     }
   },
@@ -5745,6 +5806,11 @@
       "templatePlaceholder": "Pick a template…",
       "title": "New goal",
       "trigger": "New goal"
+    },
+    "remote": {
+      "applied": "Applied on desktop.",
+      "failed": "Couldn't reach the desktop — try again.",
+      "notAllowed": "This device doesn't have remote-control permission."
     },
     "status": {
       "active": "active",
@@ -6211,6 +6277,7 @@
         "modelOverride": "Model override",
         "modelOverridePlaceholder": "claude-opus-4-7",
         "muted": "Muted (drops outbound)",
+        "mutedHint": "Defer every outbound delivery on this conversation (re-checked every minute) while the bot keeps replying in its other conversations. Same semantics as the adapter-level mute, scoped to one chat.",
         "pinned": "Pinned",
         "proactivePush": "Proactive IM notifications",
         "proactivePushHint": "Allow the assistant to proactively push task-complete / error / input-required events back to this conversation. Off by default.",
@@ -6320,6 +6387,7 @@
     "outboundSource": {
       "draftApproved": "Approved draft",
       "manual": "Manual",
+      "plugin": "Plugin",
       "skill": "Skill",
       "workflow": "Workflow",
       "workflowTooltip": "Sent by workflow node {nodeId} — click to open the run"
@@ -6565,6 +6633,22 @@
       "trace": "Trace",
       "warn": "Warning"
     },
+    "nativeViewer": {
+      "empty": "No matching entries in the scanned window.",
+      "entryCount": "{count} entries",
+      "filePlain": "Plain log",
+      "fileSelectLabel": "Log file",
+      "fileStructured": "Structured log",
+      "levelAll": "All levels",
+      "levelSelectLabel": "Minimum level",
+      "refresh": "Refresh",
+      "retry": "Retry",
+      "searchLabel": "Search native logs",
+      "searchPlaceholder": "Filter messages…",
+      "truncatedBadge": "Older entries beyond scan window",
+      "unavailableDescription": "On mobile, pair with a desktop first — native logs are read from the desktop app.",
+      "unavailableTitle": "Native logs unavailable"
+    },
     "panel": {
       "addBookmark": "Bookmark this log",
       "agentTrace": {
@@ -6639,9 +6723,14 @@
       "back": "Back",
       "bookmarked": "Bookmarked",
       "clear": "Clear logs",
+      "clearConfirmCancel": "Cancel",
+      "clearConfirmConfirm": "Clear logs",
+      "clearConfirmDescription": "This permanently deletes every persisted log entry on this device. Exports and bookmarks of deleted entries stop working.",
+      "clearConfirmTitle": "Clear all logs?",
       "clearSearchHistory": "Clear history",
       "clearSessionFocus": "Clear session focus",
       "clearTraceFocus": "Clear trace focus",
+      "clearedToast": "Logs cleared",
       "closeDetails": "Close Detail Panel",
       "closeTransportDetails": "Close",
       "copied": "Copied!",
@@ -6698,6 +6787,10 @@
       "focusTraceMenu": "Focus on this trace",
       "groupByTrace": "Group by Trace",
       "highSeverityOnly": "Toggle high-severity only",
+      "hintAllShortcuts": "all shortcuts",
+      "hintExpand": "expand",
+      "hintNextPrev": "next/prev",
+      "hintRefresh": "refresh",
       "jumpToLatest": "Jump to latest",
       "keyboardShortcuts": "Keyboard shortcuts",
       "listView": "List View",
@@ -7650,9 +7743,23 @@
       "copyAria": "Copy command: {command}",
       "copyError": "Clipboard unavailable in this shell.",
       "empty": "No commands have synced from your paired desktop yet.",
-      "intro": "Terminal commands run on your paired desktop, mirrored here read-only. Tap a command to copy it.",
+      "intro": "Terminal commands from your paired desktop, mirrored here. Tap a command to copy it, or use the play button to run it again on the desktop.",
       "noProject": "No project",
       "noResults": "No commands match your search.",
+      "run": {
+        "cancel": "Cancel",
+        "close": "Close",
+        "confirm": "Run",
+        "confirmBody": "This runs the command on your paired desktop through its shell and shows the captured output here. It requires the remote-control permission for this device.",
+        "confirmTitle": "Run on desktop?",
+        "exitCode": "Exited with code {code}.",
+        "noOutput": "(no output)",
+        "resultTitle": "Command output",
+        "running": "Running on the desktop…",
+        "timedOut": "The command timed out and was killed."
+      },
+      "runAria": "Run on desktop: {command}",
+      "runError": "Could not run the command: {message}",
       "searchAria": "Search command history",
       "searchPlaceholder": "Search commands",
       "title": "Command history",
@@ -8017,6 +8124,7 @@
         "mdnsDenied": "Local network permission denied",
         "openSettings": "Open Settings",
         "portLabel": "port",
+        "rescan": "Scan again",
         "scanning": "Scanning…",
         "source": {
           "history": "history",
@@ -8030,6 +8138,8 @@
       "switch": {
         "daysAgo": "{n}d",
         "empty": "No previously paired desktops yet.",
+        "forget": "Forget {name}",
+        "forgot": "Removed {name} from this device.",
         "hoursAgo": "{n}h",
         "justNow": "just now",
         "lastSeen": "last seen",
@@ -8054,6 +8164,7 @@
         "ws-tunnel": "WS tunnel"
       },
       "toasts": {
+        "noTier": "No WebRTC tier active — using HTTPS+WS.",
         "reconnectStarted": "Re-handshaking…",
         "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
         "syncFailed": "Sync failed ({message}).",
@@ -8065,10 +8176,13 @@
       "defaultModeHelp": "Auto replies via AI. Draft requires your approval. Manual silences AI.",
       "description": "Choose how this conversation handles incoming messages.",
       "from": "From",
+      "listDescription": "Per-connector reply mode, mute, and quiet hours.",
+      "listTitle": "Reply policies",
       "modeAuto": "Auto",
       "modeDraft": "Draft",
       "modeManual": "Manual",
       "muted": "Mute this conversation",
+      "mutedBadge": "Muted",
       "mutedHelp": "Inbound messages still arrive; outbound replies are blocked.",
       "queueLabel": "Queued — desktop will apply when online.",
       "quietHours": "Quiet hours",
@@ -8147,6 +8261,48 @@
       "toggleFailed": "Could not queue the change: {message}",
       "updateQueued": "Change queued for the desktop."
     },
+    "fleet": {
+      "connectFirst": "Connect to your desktop to watch its agent fleet.",
+      "empty": "No active agents.",
+      "permission": {
+        "allow": "Allow",
+        "allowed": "Allowed",
+        "controlLost": "Remote control was revoked.",
+        "countdown": "{seconds}s",
+        "denied": "Denied",
+        "deny": "Deny",
+        "expired": "Answered on desktop",
+        "failed": "Couldn't send — try again.",
+        "request": "Permission: {tool}",
+        "requestGeneric": "Permission requested"
+      },
+      "reply": {
+        "failed": "Couldn't send — try again.",
+        "open": "Reply",
+        "placeholder": "Send a message…",
+        "send": "Send"
+      },
+      "row": {
+        "error": {
+          "tool": "Tool error",
+          "turn": "Turn failed"
+        },
+        "focus": "Focus terminal",
+        "focusFailed": "Couldn't focus the terminal.",
+        "status": {
+          "ended": "Session ended",
+          "idle": "Idle",
+          "planPending": "Plan awaiting approval on desktop",
+          "waitingInput": "Waiting for input on desktop",
+          "waitingPermission": "Waiting for permission",
+          "working": "Working…"
+        },
+        "you": "You:"
+      },
+      "summary": "{total, plural, one {# agent} other {# agents}}",
+      "title": "Agent Fleet",
+      "waiting": "{count} waiting"
+    },
     "githubDelivery": {
       "backAria": "Back to settings",
       "intro": "Review the GitHub Delivery bot's default merge policy. Repos, credentials, audit log and usage live on the paired desktop.",
@@ -8170,6 +8326,7 @@
       "actions": {
         "agentTeams": "Agent teams",
         "discover": "Discover",
+        "fleet": "Agent fleet",
         "inbox": "Inbox",
         "me": "Me",
         "newChat": "New chat",
@@ -8262,6 +8419,7 @@
       "title": "MCP servers"
     },
     "me": {
+      "a2uiRow": "Mini apps (A2UI)",
       "aboutRow": "About",
       "account": {
         "fiveHourLabel": "5-hour quota",
@@ -8270,11 +8428,13 @@
         "sevenDayLabel": "7-day quota"
       },
       "actionPair": "Pair now",
+      "agentModesRow": "Agent modes",
       "agentRow": "Agent defaults",
       "agentTeamsSettingsRow": "Agent teams",
       "appSecurity": "App security",
       "appearanceBackAria": "Back to Me",
       "appearanceLink": "Theme & wallpaper",
+      "artifactsRow": "Artifacts",
       "backupLink": "Backup & sync",
       "backupReminder": {
         "bodyKnownLast": "Last successful backup was {days, plural, =1 {1 day ago} other {# days ago}}.",
@@ -8286,6 +8446,8 @@
       "backupRow": "Backup & restore",
       "biometricToggle": "Require biometric to unlock",
       "biometricUnavailable": "This device has no biometric enrolled.",
+      "canvasRow": "Canvas",
+      "charactersRow": "Characters",
       "commandHistoryRow": "Command history",
       "computerUse": {
         "masterStateOff": "Mobile Computer Use is disabled.",
@@ -8351,6 +8513,7 @@
       "deviceInfoRow": "Device info",
       "devicesRow": "Paired devices",
       "dexieMaintenance": "Dexie maintenance",
+      "diagnosticsRow": "Diagnostics",
       "externalAgentsRow": "External agents",
       "feedback": {
         "copyDescription": "App version, user agent, and current sync snapshot.",
@@ -8367,6 +8530,7 @@
       },
       "feedbackRow": "Feedback & diagnostics",
       "githubDeliveryRow": "GitHub Delivery",
+      "goalsRow": "Goals",
       "help": {
         "docsDescription": "Open the cognia docs site in the system browser.",
         "docsLabel": "Documentation",
@@ -8380,8 +8544,10 @@
       "helpRow": "Help & docs",
       "hooksRow": "Hooks",
       "instructionsRow": "Project instructions",
+      "logsRow": "Logs",
       "mcpRow": "MCP servers",
       "memoryRow": "Memory",
+      "memorySettingsRow": "Memory settings",
       "networkRow": "Network",
       "notificationsRow": "Notifications",
       "ocrRow": "OCR providers",
@@ -8400,6 +8566,7 @@
       },
       "profileBackAria": "Back to Me",
       "profileRow": "Profile",
+      "providersRow": "Model providers",
       "quickActions": {
         "computerUseAria": "Toggle mobile Computer Use",
         "computerUseLabel": "Computer Use",
@@ -8416,11 +8583,13 @@
         "themeLight": "Light"
       },
       "remoteSessionsRow": "Remote sessions",
+      "requiresDesktop": "Requires desktop",
       "schedulerRow": "Scheduled tasks",
       "search": "Search settings",
       "searchAria": "Search settings",
       "searchEmpty": "No matching settings.",
       "searchResults": "Results",
+      "searchRow": "Ask the web",
       "sectionAbout": "About",
       "sectionAccount": "Account",
       "sectionAdvanced": "Advanced",
@@ -8446,6 +8615,7 @@
         "pending": "Signing out…",
         "successToast": "Signed out — pairing cleared."
       },
+      "skillsRow": "Skills",
       "slashCommandsRow": "Slash commands",
       "speechRow": "Speech & voice",
       "storage": {
@@ -8506,6 +8676,7 @@
         "toastTableSynced": "Synced {table}."
       },
       "syncRow": "Sync status",
+      "teamsRow": "Teams",
       "terminalRow": "Terminal",
       "title": "Me",
       "todayStats": {
@@ -8538,17 +8709,33 @@
       "title": "Mention a teammate"
     },
     "messageActions": {
+      "bookmark": "Bookmark",
+      "bookmarkRemove": "Remove bookmark",
       "branch": "Branch conversation",
+      "branchVariants": "Reply variants",
       "copy": "Copy text",
       "copyFailed": "Copy failed: {message}",
       "copySuccess": "Copied to clipboard.",
+      "delete": "Delete message",
+      "deleteConfirm": "Delete",
+      "deleteConfirmDescription": "Removes it from this conversation on every device. This can't be undone.",
+      "deleteConfirmTitle": "Delete this message?",
+      "deleteFailed": "Delete failed: {message}",
+      "deleteSuccess": "Message deleted.",
       "description": "Pick an action.",
+      "edit": "Edit & resend",
+      "editFailed": "Resend failed: {message}",
+      "editInputAria": "Edit message text",
+      "editResend": "Resend",
       "longPressHint": "Long-press a message for actions",
       "quote": "Quote",
+      "readAloud": "Read aloud",
+      "regenerate": "Regenerate reply",
       "share": "Share…",
       "shareDialogTitle": "Share via",
       "shareFailed": "Share failed: {message}",
       "shareUnsupported": "Sharing isn't supported on this device.",
+      "stopReading": "Stop reading",
       "title": "Message"
     },
     "network": {
@@ -8732,7 +8919,7 @@
       },
       "errorTitle": "Pairing failed",
       "fingerprintHint": "This phone will refuse a different desktop signing key on every reconnect.",
-      "fingerprintMismatch": "Server identity mismatch (expected {expected}…, got {reported}…). Re-pair from the desktop's current QR.",
+      "fingerprintMismatch": "Server identity mismatch (expected {expected}…, got {reported}…). The pair code was already consumed — generate a fresh QR/code on the desktop and pair again.",
       "fingerprintPinned": "Desktop identity pinned",
       "formCardDescription": "One-tap scan or manual paste — both routes use the same 5-minute pair token.",
       "formCardTitle": "Pair this phone",
@@ -8832,6 +9019,26 @@
       "toggleAria": "Toggle plugin",
       "toggleFailed": "Toggle failed: {message}"
     },
+    "providers": {
+      "apiKey": "API key",
+      "apiKeyHelp": "Stored on this device only — never synced to other devices.",
+      "apiKeyPlaceholder": "sk-…",
+      "backAria": "Back to Me",
+      "baseUrl": "Base URL",
+      "baseUrlHelpCustom": "Endpoint for this provider (or an OpenAI-compatible gateway).",
+      "baseUrlHelpOfficial": "Leave empty to use the official endpoint.",
+      "baseUrlPlaceholder": "https://api.example.com/v1",
+      "provider": "Provider",
+      "providerHelp": "Official providers stream directly from the browser; others may need a gateway.",
+      "saveCta": "Save & use on this device",
+      "saveFailed": "Save failed ({message}).",
+      "saveSuccess": "Saved. This device will use this provider.",
+      "savedCta": "Saved",
+      "sectionDescription": "Bring your own API key so this phone can chat without a paired desktop.",
+      "sectionTitle": "Model provider (BYOK)",
+      "streamingBadge": "streams",
+      "title": "Model providers"
+    },
     "remoteSessions": {
       "approval": {
         "allow": "Allow once",
@@ -8848,8 +9055,12 @@
         "composerAria": "Follow-up message",
         "composerPlaceholder": "Send a follow-up…",
         "empty": "No messages yet.",
+        "ended": "This session has ended.",
+        "endedBadge": "Ended",
         "interruptAria": "Interrupt the current turn",
+        "notFound": "Session not found or no longer available.",
         "observeOnly": "Observe only",
+        "offlineHint": "Desktop is offline — reconnect to resume following this session.",
         "sendAria": "Send",
         "streaming": "Streaming",
         "title": "Live session"
@@ -9154,6 +9365,7 @@
     },
     "webSearch": {
       "backAria": "Back to Me",
+      "enableProviderAria": "Enable {name}",
       "enabled": "Enable web search",
       "enabledHelp": "Lets the assistant fetch fresh results from the web.",
       "fallback": "Fall back to free search",
@@ -9162,10 +9374,24 @@
       "maxResultsHelp": "How many results to pull into each search call.",
       "provider": "Preferred provider",
       "providerHelp": "Which search engine to use first.",
+      "providerKeyAria": "{name} API key",
+      "providersDescription": "Standalone mode only — keys are stored on this phone and used for in-app web search.",
+      "providersTitle": "Search provider keys",
       "resultsCount": "{count, plural, one {# result} other {# results}}",
+      "revealKeyAria": "Show or hide the {name} API key",
       "sectionDescription": "Provider API keys are configured on the desktop.",
       "sectionTitle": "Web search",
       "title": "Web search"
+    },
+    "welcome": {
+      "byokCta": "Set up API key",
+      "byokDescription": "Run standalone on this phone — chat, search, and docs against your own provider keys. No desktop needed.",
+      "byokTitle": "Use my own API key",
+      "pairCta": "Pair with desktop",
+      "pairDescription": "Connect to the Cognia desktop app on your computer to sync sessions and run tasks remotely.",
+      "pairTitle": "Pair with my desktop",
+      "subtitle": "Choose how this phone should run",
+      "title": "Welcome to Cognia"
     },
     "workflow": {
       "activeBadge": "Active",
@@ -9179,6 +9405,12 @@
         "rejectedToast": "Rejected.",
         "respondFailedToast": "Couldn't reach the desktop — try again."
       },
+      "cancelRun": "Cancel run",
+      "cancelRunConfirm": "Cancel run",
+      "cancelRunDescription": "Asks the desktop to stop this run. Steps already completed keep their results.",
+      "cancelRunFailed": "Couldn't cancel — the desktop may be unreachable or the run already finished.",
+      "cancelRunSuccess": "Run cancelled.",
+      "cancelRunTitle": "Cancel this run?",
       "density": {
         "comfortable": "Comfortable rows",
         "compact": "Compact rows"
@@ -9253,10 +9485,12 @@
         "delete": "Delete",
         "favorite": "Pin",
         "graph": "View graph",
+        "graphSheetTitle": "Flow of {name}",
         "pause": "Pause schedule",
-        "pauseDeferred": "Pause/resume from the desktop for now — server-side mirror lands in Wave 5.",
+        "pauseQueued": "Pausing schedule of {name} — queued for desktop.",
         "pinned": "Pinned.",
         "resume": "Resume schedule",
+        "resumeQueued": "Resuming schedule of {name} — queued for desktop.",
         "run": "Run now",
         "runQueued": "Triggered {name} — queued for desktop.",
         "title": "Workflow actions",
@@ -9327,6 +9561,7 @@
       "markRead": "Mark as read",
       "moreActions": "More actions",
       "open": "Open",
+      "refresh": "Refresh",
       "remove": "Remove",
       "settings": "Notification settings",
       "showDone": "Show archived",
@@ -10187,6 +10422,10 @@
         "description": "Reached level 10.",
         "title": "All Grown Up"
       },
+      "automationBuff": {
+        "description": "Watched 50 workflow runs together.",
+        "title": "Automation Buff"
+      },
       "bestFriends": {
         "description": "Maxed your bond.",
         "title": "Best Friends"
@@ -10195,13 +10434,25 @@
         "description": "Maxed the chaos stat through frantic bursts of work.",
         "title": "Chaos Gremlin"
       },
+      "chatterbox": {
+        "description": "Chatted with your pet 100 times.",
+        "title": "Chatterbox"
+      },
       "devotedCaretaker": {
         "description": "Kept your pet's care quality consistently high.",
         "title": "Devoted Caretaker"
       },
+      "dragonHoard": {
+        "description": "Held 500 coins at once.",
+        "title": "Dragon's Hoard"
+      },
       "elder": {
         "description": "Reached level 20.",
         "title": "Elder"
+      },
+      "firstBirthday": {
+        "description": "Celebrated your pet's hatch anniversary.",
+        "title": "First Birthday"
       },
       "firstXp": {
         "description": "Earned your first XP.",
@@ -10239,6 +10490,22 @@
         "description": "You own a shiny pet.",
         "title": "Shiny!"
       },
+      "spoiled": {
+        "description": "Gave 30 treats.",
+        "title": "Spoiled Rotten"
+      },
+      "squadLeader": {
+        "description": "Watched the agent team run 50 times.",
+        "title": "Squad Leader"
+      },
+      "squeakyClean": {
+        "description": "Cleaned your pet 30 times.",
+        "title": "Squeaky Clean"
+      },
+      "streakCentury": {
+        "description": "Cared for your pet 100 days in a row.",
+        "title": "Century of Care"
+      },
       "streakMonth": {
         "description": "Cared for your pet 30 days in a row.",
         "title": "Month of Devotion"
@@ -10247,9 +10514,17 @@
         "description": "Cared for your pet 7 days in a row.",
         "title": "Week of Care"
       },
+      "transcendent": {
+        "description": "Reached level 30.",
+        "title": "Transcendent"
+      },
       "wellFed": {
         "description": "Fed your pet 50 times.",
         "title": "Well Fed"
+      },
+      "wellRounded": {
+        "description": "Grew every stat to 50 or higher.",
+        "title": "Well-Rounded"
       },
       "zenMaster": {
         "description": "Grew the patience stat to its peak.",
@@ -10276,6 +10551,10 @@
         "We earned a badge!",
         "Achievement get!"
       ],
+      "birthday": {
+        "0": "It's my hatch day! 🎂",
+        "1": "Happy birthday to me! Thanks for another year!"
+      },
       "cleaned": {
         "0": "Squeaky clean!",
         "1": "So fresh!"
@@ -10388,6 +10667,10 @@
           "As expected."
         ]
       },
+      "streakDay": {
+        "0": "Day {days} together! Coins are flowing!",
+        "1": "{days}-day streak — we're on fire!"
+      },
       "success": [
         "Nailed it!",
         "Done and done.",
@@ -10464,6 +10747,7 @@
         "customize": "Customize",
         "dex": "Dex",
         "insights": "Insights",
+        "journal": "Journal",
         "nurture": "Nurture",
         "plugins": "Plugins",
         "shop": "Shop"
@@ -10508,6 +10792,7 @@
           "wizard": "Wizard"
         },
         "hatchFirst": "Hatch your pet first to customize its look.",
+        "lockedOption": "{name} — 🔒 shop",
         "palette": "Color",
         "paletteOptions": {
           "amber": "Amber",
@@ -10557,6 +10842,30 @@
     },
     "inventory": {
       "title": "Items"
+    },
+    "journal": {
+      "dayTotals": "{count} events · +{xp} XP",
+      "empty": "Nothing in the diary yet — care for your pet and its days will show up here.",
+      "kinds": {
+        "cleaned": "Got cleaned up",
+        "fed": "Had a meal",
+        "goalComplete": "Celebrated a finished goal",
+        "goalProgress": "Cheered goal progress",
+        "inboundMessage": "Noticed a new message",
+        "petted": "Got petted",
+        "played": "Played together",
+        "review": "Looked over some results",
+        "scheduledRun": "Watched a scheduled task",
+        "scheduledRunStarting": "Saw a task kick off",
+        "slept": "Took a nap",
+        "success": "Celebrated a success",
+        "talked": "Had a chat",
+        "teamRun": "Watched the agent team work",
+        "treated": "Got a treat",
+        "workflowRun": "Followed a workflow run"
+      },
+      "loading": "Opening the diary…",
+      "xp": "+{xp} XP"
     },
     "live2d": {
       "loadFailed": "The Live2D model couldn't be loaded — showing the SVG pet instead."
@@ -10619,15 +10928,60 @@
       "balance": "{coins} coins",
       "buy": "Buy",
       "categories": {
+        "care": "Care",
         "decor": "Decor",
         "food": "Food",
         "toy": "Toys"
       },
       "insufficient": "Not enough coins",
       "items": {
+        "beanie": {
+          "description": "A snug knit beanie for laid-back days.",
+          "title": "Beanie"
+        },
         "berry": {
           "description": "A quick snack — restores a little energy.",
           "title": "Berry"
+        },
+        "bubbleBath": {
+          "description": "A warm scrub that leaves your pet sparkling.",
+          "title": "Bubble Bath"
+        },
+        "cookie": {
+          "description": "A sweet treat that lifts the mood.",
+          "title": "Cookie"
+        },
+        "cozyBlanket": {
+          "description": "Tucks your pet in for a deep, restful nap.",
+          "title": "Cozy Blanket"
+        },
+        "energyDrink": {
+          "description": "A big jolt of energy — with a small comedown.",
+          "title": "Energy Drink"
+        },
+        "firstAidKit": {
+          "description": "Full care in a box — the fastest road to recovery.",
+          "title": "First-Aid Kit"
+        },
+        "frisbee": {
+          "description": "A real workout — great bonding, tiring play.",
+          "title": "Frisbee"
+        },
+        "haloRing": {
+          "description": "A gentle glowing halo for a saintly look.",
+          "title": "Halo Ring"
+        },
+        "herbalTea": {
+          "description": "A calming brew that soothes the mood.",
+          "title": "Herbal Tea"
+        },
+        "plushie": {
+          "description": "A soft companion your pet will adore.",
+          "title": "Plushie"
+        },
+        "propellerCap": {
+          "description": "A whimsical cap with a spinning propeller.",
+          "title": "Propeller Cap"
         },
         "puzzleCube": {
           "description": "A calm brain-teaser that deepens your bond.",
@@ -10637,9 +10991,25 @@
           "description": "A lavish meal — deeply restores energy.",
           "title": "Royal Feast"
         },
+        "squeakyDuck": {
+          "description": "Squeak squeak — instant silly fun.",
+          "title": "Squeaky Duck"
+        },
         "starCharm": {
           "description": "A tiny crown charm your pet can wear.",
           "title": "Star Charm"
+        },
+        "sushiSet": {
+          "description": "A balanced meal, plated with love.",
+          "title": "Sushi Set"
+        },
+        "tophatBox": {
+          "description": "A dashing top hat for formal occasions.",
+          "title": "Top Hat"
+        },
+        "wizardHat": {
+          "description": "Channel arcane energies with this pointed hat.",
+          "title": "Wizard Hat"
         },
         "yarnBall": {
           "description": "A bouncy toy for a big burst of fun.",
@@ -10678,6 +11048,14 @@
       "wisdom": "Wisdom"
     },
     "statCard": {
+      "flavor": {
+        "plain": "Plain",
+        "radiant": "Radiant"
+      },
+      "flavorHint": {
+        "plain": "Evolved under low care quality — better care next time changes this.",
+        "radiant": "Evolved under excellent care — a mark of devotion."
+      },
       "grew": "Grew from working with you",
       "shiny": "Shiny",
       "unhatched": "Unhatched"
@@ -10711,6 +11089,23 @@
       "editStepsLabel": "Steps (one per line)",
       "editTitleLabel": "Title",
       "feedbackPlaceholder": "Optional feedback for keep-planning, discard, or refinement…",
+      "interactive": {
+        "addStep": "Add step",
+        "deleteStep": "Delete step",
+        "dragHint": "Drag to reorder",
+        "empty": "No steps yet — add one below.",
+        "frameTitle": "Interactive plan editor",
+        "moveDown": "Move down",
+        "moveUp": "Move up",
+        "originalPlan": "Original plan (markdown)",
+        "reset": "Reset",
+        "save": "Save changes",
+        "stepPlaceholder": "Describe this step…",
+        "stepsLabel": "Steps",
+        "titleLabel": "Title",
+        "viewClassic": "Switch to classic view",
+        "viewInteractive": "Switch to interactive view"
+      },
       "keepPlanning": "No, keep planning",
       "moreActions": "More plan actions",
       "noSteps": "This plan has no steps.",
@@ -14890,10 +15285,18 @@
         "permissionMode": "Mode",
         "permissionTitle": "Permission mode",
         "planDesc": "Defaults applied when a plan-mode turn proposes a plan (ExitPlanMode).",
+        "planInteractiveHtml": "Interactive plan view",
+        "planInteractiveHtmlHint": "Enhanced plan mode: review proposed plans in an interactive HTML editor — drag to reorder, edit inline, add or remove steps before approving.",
+        "planInteractiveStyle": "Interactive view style",
+        "planInteractiveStyleHint": "Built-in visual preset for the interactive plan editor.",
         "planMaxAutoRefinements": "Max automatic refinements",
         "planMaxAutoRefinementsHint": "Cap on automatic repair replans after a step failure (0–10).",
         "planRequireApproval": "Require plan approval",
         "planRequireApprovalHint": "Show the approval card before implementing. When off, captured plans auto-resume in accept-edits mode.",
+        "planStyleCards": "Cards",
+        "planStyleCompact": "Compact",
+        "planStyleDefault": "Default",
+        "planStyleTimeline": "Timeline",
         "planTitle": "Plan mode",
         "routingDesc": "When a turn fails, retry against the next entry in the alias's fallback chain. Disable to keep the original error visible.",
         "routingTitle": "Routing fallback",
@@ -16888,6 +17291,10 @@
         "patternInvalid": "Invalid pattern — this condition will never match.",
         "patternLabel": "Regex pattern",
         "patternPlaceholder": "^\\[urgent\\]",
+        "respondViaHelp": "Deliver the reply through another bot instance of the same platform (cross-account send). Falls back to this bot when the target is unavailable.",
+        "respondViaLabel": "Respond via bot",
+        "respondViaMissing": "{id}… (unavailable)",
+        "respondViaSameBot": "This bot (default)",
         "senderIdsLabel": "Sender IDs",
         "senderIdsPlaceholder": "u_12345, ou_abcdef",
         "targetLabel": "Target",
@@ -17216,6 +17623,24 @@
         "quietHoursResume": "Resumes in ~{minutes} min",
         "retry": "Retry",
         "retryAria": "Retry {id}"
+      },
+      "outboundTuning": {
+        "balanceHelp": "When this bot's outbound rate limit is exhausted, deliveries spill over to the first enabled bot below that still has capacity (in order). A re-routed message is never re-routed a second time.",
+        "balanceLabel": "Load-balancing bots",
+        "balanceToggleAria": "Toggle load balancing via {name}",
+        "breakerCooldownMsLabel": "Breaker cooldown (ms)",
+        "breakerFailureThresholdPctLabel": "Breaker failure threshold (%)",
+        "breakerMinEventsLabel": "Breaker min events",
+        "breakerWindowMsLabel": "Breaker window (ms)",
+        "failoverHelp": "When this bot's circuit breaker is open, deliveries are re-routed through the first enabled bot below (in order). A re-routed message never fails over a second time.",
+        "failoverLabel": "Failover bots",
+        "failoverNoSiblings": "No other enabled bot on this platform — add a sibling bot to enable failover.",
+        "failoverOrder": "#{order}",
+        "failoverToggleAria": "Toggle failover via {name}",
+        "help": "Per-bot delivery throttle and circuit breaker. Blank fields use the runner defaults (shown as placeholders); changes apply on the next delivery without a restart.",
+        "rateCapacityLabel": "Rate burst capacity",
+        "rateRefillPerSecLabel": "Rate refill (per second)",
+        "title": "Outbound throttle & failover"
       },
       "overview": {
         "adapterCount": "{count} adapter registered",
@@ -18995,9 +19420,17 @@
         "history": {
           "activeFor": "active {duration}",
           "clear": "Clear",
+          "clearEnded": "Clear ended",
+          "count": "{count, plural, one {# session} other {# sessions}}",
+          "delete": "Remove from history",
           "empty": "No sessions recorded yet.",
           "endedAgo": "ended {ago} ago",
+          "filterAll": "All",
+          "filterAria": "Filter by agent",
           "import": "Import…",
+          "ranFor": "ran {duration}",
+          "showLess": "Show fewer",
+          "showMore": "Show all {count}",
           "title": "Recent sessions"
         },
         "island": {
@@ -19111,6 +19544,8 @@
       "linkCardDescription": "List, dashboard, trace views — search, filter, group, export and bookmark logs in real time.",
       "linkCardFooter": "Closes the settings dialog and navigates to /logs.",
       "linkCardTitle": "Open the full Log Panel",
+      "nativeCardDescription": "Read the desktop app's on-disk log files (Rust tracing + plugin log). On mobile this shows the paired desktop's logs.",
+      "nativeCardTitle": "Native log files",
       "openPanel": "Open Log Panel"
     },
     "lspServers": {
@@ -19536,6 +19971,8 @@
           "evolving": "Evolution",
           "fed": "Fed",
           "happy": "Cheer",
+          "hatch": "Hatch",
+          "land": "Landing",
           "levelUp": "Level up",
           "love": "Love",
           "petted": "Petted",
@@ -20724,9 +21161,19 @@
           "label": "CLI flags"
         }
       },
+      "bell": {
+        "both": "Flash and sound",
+        "helper": "How the terminal reacts to the BEL character (\\a) programs emit — e.g. shell completion failures or long-running commands ringing on finish.",
+        "label": "Terminal bell",
+        "none": "Off",
+        "sound": "Sound",
+        "visual": "Visual flash"
+      },
       "colorScheme": {
         "auto": "Auto (follow app theme)",
-        "label": "Color scheme"
+        "darkGroup": "Dark schemes",
+        "label": "Color scheme",
+        "lightGroup": "Light schemes"
       },
       "commandActions": {
         "helper": "Make the per-command gutter dots interactive: click one to rerun the command or copy the command and its output, with the exit code and duration.",
@@ -20803,9 +21250,13 @@
       },
       "profiles": {
         "add": "Add profile",
+        "argsLabel": "Arguments (one per line)",
+        "argsPlaceholder": "-NoLogo",
         "cwdLabel": "Working directory",
         "cwdPlaceholder": "Working directory (optional)",
         "empty": "No profiles yet.",
+        "envLabel": "Environment (KEY=VALUE per line)",
+        "envPlaceholder": "NODE_ENV=development",
         "helper": "Named shell presets (shell + working directory) the new-tab menu can launch. Set one as default for the plain \"+ New\" button.",
         "isDefault": "Default",
         "nameLabel": "Profile name",
@@ -20892,6 +21343,27 @@
       "addItem": "Add item",
       "description": "Customise the items shown in the system tray menu.",
       "desktopOnly": "The system tray is only available in the desktop build.",
+      "display": {
+        "description": "Choose where subscription usage shows up and how the tray icon looks.",
+        "iconColor": "Tray icon color",
+        "iconColorHint": "Ignored on macOS, where the menu bar tints template icons automatically.",
+        "pinnedAuto": "Auto (highest usage)",
+        "pinnedSubscription": "Subscription to display",
+        "refreshEveryMinutes": "Every {minutes} min",
+        "refreshInterval": "Usage refresh interval",
+        "refreshManual": "Manual only",
+        "showUsageInMenu": "Show subscription usage in the tray menu",
+        "showUsageInTooltip": "Show usage in the tray tooltip",
+        "taskbarMode": "Usage in the taskbar",
+        "taskbarModeHint": "Icon badge draws the percent onto the tray icon; title shows text next to it (macOS / Linux).",
+        "taskbarModes": {
+          "iconBadge": "Icon badge",
+          "off": "Off",
+          "title": "Title text"
+        },
+        "title": "Display",
+        "tooltipBase": "Tooltip text"
+      },
       "emptyPicker": "No commands available — install plugins or start a chat.",
       "hide": "Hide",
       "moveDown": "Move down",
@@ -20972,6 +21444,7 @@
         "chat-md": "Conversation (Markdown)",
         "chat-text": "Conversation (text)",
         "discover-item": "Discover item",
+        "usage-card": "Usage card",
         "workflow-png": "Workflow image"
       },
       "never": "Never",
@@ -22315,6 +22788,9 @@
     "opencode": {
       "description": "Discover credentials from `~/.local/share/opencode/auth.json` and paste an OpenCode-Zen subscription key. OpenCode itself manages many providers; we surface only the whitelisted ones.",
       "discovery": {
+        "adopt": "Adopt",
+        "adoptFailed": "Couldn't adopt the credential: {error}",
+        "adoptSuccess": "Adopted \"{subProvider}\" into the vault.",
         "description": "Read-only probe of the OpenCode CLI's auth.json. We never write back.",
         "empty": "No whitelisted entries in auth.json. Run opencode auth for one of: Anthropic, OpenAI, OpenCode Zen, or OpenCode Go.",
         "kindApiKey": "API key",
@@ -22328,6 +22804,8 @@
         "title": "Discovered in OpenCode",
         "whitelistLabel": "Whitelist"
       },
+      "quotaConsoleLink": "OpenCode Console",
+      "quotaConsoleOnly": "Zen/Go balance and quota can't be queried with an API key — OpenCode only shows them in its session-authenticated console.",
       "title": "OpenCode",
       "webModeBanner": "OpenCode credentials are stored in your OS keychain — only available in the desktop app.",
       "zen": {
@@ -22468,6 +22946,18 @@
         "7d": "Last 7 days",
         "all": "All time",
         "label": "Time range"
+      },
+      "shareCard": {
+        "action": "Share card",
+        "cardTitle": "Cognia Usage Archive",
+        "description": "Turn your usage stats into a stylized card — download it as an image or publish an encrypted share link.",
+        "downloadPng": "Download PNG",
+        "downloading": "Rendering…",
+        "pngError": "Failed to render the image. Try again.",
+        "previewTitle": "Card preview",
+        "shareLink": "Share via link",
+        "styleLabel": "Style",
+        "title": "Share usage card"
       },
       "surface": {
         "agentTeam": "Agent Team",
@@ -22810,7 +23300,9 @@
       "terminalReplSpawn": "Open a persistent interactive PTY (e.g. python / sql REPL). Returns sessionId for subsequent writes / reads.",
       "terminalReplWrite": "Write bytes into a REPL session's stdin. Non-blocking — pair with terminal_repl_read.",
       "terminateProcess": "Terminate a PID (default: only PIDs this session started).",
-      "topMemoryProcesses": "Top N processes by resident memory."
+      "topMemoryProcesses": "Top N processes by resident memory.",
+      "webClone": "Snapshot a live web page — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction + framework codegen. Writes into the workspace.",
+      "webCloneConvert": "Run component extraction + framework codegen on an existing local snapshot (bundle directory or single HTML) without re-fetching. Generates Vue/React/Angular/Svelte/jQuery components."
     },
     "webAllowPrivateDesc": "Let web_fetch reach localhost and private-network hosts (10.x, 192.168.x, 169.254.x cloud metadata). Off by default to block SSRF — enable only for trusted local development.",
     "webAllowPrivateTitle": "Allow private / local addresses",
@@ -22819,7 +23311,9 @@
     "webCardDesc": "Web search and fetch (web_search / web_fetch). On by default — works in the browser and the CLI. web_search needs a provider configured in Settings → Search.",
     "webCardTitle": "Web",
     "webNativeAnthropicDesc": "On the Anthropic path, use Claude's built-in WebSearch / WebFetch (server-side extraction + citations) instead of the multi-provider tools. Other providers keep the multi-provider tools.",
-    "webNativeAnthropicTitle": "Use native Anthropic web tools"
+    "webNativeAnthropicTitle": "Use native Anthropic web tools",
+    "webclone": "Web page snapshot",
+    "webcloneDesc": "Snapshot a live web page (web_clone / web_clone_convert) — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction and Vue/React/Angular/Svelte/jQuery codegen. Private/loopback targets are blocked unless opted in. Desktop only."
   },
   "tools": {
     "alwaysAllowTool": "Always allow this tool for the current session",
@@ -22889,7 +23383,14 @@
       "placeholder": "Status",
       "streaming": "Responding…"
     },
-    "toggleWindow": "Show / hide window"
+    "toggleWindow": "Show / hide window",
+    "usage": {
+      "auto": "Auto (highest usage)",
+      "empty": "No usage data yet",
+      "openSettings": "Subscription settings…",
+      "refresh": "Refresh usage",
+      "title": "Subscription usage"
+    }
   },
   "tts": {
     "nowPlaying": {
@@ -24574,6 +25075,16 @@
           "placeholder": "Upper bound"
         }
       },
+      "connectorDelete": {
+        "adapter": {
+          "label": "Adapter"
+        },
+        "messageId": {
+          "hint": "Platform message id to recall / delete.",
+          "label": "Message id",
+          "placeholder": "om_..."
+        }
+      },
       "connectorDraft": {
         "content": {
           "label": "Draft content"
@@ -24592,11 +25103,36 @@
           "label": "TTL (ms, optional)"
         }
       },
+      "connectorForward": {
+        "adapter": {
+          "label": "Adapter"
+        },
+        "messageId": {
+          "hint": "Platform message id to forward.",
+          "label": "Message id",
+          "placeholder": "om_..."
+        },
+        "target": {
+          "hint": "Destination conversation key (platform:adapterId:chatId) or a raw receive id.",
+          "label": "Target conversation",
+          "placeholder": "lark:bot:oc_..."
+        }
+      },
       "connectorInbound": {
         "adapter": {
           "hint": "Adapter instance id, e.g., a Telegram bot.",
           "label": "Adapter",
           "placeholder": "telegram_main"
+        },
+        "channelKinds": {
+          "hint": "Fires only in the selected channel kinds; none selected means all.",
+          "label": "Channel kinds (optional)",
+          "options": {
+            "channel": "Channel",
+            "group": "Group",
+            "private": "Private chat",
+            "thread": "Thread"
+          }
         },
         "characterId": {
           "label": "Character (optional)"
@@ -24604,6 +25140,47 @@
         "conversationKey": {
           "hint": "Optional. Limit to a specific conversation; empty fires on any.",
           "label": "Conversation key"
+        },
+        "keywords": {
+          "hint": "Comma-separated, case-insensitive substrings; fires when any matches the message text.",
+          "label": "Keywords (optional)",
+          "placeholder": "deploy, release"
+        },
+        "requireMention": {
+          "hint": "Only fire when the bot itself is mentioned.",
+          "label": "Require @-mention"
+        },
+        "senderIds": {
+          "hint": "Comma-separated platform user ids; fires only for these senders.",
+          "label": "Sender ids (optional)",
+          "placeholder": "ou_abc, ou_def"
+        }
+      },
+      "connectorReaction": {
+        "adapter": {
+          "label": "Adapter"
+        },
+        "emoji": {
+          "hint": "Platform reaction code (Lark: THUMBSUP, OK, …) or a unicode emoji.",
+          "label": "Emoji",
+          "placeholder": "THUMBSUP"
+        },
+        "messageId": {
+          "hint": "Platform message id to react to.",
+          "label": "Message id",
+          "placeholder": "om_..."
+        },
+        "op": {
+          "label": "Operation",
+          "options": {
+            "add": "Add reaction",
+            "remove": "Remove reaction"
+          }
+        },
+        "reactionId": {
+          "hint": "Id of the reaction to remove (from an earlier add node's output).",
+          "label": "Reaction id",
+          "placeholder": "ZCaGnix..."
         }
       },
       "connectorSend": {
@@ -24611,11 +25188,66 @@
           "label": "Adapter",
           "placeholder": "telegram_main"
         },
+        "cardJson": {
+          "hint": "A2UI surface object ({components, dataModel, rootId, …}). When set, sends an interactive card with the message content as plain-text fallback.",
+          "label": "A2UI card JSON (optional)",
+          "placeholder": "{\"components\": {...}, \"dataModel\": {}, \"rootId\": \"root\"}"
+        },
         "content": {
           "label": "Message content"
         },
         "conversationKey": {
           "label": "Conversation key"
+        },
+        "editTarget": {
+          "hint": "Edit this already-sent platform message in place instead of sending a new one. Platforms without edit support fall back to a new message.",
+          "label": "Edit message id (optional)",
+          "placeholder": "om_..."
+        },
+        "idempotencyKey": {
+          "hint": "Deduplication key; defaults to run id + step id.",
+          "label": "Idempotency key (optional)"
+        },
+        "replyTo": {
+          "hint": "Platforms that support replies quote this message.",
+          "label": "Reply to message id (optional)",
+          "placeholder": "om_..."
+        },
+        "threadId": {
+          "hint": "Post into this thread instead of the main channel.",
+          "label": "Thread id (optional)"
+        },
+        "waitForDelivery": {
+          "hint": "Block this step until the message is delivered (or dead-lettered) and expose delivered / status / platformMessageId / errorCode on the node output.",
+          "label": "Wait for delivery"
+        },
+        "waitTimeoutMs": {
+          "hint": "How long to wait for delivery before continuing with the latest status, in milliseconds (default 30000, max 300000).",
+          "label": "Delivery wait timeout (ms)"
+        }
+      },
+      "connectorWaitReply": {
+        "conversationKey": {
+          "hint": "Composite key platform:adapterId:chatId — the conversation to listen on.",
+          "label": "Conversation key"
+        },
+        "keywords": {
+          "hint": "Comma-separated case-insensitive substrings; any match accepts the reply.",
+          "label": "Keywords (optional)",
+          "placeholder": "approve, done"
+        },
+        "requireMention": {
+          "hint": "Only accept replies that @-mention the bot.",
+          "label": "Require @-mention"
+        },
+        "senderIds": {
+          "hint": "Comma-separated platform user ids; any sender when empty.",
+          "label": "Sender ids (optional)",
+          "placeholder": "ou_abc, ou_def"
+        },
+        "timeoutMs": {
+          "hint": "Wait budget before resolving with replied=false (default 120000, max 3600000).",
+          "label": "Timeout (ms)"
         }
       },
       "cron": {
@@ -25769,6 +26401,7 @@
         }
       },
       "pickers": {
+        "adapterInstance": "Select an adapter instance",
         "character": "Select a character",
         "mcpServer": "Select an MCP server",
         "noResults": "No matches",
@@ -26413,6 +27046,37 @@
           "label": "Timeout (seconds)"
         }
       },
+      "teamCompose": {
+        "autoStart": {
+          "hint": "Run the team lifecycle immediately after composition and wait for the terminal state.",
+          "label": "Start immediately"
+        },
+        "maxRoster": {
+          "label": "Max roster size (incl. lead)"
+        },
+        "name": {
+          "label": "Team name (optional)"
+        },
+        "objective": {
+          "hint": "One objective sentence. PII is redacted before any model call; composition fails closed if secrets remain.",
+          "label": "Objective"
+        },
+        "preferredPattern": {
+          "label": "Execution pattern",
+          "options": {
+            "auto": "Auto (routing decides)",
+            "background_handoff": "Background handoff",
+            "external_handoff": "External handoff",
+            "manager_worker": "Manager / worker",
+            "parallel_specialists": "Parallel specialists",
+            "single_agent_recommended": "Single agent",
+            "ultracode_orchestration": "Ultracode orchestration"
+          }
+        },
+        "ultracode": {
+          "label": "Ultracode"
+        }
+      },
       "teamCreate": {
         "description": {
           "label": "Description"
@@ -26436,6 +27100,94 @@
           "label": "Supervisor character"
         }
       },
+      "teamDelegate": {
+        "awaitCompletion": {
+          "hint": "Wait for the delegation to settle and surface its result. Off returns the launched record immediately.",
+          "label": "Await completion"
+        },
+        "force": {
+          "hint": "Launch even inside the team's quiet-hours window.",
+          "label": "Override quiet hours"
+        },
+        "prompt": {
+          "label": "Prompt"
+        },
+        "reason": {
+          "label": "Reason (audit log)"
+        },
+        "systemPrompt": {
+          "label": "System prompt (optional)"
+        },
+        "target": {
+          "label": "Delegate to",
+          "options": {
+            "background": "Background agent",
+            "external": "External agent",
+            "team": "Another team",
+            "twin": "Digital twin"
+          }
+        },
+        "targetAgentId": {
+          "hint": "External runtime id, e.g. claude-code or codex.",
+          "label": "External agent id"
+        },
+        "targetTeamId": {
+          "label": "Target team"
+        },
+        "teamId": {
+          "label": "Source team"
+        },
+        "twinId": {
+          "label": "Digital twin"
+        }
+      },
+      "teamMessage": {
+        "content": {
+          "label": "Message"
+        },
+        "recipientId": {
+          "label": "Recipient teammate id (optional)"
+        },
+        "senderId": {
+          "hint": "Defaults to the team lead.",
+          "label": "Sender teammate id (optional)"
+        },
+        "taskId": {
+          "label": "Attach to task id (optional)"
+        },
+        "teamId": {
+          "label": "Team"
+        }
+      },
+      "teamReconcile": {
+        "inherit": "Inherit from team config",
+        "intro": "Reconciles the per-dispatch agent branches produced so far in this run. Only meaningful inside a workspace-isolated team run.",
+        "mode": {
+          "label": "Mode",
+          "options": {
+            "manual": "Manual",
+            "merge-all": "Merge all",
+            "pipeline": "Pipeline",
+            "select": "Select winner"
+          }
+        },
+        "retain": {
+          "label": "Retain branches",
+          "options": {
+            "all": "Keep all",
+            "keep-winner": "Keep winner",
+            "prune-losers": "Prune losers"
+          }
+        },
+        "selectStrategy": {
+          "label": "Selection strategy",
+          "options": {
+            "first-success": "First success",
+            "judge": "AI judge",
+            "manual": "Manual"
+          }
+        }
+      },
       "teamRun": {
         "goal": {
           "hint": "What you want the team to accomplish. Forwarded to the lead's planning phase.",
@@ -26444,6 +27196,20 @@
         "teamId": {
           "label": "Team id",
           "placeholder": "team_..."
+        }
+      },
+      "teamStatus": {
+        "includeDelegations": {
+          "label": "Include delegations"
+        },
+        "includeTasks": {
+          "label": "Include tasks"
+        },
+        "includeTeammates": {
+          "label": "Include teammates"
+        },
+        "teamId": {
+          "label": "Team"
         }
       },
       "teamTaskDispatch": {
@@ -26740,6 +27506,76 @@
           }
         }
       },
+      "webClone": {
+        "allowPrivateHosts": {
+          "hint": "Permit private / loopback / link-local targets (SSRF opt-in). Leave off unless you trust the target.",
+          "label": "Allow private hosts"
+        },
+        "concurrency": {
+          "hint": "Number of concurrent downloads (1–32).",
+          "label": "Concurrency"
+        },
+        "extractComponents": {
+          "hint": "Also analyze the page into a component structure (template / style / logic).",
+          "label": "Extract components"
+        },
+        "framework": {
+          "hint": "Generate components in this framework from the extracted structure. Implies component extraction.",
+          "label": "Generate framework code",
+          "options": {
+            "angular": "Angular",
+            "jquery": "jQuery",
+            "none": "None",
+            "react": "React",
+            "svelte": "Svelte",
+            "vue": "Vue"
+          }
+        },
+        "frameworkHint": {
+          "hint": "Hint the extractor about the page's original framework to improve component boundaries.",
+          "label": "Framework hint",
+          "options": {
+            "none": "Auto-detect",
+            "react": "React",
+            "svelte": "Svelte",
+            "vue": "Vue"
+          }
+        },
+        "maxAssets": {
+          "hint": "Maximum number of assets to download (1–5000).",
+          "label": "Max assets"
+        },
+        "maxFileSize": {
+          "hint": "Hard per-file byte cap. Leave empty for the engine default; 0 disables the limit.",
+          "label": "Max file size (bytes)"
+        },
+        "mode": {
+          "hint": "'Bundle' writes a directory with separated assets; 'single' inlines everything into one self-contained HTML file.",
+          "label": "Mode",
+          "options": {
+            "bundle": "Directory bundle",
+            "single": "Single file"
+          }
+        },
+        "output": {
+          "hint": "Where to write the snapshot. Relative paths resolve under the open workspace; 'single' mode writes a .html file, 'bundle' a directory.",
+          "label": "Output path",
+          "placeholder": "./snapshots/site"
+        },
+        "pretty": {
+          "hint": "Format the output HTML for readability.",
+          "label": "Prettify HTML"
+        },
+        "timeout": {
+          "hint": "Per-resource timeout in milliseconds (1000–120000).",
+          "label": "Timeout (ms)"
+        },
+        "url": {
+          "hint": "Page to snapshot. Supports '{{ }}' expressions.",
+          "label": "URL",
+          "placeholder": "https://example.com/"
+        }
+      },
       "webhookBanner": {
         "desktopOnly": "Desktop only. The webhook receiver runs inside the Tauri sidecar.",
         "loading": "Loading webhook URL…",
@@ -27015,13 +27851,29 @@
           }
         },
         "connector": {
+          "delete": {
+            "description": "Recalls / deletes an already-sent platform message via a connected adapter.",
+            "label": "Delete message"
+          },
           "draft": {
             "description": "Stores the proposed reply for human review in the Inbox.",
             "label": "Save as draft"
           },
+          "forward": {
+            "description": "Forwards a message (or merge-forwards several) to another conversation via a connected adapter.",
+            "label": "Forward message"
+          },
+          "reaction": {
+            "description": "Adds an emoji reaction to a platform message via a connected adapter.",
+            "label": "React to message"
+          },
           "send": {
             "description": "Pushes a message through the outbound queue of a connected adapter.",
             "label": "Send via connector"
+          },
+          "waitReply": {
+            "description": "Pauses the run until a matching inbound message arrives in the conversation (or the wait times out). Routes the reply text downstream.",
+            "label": "Wait for reply"
           }
         },
         "desktop": {
@@ -27441,13 +28293,33 @@
           }
         },
         "team": {
+          "compose": {
+            "description": "Auto-orchestrates an agent team from a single objective: routing assessment, roster composition, and task decomposition (PII-gated). Optionally starts the team immediately.",
+            "label": "Compose team from objective"
+          },
           "create": {
             "description": "Creates a new agent team row.",
             "label": "Create team"
           },
+          "delegate": {
+            "description": "Delegates a sub-problem on behalf of a team to a digital twin, a background agent, an external agent, or another team — optionally awaiting the result.",
+            "label": "Delegate from team"
+          },
+          "message": {
+            "description": "Posts a message into an agent team's shared chat/blackboard, optionally addressed to a specific teammate or attached to a task.",
+            "label": "Post team message"
+          },
+          "reconcile": {
+            "description": "Under workspace isolation, reconcile the per-dispatch agent branches produced so far in this run — merge-all / select / pipeline.",
+            "label": "Reconcile agent worktrees"
+          },
           "run": {
             "description": "Starts an agent team's lifecycle and waits for completion.",
             "label": "Run team"
+          },
+          "status": {
+            "description": "Reads an agent team's live state mid-workflow: status, final result, and optionally its tasks, teammates, and delegations.",
+            "label": "Get team status"
           },
           "task": {
             "dispatch": {
@@ -27617,6 +28489,10 @@
         "output": {
           "description": "Declare the workflow's typed terminal output (the published interface).",
           "label": "Output"
+        },
+        "webClone": {
+          "description": "Snapshot a live web page (HTML + all CSS/JS/image/font assets) into a self-contained file or bundle, with optional component extraction + framework codegen.",
+          "label": "Web clone"
         },
         "webhook": {
           "respond": {

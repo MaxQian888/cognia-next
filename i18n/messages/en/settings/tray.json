@@ -2,6 +2,27 @@
   "addItem": "Add item",
   "description": "Customise the items shown in the system tray menu.",
   "desktopOnly": "The system tray is only available in the desktop build.",
+  "display": {
+    "description": "Choose where subscription usage shows up and how the tray icon looks.",
+    "iconColor": "Tray icon color",
+    "iconColorHint": "Ignored on macOS, where the menu bar tints template icons automatically.",
+    "pinnedAuto": "Auto (highest usage)",
+    "pinnedSubscription": "Subscription to display",
+    "refreshEveryMinutes": "Every {minutes} min",
+    "refreshInterval": "Usage refresh interval",
+    "refreshManual": "Manual only",
+    "showUsageInMenu": "Show subscription usage in the tray menu",
+    "showUsageInTooltip": "Show usage in the tray tooltip",
+    "taskbarMode": "Usage in the taskbar",
+    "taskbarModeHint": "Icon badge draws the percent onto the tray icon; title shows text next to it (macOS / Linux).",
+    "taskbarModes": {
+      "iconBadge": "Icon badge",
+      "off": "Off",
+      "title": "Title text"
+    },
+    "title": "Display",
+    "tooltipBase": "Tooltip text"
+  },
   "emptyPicker": "No commands available — install plugins or start a chat.",
   "hide": "Hide",
   "moveDown": "Move down",

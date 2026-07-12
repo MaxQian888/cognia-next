@@ -97,6 +97,7 @@
     "title": "Automation"
   },
   "inspector": {
+    "a11yOnlyNote": "This back-end reads the frontmost window's accessibility tree. Tree reading, element details, and locator export work here; element-targeted pattern tests and coordinate picking aren't available on this platform yet.",
     "clickToPopulate": "Choose a root and click Refresh to populate the tree.",
     "copyLocator": "Copy Locator",
     "copyRef": "Copy Ref",
@@ -122,6 +123,7 @@
     "pickStartTooltip": "Start a 3-second countdown, then pick the element under the cursor",
     "readTree": "Refresh",
     "reading": "Reading…",
+    "requiresTauri": "The inspector requires the Tauri runtime so it can talk to the active accessibility back-end.",
     "rootMode": {
       "desktop": "Desktop",
       "focused": "Focused",
@@ -132,18 +134,16 @@
     "testPatternsHint": "Invoke UIA patterns against the selected element to verify behavior.",
     "tree": "Accessibility Tree",
     "treeDescription": "Inspect the UIA/accessibility tree of a target window.",
-    "requiresTauri": "The inspector requires the Tauri runtime so it can talk to the active accessibility back-end.",
-    "unavailable": "The active platform back-end ({platform}) doesn't expose an accessibility tree yet, so there's nothing for the inspector to read. Tree support lands per platform in a later milestone.",
-    "a11yOnlyNote": "This back-end reads the frontmost window's accessibility tree. Tree reading, element details, and locator export work here; element-targeted pattern tests and coordinate picking aren't available on this platform yet."
+    "unavailable": "The active platform back-end ({platform}) doesn't expose an accessibility tree yet, so there's nothing for the inspector to read. Tree support lands per platform in a later milestone."
   },
   "overview": {
     "capabilities": {
+      "a11yTree": "Accessibility Tree",
       "events": "Events",
       "inputSimulation": "Input Simulation",
       "platform": "Platform",
       "screenshot": "Screenshot",
-      "uia": "UI Automation",
-      "a11yTree": "Accessibility Tree"
+      "uia": "UI Automation"
     },
     "capabilityProbeFailed": "Failed to read platform capabilities.",
     "engineStatus": "Engine Status",

@@ -1,4 +1,16 @@
 {
+  "commandMenu": {
+    "copyCommand": "复制命令",
+    "copyCommandAndOutput": "复制命令与输出",
+    "copyOutput": "复制输出",
+    "durationMs": "{value} 毫秒",
+    "durationSec": "{value} 秒",
+    "failed": "退出码 {code}",
+    "rerun": "重新运行命令",
+    "running": "运行中…",
+    "succeeded": "成功",
+    "trigger": "命令操作"
+  },
   "dock": {
     "clear": "清屏（Ctrl+L）",
     "closeConfirm": {
@@ -69,6 +81,13 @@
       "spec": "CLI"
     }
   },
+  "quickFix": {
+    "createPr": "创建 Pull Request",
+    "freePort": "释放端口 {port}",
+    "runCommand": "运行：{command}",
+    "title": "快速修复",
+    "trigger": "显示快速修复"
+  },
   "search": {
     "caseSensitive": "区分大小写",
     "close": "关闭查找",
@@ -88,6 +107,9 @@
     "pwsh": "PowerShell 7",
     "sh": "sh",
     "zsh": "zsh"
+  },
+  "stickyScroll": {
+    "label": "固定的命令标题"
   },
   "tab": {
     "close": "关闭终端",
@@ -115,27 +137,5 @@
       "idle": "空闲",
       "running": "运行中"
     }
-  },
-  "quickFix": {
-    "title": "快速修复",
-    "trigger": "显示快速修复",
-    "runCommand": "运行：{command}",
-    "freePort": "释放端口 {port}",
-    "createPr": "创建 Pull Request"
-  },
-  "commandMenu": {
-    "trigger": "命令操作",
-    "rerun": "重新运行命令",
-    "copyCommand": "复制命令",
-    "copyOutput": "复制输出",
-    "copyCommandAndOutput": "复制命令与输出",
-    "succeeded": "成功",
-    "failed": "退出码 {code}",
-    "running": "运行中…",
-    "durationMs": "{value} 毫秒",
-    "durationSec": "{value} 秒"
-  },
-  "stickyScroll": {
-    "label": "固定的命令标题"
   }
 }

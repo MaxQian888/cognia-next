@@ -121,21 +121,6 @@
     "undoFailed": "无法恢复对话",
     "undoSuccess": "对话已恢复"
   },
-  "opticalArchive": {
-    "coverage": "字符覆盖率",
-    "description": "较早的轮次被渲染为 {count} 张图像帧，由视觉模型回读。",
-    "estimate": "图像 / 文本 token",
-    "frameAlt": "光学帧 {n}",
-    "hideText": "隐藏原文",
-    "noText": "未捕获原文（此边界未开启撤销）。",
-    "notFound": "该归档已不可用。",
-    "readability": "可读性",
-    "revealText": "显示原文",
-    "saved": "已节省 {pct}%",
-    "shape": "形状",
-    "title": "光学归档",
-    "tokens": "Token"
-  },
   "composer": {
     "ariaAttachImage": "添加图片",
     "ariaMessage": "消息",
@@ -270,6 +255,8 @@
       "selectPlaceholder": "请选择…",
       "title": "配置 /{name}"
     },
+    "pasteReminder": "草稿未保存大段粘贴内容——发送前请重新粘贴（{count}）。",
+    "pastedChip": "已粘贴 {count} 行",
     "placeholder": "输入消息 — 试试 /、@、!、#",
     "placeholderDisabled": "请选择一个会话开始聊天…",
     "popover": {
@@ -321,15 +308,10 @@
       "applied": "已套用预设「{name}」。",
       "needsSession": "请先开始一个对话再套用预设。"
     },
-    "skills": {
-      "enabled": "已启用技能「{name}」。"
-    },
     "references": {
       "removeAria": "移除引用 {path}"
     },
-    "workflowRefs": {
-      "removeAria": "移除对 {label} 的引用"
-    },
+    "removePastedChip": "移除粘贴的文本",
     "sandboxShield": {
       "label": {
         "microvm": "沙盒已开启 — microVM 层",
@@ -350,8 +332,12 @@
     "sendTooltip": "发送",
     "shell": {
       "failed": "`$ {cmd}` 执行失败：{error}",
+      "interactiveRoutedToTerminal": "`$ {cmd}` 需要终端 — 已在集成终端中打开。",
       "needsCwd": "运行 shell 命令前请先设置工作目录。",
       "runningHint": "在 `{cwd}` 中执行 `$ {cmd}`…"
+    },
+    "skills": {
+      "enabled": "已启用技能「{name}」。"
     },
     "stopTooltip": "停止",
     "toolbar": {
@@ -416,13 +402,9 @@
       "voiceSettings": "语音设置"
     },
     "webLabel": "Web",
-    "pastedChip": "已粘贴 {count} 行",
-    "removePastedChip": "移除粘贴的文本",
-    "pasteReminder": "草稿未保存大段粘贴内容——发送前请重新粘贴（{count}）。"
-  },
-  "planMode": {
-    "banner": "计划模式——只读调研；智能体将在修改前先提出计划。",
-    "hint": "Shift+Tab"
+    "workflowRefs": {
+      "removeAria": "移除对 {label} 的引用"
+    }
   },
   "concurrent": {
     "awaitingApproval": "等待审批",
@@ -438,6 +420,34 @@
   },
   "copy": {
     "success": "已复制到剪贴板"
+  },
+  "diagnostics": {
+    "cache": "缓存",
+    "cacheValue": "写入 {write} · 读取 {read}",
+    "compactHint": "运行 /compact 可总结较早的对话并释放窗口空间。",
+    "contextTitle": "上下文",
+    "cost": "费用",
+    "costTitle": "费用与用量",
+    "duration": "耗时",
+    "durationValue": "{seconds} 秒",
+    "estimated": "估算",
+    "fallback": "回退",
+    "fiveHour": "5 小时窗口",
+    "freshWindow": "暂无用量指标 —— 上下文窗口是空的。",
+    "inputTokens": "输入（含缓存）",
+    "messages": "消息",
+    "messagesValue": "{user} 条用户 · {assistant} 条助手",
+    "notReported": "未上报",
+    "outputTokens": "输出",
+    "overageDisabled": "已禁用超额",
+    "resetsIn": "{hours} 小时 {minutes} 分后重置",
+    "resetting": "重置中…",
+    "sevenDay": "7 天窗口",
+    "turns": "轮次",
+    "turnsValue": "{assistant} 轮助手（{metrics} 轮含指标）",
+    "usageFooter": "在 设置 → 订阅 → 用量 查看图表与历史。",
+    "usageTitle": "订阅用量",
+    "windowUsed": "已用 {pct}%"
   },
   "empty": {
     "brandAlt": "Cognia",
@@ -474,6 +484,10 @@
     "subtitle": "随便问、直接进入某个能力，或接着上次继续。",
     "title": "今天想完成点什么？"
   },
+  "filePreview": {
+    "loading": "正在加载 {name}…",
+    "pdfFallback": "无法预览此 PDF。"
+  },
   "header": {
     "accountSwitcher": {
       "active": "当前",
@@ -485,13 +499,13 @@
     "bareMode": "极简模式",
     "briefMode": "简短输出",
     "cancel": "取消",
+    "compactAria": "压缩",
+    "compactStarted": "已开始压缩上下文",
+    "compactTooltip": "在智能体侧压缩会话上下文",
     "cwdFallbackHint": "未设置时使用: {path}",
     "cwdReset": "重置",
     "debugMode": "调试模式",
     "description": "为本会话覆盖默认值，留空则继承全局设置。",
-    "insights": "会话洞察",
-    "hideConversations": "折叠会话列表",
-    "showConversations": "展开会话列表",
     "flowDisplay": {
       "aria": "Agent 流程展示模式",
       "detailed": "详细",
@@ -507,6 +521,8 @@
       "favorites": "收藏",
       "other": "其他"
     },
+    "hideConversations": "折叠会话列表",
+    "insights": "会话洞察",
     "noApiKey": "未配置 API Key",
     "permissionModeAppDefault": "使用应用默认",
     "permissionModeLabel": "权限模式",
@@ -548,6 +564,7 @@
         "status": "状态"
       }
     },
+    "showConversations": "展开会话列表",
     "skills": {
       "aria": "本会话已激活的技能",
       "attachedInert": "本会话已停用 — 不会发送",
@@ -565,10 +582,7 @@
     "tokensLabel": "{input} in / {output} out",
     "untitledSession": "（未命名）",
     "workingDirLabel": "工作目录",
-    "workingDirPlaceholder": "/path/to/project",
-    "compactStarted": "已开始压缩上下文",
-    "compactAria": "压缩",
-    "compactTooltip": "在智能体侧压缩会话上下文"
+    "workingDirPlaceholder": "/path/to/project"
   },
   "history": {
     "loadError": "无法加载此对话。",
@@ -646,29 +660,11 @@
       "truncated": "预览已截断 — 完整内容已写入磁盘。"
     }
   },
-  "filePreview": {
-    "loading": "正在加载 {name}…",
-    "pdfFallback": "无法预览此 PDF。"
-  },
   "mcpContent": {
     "embeddedResource": "嵌入资源：{uri}"
   },
-  "ocrResult": {
-    "title": "已识别文本",
-    "provider": "识别引擎：{id}",
-    "languages": "语言：{langs}",
-    "confidence": "置信度：{pct}%",
-    "cached": "缓存命中",
-    "duration": "{ms} 毫秒",
-    "copy": "复制文本",
-    "copied": "已复制",
-    "askAbout": "追问此内容",
-    "noText": "未识别到文本。",
-    "thumbnailAlt": "源图像"
-  },
   "message": {
     "attachmentAlt": "附件",
-    "unknownPart": "未知内容（{type}）",
     "bookmarkLabel": "切换收藏",
     "bookmarkRemoveTooltip": "取消收藏",
     "bookmarkTooltip": "收藏",
@@ -743,12 +739,41 @@
     "stopReading": "停止朗读",
     "todoPlanTitle": "计划 · {done}/{total} 已完成",
     "toolCallFailed": "工具调用失败",
+    "unknownPart": "未知内容（{type}）",
     "usageCacheHit": "缓存命中：{n}",
     "usageCacheWrite": "缓存写入：{n}",
     "usageCost": "费用：${cost}",
     "usageInput": "输入：{n}",
     "usageOutput": "输出：{n}",
     "usageReasoning": "推理：{n}"
+  },
+  "ocrResult": {
+    "askAbout": "追问此内容",
+    "cached": "缓存命中",
+    "confidence": "置信度：{pct}%",
+    "copied": "已复制",
+    "copy": "复制文本",
+    "duration": "{ms} 毫秒",
+    "languages": "语言：{langs}",
+    "noText": "未识别到文本。",
+    "provider": "识别引擎：{id}",
+    "thumbnailAlt": "源图像",
+    "title": "已识别文本"
+  },
+  "opticalArchive": {
+    "coverage": "字符覆盖率",
+    "description": "较早的轮次被渲染为 {count} 张图像帧，由视觉模型回读。",
+    "estimate": "图像 / 文本 token",
+    "frameAlt": "光学帧 {n}",
+    "hideText": "隐藏原文",
+    "noText": "未捕获原文（此边界未开启撤销）。",
+    "notFound": "该归档已不可用。",
+    "readability": "可读性",
+    "revealText": "显示原文",
+    "saved": "已节省 {pct}%",
+    "shape": "形状",
+    "title": "光学归档",
+    "tokens": "Token"
   },
   "permissionMode": {
     "acceptEdits": {
@@ -777,6 +802,10 @@
       "tooltip": "只读规划模式 — Claude 仅提出方案，不会实际改动。"
     },
     "shiftTabHint": "按 Shift+Tab 可循环切换。"
+  },
+  "planMode": {
+    "banner": "计划模式——只读调研；智能体将在修改前先提出计划。",
+    "hint": "Shift+Tab"
   },
   "renderers": {
     "alert": {
@@ -892,40 +921,40 @@
       "youtubeTitle": "YouTube 视频"
     }
   },
-  "runStatus": {
-    "metricTokens": "{value} tok",
-    "metricSpeed": "{value} tok/s",
-    "metricContext": "上下文 {pct}%",
-    "working": "运行中",
-    "waitingApproval": "等待审批",
-    "interruptHint": "按 Esc 中断",
-    "interruptHintTouch": "点按中断",
-    "queued": "{count} 条待发送",
-    "steerNow": "立即发送",
-    "ariaSteerNow": "中断当前回合并立即发送队列中的消息"
-  },
   "runPanel": {
-    "expand": "展开运行详情",
-    "collapse": "收起运行详情",
+    "ariaDiscardQueue": "丢弃排队的消息",
+    "ariaEditSteer": "编辑排队的消息",
     "ariaInterrupt": "中断当前回合",
-    "ariaSubagent": "子智能体",
+    "ariaRemoveSteer": "移除排队的消息",
+    "ariaSteerAttachments": "{count} 个附件",
     "ariaSteerQueue": "待发送消息",
-    "sectionPlan": "计划",
-    "sectionTools": "工具",
-    "sectionSubagents": "子智能体",
-    "sectionSummary": "概要",
-    "summaryTools": "{count} 个工具",
-    "summarySubagents": "{count} 个子智能体",
-    "summaryTodos": "{done}/{total} 项待办",
+    "ariaSubagent": "子智能体",
+    "collapse": "收起运行详情",
+    "discardQueue": "丢弃",
+    "emptySteer": "（空）",
+    "expand": "展开运行详情",
     "lastRun": "上一轮",
     "lastRunSummary": "{count} 个工具 · {elapsed}",
     "runFailedQueued": "运行失败 · {count} 条排队中",
-    "discardQueue": "丢弃",
-    "ariaDiscardQueue": "丢弃排队的消息",
-    "ariaEditSteer": "编辑排队的消息",
-    "ariaRemoveSteer": "移除排队的消息",
-    "ariaSteerAttachments": "{count} 个附件",
-    "emptySteer": "（空）"
+    "sectionPlan": "计划",
+    "sectionSubagents": "子智能体",
+    "sectionSummary": "概要",
+    "sectionTools": "工具",
+    "summarySubagents": "{count} 个子智能体",
+    "summaryTodos": "{done}/{total} 项待办",
+    "summaryTools": "{count} 个工具"
+  },
+  "runStatus": {
+    "ariaSteerNow": "中断当前回合并立即发送队列中的消息",
+    "interruptHint": "按 Esc 中断",
+    "interruptHintTouch": "点按中断",
+    "metricContext": "上下文 {pct}%",
+    "metricSpeed": "{value} tok/s",
+    "metricTokens": "{value} tok",
+    "queued": "{count} 条待发送",
+    "steerNow": "立即发送",
+    "waitingApproval": "等待审批",
+    "working": "运行中"
   },
   "sessionCost": {
     "byModelTitle": "按模型拆分",
@@ -1081,33 +1110,5 @@
     "title": "信任此工作区？",
     "trust": "信任工作区",
     "workspaceLabel": "工作区"
-  },
-  "diagnostics": {
-    "contextTitle": "上下文",
-    "usageTitle": "订阅用量",
-    "costTitle": "费用与用量",
-    "messages": "消息",
-    "messagesValue": "{user} 条用户 · {assistant} 条助手",
-    "freshWindow": "暂无用量指标 —— 上下文窗口是空的。",
-    "inputTokens": "输入（含缓存）",
-    "outputTokens": "输出",
-    "cache": "缓存",
-    "cacheValue": "写入 {write} · 读取 {read}",
-    "compactHint": "运行 /compact 可总结较早的对话并释放窗口空间。",
-    "turns": "轮次",
-    "turnsValue": "{assistant} 轮助手（{metrics} 轮含指标）",
-    "cost": "费用",
-    "estimated": "估算",
-    "duration": "耗时",
-    "durationValue": "{seconds} 秒",
-    "fiveHour": "5 小时窗口",
-    "sevenDay": "7 天窗口",
-    "windowUsed": "已用 {pct}%",
-    "resetsIn": "{hours} 小时 {minutes} 分后重置",
-    "resetting": "重置中…",
-    "notReported": "未上报",
-    "fallback": "回退",
-    "overageDisabled": "已禁用超额",
-    "usageFooter": "在 设置 → 订阅 → 用量 查看图表与历史。"
   }
 }

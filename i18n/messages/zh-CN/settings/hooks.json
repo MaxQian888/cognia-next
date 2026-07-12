@@ -53,9 +53,17 @@
     "history": {
       "activeFor": "已活动 {duration}",
       "clear": "清空",
+      "clearEnded": "清除已结束",
+      "count": "{count} 个会话",
+      "delete": "从历史中移除",
       "empty": "尚无会话记录。",
       "endedAgo": "{ago}前结束",
+      "filterAll": "全部",
+      "filterAria": "按 Agent 筛选",
       "import": "导入…",
+      "ranFor": "运行 {duration}",
+      "showLess": "收起",
+      "showMore": "显示全部 {count} 条",
       "title": "最近会话"
     },
     "island": {

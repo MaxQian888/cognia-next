@@ -1,4 +1,16 @@
 {
+  "commandMenu": {
+    "copyCommand": "Copy command",
+    "copyCommandAndOutput": "Copy command and output",
+    "copyOutput": "Copy output",
+    "durationMs": "{value} ms",
+    "durationSec": "{value} s",
+    "failed": "Exit {code}",
+    "rerun": "Rerun command",
+    "running": "Running…",
+    "succeeded": "Succeeded",
+    "trigger": "Command actions"
+  },
   "dock": {
     "clear": "Clear terminal (Ctrl+L)",
     "closeConfirm": {
@@ -69,6 +81,13 @@
       "spec": "CLI"
     }
   },
+  "quickFix": {
+    "createPr": "Create pull request",
+    "freePort": "Free port {port}",
+    "runCommand": "Run: {command}",
+    "title": "Quick fixes",
+    "trigger": "Show quick fixes"
+  },
   "search": {
     "caseSensitive": "Match case",
     "close": "Close find",
@@ -88,6 +107,9 @@
     "pwsh": "PowerShell 7",
     "sh": "sh",
     "zsh": "zsh"
+  },
+  "stickyScroll": {
+    "label": "Sticky command header"
   },
   "tab": {
     "close": "Close terminal",
@@ -115,27 +137,5 @@
       "idle": "Idle",
       "running": "Running"
     }
-  },
-  "quickFix": {
-    "title": "Quick fixes",
-    "trigger": "Show quick fixes",
-    "runCommand": "Run: {command}",
-    "freePort": "Free port {port}",
-    "createPr": "Create pull request"
-  },
-  "commandMenu": {
-    "trigger": "Command actions",
-    "rerun": "Rerun command",
-    "copyCommand": "Copy command",
-    "copyOutput": "Copy output",
-    "copyCommandAndOutput": "Copy command and output",
-    "succeeded": "Succeeded",
-    "failed": "Exit {code}",
-    "running": "Running…",
-    "durationMs": "{value} ms",
-    "durationSec": "{value} s"
-  },
-  "stickyScroll": {
-    "label": "Sticky command header"
   }
 }

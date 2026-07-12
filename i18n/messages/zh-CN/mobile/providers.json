@@ -1,0 +1,20 @@
+{
+  "apiKey": "API 密钥",
+  "apiKeyHelp": "仅保存在本机——不会同步到其他设备。",
+  "apiKeyPlaceholder": "sk-…",
+  "backAria": "返回我的",
+  "baseUrl": "Base URL",
+  "baseUrlHelpCustom": "该提供商的接口地址（或 OpenAI 兼容网关）。",
+  "baseUrlHelpOfficial": "留空则使用官方接口地址。",
+  "baseUrlPlaceholder": "https://api.example.com/v1",
+  "provider": "提供商",
+  "providerHelp": "官方提供商可直接在浏览器内流式输出；其他可能需要网关。",
+  "saveCta": "保存并在本机使用",
+  "saveFailed": "保存失败（{message}）。",
+  "saveSuccess": "已保存，此设备将使用该提供商。",
+  "savedCta": "已保存",
+  "sectionDescription": "填入你自己的 API 密钥，让手机无需配对桌面端也能对话。",
+  "sectionTitle": "模型提供商（BYOK）",
+  "streamingBadge": "流式",
+  "title": "模型提供商"
+}

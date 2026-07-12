@@ -97,6 +97,7 @@
     "title": "自动化"
   },
   "inspector": {
+    "a11yOnlyNote": "此后端读取前台窗口的无障碍树。此处可读取树、查看元素详情并导出定位器；面向元素的模式测试与坐标拾取暂未在该平台提供。",
     "clickToPopulate": "选择根并点击刷新以填充树。",
     "copyLocator": "复制定位器",
     "copyRef": "复制引用",
@@ -122,6 +123,7 @@
     "pickStartTooltip": "启动 3 秒倒计时，结束后拾取光标所在元素",
     "readTree": "刷新",
     "reading": "读取中……",
+    "requiresTauri": "检查器需要 Tauri 运行时才能与当前无障碍后端通信。",
     "rootMode": {
       "desktop": "桌面",
       "focused": "焦点窗口",
@@ -132,18 +134,16 @@
     "testPatternsHint": "对所选元素调用 UIA 模式以验证行为。",
     "tree": "无障碍树",
     "treeDescription": "检查目标窗口的 UIA/无障碍树。",
-    "requiresTauri": "检查器需要 Tauri 运行时才能与当前无障碍后端通信。",
-    "unavailable": "当前平台后端（{platform}）尚未暴露无障碍树，检查器暂无内容可读。各平台的树支持将在后续里程碑中陆续提供。",
-    "a11yOnlyNote": "此后端读取前台窗口的无障碍树。此处可读取树、查看元素详情并导出定位器；面向元素的模式测试与坐标拾取暂未在该平台提供。"
+    "unavailable": "当前平台后端（{platform}）尚未暴露无障碍树，检查器暂无内容可读。各平台的树支持将在后续里程碑中陆续提供。"
   },
   "overview": {
     "capabilities": {
+      "a11yTree": "无障碍树",
       "events": "事件",
       "inputSimulation": "输入模拟",
       "platform": "平台",
       "screenshot": "截屏",
-      "uia": "UI 自动化",
-      "a11yTree": "无障碍树"
+      "uia": "UI 自动化"
     },
     "capabilityProbeFailed": "读取平台能力失败。",
     "engineStatus": "引擎状态",

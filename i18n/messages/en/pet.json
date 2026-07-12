@@ -4,9 +4,17 @@
       "description": "Reached level 10.",
       "title": "All Grown Up"
     },
+    "automationBuff": {
+      "description": "Watched 50 workflow runs together.",
+      "title": "Automation Buff"
+    },
     "bestFriends": {
       "description": "Maxed your bond.",
       "title": "Best Friends"
+    },
+    "chatterbox": {
+      "description": "Chatted with your pet 100 times.",
+      "title": "Chatterbox"
     },
     "chaosGremlin": {
       "description": "Maxed the chaos stat through frantic bursts of work.",
@@ -16,9 +24,17 @@
       "description": "Kept your pet's care quality consistently high.",
       "title": "Devoted Caretaker"
     },
+    "dragonHoard": {
+      "description": "Held 500 coins at once.",
+      "title": "Dragon's Hoard"
+    },
     "elder": {
       "description": "Reached level 20.",
       "title": "Elder"
+    },
+    "firstBirthday": {
+      "description": "Celebrated your pet's hatch anniversary.",
+      "title": "First Birthday"
     },
     "firstXp": {
       "description": "Earned your first XP.",
@@ -56,6 +72,22 @@
       "description": "You own a shiny pet.",
       "title": "Shiny!"
     },
+    "spoiled": {
+      "description": "Gave 30 treats.",
+      "title": "Spoiled Rotten"
+    },
+    "squadLeader": {
+      "description": "Watched the agent team run 50 times.",
+      "title": "Squad Leader"
+    },
+    "squeakyClean": {
+      "description": "Cleaned your pet 30 times.",
+      "title": "Squeaky Clean"
+    },
+    "streakCentury": {
+      "description": "Cared for your pet 100 days in a row.",
+      "title": "Century of Care"
+    },
     "streakMonth": {
       "description": "Cared for your pet 30 days in a row.",
       "title": "Month of Devotion"
@@ -64,9 +96,17 @@
       "description": "Cared for your pet 7 days in a row.",
       "title": "Week of Care"
     },
+    "transcendent": {
+      "description": "Reached level 30.",
+      "title": "Transcendent"
+    },
     "wellFed": {
       "description": "Fed your pet 50 times.",
       "title": "Well Fed"
+    },
+    "wellRounded": {
+      "description": "Grew every stat to 50 or higher.",
+      "title": "Well-Rounded"
     },
     "zenMaster": {
       "description": "Grew the patience stat to its peak.",
@@ -90,6 +130,10 @@
   },
   "bubbles": {
     "achievementUnlocked": ["We earned a badge!", "Achievement get!"],
+    "birthday": {
+      "0": "It's my hatch day! 🎂",
+      "1": "Happy birthday to me! Thanks for another year!"
+    },
     "cleaned": {
       "0": "Squeaky clean!",
       "1": "So fresh!"
@@ -121,6 +165,10 @@
       "0": "Zzz…",
       "1": "So cozy…"
     },
+    "streakDay": {
+      "0": "Day {days} together! Coins are flowing!",
+      "1": "{days}-day streak — we're on fire!"
+    },
     "snarky": {
       "error": ["Who wrote this? …Oh.", "Not my bug."],
       "fed": ["Finally.", "Acceptable."],
@@ -146,33 +194,29 @@
       "title": "Your pet isn't feeling great"
     }
   },
-  "notifications": {
-    "scheduledDue": {
-      "title": "Scheduled task due",
-      "body": "\"{taskName}\" is due right now.",
-      "bodyGeneric": "One of your scheduled tasks is due right now."
-    }
-  },
   "chat": {
-    "you": "You",
-    "petFallbackName": "Pet",
-    "empty": "Say hi to your pet — it can chat back now.",
-    "sending": "{name} is thinking…",
-    "openFullChat": "Open full chat",
-    "openPanel": "Chat",
-    "enableCta": {
-      "title": "Turn on pet chat",
-      "body": "Let your pet actually talk back using your configured model. It stays playful and never sends personal data.",
-      "action": "Enable chat"
-    },
     "degrade": {
       "disabled": "Pet chat is off right now.",
-      "pii": "That looked like personal info, so I kept it private and didn't send it.",
-      "rateLimited": "Give me a moment to catch my breath…",
-      "noClient": "No chat model is configured yet — check the pet settings.",
       "empty": "Hmm, I didn't have anything to say to that.",
-      "error": "Something went wrong reaching the model. Try again?"
-    }
+      "error": "Something went wrong reaching the model. Try again?",
+      "noClient": "No chat model is configured yet — check the pet settings.",
+      "pii": "That looked like personal info, so I kept it private and didn't send it.",
+      "rateLimited": "Give me a moment to catch my breath…"
+    },
+    "empty": "Say hi to your pet — it can chat back now.",
+    "enableCta": {
+      "action": "Enable chat",
+      "body": "Let your pet actually talk back using your configured model. It stays playful and never sends personal data.",
+      "title": "Turn on pet chat"
+    },
+    "openFullChat": "Open full chat",
+    "openPanel": "Chat",
+    "petFallbackName": "Pet",
+    "sending": "{name} is thinking…",
+    "you": "You"
+  },
+  "condition": {
+    "unwell": "Needs care"
   },
   "console": {
     "hatch": "Hatch",
@@ -186,12 +230,37 @@
       "chat": "Chat",
       "customize": "Customize",
       "dex": "Dex",
+      "insights": "Insights",
+      "journal": "Journal",
       "nurture": "Nurture",
       "plugins": "Plugins",
-      "shop": "Shop",
-      "insights": "Insights"
+      "shop": "Shop"
     },
     "title": "Your Pet"
+  },
+  "journal": {
+    "dayTotals": "{count} events · +{xp} XP",
+    "empty": "Nothing in the diary yet — care for your pet and its days will show up here.",
+    "kinds": {
+      "cleaned": "Got cleaned up",
+      "fed": "Had a meal",
+      "goalComplete": "Celebrated a finished goal",
+      "goalProgress": "Cheered goal progress",
+      "inboundMessage": "Noticed a new message",
+      "petted": "Got petted",
+      "played": "Played together",
+      "review": "Looked over some results",
+      "scheduledRun": "Watched a scheduled task",
+      "scheduledRunStarting": "Saw a task kick off",
+      "slept": "Took a nap",
+      "success": "Celebrated a success",
+      "talked": "Had a chat",
+      "teamRun": "Watched the agent team work",
+      "treated": "Got a treat",
+      "workflowRun": "Followed a workflow run"
+    },
+    "loading": "Opening the diary…",
+    "xp": "+{xp} XP"
   },
   "customize": {
     "appearance": {
@@ -231,6 +300,7 @@
         "wizard": "Wizard"
       },
       "hatchFirst": "Hatch your pet first to customize its look.",
+      "lockedOption": "{name} — 🔒 shop",
       "palette": "Color",
       "paletteOptions": {
         "amber": "Amber",
@@ -278,13 +348,30 @@
     "speciesTitle": "Built-in species",
     "useMascot": "Use built-in mascot"
   },
+  "inventory": {
+    "title": "Items"
+  },
   "live2d": {
     "loadFailed": "The Live2D model couldn't be loaded — showing the SVG pet instead."
+  },
+  "mood": {
+    "content": "Content",
+    "grumpy": "Grumpy",
+    "happy": "Happy",
+    "lonely": "Lonely",
+    "tired": "Tired"
   },
   "needs": {
     "bond": "Bond",
     "energy": "Energy",
     "mood": "Mood"
+  },
+  "notifications": {
+    "scheduledDue": {
+      "body": "\"{taskName}\" is due right now.",
+      "bodyGeneric": "One of your scheduled tasks is due right now.",
+      "title": "Scheduled task due"
+    }
   },
   "overlay": {
     "petLabel": "Desktop pet",
@@ -325,15 +412,60 @@
     "balance": "{coins} coins",
     "buy": "Buy",
     "categories": {
+      "care": "Care",
       "decor": "Decor",
       "food": "Food",
       "toy": "Toys"
     },
     "insufficient": "Not enough coins",
     "items": {
+      "beanie": {
+        "description": "A snug knit beanie for laid-back days.",
+        "title": "Beanie"
+      },
       "berry": {
         "description": "A quick snack — restores a little energy.",
         "title": "Berry"
+      },
+      "bubbleBath": {
+        "description": "A warm scrub that leaves your pet sparkling.",
+        "title": "Bubble Bath"
+      },
+      "cookie": {
+        "description": "A sweet treat that lifts the mood.",
+        "title": "Cookie"
+      },
+      "cozyBlanket": {
+        "description": "Tucks your pet in for a deep, restful nap.",
+        "title": "Cozy Blanket"
+      },
+      "energyDrink": {
+        "description": "A big jolt of energy — with a small comedown.",
+        "title": "Energy Drink"
+      },
+      "firstAidKit": {
+        "description": "Full care in a box — the fastest road to recovery.",
+        "title": "First-Aid Kit"
+      },
+      "frisbee": {
+        "description": "A real workout — great bonding, tiring play.",
+        "title": "Frisbee"
+      },
+      "haloRing": {
+        "description": "A gentle glowing halo for a saintly look.",
+        "title": "Halo Ring"
+      },
+      "herbalTea": {
+        "description": "A calming brew that soothes the mood.",
+        "title": "Herbal Tea"
+      },
+      "plushie": {
+        "description": "A soft companion your pet will adore.",
+        "title": "Plushie"
+      },
+      "propellerCap": {
+        "description": "A whimsical cap with a spinning propeller.",
+        "title": "Propeller Cap"
       },
       "puzzleCube": {
         "description": "A calm brain-teaser that deepens your bond.",
@@ -343,9 +475,25 @@
         "description": "A lavish meal — deeply restores energy.",
         "title": "Royal Feast"
       },
+      "squeakyDuck": {
+        "description": "Squeak squeak — instant silly fun.",
+        "title": "Squeaky Duck"
+      },
       "starCharm": {
         "description": "A tiny crown charm your pet can wear.",
         "title": "Star Charm"
+      },
+      "sushiSet": {
+        "description": "A balanced meal, plated with love.",
+        "title": "Sushi Set"
+      },
+      "tophatBox": {
+        "description": "A dashing top hat for formal occasions.",
+        "title": "Top Hat"
+      },
+      "wizardHat": {
+        "description": "Channel arcane energies with this pointed hat.",
+        "title": "Wizard Hat"
       },
       "yarnBall": {
         "description": "A bouncy toy for a big burst of fun.",
@@ -384,6 +532,14 @@
     "wisdom": "Wisdom"
   },
   "statCard": {
+    "flavor": {
+      "plain": "Plain",
+      "radiant": "Radiant"
+    },
+    "flavorHint": {
+      "plain": "Evolved under low care quality — better care next time changes this.",
+      "radiant": "Evolved under excellent care — a mark of devotion."
+    },
     "grew": "Grew from working with you",
     "shiny": "Shiny",
     "unhatched": "Unhatched"
@@ -392,25 +548,12 @@
     "placeholder": "Say something to your pet…",
     "send": "Send"
   },
+  "wallet": {
+    "multiplier": "×{multiplier} coins"
+  },
   "widget": {
     "minimize": "Minimize pet",
     "restore": "Show pet",
     "toggle": "Open pet"
-  },
-  "mood": {
-    "content": "Content",
-    "happy": "Happy",
-    "tired": "Tired",
-    "lonely": "Lonely",
-    "grumpy": "Grumpy"
-  },
-  "condition": {
-    "unwell": "Needs care"
-  },
-  "wallet": {
-    "multiplier": "×{multiplier} coins"
-  },
-  "inventory": {
-    "title": "Items"
   }
 }

@@ -94,10 +94,10 @@
       "clearConfirm": "Clear all",
       "clearConfirmBody": "This permanently deletes every stored span. Dashboards will be empty until new telemetry is recorded. This cannot be undone.",
       "clearConfirmTitle": "Clear all telemetry?",
+      "cleared": "Cleared {count} traces",
       "olderThan": "Older than {days}d",
       "prune": "Prune",
       "pruneDone": "Pruned {count} traces",
-      "cleared": "Cleared {count} traces",
       "stored": "{count} spans stored",
       "title": "Data"
     },

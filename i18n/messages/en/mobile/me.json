@@ -1,11 +1,6 @@
 {
+  "a2uiRow": "Mini apps (A2UI)",
   "aboutRow": "About",
-  "agentRow": "Agent defaults",
-  "agentTeamsSettingsRow": "Agent teams",
-  "hooksRow": "Hooks",
-  "networkRow": "Network",
-  "slashCommandsRow": "Slash commands",
-  "instructionsRow": "Project instructions",
   "account": {
     "fiveHourLabel": "5-hour quota",
     "notSignedIn": "No Anthropic account active. Tap to sign in.",
@@ -13,9 +8,13 @@
     "sevenDayLabel": "7-day quota"
   },
   "actionPair": "Pair now",
+  "agentModesRow": "Agent modes",
+  "agentRow": "Agent defaults",
+  "agentTeamsSettingsRow": "Agent teams",
   "appSecurity": "App security",
   "appearanceBackAria": "Back to Me",
   "appearanceLink": "Theme & wallpaper",
+  "artifactsRow": "Artifacts",
   "backupLink": "Backup & sync",
   "backupReminder": {
     "bodyKnownLast": "Last successful backup was {days, plural, =1 {1 day ago} other {# days ago}}.",
@@ -27,6 +26,9 @@
   "backupRow": "Backup & restore",
   "biometricToggle": "Require biometric to unlock",
   "biometricUnavailable": "This device has no biometric enrolled.",
+  "canvasRow": "Canvas",
+  "charactersRow": "Characters",
+  "commandHistoryRow": "Command history",
   "computerUse": {
     "masterStateOff": "Mobile Computer Use is disabled.",
     "masterStateOn": "Mobile Computer Use is enabled.",
@@ -91,6 +93,7 @@
   "deviceInfoRow": "Device info",
   "devicesRow": "Paired devices",
   "dexieMaintenance": "Dexie maintenance",
+  "diagnosticsRow": "Diagnostics",
   "externalAgentsRow": "External agents",
   "feedback": {
     "copyDescription": "App version, user agent, and current sync snapshot.",
@@ -107,6 +110,7 @@
   },
   "feedbackRow": "Feedback & diagnostics",
   "githubDeliveryRow": "GitHub Delivery",
+  "goalsRow": "Goals",
   "help": {
     "docsDescription": "Open the cognia docs site in the system browser.",
     "docsLabel": "Documentation",
@@ -118,9 +122,13 @@
     "resourcesTitle": "Resources"
   },
   "helpRow": "Help & docs",
-  "commandHistoryRow": "Command history",
+  "hooksRow": "Hooks",
+  "instructionsRow": "Project instructions",
+  "logsRow": "Logs",
   "mcpRow": "MCP servers",
   "memoryRow": "Memory",
+  "memorySettingsRow": "Memory settings",
+  "networkRow": "Network",
   "notificationsRow": "Notifications",
   "ocrRow": "OCR providers",
   "pairing": "Pairing status",
@@ -138,6 +146,7 @@
   },
   "profileBackAria": "Back to Me",
   "profileRow": "Profile",
+  "providersRow": "Model providers",
   "quickActions": {
     "computerUseAria": "Toggle mobile Computer Use",
     "computerUseLabel": "Computer Use",
@@ -154,11 +163,13 @@
     "themeLight": "Light"
   },
   "remoteSessionsRow": "Remote sessions",
+  "requiresDesktop": "Requires desktop",
   "schedulerRow": "Scheduled tasks",
   "search": "Search settings",
   "searchAria": "Search settings",
   "searchEmpty": "No matching settings.",
   "searchResults": "Results",
+  "searchRow": "Ask the web",
   "sectionAbout": "About",
   "sectionAccount": "Account",
   "sectionAdvanced": "Advanced",
@@ -168,7 +179,6 @@
   "sectionData": "Data",
   "sectionFavorites": "Favorites",
   "settingsLink": "App settings",
-  "speechRow": "Speech & voice",
   "signOut": {
     "biometricDescription": "Re-prompts before clearing the pairing JWT.",
     "biometricHelp": "Require Face ID / fingerprint before clearing pairing.",
@@ -185,6 +195,9 @@
     "pending": "Signing out…",
     "successToast": "Signed out — pairing cleared."
   },
+  "skillsRow": "Skills",
+  "slashCommandsRow": "Slash commands",
+  "speechRow": "Speech & voice",
   "storage": {
     "backupsDescription": "{count} files · {total}",
     "backupsEmpty": "No successful backups yet.",
@@ -243,6 +256,7 @@
     "toastTableSynced": "Synced {table}."
   },
   "syncRow": "Sync status",
+  "teamsRow": "Teams",
   "terminalRow": "Terminal",
   "title": "Me",
   "todayStats": {

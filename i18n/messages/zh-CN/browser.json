@@ -1,49 +1,49 @@
 {
-  "title": "浏览器",
-  "url": {
-    "placeholder": "http://localhost:3000"
-  },
   "actions": {
     "back": "后退",
+    "cancelSelect": "取消选择",
     "forward": "前进",
+    "openExternal": "在外部浏览器打开",
     "reload": "刷新",
     "screenshot": "截图发送到对话",
-    "openExternal": "在外部浏览器打开",
-    "selectElement": "选择元素",
-    "cancelSelect": "取消选择"
-  },
-  "comment": {
-    "title": "对该元素评论",
-    "placeholder": "描述你想要的修改…",
-    "send": "发送到对话",
-    "cancel": "取消",
-    "sent": "已发送到对话",
-    "noSession": "请先打开一个对话会话",
-    "failed": "评论发送失败",
-    "hint": "Esc 关闭 · Ctrl+Enter 发送"
-  },
-  "screenshot": {
-    "sent": "截图已发送到对话",
-    "failed": "无法截取预览画面"
-  },
-  "selection": {
-    "selector": "选择器"
+    "selectElement": "选择元素"
   },
   "agent": {
     "driving": "智能体操作中",
     "human": "你在操作",
     "lastAction": "最近操作：{action}"
   },
-  "empty": {
-    "title": "预览网页",
-    "hint": "输入任意网址或 localhost 地址即可在此渲染，然后选择元素进行评论。",
-    "quickOpen": "快速打开："
+  "comment": {
+    "cancel": "取消",
+    "failed": "评论发送失败",
+    "hint": "Esc 关闭 · Ctrl+Enter 发送",
+    "noSession": "请先打开一个对话会话",
+    "placeholder": "描述你想要的修改…",
+    "send": "发送到对话",
+    "sent": "已发送到对话",
+    "title": "对该元素评论"
   },
-  "loading": {
-    "title": "正在加载 {host}…",
-    "label": "页面加载中"
+  "empty": {
+    "hint": "输入任意网址或 localhost 地址即可在此渲染，然后选择元素进行评论。",
+    "quickOpen": "快速打开：",
+    "title": "预览网页"
   },
   "errors": {
     "navigate": "无法导航到该地址"
+  },
+  "loading": {
+    "label": "页面加载中",
+    "title": "正在加载 {host}…"
+  },
+  "screenshot": {
+    "failed": "无法截取预览画面",
+    "sent": "截图已发送到对话"
+  },
+  "selection": {
+    "selector": "选择器"
+  },
+  "title": "浏览器",
+  "url": {
+    "placeholder": "http://localhost:3000"
   }
 }

@@ -228,11 +228,11 @@
   "participants": "参与者",
   "pin": "置顶",
   "pinned": "已置顶",
+  "pressKeys": "按下按键…",
   "preview": {
     "empty": "暂无可预览内容——开始编写吧。",
     "unsupported": "{language} 文档暂不支持实时预览。"
   },
-  "pressKeys": "按下按键…",
   "previewAction": "预览",
   "readyToRun": "准备运行",
   "reconnect": "重新连接",

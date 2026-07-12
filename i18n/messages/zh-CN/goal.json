@@ -1,9 +1,9 @@
 {
   "acceptance": {
-    "title": "等待你的验收",
-    "description": "评审判定目标已达成。点击「验收通过」完成目标，或「要求修改」让其继续运行。",
     "accept": "验收通过",
-    "requestChanges": "要求修改"
+    "description": "评审判定目标已达成。点击「验收通过」完成目标，或「要求修改」让其继续运行。",
+    "requestChanges": "要求修改",
+    "title": "等待你的验收"
   },
   "activity": {
     "acceptance_accepted": "验收通过——目标已完成",
@@ -189,11 +189,11 @@
     "maxTokensHint": "判定回复的上限。判定只回一行——200 足够。",
     "model": "判定模型",
     "modelHint": "判定目标是否完成的模型。除非想用更便宜/更快的判定，否则保持聊天模型即可。",
+    "promptOverride": "判定提示覆盖",
+    "promptOverrideHint": "替换内置判定指令。仍须要求返回一行 JSON 判定结果。",
     "provider": "判定提供商",
     "providerHint": "与判定模型配对的提供商 id。留空则复用会话 / 应用的提供商。",
     "providerPlaceholder": "会话提供商",
-    "promptOverride": "判定提示覆盖",
-    "promptOverrideHint": "替换内置判定指令。仍须要求返回一行 JSON 判定结果。",
     "temperature": "判定温度",
     "temperatureHint": "0 为确定性（推荐）。越高判定越宽松。",
     "useChatModel": "使用聊天模型"

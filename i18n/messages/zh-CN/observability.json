@@ -94,10 +94,10 @@
       "clearConfirm": "全部清空",
       "clearConfirmBody": "此操作将永久删除所有已存储的 span。在记录到新遥测数据前仪表盘将为空，且无法撤销。",
       "clearConfirmTitle": "确认清空全部遥测？",
+      "cleared": "已清空 {count} 条 Trace",
       "olderThan": "早于 {days} 天",
       "prune": "清理",
       "pruneDone": "已清理 {count} 条 Trace",
-      "cleared": "已清空 {count} 条 Trace",
       "stored": "已存储 {count} 个 span",
       "title": "数据"
     },

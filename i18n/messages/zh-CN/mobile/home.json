@@ -2,6 +2,7 @@
   "actions": {
     "agentTeams": "智能体团队",
     "discover": "发现",
+    "fleet": "智能体队列",
     "inbox": "收件箱",
     "me": "我",
     "newChat": "新建会话",
@@ -14,6 +15,11 @@
     "title": "{count, plural, =1 {1 个工作流运行中} other {# 个工作流运行中}}",
     "viewRuns": "查看运行"
   },
+  "bucketOlder": "更早",
+  "bucketPrev30": "过去 30 天",
+  "bucketPrev7": "过去 7 天",
+  "bucketToday": "今天",
+  "bucketYesterday": "昨天",
   "customize": {
     "active": "已在首页",
     "activeEmpty": "暂无快捷操作——从下方添加。",
@@ -28,11 +34,6 @@
     "title": "自定义首页"
   },
   "edit": "编辑",
-  "bucketOlder": "更早",
-  "bucketPrev30": "过去 30 天",
-  "bucketPrev7": "过去 7 天",
-  "bucketToday": "今天",
-  "bucketYesterday": "昨天",
   "emptyArchived": "没有已归档的聊天。",
   "emptyChats": "还没有聊天，点击 + 新建一个。",
   "emptyFiltered": "没有与「{query}」匹配的聊天。",

@@ -26,6 +26,7 @@
     "mdnsDenied": "本地网络权限被拒绝",
     "openSettings": "前往设置",
     "portLabel": "端口",
+    "rescan": "重新扫描",
     "scanning": "扫描中…",
     "source": {
       "history": "历史",
@@ -39,6 +40,8 @@
   "switch": {
     "daysAgo": "{n} 天",
     "empty": "尚无历史配对。",
+    "forget": "移除 {name}",
+    "forgot": "已从此设备移除 {name}。",
     "hoursAgo": "{n} 小时",
     "justNow": "刚刚",
     "lastSeen": "最近一次",
@@ -63,6 +66,7 @@
     "ws-tunnel": "WS 隧道"
   },
   "toasts": {
+    "noTier": "当前没有 WebRTC 链路，仍走 HTTPS+WS。",
     "reconnectStarted": "重新握手中…",
     "reconnectThrottled": "请稍等几秒再点重连。",
     "syncFailed": "同步失败（{message}）。",

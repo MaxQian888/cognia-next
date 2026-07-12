@@ -26,14 +26,14 @@
     "confirm": "Apply switch",
     "noChange": "Cognia-next's API key and base URL already match this provider — no sidecar restart needed.",
     "notYetSupported": "not yet supported",
-    "title": "Switch provider",
-    "willRestart": "The bundled SDK sidecar will be restarted so the new env takes effect.",
-    "willWrite": "Will write to {count, plural, =1 {1 agent file} other {# agent files}}.",
-    "useSubscription": "Official provider — cognia will reuse your Anthropic subscription (existing signed-in account, or this machine's Claude Code login) instead of an API key.",
     "subscriptionActivated": "Anthropic subscription activated from your signed-in account.",
     "subscriptionAdopted": "Local Claude Code login adopted and activated as your Anthropic subscription.",
+    "subscriptionFailed": "Couldn't activate the Anthropic subscription: {error}",
     "subscriptionNoneFound": "No Anthropic subscription found — sign in under Settings → Subscription, or run `claude login` and switch again.",
-    "subscriptionFailed": "Couldn't activate the Anthropic subscription: {error}"
+    "title": "Switch provider",
+    "useSubscription": "Official provider — cognia will reuse your Anthropic subscription (existing signed-in account, or this machine's Claude Code login) instead of an API key.",
+    "willRestart": "The bundled SDK sidecar will be restarted so the new env takes effect.",
+    "willWrite": "Will write to {count, plural, =1 {1 agent file} other {# agent files}}."
   },
   "mcp": {
     "emptyBody": "CCSwitch's mcp_servers table is empty.",

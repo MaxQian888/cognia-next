@@ -7,18 +7,6 @@
     "settingsButton": "前往设置",
     "title": "启用后台提醒"
   },
-  "queue": {
-    "cancel": "取消",
-    "cancelFailed": "取消失败：{message}",
-    "empty": "暂无已排队通知。",
-    "errorTitle": "无法加载通知列表",
-    "loading": "加载中…",
-    "refresh": "刷新",
-    "scheduledAt": "在 {time}",
-    "title": "已排队通知",
-    "unsupportedDescription": "本地通知仅在 iOS / Android 上可用。",
-    "unsupportedTitle": "当前平台不支持"
-  },
   "preferences": {
     "badge": "未读角标",
     "badgeHelp": "在应用图标和标签上显示未读计数。",
@@ -76,6 +64,18 @@
       "workflow": "工作流"
     },
     "sourceHelp": "允许来自该来源的通知。"
+  },
+  "queue": {
+    "cancel": "取消",
+    "cancelFailed": "取消失败：{message}",
+    "empty": "暂无已排队通知。",
+    "errorTitle": "无法加载通知列表",
+    "loading": "加载中…",
+    "refresh": "刷新",
+    "scheduledAt": "在 {time}",
+    "title": "已排队通知",
+    "unsupportedDescription": "本地通知仅在 iOS / Android 上可用。",
+    "unsupportedTitle": "当前平台不支持"
   },
   "section": {
     "description": "用于备份提醒和长时任务的后台通知。",

@@ -147,37 +147,37 @@
     "webModeWarning": "Wiki 重建需要 Tauri 桌面应用。"
   },
   "wikiLint": {
-    "title": "Wiki 检查",
-    "description": "检查已编译的 wiki 中的孤儿页面和失效的 [[链接]]。本地运行，不调用 LLM。",
-    "run": "运行检查",
-    "runAria": "运行 wiki 检查",
-    "never": "从未",
-    "lastRun": "上次运行",
     "articleCount": "文章数",
-    "orphanCount": "孤儿页",
     "brokenCount": "失效链接",
     "brokenListSummary": "{count} 篇文章存在失效链接",
+    "description": "检查已编译的 wiki 中的孤儿页面和失效的 [[链接]]。本地运行，不调用 LLM。",
+    "lastRun": "上次运行",
+    "never": "从未",
+    "orphanCount": "孤儿页",
     "orphanListSummary": "{count} 个孤儿页面",
-    "toastClean": "Wiki 无问题 —— 共 {count} 篇文章。",
-    "toastLinted": "检查完成：{orphans} 个孤儿页，{broken} 处失效链接。",
-    "toastLintFailed": "检查失败：{message}",
-    "scheduleTitle": "排期",
-    "scheduleHelp": "自动检查通过调度器运行。每日在本地时间 03:00；每周日 03:00。自定义使用 5 字段 cron 表达式。",
-    "scheduleModeLabel": "频率",
-    "scheduleMode": {
-      "off": "关闭",
-      "daily": "每日",
-      "weekly": "每周",
-      "custom": "自定义"
-    },
-    "scheduleCustomCronLabel": "Cron 表达式",
-    "scheduleSave": "保存",
-    "scheduleSaveAria": "保存 wiki 检查排期",
+    "run": "运行检查",
+    "runAria": "运行 wiki 检查",
     "scheduleAction": {
       "created": "已创建 wiki 检查排期。",
       "updated": "已更新 wiki 检查排期。"
     },
     "scheduleCleared": "已清除 wiki 检查排期。",
-    "scheduleInvalidCron": "无效的 cron 表达式：{expression}"
+    "scheduleCustomCronLabel": "Cron 表达式",
+    "scheduleHelp": "自动检查通过调度器运行。每日在本地时间 03:00；每周日 03:00。自定义使用 5 字段 cron 表达式。",
+    "scheduleInvalidCron": "无效的 cron 表达式：{expression}",
+    "scheduleMode": {
+      "custom": "自定义",
+      "daily": "每日",
+      "off": "关闭",
+      "weekly": "每周"
+    },
+    "scheduleModeLabel": "频率",
+    "scheduleSave": "保存",
+    "scheduleSaveAria": "保存 wiki 检查排期",
+    "scheduleTitle": "排期",
+    "title": "Wiki 检查",
+    "toastClean": "Wiki 无问题 —— 共 {count} 篇文章。",
+    "toastLintFailed": "检查失败：{message}",
+    "toastLinted": "检查完成：{orphans} 个孤儿页，{broken} 处失效链接。"
   }
 }

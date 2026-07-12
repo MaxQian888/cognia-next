@@ -27,13 +27,29 @@
       }
     },
     "connector": {
+      "delete": {
+        "description": "Recalls / deletes an already-sent platform message via a connected adapter.",
+        "label": "Delete message"
+      },
       "draft": {
         "description": "Stores the proposed reply for human review in the Inbox.",
         "label": "Save as draft"
       },
+      "forward": {
+        "description": "Forwards a message (or merge-forwards several) to another conversation via a connected adapter.",
+        "label": "Forward message"
+      },
+      "reaction": {
+        "description": "Adds an emoji reaction to a platform message via a connected adapter.",
+        "label": "React to message"
+      },
       "send": {
         "description": "Pushes a message through the outbound queue of a connected adapter.",
         "label": "Send via connector"
+      },
+      "waitReply": {
+        "description": "Pauses the run until a matching inbound message arrives in the conversation (or the wait times out). Routes the reply text downstream.",
+        "label": "Wait for reply"
       }
     },
     "desktop": {
@@ -162,124 +178,6 @@
         "label": "Issue → PR loop"
       }
     },
-    "mcp": {
-      "invokeTool": {
-        "description": "Calls a tool on a configured MCP server.",
-        "label": "Invoke MCP tool"
-      }
-    },
-    "memory": {
-      "recall": {
-        "description": "Hybrid-search the long-term memory store (BM25 + vectors when configured).",
-        "label": "Recall memory"
-      },
-      "store": {
-        "description": "Store one durable fact into long-term memory via the shared consolidator (PII-gated).",
-        "label": "Store memory"
-      }
-    },
-    "mobile": {
-      "camera": {
-        "description": "Opens the camera on a paired phone and returns the capture (base64) to the run.",
-        "label": "Take photo on phone"
-      },
-      "location": {
-        "description": "Reads the current GPS position from a paired phone.",
-        "label": "Get phone location"
-      },
-      "notify": {
-        "description": "Shows a local notification on a paired phone.",
-        "label": "Notify phone"
-      },
-      "scanBarcode": {
-        "description": "Opens the barcode/QR scanner on a paired phone and returns the raw value.",
-        "label": "Scan barcode on phone"
-      },
-      "share": {
-        "description": "Opens the native share sheet on a paired phone with the given text or link.",
-        "label": "Share from phone"
-      }
-    },
-    "plugin": {
-      "invoke": {
-        "description": "Calls a plugin task handler registered in the plugin runtime.",
-        "label": "Invoke plugin"
-      }
-    },
-    "skill": {
-      "invoke": {
-        "description": "Renders a skill into the prompt of the next AI step.",
-        "label": "Invoke skill"
-      },
-      "upsert": {
-        "description": "Creates or updates a skill with the given markdown body.",
-        "label": "Upsert skill"
-      }
-    },
-    "system": {
-      "terminal": {
-        "description": "Run a shell command in the integrated terminal dock. Routes stdout / exit code downstream.",
-        "label": "Run terminal command"
-      }
-    },
-    "team": {
-      "create": {
-        "description": "Creates a new agent team row.",
-        "label": "Create team"
-      },
-      "run": {
-        "description": "Starts an agent team's lifecycle and waits for completion.",
-        "label": "Run team"
-      },
-      "task": {
-        "dispatch": {
-          "description": "Internal node emitted by the agent-team synthesizer. One node per team task. Not hand-authored.",
-          "label": "Dispatch team task"
-        }
-      },
-      "update": {
-        "description": "Patches an existing team's roster or orchestration mode.",
-        "label": "Update team"
-      }
-    },
-    "terminal": {
-      "readRecent": {
-        "description": "Read the recent-commands ring (command, exit code, ended-at) of a terminal dock tab.",
-        "label": "Read terminal history"
-      },
-      "script": {
-        "description": "Run a script file (.sh / .ps1 / .py / .js / …) under the right interpreter, detected from its extension or overridden explicitly.",
-        "label": "Run script file"
-      },
-      "session": {
-        "close": {
-          "description": "Close a terminal session opened earlier in this run. Leftover sessions are closed automatically when the run ends.",
-          "label": "Close terminal session"
-        },
-        "open": {
-          "description": "Open a persistent terminal session (visible dock tab, or a headless private shell with unattended mode) for multi-step command runs.",
-          "label": "Open terminal session"
-        },
-        "run": {
-          "description": "Run one command in a session opened earlier in this run and wait for its exit code.",
-          "label": "Run in terminal session"
-        }
-      },
-      "waitForExit": {
-        "description": "Block until the command currently running in a terminal dock tab finishes, then route on its exit code.",
-        "label": "Wait for terminal exit"
-      }
-    },
-    "twin": {
-      "ingest": {
-        "description": "Queues a new source for the twin's ingest pipeline.",
-        "label": "Twin ingest"
-      },
-      "rag": {
-        "description": "Runs RAG over a twin's vector store and returns the top-K chunks.",
-        "label": "Twin RAG"
-      }
-    },
     "goal": {
       "analytics": {
         "description": "Compute goal completion, status, token, and timeline analytics.",
@@ -364,6 +262,44 @@
         "label": "Update goal objective"
       }
     },
+    "mcp": {
+      "invokeTool": {
+        "description": "Calls a tool on a configured MCP server.",
+        "label": "Invoke MCP tool"
+      }
+    },
+    "memory": {
+      "recall": {
+        "description": "Hybrid-search the long-term memory store (BM25 + vectors when configured).",
+        "label": "Recall memory"
+      },
+      "store": {
+        "description": "Store one durable fact into long-term memory via the shared consolidator (PII-gated).",
+        "label": "Store memory"
+      }
+    },
+    "mobile": {
+      "camera": {
+        "description": "Opens the camera on a paired phone and returns the capture (base64) to the run.",
+        "label": "Take photo on phone"
+      },
+      "location": {
+        "description": "Reads the current GPS position from a paired phone.",
+        "label": "Get phone location"
+      },
+      "notify": {
+        "description": "Shows a local notification on a paired phone.",
+        "label": "Notify phone"
+      },
+      "scanBarcode": {
+        "description": "Opens the barcode/QR scanner on a paired phone and returns the raw value.",
+        "label": "Scan barcode on phone"
+      },
+      "share": {
+        "description": "Opens the native share sheet on a paired phone with the given text or link.",
+        "label": "Share from phone"
+      }
+    },
     "pet": {
       "interact": {
         "description": "Feed / play with / clean the desktop pet (optionally consuming a shop item by id).",
@@ -426,6 +362,12 @@
       "updateDraft": {
         "description": "Patch a non-executing plan's title, steps, config, or metadata.",
         "label": "Update plan draft"
+      }
+    },
+    "plugin": {
+      "invoke": {
+        "description": "Calls a plugin task handler registered in the plugin runtime.",
+        "label": "Invoke plugin"
       }
     },
     "scheduler": {
@@ -509,6 +451,100 @@
         "description": "Read the next armed scheduler task fires across the task registry.",
         "label": "List upcoming scheduled tasks"
       }
+    },
+    "skill": {
+      "invoke": {
+        "description": "Renders a skill into the prompt of the next AI step.",
+        "label": "Invoke skill"
+      },
+      "upsert": {
+        "description": "Creates or updates a skill with the given markdown body.",
+        "label": "Upsert skill"
+      }
+    },
+    "system": {
+      "terminal": {
+        "description": "Run a shell command in the integrated terminal dock. Routes stdout / exit code downstream.",
+        "label": "Run terminal command"
+      }
+    },
+    "team": {
+      "compose": {
+        "description": "Auto-orchestrates an agent team from a single objective: routing assessment, roster composition, and task decomposition (PII-gated). Optionally starts the team immediately.",
+        "label": "Compose team from objective"
+      },
+      "create": {
+        "description": "Creates a new agent team row.",
+        "label": "Create team"
+      },
+      "delegate": {
+        "description": "Delegates a sub-problem on behalf of a team to a digital twin, a background agent, an external agent, or another team — optionally awaiting the result.",
+        "label": "Delegate from team"
+      },
+      "message": {
+        "description": "Posts a message into an agent team's shared chat/blackboard, optionally addressed to a specific teammate or attached to a task.",
+        "label": "Post team message"
+      },
+      "reconcile": {
+        "description": "Under workspace isolation, reconcile the per-dispatch agent branches produced so far in this run — merge-all / select / pipeline.",
+        "label": "Reconcile agent worktrees"
+      },
+      "run": {
+        "description": "Starts an agent team's lifecycle and waits for completion.",
+        "label": "Run team"
+      },
+      "status": {
+        "description": "Reads an agent team's live state mid-workflow: status, final result, and optionally its tasks, teammates, and delegations.",
+        "label": "Get team status"
+      },
+      "task": {
+        "dispatch": {
+          "description": "Internal node emitted by the agent-team synthesizer. One node per team task. Not hand-authored.",
+          "label": "Dispatch team task"
+        }
+      },
+      "update": {
+        "description": "Patches an existing team's roster or orchestration mode.",
+        "label": "Update team"
+      }
+    },
+    "terminal": {
+      "readRecent": {
+        "description": "Read the recent-commands ring (command, exit code, ended-at) of a terminal dock tab.",
+        "label": "Read terminal history"
+      },
+      "script": {
+        "description": "Run a script file (.sh / .ps1 / .py / .js / …) under the right interpreter, detected from its extension or overridden explicitly.",
+        "label": "Run script file"
+      },
+      "session": {
+        "close": {
+          "description": "Close a terminal session opened earlier in this run. Leftover sessions are closed automatically when the run ends.",
+          "label": "Close terminal session"
+        },
+        "open": {
+          "description": "Open a persistent terminal session (visible dock tab, or a headless private shell with unattended mode) for multi-step command runs.",
+          "label": "Open terminal session"
+        },
+        "run": {
+          "description": "Run one command in a session opened earlier in this run and wait for its exit code.",
+          "label": "Run in terminal session"
+        }
+      },
+      "waitForExit": {
+        "description": "Block until the command currently running in a terminal dock tab finishes, then route on its exit code.",
+        "label": "Wait for terminal exit"
+      }
+    },
+    "twin": {
+      "ingest": {
+        "description": "Queues a new source for the twin's ingest pipeline.",
+        "label": "Twin ingest"
+      },
+      "rag": {
+        "description": "Runs RAG over a twin's vector store and returns the top-K chunks.",
+        "label": "Twin RAG"
+      }
     }
   },
   "ai": {
@@ -524,6 +560,10 @@
       "description": "Generate an embedding vector for semantic similarity.",
       "label": "Embed text"
     },
+    "ensemble": {
+      "description": "Run a target N times, then vote / threshold / best-of / synthesize the samples.",
+      "label": "Ensemble"
+    },
     "extract": {
       "description": "Structured extraction (JSON schema) from free-form text.",
       "label": "Extract data"
@@ -531,10 +571,6 @@
     "prompt": {
       "description": "Direct LLM call. Uses the configured provider routing.",
       "label": "AI prompt"
-    },
-    "ensemble": {
-      "label": "Ensemble",
-      "description": "Run a target N times, then vote / threshold / best-of / synthesize the samples."
     }
   },
   "annotation": {
@@ -548,6 +584,10 @@
     }
   },
   "data": {
+    "aggregate": {
+      "description": "Reduce a list: collect / concat / merge / group-by / dedupe / numeric / custom.",
+      "label": "Aggregate"
+    },
     "code": {
       "description": "Custom JS expression with a 5s timeout.",
       "label": "Code"
@@ -559,10 +599,6 @@
     "transform": {
       "description": "Map / filter / reduce / sort over an input array or object.",
       "label": "Transform"
-    },
-    "aggregate": {
-      "label": "Aggregate",
-      "description": "Reduce a list: collect / concat / merge / group-by / dedupe / numeric / custom."
     }
   },
   "eval": {
@@ -583,6 +619,10 @@
     "break": {
       "description": "Stops the innermost loop after the current iteration.",
       "label": "Break"
+    },
+    "catch": {
+      "description": "Runs only when the workflow fails terminally; receives the error and drives a recovery / notify path.",
+      "label": "Catch failure"
     },
     "continue": {
       "description": "Skips the rest of the current loop iteration.",
@@ -615,10 +655,6 @@
     "wait": {
       "description": "Pauses for a fixed duration or until a wake-up event arrives.",
       "label": "Wait"
-    },
-    "catch": {
-      "description": "Runs only when the workflow fails terminally; receives the error and drives a recovery / notify path.",
-      "label": "Catch failure"
     }
   },
   "io": {
@@ -626,15 +662,19 @@
       "description": "Call an external HTTP API with retries and timeout.",
       "label": "HTTP request"
     },
+    "output": {
+      "description": "Declare the workflow's typed terminal output (the published interface).",
+      "label": "Output"
+    },
+    "webClone": {
+      "description": "Snapshot a live web page (HTML + all CSS/JS/image/font assets) into a self-contained file or bundle, with optional component extraction + framework codegen.",
+      "label": "Web clone"
+    },
     "webhook": {
       "respond": {
         "description": "Respond to the inbound webhook trigger with a payload.",
         "label": "Webhook respond"
       }
-    },
-    "output": {
-      "label": "Output",
-      "description": "Declare the workflow's typed terminal output (the published interface)."
     }
   },
   "ocr": {

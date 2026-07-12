@@ -1,5 +1,8 @@
 {
+  "bookmark": "收藏",
+  "bookmarkRemove": "取消收藏",
   "branch": "分支对话",
+  "branchVariants": "回复版本",
   "copy": "复制文本",
   "copyFailed": "复制失败：{message}",
   "copySuccess": "已复制到剪贴板。",
@@ -10,12 +13,18 @@
   "deleteFailed": "删除失败：{message}",
   "deleteSuccess": "已删除消息。",
   "description": "选择一项操作。",
+  "edit": "编辑并重发",
+  "editFailed": "重新发送失败：{message}",
+  "editInputAria": "编辑消息内容",
+  "editResend": "重新发送",
   "longPressHint": "长按消息查看操作",
   "quote": "引用",
+  "readAloud": "朗读",
   "regenerate": "重新生成回复",
   "share": "分享…",
   "shareDialogTitle": "分享至",
   "shareFailed": "分享失败：{message}",
   "shareUnsupported": "此设备不支持分享。",
+  "stopReading": "停止朗读",
   "title": "消息"
 }

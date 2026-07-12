@@ -357,18 +357,17 @@
         "description": "通过 console.anthropic.com 授权。使用计费 API 额度。",
         "label": "Console（API 计费）"
       },
-      "subscription": {
-        "description": "通过 claude.ai 授权。使用订阅的 5 小时 / 7 天滚动配额。",
-        "label": "订阅（Pro / Max）"
-      },
       "reuse": {
         "description": "直接复用本机 Claude Code CLI 的订阅登录。只读操作——我们不会写回其凭据文件。",
         "label": "复用 Claude Code 登录"
+      },
+      "subscription": {
+        "description": "通过 claude.ai 授权。使用订阅的 5 小时 / 7 天滚动配额。",
+        "label": "订阅（Pro / Max）"
       }
     },
     "pasteHint": "如果页面没有自动打开，请点击下方链接。授权后把页面显示的 code 或完整 URL 复制粘贴到下面。",
     "reopenLink": "重新打开授权页",
-    "title": "登录 Claude",
     "reuse": {
       "adopt": "复用此登录",
       "credentialsPath": "凭据路径",
@@ -381,7 +380,8 @@
       "sourceFile": "~/.claude/.credentials.json",
       "sourceKeyring": "Claude Code 系统钥匙串条目",
       "sourceLabel": "来源"
-    }
+    },
+    "title": "登录 Claude"
   },
   "migration": {
     "toastBody": "已将 {count, plural, =1 {1 个旧账号} other {# 个旧账号}} 迁移到新版凭证仓。",
@@ -390,6 +390,9 @@
   "opencode": {
     "description": "从 `~/.local/share/opencode/auth.json` 读取已配置的凭证；OpenCode-Zen 订阅以「粘贴 API key」的方式接入。OpenCode 本身管理大量服务商，我们只展示白名单内的几项。",
     "discovery": {
+      "adopt": "采纳",
+      "adoptFailed": "凭据采纳失败：{error}",
+      "adoptSuccess": "已将 \"{subProvider}\" 采纳进保险库。",
       "description": "只读地扫描 OpenCode CLI 的 auth.json，从不写回。",
       "empty": "auth.json 中没有白名单内的条目。运行 opencode auth 配置 Anthropic / OpenAI / OpenCode Zen / OpenCode Go 之一。",
       "kindApiKey": "API key",
@@ -403,6 +406,8 @@
       "title": "OpenCode 中已配置的服务商",
       "whitelistLabel": "白名单"
     },
+    "quotaConsoleLink": "OpenCode 控制台",
+    "quotaConsoleOnly": "Zen/Go 的余额与配额无法通过 API key 查询——OpenCode 仅在其登录态控制台中展示。",
     "title": "OpenCode",
     "webModeBanner": "OpenCode 凭证存放在 OS 钥匙串中——仅在桌面版可用。",
     "zen": {
@@ -426,21 +431,21 @@
     }
   },
   "overview": {
+    "noDataBody": "点击刷新可直接从 Anthropic 免费用量接口获取额度——不消耗 token，也无需先发消息。",
+    "noDataTitle": "暂无用量数据",
+    "refresh": "刷新",
     "signInCta": "登录",
     "signedOutBody": "登录 Claude 账号即可监控 5 小时 / 7 天速率限制窗口。",
     "signedOutTitle": "未登录",
+    "sourceEndpoint": "用量接口实时数据",
+    "sourceHeaders": "来自对话响应头",
     "status": {
       "allowed": "正常",
       "allowed_warning": "警告",
       "rate_limited": "已限流",
       "unknown": "状态未知"
     },
-    "refresh": "刷新",
-    "updated": "更新于{when}",
-    "sourceEndpoint": "用量接口实时数据",
-    "sourceHeaders": "来自对话响应头",
-    "noDataTitle": "暂无用量数据",
-    "noDataBody": "点击刷新可直接从 Anthropic 免费用量接口获取额度——不消耗 token，也无需先发消息。"
+    "updated": "更新于{when}"
   },
   "providers": {
     "anthropic": "Claude",
@@ -544,6 +549,18 @@
       "all": "全部时间",
       "label": "时间范围"
     },
+    "shareCard": {
+      "action": "分享卡片",
+      "cardTitle": "Cognia 使用量档案",
+      "description": "把你的使用量统计生成风格化卡片，可下载为图片或发布加密分享链接。",
+      "downloadPng": "下载 PNG",
+      "downloading": "渲染中…",
+      "pngError": "图片渲染失败，请重试。",
+      "previewTitle": "卡片预览",
+      "shareLink": "以链接分享",
+      "styleLabel": "风格",
+      "title": "分享使用量卡片"
+    },
     "surface": {
       "agentTeam": "智能体团队",
       "all": "全部",
@@ -587,16 +604,16 @@
       "noData": "未上报",
       "noSnapshot": "尚无配额快照。发一条对话或启用主动探测。",
       "overageDisabled": "超额已禁用：{reason}。",
+      "refresh": "刷新",
       "representative": "代表窗口",
       "resetExpired": "正在重置",
       "resetUnknown": "重置时间未知",
       "resetsInHm": "{hours} 小时 {minutes} 分后重置",
       "resetsInM": "{minutes} 分后重置",
       "sevenDay": "7 天窗口",
-      "title": "当前配额窗口",
-      "refresh": "刷新",
       "sourceEndpoint": "用量接口实时数据",
-      "sourceHeaders": "来自对话响应头"
+      "sourceHeaders": "来自对话响应头",
+      "title": "当前配额窗口"
     }
   },
   "webModeBanner": "订阅凭据保存在系统钥匙串中——仅桌面应用支持。"

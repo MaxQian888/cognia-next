@@ -74,9 +74,9 @@
       "upload": "Upload image"
     },
     "browserToolsToggle": {
-      "label": "Agent browser tools",
+      "aria": "Toggle agent browser tools",
       "description": "Let this character drive the in-app preview browser (navigate, snapshot, click, type, read console/network). Desktop only.",
-      "aria": "Toggle agent browser tools"
+      "label": "Agent browser tools"
     },
     "computerUseSubSettings": {
       "allowedToolIds": {

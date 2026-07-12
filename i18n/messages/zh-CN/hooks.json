@@ -1,119 +1,119 @@
 {
   "categories": {
-    "tools": "工具",
-    "session": "会话",
+    "lifecycle": "生命周期",
     "permissions": "权限",
+    "session": "会话",
     "tasks": "任务",
-    "lifecycle": "生命周期"
+    "tools": "工具"
   },
   "events": {
-    "PreToolUse": {
-      "label": "工具调用前",
-      "desc": "工具运行前触发；hook 可拦截或改写该调用。"
-    },
-    "PostToolUse": {
-      "label": "工具调用后",
-      "desc": "工具返回后触发；可检查或标注结果。"
-    },
-    "PostToolBatch": {
-      "label": "工具批处理后",
-      "desc": "一批并行工具调用全部完成后触发一次。"
-    },
-    "PostToolUseFailure": {
-      "label": "工具失败后",
-      "desc": "工具调用出错时触发。"
-    },
-    "SessionStart": {
-      "label": "会话开始",
-      "desc": "会话开始时触发；适合注入常驻上下文。"
-    },
-    "SessionEnd": {
-      "label": "会话结束",
-      "desc": "会话结束时触发；可做清理或日志记录。"
-    },
-    "UserPromptSubmit": {
-      "label": "提交提示词",
-      "desc": "发送提示词时触发；可注入上下文或拦截。"
-    },
-    "UserPromptExpansion": {
-      "label": "提示词展开",
-      "desc": "提示词中的宏被展开时触发。"
-    },
-    "Stop": {
-      "label": "停止",
-      "desc": "助手完成本轮回复时触发。"
-    },
-    "StopFailure": {
-      "label": "停止（失败）",
-      "desc": "本轮因错误结束时触发。"
-    },
-    "Notification": {
-      "label": "通知",
-      "desc": "运行时通知（空闲、等待输入）时触发。"
-    },
-    "PermissionRequest": {
-      "label": "权限请求",
-      "desc": "工具请求权限时触发；可自动决策。"
-    },
-    "PermissionDenied": {
-      "label": "权限被拒绝",
-      "desc": "权限请求被拒绝时触发。"
-    },
-    "Elicitation": {
-      "label": "信息征询",
-      "desc": "智能体向你征询结构化输入时触发。"
-    },
-    "ElicitationResult": {
-      "label": "征询结果",
-      "desc": "你回答征询后触发。"
-    },
-    "TaskCreated": {
-      "label": "任务创建",
-      "desc": "创建智能体任务时触发。"
-    },
-    "TaskCompleted": {
-      "label": "任务完成",
-      "desc": "智能体任务完成时触发。"
-    },
-    "SubagentStop": {
-      "label": "子代理停止",
-      "desc": "子代理结束运行时触发。"
-    },
-    "TeammateIdle": {
-      "label": "队友空闲",
-      "desc": "智能体团队成员进入空闲时触发。"
-    },
-    "PreCompact": {
-      "label": "压缩前",
-      "desc": "上下文窗口压缩前触发。"
-    },
-    "PostCompact": {
-      "label": "压缩后",
-      "desc": "上下文窗口压缩后触发。"
-    },
-    "WorktreeCreate": {
-      "label": "工作树创建",
-      "desc": "创建 git 工作树时触发。"
-    },
-    "WorktreeRemove": {
-      "label": "工作树移除",
-      "desc": "移除 git 工作树时触发。"
-    },
-    "FileChanged": {
-      "label": "文件变更",
-      "desc": "被监视的文件在磁盘上变更时触发。"
+    "ConfigChange": {
+      "desc": "settings.json 变更时触发。",
+      "label": "配置变更"
     },
     "CwdChanged": {
-      "label": "工作目录变更",
-      "desc": "工作目录变更时触发。"
+      "desc": "工作目录变更时触发。",
+      "label": "工作目录变更"
+    },
+    "Elicitation": {
+      "desc": "智能体向你征询结构化输入时触发。",
+      "label": "信息征询"
+    },
+    "ElicitationResult": {
+      "desc": "你回答征询后触发。",
+      "label": "征询结果"
+    },
+    "FileChanged": {
+      "desc": "被监视的文件在磁盘上变更时触发。",
+      "label": "文件变更"
     },
     "InstructionsLoaded": {
-      "label": "指令加载",
-      "desc": "加载 CLAUDE.md / 指令时触发。"
+      "desc": "加载 CLAUDE.md / 指令时触发。",
+      "label": "指令加载"
     },
-    "ConfigChange": {
-      "label": "配置变更",
-      "desc": "settings.json 变更时触发。"
+    "Notification": {
+      "desc": "运行时通知（空闲、等待输入）时触发。",
+      "label": "通知"
+    },
+    "PermissionDenied": {
+      "desc": "权限请求被拒绝时触发。",
+      "label": "权限被拒绝"
+    },
+    "PermissionRequest": {
+      "desc": "工具请求权限时触发；可自动决策。",
+      "label": "权限请求"
+    },
+    "PostCompact": {
+      "desc": "上下文窗口压缩后触发。",
+      "label": "压缩后"
+    },
+    "PostToolBatch": {
+      "desc": "一批并行工具调用全部完成后触发一次。",
+      "label": "工具批处理后"
+    },
+    "PostToolUse": {
+      "desc": "工具返回后触发；可检查或标注结果。",
+      "label": "工具调用后"
+    },
+    "PostToolUseFailure": {
+      "desc": "工具调用出错时触发。",
+      "label": "工具失败后"
+    },
+    "PreCompact": {
+      "desc": "上下文窗口压缩前触发。",
+      "label": "压缩前"
+    },
+    "PreToolUse": {
+      "desc": "工具运行前触发；hook 可拦截或改写该调用。",
+      "label": "工具调用前"
+    },
+    "SessionEnd": {
+      "desc": "会话结束时触发；可做清理或日志记录。",
+      "label": "会话结束"
+    },
+    "SessionStart": {
+      "desc": "会话开始时触发；适合注入常驻上下文。",
+      "label": "会话开始"
+    },
+    "Stop": {
+      "desc": "助手完成本轮回复时触发。",
+      "label": "停止"
+    },
+    "StopFailure": {
+      "desc": "本轮因错误结束时触发。",
+      "label": "停止（失败）"
+    },
+    "SubagentStop": {
+      "desc": "子代理结束运行时触发。",
+      "label": "子代理停止"
+    },
+    "TaskCompleted": {
+      "desc": "智能体任务完成时触发。",
+      "label": "任务完成"
+    },
+    "TaskCreated": {
+      "desc": "创建智能体任务时触发。",
+      "label": "任务创建"
+    },
+    "TeammateIdle": {
+      "desc": "智能体团队成员进入空闲时触发。",
+      "label": "队友空闲"
+    },
+    "UserPromptExpansion": {
+      "desc": "提示词中的宏被展开时触发。",
+      "label": "提示词展开"
+    },
+    "UserPromptSubmit": {
+      "desc": "发送提示词时触发；可注入上下文或拦截。",
+      "label": "提交提示词"
+    },
+    "WorktreeCreate": {
+      "desc": "创建 git 工作树时触发。",
+      "label": "工作树创建"
+    },
+    "WorktreeRemove": {
+      "desc": "移除 git 工作树时触发。",
+      "label": "工作树移除"
     }
   }
 }

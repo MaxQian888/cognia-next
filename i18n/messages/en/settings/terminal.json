@@ -30,9 +30,27 @@
       "label": "CLI flags"
     }
   },
+  "bell": {
+    "both": "Flash and sound",
+    "helper": "How the terminal reacts to the BEL character (\\a) programs emit — e.g. shell completion failures or long-running commands ringing on finish.",
+    "label": "Terminal bell",
+    "none": "Off",
+    "sound": "Sound",
+    "visual": "Visual flash"
+  },
   "colorScheme": {
     "auto": "Auto (follow app theme)",
-    "label": "Color scheme"
+    "darkGroup": "Dark schemes",
+    "label": "Color scheme",
+    "lightGroup": "Light schemes"
+  },
+  "commandActions": {
+    "helper": "Make the per-command gutter dots interactive: click one to rerun the command or copy the command and its output, with the exit code and duration.",
+    "label": "Command actions"
+  },
+  "confirmOnClose": {
+    "helper": "Ask before closing a tab whose shell is still running a command, so an accidental close doesn't kill an in-flight run. Idle tabs always close immediately.",
+    "label": "Confirm before closing a running terminal"
   },
   "copyOnSelect": {
     "helper": "When on, every text selection in a terminal is auto-copied to the clipboard. Off by default so accidental selection doesn't overwrite your clipboard.",
@@ -59,20 +77,55 @@
   "fontSize": {
     "label": "Font size"
   },
+  "fontWeight": {
+    "bold": "Bold",
+    "label": "Font weight",
+    "normal": "Normal"
+  },
+  "fontWeightBold": {
+    "label": "Bold text weight"
+  },
   "forceUtf8": {
     "helper": "Pin PowerShell / cmd console output to UTF-8 so powerline glyphs and CJK text render correctly on non-UTF-8 system codepages (e.g. GBK on Chinese Windows). Leave on unless you depend on the legacy codepage.",
     "label": "Force UTF-8 output"
   },
+  "groups": {
+    "agents": "Agents & automation",
+    "ai": "AI autocomplete",
+    "appearance": "Appearance",
+    "behavior": "Behavior",
+    "productivity": "Productivity",
+    "shell": "Shell & session"
+  },
   "heading": "Integrated terminal",
+  "letterSpacing": {
+    "label": "Letter spacing (px)"
+  },
   "ligatures": {
     "helper": "Render programming-font ligatures (Cascadia Code, JetBrains Mono, Fira Code). Off by default; toggling reloads the terminal.",
     "label": "Font ligatures"
   },
+  "lineHeight": {
+    "helper": "Line height multiplies the font size; letter spacing adds horizontal pixels between glyphs. Both re-fit the terminal.",
+    "label": "Line height"
+  },
+  "minContrast": {
+    "aa": "WCAG AA (4.5)",
+    "aaa": "WCAG AAA (7)",
+    "helper": "Force a minimum contrast ratio between text and background for legibility. Off keeps the raw ANSI colors; AA / AAA meet WCAG; Maximum forces black/white.",
+    "label": "Minimum contrast",
+    "max": "Maximum (21)",
+    "off": "Off"
+  },
   "profiles": {
     "add": "Add profile",
+    "argsLabel": "Arguments (one per line)",
+    "argsPlaceholder": "-NoLogo",
     "cwdLabel": "Working directory",
     "cwdPlaceholder": "Working directory (optional)",
     "empty": "No profiles yet.",
+    "envLabel": "Environment (KEY=VALUE per line)",
+    "envPlaceholder": "NODE_ENV=development",
     "helper": "Named shell presets (shell + working directory) the new-tab menu can launch. Set one as default for the plain \"+ New\" button.",
     "isDefault": "Default",
     "nameLabel": "Profile name",
@@ -93,6 +146,10 @@
     "shellPlaceholder": "/usr/local/bin/fish",
     "title": "Per-project override"
   },
+  "quickFixes": {
+    "helper": "Show a lightbulb on a failed command offering a fix — git push --set-upstream, “did you mean”, create-PR link, freeing a busy port, pwsh command-not-found, and more.",
+    "label": "Quick fixes"
+  },
   "renderer": {
     "auto": "Auto",
     "canvas": "Canvas",
@@ -108,6 +165,10 @@
   "sandboxed": {
     "helper": "Launch dock terminals inside the OS sandbox (bwrap / sandbox-exec): writes are confined to the session working directory, your home stays read-only, network stays on. Experimental; off by default and not yet available on Windows.",
     "label": "Sandboxed terminal"
+  },
+  "scrollSensitivity": {
+    "helper": "Lines scrolled per mouse-wheel notch. Alt-scroll moves 5× faster.",
+    "label": "Scroll speed (lines)"
   },
   "scrollback": {
     "helper": "Number of lines kept in xterm's history buffer. Range 1000–100000.",
@@ -129,6 +190,10 @@
     "helper": "Injects OSC 633 prompt markers (bash / zsh / pwsh) so the dock can show command status and cwd badges. Disable for shells that mis-parse the sequences.",
     "label": "Enable shell integration"
   },
+  "stickyScroll": {
+    "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output.",
+    "label": "Sticky scroll"
+  },
   "subheading": "Default shell, font and scrollback for the bottom dock. Per-project overrides take precedence over these defaults.",
   "unattended": {
     "askPolicy": {
@@ -140,56 +205,5 @@
     },
     "helper": "Let workflow terminal steps run shell commands headlessly — no visible terminal tab, no consent prompt. Every command is screened by the safety classifier first; clearly dangerous commands are always blocked.",
     "label": "Allow unattended execution"
-  },
-  "quickFixes": {
-    "label": "Quick fixes",
-    "helper": "Show a lightbulb on a failed command offering a fix — git push --set-upstream, “did you mean”, create-PR link, freeing a busy port, pwsh command-not-found, and more."
-  },
-  "commandActions": {
-    "label": "Command actions",
-    "helper": "Make the per-command gutter dots interactive: click one to rerun the command or copy the command and its output, with the exit code and duration."
-  },
-  "stickyScroll": {
-    "label": "Sticky scroll",
-    "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output."
-  },
-  "groups": {
-    "agents": "Agents & automation",
-    "ai": "AI autocomplete",
-    "appearance": "Appearance",
-    "behavior": "Behavior",
-    "productivity": "Productivity",
-    "shell": "Shell & session"
-  },
-  "fontWeight": {
-    "bold": "Bold",
-    "label": "Font weight",
-    "normal": "Normal"
-  },
-  "fontWeightBold": {
-    "label": "Bold text weight"
-  },
-  "lineHeight": {
-    "helper": "Line height multiplies the font size; letter spacing adds horizontal pixels between glyphs. Both re-fit the terminal.",
-    "label": "Line height"
-  },
-  "letterSpacing": {
-    "label": "Letter spacing (px)"
-  },
-  "scrollSensitivity": {
-    "helper": "Lines scrolled per mouse-wheel notch. Alt-scroll moves 5× faster.",
-    "label": "Scroll speed (lines)"
-  },
-  "minContrast": {
-    "aa": "WCAG AA (4.5)",
-    "aaa": "WCAG AAA (7)",
-    "helper": "Force a minimum contrast ratio between text and background for legibility. Off keeps the raw ANSI colors; AA / AAA meet WCAG; Maximum forces black/white.",
-    "label": "Minimum contrast",
-    "max": "Maximum (21)",
-    "off": "Off"
-  },
-  "confirmOnClose": {
-    "helper": "Ask before closing a tab whose shell is still running a command, so an accidental close doesn't kill an in-flight run. Idle tabs always close immediately.",
-    "label": "Confirm before closing a running terminal"
   }
 }

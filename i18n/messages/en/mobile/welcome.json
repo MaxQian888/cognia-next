@@ -1,0 +1,10 @@
+{
+  "byokCta": "Set up API key",
+  "byokDescription": "Run standalone on this phone — chat, search, and docs against your own provider keys. No desktop needed.",
+  "byokTitle": "Use my own API key",
+  "pairCta": "Pair with desktop",
+  "pairDescription": "Connect to the Cognia desktop app on your computer to sync sessions and run tasks remotely.",
+  "pairTitle": "Pair with my desktop",
+  "subtitle": "Choose how this phone should run",
+  "title": "Welcome to Cognia"
+}

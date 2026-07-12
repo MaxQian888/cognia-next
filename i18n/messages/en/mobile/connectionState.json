@@ -26,6 +26,7 @@
     "mdnsDenied": "Local network permission denied",
     "openSettings": "Open Settings",
     "portLabel": "port",
+    "rescan": "Scan again",
     "scanning": "Scanning…",
     "source": {
       "history": "history",
@@ -39,6 +40,8 @@
   "switch": {
     "daysAgo": "{n}d",
     "empty": "No previously paired desktops yet.",
+    "forget": "Forget {name}",
+    "forgot": "Removed {name} from this device.",
     "hoursAgo": "{n}h",
     "justNow": "just now",
     "lastSeen": "last seen",
@@ -63,6 +66,7 @@
     "ws-tunnel": "WS tunnel"
   },
   "toasts": {
+    "noTier": "No WebRTC tier active — using HTTPS+WS.",
     "reconnectStarted": "Re-handshaking…",
     "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
     "syncFailed": "Sync failed ({message}).",

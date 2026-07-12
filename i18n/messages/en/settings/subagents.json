@@ -1,4 +1,19 @@
 {
+  "backgroundTasks": {
+    "autoResume": "Auto-resume interrupted runs on boot",
+    "autoResumeHint": "Off by default — when on, background sub-agent runs interrupted by a crash/quit are re-dispatched at startup (attempt-capped).",
+    "denyList": "Dispatch deny-list",
+    "denyListHint": "One glob per line over subagent ids (e.g. Explore, myplugin:*, template:*). Denied ids never enter the dispatch_agent tool and are refused at dispatch time.",
+    "denyListPlaceholder": "template:*\nmyplugin:reviewer",
+    "description": "Background sub-agent lifecycle and dispatch permissions.",
+    "maxAttempts": "Max auto-resume attempts",
+    "maxAttemptsHint": "Cap on chained auto-resume attempts per run lineage (prevents crash loops).",
+    "save": "Save",
+    "saved": "Background task settings saved.",
+    "surfaceAsks": "Surface sub-agent permission asks",
+    "surfaceAsksHint": "On (default): a dispatched sub-agent's permission prompts appear in this chat. Off: they are auto-denied.",
+    "title": "Background tasks & permissions"
+  },
   "description": "Reusable templates and live status for sub-agents spawned by a parent agent. Templates persist across sessions; runtime data is ephemeral.",
   "import": {
     "applyButton": "Import {count} agent(s)",
@@ -40,21 +55,6 @@
     "warningsHeader": "{count} file(s) failed to parse",
     "webPickFormats": "Accepts .md / .markdown / .mdc / .yaml / .yml.",
     "webPickHint": "Drop files here or click to browse."
-  },
-  "backgroundTasks": {
-    "autoResume": "Auto-resume interrupted runs on boot",
-    "autoResumeHint": "Off by default — when on, background sub-agent runs interrupted by a crash/quit are re-dispatched at startup (attempt-capped).",
-    "denyList": "Dispatch deny-list",
-    "denyListHint": "One glob per line over subagent ids (e.g. Explore, myplugin:*, template:*). Denied ids never enter the dispatch_agent tool and are refused at dispatch time.",
-    "denyListPlaceholder": "template:*\nmyplugin:reviewer",
-    "description": "Background sub-agent lifecycle and dispatch permissions.",
-    "maxAttempts": "Max auto-resume attempts",
-    "maxAttemptsHint": "Cap on chained auto-resume attempts per run lineage (prevents crash loops).",
-    "save": "Save",
-    "saved": "Background task settings saved.",
-    "surfaceAsks": "Surface sub-agent permission asks",
-    "surfaceAsksHint": "On (default): a dispatched sub-agent's permission prompts appear in this chat. Off: they are auto-denied.",
-    "title": "Background tasks & permissions"
   },
   "nesting": {
     "description": "Let the chat agent dispatch sub-agents that can themselves dispatch further sub-agents, with controlled depth, budget, and cycle/timeout guards.",

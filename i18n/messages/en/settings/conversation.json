@@ -17,36 +17,36 @@
   "model": "Model",
   "provider": "Provider",
   "runStatusBar": {
-    "title": "Run status bar",
+    "contextPct": {
+      "description": "How full the model's context window is after the latest turn.",
+      "heading": "Context usage",
+      "label": "Show context usage"
+    },
+    "cost": {
+      "description": "Estimated session cost so far.",
+      "heading": "Cost",
+      "label": "Show cost"
+    },
     "description": "Choose which metrics the run-status bar above the composer shows while a turn runs.",
     "elapsed": {
-      "heading": "Elapsed time",
       "description": "The active-work clock (pauses during approvals).",
+      "heading": "Elapsed time",
       "label": "Show elapsed time"
     },
     "outputTokens": {
-      "heading": "Output tokens",
       "description": "Total output tokens generated this session.",
+      "heading": "Output tokens",
       "label": "Show output tokens"
     },
     "speed": {
-      "heading": "Model speed",
       "description": "Generation throughput in tokens per second.",
+      "heading": "Model speed",
       "label": "Show model speed"
     },
-    "cost": {
-      "heading": "Cost",
-      "description": "Estimated session cost so far.",
-      "label": "Show cost"
-    },
-    "contextPct": {
-      "heading": "Context usage",
-      "description": "How full the model's context window is after the latest turn.",
-      "label": "Show context usage"
-    },
+    "title": "Run status bar",
     "tools": {
-      "heading": "Tool count",
       "description": "Number of tool calls in the running turn.",
+      "heading": "Tool count",
       "label": "Show tool count"
     }
   },

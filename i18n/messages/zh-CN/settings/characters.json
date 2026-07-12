@@ -74,9 +74,9 @@
       "upload": "上传图片"
     },
     "browserToolsToggle": {
-      "label": "智能体浏览器工具",
+      "aria": "切换智能体浏览器工具",
       "description": "允许该角色操作应用内预览浏览器（导航、快照、点击、输入、读取控制台/网络）。仅桌面端可用。",
-      "aria": "切换智能体浏览器工具"
+      "label": "智能体浏览器工具"
     },
     "computerUseSubSettings": {
       "allowedToolIds": {
@@ -160,9 +160,9 @@
     "systemPromptPlaceholder": "你是…",
     "twinBinding": {
       "cancel": "取消",
+      "citationStyleLabel": "引用格式",
       "confirmBind": "绑定",
       "createNew": "新建孪生",
-      "citationStyleLabel": "引用格式",
       "enableCitations": "来源引用",
       "enableCitationsHint": "为检索到的片段附上格式化引用（仅展示，不改变提示词）。",
       "enableCorrectiveFilter": "纠错过滤",

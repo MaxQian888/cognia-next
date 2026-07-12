@@ -357,18 +357,17 @@
         "description": "Authorize via console.anthropic.com. Uses your billed API credits.",
         "label": "Console (API billing)"
       },
-      "subscription": {
-        "description": "Authorize via claude.ai. Uses your subscription's 5h / 7d rolling quota.",
-        "label": "Subscription (Pro / Max)"
-      },
       "reuse": {
         "description": "Adopt the subscription login from this machine's Claude Code CLI. Read-only — we never write back.",
         "label": "Reuse Claude Code login"
+      },
+      "subscription": {
+        "description": "Authorize via claude.ai. Uses your subscription's 5h / 7d rolling quota.",
+        "label": "Subscription (Pro / Max)"
       }
     },
     "pasteHint": "If the page didn't open automatically, click the link below. After authorizing, copy the code or the full callback URL into the box.",
     "reopenLink": "Re-open authorization page",
-    "title": "Sign in with Claude",
     "reuse": {
       "adopt": "Adopt this login",
       "credentialsPath": "Credentials path",
@@ -381,7 +380,8 @@
       "sourceFile": "~/.claude/.credentials.json",
       "sourceKeyring": "Claude Code OS keyring entry",
       "sourceLabel": "Source"
-    }
+    },
+    "title": "Sign in with Claude"
   },
   "migration": {
     "toastBody": "Migrated {count, plural, =1 {1 legacy account} other {# legacy accounts}} into the new vault.",
@@ -390,6 +390,9 @@
   "opencode": {
     "description": "Discover credentials from `~/.local/share/opencode/auth.json` and paste an OpenCode-Zen subscription key. OpenCode itself manages many providers; we surface only the whitelisted ones.",
     "discovery": {
+      "adopt": "Adopt",
+      "adoptFailed": "Couldn't adopt the credential: {error}",
+      "adoptSuccess": "Adopted \"{subProvider}\" into the vault.",
       "description": "Read-only probe of the OpenCode CLI's auth.json. We never write back.",
       "empty": "No whitelisted entries in auth.json. Run opencode auth for one of: Anthropic, OpenAI, OpenCode Zen, or OpenCode Go.",
       "kindApiKey": "API key",
@@ -403,6 +406,8 @@
       "title": "Discovered in OpenCode",
       "whitelistLabel": "Whitelist"
     },
+    "quotaConsoleLink": "OpenCode Console",
+    "quotaConsoleOnly": "Zen/Go balance and quota can't be queried with an API key — OpenCode only shows them in its session-authenticated console.",
     "title": "OpenCode",
     "webModeBanner": "OpenCode credentials are stored in your OS keychain — only available in the desktop app.",
     "zen": {
@@ -426,21 +431,21 @@
     }
   },
   "overview": {
+    "noDataBody": "Fetch your quota straight from Anthropic's free usage endpoint — no token cost, no chat message needed.",
+    "noDataTitle": "No usage data yet",
+    "refresh": "Refresh",
     "signInCta": "Sign in",
     "signedOutBody": "Sign in with your Claude account to monitor 5h/7d rate-limit windows.",
     "signedOutTitle": "Not signed in",
+    "sourceEndpoint": "Live usage API",
+    "sourceHeaders": "From chat response headers",
     "status": {
       "allowed": "All clear",
       "allowed_warning": "Warning",
       "rate_limited": "Rate limited",
       "unknown": "Status unknown"
     },
-    "refresh": "Refresh",
-    "updated": "Updated {when}",
-    "sourceEndpoint": "Live usage API",
-    "sourceHeaders": "From chat response headers",
-    "noDataTitle": "No usage data yet",
-    "noDataBody": "Fetch your quota straight from Anthropic's free usage endpoint — no token cost, no chat message needed."
+    "updated": "Updated {when}"
   },
   "providers": {
     "anthropic": "Claude",
@@ -544,6 +549,18 @@
       "all": "All time",
       "label": "Time range"
     },
+    "shareCard": {
+      "action": "Share card",
+      "cardTitle": "Cognia Usage Archive",
+      "description": "Turn your usage stats into a stylized card — download it as an image or publish an encrypted share link.",
+      "downloadPng": "Download PNG",
+      "downloading": "Rendering…",
+      "pngError": "Failed to render the image. Try again.",
+      "previewTitle": "Card preview",
+      "shareLink": "Share via link",
+      "styleLabel": "Style",
+      "title": "Share usage card"
+    },
     "surface": {
       "agentTeam": "Agent Team",
       "all": "All",
@@ -587,16 +604,16 @@
       "noData": "not reported",
       "noSnapshot": "No quota snapshot yet. Send a chat message or enable the active probe.",
       "overageDisabled": "Overage disabled: {reason}.",
+      "refresh": "Refresh",
       "representative": "Representative",
       "resetExpired": "Resetting now",
       "resetUnknown": "Reset time unknown",
       "resetsInHm": "Resets in {hours}h {minutes}m",
       "resetsInM": "Resets in {minutes}m",
       "sevenDay": "7-day window",
-      "title": "Current quota windows",
-      "refresh": "Refresh",
       "sourceEndpoint": "Live usage API",
-      "sourceHeaders": "From chat response headers"
+      "sourceHeaders": "From chat response headers",
+      "title": "Current quota windows"
     }
   },
   "webModeBanner": "Subscription credentials are stored in your OS keychain — only available in the desktop app."

@@ -1,14 +1,14 @@
 {
   "a11y": {
     "announceErrors": "播报错误",
-    "focusIndicator": "焦点指示器",
-    "highContrast": "高对比度",
-    "reducedMotion": "减少动效",
-    "screenReaderOptimized": "屏幕阅读器优化",
     "announceErrorsDesc": "通过辅助技术的警报区域朗读 AI 操作失败信息。",
+    "focusIndicator": "焦点指示器",
     "focusIndicatorDesc": "焦点进入编辑器时在其周围绘制指示环。",
+    "highContrast": "高对比度",
     "highContrastDesc": "强制使用 Monaco 的最高对比度主题。",
+    "reducedMotion": "减少动效",
     "reducedMotionDesc": "禁用光标动画、平滑滚动与光标闪烁。",
+    "screenReaderOptimized": "屏幕阅读器优化",
     "screenReaderOptimizedDesc": "为屏幕阅读器强制启用 Monaco 的无障碍 DOM 树。"
   },
   "ai": {
@@ -51,12 +51,19 @@
       "smooth": "平滑",
       "solid": "常亮"
     },
+    "cursorSmoothCaretAnimation": "平滑光标动画",
+    "cursorSmoothCaretAnimationOptions": {
+      "explicit": "仅显式移动时",
+      "off": "关闭",
+      "on": "始终"
+    },
     "cursorStyle": "光标样式",
     "cursorStyleOptions": {
       "block": "方块",
       "line": "竖线",
       "underline": "下划线"
     },
+    "folding": "代码折叠",
     "fontFamily": "字体族",
     "fontFamilyOptions": {
       "cascadiaCode": "Cascadia Code",
@@ -66,11 +73,14 @@
       "sourceCodePro": "Source Code Pro",
       "systemMonospace": "系统等宽字体"
     },
+    "fontLigatures": "字体连字",
     "fontSize": "字体大小",
     "formatOnPaste": "粘贴时格式化",
     "formatOnType": "输入时格式化",
     "indentationGuides": "缩进参考线",
+    "inlineSuggest": "内联补全（幽灵文本）",
     "insertSpaces": "插入空格（代替 Tab）",
+    "letterSpacing": "字符间距",
     "lineHeight": "行高",
     "lineNumbers": "行号",
     "lineNumbersOptions": {
@@ -79,7 +89,17 @@
       "relative": "相对"
     },
     "minimap": "缩略图",
+    "minimapScale": "缩略图缩放",
     "mouseWheelZoom": "滚轮缩放",
+    "paddingBottom": "底部内边距",
+    "paddingTop": "顶部内边距",
+    "renderLineHighlight": "当前行高亮",
+    "renderLineHighlightOptions": {
+      "all": "整行和行号槽",
+      "gutter": "行号槽",
+      "line": "整行",
+      "none": "不高亮"
+    },
     "renderWhitespace": "显示空白字符",
     "renderWhitespaceOptions": {
       "all": "全部",
@@ -89,36 +109,16 @@
       "trailing": "行尾"
     },
     "scrollBeyondLastLine": "滚动超出最后一行",
-    "smoothScrolling": "平滑滚动",
-    "tabSize": "Tab 大小",
-    "wordWrap": "自动换行",
-    "fontLigatures": "字体连字",
-    "letterSpacing": "字符间距",
-    "minimapScale": "缩略图缩放",
-    "renderLineHighlight": "当前行高亮",
-    "renderLineHighlightOptions": {
-      "none": "不高亮",
-      "gutter": "行号槽",
-      "line": "整行",
-      "all": "整行和行号槽"
-    },
-    "stickyScroll": "粘性滚动",
-    "stickyScrollMaxLines": "粘性滚动最大行数",
-    "folding": "代码折叠",
     "showFoldingControls": "折叠控件",
     "showFoldingControlsOptions": {
       "always": "始终显示",
       "mouseover": "悬停时显示"
     },
-    "inlineSuggest": "内联补全（幽灵文本）",
-    "cursorSmoothCaretAnimation": "平滑光标动画",
-    "cursorSmoothCaretAnimationOptions": {
-      "off": "关闭",
-      "explicit": "仅显式移动时",
-      "on": "始终"
-    },
-    "paddingTop": "顶部内边距",
-    "paddingBottom": "底部内边距"
+    "smoothScrolling": "平滑滚动",
+    "stickyScroll": "粘性滚动",
+    "stickyScrollMaxLines": "粘性滚动最大行数",
+    "tabSize": "Tab 大小",
+    "wordWrap": "自动换行"
   },
   "execution": {
     "autoExecute": "保存时自动执行",

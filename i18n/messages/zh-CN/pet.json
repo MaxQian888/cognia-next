@@ -4,6 +4,10 @@
       "description": "达到 10 级。",
       "title": "成年"
     },
+    "automationBuff": {
+      "description": "一起围观了 50 次工作流运行。",
+      "title": "自动化爱好者"
+    },
     "bestFriends": {
       "description": "亲密度拉满。",
       "title": "挚友"
@@ -12,13 +16,25 @@
       "description": "在密集的工作冲刺中把混沌值练满。",
       "title": "混沌小妖"
     },
+    "chatterbox": {
+      "description": "和宠物聊天 100 次。",
+      "title": "话痨"
+    },
     "devotedCaretaker": {
       "description": "长期把宠物的照护质量保持在高位。",
       "title": "尽责饲主"
     },
+    "dragonHoard": {
+      "description": "一次性持有 500 金币。",
+      "title": "巨龙宝库"
+    },
     "elder": {
       "description": "达到 20 级。",
       "title": "长老"
+    },
+    "firstBirthday": {
+      "description": "庆祝了宠物的孵化纪念日。",
+      "title": "第一个生日"
     },
     "firstXp": {
       "description": "获得了第一点经验。",
@@ -56,6 +72,22 @@
       "description": "你拥有一只闪光宠物。",
       "title": "闪光！"
     },
+    "spoiled": {
+      "description": "给了 30 次奖励。",
+      "title": "宠上天"
+    },
+    "squadLeader": {
+      "description": "围观智能体团队运行 50 次。",
+      "title": "小队队长"
+    },
+    "squeakyClean": {
+      "description": "给宠物洗澡 30 次。",
+      "title": "干干净净"
+    },
+    "streakCentury": {
+      "description": "连续 100 天照顾你的宠物。",
+      "title": "百日守护"
+    },
     "streakMonth": {
       "description": "连续 30 天照顾你的宠物。",
       "title": "三十日守护"
@@ -64,9 +96,17 @@
       "description": "连续 7 天照顾你的宠物。",
       "title": "七日相伴"
     },
+    "transcendent": {
+      "description": "达到 30 级。",
+      "title": "超凡入圣"
+    },
     "wellFed": {
       "description": "喂食 50 次。",
       "title": "吃得好"
+    },
+    "wellRounded": {
+      "description": "把每项能力都练到 50 以上。",
+      "title": "全面发展"
     },
     "zenMaster": {
       "description": "把耐心值练到了顶峰。",
@@ -90,6 +130,10 @@
   },
   "bubbles": {
     "achievementUnlocked": ["我们拿到徽章啦！", "成就达成！"],
+    "birthday": {
+      "0": "今天是我的孵化日！🎂",
+      "1": "祝我生日快乐！谢谢你陪我又一年！"
+    },
     "cleaned": {
       "0": "干干净净！",
       "1": "好清爽！"
@@ -118,6 +162,10 @@
       "0": "呼呼…",
       "1": "好舒服…"
     },
+    "streakDay": {
+      "0": "在一起第 {days} 天啦！金币滚滚来！",
+      "1": "连续 {days} 天——我们势头正旺！"
+    },
     "snarky": {
       "error": ["这代码谁写的？…哦。", "反正不是我的锅。"],
       "fed": ["总算想起我了。", "勉强能吃。"],
@@ -143,33 +191,29 @@
       "title": "你的宠物不太舒服"
     }
   },
-  "notifications": {
-    "scheduledDue": {
-      "title": "定时任务到点",
-      "body": "「{taskName}」现在到点啦。",
-      "bodyGeneric": "你有一个定时任务现在到点啦。"
-    }
-  },
   "chat": {
-    "you": "你",
-    "petFallbackName": "宠物",
-    "empty": "跟你的宠物打个招呼吧——它现在能回话啦。",
-    "sending": "{name} 正在思考…",
-    "openFullChat": "打开完整对话",
-    "openPanel": "聊天",
-    "enableCta": {
-      "title": "开启宠物聊天",
-      "body": "让宠物用你配置的模型真正回话。它依然俏皮，也绝不会发送个人信息。",
-      "action": "开启聊天"
-    },
     "degrade": {
       "disabled": "宠物聊天当前已关闭。",
-      "pii": "这看起来像是个人信息，我帮你保密没有发送。",
-      "rateLimited": "让我喘口气，稍等一下…",
-      "noClient": "还没有配置聊天模型——去宠物设置里看看吧。",
       "empty": "唔，这个我暂时没什么好说的。",
-      "error": "连接模型时出错了，要不再试一次？"
-    }
+      "error": "连接模型时出错了，要不再试一次？",
+      "noClient": "还没有配置聊天模型——去宠物设置里看看吧。",
+      "pii": "这看起来像是个人信息，我帮你保密没有发送。",
+      "rateLimited": "让我喘口气，稍等一下…"
+    },
+    "empty": "跟你的宠物打个招呼吧——它现在能回话啦。",
+    "enableCta": {
+      "action": "开启聊天",
+      "body": "让宠物用你配置的模型真正回话。它依然俏皮，也绝不会发送个人信息。",
+      "title": "开启宠物聊天"
+    },
+    "openFullChat": "打开完整对话",
+    "openPanel": "聊天",
+    "petFallbackName": "宠物",
+    "sending": "{name} 正在思考…",
+    "you": "你"
+  },
+  "condition": {
+    "unwell": "需要照顾"
   },
   "console": {
     "hatch": "孵化",
@@ -183,12 +227,37 @@
       "chat": "聊天",
       "customize": "自定义",
       "dex": "图鉴",
+      "insights": "洞察",
+      "journal": "日记",
       "nurture": "养育",
       "plugins": "插件",
-      "shop": "商店",
-      "insights": "洞察"
+      "shop": "商店"
     },
     "title": "你的宠物"
+  },
+  "journal": {
+    "dayTotals": "{count} 条 · +{xp} XP",
+    "empty": "日记还是空的——照顾你的宠物，它的每一天都会记录在这里。",
+    "kinds": {
+      "cleaned": "洗得干干净净",
+      "fed": "吃了一顿饭",
+      "goalComplete": "庆祝目标完成",
+      "goalProgress": "为目标进展欢呼",
+      "inboundMessage": "注意到新消息",
+      "petted": "被摸了摸头",
+      "played": "一起玩耍",
+      "review": "查看了一些结果",
+      "scheduledRun": "围观定时任务",
+      "scheduledRunStarting": "看到任务启动",
+      "slept": "睡了个午觉",
+      "success": "庆祝一次成功",
+      "talked": "聊了聊天",
+      "teamRun": "围观智能体团队干活",
+      "treated": "收到小奖励",
+      "workflowRun": "围观工作流运行"
+    },
+    "loading": "正在翻开日记…",
+    "xp": "+{xp} XP"
   },
   "customize": {
     "appearance": {
@@ -228,6 +297,7 @@
         "wizard": "巫师帽"
       },
       "hatchFirst": "先孵化宠物才能自定义外观。",
+      "lockedOption": "{name} — 🔒 商店",
       "palette": "颜色",
       "paletteOptions": {
         "amber": "琥珀",
@@ -275,13 +345,30 @@
     "speciesTitle": "内置物种",
     "useMascot": "使用内置形象"
   },
+  "inventory": {
+    "title": "道具"
+  },
   "live2d": {
     "loadFailed": "无法加载 Live2D 模型，已改为显示 SVG 宠物。"
+  },
+  "mood": {
+    "content": "满足",
+    "grumpy": "暴躁",
+    "happy": "开心",
+    "lonely": "孤单",
+    "tired": "疲惫"
   },
   "needs": {
     "bond": "亲密",
     "energy": "精力",
     "mood": "心情"
+  },
+  "notifications": {
+    "scheduledDue": {
+      "body": "「{taskName}」现在到点啦。",
+      "bodyGeneric": "你有一个定时任务现在到点啦。",
+      "title": "定时任务到点"
+    }
   },
   "overlay": {
     "petLabel": "桌面宠物",
@@ -322,15 +409,60 @@
     "balance": "{coins} 金币",
     "buy": "购买",
     "categories": {
+      "care": "护理",
       "decor": "装饰",
       "food": "食物",
       "toy": "玩具"
     },
     "insufficient": "金币不足",
     "items": {
+      "beanie": {
+        "description": "一顶柔软针织帽，适合慵懒的日子。",
+        "title": "针织帽"
+      },
       "berry": {
         "description": "小零嘴——恢复少量精力。",
         "title": "浆果"
+      },
+      "bubbleBath": {
+        "description": "暖暖的泡泡浴，洗完闪闪发亮。",
+        "title": "泡泡浴"
+      },
+      "cookie": {
+        "description": "甜甜的小饼干，让心情变好。",
+        "title": "曲奇饼干"
+      },
+      "cozyBlanket": {
+        "description": "把宠物裹起来，睡个深沉的好觉。",
+        "title": "舒适毯子"
+      },
+      "energyDrink": {
+        "description": "精力大爆发——随后有点小低落。",
+        "title": "能量饮料"
+      },
+      "firstAidKit": {
+        "description": "全套护理装备——康复的最快捷径。",
+        "title": "急救箱"
+      },
+      "frisbee": {
+        "description": "运动量十足——羁绊拉满，玩完很累。",
+        "title": "飞盘"
+      },
+      "haloRing": {
+        "description": "轻轻发光的天使光环，圣洁气质。",
+        "title": "天使光环"
+      },
+      "herbalTea": {
+        "description": "安神的草本茶，抚平情绪。",
+        "title": "草本茶"
+      },
+      "plushie": {
+        "description": "柔软的玩偶伙伴，宠物的最爱。",
+        "title": "毛绒玩偶"
+      },
+      "propellerCap": {
+        "description": "带旋转螺旋桨的俏皮小帽。",
+        "title": "螺旋桨帽"
       },
       "puzzleCube": {
         "description": "安静的益智玩具，加深羁绊。",
@@ -340,9 +472,25 @@
         "description": "丰盛大餐——大幅恢复精力。",
         "title": "皇家盛宴"
       },
+      "squeakyDuck": {
+        "description": "吱吱——立刻开心起来。",
+        "title": "吱吱鸭"
+      },
       "starCharm": {
         "description": "一顶小小的王冠饰品，让宠物戴上。",
         "title": "星星挂饰"
+      },
+      "sushiSet": {
+        "description": "营养均衡的一餐，用心摆盘。",
+        "title": "寿司拼盘"
+      },
+      "tophatBox": {
+        "description": "潇洒的礼帽，正式场合必备。",
+        "title": "绅士礼帽"
+      },
+      "wizardHat": {
+        "description": "戴上尖顶帽，引导神秘能量。",
+        "title": "巫师帽"
       },
       "yarnBall": {
         "description": "弹跳毛线球，尽情玩耍。",
@@ -381,6 +529,14 @@
     "wisdom": "智慧"
   },
   "statCard": {
+    "flavor": {
+      "plain": "朴素",
+      "radiant": "光辉"
+    },
+    "flavorHint": {
+      "plain": "在低照护质量下进化——下次好好照顾就会不一样。",
+      "radiant": "在精心照护下进化——这是用心的印记。"
+    },
     "grew": "因和你一起工作而成长",
     "shiny": "闪光",
     "unhatched": "未孵化"
@@ -389,25 +545,12 @@
     "placeholder": "对宠物说点什么…",
     "send": "发送"
   },
+  "wallet": {
+    "multiplier": "金币 ×{multiplier}"
+  },
   "widget": {
     "minimize": "最小化宠物",
     "restore": "显示宠物",
     "toggle": "打开宠物"
-  },
-  "mood": {
-    "content": "满足",
-    "happy": "开心",
-    "tired": "疲惫",
-    "lonely": "孤单",
-    "grumpy": "暴躁"
-  },
-  "condition": {
-    "unwell": "需要照顾"
-  },
-  "wallet": {
-    "multiplier": "金币 ×{multiplier}"
-  },
-  "inventory": {
-    "title": "道具"
   }
 }

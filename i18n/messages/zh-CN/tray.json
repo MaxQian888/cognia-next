@@ -54,5 +54,12 @@
     "placeholder": "状态",
     "streaming": "回复中…"
   },
-  "toggleWindow": "显示 / 隐藏窗口"
+  "toggleWindow": "显示 / 隐藏窗口",
+  "usage": {
+    "auto": "自动（用量最高）",
+    "empty": "暂无额度数据",
+    "openSettings": "订阅设置…",
+    "refresh": "刷新额度",
+    "title": "订阅额度"
+  }
 }

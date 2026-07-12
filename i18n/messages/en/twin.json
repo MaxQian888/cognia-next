@@ -1,4 +1,35 @@
 {
+  "addSource": {
+    "added": "Added {count, plural, =1 {1 source} other {# sources}}.",
+    "adding": "Adding…",
+    "back": "Back",
+    "charCount": "{count} chars",
+    "confirmAdd": "Add {count, plural, =1 {1 source} other {# sources}}",
+    "description": "Choose where the content comes from, preview what was extracted, then confirm.",
+    "extract": "Fetch & preview",
+    "extracting": "Extracting…",
+    "includeAria": "Include {title}",
+    "pickTypeLabel": "Source type",
+    "reviewTitle": "Review before adding",
+    "selectedCount": "{selected} of {count} selected",
+    "skippedFiles": "Some files were skipped",
+    "switchToLark": "Fetch it as a Feishu doc instead",
+    "title": "Add sources",
+    "type": {
+      "file": "Files",
+      "git": "Git repository",
+      "lark": "Feishu doc",
+      "paste": "Paste text",
+      "url": "Web page"
+    },
+    "typeDesc": {
+      "file": "Documents, spreadsheets, chat exports, mailboxes…",
+      "git": "Import commits from a local repository (desktop only).",
+      "lark": "A Feishu doc or wiki page, read with a bound account.",
+      "paste": "Paste any text snippet directly.",
+      "url": "Fetch an article or docs page by URL."
+    }
+  },
   "charts": {
     "description": "Live indexing stats — refreshes as ingest jobs complete in any tab.",
     "growthChunks": "Chunks",
@@ -348,8 +379,20 @@
       "dingTalkParseFailedFallback": "Failed to parse DingTalk export (fallback parser also rejected it)",
       "fileEmpty": "File is empty",
       "formatUnsupported": "Unsupported file format",
+      "gitWalkFailed": "Could not walk the repository: {reason}",
       "importParseFailed": "Failed to parse export",
       "importParseFailedFallback": "Failed to parse export (fallback parser also rejected it)",
+      "larkBrowserUnsupported": "Feishu docs can only be fetched in the desktop app (the browser blocks cross-origin requests).",
+      "larkCliUnavailable": "lark-cli is not available in this environment.",
+      "larkEmptyDoc": "The document {title} has no readable text.",
+      "larkInvalidUrl": "This does not look like a Feishu/Lark doc link or token.",
+      "larkNetwork": "Feishu request failed: {reason}",
+      "larkNoAccount": "No Feishu account selected. Bind one in Settings → Connections first.",
+      "larkNoPermission": "The account {account} has no permission to read this document. Ask for access, or complete the user authorization in Settings → Connections.",
+      "larkNotAuthorized": "The Feishu account {account} is missing credentials. Re-authorize it in Settings → Connections.",
+      "larkNotFound": "Document not found — it may have been deleted, or the link is wrong.",
+      "larkRateLimited": "Feishu rate limit hit — wait a moment and try again.",
+      "larkUnsupportedType": "This link points to a {type} object; only docs and wiki pages are supported for now.",
       "noCommitsFound": "No commits found in the selected repository",
       "noMessagesParsed": "No messages parsed",
       "noTextExtracted": "No text could be extracted",
@@ -361,19 +404,7 @@
       "urlEmpty": "Enter a URL first",
       "urlFetchFailed": "Couldn’t fetch that URL: {reason}",
       "urlInvalid": "That doesn’t look like a valid URL",
-      "urlNoText": "That URL returned no readable text",
-      "gitWalkFailed": "Could not walk the repository: {reason}",
-      "larkInvalidUrl": "This does not look like a Feishu/Lark doc link or token.",
-      "larkNoAccount": "No Feishu account selected. Bind one in Settings → Connections first.",
-      "larkNotAuthorized": "The Feishu account {account} is missing credentials. Re-authorize it in Settings → Connections.",
-      "larkNoPermission": "The account {account} has no permission to read this document. Ask for access, or complete the user authorization in Settings → Connections.",
-      "larkNotFound": "Document not found — it may have been deleted, or the link is wrong.",
-      "larkUnsupportedType": "This link points to a {type} object; only docs and wiki pages are supported for now.",
-      "larkRateLimited": "Feishu rate limit hit — wait a moment and try again.",
-      "larkEmptyDoc": "The document {title} has no readable text.",
-      "larkBrowserUnsupported": "Feishu docs can only be fetched in the desktop app (the browser blocks cross-origin requests).",
-      "larkCliUnavailable": "lark-cli is not available in this environment.",
-      "larkNetwork": "Feishu request failed: {reason}"
+      "urlNoText": "That URL returned no readable text"
     },
     "fetching": "Fetching…",
     "filesDescription": "Text formats (Markdown / CSV / HTML / JSON / source code / .eml / .mbox) are stored as-is. Binary formats (PDF / DOCX / PPTX / EPUB / ODT / ODP) are parsed in the browser; only the extracted text lands in Dexie. Chat exports (ChatGPT / Claude / Gemini / Slack / Lark / WeChat / DingTalk) and mbox files fan out into one source per conversation.",
@@ -383,6 +414,20 @@
     "gitRepoTitle": "From a local Git repository",
     "importedSummaryPlural": "Imported {count} sources.",
     "importedSummarySingular": "Imported 1 source.",
+    "lark": {
+      "accountLabel": "Feishu account",
+      "accountPlaceholder": "Choose an account",
+      "appOnlyHint": "This account has no connected user — documents will be read with the bot identity, which usually sees fewer docs. Complete the user authorization for personal permissions.",
+      "browserModeHint": "Feishu fetching requires the desktop app.",
+      "detectedDoc": "Feishu doc link detected",
+      "detectedWiki": "Feishu wiki link detected",
+      "goBind": "Bind one in Settings → Connections",
+      "loadingAccounts": "Loading bound accounts…",
+      "noAccounts": "No Feishu account is bound yet.",
+      "sectionDescription": "Fetch a Feishu doc or wiki page with one of your bound Feishu accounts.",
+      "urlLabel": "Doc link or token",
+      "urlPlaceholder": "https://xxx.feishu.cn/docx/… or doxcn…"
+    },
     "maxCommits": "Max commits",
     "pasteTitle": "Or paste text",
     "perFileSrcPlural": "{count} srcs",
@@ -401,21 +446,7 @@
     "urlPlaceholder": "https://example.com/article",
     "urlTitle": "From a URL",
     "walking": "Walking…",
-    "webModeHint": "In the browser, cross-origin fetches may be blocked by CORS. The desktop app fetches through a local proxy without this limit.",
-    "lark": {
-      "sectionDescription": "Fetch a Feishu doc or wiki page with one of your bound Feishu accounts.",
-      "accountLabel": "Feishu account",
-      "accountPlaceholder": "Choose an account",
-      "loadingAccounts": "Loading bound accounts…",
-      "noAccounts": "No Feishu account is bound yet.",
-      "goBind": "Bind one in Settings → Connections",
-      "appOnlyHint": "This account has no connected user — documents will be read with the bot identity, which usually sees fewer docs. Complete the user authorization for personal permissions.",
-      "detectedDoc": "Feishu doc link detected",
-      "detectedWiki": "Feishu wiki link detected",
-      "urlLabel": "Doc link or token",
-      "urlPlaceholder": "https://xxx.feishu.cn/docx/… or doxcn…",
-      "browserModeHint": "Feishu fetching requires the desktop app."
-    }
+    "webModeHint": "In the browser, cross-origin fetches may be blocked by CORS. The desktop app fetches through a local proxy without this limit."
   },
   "sources": {
     "addSource": "Add source",
@@ -538,36 +569,5 @@
     "templateSelfHint": "A twin of my own voice and knowledge.",
     "title": "Create a digital twin",
     "workerEnabled": "Worker enabled"
-  },
-  "addSource": {
-    "title": "Add sources",
-    "description": "Choose where the content comes from, preview what was extracted, then confirm.",
-    "pickTypeLabel": "Source type",
-    "type": {
-      "file": "Files",
-      "url": "Web page",
-      "lark": "Feishu doc",
-      "paste": "Paste text",
-      "git": "Git repository"
-    },
-    "typeDesc": {
-      "file": "Documents, spreadsheets, chat exports, mailboxes…",
-      "url": "Fetch an article or docs page by URL.",
-      "lark": "A Feishu doc or wiki page, read with a bound account.",
-      "paste": "Paste any text snippet directly.",
-      "git": "Import commits from a local repository (desktop only)."
-    },
-    "back": "Back",
-    "extract": "Fetch & preview",
-    "extracting": "Extracting…",
-    "switchToLark": "Fetch it as a Feishu doc instead",
-    "reviewTitle": "Review before adding",
-    "selectedCount": "{selected} of {count} selected",
-    "skippedFiles": "Some files were skipped",
-    "includeAria": "Include {title}",
-    "charCount": "{count} chars",
-    "confirmAdd": "Add {count, plural, =1 {1 source} other {# sources}}",
-    "adding": "Adding…",
-    "added": "Added {count, plural, =1 {1 source} other {# sources}}."
   }
 }

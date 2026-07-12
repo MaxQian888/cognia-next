@@ -6,6 +6,12 @@
   },
   "island": {
     "empty": "No active agents",
+    "legend": {
+      "done": "{count} done",
+      "idle": "{count} idle",
+      "needsYou": "{count} waiting",
+      "working": "{count} working"
+    },
     "summary": "{count, plural, one {# agent} other {# agents}}",
     "summaryWaiting": "{count, plural, one {# agent} other {# agents}} · {waiting} waiting",
     "toggle": "Toggle agent list"
@@ -26,7 +32,39 @@
     "send": "Send"
   },
   "row": {
+    "detail": {
+      "branch": "Branch",
+      "cwd": "Path",
+      "duration": "Ran {duration}",
+      "ended": "Ended",
+      "pid": "PID {pid}",
+      "sessionRef": "Session",
+      "source": {
+        "clear": "Cleared",
+        "compact": "Compacted",
+        "resume": "Resumed",
+        "startup": "Fresh start"
+      },
+      "started": "Started",
+      "toggleHide": "Hide details",
+      "toggleShow": "Show details",
+      "tools": "{count, plural, one {# tool call} other {# tool calls}}",
+      "turns": "{count, plural, one {# turn} other {# turns}}"
+    },
+    "error": {
+      "tool": "Tool error",
+      "turn": "Turn failed"
+    },
     "focusTerminal": "Focus terminal",
+    "meta": {
+      "model": "Model: {model}",
+      "permissionMode": "Permission mode: {mode}"
+    },
+    "multiSelect": "Select all that apply",
+    "openTranscript": "Reveal transcript",
+    "questionMore": "{count, plural, one {+# more question} other {+# more questions}}",
+    "subagentBackground": "bg",
+    "subagents": "{count, plural, one {# subagent} other {# subagents}}",
     "status": {
       "ended": "Session ended",
       "idle": "Idle",
@@ -35,6 +73,7 @@
       "waitingPermission": "Waiting for permission approval",
       "working": "Working…"
     },
+    "waitingFor": "waiting {duration}",
     "you": "You:"
   }
 }

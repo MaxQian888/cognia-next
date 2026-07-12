@@ -1,14 +1,14 @@
 {
   "a11y": {
     "announceErrors": "Announce errors",
-    "focusIndicator": "Focus indicator",
-    "highContrast": "High contrast",
-    "reducedMotion": "Reduced motion",
-    "screenReaderOptimized": "Screen reader optimised",
     "announceErrorsDesc": "Speak AI-action failures aloud via an assistive-tech alert region.",
+    "focusIndicator": "Focus indicator",
     "focusIndicatorDesc": "Draw a ring around the editor whenever focus is inside it.",
+    "highContrast": "High contrast",
     "highContrastDesc": "Force Monaco's maximal-contrast high-contrast theme.",
+    "reducedMotion": "Reduced motion",
     "reducedMotionDesc": "Disable caret animation, smooth scrolling, and cursor blink.",
+    "screenReaderOptimized": "Screen reader optimised",
     "screenReaderOptimizedDesc": "Force Monaco's accessible DOM tree for screen readers."
   },
   "ai": {
@@ -51,12 +51,19 @@
       "smooth": "Smooth",
       "solid": "Solid"
     },
+    "cursorSmoothCaretAnimation": "Smooth caret animation",
+    "cursorSmoothCaretAnimationOptions": {
+      "explicit": "On explicit moves",
+      "off": "Off",
+      "on": "Always"
+    },
     "cursorStyle": "Cursor style",
     "cursorStyleOptions": {
       "block": "Block",
       "line": "Line",
       "underline": "Underline"
     },
+    "folding": "Code folding",
     "fontFamily": "Font family",
     "fontFamilyOptions": {
       "cascadiaCode": "Cascadia Code",
@@ -66,11 +73,14 @@
       "sourceCodePro": "Source Code Pro",
       "systemMonospace": "System monospace"
     },
+    "fontLigatures": "Font ligatures",
     "fontSize": "Font size",
     "formatOnPaste": "Format on paste",
     "formatOnType": "Format on type",
     "indentationGuides": "Indentation guides",
+    "inlineSuggest": "Inline completions (ghost text)",
     "insertSpaces": "Insert spaces (vs. tabs)",
+    "letterSpacing": "Letter spacing",
     "lineHeight": "Line height",
     "lineNumbers": "Line numbers",
     "lineNumbersOptions": {
@@ -79,7 +89,17 @@
       "relative": "Relative"
     },
     "minimap": "Minimap",
+    "minimapScale": "Minimap scale",
     "mouseWheelZoom": "Mouse-wheel zoom",
+    "paddingBottom": "Bottom padding",
+    "paddingTop": "Top padding",
+    "renderLineHighlight": "Current line highlight",
+    "renderLineHighlightOptions": {
+      "all": "Line & gutter",
+      "gutter": "Gutter",
+      "line": "Line",
+      "none": "None"
+    },
     "renderWhitespace": "Render whitespace",
     "renderWhitespaceOptions": {
       "all": "All",
@@ -89,36 +109,16 @@
       "trailing": "Trailing"
     },
     "scrollBeyondLastLine": "Scroll beyond last line",
-    "smoothScrolling": "Smooth scrolling",
-    "tabSize": "Tab size",
-    "wordWrap": "Word wrap",
-    "fontLigatures": "Font ligatures",
-    "letterSpacing": "Letter spacing",
-    "minimapScale": "Minimap scale",
-    "renderLineHighlight": "Current line highlight",
-    "renderLineHighlightOptions": {
-      "none": "None",
-      "gutter": "Gutter",
-      "line": "Line",
-      "all": "Line & gutter"
-    },
-    "stickyScroll": "Sticky scroll",
-    "stickyScrollMaxLines": "Sticky scroll max lines",
-    "folding": "Code folding",
     "showFoldingControls": "Folding controls",
     "showFoldingControlsOptions": {
       "always": "Always visible",
       "mouseover": "On hover"
     },
-    "inlineSuggest": "Inline completions (ghost text)",
-    "cursorSmoothCaretAnimation": "Smooth caret animation",
-    "cursorSmoothCaretAnimationOptions": {
-      "off": "Off",
-      "explicit": "On explicit moves",
-      "on": "Always"
-    },
-    "paddingTop": "Top padding",
-    "paddingBottom": "Bottom padding"
+    "smoothScrolling": "Smooth scrolling",
+    "stickyScroll": "Sticky scroll",
+    "stickyScrollMaxLines": "Sticky scroll max lines",
+    "tabSize": "Tab size",
+    "wordWrap": "Word wrap"
   },
   "execution": {
     "autoExecute": "Auto-execute on save",

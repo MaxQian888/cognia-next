@@ -1,0 +1,42 @@
+{
+  "connectFirst": "Connect to your desktop to watch its agent fleet.",
+  "empty": "No active agents.",
+  "permission": {
+    "allow": "Allow",
+    "allowed": "Allowed",
+    "controlLost": "Remote control was revoked.",
+    "countdown": "{seconds}s",
+    "denied": "Denied",
+    "deny": "Deny",
+    "expired": "Answered on desktop",
+    "failed": "Couldn't send — try again.",
+    "request": "Permission: {tool}",
+    "requestGeneric": "Permission requested"
+  },
+  "reply": {
+    "failed": "Couldn't send — try again.",
+    "open": "Reply",
+    "placeholder": "Send a message…",
+    "send": "Send"
+  },
+  "row": {
+    "error": {
+      "tool": "Tool error",
+      "turn": "Turn failed"
+    },
+    "focus": "Focus terminal",
+    "focusFailed": "Couldn't focus the terminal.",
+    "status": {
+      "ended": "Session ended",
+      "idle": "Idle",
+      "planPending": "Plan awaiting approval on desktop",
+      "waitingInput": "Waiting for input on desktop",
+      "waitingPermission": "Waiting for permission",
+      "working": "Working…"
+    },
+    "you": "You:"
+  },
+  "summary": "{total, plural, one {# agent} other {# agents}}",
+  "title": "Agent Fleet",
+  "waiting": "{count} waiting"
+}

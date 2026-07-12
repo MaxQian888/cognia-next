@@ -9,9 +9,9 @@
     "off": "关闭",
     "perDay": "每天 {count} 次",
     "protectedBranches": "受保护分支",
-    "required": "必需",
     "requireGreenCi": "要求 CI 通过",
     "requireHumanApproval": "要求人工审批",
+    "required": "必需",
     "title": "默认策略"
   },
   "runtimeNote": "投递机器人在已配对的桌面端运行。审计决策和速率限制用量可在桌面端实时查看。",

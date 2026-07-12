@@ -1,5 +1,8 @@
 {
+  "bookmark": "Bookmark",
+  "bookmarkRemove": "Remove bookmark",
   "branch": "Branch conversation",
+  "branchVariants": "Reply variants",
   "copy": "Copy text",
   "copyFailed": "Copy failed: {message}",
   "copySuccess": "Copied to clipboard.",
@@ -10,12 +13,18 @@
   "deleteFailed": "Delete failed: {message}",
   "deleteSuccess": "Message deleted.",
   "description": "Pick an action.",
+  "edit": "Edit & resend",
+  "editFailed": "Resend failed: {message}",
+  "editInputAria": "Edit message text",
+  "editResend": "Resend",
   "longPressHint": "Long-press a message for actions",
   "quote": "Quote",
+  "readAloud": "Read aloud",
   "regenerate": "Regenerate reply",
   "share": "Share…",
   "shareDialogTitle": "Share via",
   "shareFailed": "Share failed: {message}",
   "shareUnsupported": "Sharing isn't supported on this device.",
+  "stopReading": "Stop reading",
   "title": "Message"
 }

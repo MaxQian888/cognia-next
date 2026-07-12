@@ -37,69 +37,42 @@
       "label": "启用工具"
     }
   },
-  "mobileCamera": {
-    "quality": {
-      "label": "JPEG 质量（1–100）"
+  "aggregate": {
+    "keyExpression": {
+      "hint": "逐项取键。$item 为当前项，例如 $item.category",
+      "label": "键表达式"
     },
-    "width": {
-      "label": "最大宽度（px）"
-    }
-  },
-  "mobileLocation": {
-    "enableHighAccuracy": {
-      "label": "高精度（GPS）"
-    }
-  },
-  "mobileNotify": {
-    "body": {
-      "label": "内容"
+    "numericField": {
+      "hint": "逐项取数值。留空表示项本身。",
+      "label": "取值表达式"
     },
-    "title": {
-      "label": "标题"
-    }
-  },
-  "mobileScanBarcode": {
-    "formats": {
-      "hint": "逗号分隔（如 QR_CODE, EAN_13）。留空 = 仅二维码。",
-      "label": "格式"
-    }
-  },
-  "mobileShare": {
-    "text": {
-      "hint": "文本或 URL 必填其一。",
-      "label": "文本"
+    "numericOp": {
+      "label": "函数",
+      "options": {
+        "avg": "平均",
+        "count": "计数",
+        "max": "最大",
+        "min": "最小",
+        "sum": "求和"
+      }
     },
-    "title": {
-      "label": "标题（可选）"
+    "operation": {
+      "hint": "如何把输入列表归约为单个值。",
+      "label": "操作",
+      "options": {
+        "collect": "收集（成列表）",
+        "concat": "拼接（展开一层）",
+        "custom": "自定义归约",
+        "dedupe": "去重",
+        "groupBy": "按键分组",
+        "mergeObjects": "合并对象",
+        "numeric": "数值（求和 / 平均 / …）"
+      }
     },
-    "url": {
-      "label": "URL（可选）"
-    }
-  },
-  "mobileStep": {
-    "deviceId": {
-      "hint": "留空 = 任意具备能力的已配对设备（最近活跃优先）。",
-      "label": "设备 ID（可选）"
-    },
-    "timeoutMs": {
-      "label": "超时（毫秒）"
-    }
-  },
-  "approvalRequest": {
-    "message": {
-      "label": "说明（可选）"
-    },
-    "onTimeout": {
-      "fail": "步骤失败",
-      "label": "超时处理",
-      "reject": "按已拒绝路由"
-    },
-    "timeoutMs": {
-      "hint": "等待决定的时长。默认 1 小时。",
-      "label": "超时（毫秒）"
-    },
-    "title": {
-      "label": "标题"
+    "reducerExpression": {
+      "hint": "返回新累加器的 JS 表达式。作用域内有 acc、item、index。",
+      "label": "归约表达式 (JS)",
+      "placeholder": "acc + item.value"
     }
   },
   "aiClassify": {
@@ -144,6 +117,47 @@
       "hint": "Provider id，可填写 openrouter、deepseek、groq、codex、azure 等 OpenAI 兼容 id。",
       "label": "提供方",
       "placeholder": "openrouter"
+    }
+  },
+  "aiCouncil": {
+    "councillorsJson": {
+      "hint": "{ name, modelAlias, systemPrompt? } 对象数组。modelAlias 使用「设置 -> 路由」中的别名。",
+      "label": "议会成员 JSON",
+      "placeholder": "[\n  { \"name\": \"Reviewer\", \"modelAlias\": \"smart\" },\n  { \"name\": \"Fast pass\", \"modelAlias\": \"fast\" }\n]"
+    },
+    "executionMode": {
+      "label": "执行模式",
+      "options": {
+        "parallel": "并行",
+        "serial": "串行"
+      }
+    },
+    "maxConcurrency": {
+      "hint": "并行模式下同时运行的议会成员调用数上限。",
+      "label": "最大并发"
+    },
+    "piiGate": {
+      "block": "拦截（让步骤失败）",
+      "hint": "在提示词外发到每个议会成员和综合器前运行。",
+      "label": "PII 闸",
+      "off": "关闭",
+      "redact": "脱敏"
+    },
+    "prompt": {
+      "label": "提示词"
+    },
+    "synthesisInstructions": {
+      "hint": "终审综合步骤的可选指导。",
+      "label": "综合指导"
+    },
+    "synthesizerAlias": {
+      "hint": "用于合并各模型回答的路由模型别名。",
+      "label": "综合器别名",
+      "placeholder": "quality"
+    },
+    "timeoutMs": {
+      "hint": "单个议会成员的超时时间。有效范围：1000-600000 毫秒。",
+      "label": "超时（毫秒）"
     }
   },
   "aiEmbed": {
@@ -233,15 +247,15 @@
       "label": "Base URL（可选）",
       "placeholder": "https://api.openai.com/v1"
     },
-    "jsonSchema": {
-      "hint": "希望模型匹配的示例形状，会注入到提示词中。",
-      "label": "JSON 形状（可选）",
-      "placeholder": "{\n  \"title\": \"string\",\n  \"score\": \"number\"\n}"
-    },
     "headersJson": {
       "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
       "label": "Headers JSON（可选）",
       "placeholder": "{ \"HTTP-Referer\": \"https://app.example\", \"X-Title\": \"Cognia\" }"
+    },
+    "jsonSchema": {
+      "hint": "希望模型匹配的示例形状，会注入到提示词中。",
+      "label": "JSON 形状（可选）",
+      "placeholder": "{\n  \"title\": \"string\",\n  \"score\": \"number\"\n}"
     },
     "mode": {
       "explicit": "指定提供方",
@@ -288,45 +302,21 @@
       "label": "用户提示词"
     }
   },
-  "aiCouncil": {
-    "councillorsJson": {
-      "hint": "{ name, modelAlias, systemPrompt? } 对象数组。modelAlias 使用「设置 -> 路由」中的别名。",
-      "label": "议会成员 JSON",
-      "placeholder": "[\n  { \"name\": \"Reviewer\", \"modelAlias\": \"smart\" },\n  { \"name\": \"Fast pass\", \"modelAlias\": \"fast\" }\n]"
+  "approvalRequest": {
+    "message": {
+      "label": "说明（可选）"
     },
-    "executionMode": {
-      "label": "执行模式",
-      "options": {
-        "parallel": "并行",
-        "serial": "串行"
-      }
-    },
-    "maxConcurrency": {
-      "hint": "并行模式下同时运行的议会成员调用数上限。",
-      "label": "最大并发"
-    },
-    "piiGate": {
-      "block": "拦截（让步骤失败）",
-      "hint": "在提示词外发到每个议会成员和综合器前运行。",
-      "label": "PII 闸",
-      "off": "关闭",
-      "redact": "脱敏"
-    },
-    "prompt": {
-      "label": "提示词"
-    },
-    "synthesisInstructions": {
-      "hint": "终审综合步骤的可选指导。",
-      "label": "综合指导"
-    },
-    "synthesizerAlias": {
-      "hint": "用于合并各模型回答的路由模型别名。",
-      "label": "综合器别名",
-      "placeholder": "quality"
+    "onTimeout": {
+      "fail": "步骤失败",
+      "label": "超时处理",
+      "reject": "按已拒绝路由"
     },
     "timeoutMs": {
-      "hint": "单个议会成员的超时时间。有效范围：1000-600000 毫秒。",
+      "hint": "等待决定的时长。默认 1 小时。",
       "label": "超时（毫秒）"
+    },
+    "title": {
+      "label": "标题"
     }
   },
   "branch": {
@@ -462,6 +452,16 @@
       "placeholder": "上界"
     }
   },
+  "connectorDelete": {
+    "adapter": {
+      "label": "适配器"
+    },
+    "messageId": {
+      "label": "消息 ID",
+      "hint": "要撤回/删除的平台消息 ID。",
+      "placeholder": "om_..."
+    }
+  },
   "connectorDraft": {
     "content": {
       "label": "草稿内容"
@@ -486,12 +486,78 @@
       "label": "适配器",
       "placeholder": "telegram_main"
     },
+    "channelKinds": {
+      "hint": "仅在选中的会话类型中触发；不选表示全部。",
+      "label": "会话类型（可选）",
+      "options": {
+        "channel": "频道",
+        "group": "群聊",
+        "private": "私聊",
+        "thread": "话题"
+      }
+    },
     "characterId": {
       "label": "角色（可选）"
     },
     "conversationKey": {
       "hint": "可选。限定特定会话；留空时任意会话都会触发。",
       "label": "会话标识"
+    },
+    "keywords": {
+      "hint": "逗号分隔、不区分大小写的子串；任一命中消息文本即触发。",
+      "label": "关键词（可选）",
+      "placeholder": "部署, 发布"
+    },
+    "requireMention": {
+      "hint": "仅当机器人被 @ 提及时触发。",
+      "label": "要求 @ 提及"
+    },
+    "senderIds": {
+      "hint": "逗号分隔的平台用户 ID；仅这些发送者的消息会触发。",
+      "label": "发送者 ID（可选）",
+      "placeholder": "ou_abc, ou_def"
+    }
+  },
+  "connectorReaction": {
+    "adapter": {
+      "label": "适配器"
+    },
+    "op": {
+      "label": "操作",
+      "options": {
+        "add": "添加回应",
+        "remove": "移除回应"
+      }
+    },
+    "messageId": {
+      "label": "消息 ID",
+      "hint": "要添加回应的平台消息 ID。",
+      "placeholder": "om_..."
+    },
+    "emoji": {
+      "label": "表情",
+      "hint": "平台回应代码（飞书：THUMBSUP、OK 等）或 Unicode 表情。",
+      "placeholder": "THUMBSUP"
+    },
+    "reactionId": {
+      "label": "回应 ID",
+      "hint": "要移除的回应 ID（来自前置添加节点的输出）。",
+      "placeholder": "ZCaGnix..."
+    }
+  },
+  "connectorForward": {
+    "adapter": {
+      "label": "适配器"
+    },
+    "messageId": {
+      "label": "消息 ID",
+      "hint": "要转发的平台消息 ID。",
+      "placeholder": "om_..."
+    },
+    "target": {
+      "label": "目标会话",
+      "hint": "目标会话键（platform:adapterId:chatId）或原始 receive id。",
+      "placeholder": "lark:bot:oc_..."
     }
   },
   "connectorSend": {
@@ -504,6 +570,61 @@
     },
     "conversationKey": {
       "label": "会话标识"
+    },
+    "editTarget": {
+      "hint": "原位编辑该条已发送的平台消息，而不是发送新消息。不支持编辑的平台会退回发送新消息。",
+      "label": "编辑消息 ID（可选）",
+      "placeholder": "om_..."
+    },
+    "idempotencyKey": {
+      "hint": "去重键；默认为运行 ID + 步骤 ID。",
+      "label": "幂等键（可选）"
+    },
+    "replyTo": {
+      "hint": "支持回复的平台会引用该消息。",
+      "label": "回复消息 ID（可选）",
+      "placeholder": "om_..."
+    },
+    "threadId": {
+      "hint": "发送到该话题而非主会话。",
+      "label": "话题 ID（可选）"
+    },
+    "waitForDelivery": {
+      "hint": "阻塞此步骤直到消息送达（或进入死信），并在节点输出中暴露 delivered / status / platformMessageId / errorCode。",
+      "label": "等待送达"
+    },
+    "waitTimeoutMs": {
+      "hint": "等待送达的最长时间（毫秒），超时后携带最新状态继续（默认 30000，最大 300000）。",
+      "label": "送达等待超时（毫秒）"
+    },
+    "cardJson": {
+      "label": "A2UI 卡片 JSON（可选）",
+      "hint": "A2UI surface 对象（{components, dataModel, rootId, …}）。设置后发送交互卡片，消息内容作为纯文本降级。",
+      "placeholder": "{\"components\": {...}, \"dataModel\": {}, \"rootId\": \"root\"}"
+    }
+  },
+  "connectorWaitReply": {
+    "conversationKey": {
+      "label": "会话键",
+      "hint": "组合键 platform:adapterId:chatId——要监听的会话。"
+    },
+    "senderIds": {
+      "label": "发送者 ID（可选）",
+      "hint": "逗号分隔的平台用户 ID；留空则接受任何发送者。",
+      "placeholder": "ou_abc, ou_def"
+    },
+    "keywords": {
+      "label": "关键词（可选）",
+      "hint": "逗号分隔、不区分大小写的子串；任一匹配即接受回复。",
+      "placeholder": "approve, done"
+    },
+    "requireMention": {
+      "label": "要求 @提及",
+      "hint": "只接受 @提及机器人的回复。"
+    },
+    "timeoutMs": {
+      "label": "超时（毫秒）",
+      "hint": "等待预算，超时后以 replied=false 继续（默认 120000，最大 3600000）。"
     }
   },
   "cron": {
@@ -699,6 +820,78 @@
     },
     "width": {
       "label": "宽度（像素）"
+    }
+  },
+  "ensemble": {
+    "aggField": {
+      "hint": "用于投票/计数的对象字段。留空表示整个结果。",
+      "label": "字段"
+    },
+    "aggregation": {
+      "hint": "如何把 N 个样本归约为单个结果。",
+      "label": "聚合",
+      "options": {
+        "bestOf": "最优（按分数）",
+        "majority": "按字段多数投票",
+        "synthesize": "综合（终审 agent）",
+        "threshold": "阈值计数"
+      }
+    },
+    "iterationConcurrency": {
+      "hint": "同时运行的最大样本数。",
+      "label": "并发"
+    },
+    "lens": {
+      "hint": "每行一个引导提示，按样本循环（例如对抗校验）。",
+      "label": "视角（可选）",
+      "placeholder": "支持该论点\n反驳该论点"
+    },
+    "n": {
+      "hint": "目标运行的次数。",
+      "label": "样本数 (N)"
+    },
+    "outputSchema": {
+      "hint": "类型化输出可启用按字段投票。",
+      "label": "样本输出结构"
+    },
+    "piiGate": {
+      "block": "拦截（让步骤失败）",
+      "hint": "在提示词外发到每个样本前运行。",
+      "label": "PII 闸",
+      "off": "关闭",
+      "redact": "脱敏"
+    },
+    "prompt": {
+      "label": "提示词"
+    },
+    "scoreField": {
+      "hint": "要最大化的数值字段。",
+      "label": "分数字段"
+    },
+    "synthesizerAlias": {
+      "hint": "终审合并模型的路由别名。",
+      "label": "综合器别名",
+      "placeholder": "例如 quality"
+    },
+    "targetKind": {
+      "hint": "要运行 N 次的对象。",
+      "label": "目标",
+      "options": {
+        "agentTurn": "Agent 轮次（内联）",
+        "subworkflow": "子工作流"
+      }
+    },
+    "targetModel": {
+      "hint": "每个 agent 样本使用的模型。",
+      "label": "模型（可选）"
+    },
+    "threshold": {
+      "hint": "通过所需的最少匹配样本数。",
+      "label": "阈值"
+    },
+    "workflowId": {
+      "hint": "每个样本运行的工作流。",
+      "label": "子工作流"
     }
   },
   "eval": {
@@ -1231,6 +1424,10 @@
     }
   },
   "join": {
+    "aggregate": {
+      "hint": "把汇聚的分支输出一步归约。",
+      "label": "聚合汇聚结果"
+    },
     "joinPolicy": {
       "label": "汇聚策略",
       "options": {
@@ -1242,10 +1439,6 @@
     "timeoutMs": {
       "hint": "0 = 无限等待；否则到时中止汇聚。",
       "label": "超时（毫秒，可选）"
-    },
-    "aggregate": {
-      "label": "聚合汇聚结果",
-      "hint": "把汇聚的分支输出一步归约。"
     }
   },
   "loop": {
@@ -1339,11 +1532,11 @@
     }
   },
   "manualTrigger": {
-    "intro": "在编辑器中点击「运行」按钮时触发，无需额外配置。",
     "inputSchema": {
-      "label": "输入结构（可选）",
-      "hint": "声明运行载荷（$trigger.payload），用于把该工作流发布为可调用单元。"
-    }
+      "hint": "声明运行载荷（$trigger.payload），用于把该工作流发布为可调用单元。",
+      "label": "输入结构（可选）"
+    },
+    "intro": "在编辑器中点击「运行」按钮时触发，无需额外配置。"
   },
   "mcpInvokeTool": {
     "argsJson": {
@@ -1399,6 +1592,54 @@
     "text": {
       "hint": "一条自洽的陈述。会经整合器与既有记忆去重。",
       "label": "事实"
+    }
+  },
+  "mobileCamera": {
+    "quality": {
+      "label": "JPEG 质量（1–100）"
+    },
+    "width": {
+      "label": "最大宽度（px）"
+    }
+  },
+  "mobileLocation": {
+    "enableHighAccuracy": {
+      "label": "高精度（GPS）"
+    }
+  },
+  "mobileNotify": {
+    "body": {
+      "label": "内容"
+    },
+    "title": {
+      "label": "标题"
+    }
+  },
+  "mobileScanBarcode": {
+    "formats": {
+      "hint": "逗号分隔（如 QR_CODE, EAN_13）。留空 = 仅二维码。",
+      "label": "格式"
+    }
+  },
+  "mobileShare": {
+    "text": {
+      "hint": "文本或 URL 必填其一。",
+      "label": "文本"
+    },
+    "title": {
+      "label": "标题（可选）"
+    },
+    "url": {
+      "label": "URL（可选）"
+    }
+  },
+  "mobileStep": {
+    "deviceId": {
+      "hint": "留空 = 任意具备能力的已配对设备（最近活跃优先）。",
+      "label": "设备 ID（可选）"
+    },
+    "timeoutMs": {
+      "label": "超时（毫秒）"
     }
   },
   "note": {
@@ -1462,7 +1703,82 @@
       "placeholder": "https://example.com/scan.pdf"
     }
   },
+  "output": {
+    "onSchemaViolation": {
+      "fail": "让运行失败",
+      "hint": "输出值不符合结构时的处理方式。",
+      "label": "校验失败时",
+      "soft": "带警告透传"
+    },
+    "outputSchema": {
+      "hint": "发布接口的输出契约。",
+      "label": "输出结构"
+    },
+    "value": {
+      "hint": "终端输出的表达式。留空则使用上游值。",
+      "label": "输出值"
+    }
+  },
+  "outputSchema": {
+    "addField": "添加字段",
+    "editFields": "按字段编辑",
+    "editRaw": "按 JSON 编辑",
+    "empty": "暂无字段——添加一个以强制类型化输出。",
+    "fieldDescription": "描述",
+    "fieldDescriptionPlaceholder": "该字段的含义（有助于模型理解）",
+    "fieldName": "字段名",
+    "fieldNamePlaceholder": "例如 verdict",
+    "fieldType": "类型",
+    "hint": "声明回复必须满足的 JSON 结构。留空则为自由文本。",
+    "onSchemaViolation": {
+      "fail": "让步骤失败",
+      "hint": "一次自动修复重试后输出仍不符合结构时的处理方式。",
+      "label": "校验失败时",
+      "soft": "保留未校验输出"
+    },
+    "rawLabel": "JSON Schema",
+    "removeField": "移除字段",
+    "required": "必填",
+    "sectionTitle": "类型化输出"
+  },
+  "petEventTrigger": {
+    "cooldownMs": {
+      "hint": "同一工作流两次触发之间的最短间隔，避免工作流自触发循环。",
+      "label": "冷却时间（毫秒）"
+    },
+    "intro": "当桌面宠物进入受支持的生命周期事件时触发。",
+    "kinds": {
+      "hint": "全部不选时会监听所有受支持的宠物生命周期事件。",
+      "label": "宠物事件",
+      "options": {
+        "achievementUnlocked": "解锁成就",
+        "evolved": "进化",
+        "levelUp": "升级",
+        "unwell": "不适"
+      }
+    }
+  },
+  "petInteract": {
+    "itemId": {
+      "hint": "可选的商店物品 ID，由宠物控制器消耗。",
+      "label": "物品 ID",
+      "placeholder": "pet_item_..."
+    },
+    "kind": {
+      "label": "互动",
+      "options": {
+        "cleaned": "清洁",
+        "fed": "喂食",
+        "petted": "抚摸",
+        "played": "玩耍",
+        "slept": "休息",
+        "talked": "聊天",
+        "treated": "治疗"
+      }
+    }
+  },
   "pickers": {
+    "adapterInstance": "选择适配器实例",
     "character": "选择角色",
     "mcpServer": "选择 MCP 服务器",
     "noResults": "无匹配项",
@@ -2107,6 +2423,37 @@
       "label": "超时（秒）"
     }
   },
+  "teamCompose": {
+    "autoStart": {
+      "hint": "组建完成后立即运行团队生命周期并等待终态。",
+      "label": "立即启动"
+    },
+    "maxRoster": {
+      "label": "最大成员数（含队长）"
+    },
+    "name": {
+      "label": "团队名称（可选）"
+    },
+    "objective": {
+      "hint": "一句话目标。发送模型前会先做 PII 脱敏；若仍残留敏感信息则组建失败。",
+      "label": "目标"
+    },
+    "preferredPattern": {
+      "label": "执行模式",
+      "options": {
+        "auto": "自动（由路由决定）",
+        "background_handoff": "后台交接",
+        "external_handoff": "外部交接",
+        "manager_worker": "管理者 / 执行者",
+        "parallel_specialists": "并行专家",
+        "single_agent_recommended": "单智能体",
+        "ultracode_orchestration": "Ultracode 编排"
+      }
+    },
+    "ultracode": {
+      "label": "Ultracode"
+    }
+  },
   "teamCreate": {
     "description": {
       "label": "描述"
@@ -2130,6 +2477,94 @@
       "label": "Supervisor 角色"
     }
   },
+  "teamDelegate": {
+    "awaitCompletion": {
+      "hint": "等待委派结束并返回结果；关闭则立即返回已启动的记录。",
+      "label": "等待完成"
+    },
+    "force": {
+      "hint": "即使处于团队勿扰时段也立即启动。",
+      "label": "无视勿扰时段"
+    },
+    "prompt": {
+      "label": "提示词"
+    },
+    "reason": {
+      "label": "原因（审计日志）"
+    },
+    "systemPrompt": {
+      "label": "系统提示词（可选）"
+    },
+    "target": {
+      "label": "委派给",
+      "options": {
+        "background": "后台智能体",
+        "external": "外部智能体",
+        "team": "另一个团队",
+        "twin": "数字孪生"
+      }
+    },
+    "targetAgentId": {
+      "hint": "外部运行时 ID，例如 claude-code 或 codex。",
+      "label": "外部智能体 ID"
+    },
+    "targetTeamId": {
+      "label": "目标团队"
+    },
+    "teamId": {
+      "label": "来源团队"
+    },
+    "twinId": {
+      "label": "数字孪生"
+    }
+  },
+  "teamMessage": {
+    "content": {
+      "label": "消息内容"
+    },
+    "recipientId": {
+      "label": "接收成员 ID（可选）"
+    },
+    "senderId": {
+      "hint": "默认使用队长身份。",
+      "label": "发送成员 ID（可选）"
+    },
+    "taskId": {
+      "label": "关联任务 ID（可选）"
+    },
+    "teamId": {
+      "label": "团队"
+    }
+  },
+  "teamReconcile": {
+    "inherit": "继承团队配置",
+    "intro": "整合本次运行至今产生的各派发分支。仅在工作区隔离的团队运行中生效。",
+    "mode": {
+      "label": "模式",
+      "options": {
+        "manual": "手动",
+        "merge-all": "全部合并",
+        "pipeline": "流水线",
+        "select": "择优选取"
+      }
+    },
+    "retain": {
+      "label": "分支保留",
+      "options": {
+        "all": "全部保留",
+        "keep-winner": "仅保留胜者",
+        "prune-losers": "清理落选分支"
+      }
+    },
+    "selectStrategy": {
+      "label": "选取策略",
+      "options": {
+        "first-success": "首个成功",
+        "judge": "AI 评审",
+        "manual": "手动"
+      }
+    }
+  },
   "teamRun": {
     "goal": {
       "hint": "希望团队完成什么。会转交到 Lead 的规划阶段。",
@@ -2138,6 +2573,20 @@
     "teamId": {
       "label": "团队 ID",
       "placeholder": "team_..."
+    }
+  },
+  "teamStatus": {
+    "includeDelegations": {
+      "label": "包含委派记录"
+    },
+    "includeTasks": {
+      "label": "包含任务"
+    },
+    "includeTeammates": {
+      "label": "包含成员"
+    },
+    "teamId": {
+      "label": "团队"
     }
   },
   "teamTaskDispatch": {
@@ -2434,6 +2883,76 @@
       }
     }
   },
+  "webClone": {
+    "allowPrivateHosts": {
+      "hint": "放行私有 / 回环 / 链路本地地址（SSRF 放行）。除非信任目标，否则请保持关闭。",
+      "label": "允许私有地址"
+    },
+    "concurrency": {
+      "hint": "并发下载数（1–32）。",
+      "label": "并发数"
+    },
+    "extractComponents": {
+      "hint": "同时把页面分析成组件结构（模板 / 样式 / 逻辑）。",
+      "label": "提取组件"
+    },
+    "framework": {
+      "hint": "从提取的组件结构生成该框架的组件代码。会隐含开启组件提取。",
+      "label": "生成框架代码",
+      "options": {
+        "angular": "Angular",
+        "jquery": "jQuery",
+        "none": "无",
+        "react": "React",
+        "svelte": "Svelte",
+        "vue": "Vue"
+      }
+    },
+    "frameworkHint": {
+      "hint": "提示提取器页面原本的框架，以改善组件边界识别。",
+      "label": "框架提示",
+      "options": {
+        "none": "自动检测",
+        "react": "React",
+        "svelte": "Svelte",
+        "vue": "Vue"
+      }
+    },
+    "maxAssets": {
+      "hint": "最多下载的资源数（1–5000）。",
+      "label": "最大资源数"
+    },
+    "maxFileSize": {
+      "hint": "单个文件的硬字节上限。留空使用引擎默认值；填 0 关闭限制。",
+      "label": "单文件大小上限（字节）"
+    },
+    "mode": {
+      "hint": "'目录 bundle' 写入含分离资源的目录；'单文件' 把所有内容内联进一个自包含 HTML 文件。",
+      "label": "模式",
+      "options": {
+        "bundle": "目录 bundle",
+        "single": "单文件"
+      }
+    },
+    "output": {
+      "hint": "快照写入位置。相对路径基于已打开的工作区解析；'single' 模式写 .html 文件，'bundle' 模式写目录。",
+      "label": "输出路径",
+      "placeholder": "./snapshots/site"
+    },
+    "pretty": {
+      "hint": "格式化输出的 HTML 以便阅读。",
+      "label": "美化 HTML"
+    },
+    "timeout": {
+      "hint": "单个资源的超时时间，毫秒（1000–120000）。",
+      "label": "超时（毫秒）"
+    },
+    "url": {
+      "hint": "要快照的页面。支持 '{{ }}' 表达式。",
+      "label": "URL",
+      "placeholder": "https://example.com/"
+    }
+  },
   "webhookBanner": {
     "desktopOnly": "仅桌面端。Webhook 接收器运行在 Tauri sidecar 中。",
     "loading": "正在加载 Webhook URL…",
@@ -2478,190 +2997,6 @@
       "hint": "可选。默认为工作流运行 ID。",
       "label": "响应正文模板",
       "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
-    }
-  },
-  "outputSchema": {
-    "sectionTitle": "类型化输出",
-    "hint": "声明回复必须满足的 JSON 结构。留空则为自由文本。",
-    "editRaw": "按 JSON 编辑",
-    "editFields": "按字段编辑",
-    "rawLabel": "JSON Schema",
-    "empty": "暂无字段——添加一个以强制类型化输出。",
-    "fieldName": "字段名",
-    "fieldNamePlaceholder": "例如 verdict",
-    "fieldDescription": "描述",
-    "fieldDescriptionPlaceholder": "该字段的含义（有助于模型理解）",
-    "fieldType": "类型",
-    "required": "必填",
-    "removeField": "移除字段",
-    "addField": "添加字段",
-    "onSchemaViolation": {
-      "label": "校验失败时",
-      "hint": "一次自动修复重试后输出仍不符合结构时的处理方式。",
-      "fail": "让步骤失败",
-      "soft": "保留未校验输出"
-    }
-  },
-  "aggregate": {
-    "operation": {
-      "label": "操作",
-      "hint": "如何把输入列表归约为单个值。",
-      "options": {
-        "collect": "收集（成列表）",
-        "concat": "拼接（展开一层）",
-        "mergeObjects": "合并对象",
-        "groupBy": "按键分组",
-        "dedupe": "去重",
-        "numeric": "数值（求和 / 平均 / …）",
-        "custom": "自定义归约"
-      }
-    },
-    "keyExpression": {
-      "label": "键表达式",
-      "hint": "逐项取键。$item 为当前项，例如 $item.category"
-    },
-    "numericOp": {
-      "label": "函数",
-      "options": {
-        "sum": "求和",
-        "avg": "平均",
-        "min": "最小",
-        "max": "最大",
-        "count": "计数"
-      }
-    },
-    "numericField": {
-      "label": "取值表达式",
-      "hint": "逐项取数值。留空表示项本身。"
-    },
-    "reducerExpression": {
-      "label": "归约表达式 (JS)",
-      "hint": "返回新累加器的 JS 表达式。作用域内有 acc、item、index。",
-      "placeholder": "acc + item.value"
-    }
-  },
-  "ensemble": {
-    "targetKind": {
-      "label": "目标",
-      "hint": "要运行 N 次的对象。",
-      "options": {
-        "agentTurn": "Agent 轮次（内联）",
-        "subworkflow": "子工作流"
-      }
-    },
-    "prompt": {
-      "label": "提示词"
-    },
-    "targetModel": {
-      "label": "模型（可选）",
-      "hint": "每个 agent 样本使用的模型。"
-    },
-    "outputSchema": {
-      "label": "样本输出结构",
-      "hint": "类型化输出可启用按字段投票。"
-    },
-    "workflowId": {
-      "label": "子工作流",
-      "hint": "每个样本运行的工作流。"
-    },
-    "n": {
-      "label": "样本数 (N)",
-      "hint": "目标运行的次数。"
-    },
-    "iterationConcurrency": {
-      "label": "并发",
-      "hint": "同时运行的最大样本数。"
-    },
-    "lens": {
-      "label": "视角（可选）",
-      "hint": "每行一个引导提示，按样本循环（例如对抗校验）。",
-      "placeholder": "支持该论点\n反驳该论点"
-    },
-    "aggregation": {
-      "label": "聚合",
-      "hint": "如何把 N 个样本归约为单个结果。",
-      "options": {
-        "majority": "按字段多数投票",
-        "threshold": "阈值计数",
-        "bestOf": "最优（按分数）",
-        "synthesize": "综合（终审 agent）"
-      }
-    },
-    "aggField": {
-      "label": "字段",
-      "hint": "用于投票/计数的对象字段。留空表示整个结果。"
-    },
-    "threshold": {
-      "label": "阈值",
-      "hint": "通过所需的最少匹配样本数。"
-    },
-    "scoreField": {
-      "label": "分数字段",
-      "hint": "要最大化的数值字段。"
-    },
-    "synthesizerAlias": {
-      "label": "综合器别名",
-      "hint": "终审合并模型的路由别名。",
-      "placeholder": "例如 quality"
-    },
-    "piiGate": {
-      "label": "PII 闸",
-      "hint": "在提示词外发到每个样本前运行。",
-      "off": "关闭",
-      "block": "拦截（让步骤失败）",
-      "redact": "脱敏"
-    }
-  },
-  "petEventTrigger": {
-    "cooldownMs": {
-      "hint": "同一工作流两次触发之间的最短间隔，避免工作流自触发循环。",
-      "label": "冷却时间（毫秒）"
-    },
-    "intro": "当桌面宠物进入受支持的生命周期事件时触发。",
-    "kinds": {
-      "hint": "全部不选时会监听所有受支持的宠物生命周期事件。",
-      "label": "宠物事件",
-      "options": {
-        "achievementUnlocked": "解锁成就",
-        "evolved": "进化",
-        "levelUp": "升级",
-        "unwell": "不适"
-      }
-    }
-  },
-  "petInteract": {
-    "itemId": {
-      "hint": "可选的商店物品 ID，由宠物控制器消耗。",
-      "label": "物品 ID",
-      "placeholder": "pet_item_..."
-    },
-    "kind": {
-      "label": "互动",
-      "options": {
-        "cleaned": "清洁",
-        "fed": "喂食",
-        "petted": "抚摸",
-        "played": "玩耍",
-        "slept": "休息",
-        "talked": "聊天",
-        "treated": "治疗"
-      }
-    }
-  },
-  "output": {
-    "value": {
-      "label": "输出值",
-      "hint": "终端输出的表达式。留空则使用上游值。"
-    },
-    "outputSchema": {
-      "label": "输出结构",
-      "hint": "发布接口的输出契约。"
-    },
-    "onSchemaViolation": {
-      "label": "校验失败时",
-      "hint": "输出值不符合结构时的处理方式。",
-      "fail": "让运行失败",
-      "soft": "带警告透传"
     }
   }
 }

@@ -1,5 +1,10 @@
 {
   "channelList": {
+    "bucketOlder": "更早",
+    "bucketPrev30": "过去 30 天",
+    "bucketPrev7": "过去 7 天",
+    "bucketToday": "今天",
+    "bucketYesterday": "昨天",
     "bulk": {
       "archive": "归档",
       "archiveSuccess": "已归档 {count} 个会话",
@@ -16,11 +21,6 @@
       "unpin": "取消置顶",
       "unpinSuccess": "已取消置顶 {count} 个会话"
     },
-    "bucketOlder": "更早",
-    "bucketPrev30": "过去 30 天",
-    "bucketPrev7": "过去 7 天",
-    "bucketToday": "今天",
-    "bucketYesterday": "昨天",
     "cancel": "取消",
     "clearSearch": "清空搜索",
     "conversationsTitle": "会话",
@@ -92,6 +92,14 @@
       "updateFailed": "检查更新失败：{message}",
       "updatesDesktopOnly": "仅桌面端支持检查更新。"
     }
+  },
+  "find": {
+    "close": "关闭查找",
+    "matchOf": "第 {index} / {total} 项",
+    "next": "下一个匹配",
+    "noMatches": "无结果",
+    "placeholder": "在页面中查找",
+    "previous": "上一个匹配"
   },
   "guildRail": {
     "agentRuns": "智能体运行",
@@ -168,8 +176,8 @@
     "fields": {
       "elapsed": "耗时：{value}",
       "startedAt": "开始：{value}",
-      "toolCalls": "工具：{value}",
-      "tokens": "Tokens：{value}"
+      "tokens": "Tokens：{value}",
+      "toolCalls": "工具：{value}"
     },
     "kind": {
       "pluginAgent": "插件代理",
@@ -471,12 +479,18 @@
   },
   "statusBar": {
     "awaitingApproval": "等待批准",
+    "connOffline": "离线",
+    "connOnline": "在线",
+    "connReconnecting": "重新连接中…",
     "error": "错误",
     "idle": "空闲",
     "locale": "语言",
     "noSession": "无会话",
     "openCommandPalette": "打开命令面板",
     "openLogs": "查看日志",
+    "perf": "性能",
+    "perfCpu": "CPU",
+    "perfMem": "内存",
     "permissionAcceptEdits": "自动接受",
     "permissionAdvanced": "高级",
     "permissionAuto": "自动",
@@ -487,28 +501,22 @@
     "permissionPlan": "Plan",
     "streaming": "流式响应中",
     "switchLocale": "切换语言",
+    "syncLast": "已同步 {time}",
+    "syncNever": "未同步",
+    "syncNow": "立即同步",
     "tauri": "桌面",
     "themeDark": "深色主题",
     "themeLight": "浅色主题",
     "themeNext": "切换主题",
     "themeSystem": "跟随系统",
     "toggleSidebar": "切换侧边栏",
+    "usage": "用量与额度",
+    "usageOpen": "打开用量与额度",
     "web": "Web",
     "zoom": "缩放",
     "zoomIn": "放大",
     "zoomOut": "缩小",
-    "zoomReset": "重置缩放",
-    "connOnline": "在线",
-    "connOffline": "离线",
-    "connReconnecting": "重新连接中…",
-    "syncNever": "未同步",
-    "syncLast": "已同步 {time}",
-    "syncNow": "立即同步",
-    "perf": "性能",
-    "perfCpu": "CPU",
-    "perfMem": "内存",
-    "usage": "用量与额度",
-    "usageOpen": "打开用量与额度"
+    "zoomReset": "重置缩放"
   },
   "titleBar": {
     "alwaysOnTop": "置顶窗口",
@@ -526,42 +534,34 @@
     "kbdHint": "Ctrl+K",
     "layout": {
       "customize": "自定义布局",
+      "itemAccount": "账户",
+      "itemConnectivity": "连接状态",
+      "itemPerf": "性能监视",
+      "itemQuickActions": "快捷开关",
+      "itemSync": "同步状态",
+      "itemUsage": "用量与额度",
+      "itemWorkspace": "工作区",
+      "statusBarGroup": "状态栏",
       "title": "自定义布局",
+      "titleBarGroup": "标题栏",
       "toggleGuildRail": "切换工会侧栏",
       "toggleSidebar": "切换侧栏",
       "toggleStatusBar": "切换状态栏",
-      "toggleTerminal": "切换终端",
-      "statusBarGroup": "状态栏",
-      "titleBarGroup": "标题栏",
-      "itemConnectivity": "连接状态",
-      "itemSync": "同步状态",
-      "itemPerf": "性能监视",
-      "itemAccount": "账户",
-      "itemUsage": "用量与额度",
-      "itemWorkspace": "工作区",
-      "itemQuickActions": "快捷开关"
+      "toggleTerminal": "切换终端"
     },
     "maximize": "最大化",
     "minimize": "最小化",
     "openMenus": "打开菜单",
+    "quickActions": {
+      "capture": "内容采集",
+      "hidePet": "隐藏桌面宠物",
+      "ocr": "屏幕 OCR",
+      "showPet": "显示桌面宠物"
+    },
     "restore": "还原",
     "searchPlaceholder": "搜索或运行命令…",
     "separator": " — ",
     "workspace": "工作区",
-    "workspaceUntitled": "未命名工作区",
-    "quickActions": {
-      "showPet": "显示桌面宠物",
-      "hidePet": "隐藏桌面宠物",
-      "ocr": "屏幕 OCR",
-      "capture": "内容采集"
-    }
-  },
-  "find": {
-    "placeholder": "在页面中查找",
-    "noMatches": "无结果",
-    "matchOf": "第 {index} / {total} 项",
-    "previous": "上一个匹配",
-    "next": "下一个匹配",
-    "close": "关闭查找"
+    "workspaceUntitled": "未命名工作区"
   }
 }

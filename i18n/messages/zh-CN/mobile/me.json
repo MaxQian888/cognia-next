@@ -1,11 +1,6 @@
 {
+  "a2uiRow": "迷你应用 (A2UI)",
   "aboutRow": "关于",
-  "agentRow": "Agent 默认设置",
-  "agentTeamsSettingsRow": "智能体团队",
-  "hooksRow": "钩子",
-  "networkRow": "网络",
-  "slashCommandsRow": "斜杠命令",
-  "instructionsRow": "项目指令",
   "account": {
     "fiveHourLabel": "5 小时额度",
     "notSignedIn": "未登录 Anthropic 账户。点击此处登录。",
@@ -13,9 +8,13 @@
     "sevenDayLabel": "7 日额度"
   },
   "actionPair": "去配对",
+  "agentModesRow": "代理模式",
+  "agentRow": "Agent 默认设置",
+  "agentTeamsSettingsRow": "智能体团队",
   "appSecurity": "应用安全",
   "appearanceBackAria": "返回个人",
   "appearanceLink": "主题与壁纸",
+  "artifactsRow": "制品",
   "backupLink": "备份与同步",
   "backupReminder": {
     "bodyKnownLast": "上次成功备份是在 {days, plural, =1 {1 天前} other {# 天前}}。",
@@ -27,6 +26,9 @@
   "backupRow": "备份与恢复",
   "biometricToggle": "启用生物识别解锁",
   "biometricUnavailable": "本设备未注册生物识别。",
+  "canvasRow": "画布",
+  "charactersRow": "角色",
+  "commandHistoryRow": "命令历史",
   "computerUse": {
     "masterStateOff": "移动端 Computer Use 已停用。",
     "masterStateOn": "移动端 Computer Use 已启用。",
@@ -91,6 +93,7 @@
   "deviceInfoRow": "设备信息",
   "devicesRow": "已配对设备",
   "dexieMaintenance": "Dexie 维护",
+  "diagnosticsRow": "诊断",
   "externalAgentsRow": "外部 Agent",
   "feedback": {
     "copyDescription": "应用版本、User Agent 和当前同步快照。",
@@ -107,6 +110,7 @@
   },
   "feedbackRow": "反馈与诊断",
   "githubDeliveryRow": "GitHub 投递",
+  "goalsRow": "目标",
   "help": {
     "docsDescription": "在系统浏览器中打开 cognia 文档。",
     "docsLabel": "文档站",
@@ -118,9 +122,13 @@
     "resourcesTitle": "资源"
   },
   "helpRow": "帮助与文档",
-  "commandHistoryRow": "命令历史",
+  "hooksRow": "钩子",
+  "instructionsRow": "项目指令",
+  "logsRow": "日志",
   "mcpRow": "MCP 服务器",
   "memoryRow": "记忆",
+  "memorySettingsRow": "记忆设置",
+  "networkRow": "网络",
   "notificationsRow": "通知",
   "ocrRow": "OCR 提供方",
   "pairing": "配对状态",
@@ -138,6 +146,7 @@
   },
   "profileBackAria": "返回我的",
   "profileRow": "个人资料",
+  "providersRow": "模型提供商",
   "quickActions": {
     "computerUseAria": "切换移动端 Computer Use",
     "computerUseLabel": "Computer Use",
@@ -154,11 +163,13 @@
     "themeLight": "浅色"
   },
   "remoteSessionsRow": "远程会话",
+  "requiresDesktop": "需配对桌面端",
   "schedulerRow": "计划任务",
   "search": "搜索设置",
   "searchAria": "搜索设置",
   "searchEmpty": "没有匹配的设置。",
   "searchResults": "结果",
+  "searchRow": "联网提问",
   "sectionAbout": "关于",
   "sectionAccount": "账户",
   "sectionAdvanced": "高级",
@@ -168,7 +179,6 @@
   "sectionData": "数据",
   "sectionFavorites": "常用",
   "settingsLink": "应用设置",
-  "speechRow": "语音",
   "signOut": {
     "biometricDescription": "清除配对前重新验证身份。",
     "biometricHelp": "清除配对前要求 Face ID / 指纹。",
@@ -185,6 +195,9 @@
     "pending": "正在退出…",
     "successToast": "已退出，配对已清除。"
   },
+  "skillsRow": "技能",
+  "slashCommandsRow": "斜杠命令",
+  "speechRow": "语音",
   "storage": {
     "backupsDescription": "{count} 个文件 · {total}",
     "backupsEmpty": "尚无成功的备份。",
@@ -243,6 +256,7 @@
     "toastTableSynced": "已同步 {table}"
   },
   "syncRow": "同步状态",
+  "teamsRow": "团队",
   "terminalRow": "终端",
   "title": "我",
   "todayStats": {

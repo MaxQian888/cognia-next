@@ -1,48 +1,48 @@
 {
   "panel": {
-    "title": "Attention Radar",
+    "empty": "No report yet. Run the radar to analyze your recent info diet.",
+    "meta": "{count} items analyzed · {days}-day window",
     "run": "Run now",
     "runAria": "Generate a new radar report",
-    "empty": "No report yet. Run the radar to analyze your recent info diet.",
-    "meta": "{count} items analyzed · {days}-day window"
+    "title": "Attention Radar"
   },
   "section": {
+    "actions": "Actions",
     "atAGlance": "At a glance",
+    "blindSpots": "Blind spots",
+    "graveyard": "Graveyard",
+    "heatmap": "Activity",
     "infoDiet": "Info diet",
     "subconscious": "Subconscious",
-    "blindSpots": "Blind spots",
-    "actions": "Actions",
-    "graveyard": "Graveyard",
-    "topics": "Topics",
-    "heatmap": "Activity"
-  },
-  "toast": {
-    "generated": "Radar report generated.",
-    "skipped": "Not enough recent activity yet — nothing to report.",
-    "failed": "Radar failed: {message}",
-    "noModel": "No LLM API key configured. Add one in Settings → Providers."
+    "topics": "Topics"
   },
   "settings": {
-    "save": "Save",
-    "saved": "Radar settings saved.",
     "enabled": "Enable radar",
     "enabledDesc": "Auto-generate reports and nudge via the pet.",
-    "windowDays": "Window (days)",
     "intervalDays": "Min interval (days)",
-    "scheduleModeLabel": "Schedule",
-    "scheduleMode": {
-      "off": "Off",
-      "daily": "Daily",
-      "weekly": "Weekly",
-      "custom": "Custom"
-    },
-    "scheduleCustomCronLabel": "Cron expression",
-    "scheduleSaveAria": "Save radar settings",
+    "save": "Save",
+    "saved": "Radar settings saved.",
     "scheduleAction": {
       "created": "Radar schedule created.",
       "updated": "Radar schedule updated."
     },
     "scheduleCleared": "Radar schedule cleared.",
-    "scheduleInvalidCron": "Invalid cron expression: {expression}"
+    "scheduleCustomCronLabel": "Cron expression",
+    "scheduleInvalidCron": "Invalid cron expression: {expression}",
+    "scheduleMode": {
+      "custom": "Custom",
+      "daily": "Daily",
+      "off": "Off",
+      "weekly": "Weekly"
+    },
+    "scheduleModeLabel": "Schedule",
+    "scheduleSaveAria": "Save radar settings",
+    "windowDays": "Window (days)"
+  },
+  "toast": {
+    "failed": "Radar failed: {message}",
+    "generated": "Radar report generated.",
+    "noModel": "No LLM API key configured. Add one in Settings → Providers.",
+    "skipped": "Not enough recent activity yet — nothing to report."
   }
 }
