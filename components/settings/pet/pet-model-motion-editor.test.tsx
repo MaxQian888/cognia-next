@@ -28,9 +28,9 @@ const expressionSelect = (key: string) =>
   screen.getByTestId(`pet-mapping-expression-${key}`) as HTMLSelectElement
 
 describe("PetModelMotionEditor", () => {
-  it("renders one row per state + namespaced one-shot (22 total)", () => {
+  it("renders one row per state + namespaced one-shot (24 total)", () => {
     setup()
-    expect(screen.getAllByTestId(/pet-mapping-row-/)).toHaveLength(22)
+    expect(screen.getAllByTestId(/pet-mapping-row-/)).toHaveLength(24)
     expect(screen.getByTestId("pet-mapping-row-unwell")).toBeInTheDocument()
     expect(screen.getByTestId("pet-mapping-row-happy")).toBeInTheDocument()
     expect(screen.getByTestId("pet-mapping-row-shot:happy")).toBeInTheDocument()

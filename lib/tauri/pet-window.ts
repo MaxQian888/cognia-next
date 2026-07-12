@@ -212,3 +212,66 @@ export async function showMainWindow(): Promise<boolean> {
     return false
   }
 }
+
+// ── Native pet-window events ─────────────────────────────────────────────────
+// The Rust side broadcasts window-state changes it initiates itself (tray
+// toggle, click-through recovery, blur-hide, suspend/resume, monitor change)
+// so renderer state never silently desyncs from native mutations. Each
+// subscription returns a disposer; all are no-ops off Tauri.
+
+/** Payload of `pet://state-changed` (mirrors the Rust `PetStateChanged` DTO). */
+export interface PetNativeState {
+  open: boolean
+  clickThrough: boolean
+}
+
+type Disposer = () => void
+
+/** Shared listen-with-guard helper: returns an inert disposer off Tauri. */
+function subscribe(event: string, handler: (payload: unknown) => void): Disposer {
+  if (!isTauri()) return () => {}
+  let disposed = false
+  let unlisten: (() => void) | null = null
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) => listen(event, (e) => handler(e.payload)))
+    .then((off) => {
+      if (disposed) off()
+      else unlisten = off
+    })
+    .catch((err) => console.warn(`subscribe(${event}) failed`, err))
+  return () => {
+    disposed = true
+    unlisten?.()
+    unlisten = null
+  }
+}
+
+/** Native open/click-through changes (tray toggle, recovery, destroy). */
+export function onPetNativeStateChanged(handler: (state: PetNativeState) => void): Disposer {
+  return subscribe("pet://state-changed", (payload) => {
+    const p = payload as Partial<PetNativeState> | null
+    if (p && typeof p.open === "boolean" && typeof p.clickThrough === "boolean") {
+      handler({ open: p.open, clickThrough: p.clickThrough })
+    }
+  })
+}
+
+/** The sprite window was hidden — pause animation loops (ticker / rAF). */
+export function onPetSuspend(handler: () => void): Disposer {
+  return subscribe("pet://suspend", () => handler())
+}
+
+/** The sprite window is visible again — resume animation loops. */
+export function onPetResume(handler: () => void): Disposer {
+  return subscribe("pet://resume", () => handler())
+}
+
+/** Monitor topology / DPI changed — re-read the work area immediately. */
+export function onPetWorkAreaChanged(handler: () => void): Disposer {
+  return subscribe("pet://work-area-changed", () => handler())
+}
+
+/** The popup was natively hidden (blur-to-close) — sync popup UI state. */
+export function onPetPopupHidden(handler: () => void): Disposer {
+  return subscribe("pet-popup://hidden", () => handler())
+}
