@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { interpretLine, chatCommand } from "./chat"
+import { interpretLine, chatCommand, launchCommandFromFlags } from "./chat"
 import { parseArgv } from "./args"
 import type { OutputSink } from "./output"
 import type { AgentSession } from "../agent/session-runner"
@@ -47,6 +47,26 @@ function fakeSessionFactory() {
   })
   return { factory, sessions }
 }
+
+describe("launchCommandFromFlags", () => {
+  it("maps --continue / -c to /continue", () => {
+    expect(launchCommandFromFlags(parseArgv(["chat", "--continue"]))).toBe("/continue")
+    expect(launchCommandFromFlags(parseArgv(["chat", "-c"]))).toBe("/continue")
+  })
+
+  it("maps --resume <id> to /resume <id> and bare --resume to the picker", () => {
+    expect(launchCommandFromFlags(parseArgv(["chat", "--resume", "s-42"]))).toBe("/resume s-42")
+    expect(launchCommandFromFlags(parseArgv(["chat", "--resume"]))).toBe("/resume")
+  })
+
+  it("returns undefined with no session flags", () => {
+    expect(launchCommandFromFlags(parseArgv(["chat"]))).toBeUndefined()
+  })
+
+  it("prefers --continue when both flags are passed", () => {
+    expect(launchCommandFromFlags(parseArgv(["chat", "-c", "--resume", "s-1"]))).toBe("/continue")
+  })
+})
 
 describe("interpretLine", () => {
   it.each([
@@ -192,6 +212,32 @@ describe("chatCommand", () => {
     expect(arg.config.cwd).toBe("/work")
     expect(arg.createSession).toBe(f.factory)
     expect(typeof arg.pushHandoff).toBe("function")
+  })
+
+  it("threads the --continue launch flag to the TUI as /continue", async () => {
+    const f = fakeSessionFactory()
+    const renderTui = jest.fn(async (_deps: { initialCommand?: string }) => 0)
+    await chatCommand(parseArgv(["chat", "--continue"]), {
+      loadConfig: () => cfg(),
+      out: sink().out,
+      createSession: f.factory,
+      isTty: () => true,
+      renderTui,
+    })
+    expect(renderTui.mock.calls[0][0].initialCommand).toBe("/continue")
+  })
+
+  it("warns that resume flags need a TTY on the readline path", async () => {
+    const s = sink()
+    const f = fakeSessionFactory()
+    await chatCommand(parseArgv(["chat", "-c"]), {
+      ...baseDeps(),
+      out: s.out,
+      createSession: f.factory,
+      isTty: () => false,
+      readLine: scriptedReader(["/exit"]),
+    })
+    expect(s.stderr()).toMatch(/interactive terminal/)
   })
 
   it("falls back to the readline REPL when stdin is not a TTY", async () => {

@@ -32,12 +32,21 @@ export const BOOLEAN_FLAGS = new Set([
   "print",
   // Dev: discover + load the repo's in-tree `plugins/<id>` as live disk plugins.
   "dev-plugins",
+  // `chat --continue` — resume the most recent session at launch (never takes a
+  // value; `--resume [id]` is the value-taking variant).
+  "continue",
 ])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
 export const GROUPED_COMMANDS = new Set(["auth", "config", "logto"])
 
-const SHORT_ALIAS: Record<string, string> = { h: "help", v: "version", y: "yes", p: "print" }
+const SHORT_ALIAS: Record<string, string> = {
+  h: "help",
+  v: "version",
+  y: "yes",
+  p: "print",
+  c: "continue",
+}
 
 function normalizeFlagName(token: string): { name: string; inlineValue?: string } {
   const body = token.replace(/^--?/, "")

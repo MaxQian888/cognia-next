@@ -11,17 +11,22 @@
  * Git safety: base is auto-detected (main → master); a PR is refused when the
  * current branch IS the base. CLI is English-only.
  */
-import type { ResolvedConfig } from "../../config/schema"
+import {
+  DEFAULT_PR_FOOTER,
+  resolveGitWorkflowConfig,
+  type ResolvedConfig,
+} from "../../config/schema"
 import { runGit as defaultRunGit, runExec, type ExecFn, type ExecResult } from "../../agent/run-git"
 import { generateText } from "../../agent/generate-text"
 import { errorMessage, openDocument } from "./shared"
 import type { TuiAction } from "../state/types"
 
-/** Base branches to try, in order. */
+/** Base branches to try, in order (when `config.git.baseBranch` is not set). */
 const BASE_CANDIDATES = ["main", "master"] as const
 
-/** The PR-body footer every drafted PR ends with (repo convention). */
-export const PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+/** The default PR-body footer (re-exported for tests / callers; the active
+ * value comes from `config.git.prFooter`). */
+export const PR_FOOTER = DEFAULT_PR_FOOTER
 
 export interface PrDeps {
   dispatch: (action: TuiAction) => void
@@ -96,11 +101,15 @@ export function parsePrDraft(text: string): { title: string; body: string } {
   return { title: first.trim(), body: rest.join("\n").trim() }
 }
 
-/** Append the repo PR footer to a body (idempotent). */
-export function formatPrBody(body: string): string {
+/**
+ * Append the configured PR footer to a body (idempotent). `footer: null`
+ * (config `prFooter: false`) appends nothing.
+ */
+export function formatPrBody(body: string, footer: string | null = DEFAULT_PR_FOOTER): string {
   const b = body.trim()
-  if (b.includes(PR_FOOTER)) return b
-  return `${b}\n\n${PR_FOOTER}`
+  if (footer === null) return b
+  if (b.includes(footer)) return b
+  return `${b}\n\n${footer}`
 }
 
 const gitOf = (deps: PrDeps) =>
@@ -109,10 +118,15 @@ const ghOf = (deps: PrDeps) =>
   deps.runGh ?? ((args: string[]) => (runExec as ExecFn)("gh", args, { cwd: deps.cwd }))
 const generateOf = (deps: PrDeps) => deps.generate ?? generateText
 
-/** Detect the base branch (main → master) that exists in this repo. */
+/**
+ * Detect the PR base branch: the `config.git.baseBranch` override when it
+ * exists in the repo, else the first of main → master that does.
+ */
 async function detectBase(deps: PrDeps): Promise<string | null> {
   const git = gitOf(deps)
-  for (const candidate of BASE_CANDIDATES) {
+  const override = resolveGitWorkflowConfig(deps.config?.git).baseBranch
+  const candidates = override ? [override] : [...BASE_CANDIDATES]
+  for (const candidate of candidates) {
     const res = await git(["rev-parse", "--verify", "--quiet", candidate], deps.cwd)
     if (res.code === 0) return candidate
   }
@@ -127,9 +141,12 @@ async function runFlow(deps: PrDeps): Promise<void> {
   const git = gitOf(deps)
   const base = await detectBase(deps)
   if (!base) {
+    const override = resolveGitWorkflowConfig(deps.config?.git).baseBranch
     deps.dispatch({
       type: "NOTICE",
-      message: "No `main` or `master` base branch found in this repo.",
+      message: override
+        ? `Configured base branch "${override}" (config.git.baseBranch) not found in this repo.`
+        : "No `main` or `master` base branch found in this repo.",
     })
     return
   }
@@ -175,7 +192,7 @@ async function runFlow(deps: PrDeps): Promise<void> {
     deps.dispatch({ type: "NOTICE", message: "Model returned no PR title." })
     return
   }
-  const body = formatPrBody(parsed.body)
+  const body = formatPrBody(parsed.body, resolveGitWorkflowConfig(deps.config?.git).prFooter)
   deps.dispatch({ type: "SET_PR_DRAFT", title: parsed.title, body, base })
   deps.dispatch({
     type: "OVERLAY_OPEN",

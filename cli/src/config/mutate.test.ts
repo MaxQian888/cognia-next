@@ -10,7 +10,9 @@ import {
   setConfigValue,
   setCustomTheme,
   setEditorConfig,
+  setGitWorkflowConfig,
   setKeybindings,
+  setLoggingConfig,
   setNumberConfig,
   setMascotConfig,
   setPluginToolsConfig,
@@ -672,5 +674,81 @@ describe("setSubagentModel", () => {
     expect(() => setSubagentModel(HOME, "  ", { model: "x" }, memFs().fsx)).toThrow(
       /id is required/
     )
+  })
+})
+
+describe("setGitWorkflowConfig", () => {
+  it("writes a git patch into a fresh config", () => {
+    const { fsx, files } = memFs()
+    setGitWorkflowConfig(HOME, { protectedBranches: ["master", "main", "dev"] }, fsx)
+    const written = JSON.parse(files.get(userConfigPath(HOME))!)
+    expect(written.git).toEqual({ protectedBranches: ["master", "main", "dev"] })
+  })
+
+  it("merges into an existing git object, preserving other keys", () => {
+    const { fsx, files } = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ git: { baseBranch: "dev" } }),
+    })
+    setGitWorkflowConfig(HOME, { coauthorTrailer: false }, fsx)
+    const written = JSON.parse(files.get(userConfigPath(HOME))!)
+    expect(written.git).toEqual({ baseBranch: "dev", coauthorTrailer: false })
+  })
+
+  it("clears a key when the patch sets it to undefined", () => {
+    const { fsx, files } = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ git: { baseBranch: "dev", prFooter: false } }),
+    })
+    setGitWorkflowConfig(HOME, { baseBranch: undefined }, fsx)
+    const written = JSON.parse(files.get(userConfigPath(HOME))!)
+    expect(written.git).toEqual({ prFooter: false })
+  })
+
+  it("drops the git key entirely when the last entry is cleared", () => {
+    const { fsx, files } = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ git: { baseBranch: "dev" } }),
+    })
+    setGitWorkflowConfig(HOME, { baseBranch: undefined }, fsx)
+    const written = JSON.parse(files.get(userConfigPath(HOME))!)
+    expect(written.git).toBeUndefined()
+  })
+
+  it("rejects a patch the schema refuses (empty branch name)", () => {
+    const { fsx } = memFs()
+    expect(() => setGitWorkflowConfig(HOME, { protectedBranches: [""] }, fsx)).toThrow()
+  })
+})
+
+describe("setLoggingConfig", () => {
+  it("writes a new logging block into config.json", () => {
+    const m = memFs()
+    const target = setLoggingConfig(HOME, { fileLevel: "warn", mcpLogMaxKb: 4096 }, m.fsx)
+    expect(target).toBe(userConfigPath(HOME))
+    const written = JSON.parse(m.files.get(userConfigPath(HOME))!)
+    expect(written.logging).toEqual({ fileLevel: "warn", mcpLogMaxKb: 4096 })
+  })
+
+  it("merges over an existing logging block", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        logging: { fileLevel: "debug", crashLogMaxKb: 512 },
+      }),
+    })
+    setLoggingConfig(HOME, { fileLevel: "error" }, m.fsx)
+    const written = JSON.parse(m.files.get(userConfigPath(HOME))!)
+    expect(written.logging).toEqual({ fileLevel: "error", crashLogMaxKb: 512 })
+  })
+
+  it("drops keys cleared to undefined and removes an empty block", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({ logging: { fileLevel: "debug" } }),
+    })
+    setLoggingConfig(HOME, { fileLevel: undefined }, m.fsx)
+    const written = JSON.parse(m.files.get(userConfigPath(HOME))!)
+    expect("logging" in written).toBe(false)
+  })
+
+  it("rejects a value the schema refuses (rotation size below the floor)", () => {
+    const m = memFs()
+    expect(() => setLoggingConfig(HOME, { mcpLogMaxKb: 1 }, m.fsx)).toThrow()
   })
 })

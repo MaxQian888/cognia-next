@@ -185,9 +185,12 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     theme: layer.theme ?? acc.theme,
     customLimitsSources: layer.customLimitsSources ?? acc.customLimitsSources,
     render: layer.render ? { ...acc.render, ...stripUndefined(layer.render) } : acc.render,
+    git: layer.git ? { ...acc.git, ...stripUndefined(layer.git) } : acc.git,
     keybindings: layer.keybindings ? { ...acc.keybindings, ...layer.keybindings } : acc.keybindings,
     layout: layer.layout ?? acc.layout,
     mouse: layer.mouse ?? acc.mouse,
+    vim: layer.vim ?? acc.vim,
+    terminalTitle: layer.terminalTitle ?? acc.terminalTitle,
     notify: layer.notify ?? acc.notify,
     desktopNotifications: layer.desktopNotifications ?? acc.desktopNotifications,
     clipboard: layer.clipboard

@@ -800,6 +800,48 @@ describe("App", () => {
     expect(container.textContent).toContain("No past sessions to resume.")
   })
 
+  it("resumes a specific session on /resume <id> and notices on an unknown id", async () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home"
+        readdir={() => ["ses1.jsonl"]}
+        transcriptFs={transcriptFs}
+      />
+    )
+    type("/resume nope")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(container.textContent).toContain('No session "nope"')
+    type("/resume ses1")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("resumed answer"))
+  })
+
+  it("runs the launch-flag initial command once on mount (--continue)", async () => {
+    const { create } = fakeSession()
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home"
+        readdir={() => ["ses1.jsonl"]}
+        transcriptFs={transcriptFs}
+        initialCommand="/continue"
+      />
+    )
+    await waitFor(() => expect(container.textContent).toContain("resumed answer"))
+  })
+
   it("recalls the previous submission with the up arrow", async () => {
     const { create, prompts } = fakeSession("ok")
     render(<App config={config} sessionId="s1" createSession={create} />)
@@ -1207,6 +1249,34 @@ describe("App", () => {
     })
     await waitFor(() => expect(container.textContent).toContain("Command moved to background"))
     await waitFor(() => expect(container.textContent).toContain("(background)"))
+  })
+
+  it("routes a plain line into a running foreground !command's stdin (not the model)", async () => {
+    const { create, prompts } = fakeSession()
+    const writes: string[] = []
+    // A never-resolving interactive command that exposes a stdin writer.
+    const runShell = jest.fn((_cmd: string, opts: RunShellOpts): Promise<ShellResult> => {
+      opts.registerInput?.((d) => writes.push(d))
+      return new Promise(() => {})
+    })
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} runShell={runShell} />
+    )
+    type("!ssh example.com")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    // The interactive notice primes the user.
+    await waitFor(() => expect(container.textContent).toContain("Interactive command"))
+    // A subsequent plain line is fed to the command's stdin, not sent to the model.
+    type("my-passphrase")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    expect(writes).toEqual(["my-passphrase\n"])
+    expect(prompts).toHaveLength(0)
   })
 
   it("/analyze sends the last failed !command to the agent", async () => {

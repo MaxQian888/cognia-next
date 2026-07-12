@@ -146,6 +146,24 @@ describe("SelectList", () => {
       expect(text).not.toContain("type to filter models")
     })
 
+    it("lazy search: hides the 🔎 row when searchRowVisible is false but still types", () => {
+      const onQueryChange = jest.fn()
+      const { container } = render(
+        <SelectList
+          items={items}
+          index={0}
+          query=""
+          searchRowVisible={false}
+          onQueryChange={onQueryChange}
+          onMove={() => {}}
+          onSelect={() => {}}
+        />
+      )
+      expect(container.textContent ?? "").not.toContain("🔎")
+      __fireInput("t", {})
+      expect(onQueryChange).toHaveBeenCalledWith("t")
+    })
+
     it("appends printable keys and trims on backspace", () => {
       const onQueryChange = jest.fn()
       render(

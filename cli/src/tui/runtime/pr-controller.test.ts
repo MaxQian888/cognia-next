@@ -226,3 +226,64 @@ describe("runPr", () => {
     expect(h.actions).toEqual([{ type: "CLEAR_PR_DRAFT" }])
   })
 })
+
+describe("runPr with config.git overrides", () => {
+  it("targets the configured base branch instead of auto-detect", async () => {
+    const h = harness({
+      config: { cwd: "/repo", git: { baseBranch: "dev" } } as ResolvedConfig,
+    })
+    await runPr(h.deps)
+    // Only the override is probed — never main/master.
+    const probes = h.git.mock.calls
+      .map((c) => (c[0] as string[]).join(" "))
+      .filter((s) => s.startsWith("rev-parse --verify"))
+    expect(probes).toEqual(["rev-parse --verify --quiet dev"])
+    const draft = h.actions.find((a) => a.type === "SET_PR_DRAFT")
+    expect(draft && "base" in draft && draft.base).toBe("dev")
+  })
+
+  it("notices when the configured base branch does not exist", async () => {
+    const git = jest.fn(async (args: string[]): Promise<ExecResult> => {
+      const s = args.join(" ")
+      if (s === "rev-parse --verify --quiet release") return { ...OK, code: 1 }
+      return OK
+    })
+    const h = harness({
+      runGit: git,
+      config: { cwd: "/repo", git: { baseBranch: "release" } } as ResolvedConfig,
+    })
+    await runPr(h.deps)
+    const notice = h.actions.find((a) => a.type === "NOTICE")
+    expect(notice && "message" in notice && notice.message).toContain('"release"')
+  })
+
+  it("omits the PR footer when prFooter is false", async () => {
+    const h = harness({
+      config: { cwd: "/repo", git: { prFooter: false } } as ResolvedConfig,
+    })
+    await runPr(h.deps)
+    const draft = h.actions.find((a) => a.type === "SET_PR_DRAFT")
+    expect(draft && "body" in draft && draft.body).not.toContain(PR_FOOTER)
+  })
+
+  it("uses a custom footer string when configured", async () => {
+    const h = harness({
+      config: { cwd: "/repo", git: { prFooter: "Reviewed-by: humans" } } as ResolvedConfig,
+    })
+    await runPr(h.deps)
+    const draft = h.actions.find((a) => a.type === "SET_PR_DRAFT")
+    expect(draft && "body" in draft && draft.body).toContain("Reviewed-by: humans")
+  })
+})
+
+describe("formatPrBody with a configured footer", () => {
+  it("appends nothing when footer is null", () => {
+    expect(formatPrBody("## Summary\nx", null)).toBe("## Summary\nx")
+  })
+
+  it("appends a custom footer once", () => {
+    const once = formatPrBody("body", "F")
+    expect(once).toBe("body\n\nF")
+    expect(formatPrBody(once, "F")).toBe(once)
+  })
+})

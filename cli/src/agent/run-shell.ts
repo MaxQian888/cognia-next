@@ -19,6 +19,9 @@ export interface ShellResult {
 export interface ShellChild {
   stdout: { on(event: "data", cb: (chunk: unknown) => void): void } | null
   stderr: { on(event: "data", cb: (chunk: unknown) => void): void } | null
+  /** Write interactive input to the process stdin. Optional so the injected test
+   * child can omit it; the real spawn surfaces the Node `child.stdin`. */
+  stdin?: { write(data: string): void } | null
   on(event: "close", cb: (code: number | null) => void): void
   on(event: "error", cb: (err: Error) => void): void
   /** Terminate the process (and, for the real spawn, its whole tree). Optional so
@@ -83,6 +86,7 @@ const realSpawn: ShellSpawn = (command, opts) => {
   return {
     stdout: child.stdout,
     stderr: child.stderr,
+    stdin: child.stdin,
     on: (event: "close" | "error", cb: never) => child.on(event, cb),
     kill: (signal) => killTree(child, (signal as NodeJS.Signals) ?? "SIGTERM"),
   } as ShellChild
@@ -101,6 +105,11 @@ export interface RunShellOpts {
   /** Abort kills the running process tree (Ctrl+C on a blocking command). The
    * resolved {@link ShellResult} carries `aborted: true`. */
   signal?: AbortSignal
+  /** Called once, after a successful spawn, with a writer that appends to the
+   * child's stdin. Lets the TUI feed a line-based interactive prompt (a `y/n`,
+   * a passphrase) into a running foreground `!command`. No-op after the process
+   * exits or is aborted. */
+  registerInput?: (write: (data: string) => void) => void
 }
 
 /** Coerce a `data` event payload to a Buffer (real child) or keep a string (the
@@ -184,6 +193,17 @@ export function runShell(command: string, opts: RunShellOpts = {}): Promise<Shel
     if (opts.signal) {
       if (opts.signal.aborted) onAbort()
       else opts.signal.addEventListener("abort", onAbort, { once: true })
+    }
+    if (opts.registerInput && child.stdin) {
+      const stdin = child.stdin
+      opts.registerInput((data: string) => {
+        if (aborted) return
+        try {
+          stdin.write(data)
+        } catch {
+          // stdin closed / EPIPE — the process is gone; drop the input.
+        }
+      })
     }
     child.stdout?.on("data", (c) => out.feed(c))
     child.stderr?.on("data", (c) => err.feed(c))

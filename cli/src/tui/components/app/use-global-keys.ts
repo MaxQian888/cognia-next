@@ -14,7 +14,11 @@ import { footerSegmentCommand } from "../../format/footer-action"
 import { cyclePermissionMode } from "../../input/mode-cycle"
 import { permissionModeMeta } from "../../state/permission-mode-meta"
 import { deriveEffortSliderState } from "../../../config/thinking"
-import { matchAction } from "../../input/keybindings"
+import {
+  LEADER_TIMEOUT_MS,
+  resolveChordEvent,
+  type KeybindableAction,
+} from "../../input/keybindings"
 import { lastAssistantText } from "../../state/selectors"
 import { collectInspectables } from "../../runtime/inspect"
 import { buildStepInspectorDoc } from "../../runtime/workflow-step-doc"
@@ -95,6 +99,9 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
   // Owned here (not shared with App): clears the Ctrl+C double-press window after
   // the hint expires, so a single press doesn't linger waiting for a second.
   const ctrlCTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Armed leader-chord prefix (OpenCode-style `"ctrl+x n"` bindings) + when it
+  // was armed; lapses after LEADER_TIMEOUT_MS.
+  const chordPrefixRef = useRef<{ prefix: string; at: number } | null>(null)
   useInput((input, key) => {
     const {
       state,
@@ -418,7 +425,22 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
     // table — see `input/keybindings.ts`. Each keeps its own guard; all are gated
     // on no-overlay so a modal owns input while open. Defaults reproduce the
     // historic chords (Ctrl+T/R/O/V/I) plus the new Ctrl+G inspector.
-    const chord = overlayOpen ? undefined : matchAction(keybindings, input, key)
+    let chord: KeybindableAction | undefined
+    if (!overlayOpen) {
+      // Chord-aware resolution: single chords match directly; a leader binding
+      // (`"ctrl+x n"`) arms its prefix on the first key and completes (or
+      // lapses after LEADER_TIMEOUT_MS / on a non-matching key) on the next.
+      const pending = chordPrefixRef.current
+      chordPrefixRef.current = null
+      const active = pending && now() - pending.at <= LEADER_TIMEOUT_MS ? pending.prefix : null
+      const res = resolveChordEvent(keybindings, input, key, active)
+      if (res.kind === "action") {
+        chord = res.action
+      } else if (res.kind === "prefix") {
+        chordPrefixRef.current = { prefix: res.prefix, at: now() }
+        return // leader consumed; the next key completes or drops the chord
+      }
+    }
     // Toggle tool/thinking output for the whole transcript. The transcript lives
     // in `<Static>` (write-once), so clear the screen and let the bumped epoch
     // re-print every cell with the new collapsed state.

@@ -211,3 +211,63 @@ describe("runCommit", () => {
     expect(h.actions).toEqual([{ type: "CLEAR_COMMIT_DRAFT" }])
   })
 })
+
+describe("runCommit with config.git overrides", () => {
+  it("refuses a branch listed in config.git.protectedBranches", async () => {
+    const h = harness({
+      git: { branch: "dev" },
+      config: {
+        cwd: "/repo",
+        git: { protectedBranches: ["master", "main", "dev"] },
+      } as ResolvedConfig,
+    })
+    await runCommit(h.deps)
+    const notice = h.actions.find((a) => a.type === "NOTICE")
+    expect(notice && "message" in notice && notice.message).toContain('"dev"')
+    expect(h.generate).not.toHaveBeenCalled()
+  })
+
+  it("allows master when the user's protected list omits it", async () => {
+    const h = harness({
+      git: { branch: "master" },
+      config: { cwd: "/repo", git: { protectedBranches: ["release"] } } as ResolvedConfig,
+    })
+    await runCommit(h.deps)
+    expect(h.generate).toHaveBeenCalled()
+  })
+
+  it("omits the co-author trailer when coauthorTrailer is false", async () => {
+    const h = harness({
+      config: { cwd: "/repo", git: { coauthorTrailer: false } } as ResolvedConfig,
+    })
+    await runCommit(h.deps)
+    const draft = h.actions.find((a) => a.type === "SET_COMMIT_DRAFT")
+    expect(draft && "message" in draft && draft.message).not.toContain("Co-Authored-By")
+  })
+
+  it("uses a custom trailer string when configured", async () => {
+    const h = harness({
+      config: {
+        cwd: "/repo",
+        git: { coauthorTrailer: "Co-Authored-By: Bot <bot@example.com>" },
+      } as ResolvedConfig,
+    })
+    await runCommit(h.deps)
+    const draft = h.actions.find((a) => a.type === "SET_COMMIT_DRAFT")
+    expect(draft && "message" in draft && draft.message).toContain(
+      "Co-Authored-By: Bot <bot@example.com>"
+    )
+  })
+})
+
+describe("formatCommitMessage with a configured trailer", () => {
+  it("appends nothing when trailer is null", () => {
+    expect(formatCommitMessage("feat: x", null)).toBe("feat: x\n")
+  })
+
+  it("appends a custom trailer", () => {
+    expect(formatCommitMessage("feat: x", "Signed-off-by: A <a@b.c>")).toBe(
+      "feat: x\n\nSigned-off-by: A <a@b.c>\n"
+    )
+  })
+})

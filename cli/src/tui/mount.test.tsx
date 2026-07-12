@@ -57,6 +57,24 @@ describe("renderTui", () => {
     expect(mountedSessionId).toBe("ses-abc")
   })
 
+  it("threads the launch-flag initial command through to the app element", async () => {
+    let mounted: string | undefined
+    const render = jest.fn(
+      (element: { props: { children: { props: { initialCommand?: string } } } }) => {
+        mounted = element.props.children.props.initialCommand
+        return {
+          unmount: jest.fn(),
+          waitUntilExit: () => Promise.resolve(),
+          rerender: jest.fn(),
+          clear: jest.fn(),
+          cleanup: jest.fn(),
+        }
+      }
+    ) as never
+    await renderTui({ config, initialCommand: "/continue", render })
+    expect(mounted).toBe("/continue")
+  })
+
   it("backfills the active model so the banner matches the model the agent runs", async () => {
     // config has no explicit model; the app must mount with the provider's
     // resolved default rather than `undefined` (the first-entry sync fix).

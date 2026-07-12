@@ -1,11 +1,20 @@
 import {
+  CLI_LOGGING_DEFAULTS,
   cliConfigFileSchema,
+  cliLoggingSchema,
+  cliLogLevelRank,
   clipboardSchema,
+  DEFAULT_COAUTHOR_TRAILER,
   DEFAULT_OSC52_MAX_BYTES,
+  DEFAULT_PR_FOOTER,
   DEFAULT_RESOLVED_CONFIG,
+  GIT_WORKFLOW_DEFAULTS,
+  gitWorkflowSchema,
   NOTICE_DEFAULTS,
   noticesSchema,
   RENDER_DEFAULTS,
+  resolveCliLoggingConfig,
+  resolveGitWorkflowConfig,
   resolveNotices,
   resolveRenderConfig,
   renderConfigSchema,
@@ -314,5 +323,87 @@ describe("clipboardSchema (osc52MaxBytes)", () => {
   it("rejects a negative or fractional cap", () => {
     expect(clipboardSchema.safeParse({ osc52MaxBytes: -1 }).success).toBe(false)
     expect(clipboardSchema.safeParse({ osc52MaxBytes: 1.5 }).success).toBe(false)
+  })
+})
+
+describe("gitWorkflowSchema + resolveGitWorkflowConfig", () => {
+  it("resolves the historic defaults when the section is absent", () => {
+    expect(resolveGitWorkflowConfig(undefined)).toEqual(GIT_WORKFLOW_DEFAULTS)
+    expect(GIT_WORKFLOW_DEFAULTS.protectedBranches).toEqual(["master", "main"])
+    expect(GIT_WORKFLOW_DEFAULTS.coauthorTrailer).toBe(DEFAULT_COAUTHOR_TRAILER)
+    expect(GIT_WORKFLOW_DEFAULTS.prFooter).toBe(DEFAULT_PR_FOOTER)
+    expect(GIT_WORKFLOW_DEFAULTS.baseBranch).toBeNull()
+  })
+
+  it("false disables the trailer/footer; a string replaces it", () => {
+    const r = resolveGitWorkflowConfig({
+      coauthorTrailer: false,
+      prFooter: "Custom footer",
+    })
+    expect(r.coauthorTrailer).toBeNull()
+    expect(r.prFooter).toBe("Custom footer")
+  })
+
+  it("true keeps the default trailer/footer text", () => {
+    const r = resolveGitWorkflowConfig({ coauthorTrailer: true, prFooter: true })
+    expect(r.coauthorTrailer).toBe(DEFAULT_COAUTHOR_TRAILER)
+    expect(r.prFooter).toBe(DEFAULT_PR_FOOTER)
+  })
+
+  it("carries protectedBranches and baseBranch overrides through", () => {
+    const r = resolveGitWorkflowConfig({
+      protectedBranches: ["master", "main", "dev"],
+      baseBranch: "dev",
+    })
+    expect(r.protectedBranches).toEqual(["master", "main", "dev"])
+    expect(r.baseBranch).toBe("dev")
+  })
+
+  it("rejects unknown keys and empty strings (strict)", () => {
+    expect(gitWorkflowSchema.safeParse({ nope: true }).success).toBe(false)
+    expect(gitWorkflowSchema.safeParse({ baseBranch: "" }).success).toBe(false)
+    expect(gitWorkflowSchema.safeParse({ protectedBranches: [""] }).success).toBe(false)
+  })
+
+  it("is accepted as the top-level `git` key of the config file", () => {
+    const parsed = cliConfigFileSchema.safeParse({
+      git: { protectedBranches: ["main"], coauthorTrailer: false },
+    })
+    expect(parsed.success).toBe(true)
+  })
+})
+
+describe("cliLoggingSchema + resolveCliLoggingConfig", () => {
+  it("returns the defaults when logging is absent", () => {
+    expect(resolveCliLoggingConfig(undefined)).toEqual(CLI_LOGGING_DEFAULTS)
+  })
+
+  it("overlays a sparse patch onto the defaults", () => {
+    const r = resolveCliLoggingConfig({ fileLevel: "warn" })
+    expect(r.fileLevel).toBe("warn")
+    expect(r.mcpLogMaxKb).toBe(CLI_LOGGING_DEFAULTS.mcpLogMaxKb)
+    expect(r.crashLogMaxKb).toBe(CLI_LOGGING_DEFAULTS.crashLogMaxKb)
+  })
+
+  it("accepts crashLogMaxKb 0 (never rotate) but rejects a sub-floor mcp size", () => {
+    expect(cliLoggingSchema.safeParse({ crashLogMaxKb: 0 }).success).toBe(true)
+    expect(cliLoggingSchema.safeParse({ mcpLogMaxKb: 8 }).success).toBe(false)
+  })
+
+  it("rejects unknown keys and unknown levels", () => {
+    expect(cliLoggingSchema.safeParse({ bogus: true }).success).toBe(false)
+    expect(cliLoggingSchema.safeParse({ fileLevel: "verbose" }).success).toBe(false)
+  })
+
+  it("is registered on the config-file schema", () => {
+    const parsed = cliConfigFileSchema.safeParse({ logging: { fileLevel: "error" } })
+    expect(parsed.success).toBe(true)
+  })
+
+  it("ranks levels debug < info < warn < error, with unknown ranked as info", () => {
+    expect(cliLogLevelRank("debug")).toBeLessThan(cliLogLevelRank("info"))
+    expect(cliLogLevelRank("info")).toBeLessThan(cliLogLevelRank("warn"))
+    expect(cliLogLevelRank("warn")).toBeLessThan(cliLogLevelRank("error"))
+    expect(cliLogLevelRank("notice")).toBe(cliLogLevelRank("info"))
   })
 })

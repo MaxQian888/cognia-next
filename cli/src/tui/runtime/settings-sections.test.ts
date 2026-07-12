@@ -40,8 +40,10 @@ describe("settingsSections", () => {
       "appearance",
       "display",
       "tools",
+      "git",
       "behavior",
       "terminal",
+      "logging",
       "advanced",
       "keybindings",
       "workspace",
@@ -98,7 +100,7 @@ describe("settingsSections", () => {
       keybindings: { inspect: "ctrl+j" },
     })
     const sections = settingsSections(full)
-    expect(sections).toHaveLength(9)
+    expect(sections).toHaveLength(11)
     for (const section of sections) {
       for (const row of section.rows) {
         expect(row.value.length).toBeGreaterThan(0)
@@ -392,5 +394,89 @@ describe("cycleEnum", () => {
   })
   it("returns the current value for an empty option list", () => {
     expect(cycleEnum([], "x", 1)).toBe("x")
+  })
+})
+
+describe("git section", () => {
+  it("shows the defaults: master/main protected, trailer + footer on, auto base", () => {
+    expect(findRow(cfg(), "git", "gitProtectedBranches")?.value).toBe("master main")
+    expect(findRow(cfg(), "git", "gitBaseBranch")?.value).toContain("auto")
+    expect(findRow(cfg(), "git", "gitCoauthorTrailer")?.value).toBe("on")
+    expect(findRow(cfg(), "git", "gitPrFooter")?.value).toBe("on")
+  })
+
+  it("reflects config.git overrides, including a custom trailer string", () => {
+    const c = cfg({
+      git: {
+        protectedBranches: ["master", "main", "dev"],
+        baseBranch: "dev",
+        coauthorTrailer: "Co-Authored-By: Bot <b@x>",
+        prFooter: false,
+      },
+    })
+    expect(findRow(c, "git", "gitProtectedBranches")?.value).toBe("master main dev")
+    expect(findRow(c, "git", "gitBaseBranch")?.value).toBe("dev")
+    expect(findRow(c, "git", "gitCoauthorTrailer")?.value).toBe("custom")
+    expect(findRow(c, "git", "gitPrFooter")?.value).toBe("off")
+  })
+
+  it("wires the boolean rows to the gitWorkflow apply target", () => {
+    const trailer = findRow(cfg(), "git", "gitCoauthorTrailer")
+    expect(trailer?.control).toMatchObject({
+      type: "boolean",
+      current: true,
+      apply: { kind: "gitWorkflow", key: "coauthorTrailer" },
+    })
+    const footer = findRow(cfg({ git: { prFooter: false } }), "git", "gitPrFooter")
+    expect(footer?.control).toMatchObject({ type: "boolean", current: false })
+  })
+
+  it("wires branches/base to single-field forms", () => {
+    expect(findRow(cfg(), "git", "gitProtectedBranches")?.control).toEqual({
+      type: "form",
+      field: "gitProtectedBranches",
+    })
+    expect(findRow(cfg(), "git", "gitBaseBranch")?.control).toEqual({
+      type: "form",
+      field: "gitBaseBranch",
+    })
+  })
+
+  it("applyTargetDefault turns both git booleans back on", () => {
+    expect(applyTargetDefault({ kind: "gitWorkflow", key: "coauthorTrailer" })).toBe(true)
+    expect(applyTargetDefault({ kind: "gitWorkflow", key: "prFooter" })).toBe(true)
+  })
+})
+
+describe("logging section", () => {
+  it("shows resolved defaults for a config without a logging block", () => {
+    expect(findRow(cfg(), "logging", "loggingFileLevel")?.value).toBe("info")
+    expect(findRow(cfg(), "logging", "loggingMcpLogMaxKb")?.value).toBe("2048")
+    expect(findRow(cfg(), "logging", "loggingCrashLogMaxKb")?.value).toBe("1024")
+  })
+
+  it("reflects configured values and renders crashLogMaxKb 0 as never", () => {
+    const config = cfg({ logging: { fileLevel: "warn", crashLogMaxKb: 0 } })
+    expect(findRow(config, "logging", "loggingFileLevel")?.value).toBe("warn")
+    expect(findRow(config, "logging", "loggingCrashLogMaxKb")?.value).toBe("never")
+  })
+
+  it("wires enum rows to the logging apply target", () => {
+    const row = findRow(cfg(), "logging", "loggingFileLevel")
+    expect(row?.control).toMatchObject({
+      type: "enum",
+      apply: { kind: "logging", key: "fileLevel" },
+    })
+  })
+
+  it("delegates the log viewer row to /mcp logs", () => {
+    const row = findRow(cfg(), "logging", "loggingViewMcpLogs")
+    expect(row?.control).toEqual({ type: "delegate", command: "/mcp logs" })
+  })
+
+  it("resets logging targets to their defaults", () => {
+    expect(applyTargetDefault({ kind: "logging", key: "fileLevel" })).toBe("info")
+    expect(applyTargetDefault({ kind: "logging", key: "mcpLogMaxKb" })).toBe("2048")
+    expect(applyTargetDefault({ kind: "logging", key: "crashLogMaxKb" })).toBe("1024")
   })
 })

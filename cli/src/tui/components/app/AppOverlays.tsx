@@ -387,7 +387,9 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           const all = state.overlay.items
           const query = state.overlay.query ?? ""
           const filtered = filterSessionItems(all, query)
-          const searchable = all.length >= SEARCHABLE_MIN
+          // Lazy search: short lists stay chrome-free, but typing always
+          // filters — the 🔎 row appears with the first typed character.
+          const searchable = all.length >= SEARCHABLE_MIN || query.length > 0
           return (
             <SelectList
               title="Resume session"
@@ -395,12 +397,11 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               index={state.overlay.index}
               width={columns}
               maxRows={overlayRows}
-              query={searchable ? query : undefined}
-              searchPlaceholder={searchable ? "type to filter sessions" : undefined}
-              emptyHint={searchable ? "no sessions match" : undefined}
-              onQueryChange={
-                searchable ? (q) => dispatch({ type: "OVERLAY_QUERY", query: q }) : undefined
-              }
+              query={query}
+              searchRowVisible={searchable}
+              searchPlaceholder="type to filter sessions"
+              emptyHint="no sessions match"
+              onQueryChange={(q) => dispatch({ type: "OVERLAY_QUERY", query: q })}
               onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
               onSelect={(i) => {
                 const picked = filtered[i]
@@ -417,7 +418,8 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           const o = state.overlay
           const query = o.query ?? ""
           const filtered = filterSelectItems(o.items, query)
-          const searchable = o.items.length >= SEARCHABLE_MIN
+          // Lazy search — same model as the sessions picker above.
+          const searchable = o.items.length >= SEARCHABLE_MIN || query.length > 0
           return (
             <SelectList
               title={o.title}
@@ -425,12 +427,11 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               index={o.index}
               width={columns}
               maxRows={overlayRows}
-              query={searchable ? query : undefined}
-              searchPlaceholder={searchable ? "type to filter" : undefined}
-              emptyHint={searchable ? "no matches" : undefined}
-              onQueryChange={
-                searchable ? (q) => dispatch({ type: "OVERLAY_QUERY", query: q }) : undefined
-              }
+              query={query}
+              searchRowVisible={searchable}
+              searchPlaceholder="type to filter"
+              emptyHint="no matches"
+              onQueryChange={(q) => dispatch({ type: "OVERLAY_QUERY", query: q })}
               onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
               onSelect={(i) => {
                 const item = filtered[i]

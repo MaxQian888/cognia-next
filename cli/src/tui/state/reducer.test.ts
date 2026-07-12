@@ -1581,6 +1581,23 @@ describe("tuiReducer", () => {
     expect(s.cells.find((c) => c.id === "bash-1")).toBe(settled)
   })
 
+  it("BASH_FOREGROUND promotes the target and demotes every other running bash cell", () => {
+    let s = reduce(base(), { type: "BASH_START", command: "a", id: "bash-1" })
+    s = reduce(s, { type: "BASH_BACKGROUND", id: "bash-1" })
+    s = reduce(s, { type: "BASH_START", command: "b", id: "bash-2" })
+    s = reduce(s, { type: "BASH_FOREGROUND", id: "bash-1" })
+    expect(s.cells.find((c) => c.id === "bash-1")).toMatchObject({ background: false })
+    expect(s.cells.find((c) => c.id === "bash-2")).toMatchObject({ background: true })
+  })
+
+  it("BASH_FOREGROUND no-ops on a settled or unknown cell", () => {
+    let s = reduce(base(), { type: "BASH_START", command: "a", id: "bash-1" })
+    s = reduce(s, { type: "BASH_RESULT", output: "x", status: "done", id: "bash-1" })
+    const settled = s
+    expect(reduce(settled, { type: "BASH_FOREGROUND", id: "bash-1" })).toBe(settled)
+    expect(reduce(settled, { type: "BASH_FOREGROUND", id: "nope" })).toBe(settled)
+  })
+
   it("ACTIVITY_START/PROGRESS/END drive the background activity pill", () => {
     let s = reduce(base(), { type: "ACTIVITY_START", kind: "goal", label: "ship it" })
     expect(s.activity).toEqual({ kind: "goal", label: "ship it", status: "running" })

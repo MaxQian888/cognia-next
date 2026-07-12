@@ -38,7 +38,13 @@ import type { CommandDescriptor, CommandEffect } from "./types"
 export type SlashCommand = CommandDescriptor
 
 /** Settings fields edited via the panel's single-field form (`/settings <field> <value>`). */
-const SETTINGS_FORM_FIELDS = ["systemPrompt", "skillDirs", "allowedTools"] as const
+const SETTINGS_FORM_FIELDS = [
+  "systemPrompt",
+  "skillDirs",
+  "allowedTools",
+  "gitProtectedBranches",
+  "gitBaseBranch",
+] as const
 
 // ── Core command catalog ──────────────────────────────────────────────────────
 // Order is meaningful: it drives the palette + `/help` listing and keeps the

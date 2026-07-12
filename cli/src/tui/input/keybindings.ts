@@ -113,15 +113,45 @@ export function parseKeySpec(spec: string): ParsedKeySpec | null {
   return { ctrl, shift, meta, key }
 }
 
-/** Canonical display form of a spec, e.g. `"ctrl+o"` → `"Ctrl+O"`. Invalid → "—". */
-export function formatKeySpec(spec: string): string {
-  const p = parseKeySpec(spec)
-  if (!p) return "—"
+/** How long a leader-chord prefix stays armed before it lapses (OpenCode's
+ * `leader_timeout` default). */
+export const LEADER_TIMEOUT_MS = 2000
+
+/**
+ * Parse a spec that may be a single chord (`"ctrl+o"`) or an OpenCode-style
+ * leader sequence (`"ctrl+x n"` — leader, then action key). Space-separated;
+ * at most two steps. Null when any step is malformed.
+ */
+export function parseKeySequence(spec: string): ParsedKeySpec[] | null {
+  const steps = spec.trim().split(/\s+/).filter(Boolean)
+  if (steps.length === 0 || steps.length > 2) return null
+  const parsed = steps.map(parseKeySpec)
+  return parsed.every((p): p is ParsedKeySpec => p !== null) ? parsed : null
+}
+
+function matchParsed(p: ParsedKeySpec, input: string, key: KeyFlags): boolean {
+  return (
+    Boolean(key.ctrl) === p.ctrl &&
+    Boolean(key.shift) === p.shift &&
+    Boolean(key.meta) === p.meta &&
+    input.toLowerCase() === p.key
+  )
+}
+
+function formatParsed(p: ParsedKeySpec): string {
   const mods: string[] = []
   if (p.ctrl) mods.push("Ctrl")
   if (p.meta) mods.push("Alt")
   if (p.shift) mods.push("Shift")
   return [...mods, p.key.toUpperCase()].join("+")
+}
+
+/** Canonical display form of a spec, e.g. `"ctrl+o"` → `"Ctrl+O"`, a leader
+ * sequence `"ctrl+x n"` → `"Ctrl+X N"`. Invalid → "—". */
+export function formatKeySpec(spec: string): string {
+  const seq = parseKeySequence(spec)
+  if (!seq) return "—"
+  return seq.map(formatParsed).join(" ")
 }
 
 /** Does a raw Ink key event match a parsed spec? */
@@ -147,9 +177,56 @@ export function resolveKeybindings(
   if (!overrides) return out
   for (const action of KEYBINDABLE_ACTIONS) {
     const spec = overrides[action]
-    if (typeof spec === "string" && parseKeySpec(spec)) out[action] = spec
+    if (typeof spec === "string" && parseKeySequence(spec)) out[action] = spec
   }
   return out
+}
+
+/** What one key event resolves to under chord-aware matching. */
+export type ChordResolution =
+  | { kind: "action"; action: KeybindableAction }
+  /** The event armed a leader prefix (canonical form, e.g. `"Ctrl+X"`); the
+   * caller stores it and passes it back with the next event. */
+  | { kind: "prefix"; prefix: string }
+  | { kind: "none" }
+
+/**
+ * Chord-aware event resolution. With no pending prefix: a single-step binding
+ * that matches wins; otherwise an event matching the FIRST step of any
+ * two-step binding arms that prefix (the event is consumed). With a pending
+ * prefix: only the second steps of matching sequences are considered — a miss
+ * resolves to `none` and the caller lets the key flow on normally.
+ */
+export function resolveChordEvent(
+  bindings: Record<KeybindableAction, string>,
+  input: string,
+  key: KeyFlags,
+  pendingPrefix: string | null
+): ChordResolution {
+  if (pendingPrefix) {
+    for (const action of KEYBINDABLE_ACTIONS) {
+      const seq = parseKeySequence(bindings[action])
+      if (
+        seq?.length === 2 &&
+        formatParsed(seq[0]) === pendingPrefix &&
+        matchParsed(seq[1], input, key)
+      ) {
+        return { kind: "action", action }
+      }
+    }
+    return { kind: "none" }
+  }
+  for (const action of KEYBINDABLE_ACTIONS) {
+    const seq = parseKeySequence(bindings[action])
+    if (seq?.length === 1 && matchParsed(seq[0], input, key)) return { kind: "action", action }
+  }
+  for (const action of KEYBINDABLE_ACTIONS) {
+    const seq = parseKeySequence(bindings[action])
+    if (seq?.length === 2 && matchParsed(seq[0], input, key)) {
+      return { kind: "prefix", prefix: formatParsed(seq[0]) }
+    }
+  }
+  return { kind: "none" }
 }
 
 /**

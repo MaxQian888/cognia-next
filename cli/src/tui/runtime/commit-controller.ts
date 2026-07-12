@@ -15,18 +15,19 @@
  *
  * CLI is English-only.
  */
-import type { ResolvedConfig } from "../../config/schema"
+import {
+  DEFAULT_COAUTHOR_TRAILER,
+  resolveGitWorkflowConfig,
+  type ResolvedConfig,
+} from "../../config/schema"
 import { runGit as defaultRunGit, type ExecResult } from "../../agent/run-git"
 import { generateText } from "../../agent/generate-text"
 import { errorMessage } from "./shared"
 import type { TuiAction } from "../state/types"
 
-/** Base branches a commit must never target directly. */
-const PROTECTED_BRANCHES = new Set(["master", "main"])
-
-/** The trailer every generated commit ends with (repo convention). */
-export const COAUTHOR_TRAILER =
-  "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+/** The default trailer generated commits end with (re-exported for tests /
+ * callers; the active value comes from `config.git.coauthorTrailer`). */
+export const COAUTHOR_TRAILER = DEFAULT_COAUTHOR_TRAILER
 
 /** Cap the diff fed to the model — the message only needs the shape of the change. */
 const MAX_DIFF_CHARS = 12_000
@@ -84,11 +85,18 @@ export function buildCommitMessagePrompt(ctx: CommitPromptContext): string {
   ].join("\n")
 }
 
-/** Append the Co-Authored-By trailer as its own paragraph (idempotent). */
-export function formatCommitMessage(raw: string): string {
+/**
+ * Append the configured co-author trailer as its own paragraph (idempotent).
+ * `trailer: null` (config `coauthorTrailer: false`) appends nothing.
+ */
+export function formatCommitMessage(
+  raw: string,
+  trailer: string | null = DEFAULT_COAUTHOR_TRAILER
+): string {
   const body = raw.trim()
+  if (trailer === null) return `${body}\n`
   if (/Co-Authored-By:\s*Claude/i.test(body)) return `${body}\n`
-  return `${body}\n\n${COAUTHOR_TRAILER}\n`
+  return `${body}\n\n${trailer}\n`
 }
 
 const gitOf = (deps: CommitDeps) =>
@@ -142,7 +150,10 @@ async function generateAndStage(deps: CommitDeps, branch: string): Promise<void>
     deps.dispatch({ type: "NOTICE", message: "Model returned an empty commit message." })
     return
   }
-  const message = formatCommitMessage(raw)
+  const message = formatCommitMessage(
+    raw,
+    resolveGitWorkflowConfig(deps.config?.git).coauthorTrailer
+  )
   deps.dispatch({ type: "SET_COMMIT_DRAFT", message })
   deps.dispatch({
     type: "OVERLAY_OPEN",
@@ -164,7 +175,8 @@ async function runFlow(deps: CommitDeps): Promise<void> {
     deps.dispatch({ type: "NOTICE", message: cur.error })
     return
   }
-  if (PROTECTED_BRANCHES.has(cur.branch)) {
+  const protectedBranches = resolveGitWorkflowConfig(deps.config?.git).protectedBranches
+  if (protectedBranches.includes(cur.branch)) {
     deps.dispatch({
       type: "NOTICE",
       message: `Refusing to commit directly to "${cur.branch}". Create a feature branch first (e.g. \`git checkout -b feature/…\`).`,

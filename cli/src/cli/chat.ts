@@ -17,8 +17,22 @@ import { createAgentSession, type AgentSession } from "../agent/session-runner"
 import { createPermissionGate } from "../agent/permission-gate"
 import { maybePushHandoff as defaultPushHandoff } from "./handoff-cmd"
 import { runFlagsToOverrides } from "./run-command"
-import { type ParsedArgs } from "./args"
+import { boolFlag, type ParsedArgs } from "./args"
 import { realOutput, type OutputSink } from "./output"
+
+/**
+ * Map the session launch flags to the slash command the TUI runs on mount:
+ * `--continue` / `-c` → `/continue` (most recent session), `--resume <id>` →
+ * `/resume <id>`, bare `--resume` → `/resume` (session picker). Mirrors
+ * `claude --continue` / `claude --resume`. Pure + exported for tests.
+ */
+export function launchCommandFromFlags(args: ParsedArgs): string | undefined {
+  if (boolFlag(args, "continue")) return "/continue"
+  const resume = args.flags["resume"]
+  if (typeof resume === "string") return `/resume ${resume}`
+  if (resume === true) return "/resume"
+  return undefined
+}
 
 /** What a typed line resolves to. */
 export type ChatAction =
@@ -77,6 +91,7 @@ export interface ChatDeps {
     config: ReturnType<typeof defaultLoadConfig>
     createSession: typeof createAgentSession
     pushHandoff: (sessionId: string) => void | Promise<void>
+    initialCommand?: string
   }) => Promise<number>
 }
 
@@ -99,6 +114,7 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
   // module is imported lazily so `--help`, `run`, and the readline path never
   // pull Ink into the bundle's eager graph.
   const isTty = deps.isTty ?? (() => Boolean(stdout.isTTY && stdin.isTTY))
+  const initialCommand = launchCommandFromFlags(args)
   if (isTty() && !deps.readLine) {
     const renderTui = deps.renderTui ?? (await import("../tui/mount")).renderTui
     return renderTui({
@@ -107,7 +123,12 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
       pushHandoff: (sessionId: string) => {
         void pushHandoff(sessionId, undefined, { out })
       },
+      initialCommand,
     })
+  }
+  // The readline fallback has no session store — resuming needs the TUI.
+  if (initialCommand) {
+    out.error("--continue/--resume need an interactive terminal (TTY); starting fresh.")
   }
 
   // Default IO (real terminal). Tests inject readLine + confirm instead.

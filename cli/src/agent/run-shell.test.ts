@@ -118,4 +118,93 @@ describe("runShell", () => {
     expect(kill).toHaveBeenCalled()
     expect(r.aborted).toBe(true)
   })
+
+  it("hands registerInput a writer that appends to the child's stdin", async () => {
+    const handlers: Record<string, ((arg: unknown) => void)[]> = {}
+    const writes: string[] = []
+    const child: ShellChild = {
+      stdout: { on: () => {} },
+      stderr: { on: () => {} },
+      stdin: { write: (d) => writes.push(d) },
+      on(event, cb) {
+        ;(handlers[event] ??= []).push(cb as (arg: unknown) => void)
+      },
+    }
+    let writer: ((d: string) => void) | undefined
+    const promise = runShell("cat", {
+      spawn: () => child,
+      registerInput: (w) => {
+        writer = w
+      },
+    })
+    // registerInput fires synchronously during the spawn, before runShell resolves.
+    expect(writer).toBeDefined()
+    writer!("yes\n")
+    expect(writes).toEqual(["yes\n"])
+    handlers.close?.forEach((cb) => cb(0))
+    await promise
+  })
+
+  it("drops stdin writes after the run is aborted", async () => {
+    const handlers: Record<string, ((arg: unknown) => void)[]> = {}
+    const writes: string[] = []
+    const kill = jest.fn(() => handlers.close?.forEach((cb) => cb(null)))
+    const child: ShellChild = {
+      stdout: { on: () => {} },
+      stderr: { on: () => {} },
+      stdin: { write: (d) => writes.push(d) },
+      on(event, cb) {
+        ;(handlers[event] ??= []).push(cb as (arg: unknown) => void)
+      },
+      kill,
+    }
+    let writer: ((d: string) => void) | undefined
+    const controller = new AbortController()
+    const promise = runShell("cat", {
+      spawn: () => child,
+      signal: controller.signal,
+      registerInput: (w) => {
+        writer = w
+      },
+    })
+    writer!("before\n")
+    controller.abort()
+    const r = await promise
+    writer!("after\n")
+    expect(writes).toEqual(["before\n"])
+    expect(r.aborted).toBe(true)
+  })
+
+  it("does not call registerInput when the child has no stdin", async () => {
+    const register = jest.fn()
+    const spawn: ShellSpawn = () => fakeChild({ code: 0 })
+    await runShell("x", { spawn, registerInput: register })
+    expect(register).not.toHaveBeenCalled()
+  })
+
+  it("swallows errors when the child stdin write throws (EPIPE)", async () => {
+    const handlers: Record<string, ((arg: unknown) => void)[]> = {}
+    const child: ShellChild = {
+      stdout: { on: () => {} },
+      stderr: { on: () => {} },
+      stdin: {
+        write: () => {
+          throw new Error("EPIPE")
+        },
+      },
+      on(event, cb) {
+        ;(handlers[event] ??= []).push(cb as (arg: unknown) => void)
+      },
+    }
+    let writer: ((d: string) => void) | undefined
+    const promise = runShell("cat", {
+      spawn: () => child,
+      registerInput: (w) => {
+        writer = w
+      },
+    })
+    expect(() => writer!("x\n")).not.toThrow()
+    handlers.close?.forEach((cb) => cb(0))
+    await promise
+  })
 })

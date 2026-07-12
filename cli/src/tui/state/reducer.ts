@@ -864,6 +864,18 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       )
       return { ...state, cells: updated }
     }
+    case "BASH_FOREGROUND": {
+      // Only a still-running cell can come back to the foreground; every other
+      // running bash cell is demoted so at most one renders as foreground.
+      const target = state.cells.find(
+        (c) => c.id === action.id && c.kind === "bash" && c.status === "running"
+      )
+      if (!target) return state
+      const updated = state.cells.map((c) =>
+        c.kind === "bash" && c.status === "running" ? { ...c, background: c.id !== action.id } : c
+      )
+      return { ...state, cells: updated }
+    }
 
     // ── Cells ────────────────────────────────────────────────────────────────────
     case "TOGGLE_COLLAPSE": {

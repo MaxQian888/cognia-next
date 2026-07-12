@@ -30,6 +30,7 @@ export function SelectList({
   footerHint,
   query,
   onQueryChange,
+  searchRowVisible = true,
   searchPlaceholder,
   emptyHint,
   disableWheel = false,
@@ -55,6 +56,10 @@ export function SelectList({
    * stays a pure presenter. Omit both to keep the plain (non-searchable) list. */
   query?: string
   onQueryChange?: (query: string) => void
+  /** Hide the 🔎 row while still accepting typeahead input (lazy search): short
+   * lists stay chrome-free, and the row appears the moment the parent sees a
+   * non-empty query. Defaults to true (row always shown when searchable). */
+  searchRowVisible?: boolean
   /** Placeholder shown on the search line while `query` is empty. */
   searchPlaceholder?: string
   /** Line shown in place of the list when a search filters everything out. */
@@ -73,9 +78,10 @@ export function SelectList({
   // Mouse (fullscreen `scroll` mode only): a click on a row both highlights and
   // selects it (Claude-Code parity); the wheel moves the highlight. Header rows
   // above the items = the optional title line + the optional search line.
+  const searchRowShown = Boolean(onQueryChange && searchRowVisible)
   const handleMouse = usePanelClick({
     boxRef,
-    headerRows: (title ? 1 : 0) + (onQueryChange ? 1 : 0),
+    headerRows: (title ? 1 : 0) + (searchRowShown ? 1 : 0),
     hasAboveMore: win.above > 0,
     visibleCount: visible.length,
     onPick: (offset) => {
@@ -114,7 +120,7 @@ export function SelectList({
       width={width}
     >
       {title ? <Text bold>{title}</Text> : null}
-      {onQueryChange ? (
+      {searchRowShown ? (
         <Text color={theme.muted}>
           {"🔎 "}
           {query && query.length > 0 ? (

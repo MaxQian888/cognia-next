@@ -20,7 +20,8 @@ export { VERSION }
 export const HELP = `cognia-agent — standalone Cognia coding agent
 
 Usage:
-  cognia-agent chat [--plugin-tools] [--dev-plugins]   interactive terminal agent
+  cognia-agent chat [--continue | --resume [id]]       interactive terminal agent
+                    [--plugin-tools] [--dev-plugins]
   cognia-agent -p "<prompt>"                            headless one-shot (alias of run)
   cognia-agent run "<prompt>" [--model m] [--provider p] [--cwd dir]
                               [--system s] [--allow a,b] [--yes] [--max-turns n]
@@ -44,6 +45,8 @@ Headless prompt is read from the argument AND piped stdin
 Flags:
   -p, --print           headless one-shot turn without the 'run' keyword
   -y, --yes             approve all tool requests (non-interactive / CI)
+  -c, --continue        chat: resume the most recent session at launch
+      --resume [id]     chat: resume a session by id (bare → session picker)
       --output-format   text (default) | json (one result object) | stream-json (JSONL)
       --json            alias for --output-format stream-json
       --max-turns n     cap the agentic loop for this run

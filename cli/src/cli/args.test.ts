@@ -45,6 +45,17 @@ describe("parseArgv", () => {
     expect(boolFlag(parseArgv(["-p", "fix bug"]), "print")).toBe(true)
   })
 
+  it("treats --continue/-c as boolean and --resume as an optional-value flag", () => {
+    // `--continue` never eats the next token (it's in BOOLEAN_FLAGS).
+    const a = parseArgv(["chat", "--continue", "extra"])
+    expect(boolFlag(a, "continue")).toBe(true)
+    expect(a.positionals).toContain("extra")
+    expect(boolFlag(parseArgv(["chat", "-c"]), "continue")).toBe(true)
+    // `--resume` takes an optional value: id when given, boolean when bare.
+    expect(stringFlag(parseArgv(["chat", "--resume", "s-42"]), "resume")).toBe("s-42")
+    expect(boolFlag(parseArgv(["chat", "--resume"]), "resume")).toBe(true)
+  })
+
   it("treats -p/--print as boolean and keeps the prompt as a positional", () => {
     const a = parseArgv(["-p", "fix the bug"])
     expect(boolFlag(a, "print")).toBe(true)

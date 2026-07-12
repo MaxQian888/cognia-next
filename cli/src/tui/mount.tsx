@@ -28,6 +28,8 @@ export interface RenderTuiDeps {
   pushHandoff?: (sessionId: string) => void | Promise<void>
   sessionId?: string
   render?: typeof inkRender
+  /** Slash command to run once on mount (launch flags: `--continue`/`--resume`). */
+  initialCommand?: string
 }
 
 export async function renderTui(deps: RenderTuiDeps): Promise<number> {
@@ -85,6 +87,7 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
         pushHandoff={deps.pushHandoff}
         trusted={trusted}
         initialHistory={initialHistory}
+        initialCommand={deps.initialCommand}
         altScreenPreEntered={fullscreen}
       />
     </AppErrorBoundary>,

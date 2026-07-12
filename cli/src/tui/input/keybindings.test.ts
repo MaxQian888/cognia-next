@@ -8,7 +8,9 @@ import {
   formatKeySpec,
   matchAction,
   matchKeySpec,
+  parseKeySequence,
   parseKeySpec,
+  resolveChordEvent,
   resolveKeybindings,
 } from "./keybindings"
 import type { KeyFlags } from "./keymap"
@@ -121,5 +123,56 @@ describe("DEFAULT_KEYBINDINGS", () => {
     for (const action of KEYBINDABLE_ACTIONS) {
       expect(parseKeySpec(DEFAULT_KEYBINDINGS[action])).not.toBeNull()
     }
+  })
+})
+
+describe("parseKeySequence", () => {
+  it("parses a single chord and a two-step leader sequence", () => {
+    expect(parseKeySequence("ctrl+o")).toHaveLength(1)
+    const seq = parseKeySequence("ctrl+x n")
+    expect(seq).toHaveLength(2)
+    expect(seq?.[0]).toMatchObject({ ctrl: true, key: "x" })
+    expect(seq?.[1]).toMatchObject({ ctrl: false, key: "n" })
+  })
+
+  it("rejects empty, three-step, and malformed sequences", () => {
+    expect(parseKeySequence("")).toBeNull()
+    expect(parseKeySequence("ctrl+x n m")).toBeNull()
+    expect(parseKeySequence("ctrl+x nn")).toBeNull()
+  })
+
+  it("formats a sequence for display", () => {
+    expect(formatKeySpec("ctrl+x n")).toBe("Ctrl+X N")
+  })
+})
+
+describe("resolveChordEvent (leader chords)", () => {
+  const b = resolveKeybindings({ agentsPanel: "ctrl+x a" })
+
+  it("matches single-step bindings directly", () => {
+    expect(resolveChordEvent(b, "g", { ctrl: true }, null)).toEqual({
+      kind: "action",
+      action: "inspect",
+    })
+  })
+
+  it("arms the prefix on the leader key and completes on the second", () => {
+    const first = resolveChordEvent(b, "x", { ctrl: true }, null)
+    expect(first).toEqual({ kind: "prefix", prefix: "Ctrl+X" })
+    if (first.kind !== "prefix") throw new Error("expected prefix")
+    expect(resolveChordEvent(b, "a", {}, first.prefix)).toEqual({
+      kind: "action",
+      action: "agentsPanel",
+    })
+  })
+
+  it("a non-matching second key resolves to none (key flows on normally)", () => {
+    expect(resolveChordEvent(b, "q", {}, "Ctrl+X")).toEqual({ kind: "none" })
+  })
+
+  it("resolveKeybindings accepts a leader-sequence override", () => {
+    expect(b.agentsPanel).toBe("ctrl+x a")
+    // Ctrl+B no longer triggers the panel once rebound to the sequence.
+    expect(resolveChordEvent(b, "b", { ctrl: true }, null)).toEqual({ kind: "none" })
   })
 })
