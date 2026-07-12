@@ -17,6 +17,7 @@
 pub mod backend;
 pub mod backends;
 pub mod commands;
+pub mod credential_store;
 pub mod credentials;
 pub mod db;
 pub mod error;
@@ -31,6 +32,7 @@ use log::error;
 use parking_lot::Mutex;
 
 pub use backend::VectorBackend;
+pub use credential_store::{install_credential_store, CredentialStore};
 pub use db::{ScrollPage, VectorStore};
 pub use error::{Result, VectorError};
 pub use registry::VectorRegistry;

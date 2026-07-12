@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::{Result, VectorError};
 use super::types::VectorProvider;
-use crate::keyring_secrets;
+use crate::credential_store::store;
 
 fn namespace(provider: VectorProvider) -> &'static str {
     match provider {
@@ -85,7 +85,9 @@ pub fn save(config_id: &str, creds: &VectorCredentials) -> Result<()> {
     }
     let json = serde_json::to_string(creds)
         .map_err(|e| VectorError::Configuration(format!("serialize creds: {e}")))?;
-    keyring_secrets::set(namespace(creds.provider()), config_id, &json).map_err(VectorError::Auth)
+    store()
+        .and_then(|s| s.set(namespace(creds.provider()), config_id, &json))
+        .map_err(VectorError::Auth)
 }
 
 pub fn load(provider: VectorProvider, config_id: &str) -> Result<Option<VectorCredentials>> {
@@ -94,7 +96,9 @@ pub fn load(provider: VectorProvider, config_id: &str) -> Result<Option<VectorCr
             "config_id must not be empty".into(),
         ));
     }
-    let raw = keyring_secrets::get(namespace(provider), config_id).map_err(VectorError::Auth)?;
+    let raw = store()
+        .and_then(|s| s.get(namespace(provider), config_id))
+        .map_err(VectorError::Auth)?;
     match raw {
         None => Ok(None),
         Some(s) => {
@@ -118,7 +122,9 @@ pub fn delete(provider: VectorProvider, config_id: &str) -> Result<()> {
             "config_id must not be empty".into(),
         ));
     }
-    keyring_secrets::clear(namespace(provider), config_id).map_err(VectorError::Auth)
+    store()
+        .and_then(|s| s.clear(namespace(provider), config_id))
+        .map_err(VectorError::Auth)
 }
 
 #[cfg(test)]

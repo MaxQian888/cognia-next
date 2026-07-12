@@ -105,7 +105,7 @@ pub async fn vector_upsert_points(
     collection: String,
     points: Vec<Point>,
 ) -> Result<(), String> {
-    let _perf = crate::perf::guard("vector.upsert");
+    let _perf = cognia_instrument::guard("vector.upsert");
     debug!(
         "vector_upsert_points: collection={}, count={}",
         collection,
@@ -595,7 +595,7 @@ pub async fn vector_cloud_query(
     query_vector: Vec<f32>,
     options: SearchOptions,
 ) -> Result<SearchResponse, String> {
-    let _perf = crate::perf::guard("vector.query");
+    let _perf = cognia_instrument::guard("vector.query");
     let backend = resolve_cloud(&registry, provider, &config_id).await?;
     backend
         .query(&collection, query_vector, options)

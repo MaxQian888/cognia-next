@@ -1273,7 +1273,7 @@ fn materialise_point(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector::types::FilterOp;
+    use crate::types::FilterOp;
     use serde_json::json;
     use tempfile::tempdir;
 

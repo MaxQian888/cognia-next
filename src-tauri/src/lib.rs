@@ -55,7 +55,9 @@ mod terminal;
 mod timing;
 mod tts;
 mod twin;
-mod vector;
+// ADR-0067 Phase 4 — extracted to `crates/cognia-vector`; re-aliased so
+// `crate::vector::{VectorState, VectorRegistry, commands::…}` resolve.
+pub use cognia_vector as vector;
 mod wallpaper;
 mod webclone;
 mod workflow;
@@ -152,8 +154,29 @@ async fn claude_restart_sidecar(state: State<'_, SidecarState>) -> Result<(), St
     Ok(())
 }
 
+/// Forwards `cognia-vector`'s credential persistence to the OS keyring via
+/// `keyring_secrets` (ADR-0067 Phase 4). Installed once at boot so the extracted
+/// vector crate never depends on `secret_store`/`keyring_secrets` directly.
+struct KeyringVectorCredentialStore;
+
+impl cognia_vector::CredentialStore for KeyringVectorCredentialStore {
+    fn set(&self, namespace: &str, key: &str, value: &str) -> Result<(), String> {
+        keyring_secrets::set(namespace, key, value)
+    }
+    fn get(&self, namespace: &str, key: &str) -> Result<Option<String>, String> {
+        keyring_secrets::get(namespace, key)
+    }
+    fn clear(&self, namespace: &str, key: &str) -> Result<(), String> {
+        keyring_secrets::clear(namespace, key)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // ADR-0067 Phase 4 — install the vector credential store before any command
+    // (or the managed VectorRegistry) can touch provider credentials.
+    vector::install_credential_store(Box::new(KeyringVectorCredentialStore));
+
     let mut builder = tauri::Builder::default();
 
     // single-instance MUST be registered first per Tauri docs. When a duplicate

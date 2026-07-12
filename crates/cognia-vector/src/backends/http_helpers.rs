@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use reqwest::{Client, StatusCode};
 
-use crate::vector::error::{Result, VectorError};
+use crate::error::{Result, VectorError};
 
 const MAX_UPSTREAM_ERROR_BODY_CHARS: usize = 512;
 const TRUNCATED_BODY_SUFFIX: &str = "... (truncated)";

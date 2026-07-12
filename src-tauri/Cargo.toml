@@ -147,12 +147,11 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 matrix-sdk-crypto = { version = "0.18.0", default-features = false }
 matrix-sdk-sqlite = { version = "0.18.0", default-features = false, features = ["crypto-store", "bundled"] }
 ruma = { version = "0.16.0", features = ["client-api-c", "events", "rand"] }
-# Native vector store backend — sqlite-vec FFI is loaded as a SQLite
-# auto-extension before any connection opens (mirrors the pattern in the
-# crate's own integration test). The crate itself has no rusqlite dep, so
-# its only constraint is that the host SQLite supports loadable extensions
-# (the `bundled` feature does).
-sqlite-vec = "0.1"
+# ADR-0067 Phase 4 — the native (sqlite-vec) + cloud (qdrant/…) vector store
+# lives in `crates/cognia-vector`, which owns the `sqlite-vec` + `qdrant-client`
+# deps. Re-aliased as `crate::vector` in lib.rs; the app installs a keyring-backed
+# `CredentialStore` at boot so the crate never touches `secret_store` directly.
+cognia-vector = { path = "../crates/cognia-vector" }
 
 gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"
@@ -176,15 +175,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 futures-util = { version = "0.3", default-features = false }
 bytes = "1"
 
-# Vector cloud backends (ADR-0022) — port the 5 cloud vector providers from
-# the dead-coded JS layer into Rust so they actually execute in Tauri.
-# Qdrant: official client, verified 1.18.0 on crates.io 2026-05-17. REST mode
-# keeps TLS handling identical to our existing reqwest stack.
-qdrant-client = { version = "1.18", default-features = false, features = ["serde"] }
-# Milvus: deliberately NOT taking the `milvus-sdk-rust` 0.1.0 dep — its build
-# script panics without a local `protoc` install (verified 2026-05-17). We use
-# the HTTP `/v2/vectordb/*` API instead, which is the same reqwest path as
-# Pinecone/Chroma/Weaviate. See ADR-0022.
+# Vector cloud backends (ADR-0022, qdrant/milvus/pinecone/chroma/weaviate) moved
+# to `crates/cognia-vector` (ADR-0067 Phase 4).
 
 # TTS support — provider key vault, Edge-TTS WebSocket bridge, and HTTP proxy.
 # keyring v3 has NO default features: without an explicit platform backend it
