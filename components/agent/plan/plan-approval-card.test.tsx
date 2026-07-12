@@ -18,6 +18,31 @@ jest.mock("@/components/chat/markdown-renderer", () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
 }))
 
+// The interactive HTML body has its own suite (plan-html-view.test.tsx); stub
+// it here so these tests only assert the card's view branching + edit channel.
+jest.mock("./plan-html-view", () => ({
+  PlanHtmlView: ({
+    onSave,
+    styleVariant,
+    disabled,
+  }: {
+    onSave: (patch: { title: string; stepTitles: string[] }) => void
+    styleVariant?: string
+    disabled?: boolean
+  }) => (
+    <div
+      data-testid="plan-html-view-stub"
+      data-style={styleVariant ?? ""}
+      data-disabled={disabled ? "true" : "false"}
+    >
+      <button
+        data-testid="plan-html-stub-save"
+        onClick={() => onSave({ title: "From HTML", stepTitles: ["html step"] })}
+      />
+    </div>
+  ),
+}))
+
 function step(id: string, over: Partial<PlanStep> = {}): PlanStep {
   return {
     id,
@@ -223,6 +248,77 @@ describe("PlanApprovalCard", () => {
     expect(screen.queryByTestId("plan-approval-steps")).not.toBeInTheDocument()
     // No steps → no progress bar.
     expect(screen.queryByTestId("plan-approval-progress")).not.toBeInTheDocument()
+  })
+
+  it("renders the interactive HTML body when interactiveView is on and the plan is editable", () => {
+    render(<PlanApprovalCard plan={plan()} {...noop} onEdit={jest.fn()} interactiveView />)
+    expect(screen.getByTestId("plan-html-view-stub")).toBeInTheDocument()
+    // Static bodies are replaced…
+    expect(screen.queryByTestId("plan-approval-steps")).not.toBeInTheDocument()
+    // …and the pencil is redundant (inline editing lives in the HTML view).
+    expect(screen.queryByTestId("plan-approval-edit")).not.toBeInTheDocument()
+    // Approval actions stay native (trusted DOM).
+    expect(screen.getByTestId("plan-approval-approve-auto")).toBeInTheDocument()
+  })
+
+  it("falls back to the classic body when the plan is not editable", () => {
+    // No onEdit → the interactive editor has no save channel.
+    const { unmount } = render(<PlanApprovalCard plan={plan()} {...noop} interactiveView />)
+    expect(screen.queryByTestId("plan-html-view-stub")).not.toBeInTheDocument()
+    expect(screen.getByTestId("plan-approval-steps")).toBeInTheDocument()
+    expect(screen.queryByTestId("plan-approval-view-toggle")).not.toBeInTheDocument()
+    unmount()
+
+    // Draft plan (not awaiting approval) → classic body too.
+    render(
+      <PlanApprovalCard
+        plan={plan({ status: "draft" })}
+        {...noop}
+        onEdit={jest.fn()}
+        interactiveView
+      />
+    )
+    expect(screen.queryByTestId("plan-html-view-stub")).not.toBeInTheDocument()
+  })
+
+  it("toggles between the interactive and classic bodies via the header button", async () => {
+    render(<PlanApprovalCard plan={plan()} {...noop} onEdit={jest.fn()} interactiveView />)
+    expect(screen.getByTestId("plan-html-view-stub")).toBeInTheDocument()
+
+    await userEvent.click(screen.getByTestId("plan-approval-view-toggle"))
+    expect(screen.queryByTestId("plan-html-view-stub")).not.toBeInTheDocument()
+    expect(screen.getByTestId("plan-approval-steps")).toBeInTheDocument()
+    // Classic mode restores the pencil editor.
+    expect(screen.getByTestId("plan-approval-edit")).toBeInTheDocument()
+
+    await userEvent.click(screen.getByTestId("plan-approval-view-toggle"))
+    expect(screen.getByTestId("plan-html-view-stub")).toBeInTheDocument()
+  })
+
+  it("routes interactive saves through onEdit and mirrors the disabled state", async () => {
+    const onEdit = jest.fn()
+    const { unmount } = render(
+      <PlanApprovalCard plan={plan()} {...noop} onEdit={onEdit} interactiveView />
+    )
+    await userEvent.click(screen.getByTestId("plan-html-stub-save"))
+    expect(onEdit).toHaveBeenCalledWith({ title: "From HTML", stepTitles: ["html step"] })
+    unmount()
+
+    render(<PlanApprovalCard plan={plan()} {...noop} onEdit={onEdit} interactiveView disabled />)
+    expect(screen.getByTestId("plan-html-view-stub")).toHaveAttribute("data-disabled", "true")
+  })
+
+  it("forwards the interactive style preset to the HTML view", () => {
+    render(
+      <PlanApprovalCard
+        plan={plan()}
+        {...noop}
+        onEdit={jest.fn()}
+        interactiveView
+        interactiveStyle="cards"
+      />
+    )
+    expect(screen.getByTestId("plan-html-view-stub")).toHaveAttribute("data-style", "cards")
   })
 
   it("shows step progress as a count and a progressbar", () => {

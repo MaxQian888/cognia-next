@@ -33,6 +33,11 @@ import {
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { InstructionsCard } from "@/components/settings/instructions/instructions-card"
 import { DefaultModelPicker } from "../parts/default-model-picker"
+import {
+  PLAN_HTML_STYLES,
+  resolvePlanHtmlStyle,
+  type PlanHtmlStyle,
+} from "@/lib/agent/plan/plan-html"
 
 const THINKING_BUDGET_MIN = 0
 const THINKING_BUDGET_MAX = 64000
@@ -54,6 +59,13 @@ const PERMISSION_MODE_LABEL_KEY: Record<PermissionMode, string> = {
   auto: "permAuto",
 }
 
+const PLAN_STYLE_LABEL_KEY: Record<PlanHtmlStyle, string> = {
+  default: "planStyleDefault",
+  compact: "planStyleCompact",
+  timeline: "planStyleTimeline",
+  cards: "planStyleCards",
+}
+
 export function DefaultsTab() {
   const t = useTranslations("settings.agentRuntimeSection.defaults")
   const settings = useSettingsStore((s) => s.settings)
@@ -71,6 +83,8 @@ export function DefaultsTab() {
   const [briefMode, setBriefMode] = useState(false)
   const [planRequireApproval, setPlanRequireApproval] = useState(true)
   const [planMaxAutoRefinements, setPlanMaxAutoRefinements] = useState<number>(2)
+  const [planInteractiveHtml, setPlanInteractiveHtml] = useState(false)
+  const [planInteractiveStyle, setPlanInteractiveStyle] = useState<PlanHtmlStyle>("default")
 
   useEffect(() => {
     if (!settings) return
@@ -90,6 +104,8 @@ export function DefaultsTab() {
     setBriefMode(Boolean(settings.briefMode))
     setPlanRequireApproval(settings.planSettings?.requireApproval !== false)
     setPlanMaxAutoRefinements(settings.planSettings?.maxAutoRefinements ?? 2)
+    setPlanInteractiveHtml(settings.planSettings?.interactiveHtmlView === true)
+    setPlanInteractiveStyle(resolvePlanHtmlStyle(settings.planSettings?.interactiveHtmlStyle))
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [settings])
 
@@ -163,6 +179,22 @@ export function DefaultsTab() {
     // merge (same rationale as cacheOptimizationEnabled).
     void save({
       planSettings: { ...settings?.planSettings, requireApproval: value },
+    })
+  }
+
+  const persistPlanInteractiveHtml = (value: boolean) => {
+    setPlanInteractiveHtml(value)
+    // Opt-in enhanced plan mode (default OFF) — persist the explicit boolean.
+    void save({
+      planSettings: { ...settings?.planSettings, interactiveHtmlView: value },
+    })
+  }
+
+  const persistPlanInteractiveStyle = (next: string) => {
+    const value = resolvePlanHtmlStyle(next)
+    setPlanInteractiveStyle(value)
+    void save({
+      planSettings: { ...settings?.planSettings, interactiveHtmlStyle: value },
     })
   }
 
@@ -429,6 +461,50 @@ export function DefaultsTab() {
               aria-label={t("planRequireApproval")}
               data-testid="plan-require-approval-switch"
             />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="agent-runtime-plan-interactive" className="text-sm">
+                {t("planInteractiveHtml")}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("planInteractiveHtmlHint")}</p>
+            </div>
+            <Switch
+              id="agent-runtime-plan-interactive"
+              checked={planInteractiveHtml}
+              onCheckedChange={persistPlanInteractiveHtml}
+              aria-label={t("planInteractiveHtml")}
+              data-testid="plan-interactive-html-switch"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="agent-runtime-plan-style" className="text-sm">
+                {t("planInteractiveStyle")}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("planInteractiveStyleHint")}</p>
+            </div>
+            <Select
+              value={planInteractiveStyle}
+              onValueChange={persistPlanInteractiveStyle}
+              disabled={!planInteractiveHtml}
+            >
+              <SelectTrigger
+                id="agent-runtime-plan-style"
+                className="w-[160px]"
+                aria-label={t("planInteractiveStyle")}
+                data-testid="plan-interactive-style-select"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PLAN_HTML_STYLES.map((style) => (
+                  <SelectItem key={style} value={style}>
+                    {t(PLAN_STYLE_LABEL_KEY[style])}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">

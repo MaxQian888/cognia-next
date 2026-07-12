@@ -27,15 +27,45 @@ import { PlanApprovalCard, type PlanEditPatch, type PlanResumeMode } from "./pla
 import { useSessionPlan } from "@/hooks/agent/use-session-plan"
 import { getPlanRuntime } from "@/lib/agent/plan/runtime"
 import { parsePlanText } from "@/lib/agent/plan/exit-plan-capture"
+import { resolvePlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { materializeSteps } from "@/lib/agent/plan/steps"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@/lib/claude/types"
-import type { CreatePlanStepInput, PlanRefinementType } from "@/types/agent/plan"
+import type { AgentPlan, CreatePlanStepInput, PlanRefinementType } from "@/types/agent/plan"
 
 /** The synthetic turn injected after a plan is approved. */
 export const PLAN_APPROVED_PROMPT =
   "The plan above is approved. Implement it now, step by step, following the plan."
+
+/**
+ * The synthetic turn injected after approval. When the user ADJUSTED the plan
+ * during review (inline / interactive edits — `metadata.userEdited`, stamped by
+ * {@link PlanApprovalDock}'s edit handler), the model's own transcript still
+ * contains its ORIGINAL proposal, so the base "the plan above" prompt would
+ * implement the wrong version. Embed the adjusted plan instead — the same
+ * embed-the-plan pattern as the CLI's `PLAN_EXECUTE_PROMPT`.
+ */
+export function buildPlanApprovedPrompt(plan: AgentPlan): string {
+  if (!plan.metadata?.userEdited) return PLAN_APPROVED_PROMPT
+  const meta = plan.metadata as { planText?: unknown }
+  const planText = typeof meta.planText === "string" ? meta.planText.trim() : ""
+  const body =
+    planText ||
+    [...plan.steps]
+      .sort((a, b) => a.order - b.order)
+      .map((s, i) => `${i + 1}. ${s.title}`)
+      .join("\n")
+  return [
+    "The plan is approved, but the user ADJUSTED it during review — the approved version below supersedes the plan you proposed earlier. Where they differ, follow the version below.",
+    "",
+    `# ${plan.title}`,
+    "",
+    body,
+    "",
+    "Implement it now, step by step, following the approved plan above.",
+  ].join("\n")
+}
 
 /** Build the linear `agent_turn` step chain `exit-plan-capture` / edits share. */
 function linearSteps(titles: string[]) {
@@ -197,6 +227,8 @@ export function PlanApprovalDock({
         onDiscard={handleDiscard}
         onRefine={handleRefine}
         onEdit={handleEdit}
+        interactiveView={appSettings?.planSettings?.interactiveHtmlView === true}
+        interactiveStyle={resolvePlanHtmlStyle(appSettings?.planSettings?.interactiveHtmlStyle)}
       />
     </div>
   )

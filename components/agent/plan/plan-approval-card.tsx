@@ -41,6 +41,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { PlanHtmlView } from "./plan-html-view"
+import type { PlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { permissionRiskMarker } from "@/lib/settings/permission-mode-meta"
 import {
   computePlanCounts,
@@ -72,8 +74,7 @@ export type PlanResumeMode = "acceptEdits" | "default" | "auto"
  * without a fallback branch.
  */
 export type PlanEditPatch =
-  | { title: string; planText: string }
-  | { title: string; stepTitles: string[] }
+  { title: string; planText: string } | { title: string; stepTitles: string[] }
 
 export function stepStatusIcon(status: PlanStepStatus) {
   switch (status) {
@@ -114,6 +115,16 @@ export interface PlanApprovalCardProps {
    * per line and the patch carries `stepTitles`.
    */
   onEdit?: (patch: PlanEditPatch) => void
+  /**
+   * Enhanced plan mode (opt-in via `planSettings.interactiveHtmlView`): render
+   * the plan body as an interactive HTML editor (sandboxed iframe with drag
+   * reorder / inline edit / add / remove steps) instead of the static list. A
+   * header toggle lets the user fall back to the classic view. Requires
+   * `onEdit` and an awaiting-approval plan; otherwise the classic body renders.
+   */
+  interactiveView?: boolean
+  /** Built-in visual preset for the interactive body (`planSettings.interactiveHtmlStyle`). */
+  interactiveStyle?: PlanHtmlStyle
   /** Disables all actions (e.g. while an approve/refine is in flight). */
   disabled?: boolean
 }
@@ -285,7 +296,19 @@ export function PlanApprovalCard({
             </div>
           )}
 
-          {isMarkdownPlan ? (
+          {showInteractive ? (
+            // Enhanced plan mode: the interactive HTML editor (sandboxed
+            // iframe) replaces the static body; edits flow through the same
+            // onEdit channel as the classic pencil editor.
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              <PlanHtmlView
+                plan={plan}
+                onSave={(patch) => onEdit?.(patch)}
+                styleVariant={interactiveStyle}
+                disabled={disabled}
+              />
+            </div>
+          ) : isMarkdownPlan ? (
             // Faithful plan body: render the captured markdown (headings, lists,
             // code, tables) instead of the lossy step-title projection, capped +
             // scrolling in its own container so the actions/composer stay put.

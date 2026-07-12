@@ -20,3 +20,19 @@ export const PLAN_MODE_PROMPT = [
   "- If you need clarification, ask the user directly in plain text — do not call the plan-submission tool for a question.",
   "- When the plan is ready, present it and call the exit-plan tool (`ExitPlanMode`, or `exit_plan_mode` where that is the offered name) with the full plan as markdown; do not just print the plan as text. Do not ask to start implementing until the user approves — approving is how they choose to proceed.",
 ].join("\n")
+
+/**
+ * Appended AFTER {@link PLAN_MODE_PROMPT} when the enhanced plan mode is on
+ * (`planSettings.interactiveHtmlView`): the submitted plan renders in an
+ * interactive step editor that projects the markdown into discrete steps
+ * (`parsePlanText` recognises top-level `-`/`*` bullets and `1.`/`1)` items),
+ * so the plan body must carry a clean machine-parsable step list. Kept as a
+ * SEPARATE constant so the shared base prompt (drift-tripwire-tested, also
+ * used by the CLI) stays byte-identical.
+ */
+export const PLAN_MODE_STRUCTURED_STEPS_SNIPPET = [
+  "Structured plan format (the user reviews your plan in an interactive step editor):",
+  "- End the plan markdown with a `## Steps` section containing a single flat numbered list — one list item per execution step.",
+  "- Each step is one short imperative sentence (aim for <= 16 words) naming the concrete action, file, or component; put details, code, and rationale in the sections above the list, not inside the list items.",
+  '- Order the list first-to-last so each step builds on the previous ones. 2-16 steps; no meta steps like "understand the code" or "done".',
+].join("\n")

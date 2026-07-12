@@ -2608,7 +2608,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // signal — not a misclassified clarifying question.
   if (opts.permissionMode === "plan") {
     const existing = opts.appendSystemPrompt?.trim() ?? ""
-    opts.appendSystemPrompt = existing ? `${existing}\n\n${PLAN_MODE_SNIPPET}` : PLAN_MODE_SNIPPET
+    // Enhanced plan mode: the submitted plan is reviewed in the interactive
+    // step editor, so ask for a machine-parsable `## Steps` list too.
+    const planSnippet =
+      appSettings?.planSettings?.interactiveHtmlView === true
+        ? `${PLAN_MODE_SNIPPET}\n\n${PLAN_MODE_STRUCTURED_STEPS_SNIPPET}`
+        : PLAN_MODE_SNIPPET
+    opts.appendSystemPrompt = existing ? `${existing}\n\n${planSnippet}` : planSnippet
   }
 
   // Output style — Claude Code parity. Composes with brief mode (both append).

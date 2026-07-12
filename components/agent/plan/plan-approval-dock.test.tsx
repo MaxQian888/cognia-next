@@ -37,8 +37,25 @@ jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: (...a: unknown[]) => buildClient(...a),
 }))
 
-jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (sel: (s: unknown) => unknown) => sel({ settings: { foo: 1 } }),
+jest.mock("@/stores/settings", () => {
+  const state: { settings: Record<string, unknown> } = { settings: { foo: 1 } }
+  return {
+    useSettingsStore: (sel: (s: typeof state) => unknown) => sel(state),
+    __setMockSettings: (s: Record<string, unknown>) => {
+      state.settings = s
+    },
+  }
+})
+const { __setMockSettings } = jest.requireMock("@/stores/settings") as {
+  __setMockSettings: (s: Record<string, unknown>) => void
+}
+
+// The interactive HTML body has its own suite; stub it so the settings-gate
+// test doesn't pull in next-themes / the iframe document.
+jest.mock("./plan-html-view", () => ({
+  PlanHtmlView: ({ styleVariant }: { styleVariant?: string }) => (
+    <div data-testid="plan-html-view-stub" data-style={styleVariant ?? ""} />
+  ),
 }))
 
 const toastError = jest.fn()
@@ -250,6 +267,97 @@ describe("PlanApprovalDock", () => {
     await userEvent.type(screen.getByTestId("plan-approval-feedback"), "note")
     await userEvent.click(screen.getByTestId("plan-approval-keep-planning"))
     await waitFor(() => expect(keepPlanning).toHaveBeenCalledWith("p1", "note"))
+  })
+
+  it("approving a user-edited plan embeds the adjusted plan in the resume prompt", async () => {
+    mockPlan.mockReturnValue(
+      plan({
+        steps: [step("a", "one", 0)],
+        metadata: { userEdited: true, planText: "- alpha\n- beta" },
+      })
+    )
+    const onResume = jest.fn()
+    render(<PlanApprovalDock sessionId="ses" onResume={onResume} />)
+    await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
+    await waitFor(() => expect(onResume).toHaveBeenCalled())
+    const [prompt, mode] = onResume.mock.calls[0] as [string, string]
+    expect(mode).toBe("acceptEdits")
+    expect(prompt).not.toBe(PLAN_APPROVED_PROMPT)
+    expect(prompt).toContain("ADJUSTED")
+    expect(prompt).toContain("- alpha\n- beta")
+    expect(prompt).toContain("# Ship it")
+  })
+
+  it("saving an edit stamps metadata.userEdited for the approval prompt", async () => {
+    mockPlan.mockReturnValue(plan({ steps: [step("a", "one", 0)] }))
+    render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    await userEvent.click(screen.getByTestId("plan-approval-edit"))
+    await userEvent.clear(screen.getByTestId("plan-edit-steps"))
+    await userEvent.type(screen.getByTestId("plan-edit-steps"), "alpha")
+    await userEvent.click(screen.getByTestId("plan-edit-save"))
+    await waitFor(() => expect(updatePlanDraft).toHaveBeenCalled())
+    const [, patch] = updatePlanDraft.mock.calls[0] as [
+      string,
+      { metadata: { userEdited?: boolean } },
+    ]
+    expect(patch.metadata.userEdited).toBe(true)
+  })
+
+  it("renders the interactive HTML body only when planSettings.interactiveHtmlView is on", () => {
+    mockPlan.mockReturnValue(plan({ steps: [step("a", "one", 0)] }))
+    const { rerender } = render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    // Default (setting absent) → classic body.
+    expect(screen.queryByTestId("plan-html-view-stub")).not.toBeInTheDocument()
+
+    __setMockSettings({ planSettings: { interactiveHtmlView: true } })
+    rerender(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    expect(screen.getByTestId("plan-html-view-stub")).toBeInTheDocument()
+    // No persisted style → coerced to the default preset.
+    expect(screen.getByTestId("plan-html-view-stub")).toHaveAttribute("data-style", "default")
+
+    // Persisted style preset flows through; junk values coerce to default.
+    __setMockSettings({
+      planSettings: { interactiveHtmlView: true, interactiveHtmlStyle: "timeline" },
+    })
+    rerender(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    expect(screen.getByTestId("plan-html-view-stub")).toHaveAttribute("data-style", "timeline")
+
+    __setMockSettings({
+      planSettings: { interactiveHtmlView: true, interactiveHtmlStyle: "neon" },
+    })
+    rerender(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    expect(screen.getByTestId("plan-html-view-stub")).toHaveAttribute("data-style", "default")
+
+    // Explicit off behaves like absent.
+    __setMockSettings({ planSettings: { interactiveHtmlView: false } })
+    rerender(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    expect(screen.queryByTestId("plan-html-view-stub")).not.toBeInTheDocument()
+  })
+})
+
+describe("buildPlanApprovedPrompt", () => {
+  it("returns the base prompt for an unedited plan", () => {
+    expect(buildPlanApprovedPrompt(plan())).toBe(PLAN_APPROVED_PROMPT)
+    expect(buildPlanApprovedPrompt(plan({ metadata: { planText: "- x" } }))).toBe(
+      PLAN_APPROVED_PROMPT
+    )
+  })
+
+  it("embeds the edited markdown body when present", () => {
+    const p = plan({ metadata: { userEdited: true, planText: "## Plan\n- do it" } })
+    const prompt = buildPlanApprovedPrompt(p)
+    expect(prompt).toContain("supersedes")
+    expect(prompt).toContain("## Plan\n- do it")
+  })
+
+  it("falls back to a numbered step list when there is no markdown body", () => {
+    const p = plan({
+      steps: [step("b", "second", 1), step("a", "first", 0)],
+      metadata: { userEdited: true },
+    })
+    const prompt = buildPlanApprovedPrompt(p)
+    // Ordered by `order`, not array position.
+    expect(prompt).toContain("1. first\n2. second")
   })
 
   it("keepPlanning failure resets busy instead of wedging the card", async () => {

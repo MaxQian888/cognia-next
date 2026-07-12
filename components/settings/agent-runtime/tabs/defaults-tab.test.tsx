@@ -247,4 +247,70 @@ describe("DefaultsTab", () => {
     render(<DefaultsTab />)
     expect(screen.getByTestId("thinking-budget-reset")).toBeDisabled()
   })
+
+  it("interactive plan view switch is off by default and persists true when enabled", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const sw = screen.getByTestId("plan-interactive-html-switch")
+    // Opt-in enhanced plan mode: absent setting → unchecked.
+    expect(sw).toHaveAttribute("data-state", "unchecked")
+    await user.click(sw)
+    expect(save).toHaveBeenCalledWith({ planSettings: { interactiveHtmlView: true } })
+  })
+
+  it("interactive plan view switch mirrors the persisted value and keeps sibling plan settings", async () => {
+    stateRef.current = {
+      ...stateRef.current,
+      planSettings: { requireApproval: false, interactiveHtmlView: true },
+    } as never
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const sw = screen.getByTestId("plan-interactive-html-switch")
+    expect(sw).toHaveAttribute("data-state", "checked")
+    await user.click(sw)
+    // Sibling plan settings survive the spread; the explicit false persists.
+    expect(save).toHaveBeenCalledWith({
+      planSettings: { requireApproval: false, interactiveHtmlView: false },
+    })
+  })
+
+  it("interactive style select is disabled until the interactive view is on", () => {
+    render(<DefaultsTab />)
+    expect(screen.getByTestId("plan-interactive-style-select")).toBeDisabled()
+  })
+
+  it("interactive style select persists the preset and keeps sibling plan settings", async () => {
+    stateRef.current = {
+      ...stateRef.current,
+      planSettings: { interactiveHtmlView: true },
+    } as never
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const trigger = screen.getByTestId("plan-interactive-style-select")
+    expect(trigger).not.toBeDisabled()
+    await user.click(trigger)
+    await user.click(screen.getByRole("option", { name: "planStyleTimeline" }))
+    expect(save).toHaveBeenCalledWith({
+      planSettings: { interactiveHtmlView: true, interactiveHtmlStyle: "timeline" },
+    })
+  })
+
+  it("interactive style select mirrors a persisted preset, coercing junk to default", () => {
+    stateRef.current = {
+      ...stateRef.current,
+      planSettings: { interactiveHtmlView: true, interactiveHtmlStyle: "cards" },
+    } as never
+    const { unmount } = render(<DefaultsTab />)
+    expect(screen.getByTestId("plan-interactive-style-select")).toHaveTextContent("planStyleCards")
+    unmount()
+
+    stateRef.current = {
+      ...stateRef.current,
+      planSettings: { interactiveHtmlView: true, interactiveHtmlStyle: "neon" },
+    } as never
+    render(<DefaultsTab />)
+    expect(screen.getByTestId("plan-interactive-style-select")).toHaveTextContent(
+      "planStyleDefault"
+    )
+  })
 })

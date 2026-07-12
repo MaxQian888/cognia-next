@@ -3040,10 +3040,17 @@ export interface AppSettings {
    *   true). False lands the capture `approved` and the dock auto-resumes the
    *   implementing turn once (idempotent via a metadata stamp).
    * - `maxAutoRefinements` — cap on automatic repair replans per plan.
+   * - `interactiveHtmlView` — opt-in enhanced plan mode: render the approval
+   *   card body as an interactive HTML editor (sandboxed iframe with drag
+   *   reorder / inline edit / add / remove steps) instead of the static list.
+   * - `interactiveHtmlStyle` — built-in visual preset for the interactive
+   *   editor (mirrors `lib/agent/plan/plan-html.ts:PLAN_HTML_STYLES`).
    */
   planSettings?: {
     requireApproval?: boolean
     maxAutoRefinements?: number
+    interactiveHtmlView?: boolean
+    interactiveHtmlStyle?: "default" | "compact" | "timeline" | "cards"
   }
   /**
    * Per-provider configuration. Stores the full `UserProviderSettings`

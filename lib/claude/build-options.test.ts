@@ -2543,6 +2543,35 @@ describe("resolveSendOptions — plan mode prompt", () => {
     })
     expect(opts.appendSystemPrompt ?? "").not.toContain("Plan mode (READ-ONLY")
   })
+
+  it("appends the structured-steps snippet only when enhanced plan mode is on", async () => {
+    const on = await resolveSendOptions({
+      session: makeSession({ id: "s1", permissionMode: "plan" }),
+      appSettings: {
+        id: "singleton",
+        planSettings: { interactiveHtmlView: true },
+      } as AppSettings,
+    })
+    expect(on.appendSystemPrompt).toContain("Plan mode (READ-ONLY")
+    expect(on.appendSystemPrompt).toContain("## Steps")
+
+    const off = await resolveSendOptions({
+      session: makeSession({ id: "s1", permissionMode: "plan" }),
+      appSettings: { id: "singleton" } as AppSettings,
+    })
+    expect(off.appendSystemPrompt).toContain("Plan mode (READ-ONLY")
+    expect(off.appendSystemPrompt ?? "").not.toContain("## Steps")
+
+    // Outside plan mode the snippet never appears, even with the setting on.
+    const notPlan = await resolveSendOptions({
+      session: makeSession({ id: "s1", permissionMode: "acceptEdits" }),
+      appSettings: {
+        id: "singleton",
+        planSettings: { interactiveHtmlView: true },
+      } as AppSettings,
+    })
+    expect(notPlan.appendSystemPrompt ?? "").not.toContain("## Steps")
+  })
 })
 
 describe("resolveSendOptions — brief mode", () => {
