@@ -26,7 +26,10 @@ pub const FLEET_TOKEN_HEADER: &str = "x-cognia-fleet-token";
 pub fn router() -> Router {
     Router::new()
         .route("/api/v1/fleet/hook", post(hook_handler))
-        .route("/api/v1/fleet/opencode/commands", post(opencode_commands_handler))
+        .route(
+            "/api/v1/fleet/opencode/commands",
+            post(opencode_commands_handler),
+        )
 }
 
 /// Body for the OpenCode command poll.
@@ -288,9 +291,14 @@ mod tests {
         assert!(responder.await.unwrap(), "responder saw the pending row");
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(json["hookSpecificOutput"]["hookEventName"], "PermissionRequest");
+        assert_eq!(
+            json["hookSpecificOutput"]["hookEventName"],
+            "PermissionRequest"
+        );
         assert_eq!(json["hookSpecificOutput"]["decision"]["behavior"], "allow");
 
         // Pending cleared after resolution.
@@ -351,10 +359,16 @@ mod tests {
         };
 
         // LAN peer → 403.
-        let resp = router().oneshot(req(lan_peer(), Some(&token))).await.unwrap();
+        let resp = router()
+            .oneshot(req(lan_peer(), Some(&token)))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
         // Bad token → 401.
-        let resp = router().oneshot(req(loopback_peer(), Some("nope"))).await.unwrap();
+        let resp = router()
+            .oneshot(req(loopback_peer(), Some("nope")))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -374,13 +388,17 @@ mod tests {
                     .header("content-type", "application/json")
                     .header(FLEET_TOKEN_HEADER, &token)
                     .extension(loopback_peer())
-                    .body(axum::body::Body::from(r#"{"session_ids":["route-cmd-sess"]}"#))
+                    .body(axum::body::Body::from(
+                        r#"{"session_ids":["route-cmd-sess"]}"#,
+                    ))
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(json["commands"][0]["sessionId"], "route-cmd-sess");
         assert_eq!(json["commands"][0]["text"], "please continue");

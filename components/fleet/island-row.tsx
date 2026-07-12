@@ -10,12 +10,14 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { FileTextIcon } from "lucide-react"
 import { AgentBadge } from "./agent-badge"
 import { TerminalBadge } from "./terminal-badge"
 import { IslandPermissionActions } from "./island-permission-actions"
 import { IslandReply } from "./island-reply"
+import { SessionMetaChips } from "./session-meta-chips"
 import { activityLine, formatElapsed, truncateLine } from "@/lib/fleet/format"
-import { fleetFocusTerminal } from "@/lib/tauri/fleet"
+import { fleetFocusTerminal, fleetRevealTranscript } from "@/lib/tauri/fleet"
 import type { FleetSession, FleetStatus } from "@/lib/fleet/types"
 import { cn } from "@/lib/utils"
 
@@ -28,7 +30,14 @@ const STATUS_DOT: Record<FleetStatus, string> = {
   ended: "bg-white/15",
 }
 
-export function IslandRow({ session }: { session: FleetSession }) {
+export function IslandRow({
+  session,
+  enterDelayMs = 0,
+}: {
+  session: FleetSession
+  /** Stagger offset for the entrance animation (list index × step). */
+  enterDelayMs?: number
+}) {
   const t = useTranslations("fleet.row")
   const [nowMs, setNowMs] = useState(() => Date.now())
 
@@ -46,8 +55,31 @@ export function IslandRow({ session }: { session: FleetSession }) {
     if (canFocus) void fleetFocusTerminal(session.agent, session.sessionId)
   }
 
+  // The transcript file can be revealed in the OS file manager once the agent
+  // has reported its path (a `SessionStart` carries it) — surfaces the row's
+  // otherwise-unused `openTranscript` capability.
+  const canRevealTranscript = session.capabilities.openTranscript && Boolean(session.transcriptPath)
+  const revealTranscript = () => {
+    if (session.transcriptPath) void fleetRevealTranscript(session.transcriptPath)
+  }
+
   // OpenCode sessions can receive an injected prompt (see fleet/opencode.rs).
   const canReply = session.capabilities.sendMessage && session.status !== "ended"
+
+  // How long a blocked session has been waiting (its last event is the moment
+  // it entered the waiting state). Permission rows carry their own countdown.
+  const waitedFor =
+    session.status === "plan-pending" || session.status === "waiting-input"
+      ? formatElapsed(session.lastEventAt, nowMs)
+      : null
+
+  // A parked AskUserQuestion replaces the generic waiting-input status line
+  // with the actual question + option chips (display-only — it is answered in
+  // the agent's own terminal).
+  const questions = session.status === "waiting-input" ? (session.pendingQuestions ?? []) : []
+  const firstQuestion = questions.length > 0 ? questions[0] : null
+  const moreQuestions = Math.max(0, questions.length - 1)
+  const subagents = session.subagents ?? []
 
   const statusLine = (() => {
     switch (session.status) {
@@ -73,9 +105,18 @@ export function IslandRow({ session }: { session: FleetSession }) {
       data-testid={`island-row-${session.agent}-${session.sessionId}`}
       data-status={session.status}
       className={cn(
-        "flex flex-col gap-0.5 rounded-xl px-3 py-2 hover:bg-white/5",
+        "flex flex-col gap-0.5 rounded-xl px-3 py-2 transition-colors duration-200 hover:bg-white/5",
+        "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200",
         canFocus && "cursor-pointer"
       )}
+      // Backwards fill keeps a delayed row invisible until its stagger slot;
+      // inline (not a utility) so the entrance never flashes if the fill-mode
+      // utility is unavailable.
+      style={
+        enterDelayMs > 0
+          ? { animationDelay: `${enterDelayMs}ms`, animationFillMode: "backwards" }
+          : undefined
+      }
       onClick={canFocus ? focusTerminal : undefined}
       role={canFocus ? "button" : undefined}
       tabIndex={canFocus ? 0 : undefined}
@@ -95,7 +136,10 @@ export function IslandRow({ session }: { session: FleetSession }) {
         <span
           aria-hidden
           data-testid="status-dot"
-          className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[session.status])}
+          className={cn(
+            "size-1.5 shrink-0 rounded-full transition-colors duration-300",
+            STATUS_DOT[session.status]
+          )}
         />
         <AgentBadge agent={session.agent} />
         <span className="min-w-0 flex-1 truncate text-xs font-semibold text-white/90">
@@ -105,8 +149,25 @@ export function IslandRow({ session }: { session: FleetSession }) {
         <span className="shrink-0 text-[10px] tabular-nums text-white/50" data-testid="elapsed">
           {formatElapsed(session.startedAt, nowMs)}
         </span>
+        {canRevealTranscript ? (
+          <button
+            type="button"
+            data-testid="island-reveal-transcript"
+            aria-label={t("openTranscript")}
+            onClick={(e) => {
+              e.stopPropagation()
+              revealTranscript()
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="shrink-0 rounded-md p-0.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white/80"
+          >
+            <FileTextIcon className="size-3" aria-hidden />
+          </button>
+        ) : null}
         {canReply ? <IslandReply sessionId={session.sessionId} /> : null}
       </div>
+
+      <SessionMetaChips session={session} className="pl-3.5" />
 
       {session.lastPrompt ? (
         <p className="truncate pl-3.5 text-[11px] text-white/60" data-testid="last-prompt">
@@ -124,10 +185,110 @@ export function IslandRow({ session }: { session: FleetSession }) {
         >
           <IslandPermissionActions pending={session.pendingPermission} className="pl-3.5" />
         </div>
-      ) : statusLine ? (
+      ) : statusLine && !firstQuestion ? (
         <p className="truncate pl-3.5 text-[11px] text-white/45" data-testid="status-line">
           {statusLine}
+          {waitedFor ? (
+            <span className="text-white/35" data-testid="status-waited">
+              {" · "}
+              {t("waitingFor", { duration: waitedFor })}
+            </span>
+          ) : null}
         </p>
+      ) : null}
+
+      {firstQuestion ? (
+        <div
+          data-testid="pending-question"
+          className="ml-3.5 space-y-1 rounded-lg border border-amber-400/20 bg-amber-500/10 px-2 py-1.5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+        >
+          <p className="text-[11px] leading-snug text-amber-100/90">
+            {firstQuestion.header ? (
+              <span className="mr-1.5 rounded bg-amber-400/20 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-200">
+                {firstQuestion.header}
+              </span>
+            ) : null}
+            {truncateLine(firstQuestion.question, 200)}
+          </p>
+          {firstQuestion.options.length > 0 ? (
+            <div className="flex flex-wrap gap-1" data-testid="question-options">
+              {firstQuestion.options.map((option) => (
+                <span
+                  key={option}
+                  className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] text-white/70"
+                >
+                  {truncateLine(option, 40)}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between gap-2">
+            {moreQuestions > 0 ? (
+              <p className="text-[10px] text-amber-200/60" data-testid="question-more">
+                {t("questionMore", { count: moreQuestions })}
+              </p>
+            ) : (
+              <span />
+            )}
+            {waitedFor ? (
+              <p
+                className="text-[10px] tabular-nums text-amber-200/50"
+                data-testid="question-waited"
+              >
+                {t("waitingFor", { duration: waitedFor })}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {session.status === "plan-pending" && session.pendingPlan ? (
+        <div
+          data-testid="pending-plan"
+          className="ml-3.5 line-clamp-3 whitespace-pre-wrap rounded-lg border border-sky-400/20 bg-sky-500/10 px-2 py-1.5 text-[10px] leading-snug text-sky-100/85 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+        >
+          {session.pendingPlan}
+        </div>
+      ) : null}
+
+      {subagents.length > 0 ? (
+        <div
+          data-testid="subagents"
+          className="ml-3.5 flex flex-wrap items-center gap-1 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+        >
+          <span className="text-[10px] text-white/45">
+            {t("subagents", { count: subagents.length })}
+          </span>
+          {subagents.slice(0, 3).map((subagent, i) => (
+            <span
+              key={`${subagent.startedAt}-${i}`}
+              data-testid={`subagent-chip-${i}`}
+              data-background={subagent.background ? "true" : "false"}
+              className="inline-flex max-w-56 items-center gap-1 rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] text-white/70"
+            >
+              {subagent.background ? (
+                <span
+                  aria-hidden
+                  className="size-1 shrink-0 animate-pulse rounded-full bg-violet-400"
+                />
+              ) : null}
+              <span className="truncate">
+                {subagent.agentType ? `${subagent.agentType} · ` : ""}
+                {truncateLine(subagent.description, 48)}
+              </span>
+              {subagent.background ? (
+                <span className="shrink-0 text-[9px] uppercase tracking-wide text-violet-300/80">
+                  {t("subagentBackground")}
+                </span>
+              ) : null}
+            </span>
+          ))}
+          {subagents.length > 3 ? (
+            <span className="text-[10px] text-white/40" data-testid="subagent-overflow">
+              +{subagents.length - 3}
+            </span>
+          ) : null}
+        </div>
       ) : null}
     </div>
   )

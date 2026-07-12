@@ -281,6 +281,67 @@ describe("IslandShell", () => {
     })
   })
 
+  describe("attention ring", () => {
+    it("breathes an attention ring while a session needs the user", () => {
+      streamState.snapshot = {
+        generatedAt: 1,
+        sessions: [
+          session({
+            status: "waiting-permission",
+            pendingPermission: {
+              requestId: "r",
+              toolName: "Bash",
+              detail: null,
+              requestedAt: Date.now(),
+            },
+          }),
+        ],
+      }
+      render(<IslandShell />)
+      expect(screen.getByTestId("island-attention-ring")).toBeInTheDocument()
+    })
+
+    it("has no ring when every session is merely working or idle", () => {
+      streamState.snapshot = { generatedAt: 1, sessions: [session()] }
+      render(<IslandShell />)
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+      expect(screen.queryByTestId("island-attention-ring")).toBeNull()
+    })
+  })
+
+  describe("status legend (expanded triage)", () => {
+    it("shows a per-status breakdown for two or more sessions", () => {
+      streamState.snapshot = {
+        generatedAt: 1,
+        sessions: [
+          session({ sessionId: "a", status: "working" }),
+          session({ sessionId: "b", status: "waiting-input" }),
+          session({ sessionId: "c", status: "idle" }),
+        ],
+      }
+      render(<IslandShell />)
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+      const legend = screen.getByTestId("island-legend")
+      expect(legend).toBeInTheDocument()
+      expect(screen.getByTestId("island-legend-needsYou").textContent).toContain(
+        'legend.needsYou:{"count":1}'
+      )
+      expect(screen.getByTestId("island-legend-working").textContent).toContain(
+        'legend.working:{"count":1}'
+      )
+      expect(screen.getByTestId("island-legend-idle").textContent).toContain(
+        'legend.idle:{"count":1}'
+      )
+    })
+
+    it("omits the legend for a single-session fleet", () => {
+      streamState.snapshot = { generatedAt: 1, sessions: [session()] }
+      render(<IslandShell />)
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+      expect(screen.queryByTestId("island-legend")).toBeNull()
+    })
+  })
+
   describe("notch inset (top safe area)", () => {
     it("pads the card below the notch when island_resize returns an inset", async () => {
       resizeMock.mockReturnValue(Promise.resolve(37))

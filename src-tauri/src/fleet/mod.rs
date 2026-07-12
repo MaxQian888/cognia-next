@@ -460,7 +460,11 @@ pub async fn fleet_monitor_status(
     let enabled = runtime.is_enabled();
     Ok(FleetMonitorStatus {
         enabled,
-        port: if enabled { companion.bound_port() } else { None },
+        port: if enabled {
+            companion.bound_port()
+        } else {
+            None
+        },
         config_path: install::monitor_config_path()
             .filter(|p| p.exists())
             .map(|p| p.to_string_lossy().into_owned()),
@@ -603,7 +607,8 @@ mod tests {
         let poller = {
             let rt = Arc::clone(&rt);
             tokio::spawn(async move {
-                rt.poll_opencode_commands(&["mod-oc-wake".into()], 5_000).await
+                rt.poll_opencode_commands(&["mod-oc-wake".into()], 5_000)
+                    .await
             })
         };
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

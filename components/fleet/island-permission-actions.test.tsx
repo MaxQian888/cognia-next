@@ -88,4 +88,30 @@ describe("IslandPermissionActions", () => {
     render(<IslandPermissionActions pending={pending({ toolName: null, detail: null })} />)
     expect(screen.getByText("requestGeneric")).toBeInTheDocument()
   })
+
+  it("drains the countdown progress bar and turns red near the deadline", () => {
+    jest.useFakeTimers()
+    try {
+      render(<IslandPermissionActions pending={pending({ requestedAt: Date.now() })} />)
+      const bar = screen.getByTestId("permission-progress")
+      // Fresh request → (almost) full width, amber.
+      expect(bar.style.width).toBe("100%")
+      expect(bar.className).toContain("bg-amber-400")
+      // Advance to within the last 5 seconds → shrunken and red.
+      act(() => {
+        jest.advanceTimersByTime(FLEET_PERMISSION_WAIT_MS - 4_000)
+      })
+      expect(parseFloat(screen.getByTestId("permission-progress").style.width)).toBeLessThan(25)
+      expect(screen.getByTestId("permission-progress").className).toContain("bg-red-400")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("hides the progress bar once answered or expired", async () => {
+    render(<IslandPermissionActions pending={pending()} />)
+    expect(screen.getByTestId("permission-progress-track")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("permission-allow"))
+    await waitFor(() => expect(screen.queryByTestId("permission-progress-track")).toBeNull())
+  })
 })

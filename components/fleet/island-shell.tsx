@@ -34,7 +34,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useFleetStream } from "@/hooks/fleet/use-fleet-stream"
-import { attentionCount, sortForIsland } from "@/lib/fleet/format"
+import { attentionCount, fleetStatusSummary, sortForIsland } from "@/lib/fleet/format"
 import { FLEET_ISLAND_GEOMETRY_EVENT, type IslandGeometry } from "@/lib/fleet/types"
 import { isTauri } from "@/lib/tauri"
 import { islandResize } from "@/lib/tauri/fleet"
@@ -53,6 +53,8 @@ export const ISLAND_PEEK_HEIGHT = 6
 export const ISLAND_TUCK_DELAY_MS = 1500
 /** Window-shrink deferral: the 300ms width transition plus a settle margin. */
 export const ISLAND_SHRINK_SETTLE_MS = 320
+/** Per-row entrance stagger step in the expanded list. */
+export const ISLAND_ROW_STAGGER_MS = 30
 
 export function IslandShell() {
   const t = useTranslations("fleet.island")
@@ -104,6 +106,29 @@ export function IslandShell() {
   const sessions = sortForIsland(snapshot.sessions)
   const waiting = attentionCount(snapshot.sessions)
   const empty = sessions.length === 0
+
+  // Per-status counts for the expanded triage legend. Buckets with a zero
+  // count are dropped so the legend only ever shows what's actually present.
+  const summary = fleetStatusSummary(sessions)
+  const legendSegments = [
+    { key: "needsYou", count: summary.attention, dot: "bg-amber-400" },
+    { key: "working", count: summary.working, dot: "bg-emerald-400" },
+    { key: "idle", count: summary.idle, dot: "bg-white/40" },
+    { key: "done", count: summary.ended, dot: "bg-white/20" },
+  ].filter((seg) => seg.count > 0)
+
+  // Signature of everything that changes a row's rendered height (plan
+  // preview, question block, subagent chips, prompt line, permission
+  // controls). The resize effect keys on it so content growing inside an
+  // already-expanded island still re-reports the window size.
+  const contentKey = sessions
+    .map(
+      (s) =>
+        `${s.agent}:${s.sessionId}:${s.status}:${s.pendingPermission ? 1 : 0}:` +
+        `${s.pendingPlan ? 1 : 0}:${s.pendingQuestions?.length ?? 0}:` +
+        `${s.subagents?.length ?? 0}:${s.lastPrompt ? 1 : 0}`
+    )
+    .join("|")
 
   // A pending permission forces the island open so its Approve/Deny controls
   // are never hidden behind the collapsed pill. Derived during render from the
@@ -171,7 +196,7 @@ export function IslandShell() {
       report(width, height)
     }, ISLAND_SHRINK_SETTLE_MS)
     return () => clearTimeout(timer)
-  }, [width, expanded, sessions.length, topInset, applyInset])
+  }, [width, expanded, sessions.length, contentKey, topInset, applyInset])
 
   const toggle = useCallback(() => setPinnedOpen((v) => !v), [])
 
@@ -197,7 +222,7 @@ export function IslandShell() {
           data-testid="island-shell"
           data-expanded={expanded ? "true" : "false"}
           data-tucked={tucked ? "true" : "false"}
-          className="mx-auto select-none overflow-hidden rounded-2xl border border-white/10 bg-black/85 text-white shadow-2xl backdrop-blur-xl transition-[transform,width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none"
+          className="relative mx-auto select-none overflow-hidden rounded-2xl border border-white/10 bg-black/85 text-white shadow-2xl backdrop-blur-xl transition-[transform,width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none"
           style={{
             width,
             transform: tucked
@@ -219,7 +244,7 @@ export function IslandShell() {
             <span
               aria-hidden
               className={cn(
-                "size-1.5 rounded-full",
+                "size-1.5 rounded-full transition-colors duration-300",
                 waiting > 0
                   ? "animate-pulse bg-amber-400"
                   : sessions.length > 0
@@ -237,14 +262,52 @@ export function IslandShell() {
           </button>
 
           {expanded && sessions.length > 0 ? (
-            <div
-              className="flex max-h-[420px] flex-col gap-0.5 overflow-y-auto px-1 pb-2"
-              data-testid="island-list"
-            >
-              {sessions.map((s) => (
-                <IslandRow key={`${s.agent}:${s.sessionId}`} session={s} />
-              ))}
-            </div>
+            <>
+              {sessions.length >= 2 && legendSegments.length > 0 ? (
+                <div
+                  data-testid="island-legend"
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-1.5 text-[10px] text-white/50 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+                >
+                  {legendSegments.map((seg) => (
+                    <span
+                      key={seg.key}
+                      data-testid={`island-legend-${seg.key}`}
+                      className="inline-flex items-center gap-1 tabular-nums"
+                    >
+                      <span aria-hidden className={cn("size-1.5 rounded-full", seg.dot)} />
+                      {t(`legend.${seg.key}`, { count: seg.count })}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div
+                className="flex max-h-[420px] flex-col gap-0.5 overflow-y-auto px-1 pb-2 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200"
+                data-testid="island-list"
+              >
+                {sessions.map((s, i) => (
+                  <IslandRow
+                    key={`${s.agent}:${s.sessionId}`}
+                    session={s}
+                    // Gentle stagger, capped so a long list doesn't feel sluggish.
+                    enterDelayMs={Math.min(i, 6) * ISLAND_ROW_STAGGER_MS}
+                  />
+                ))}
+              </div>
+            </>
+          ) : null}
+
+          {/*
+           * Attention ring: a breathing amber inset ring while any session
+           * needs the user. A pointer-events-none overlay so it never blocks
+           * the pill/list; painted last so it sits above the content edges.
+           * Suppressed while tucked (the card is a bare sliver then).
+           */}
+          {waiting > 0 && !tucked ? (
+            <span
+              aria-hidden
+              data-testid="island-attention-ring"
+              className="island-attention-ring pointer-events-none absolute inset-0 rounded-2xl"
+            />
           ) : null}
         </div>
       </div>

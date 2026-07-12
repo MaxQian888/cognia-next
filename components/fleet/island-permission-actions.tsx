@@ -36,6 +36,12 @@ export function IslandPermissionActions({
   }, [pending.requestedAt, nowMs])
 
   const expired = remainingSec <= 0
+  // Fraction of the answer window left — drives the draining progress bar.
+  // The 1s tick quantizes it; the linear width transition bridges the steps.
+  const remainingFraction = Math.min(
+    1,
+    Math.max(0, (remainingSec * 1000) / FLEET_PERMISSION_WAIT_MS)
+  )
 
   const respond = async (behavior: "allow" | "deny") => {
     if (answering || answered || expired) return
@@ -49,50 +55,65 @@ export function IslandPermissionActions({
   }
 
   return (
-    <div
-      data-testid="island-permission-actions"
-      className={cn("flex items-center gap-2", className)}
-    >
-      <span className="min-w-0 flex-1 truncate text-[11px] text-amber-300">
-        {pending.toolName ? t("request", { tool: pending.toolName }) : t("requestGeneric")}
-        {pending.detail ? <span className="text-white/50"> {pending.detail}</span> : null}
-      </span>
-      {answered ? (
-        <span className="text-[11px] text-white/60" data-testid="permission-answered">
-          {t(answered === "allow" ? "allowed" : "denied")}
+    <div data-testid="island-permission-actions" className={cn("flex flex-col gap-1", className)}>
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-amber-300">
+          {pending.toolName ? t("request", { tool: pending.toolName }) : t("requestGeneric")}
+          {pending.detail ? <span className="text-white/50"> {pending.detail}</span> : null}
         </span>
-      ) : expired ? (
-        <span className="text-[11px] text-white/40" data-testid="permission-expired">
-          {t("expired")}
-        </span>
-      ) : (
-        <>
-          <span
-            className="text-[10px] tabular-nums text-white/40"
-            data-testid="permission-countdown"
-          >
-            {t("countdown", { seconds: remainingSec })}
+        {answered ? (
+          <span className="text-[11px] text-white/60" data-testid="permission-answered">
+            {t(answered === "allow" ? "allowed" : "denied")}
           </span>
-          <button
-            type="button"
-            data-testid="permission-allow"
-            disabled={answering}
-            onClick={() => void respond("allow")}
-            className="rounded-md bg-emerald-500/90 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-emerald-400 disabled:opacity-50"
-          >
-            {t("allow")}
-          </button>
-          <button
-            type="button"
-            data-testid="permission-deny"
-            disabled={answering}
-            onClick={() => void respond("deny")}
-            className="rounded-md bg-red-500/80 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-red-400 disabled:opacity-50"
-          >
-            {t("deny")}
-          </button>
-        </>
-      )}
+        ) : expired ? (
+          <span className="text-[11px] text-white/40" data-testid="permission-expired">
+            {t("expired")}
+          </span>
+        ) : (
+          <>
+            <span
+              className="text-[10px] tabular-nums text-white/40"
+              data-testid="permission-countdown"
+            >
+              {t("countdown", { seconds: remainingSec })}
+            </span>
+            <button
+              type="button"
+              data-testid="permission-allow"
+              disabled={answering}
+              onClick={() => void respond("allow")}
+              className="rounded-md bg-emerald-500/90 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {t("allow")}
+            </button>
+            <button
+              type="button"
+              data-testid="permission-deny"
+              disabled={answering}
+              onClick={() => void respond("deny")}
+              className="rounded-md bg-red-500/80 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-red-400 disabled:opacity-50"
+            >
+              {t("deny")}
+            </button>
+          </>
+        )}
+      </div>
+      {!answered && !expired ? (
+        <div
+          className="h-0.5 w-full overflow-hidden rounded-full bg-white/10"
+          data-testid="permission-progress-track"
+          aria-hidden
+        >
+          <div
+            data-testid="permission-progress"
+            className={cn(
+              "h-full rounded-full transition-[width] duration-1000 ease-linear motion-reduce:transition-none",
+              remainingSec <= 5 ? "bg-red-400" : "bg-amber-400"
+            )}
+            style={{ width: `${remainingFraction * 100}%` }}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }

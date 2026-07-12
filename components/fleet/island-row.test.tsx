@@ -13,10 +13,12 @@ jest.mock("next-intl", () => ({
 
 const focusMock = jest.fn()
 const sendMock = jest.fn()
+const revealMock = jest.fn()
 jest.mock("@/lib/tauri/fleet", () => ({
   fleetPermissionRespond: jest.fn(),
   fleetFocusTerminal: (...args: unknown[]) => focusMock(...args),
   fleetOpencodeSendMessage: (...args: unknown[]) => sendMock(...args),
+  fleetRevealTranscript: (...args: unknown[]) => revealMock(...args),
 }))
 
 function session(overrides: Partial<FleetSession> = {}): FleetSession {
@@ -46,7 +48,10 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
   }
 }
 
-beforeEach(() => focusMock.mockClear())
+beforeEach(() => {
+  focusMock.mockClear()
+  revealMock.mockClear()
+})
 
 describe("IslandRow", () => {
   it("focuses the terminal on row click when capable", () => {
@@ -172,6 +177,102 @@ describe("IslandRow", () => {
     expect(screen.getByTestId("status-line")).toHaveTextContent("status.waitingPermission")
   })
 
+  it("renders a parked question with header, options and more-count instead of the status line", () => {
+    render(
+      <IslandRow
+        session={session({
+          status: "waiting-input",
+          activity: null,
+          pendingQuestions: [
+            {
+              question: "Which auth method should we use?",
+              header: "Auth",
+              options: ["OAuth", "API key"],
+              multiSelect: false,
+            },
+            { question: "Enable telemetry?", options: ["Yes", "No"], multiSelect: true },
+          ],
+        })}
+      />
+    )
+    const block = screen.getByTestId("pending-question")
+    expect(block).toHaveTextContent("Auth")
+    expect(block).toHaveTextContent("Which auth method should we use?")
+    expect(screen.getByTestId("question-options")).toHaveTextContent("OAuth")
+    expect(screen.getByTestId("question-options")).toHaveTextContent("API key")
+    expect(screen.getByTestId("question-more").textContent).toContain("questionMore")
+    // The generic waiting-input status line is superseded by the question.
+    expect(screen.queryByTestId("status-line")).toBeNull()
+  })
+
+  it("keeps the generic waiting-input line when no question is parked", () => {
+    render(<IslandRow session={session({ status: "waiting-input", activity: null })} />)
+    expect(screen.getByTestId("status-line")).toHaveTextContent("status.waitingInput")
+    expect(screen.queryByTestId("pending-question")).toBeNull()
+  })
+
+  it("shows the plan preview while plan-pending", () => {
+    render(
+      <IslandRow
+        session={session({
+          status: "plan-pending",
+          activity: null,
+          pendingPlan: "## Steps\n1. Do X\n2. Do Y",
+        })}
+      />
+    )
+    expect(screen.getByTestId("pending-plan")).toHaveTextContent("1. Do X")
+    // Status line still explains where to approve.
+    expect(screen.getByTestId("status-line")).toHaveTextContent("status.planPending")
+  })
+
+  it("hides the plan preview outside plan-pending", () => {
+    render(<IslandRow session={session({ status: "working", pendingPlan: "text" })} />)
+    expect(screen.queryByTestId("pending-plan")).toBeNull()
+  })
+
+  it("lists subagents with background markers and an overflow chip", () => {
+    render(
+      <IslandRow
+        session={session({
+          subagents: [
+            { description: "Audit i18n", agentType: "Explore", background: false, startedAt: 1 },
+            { description: "Watch tests", agentType: null, background: true, startedAt: 2 },
+            { description: "third", background: false, startedAt: 3 },
+            { description: "fourth", background: false, startedAt: 4 },
+          ],
+        })}
+      />
+    )
+    const block = screen.getByTestId("subagents")
+    expect(block).toHaveTextContent("subagents")
+    expect(screen.getByTestId("subagent-chip-0")).toHaveTextContent("Explore · Audit i18n")
+    expect(screen.getByTestId("subagent-chip-0")).toHaveAttribute("data-background", "false")
+    expect(screen.getByTestId("subagent-chip-1")).toHaveAttribute("data-background", "true")
+    expect(screen.getByTestId("subagent-chip-1")).toHaveTextContent("subagentBackground")
+    // Only 3 chips render; the fourth folds into the overflow counter.
+    expect(screen.queryByTestId("subagent-chip-3")).toBeNull()
+    expect(screen.getByTestId("subagent-overflow")).toHaveTextContent("+1")
+  })
+
+  it("renders no subagent block for sessions without subagents", () => {
+    render(<IslandRow session={session()} />)
+    expect(screen.queryByTestId("subagents")).toBeNull()
+  })
+
+  it("applies the staggered entrance delay with backwards fill", () => {
+    render(<IslandRow session={session()} enterDelayMs={90} />)
+    const row = screen.getByTestId("island-row-claude-code-s1")
+    expect(row.style.animationDelay).toBe("90ms")
+    expect(row.style.animationFillMode).toBe("backwards")
+  })
+
+  it("omits animation inline styles without a stagger delay", () => {
+    render(<IslandRow session={session()} />)
+    const row = screen.getByTestId("island-row-claude-code-s1")
+    expect(row.style.animationDelay).toBe("")
+  })
+
   it("shows a reply affordance for OpenCode sessions that accept messages", () => {
     render(
       <IslandRow
@@ -205,5 +306,80 @@ describe("IslandRow", () => {
       />
     )
     expect(screen.queryByTestId("island-reply-open")).toBeNull()
+  })
+
+  it("reveals the transcript without focusing the terminal, only when a path is known", () => {
+    // Capability present but no path yet → no button.
+    const { rerender } = render(<IslandRow session={session({ transcriptPath: null })} />)
+    expect(screen.queryByTestId("island-reveal-transcript")).toBeNull()
+
+    rerender(<IslandRow session={session({ transcriptPath: "/x/proj/abc.jsonl" })} />)
+    const button = screen.getByTestId("island-reveal-transcript")
+    fireEvent.click(button)
+    expect(revealMock).toHaveBeenCalledWith("/x/proj/abc.jsonl")
+    // The click must not bubble to the row's focus-terminal handler.
+    expect(focusMock).not.toHaveBeenCalled()
+  })
+
+  it("hides the reveal action when the capability is off", () => {
+    render(
+      <IslandRow
+        session={session({
+          transcriptPath: "/x/proj/abc.jsonl",
+          capabilities: {
+            approvePermission: false,
+            sendMessage: false,
+            focusTerminal: true,
+            openTranscript: false,
+          },
+        })}
+      />
+    )
+    expect(screen.queryByTestId("island-reveal-transcript")).toBeNull()
+  })
+
+  it("renders model and permission-mode meta chips only when noteworthy", () => {
+    const { rerender } = render(<IslandRow session={session()} />)
+    // Default mode + no model → no meta chips.
+    expect(screen.queryByTestId("session-meta-chips")).toBeNull()
+
+    rerender(
+      <IslandRow
+        session={session({ model: "claude-opus-4-8", permissionMode: "bypassPermissions" })}
+      />
+    )
+    expect(screen.getByTestId("session-model-chip")).toHaveTextContent("Opus")
+    const modeChip = screen.getByTestId("session-mode-chip")
+    expect(modeChip).toHaveAttribute("data-mode", "bypassPermissions")
+    expect(modeChip).toHaveAttribute("data-risk", "danger")
+  })
+
+  it("appends how long a blocked session has been waiting", () => {
+    render(
+      <IslandRow
+        session={session({
+          status: "waiting-input",
+          activity: null,
+          lastEventAt: Date.now() - 65_000, // 1m05s ago
+        })}
+      />
+    )
+    const waited = screen.getByTestId("status-waited")
+    expect(waited.textContent).toContain("waitingFor")
+    expect(waited.textContent).toMatch(/1m0[45]s/)
+  })
+
+  it("shows the waited duration inside a parked question block", () => {
+    render(
+      <IslandRow
+        session={session({
+          status: "waiting-input",
+          activity: null,
+          lastEventAt: Date.now() - 30_000,
+          pendingQuestions: [{ question: "Proceed?", options: ["Yes"], multiSelect: false }],
+        })}
+      />
+    )
+    expect(screen.getByTestId("question-waited").textContent).toContain("waitingFor")
   })
 })

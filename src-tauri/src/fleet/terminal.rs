@@ -107,7 +107,11 @@ pub fn classify_terminal(env: &HashMap<String, String>) -> Option<TerminalSource
     None
 }
 
-fn source(app: TerminalApp, label: impl Into<String>, session_ref: Option<String>) -> TerminalSource {
+fn source(
+    app: TerminalApp,
+    label: impl Into<String>,
+    session_ref: Option<String>,
+) -> TerminalSource {
     TerminalSource {
         app,
         label: label.into(),
@@ -170,11 +174,7 @@ pub fn default_label(app: TerminalApp) -> &'static str {
 pub fn classify_from_pid(agent_pid: u32) -> Option<TerminalSource> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing(),
-    );
+    system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
     let mut pid = Pid::from_u32(agent_pid);
     for _ in 0..12 {
         let process = system.process(pid)?;
@@ -265,8 +265,8 @@ mod tests {
         let ala = classify_terminal(&env_of(&[("ALACRITTY_SOCKET", "/tmp/a.sock")])).unwrap();
         assert_eq!(ala.app, TerminalApp::Alacritty);
 
-        let ghostty = classify_terminal(&env_of(&[("GHOSTTY_RESOURCES_DIR", "/Applications/…")]))
-            .unwrap();
+        let ghostty =
+            classify_terminal(&env_of(&[("GHOSTTY_RESOURCES_DIR", "/Applications/…")])).unwrap();
         assert_eq!(ghostty.app, TerminalApp::Ghostty);
 
         let wt = classify_terminal(&env_of(&[("WT_SESSION", "guid")])).unwrap();
@@ -275,8 +275,8 @@ mod tests {
         let code = classify_terminal(&env_of(&[("VSCODE_PID", "4242")])).unwrap();
         assert_eq!(code.app, TerminalApp::Vscode);
 
-        let jb = classify_terminal(&env_of(&[("TERMINAL_EMULATOR", "JetBrains-JediTerm")]))
-            .unwrap();
+        let jb =
+            classify_terminal(&env_of(&[("TERMINAL_EMULATOR", "JetBrains-JediTerm")])).unwrap();
         assert_eq!(jb.app, TerminalApp::Jetbrains);
     }
 

@@ -49,6 +49,29 @@ export interface FleetActivity {
   detail: string | null
 }
 
+/**
+ * A parked AskUserQuestion (display-only — answered in the agent's own
+ * terminal). Mirrors Rust `PendingQuestion`.
+ */
+export interface PendingQuestion {
+  question: string
+  /** Short chip label ("Auth method") when the tool provided one. */
+  header?: string | null
+  /** Option labels in tool order (capped by the Rust side). */
+  options: string[]
+  multiSelect: boolean
+}
+
+/** One live subagent spawned by the session's Task tool. Mirrors Rust `FleetSubagent`. */
+export interface FleetSubagent {
+  description: string
+  /** Subagent type ("Explore", "general-purpose", …) when provided. */
+  agentType?: string | null
+  /** True for run_in_background tasks, which outlive their tool call. */
+  background: boolean
+  startedAt: number
+}
+
 export interface FleetSession {
   agent: FleetAgent
   sessionId: string
@@ -63,6 +86,12 @@ export interface FleetSession {
   transcriptPath: string | null
   agentPid: number | null
   pendingPermission: PendingPermission | null
+  /** Plan text parked by ExitPlanMode while `plan-pending`. Optional: older snapshots omit it. */
+  pendingPlan?: string | null
+  /** Questions parked by AskUserQuestion while `waiting-input`. */
+  pendingQuestions?: PendingQuestion[]
+  /** Live subagents (Task tool), foreground and background. */
+  subagents?: FleetSubagent[]
   capabilities: FleetCapabilities
   startedAt: number
   lastEventAt: number

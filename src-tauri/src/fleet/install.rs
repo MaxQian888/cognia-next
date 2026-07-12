@@ -192,7 +192,8 @@ fn write_claude_hook_script_at(base: &Path) -> Result<PathBuf, String> {
     let tmp = path.with_extension("sh.tmp");
     {
         let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
-        f.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
+        f.write_all(contents.as_bytes())
+            .map_err(|e| e.to_string())?;
     }
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
 
@@ -345,7 +346,10 @@ mod tests {
     #[test]
     fn script_write_and_status_round_trip() {
         let tmp = tempfile::tempdir().unwrap();
-        assert_eq!(claude_hook_script_status_at(tmp.path()), ScriptStatus::Missing);
+        assert_eq!(
+            claude_hook_script_status_at(tmp.path()),
+            ScriptStatus::Missing
+        );
 
         let path = write_claude_hook_script_at(tmp.path()).unwrap();
         assert!(path.exists());
@@ -370,10 +374,16 @@ mod tests {
 
         // Foreign modification → stale.
         std::fs::write(&path, "#!/bin/sh\n# hand-edited\n").unwrap();
-        assert_eq!(claude_hook_script_status_at(tmp.path()), ScriptStatus::Stale);
+        assert_eq!(
+            claude_hook_script_status_at(tmp.path()),
+            ScriptStatus::Stale
+        );
 
         remove_scripts_at(tmp.path()).unwrap();
-        assert_eq!(claude_hook_script_status_at(tmp.path()), ScriptStatus::Missing);
+        assert_eq!(
+            claude_hook_script_status_at(tmp.path()),
+            ScriptStatus::Missing
+        );
         // Second removal is a no-op.
         remove_scripts_at(tmp.path()).unwrap();
     }
@@ -434,7 +444,9 @@ mod tests {
         {
             let stdin = child.stdin.as_mut().unwrap();
             stdin
-                .write_all(br#"{"session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"}}"#)
+                .write_all(
+                    br#"{"session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"}}"#,
+                )
                 .unwrap();
         }
         let out = child.wait_with_output().unwrap();

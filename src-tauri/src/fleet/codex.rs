@@ -89,7 +89,8 @@ fn write_codex_notify_script_at(base: &Path) -> Result<PathBuf, String> {
     let tmp = path.with_extension("sh.tmp");
     {
         let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
-        f.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
+        f.write_all(contents.as_bytes())
+            .map_err(|e| e.to_string())?;
     }
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
     #[cfg(unix)]
@@ -193,7 +194,8 @@ fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
     let tmp = path.with_extension("toml.tmp");
     {
         let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
-        f.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
+        f.write_all(contents.as_bytes())
+            .map_err(|e| e.to_string())?;
         f.sync_all().ok();
     }
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
@@ -252,7 +254,10 @@ pub async fn fleet_codex_install() -> Result<CodexIntegrationStatus, String> {
     // Refuse to clobber a user's own notify program.
     if let Ok(doc) = existing.parse::<DocumentMut>() {
         if doc.get("notify").is_some() && !notify_is_ours(&doc, &script_str) {
-            return Err("Codex `notify` is already set to another program; leaving it untouched".to_string());
+            return Err(
+                "Codex `notify` is already set to another program; leaving it untouched"
+                    .to_string(),
+            );
         }
     }
 
@@ -349,7 +354,9 @@ mod tests {
         assert!(clear_our_notify(foreign, SCRIPT).unwrap().is_none());
 
         // Absent → None.
-        assert!(clear_our_notify("model = \"gpt-5\"\n", SCRIPT).unwrap().is_none());
+        assert!(clear_our_notify("model = \"gpt-5\"\n", SCRIPT)
+            .unwrap()
+            .is_none());
         assert!(clear_our_notify("", SCRIPT).unwrap().is_none());
     }
 
@@ -372,7 +379,11 @@ mod tests {
         // A two-element array (ours + an arg) is NOT exactly ours → conflict-ish
         // (not installed-by-us), reported as Conflict so we don't touch it.
         assert_eq!(
-            classify(Some(&format!("notify = [\"{SCRIPT}\", \"x\"]\n")), true, SCRIPT),
+            classify(
+                Some(&format!("notify = [\"{SCRIPT}\", \"x\"]\n")),
+                true,
+                SCRIPT
+            ),
             CodexStatus::Conflict
         );
     }

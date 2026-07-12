@@ -67,3 +67,69 @@ export function attentionCount(sessions: readonly FleetSession[]): number {
       s.status === "waiting-input"
   ).length
 }
+
+/**
+ * Compact brand label for a raw model id, for the island's model chip:
+ * `claude-opus-4-8` → "Opus", `claude-3-5-sonnet-20241022` → "Sonnet",
+ * `gpt-5-codex` → "GPT-5-codex", `anthropic/claude-haiku-4-5` → "Haiku".
+ * Model names are proper nouns shown verbatim (like the terminal label), so
+ * this stays i18n-free; `null` when no model is known. Kept pure for tests.
+ */
+export function formatModelLabel(model: string | null | undefined): string | null {
+  const raw = (model ?? "").trim()
+  if (!raw) return null
+  const lower = raw.toLowerCase()
+  // Known families collapse to their short brand name regardless of the exact
+  // versioned id — the common case for a Claude Code / OpenCode fleet.
+  if (lower.includes("opus")) return "Opus"
+  if (lower.includes("sonnet")) return "Sonnet"
+  if (lower.includes("haiku")) return "Haiku"
+  if (lower.includes("gemini")) return "Gemini"
+  if (lower.includes("grok")) return "Grok"
+  // Generic fallback: drop a provider prefix (`openai/…`), a trailing release
+  // date (`-20241022` / `-2024-10-22`), uppercase a leading `gpt`, then cap.
+  let label = raw.includes("/") ? raw.slice(raw.lastIndexOf("/") + 1) : raw
+  label = label.replace(/-?\d{4}-\d{2}-\d{2}$/, "").replace(/-?\d{8}$/, "")
+  label = label.replace(/^gpt/i, "GPT").trim() || raw
+  return label.length > 22 ? `${label.slice(0, 21)}…` : label
+}
+
+/** Per-status counts for the island's expanded triage legend. */
+export interface FleetStatusSummary {
+  /** waiting-permission + plan-pending + waiting-input (the "needs you" bucket). */
+  attention: number
+  working: number
+  idle: number
+  ended: number
+  total: number
+}
+
+/** Bucket a session list by status for the expanded breakdown legend. Pure. */
+export function fleetStatusSummary(sessions: readonly FleetSession[]): FleetStatusSummary {
+  const summary: FleetStatusSummary = {
+    attention: 0,
+    working: 0,
+    idle: 0,
+    ended: 0,
+    total: sessions.length,
+  }
+  for (const s of sessions) {
+    switch (s.status) {
+      case "waiting-permission":
+      case "plan-pending":
+      case "waiting-input":
+        summary.attention += 1
+        break
+      case "working":
+        summary.working += 1
+        break
+      case "idle":
+        summary.idle += 1
+        break
+      case "ended":
+        summary.ended += 1
+        break
+    }
+  }
+  return summary
+}

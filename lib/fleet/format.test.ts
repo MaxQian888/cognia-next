@@ -1,4 +1,12 @@
-import { activityLine, attentionCount, formatElapsed, sortForIsland, truncateLine } from "./format"
+import {
+  activityLine,
+  attentionCount,
+  fleetStatusSummary,
+  formatElapsed,
+  formatModelLabel,
+  sortForIsland,
+  truncateLine,
+} from "./format"
 import type { FleetSession } from "./types"
 
 function session(overrides: Partial<FleetSession>): FleetSession {
@@ -92,5 +100,60 @@ describe("attentionCount", () => {
         session({ status: "ended" }),
       ])
     ).toBe(3)
+  })
+})
+
+describe("formatModelLabel", () => {
+  it("collapses known Claude families to their short brand name", () => {
+    expect(formatModelLabel("claude-opus-4-8")).toBe("Opus")
+    expect(formatModelLabel("claude-3-5-sonnet-20241022")).toBe("Sonnet")
+    expect(formatModelLabel("anthropic/claude-haiku-4-5")).toBe("Haiku")
+    expect(formatModelLabel("opusplan")).toBe("Opus")
+  })
+
+  it("recognizes other providers", () => {
+    expect(formatModelLabel("gemini-2.5-pro")).toBe("Gemini")
+    expect(formatModelLabel("grok-4")).toBe("Grok")
+  })
+
+  it("cleans generic ids: provider prefix, release date, gpt casing", () => {
+    expect(formatModelLabel("openai/gpt-4o")).toBe("GPT-4o")
+    expect(formatModelLabel("gpt-5-codex")).toBe("GPT-5-codex")
+    expect(formatModelLabel("o1-preview-2024-09-12")).toBe("o1-preview")
+    expect(formatModelLabel("deepseek-chat")).toBe("deepseek-chat")
+  })
+
+  it("caps overly long labels and returns null for empty input", () => {
+    expect(formatModelLabel("x".repeat(40))).toHaveLength(22)
+    expect(formatModelLabel("x".repeat(40))?.endsWith("…")).toBe(true)
+    expect(formatModelLabel(null)).toBeNull()
+    expect(formatModelLabel("  ")).toBeNull()
+    expect(formatModelLabel(undefined)).toBeNull()
+  })
+})
+
+describe("fleetStatusSummary", () => {
+  it("buckets sessions by status with a total", () => {
+    expect(
+      fleetStatusSummary([
+        session({ status: "waiting-permission" }),
+        session({ status: "plan-pending" }),
+        session({ status: "waiting-input" }),
+        session({ status: "working" }),
+        session({ status: "working" }),
+        session({ status: "idle" }),
+        session({ status: "ended" }),
+      ])
+    ).toEqual({ attention: 3, working: 2, idle: 1, ended: 1, total: 7 })
+  })
+
+  it("is all-zero for an empty fleet", () => {
+    expect(fleetStatusSummary([])).toEqual({
+      attention: 0,
+      working: 0,
+      idle: 0,
+      ended: 0,
+      total: 0,
+    })
   })
 })

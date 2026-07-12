@@ -143,7 +143,10 @@ impl IslandAnchor {
     /// Max content size (logical px) the renderer card may occupy: the full
     /// frame minus the notch strip the card is padded below.
     fn content_max_logical(&self) -> (f64, f64) {
-        (self.w / self.scale, self.h / self.scale - self.top_inset_logical())
+        (
+            self.w / self.scale,
+            self.h / self.scale - self.top_inset_logical(),
+        )
     }
 }
 
@@ -411,7 +414,10 @@ pub(crate) fn is_island_window_open_inner<R: Runtime>(app: &AppHandle<R>) -> boo
 }
 
 #[tauri::command]
-pub async fn open_island_window(app: AppHandle, opts: Option<IslandWindowOpts>) -> Result<(), String> {
+pub async fn open_island_window(
+    app: AppHandle,
+    opts: Option<IslandWindowOpts>,
+) -> Result<(), String> {
     open_island_window_inner(&app, opts.unwrap_or_default())
 }
 
@@ -536,9 +542,15 @@ mod tests {
     #[test]
     fn clamp_keeps_content_inside_the_area() {
         // Fits → untouched.
-        assert_eq!(clamp_island_size(560.0, 300.0, (1512.0, 950.0)), (560.0, 300.0));
+        assert_eq!(
+            clamp_island_size(560.0, 300.0, (1512.0, 950.0)),
+            (560.0, 300.0)
+        );
         // Overflows → clamped to the logical area.
-        assert_eq!(clamp_island_size(2000.0, 1200.0, (1512.0, 950.0)), (1512.0, 950.0));
+        assert_eq!(
+            clamp_island_size(2000.0, 1200.0, (1512.0, 950.0)),
+            (1512.0, 950.0)
+        );
         // Degenerate input can't produce a zero/negative window.
         assert_eq!(clamp_island_size(0.0, -5.0, (1512.0, 950.0)), (1.0, 1.0));
     }
