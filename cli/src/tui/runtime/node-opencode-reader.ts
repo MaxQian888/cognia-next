@@ -40,6 +40,8 @@ export function candidateDbPaths(home: string, env: NodeJS.ProcessEnv = process.
   const xdg = env.XDG_DATA_HOME
   if (xdg) out.push(path.join(xdg, "opencode", "opencode.db"))
   out.push(path.join(home, ".local", "share", "opencode", "opencode.db"))
+  // Unverified fallback: opencode (Bun) uses the XDG path even on Windows;
+  // the Roaming probe only covers a hypothetical future relocation.
   out.push(path.join(home, "AppData", "Roaming", "opencode", "opencode.db"))
   return out
 }
@@ -50,6 +52,15 @@ async function loadSqlite(): Promise<SqliteModule | null> {
   } catch {
     return null
   }
+}
+
+/**
+ * Whether this Node runtime can read OpenCode's SQLite store (`node:sqlite`,
+ * Node 22.5+). Lets the CLI tell the user OpenCode was skipped instead of
+ * silently showing zero OpenCode sessions on older Node versions.
+ */
+export async function isNodeSqliteAvailable(): Promise<boolean> {
+  return (await loadSqlite()) !== null
 }
 
 function num(v: unknown): number {
@@ -132,10 +143,13 @@ function messageTokens(m: Row): OpencodeTokens | undefined {
   const cache = (t.cache && typeof t.cache === "object" ? t.cache : {}) as Row
   const input = num(t.input)
   const output = num(t.output)
+  // Reasoning tokens are billed output-side; dropping them undercounts
+  // thinking-heavy models (mirrors the Rust reader and the live adapter).
+  const reasoning = num(t.reasoning)
   const cacheRead = num(cache.read)
   const cacheWrite = num(cache.write)
-  if (!input && !output && !cacheRead && !cacheWrite) return undefined
-  return { input, output, cacheRead, cacheWrite }
+  if (!input && !output && !reasoning && !cacheRead && !cacheWrite) return undefined
+  return { input, output, reasoning, cacheRead, cacheWrite }
 }
 
 /**
@@ -153,13 +167,18 @@ export function buildSessions(db: SqliteDb): OpencodeSession[] {
   const messages = rowsAsMaps(db, messageTbl)
   const parts = rowsAsMaps(db, partTbl)
 
-  const partsByMsg = new Map<string, OpencodePart[]>()
+  // `SELECT *` gives table-scan order — sort parts by id (lexicographically
+  // ordered ULIDs) and messages by createdAt for a deterministic transcript.
+  const partsByMsg = new Map<string, Array<{ pid: string; part: OpencodePart }>>()
   for (const p of parts) {
     const mid = firstStr(p, ["messageID", "message_id", "messageId"])
     if (!mid) continue
     const arr = partsByMsg.get(mid) ?? []
-    arr.push(p as unknown as OpencodePart)
+    arr.push({ pid: firstStr(p, ["id"]) ?? "", part: p as unknown as OpencodePart })
     partsByMsg.set(mid, arr)
+  }
+  for (const arr of partsByMsg.values()) {
+    arr.sort((a, b) => (a.pid < b.pid ? -1 : a.pid > b.pid ? 1 : 0))
   }
 
   const msgsBySession = new Map<string, OpencodeMessage[]>()
@@ -170,7 +189,7 @@ export function buildSessions(db: SqliteDb): OpencodeSession[] {
     const msg: OpencodeMessage = {
       role: firstStr(m, ["role"]) ?? "user",
       createdAt: nestedNum(m, "time", "created", ["created", "time_created"]),
-      parts: partsByMsg.get(mid) ?? [],
+      parts: (partsByMsg.get(mid) ?? []).map((e) => e.part),
     }
     const model = firstStr(m, ["modelID", "model"])
     if (model) msg.model = model
@@ -180,6 +199,9 @@ export function buildSessions(db: SqliteDb): OpencodeSession[] {
     const arr = msgsBySession.get(sid) ?? []
     arr.push(msg)
     msgsBySession.set(sid, arr)
+  }
+  for (const arr of msgsBySession.values()) {
+    arr.sort((a, b) => a.createdAt - b.createdAt)
   }
 
   const out: OpencodeSession[] = []
@@ -193,6 +215,7 @@ export function buildSessions(db: SqliteDb): OpencodeSession[] {
       title: firstStr(s, ["title"]) ?? "OpenCode session",
       cwd: firstStr(s, ["directory", "cwd"]),
       model: firstStr(s, ["model"]),
+      parentId: firstStr(s, ["parentID", "parent_id", "parentId"]),
       createdAt: created,
       updatedAt: updated !== 0 ? updated : created,
       messages: msgsBySession.get(id) ?? [],

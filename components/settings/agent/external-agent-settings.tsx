@@ -63,6 +63,7 @@ import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { DelegationRulesSection } from "./delegation-rules-section"
 import { CodexAppServerStatusCard } from "./codex-app-server-status-card"
+import { OpencodeStatusCard } from "./opencode-status-card"
 import {
   getExternalAgentEcosystemReadiness,
   getExternalAgentExecutionBlockReason,
@@ -129,6 +130,17 @@ interface AgentFormData {
   codexReasoningSummary: "" | "auto" | "concise" | "detailed" | "none"
   /** Newline-separated absolute folders registered as extra Codex skill roots */
   codexExtraSkillRoots: string
+  // OpenCode options (shown only for protocol === "opencode")
+  opencodeAutoSpawn: boolean
+  /** Empty string = let the server pick a free port (0) */
+  opencodePort: string
+  /** Empty string = 127.0.0.1 */
+  opencodeHostname: string
+  opencodeServerPassword: string
+  /** Empty string = "opencode" (the server's Basic-Auth default user) */
+  opencodeServerUsername: string
+  /** Default model as "providerID/modelID"; empty = server default */
+  opencodeModel: string
 }
 
 /** Split the newline-separated skill-roots textarea into clean, unique paths. */
@@ -171,6 +183,36 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   codexDefaultEffort: "",
   codexReasoningSummary: "",
   codexExtraSkillRoots: "",
+  opencodeAutoSpawn: false,
+  opencodePort: "",
+  opencodeHostname: "",
+  opencodeServerPassword: "",
+  opencodeServerUsername: "",
+  opencodeModel: "",
+}
+
+/** Pull the OpenCode form fields out of an agent/preset `metadata` bag. */
+function opencodeFieldsFromMetadata(
+  metadata: Record<string, unknown> | undefined
+): Pick<
+  AgentFormData,
+  | "opencodeAutoSpawn"
+  | "opencodePort"
+  | "opencodeHostname"
+  | "opencodeServerPassword"
+  | "opencodeServerUsername"
+  | "opencodeModel"
+> {
+  return {
+    opencodeAutoSpawn: metadata?.autoSpawnServer === true,
+    opencodePort: typeof metadata?.port === "number" ? String(metadata.port) : "",
+    opencodeHostname: typeof metadata?.hostname === "string" ? metadata.hostname : "",
+    opencodeServerPassword:
+      typeof metadata?.serverPassword === "string" ? metadata.serverPassword : "",
+    opencodeServerUsername:
+      typeof metadata?.serverUsername === "string" ? metadata.serverUsername : "",
+    opencodeModel: typeof metadata?.model === "string" ? metadata.model : "",
+  }
 }
 
 /** Static effort choices offered as per-agent defaults; the true per-model
@@ -219,6 +261,7 @@ function AgentEditorDialog({
   onSave,
 }: AgentEditorDialogProps) {
   const t = useTranslations("externalAgent.settings")
+  const tManager = useTranslations("externalAgent.manager")
   const tCommon = useTranslations("common")
   const { getAgent } = useExternalAgentStore()
 
@@ -244,6 +287,7 @@ function AgentEditorDialog({
           networkEndpoint: preset.network?.endpoint ?? "",
           defaultPermissionMode: preset.defaultPermissionMode,
           description: preset.description,
+          ...opencodeFieldsFromMetadata(preset.metadata),
         }
       }
     }
@@ -278,6 +322,7 @@ function AgentEditorDialog({
       codexDefaultEffort: agent.codexOptions?.defaultReasoningEffort ?? "",
       codexReasoningSummary: agent.codexOptions?.reasoningSummary ?? "",
       codexExtraSkillRoots: agent.codexOptions?.extraSkillRoots?.join("\n") ?? "",
+      ...opencodeFieldsFromMetadata(agent.metadata),
     }
   })
 
@@ -329,9 +374,9 @@ function AgentEditorDialog({
       selectedPreset && selectedPreset !== "custom" ? getPresetConfig(selectedPreset) : null
 
     if (formData.protocol === "opencode") {
-      // OpenCode auto-spawns a local `opencode serve` when the preset requests
-      // it; otherwise it connects to a configured server endpoint.
-      if (selectedPresetConfig?.metadata?.autoSpawnServer === true) {
+      // OpenCode auto-spawns a local `opencode serve` when the toggle is on
+      // (seeded from the preset); otherwise it connects to a server endpoint.
+      if (formData.opencodeAutoSpawn) {
         input.process = {
           command: formData.processCommand.trim() || "opencode",
           args: formData.processArgs.split(" ").filter(Boolean),
@@ -397,6 +442,32 @@ function AgentEditorDialog({
       }
     }
 
+    if (formData.protocol === "opencode") {
+      // The adapter reads all of these off `metadata` (resolveBaseUrl /
+      // buildAuthHeaders / resolveModel) — write what the user set, and
+      // override any preset-carried defaults with the form values.
+      const opencodeMetadata: Record<string, unknown> = {
+        ...(input.metadata ?? {}),
+        autoSpawnServer: formData.opencodeAutoSpawn,
+      }
+      const port = Number.parseInt(formData.opencodePort, 10)
+      if (!Number.isNaN(port) && port >= 0) opencodeMetadata.port = port
+      else delete opencodeMetadata.port
+      if (formData.opencodeHostname.trim()) {
+        opencodeMetadata.hostname = formData.opencodeHostname.trim()
+      } else delete opencodeMetadata.hostname
+      if (formData.opencodeServerPassword) {
+        opencodeMetadata.serverPassword = formData.opencodeServerPassword
+      } else delete opencodeMetadata.serverPassword
+      if (formData.opencodeServerUsername.trim()) {
+        opencodeMetadata.serverUsername = formData.opencodeServerUsername.trim()
+      } else delete opencodeMetadata.serverUsername
+      if (formData.opencodeModel.trim()) {
+        opencodeMetadata.model = formData.opencodeModel.trim()
+      } else delete opencodeMetadata.model
+      input.metadata = opencodeMetadata
+    }
+
     onSave(input)
     onOpenChange(false)
     setFormData(DEFAULT_FORM_DATA)
@@ -423,6 +494,7 @@ function AgentEditorDialog({
         networkEndpoint: preset.network?.endpoint || current.networkEndpoint,
         defaultPermissionMode: preset.defaultPermissionMode,
         description: preset.description,
+        ...opencodeFieldsFromMetadata(preset.metadata),
       }))
     },
     [setFormData]
@@ -530,8 +602,123 @@ function AgentEditorDialog({
             </Select>
           </div>
 
+          {/* OpenCode server config — auto-spawn vs remote endpoint, plus the
+              auth/model metadata the adapter reads (resolveBaseUrl /
+              buildAuthHeaders / resolveModel). Mirrors the chat-side dialog in
+              components/agent/external-agent/manager.tsx. */}
+          {formData.protocol === "opencode" && (
+            <>
+              <Separator />
+              <div
+                className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3"
+                data-testid="opencode-options-section"
+              >
+                <div className="space-y-0.5">
+                  <Label htmlFor="opencode-auto-spawn" className="cursor-pointer text-sm">
+                    {tManager("autoSpawnServer")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{tManager("autoSpawnServerHint")}</p>
+                </div>
+                <Switch
+                  id="opencode-auto-spawn"
+                  checked={formData.opencodeAutoSpawn}
+                  onCheckedChange={(v) => setFormData({ ...formData, opencodeAutoSpawn: v })}
+                  aria-label={tManager("autoSpawnServer")}
+                />
+              </div>
+              {formData.opencodeAutoSpawn ? (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="opencode-command">{t("command")}</Label>
+                    <Input
+                      id="opencode-command"
+                      value={formData.processCommand}
+                      onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
+                      // i18n-exempt: example CLI command, not UI prose
+                      placeholder="opencode"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label htmlFor="opencode-port">{tManager("serverPort")}</Label>
+                      <Input
+                        id="opencode-port"
+                        type="number"
+                        min={0}
+                        value={formData.opencodePort}
+                        onChange={(e) => setFormData({ ...formData, opencodePort: e.target.value })}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="opencode-hostname">{tManager("serverHostname")}</Label>
+                      <Input
+                        id="opencode-hostname"
+                        value={formData.opencodeHostname}
+                        onChange={(e) =>
+                          setFormData({ ...formData, opencodeHostname: e.target.value })
+                        }
+                        // i18n-exempt: example hostname, not UI prose
+                        placeholder="127.0.0.1"
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="grid gap-2">
+                  <Label htmlFor="opencode-endpoint">{t("endpoint")}</Label>
+                  <Input
+                    id="opencode-endpoint"
+                    value={formData.networkEndpoint}
+                    onChange={(e) => setFormData({ ...formData, networkEndpoint: e.target.value })}
+                    // i18n-exempt: example URL, not UI prose
+                    placeholder="http://127.0.0.1:4096"
+                  />
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="opencode-server-password">{tManager("serverPassword")}</Label>
+                  <Input
+                    id="opencode-server-password"
+                    type="password"
+                    value={formData.opencodeServerPassword}
+                    onChange={(e) =>
+                      setFormData({ ...formData, opencodeServerPassword: e.target.value })
+                    }
+                    placeholder="••••••••"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="opencode-server-username">{tManager("serverUsername")}</Label>
+                  <Input
+                    id="opencode-server-username"
+                    value={formData.opencodeServerUsername}
+                    onChange={(e) =>
+                      setFormData({ ...formData, opencodeServerUsername: e.target.value })
+                    }
+                    // i18n-exempt: the server's documented default Basic-Auth user
+                    placeholder="opencode"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">{tManager("serverPasswordHint")}</p>
+              <div className="grid gap-2">
+                <Label htmlFor="opencode-model">{tManager("defaultModel")}</Label>
+                <Input
+                  id="opencode-model"
+                  value={formData.opencodeModel}
+                  onChange={(e) => setFormData({ ...formData, opencodeModel: e.target.value })}
+                  // i18n-exempt: example provider/model id, not UI prose
+                  placeholder="anthropic/claude-sonnet-4-5"
+                />
+                <p className="text-xs text-muted-foreground">{tManager("defaultModelHint")}</p>
+              </div>
+            </>
+          )}
+
           {/* Process Config (for stdio) */}
-          {formData.transport === "stdio" && (
+          {formData.protocol !== "opencode" && formData.transport === "stdio" && (
             <>
               <Separator />
               <div className="grid gap-2">
@@ -567,7 +754,7 @@ function AgentEditorDialog({
           )}
 
           {/* Network Config (for http/websocket) */}
-          {formData.transport !== "stdio" && (
+          {formData.protocol !== "opencode" && formData.transport !== "stdio" && (
             <>
               <Separator />
               <div className="grid gap-2">
@@ -1165,6 +1352,11 @@ function AgentDetail({
         {/* Native Codex app-server status (MCP servers + skills) */}
         {agent.protocol === "codex-app-server" && (
           <CodexAppServerStatusCard agentId={agent.id} connected={isConnected} />
+        )}
+
+        {/* OpenCode server status (project / providers / agents / MCP / LSP) */}
+        {agent.protocol === "opencode" && (
+          <OpencodeStatusCard agentId={agent.id} connected={isConnected} />
         )}
 
         {/* Actions */}

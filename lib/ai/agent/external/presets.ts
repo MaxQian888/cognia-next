@@ -134,7 +134,10 @@ const OPENCODE_SERVER_PRESET: ExternalAgentPresetConfig = {
   description: "Launch a local `opencode serve` process and connect to it (desktop only).",
   protocol: "opencode",
   transport: "sse",
-  process: { command: "opencode", args: ["serve"] },
+  // `spawnServer` in opencode-client.ts already prepends "serve" (plus
+  // --hostname/--port); keep args empty so the CLI doesn't receive a duplicate
+  // positional "serve" argument.
+  process: { command: "opencode", args: [] },
   metadata: { autoSpawnServer: true },
   setupHint: "Requires the OpenCode CLI on PATH and the Cognia desktop app.",
   docsUrl: "https://opencode.ai/docs/server/",

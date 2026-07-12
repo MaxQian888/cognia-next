@@ -34,6 +34,7 @@ import type {
   SessionSummary,
 } from "../types"
 import {
+  opencodeDataDirs,
   readOpencodeSessions,
   type OpencodeMessage,
   type OpencodePart,
@@ -64,9 +65,13 @@ function mapPart(part: OpencodePart): Part | null {
       })
     }
     case "file":
+      // OpenCode's FilePart stores the MIME type under `mime` (the SDK sends it
+      // that way too); `mediaType` is only seen in older share exports. Reading
+      // only `mediaType` used to flatten every file to application/octet-stream,
+      // so pasted screenshots never rendered inline after import.
       return part.url
         ? filePart({
-            mediaType: part.mediaType || "application/octet-stream",
+            mediaType: part.mime || part.mediaType || "application/octet-stream",
             url: part.url,
             filename: part.filename,
           })
@@ -81,6 +86,16 @@ function mapPart(part: OpencodePart): Part | null {
       const detail = part.text || part.filename || ""
       return textPart(detail ? `[${label}: ${detail}]` : `[${label}]`)
     }
+    case "agent": {
+      // Subagent delegation marker — the child transcript itself is imported as
+      // a nested conversation (see parseSession); keep a pointer in the parent.
+      const name = part.name || "subagent"
+      return textPart(`[delegated to agent: ${name}]`)
+    }
+    case "retry":
+      return textPart("[retry]")
+    case "compaction":
+      return textPart(part.text ? `[context compacted: ${part.text}]` : "[context compacted]")
     default:
       return null
   }
@@ -89,11 +104,13 @@ function mapPart(part: OpencodePart): Part | null {
 /** Imported-usage metadata for an assistant OpenCode message, or `undefined`. */
 function opencodeUsageMeta(msg: OpencodeMessage): StoredMessage["metadata"] | undefined {
   const t = msg.tokens
-  const hasTokens = !!t && !!(t.input || t.output || t.cacheRead || t.cacheWrite)
+  const hasTokens = !!t && !!(t.input || t.output || t.reasoning || t.cacheRead || t.cacheWrite)
   if (!hasTokens && typeof msg.cost !== "number") return undefined
   const usage: UsageInfo = {
     inputTokens: t?.input ?? 0,
-    outputTokens: t?.output ?? 0,
+    // Reasoning tokens are billed as output; fold them in like the live
+    // adapter does (opencode-client.ts mapOpenCodeTokens).
+    outputTokens: (t?.output ?? 0) + (t?.reasoning ?? 0),
     cacheReadInputTokens: t?.cacheRead ?? 0,
     cacheCreationInputTokens: t?.cacheWrite ?? 0,
     ...(typeof msg.cost === "number" ? { totalCostUsd: msg.cost } : {}),
@@ -183,6 +200,7 @@ function readOpencodeUsage(
     out.tokens = {
       input: numOr(t.input),
       output: numOr(t.output),
+      reasoning: numOr(t.reasoning),
       cacheRead: numOr(cache.read),
       cacheWrite: numOr(cache.write),
     }
@@ -230,6 +248,7 @@ export function parseOpencodeExport(content: string): OpencodeSession[] {
         id: String(c.id),
         title: typeof c.title === "string" ? c.title : "OpenCode session",
         cwd: typeof c.directory === "string" ? c.directory : undefined,
+        parentId: typeof c.parentID === "string" && c.parentID ? c.parentID : undefined,
         createdAt: Number(time.created ?? 0),
         updatedAt: Number(time.updated ?? time.created ?? 0),
         messages: [],
@@ -280,6 +299,10 @@ function normalizeNested(obj: Record<string, unknown>): OpencodeSession | null {
     id,
     title: typeof sessionInfo.title === "string" ? sessionInfo.title : "OpenCode session",
     cwd: typeof sessionInfo.directory === "string" ? sessionInfo.directory : undefined,
+    parentId:
+      typeof sessionInfo.parentID === "string" && sessionInfo.parentID
+        ? sessionInfo.parentID
+        : undefined,
     createdAt: Number(time.created ?? 0),
     updatedAt: Number(time.updated ?? time.created ?? 0),
     messages,
@@ -297,13 +320,24 @@ function summarize(session: OpencodeSession): SessionSummary {
   }
 }
 
+// One import run reuses the same `SessionScanInput` object for every ref, so a
+// per-input cache turns the previous O(selected sessions × full-DB read) into a
+// single DB read per run. Keyed weakly: a fresh scan builds a fresh input, so
+// there is no staleness across runs and no explicit invalidation needed.
+const sessionCache = new WeakMap<SessionScanInput, Promise<OpencodeSession[]>>()
+
 async function collectSessions(input: SessionScanInput): Promise<OpencodeSession[]> {
-  if (input.pickedFiles?.length) {
-    return input.pickedFiles
-      .filter((f) => f.name.toLowerCase().endsWith(".json"))
-      .flatMap((f) => parseOpencodeExport(f.content))
-  }
-  return readOpencodeSessions(input.home)
+  const cached = sessionCache.get(input)
+  if (cached) return cached
+  const promise = input.pickedFiles?.length
+    ? Promise.resolve(
+        input.pickedFiles
+          .filter((f) => f.name.toLowerCase().endsWith(".json"))
+          .flatMap((f) => parseOpencodeExport(f.content))
+      )
+    : readOpencodeSessions(input.home)
+  sessionCache.set(input, promise)
+  return promise
 }
 
 export const opencodeSessionSource: AgentSessionSourceAdapter = {
@@ -312,10 +346,12 @@ export const opencodeSessionSource: AgentSessionSourceAdapter = {
   labelKey: "opencode",
   acceptedExtensions: ACCEPTED,
 
-  // Filesystem scan is via the Rust SQLite reader (keyed by home), not a plain
-  // dir walk, so no scanRoots are advertised for the generic walker.
-  scanRoots() {
-    return []
+  // The scan itself goes through the Rust SQLite reader (keyed by home), not a
+  // dir walk — but the roots still matter: they feed the fs-watcher
+  // (`collectWatchRoots`), and the watcher already recognizes `.db` files. An
+  // empty list here meant OpenCode never got incremental re-imports.
+  scanRoots(home: string) {
+    return opencodeDataDirs(home)
   },
 
   detect(files: PickedSessionFile[]) {
@@ -340,10 +376,17 @@ export const opencodeSessionSource: AgentSessionSourceAdapter = {
 
   async listSessions(input: SessionScanInput) {
     const sessions = await collectSessions(input)
-    return sessions
-      .filter((s) => s.messages.length > 0)
-      .map(summarize)
-      .sort((a, b) => b.updatedAt - a.updatedAt)
+    const known = new Set(sessions.map((s) => s.id))
+    return (
+      sessions
+        .filter((s) => s.messages.length > 0)
+        // Child (subagent) sessions ride along as `nested` conversations of their
+        // parent (see parseSession) — only list them when the parent is missing
+        // from the store (otherwise they'd be unreachable).
+        .filter((s) => !s.parentId || !known.has(s.parentId))
+        .map(summarize)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+    )
   },
 
   async parseSession(ref: SessionRef, input: SessionScanInput) {
@@ -359,6 +402,13 @@ export const opencodeSessionSource: AgentSessionSourceAdapter = {
         messages: [],
       })
     }
-    return opencodeToConversation(found)
+    const conv = opencodeToConversation(found)
+    // Attach subagent (child) sessions as nested conversations (ADR-0062), so
+    // they import alongside their parent instead of as orphan top-level rows.
+    const nested = sessions
+      .filter((s) => s.parentId === found.id && s.messages.length > 0)
+      .map((s) => opencodeToConversation(s))
+    if (nested.length > 0) conv.nested = nested
+    return conv
   },
 }

@@ -146,6 +146,31 @@ describe("getExternalAgentExecutionBlock", () => {
     __resetPluginProtocolAdaptersForTesting()
   })
 
+  it("blocks an auto-spawn OpenCode config off-desktop (spawn needs Tauri)", () => {
+    const cfg = baseConfig({
+      protocol: "opencode" as never,
+      transport: "sse" as never,
+      process: { command: "opencode", args: [] },
+      metadata: { autoSpawnServer: true },
+    })
+    const block = getExternalAgentExecutionBlock(cfg, false)
+    expect(block?.code).toBe("transport_blocked")
+    expect(block?.reason).toMatch(/desktop/i)
+    // Same config IS executable on desktop.
+    expect(getExternalAgentExecutionBlock(cfg, true)).toBeNull()
+  })
+
+  it("does not block a remote OpenCode config (explicit endpoint) off-desktop", () => {
+    const cfg = baseConfig({
+      protocol: "opencode" as never,
+      transport: "sse" as never,
+      process: undefined,
+      network: { endpoint: "http://127.0.0.1:4096" },
+      metadata: {},
+    })
+    expect(getExternalAgentExecutionBlock(cfg, false)).toBeNull()
+  })
+
   it("blocks documented-only ecosystem surfaces", () => {
     const cfg = baseConfig({
       metadata: {

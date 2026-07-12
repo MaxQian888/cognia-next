@@ -289,6 +289,19 @@ export class ExternalAgentManager {
     return adapter instanceof CodexAppServerAdapter ? adapter : null
   }
 
+  /**
+   * Return the live OpenCode adapter for an agent, or null when the agent isn't
+   * connected through the `opencode` protocol. The OpenCode-specific surfaces
+   * (share links, session diff/todos, PTY, TUI driving, dynamic MCP, workspace
+   * find/*, VCS/project info) live on the adapter rather than the generic
+   * {@link ProtocolAdapter} contract — this is the sanctioned way for UI code
+   * to reach them (mirrors {@link getCodexAppServerAdapter}).
+   */
+  getOpenCodeAdapter(agentId: string): OpenCodeClientAdapter | null {
+    const adapter = this.adapters.get(agentId)
+    return adapter instanceof OpenCodeClientAdapter ? adapter : null
+  }
+
   async setSessionModel(agentId: string, sessionId: string, modelId: string): Promise<void> {
     const adapter = this.adapters.get(agentId)
     if (!adapter?.setSessionModel) {

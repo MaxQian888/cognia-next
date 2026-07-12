@@ -40,7 +40,7 @@ describe("opencodeToConversation", () => {
     expect(asstParts[1].output).toBe("ok")
   })
 
-  it("maps assistant tokens/cost/model into usage metadata", () => {
+  it("maps assistant tokens/cost/model into usage metadata (reasoning folds into output)", () => {
     const conv = opencodeToConversation({
       ...SESSION,
       messages: [
@@ -49,7 +49,7 @@ describe("opencodeToConversation", () => {
           createdAt: 1500,
           model: "claude-x",
           cost: 0.05,
-          tokens: { input: 120, output: 60, cacheRead: 300, cacheWrite: 8 },
+          tokens: { input: 120, output: 60, reasoning: 40, cacheRead: 300, cacheWrite: 8 },
           parts: [{ type: "text", text: "done" }],
         },
       ],
@@ -57,12 +57,55 @@ describe("opencodeToConversation", () => {
     const meta = conv.messages[0].metadata as { usage?: Record<string, number>; model?: string }
     expect(meta.usage).toMatchObject({
       inputTokens: 120,
-      outputTokens: 60,
+      outputTokens: 100,
       cacheReadInputTokens: 300,
       cacheCreationInputTokens: 8,
       totalCostUsd: 0.05,
     })
     expect(meta.model).toBe("claude-x")
+  })
+
+  it("keeps the real MIME type of file parts (OpenCode stores it as `mime`)", () => {
+    const conv = opencodeToConversation({
+      ...SESSION,
+      messages: [
+        {
+          role: "user",
+          createdAt: 1,
+          parts: [
+            { type: "file", mime: "image/png", url: "data:image/png;base64,AA", filename: "s.png" },
+            { type: "file", mediaType: "text/plain", url: "file:///a.txt" },
+          ],
+        },
+      ],
+    })
+    const parts = conv.messages[0].parts as Array<Record<string, unknown>>
+    expect(parts[0].mediaType).toBe("image/png")
+    expect(parts[1].mediaType).toBe("text/plain")
+  })
+
+  it("surfaces agent/retry/compaction markers instead of dropping them", () => {
+    const conv = opencodeToConversation({
+      ...SESSION,
+      messages: [
+        {
+          role: "assistant",
+          createdAt: 1,
+          parts: [
+            { type: "agent", name: "reviewer" },
+            { type: "retry" },
+            { type: "compaction" },
+            { type: "unknown-future-type" },
+          ],
+        },
+      ],
+    })
+    const parts = conv.messages[0].parts as Array<Record<string, unknown>>
+    expect(parts.map((p) => p.text)).toEqual([
+      "[delegated to agent: reviewer]",
+      "[retry]",
+      "[context compacted]",
+    ])
   })
 
   it("surfaces patch/snapshot markers (previously dropped) but still drops step markers", () => {
@@ -163,6 +206,56 @@ describe("opencodeSessionSource", () => {
     expect(list[0].title).toBe("Refactor module")
     const conv = await opencodeSessionSource.parseSession(list[0].ref, input)
     expect(conv.messages).toHaveLength(2)
+  })
+
+  it("advertises the opencode data dirs as scan roots (feeds the fs-watcher)", () => {
+    const roots = opencodeSessionSource.scanRoots("/home/u")
+    expect(roots).toContain("/home/u/.local/share/opencode")
+    expect(roots.some((r) => r.includes("AppData"))).toBe(true)
+    expect(opencodeSessionSource.scanRoots("")).toEqual([])
+  })
+
+  it("reads the DB once per scan input (parse of N sessions is not N reads)", async () => {
+    let reads = 0
+    __setOpencodeReaderForTesting(async () => {
+      reads += 1
+      return [SESSION, { ...SESSION, id: "oc-b" }]
+    })
+    const input: SessionScanInput = { fs, home: "/home/u" }
+    const list = await opencodeSessionSource.listSessions(input)
+    for (const s of list) await opencodeSessionSource.parseSession(s.ref, input)
+    expect(reads).toBe(1)
+    // A NEW scan input re-reads (no cross-run staleness).
+    await opencodeSessionSource.listSessions({ fs, home: "/home/u" })
+    expect(reads).toBe(2)
+  })
+
+  it("nests child (subagent) sessions under their parent and hides them from the list", async () => {
+    const child: OpencodeSession = {
+      ...SESSION,
+      id: "oc-child",
+      title: "Subagent run",
+      parentId: "oc-1",
+      messages: [{ role: "user", createdAt: 1, parts: [{ type: "text", text: "sub task" }] }],
+    }
+    __setOpencodeReaderForTesting(async () => [SESSION, child])
+    const input: SessionScanInput = { fs, home: "/home/u" }
+    const list = await opencodeSessionSource.listSessions(input)
+    expect(list.map((s) => s.ref.originalSessionId)).toEqual(["oc-1"])
+    const conv = await opencodeSessionSource.parseSession(list[0].ref, input)
+    expect(conv.nested).toHaveLength(1)
+    expect(conv.nested?.[0].session.id).toBe("import:opencode:oc-child")
+  })
+
+  it("still lists an orphaned child whose parent is missing from the store", async () => {
+    const orphan: OpencodeSession = {
+      ...SESSION,
+      id: "oc-orphan",
+      parentId: "oc-gone",
+    }
+    __setOpencodeReaderForTesting(async () => [orphan])
+    const list = await opencodeSessionSource.listSessions({ fs, home: "/home/u" })
+    expect(list.map((s) => s.ref.originalSessionId)).toEqual(["oc-orphan"])
   })
 
   it("lists from a picked export file", async () => {

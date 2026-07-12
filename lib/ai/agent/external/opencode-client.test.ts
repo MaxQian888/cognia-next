@@ -27,11 +27,13 @@ jest.mock("@/lib/utils", () => {
 const mockSpawn = jest.fn()
 const mockKill = jest.fn()
 const mockOnStdout = jest.fn()
+const mockOnStderr = jest.fn()
 const mockOnExit = jest.fn()
 jest.mock("@/lib/native/external-agent", () => ({
   spawnExternalAgent: (...args: unknown[]) => mockSpawn(...args),
   killExternalAgent: (...args: unknown[]) => mockKill(...args),
   onExternalAgentStdout: (...args: unknown[]) => mockOnStdout(...args),
+  onExternalAgentStderr: (...args: unknown[]) => mockOnStderr(...args),
   onExternalAgentExit: (...args: unknown[]) => mockOnExit(...args),
 }))
 
@@ -163,6 +165,9 @@ async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
 beforeEach(() => {
   jest.clearAllMocks()
   mockIsTauri.mockReturnValue(false)
+  // Default: stderr listener registers fine but never emits. Individual
+  // spawn tests override it to exercise the stderr "listening" path.
+  mockOnStderr.mockResolvedValue(() => {})
 })
 
 // ---------------------------------------------------------------------------
@@ -378,6 +383,35 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
 
     await a.disconnect()
     expect(mockKill).toHaveBeenCalledWith("opencode-server-agent")
+  })
+
+  it("also resolves the listening URL from stderr (some runtimes log there)", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
+    mockSpawn.mockResolvedValue("agent")
+    mockKill.mockResolvedValue(undefined)
+    mockOnExit.mockResolvedValue(() => {})
+    mockOnStdout.mockResolvedValue(() => {})
+    mockOnStderr.mockImplementation((cb: (e: { agentId: string; data: string }) => void) => {
+      setTimeout(
+        () =>
+          cb({
+            agentId: "opencode-server-agent",
+            data: "opencode server listening on http://127.0.0.1:55002\n",
+          }),
+        0
+      )
+      return Promise.resolve(() => {})
+    })
+
+    const a = new OpenCodeClientAdapter()
+    await a.connect(
+      buildConfig({ metadata: { autoSpawnServer: true }, process: { command: "opencode" } })
+    )
+    expect(mockCreateOpencodeClient).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: "http://127.0.0.1:55002" })
+    )
+    await a.disconnect()
   })
 
   it("kills the process and fails if it exits before becoming ready", async () => {

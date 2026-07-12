@@ -45,30 +45,47 @@ maybe("buildSessions (node:sqlite)", () => {
       CREATE TABLE message (id TEXT, session_id TEXT, role TEXT, data TEXT);
       CREATE TABLE part (id TEXT, message_id TEXT, type TEXT, data TEXT);
       INSERT INTO session VALUES ('s1','Fix bug','{"directory":"/repo","time":{"created":10,"updated":20}}');
+      INSERT INTO session VALUES ('s2','Child','{"parentID":"s1","time":{"created":12}}');
+      -- Assistant inserted first to prove the createdAt sort reorders messages.
+      INSERT INTO message VALUES ('m2','s1','assistant','{"time":{"created":15},"modelID":"claude","cost":0.02,"tokens":{"input":100,"output":50,"reasoning":30,"cache":{"read":200,"write":10}}}');
       INSERT INTO message VALUES ('m1','s1','user','{"time":{"created":10}}');
-      INSERT INTO message VALUES ('m2','s1','assistant','{"time":{"created":15},"modelID":"claude","cost":0.02,"tokens":{"input":100,"output":50,"cache":{"read":200,"write":10}}}');
-      INSERT INTO part VALUES ('p1','m1','text','{"type":"text","text":"hello"}');
+      -- Parts inserted out of id order to prove the id sort reorders them.
+      INSERT INTO part VALUES ('p2','m2','text','{"type":"text","text":"done"}');
+      INSERT INTO part VALUES ('p1','m2','text','{"type":"text","text":"first"}');
+      INSERT INTO part VALUES ('p0','m1','text','{"type":"text","text":"hello"}');
     `)
     return db
   }
 
-  it("groups sessions/messages/parts and projects usage", () => {
+  it("groups sessions/messages/parts and projects usage (incl. reasoning)", () => {
     const db = seed()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sessions = buildSessions(db as any)
     db.close()
-    expect(sessions).toHaveLength(1)
-    const s = sessions[0]
-    expect(s.id).toBe("s1")
+    expect(sessions).toHaveLength(2)
+    const s = sessions.find((x) => x.id === "s1")!
     expect(s.cwd).toBe("/repo")
     expect(s.createdAt).toBe(10)
     expect(s.updatedAt).toBe(20)
-    const asst = s.messages.find((m) => m.role === "assistant")
+    expect(s.parentId).toBeUndefined()
+    // Messages sorted by createdAt (user turn first despite insert order).
+    expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant"])
+    const asst = s.messages[1]
     expect(asst?.model).toBe("claude")
     expect(asst?.cost).toBe(0.02)
-    expect(asst?.tokens).toMatchObject({ input: 100, output: 50, cacheRead: 200, cacheWrite: 10 })
-    const user = s.messages.find((m) => m.role === "user")
+    expect(asst?.tokens).toMatchObject({
+      input: 100,
+      output: 50,
+      reasoning: 30,
+      cacheRead: 200,
+      cacheWrite: 10,
+    })
+    // Parts sorted by id (p1 before p2 despite insert order).
+    expect(asst.parts.map((p) => p.text)).toEqual(["first", "done"])
+    const user = s.messages[0]
     expect(user?.parts[0]).toMatchObject({ type: "text", text: "hello" })
+    // Child sessions expose their parent id for nesting.
+    expect(sessions.find((x) => x.id === "s2")?.parentId).toBe("s1")
   })
 
   it("returns [] when the expected tables are missing", () => {

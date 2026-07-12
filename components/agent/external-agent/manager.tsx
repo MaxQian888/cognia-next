@@ -115,7 +115,10 @@ const DEFAULT_ADD_AGENT_FORM_DATA: AddAgentFormData = {
   endpoint: "",
   autoSpawnServer: false,
   port: "",
+  hostname: "",
   serverPassword: "",
+  serverUsername: "",
+  model: "",
   timeoutMs: DEFAULT_TIMEOUT_MS,
   retryMaxRetries: DEFAULT_RETRY_MAX_RETRIES,
   retryDelayMs: DEFAULT_RETRY_DELAY_MS,
@@ -341,6 +344,8 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
           endpoint: preset.network?.endpoint || "",
           autoSpawnServer: preset.metadata?.autoSpawnServer === true,
           port: typeof presetPort === "number" ? String(presetPort) : "",
+          hostname: typeof preset.metadata?.hostname === "string" ? preset.metadata.hostname : "",
+          model: typeof preset.metadata?.model === "string" ? preset.metadata.model : "",
         }))
       }
     }
@@ -616,16 +621,28 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                         placeholder="opencode"
                       />
                     </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="port">{tManager("serverPort")}</Label>
-                      <Input
-                        id="port"
-                        type="number"
-                        min={0}
-                        value={formData.port}
-                        onChange={(e) => setFormData({ ...formData, port: e.target.value })}
-                        placeholder="0"
-                      />
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor="port">{tManager("serverPort")}</Label>
+                        <Input
+                          id="port"
+                          type="number"
+                          min={0}
+                          value={formData.port}
+                          onChange={(e) => setFormData({ ...formData, port: e.target.value })}
+                          placeholder="0"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="hostname">{tManager("serverHostname")}</Label>
+                        <Input
+                          id="hostname"
+                          value={formData.hostname}
+                          onChange={(e) => setFormData({ ...formData, hostname: e.target.value })}
+                          // i18n-exempt: example hostname, not UI prose
+                          placeholder="127.0.0.1"
+                        />
+                      </div>
                     </div>
                   </>
                 ) : (
@@ -640,16 +657,39 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     />
                   </div>
                 )}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="server-password">{tManager("serverPassword")}</Label>
+                    <Input
+                      id="server-password"
+                      type="password"
+                      value={formData.serverPassword}
+                      onChange={(e) => setFormData({ ...formData, serverPassword: e.target.value })}
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="server-username">{tManager("serverUsername")}</Label>
+                    <Input
+                      id="server-username"
+                      value={formData.serverUsername}
+                      onChange={(e) => setFormData({ ...formData, serverUsername: e.target.value })}
+                      // i18n-exempt: the server's documented default Basic-Auth user
+                      placeholder="opencode"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">{tManager("serverPasswordHint")}</p>
                 <div className="grid gap-2">
-                  <Label htmlFor="server-password">{tManager("serverPassword")}</Label>
+                  <Label htmlFor="opencode-model">{tManager("defaultModel")}</Label>
                   <Input
-                    id="server-password"
-                    type="password"
-                    value={formData.serverPassword}
-                    onChange={(e) => setFormData({ ...formData, serverPassword: e.target.value })}
-                    placeholder="••••••••"
+                    id="opencode-model"
+                    value={formData.model}
+                    onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                    // i18n-exempt: example provider/model id, not UI prose
+                    placeholder="anthropic/claude-sonnet-4-5"
                   />
-                  <p className="text-xs text-muted-foreground">{tManager("serverPasswordHint")}</p>
+                  <p className="text-xs text-muted-foreground">{tManager("defaultModelHint")}</p>
                 </div>
               </>
             ) : isStdio ? (
@@ -940,8 +980,17 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         } else if (data.endpoint.trim()) {
           config.network = { endpoint: data.endpoint.trim() }
         }
+        if (data.hostname.trim()) {
+          metadata.hostname = data.hostname.trim()
+        }
         if (data.serverPassword) {
           metadata.serverPassword = data.serverPassword
+        }
+        if (data.serverUsername.trim()) {
+          metadata.serverUsername = data.serverUsername.trim()
+        }
+        if (data.model.trim()) {
+          metadata.model = data.model.trim()
         }
         if (Object.keys(metadata).length > 0) {
           config.metadata = metadata

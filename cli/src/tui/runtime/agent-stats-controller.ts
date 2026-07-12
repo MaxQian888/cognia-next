@@ -23,7 +23,7 @@ import { setOpencodeReader } from "@/lib/session-import/adapters/opencode-db"
 
 import type { TuiAction } from "../state/types"
 import { nodeSessionFs } from "./node-session-fs"
-import { nodeOpencodeReader } from "./node-opencode-reader"
+import { isNodeSqliteAvailable, nodeOpencodeReader } from "./node-opencode-reader"
 import { buildAgentStats, sourceOfSessionId, type ConvWithUsage } from "./agent-stats-model"
 
 export interface AgentStatsDeps {
@@ -66,6 +66,11 @@ export async function runAgentStats(deps: AgentStatsDeps): Promise<void> {
   }
 
   const notes: string[] = []
+  // Older Node (< 22.5) has no `node:sqlite`, so the OpenCode reader silently
+  // yields nothing — disclose the skip instead of underreporting.
+  if (!deps.installOpencodeReader && !(await isNodeSqliteAvailable())) {
+    notes.push("OpenCode sessions skipped: this Node runtime lacks node:sqlite (need Node 22.5+).")
+  }
   const cap = deps.maxConversations ?? DEFAULT_MAX
   let refs: SessionRef[] = summaries.map((s) => s.ref)
   if (refs.length > cap) {

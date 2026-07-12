@@ -132,13 +132,11 @@ export function getExternalAgentEcosystemReadiness(
   const supportTier =
     resolved?.surface.supportTier ??
     (asNonEmptyString(metadata.ecosystemSupportTier) as
-      | ExternalAgentEcosystemReadinessSnapshot["supportTier"]
-      | undefined)
+      ExternalAgentEcosystemReadinessSnapshot["supportTier"] | undefined)
   const executionMode =
     resolved?.surface.executionMode ??
     (asNonEmptyString(metadata.ecosystemExecutionMode) as
-      | ExternalAgentEcosystemReadinessSnapshot["executionMode"]
-      | undefined)
+      ExternalAgentEcosystemReadinessSnapshot["executionMode"] | undefined)
   const docsUrl =
     resolved?.surface.docsUrl ??
     resolved?.adapter.docsUrl ??
@@ -152,8 +150,7 @@ export function getExternalAgentEcosystemReadiness(
     asNonEmptyString(metadata.setupHint)
   const storedPrerequisiteStatus = (asNonEmptyString(storedReadiness?.prerequisiteStatus) ??
     asNonEmptyString(metadata.ecosystemPrerequisiteStatus)) as
-    | ExternalAgentEcosystemPrerequisiteStatus
-    | undefined
+    ExternalAgentEcosystemPrerequisiteStatus | undefined
   const storedPrerequisites = Array.isArray(storedReadiness?.prerequisites)
     ? (storedReadiness?.prerequisites as ExternalAgentEcosystemPrerequisite[])
     : undefined
@@ -393,6 +390,22 @@ export function getExternalAgentExecutionBlock(
     return {
       code: "transport_blocked",
       reason: "The stdio transport requires the desktop (Tauri) runtime.",
+    }
+  }
+  // An OpenCode config without an explicit endpoint auto-spawns `opencode
+  // serve` (see OpenCodeClientAdapter.resolveBaseUrl), which needs the desktop
+  // process bridge. Without this gate the browser marks the agent executable
+  // and the desktop-only error surfaces later, at connect time.
+  if (
+    config.protocol === "opencode" &&
+    !runtimeIsTauri &&
+    !config.network?.endpoint &&
+    (config.metadata?.autoSpawnServer === true || Boolean(config.process?.command))
+  ) {
+    return {
+      code: "transport_blocked",
+      reason:
+        "Auto-spawning an OpenCode server requires the desktop (Tauri) runtime; configure a server endpoint instead.",
     }
   }
   const ecosystemReadiness = getExternalAgentEcosystemReadiness(config, runtimeIsTauri)

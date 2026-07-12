@@ -90,6 +90,9 @@ describe("OpenCode presets", () => {
     expect(server.protocol).toBe("opencode")
     expect(server.transport).toBe("sse")
     expect(server.process?.command).toBe("opencode")
+    // spawnServer prepends "serve" itself — a preset-provided "serve" would
+    // produce `opencode serve ... serve` and the CLI rejects the extra arg.
+    expect(server.process?.args).toEqual([])
     expect(server.metadata?.autoSpawnServer).toBe(true)
 
     const remote = EXTERNAL_AGENT_PRESETS["opencode-remote"]!

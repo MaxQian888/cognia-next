@@ -21,15 +21,32 @@ import { PresetPicker } from "./preset-picker"
 import { ProviderQuotaPanel } from "./provider-quota-panel"
 
 import { useOpencodeDiscovery } from "@/lib/subscription/opencode/discovery"
+import { opencodeAdoptDiscovered } from "@/lib/subscription/core/transport"
 import { OPENCODE_WHITELIST } from "@/types/subscription"
+import { toast } from "@/components/ui/sonner"
 
 export function ProviderTabOpencode() {
   const t = useTranslations("subscription.opencode")
   const tDiscovery = useTranslations("subscription.opencode.discovery")
   const tZen = useTranslations("subscription.opencode.zen")
   const [addOpen, setAddOpen] = useState(false)
+  const [adopting, setAdopting] = useState<string | null>(null)
 
   const { discovered, loading, error, reload } = useOpencodeDiscovery()
+
+  const adopt = async (subProvider: string) => {
+    setAdopting(subProvider)
+    try {
+      await opencodeAdoptDiscovered(subProvider)
+      toast.success(tDiscovery("adoptSuccess", { subProvider }))
+    } catch (err) {
+      toast.error(
+        tDiscovery("adoptFailed", { error: err instanceof Error ? err.message : String(err) })
+      )
+    } finally {
+      setAdopting(null)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -49,6 +66,24 @@ export function ProviderTabOpencode() {
       />
 
       <ProviderQuotaPanel provider="opencode" />
+
+      {/* OpenCode Zen/Go has NO API-key-queryable balance/usage endpoint —
+          billing gates run server-side inside the inference handler and the
+          numbers are only visible in the session-authenticated Console
+          (verified against sst/opencode packages/console zen/util/handler.ts,
+          2026-07-11). Say so instead of leaving the quota panel silently
+          empty. */}
+      <p className="text-xs text-muted-foreground">
+        {t("quotaConsoleOnly")}{" "}
+        <a
+          href="https://opencode.ai/docs/zen"
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-2 hover:text-foreground"
+        >
+          {t("quotaConsoleLink")}
+        </a>
+      </p>
 
       <PresetPicker provider="opencode" />
 
@@ -87,9 +122,24 @@ export function ProviderTabOpencode() {
                     className="flex items-center justify-between gap-2 rounded border bg-muted/30 px-2.5 py-1.5"
                   >
                     <span className="font-medium">{entry.subProvider}</span>
-                    <Badge variant="outline" className="text-[10px]">
-                      {kindLabel(entry.kind, tDiscovery)}
-                    </Badge>
+                    <span className="flex items-center gap-1.5">
+                      <Badge variant="outline" className="text-[10px]">
+                        {kindLabel(entry.kind, tDiscovery)}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-2 text-[11px]"
+                        disabled={adopting !== null}
+                        onClick={() => void adopt(entry.subProvider)}
+                        data-testid={`opencode-adopt-${entry.subProvider}`}
+                      >
+                        {adopting === entry.subProvider && (
+                          <Loader2Icon className="mr-1 size-3 animate-spin" />
+                        )}
+                        {tDiscovery("adopt")}
+                      </Button>
+                    </span>
                   </li>
                 ))}
               </ul>

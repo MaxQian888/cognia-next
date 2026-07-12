@@ -1,4 +1,8 @@
-import { __setOpencodeReaderForTesting, readOpencodeSessions } from "./opencode-db"
+import {
+  __setOpencodeReaderForTesting,
+  opencodeDataDirs,
+  readOpencodeSessions,
+} from "./opencode-db"
 
 describe("opencode-db reader", () => {
   afterEach(() => __setOpencodeReaderForTesting(null))
@@ -14,5 +18,22 @@ describe("opencode-db reader", () => {
     ])
     const out = await readOpencodeSessions("/x")
     expect(out[0].id).toBe("/x")
+  })
+})
+
+describe("opencodeDataDirs", () => {
+  it("returns posix-joined candidate dirs for a posix home", () => {
+    expect(opencodeDataDirs("/home/u")).toEqual([
+      "/home/u/.local/share/opencode",
+      "/home/u/AppData/Roaming/opencode",
+    ])
+  })
+
+  it("uses backslashes for a Windows home and [] for an empty home", () => {
+    expect(opencodeDataDirs("C:\\Users\\u")).toEqual([
+      "C:\\Users\\u\\.local\\share\\opencode",
+      "C:\\Users\\u\\AppData\\Roaming\\opencode",
+    ])
+    expect(opencodeDataDirs("")).toEqual([])
   })
 })

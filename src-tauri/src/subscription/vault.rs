@@ -118,12 +118,14 @@ pub struct CodexCredentialData {
 /// flows through `OpencodeZenData` for `opencode-zen` or `opencode_save_zen_key`.
 ///
 /// Note: discovery results are surfaced separately via `opencode_oauth_discover`
-/// and are NOT routinely persisted into the vault. This variant exists so a
-/// future "snapshot adopt" flow can record a discovery decision without
-/// re-reading auth.json. It is currently only used in tests.
+/// and are NOT routinely persisted into the vault. This variant is created by
+/// the `opencode_adopt_discovered` command when a non-managed-plan entry
+/// (anthropic / openai, or an OAuth-shaped payload) is adopted — managed-plan
+/// keys adopt into `OpencodeZenData` instead.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OpencodeDiscoveredData {
-    /// `"anthropic"` | `"openai"` | `"opencode-zen"` — whitelisted sub-providers.
+    /// `"anthropic"` | `"openai"` | `"opencode"` | `"opencode-go"` |
+    /// `"opencode-zen"` — whitelisted sub-providers.
     #[serde(rename = "subProvider")]
     pub sub_provider: String,
     /// Resolved path to the source `auth.json`.

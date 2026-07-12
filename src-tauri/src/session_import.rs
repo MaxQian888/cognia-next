@@ -32,7 +32,11 @@ fn candidate_db_paths(home: &str) -> Vec<PathBuf> {
             .join("opencode")
             .join("opencode.db"),
     );
-    // Windows-style location as a fallback.
+    // Windows-style location as a fallback. NOTE: unverified guess — the
+    // opencode CLI (Bun) has been observed using the XDG-style
+    // `~/.local/share/opencode/` even on Windows (see
+    // subscription/opencode/discovery.rs); this Roaming probe only exists in
+    // case a future build relocates.
     out.push(
         home_path
             .join("AppData")
@@ -118,6 +122,9 @@ fn message_tokens(map: &Map<String, Value>) -> Option<Value> {
     let cache = obj.get("cache").and_then(|c| c.as_object());
     let input = obj.get("input").and_then(|v| v.as_i64()).unwrap_or(0);
     let output = obj.get("output").and_then(|v| v.as_i64()).unwrap_or(0);
+    // Reasoning tokens are billed as output-side usage; dropping them
+    // undercounts thinking-heavy models (the live adapter counts them too).
+    let reasoning = obj.get("reasoning").and_then(|v| v.as_i64()).unwrap_or(0);
     let cache_read = cache
         .and_then(|c| c.get("read"))
         .and_then(|v| v.as_i64())
@@ -126,12 +133,13 @@ fn message_tokens(map: &Map<String, Value>) -> Option<Value> {
         .and_then(|c| c.get("write"))
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
-    if input == 0 && output == 0 && cache_read == 0 && cache_write == 0 {
+    if input == 0 && output == 0 && reasoning == 0 && cache_read == 0 && cache_write == 0 {
         return None;
     }
     Some(json!({
         "input": input,
         "output": output,
+        "reasoning": reasoning,
         "cacheRead": cache_read,
         "cacheWrite": cache_write,
     }))
@@ -152,7 +160,11 @@ fn find_table(tables: &[String], want: &str) -> Option<String> {
     tables
         .iter()
         .find(|t| t.eq_ignore_ascii_case(want))
-        .or_else(|| tables.iter().find(|t| t.eq_ignore_ascii_case(&format!("{want}s"))))
+        .or_else(|| {
+            tables
+                .iter()
+                .find(|t| t.eq_ignore_ascii_case(&format!("{want}s")))
+        })
         .or_else(|| {
             tables.iter().find(|t| {
                 let l = t.to_lowercase();
@@ -180,18 +192,24 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
     let messages = rows_as_maps(conn, &message_tbl);
     let parts = rows_as_maps(conn, &part_tbl);
 
-    // Group parts by message id.
-    let mut parts_by_msg: std::collections::HashMap<String, Vec<Value>> =
+    // Group parts by message id. `SELECT *` gives table-scan order, which is
+    // not guaranteed to match creation order — sort by part id (OpenCode ids
+    // are lexicographically ordered ULIDs) for a deterministic transcript.
+    let mut parts_by_msg: std::collections::HashMap<String, Vec<(String, Value)>> =
         std::collections::HashMap::new();
     for p in &parts {
         let mid = match first_str(p, &["messageID", "message_id", "messageId"]) {
             Some(s) => s.to_string(),
             None => continue,
         };
+        let pid = first_str(p, &["id"]).unwrap_or("").to_string();
         parts_by_msg
             .entry(mid)
             .or_default()
-            .push(Value::Object(p.clone()));
+            .push((pid, Value::Object(p.clone())));
+    }
+    for list in parts_by_msg.values_mut() {
+        list.sort_by(|a, b| a.0.cmp(&b.0));
     }
 
     // Group messages by session id, carrying their parts.
@@ -205,7 +223,10 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
         let mid = first_str(m, &["id"]).unwrap_or("").to_string();
         let role = first_str(m, &["role"]).unwrap_or("user").to_string();
         let created = nested_num(m, "time", "created", &["created", "time_created"]);
-        let part_values = parts_by_msg.get(&mid).cloned().unwrap_or_default();
+        let part_values: Vec<Value> = parts_by_msg
+            .get(&mid)
+            .map(|list| list.iter().map(|(_, v)| v.clone()).collect())
+            .unwrap_or_default();
         let mut msg = json!({
             "role": role,
             "createdAt": created,
@@ -224,6 +245,11 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
         }
         msgs_by_session.entry(sid).or_default().push(msg);
     }
+    // Deterministic in-session order: creation time, independent of table-scan
+    // order (serde_json arena preserves push order, so the sort is stable).
+    for msgs in msgs_by_session.values_mut() {
+        msgs.sort_by_key(|m| m["createdAt"].as_i64().unwrap_or(0));
+    }
 
     let mut out = Vec::new();
     for s in &sessions {
@@ -231,9 +257,14 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
             Some(s) => s.to_string(),
             None => continue,
         };
-        let title = first_str(s, &["title"]).unwrap_or("OpenCode session").to_string();
+        let title = first_str(s, &["title"])
+            .unwrap_or("OpenCode session")
+            .to_string();
         let cwd = first_str(s, &["directory", "cwd"]).map(|s| s.to_string());
         let model = first_str(s, &["model"]).map(|s| s.to_string());
+        // Subagent (child) sessions carry their parent's id; the TS adapter
+        // nests them under the parent instead of listing them as orphans.
+        let parent_id = first_str(s, &["parentID", "parent_id", "parentId"]).map(|s| s.to_string());
         let created = nested_num(s, "time", "created", &["created", "time_created"]);
         let updated = nested_num(s, "time", "updated", &["updated", "time_updated"]);
         let msgs = msgs_by_session.get(&id).cloned().unwrap_or_default();
@@ -242,6 +273,7 @@ fn build_sessions(conn: &Connection) -> Vec<Value> {
             "title": title,
             "cwd": cwd,
             "model": model,
+            "parentId": parent_id,
             "createdAt": created,
             "updatedAt": if updated != 0 { updated } else { created },
             "messages": msgs,
@@ -278,8 +310,12 @@ mod tests {
             CREATE TABLE message (id TEXT, session_id TEXT, role TEXT, data TEXT);
             CREATE TABLE part (id TEXT, message_id TEXT, type TEXT, data TEXT);
             INSERT INTO session VALUES ('s1', 'Fix bug', '{"directory":"/repo","time":{"created":10,"updated":20}}');
+            INSERT INTO session VALUES ('s2', 'Subagent run', '{"parentID":"s1","time":{"created":12,"updated":13}}');
+            -- Inserted assistant-first to prove the createdAt sort reorders them.
+            INSERT INTO message VALUES ('m2', 's1', 'assistant', '{"time":{"created":15},"modelID":"claude-sonnet","cost":0.02,"tokens":{"input":100,"output":50,"reasoning":30,"cache":{"read":200,"write":10}}}');
             INSERT INTO message VALUES ('m1', 's1', 'user', '{"time":{"created":10}}');
-            INSERT INTO message VALUES ('m2', 's1', 'assistant', '{"time":{"created":15},"modelID":"claude-sonnet","cost":0.02,"tokens":{"input":100,"output":50,"cache":{"read":200,"write":10}}}');
+            -- Parts inserted out of id order to prove the id sort reorders them.
+            INSERT INTO part VALUES ('p3', 'm2', 'text', '{"type":"text","text":"done"}');
             INSERT INTO part VALUES ('p1', 'm1', 'text', '{"type":"text","text":"hello"}');
             INSERT INTO part VALUES ('p2', 'm2', 'tool', '{"type":"tool","tool":"edit","callID":"c1","state":{"status":"completed","output":"ok"}}');
             "#,
@@ -292,27 +328,35 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         seed(&conn);
         let sessions = build_sessions(&conn);
-        assert_eq!(sessions.len(), 1);
-        let s = &sessions[0];
-        assert_eq!(s["id"], "s1");
+        assert_eq!(sessions.len(), 2);
+        let s = sessions.iter().find(|s| s["id"] == "s1").unwrap();
         assert_eq!(s["title"], "Fix bug");
         assert_eq!(s["cwd"], "/repo");
         assert_eq!(s["createdAt"], 10);
         assert_eq!(s["updatedAt"], 20);
+        assert_eq!(s["parentId"], Value::Null);
         let msgs = s["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 2);
-        // The user message carries its text part.
-        let user = msgs.iter().find(|m| m["role"] == "user").unwrap();
+        // Messages come back in createdAt order despite reversed insert order.
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[1]["role"], "assistant");
+        let user = &msgs[0];
         assert_eq!(user["parts"][0]["text"], "hello");
-        let asst = msgs.iter().find(|m| m["role"] == "assistant").unwrap();
+        let asst = &msgs[1];
+        // Parts come back in id order (p2 before p3) despite insert order.
         assert_eq!(asst["parts"][0]["tool"], "edit");
+        assert_eq!(asst["parts"][1]["text"], "done");
         // The assistant turn's usage is projected in the normalized shape.
         assert_eq!(asst["model"], "claude-sonnet");
         assert_eq!(asst["cost"], 0.02);
         assert_eq!(asst["tokens"]["input"], 100);
         assert_eq!(asst["tokens"]["output"], 50);
+        assert_eq!(asst["tokens"]["reasoning"], 30);
         assert_eq!(asst["tokens"]["cacheRead"], 200);
         assert_eq!(asst["tokens"]["cacheWrite"], 10);
+        // Child (subagent) sessions surface their parent id for nesting.
+        let child = sessions.iter().find(|s| s["id"] == "s2").unwrap();
+        assert_eq!(child["parentId"], "s1");
     }
 
     #[test]

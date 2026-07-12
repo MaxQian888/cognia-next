@@ -440,12 +440,17 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     return new Promise<string>((resolve, reject) => {
       let settled = false
       let unlistenStdout: () => void = () => {}
+      let unlistenStderr: () => void = () => {}
       let unlistenExit: () => void = () => {}
-      let buffer = ""
+      // stdout and stderr are buffered separately so an interleaved chunk from
+      // one stream can never split the other's "listening" line.
+      let stdoutBuffer = ""
+      let stderrBuffer = ""
 
       const cleanup = () => {
         clearTimeout(timer)
         unlistenStdout()
+        unlistenStderr()
         unlistenExit()
       }
 
@@ -456,20 +461,37 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         reject(new Error(`Timed out after ${timeoutMs}ms waiting for OpenCode server to start`))
       }, timeoutMs)
 
+      const scan = (buffer: string) => {
+        const match = buffer.match(/opencode server listening[^\n]*?on\s+(https?:\/\/\S+)/i)
+        if (match) {
+          settled = true
+          cleanup()
+          resolve(match[1])
+        }
+      }
+
       void native
         .onExternalAgentStdout((event) => {
           if (settled || event.agentId !== id) return
-          buffer += event.data
-          const match = buffer.match(/opencode server listening[^\n]*?on\s+(https?:\/\/\S+)/i)
-          if (match) {
-            settled = true
-            cleanup()
-            resolve(match[1])
-          }
+          stdoutBuffer += event.data
+          scan(stdoutBuffer)
         })
         .then((un) => {
           if (settled) un()
           else unlistenStdout = un
+        })
+
+      // Some runtimes route the startup banner to stderr — scan both streams
+      // rather than timing out when stdout stays silent.
+      void native
+        .onExternalAgentStderr((event) => {
+          if (settled || event.agentId !== id) return
+          stderrBuffer += event.data
+          scan(stderrBuffer)
+        })
+        .then((un) => {
+          if (settled) un()
+          else unlistenStderr = un
         })
 
       void native
@@ -1991,8 +2013,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     options?: ExternalAgentExecutionOptions
   ): { providerID: string; modelID: string } | undefined {
     const ctxModel = options?.context?.custom?.model as
-      | { providerID: string; modelID: string }
-      | undefined
+      { providerID: string; modelID: string } | undefined
     if (ctxModel?.providerID && ctxModel?.modelID) {
       return ctxModel
     }

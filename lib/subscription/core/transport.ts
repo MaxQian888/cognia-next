@@ -354,7 +354,10 @@ export async function codexOauthRevoke(token: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export interface DiscoveredOpencodeEntry {
-  /** Whitelist value: "anthropic" | "openai" | "opencode-zen". */
+  /**
+   * Whitelist value: "anthropic" | "openai" | "opencode" | "opencode-go" |
+   * "opencode-zen" (must stay in sync with `OPENCODE_WHITELIST`).
+   */
   subProvider: string
   /** "api-key" | "oauth" | "unknown". */
   kind: string
@@ -372,6 +375,22 @@ export interface DiscoveredOpencodeAuth {
 export async function opencodeOauthDiscover(): Promise<DiscoveredOpencodeAuth | null> {
   const got = await transport.call<DiscoveredOpencodeAuth | null>("opencode_oauth_discover")
   return got ?? null
+}
+
+/**
+ * Adopt one discovered auth.json entry into the vault. Managed-plan keys
+ * (opencode / opencode-go / opencode-zen) become usable Zen/Go accounts;
+ * anthropic/openai (and OAuth-shaped) entries are snapshotted as
+ * `opencode-discovered` accounts. The key is re-read host-side, so the secret
+ * never crosses the renderer.
+ */
+export async function opencodeAdoptDiscovered(subProvider: string): Promise<Account> {
+  const account = await transport.call<Account>("opencode_adopt_discovered", {
+    ...subscriptionScope(),
+    subProvider,
+  })
+  vaultMutated()
+  return account
 }
 
 export async function opencodeSaveZenKey(

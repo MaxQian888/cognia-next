@@ -454,6 +454,7 @@ pub fn run() {
             subscription::codex::commands::codex_oauth_revoke,
             subscription::opencode::commands::opencode_oauth_discover,
             subscription::opencode::commands::opencode_save_zen_key,
+            subscription::opencode::commands::opencode_adopt_discovered,
             claude_set_api_key,
             claude_set_provider_env,
             claude_set_oauth_bearer,

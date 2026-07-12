@@ -17,15 +17,21 @@ export interface OpencodePart {
     output?: unknown
     error?: string
   }
+  /** OpenCode `FilePart` MIME field (the SDK sends/stores `mime`). */
+  mime?: string
+  /** Legacy/normalized spelling kept for share exports that used it. */
   mediaType?: string
   filename?: string
   url?: string
+  /** Agent-delegation part: the subagent's name. */
+  name?: string
 }
 
 /** Normalized per-turn token counts projected by the readers. */
 export interface OpencodeTokens {
   input?: number
   output?: number
+  reasoning?: number
   cacheRead?: number
   cacheWrite?: number
 }
@@ -47,9 +53,24 @@ export interface OpencodeSession {
   title: string
   cwd?: string
   model?: string
+  /** Parent session id when this is a subagent (child) session. */
+  parentId?: string
   createdAt: number
   updatedAt: number
   messages: OpencodeMessage[]
+}
+
+/**
+ * Candidate directories that may contain `opencode.db`, most-specific first.
+ * MUST stay in sync with `candidate_db_paths` in `src-tauri/src/session_import.rs`
+ * and `candidateDbPaths` in `cli/src/tui/runtime/node-opencode-reader.ts`.
+ * Used as the watch roots so the fs-watcher picks up OpenCode writes.
+ */
+export function opencodeDataDirs(home: string): string[] {
+  if (!home) return []
+  const sep = home.includes("\\") ? "\\" : "/"
+  const join = (...parts: string[]) => [home, ...parts].join(sep)
+  return [join(".local", "share", "opencode"), join("AppData", "Roaming", "opencode")]
 }
 
 export type OpencodeReader = (home: string) => Promise<OpencodeSession[]>
