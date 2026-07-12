@@ -1713,6 +1713,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-automation"
+version = "0.1.0"
+dependencies = [
+ "accessibility",
+ "accessibility-sys",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "cognia-core",
+ "cognia-instrument",
+ "core-foundation 0.10.1",
+ "core-foundation 0.9.4",
+ "core-foundation-sys",
+ "core-graphics 0.25.0",
+ "core-graphics-types 0.2.0",
+ "dirs 6.0.0",
+ "enigo",
+ "futures-util",
+ "hex",
+ "libc",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "rand 0.8.6",
+ "regex",
+ "seccompiler",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-clipboard-manager",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.24.0",
+ "uiautomation",
+ "url",
+ "uuid",
+ "windows 0.62.2",
+ "xcap",
+]
+
+[[package]]
 name = "cognia-cli"
 version = "0.1.0"
 dependencies = [
@@ -1785,8 +1828,6 @@ dependencies = [
 name = "cognia-next"
 version = "0.1.0"
 dependencies = [
- "accessibility",
- "accessibility-sys",
  "aes 0.9.1",
  "aes-gcm",
  "anyhow",
@@ -1800,6 +1841,7 @@ dependencies = [
  "cbc 0.2.1",
  "chrono",
  "clap",
+ "cognia-automation",
  "cognia-core",
  "cognia-git",
  "cognia-instrument",
@@ -1817,7 +1859,6 @@ dependencies = [
  "directories",
  "dirs 6.0.0",
  "ed25519-dalek",
- "enigo",
  "eventlog",
  "fern",
  "flate2",
@@ -1854,7 +1895,6 @@ dependencies = [
  "ruma",
  "rusqlite",
  "rustls",
- "seccompiler",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -1899,7 +1939,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "uiautomation",
  "url",
  "urlencoding",
  "uuid",
@@ -1910,7 +1949,6 @@ dependencies = [
  "webrtc",
  "windows 0.62.2",
  "wiremock",
- "xcap",
  "zip 2.4.2",
 ]
 

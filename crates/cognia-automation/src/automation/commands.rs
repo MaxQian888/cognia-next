@@ -84,7 +84,7 @@ impl AutomationState {
 
 /// Mirror of `AuditDecision` for the wire — uses the same SCREAMING_SNAKE_CASE
 /// reason tagging as `AutomationError` so the renderer can deserialize either.
-pub(crate) fn now_ms() -> i64 {
+pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
@@ -92,7 +92,7 @@ pub(crate) fn now_ms() -> i64 {
 /// requires `Result<T, E: Serialize>`; serializing the enum directly is
 /// preferable but the existing codebase returns String for compatibility.
 /// We serialize as JSON so the TS side can `JSON.parse` to recover the tag.
-pub(crate) fn err_to_string(err: &AutomationError) -> String {
+pub fn err_to_string(err: &AutomationError) -> String {
     serde_json::to_string(err).unwrap_or_else(|_| format!("{err}"))
 }
 

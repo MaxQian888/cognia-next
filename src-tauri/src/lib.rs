@@ -2,7 +2,10 @@ mod a2ui_bridge;
 mod account_auth;
 mod agents;
 mod api_key;
-mod automation;
+// ADR-0067 Phase 5 — automation/sandbox/cua_sandbox extracted to the
+// `crates/cognia-automation` cluster; re-aliased so all three module paths
+// (generate_handler! + .manage()) resolve unchanged.
+pub use cognia_automation::automation;
 mod browser;
 mod canvas;
 mod capture;
@@ -14,7 +17,7 @@ mod commands;
 pub mod companion_api;
 mod connectors;
 pub mod crash;
-mod cua_sandbox;
+pub use cognia_automation::cua_sandbox;
 mod external_agent;
 mod files;
 pub mod fleet;
@@ -43,7 +46,7 @@ mod plugin_api;
 mod plugins;
 mod proxy_config;
 mod remote_control;
-pub mod sandbox;
+pub use cognia_automation::sandbox;
 mod scheduler;
 mod secret_store;
 mod session_import;

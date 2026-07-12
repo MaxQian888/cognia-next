@@ -66,6 +66,11 @@ serde = { version = "1.0", features = ["derive"] }
 cognia-signaling-core = { path = "../services/signaling-server/core" }
 # ADR-0067 — foundation utilities (fs_atomic). Re-aliased as `crate::fs_atomic`.
 cognia-core = { path = "../crates/cognia-core" }
+# ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
+# uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
+# crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/
+# libc stay below (shared with pet_window/fleet/scheduler/etc.).
+cognia-automation = { path = "../crates/cognia-automation" }
 # ADR-0067 Phase 1 — process-global span instrumentation registry, extracted
 # from `perf/{span,registry}.rs` so the Tier-A leaf crates (cognia-git,
 # cognia-vector, cognia-ocr) can instrument without depending on the whole app.
@@ -293,10 +298,8 @@ wasmparser = "0.221"
 # maintaining a hand-rolled parser as the subcommand surface grows.
 clap = { version = "4", features = ["derive"] }
 
-# UI automation — cross-platform screenshot (xcap works on Win/macOS/Linux).
-# Windows UIA bindings (`uiautomation`) and macOS/Linux a11y crates are
-# target-gated below.
-xcap = "0.0.12"
+# ADR-0067 Phase 5 — `xcap` (screenshot) + the UIA/a11y crates moved to
+# `crates/cognia-automation`.
 dial9-tokio-telemetry = "0.3"
 
 # WebRTC stack (ADR-0021) — full ICE/DTLS/SCTP suite that integrates with
@@ -346,10 +349,7 @@ minidumper = "0.10"
 # note in [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "3", features = ["windows-native"] }
 eventlog = "0.3"
-# UI Automation — leexgone/uiautomation-rs. Pins `windows = 0.62.2`; if that
-# duplicates with Tauri's `windows` dep, run `cargo tree -d` and either pin
-# down or accept the duplication (it's at most a few hundred kB).
-uiautomation = { version = "0.25", features = ["process"] }
+# ADR-0067 Phase 5 — `uiautomation` moved to `crates/cognia-automation`.
 # Direct windows-rs dep for SendInput/MOUSEEVENTF_WHEEL/GetSystemMetrics calls
 # that aren't exposed publicly through `uiautomation::inputs`. Version pinned
 # to match uiautomation's own transitive `windows = 0.62.2` to avoid duplicate
@@ -378,10 +378,7 @@ windows = { version = "0.62.2", features = [
 # [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "3", features = ["apple-native"] }
 oslog = "0.2"
-# Cross-platform input simulation for the macOS automation backend
-# (`automation/platform/ax/mod.rs`). Pinned to a major version that's known to
-# build cleanly against Core Graphics on Apple Silicon + Intel Macs.
-enigo = "0.6"
+# ADR-0067 Phase 5 — `enigo` moved to `crates/cognia-automation`.
 # CGEventTap-based global input capture for the skill recorder
 # (`automation/record/hook_mac.rs`) — the macOS counterpart to the Windows
 # low-level hook. `enigo` already pulls both transitively, so naming them as
@@ -416,8 +413,8 @@ objc2-app-kit = { version = "0.3", features = ["NSScreen"] }
 # (`as_concrete_TypeRef` / `wrap_under_create_rule`) need that version, imported
 # under an alias in `ax/raw.rs` and never leaking into the rest of the app
 # (which is on core-foundation 0.10).
-accessibility = "0.1"
-accessibility-sys = "0.1"
+# ADR-0067 Phase 5 — `accessibility` + `accessibility-sys` moved to
+# `crates/cognia-automation`. The lower-level CF crates stay (shared).
 core-foundation-sys = "0.8"
 core-foundation-0-9 = { package = "core-foundation", version = "0.9" }
 
@@ -436,14 +433,8 @@ libc = "0.2"
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 libsystemd = "0.7"
 syslog = "7"
-# Cross-platform input simulation for the Linux automation backend
-# (`automation/platform/atspi/mod.rs`). Requires X11 / libxdo at runtime; on
-# headless systems the backend's `capabilities()` reports `hasInputSim: false`.
-enigo = "0.6"
-# Compiles the seccomp-bpf defense-in-depth filter for the `bwrap` backend
-# (`sandbox/seccomp.rs`) — blocks ptrace / process_vm_* / io_uring. Pure-Rust
-# BPF generation (no libseccomp C dependency), passed to bwrap via `--seccomp`.
-seccompiler = "0.5"
+# ADR-0067 Phase 5 — `enigo` (atspi input sim) + `seccompiler` (bwrap seccomp
+# filter) moved to `crates/cognia-automation`.
 
 [dev-dependencies]
 # HTTP mock server for connectors::http_client and attachments tests.

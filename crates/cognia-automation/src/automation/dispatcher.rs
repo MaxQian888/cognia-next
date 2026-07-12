@@ -329,7 +329,7 @@ pub async fn execute_action(
     confine: Option<&SandboxConfine>,
     action: Action,
 ) -> Result<ActionOutput> {
-    let _perf = crate::perf::guard("automation.action");
+    let _perf = cognia_instrument::guard("automation.action");
     Ok(match action {
         Action::Screenshot { opts } => {
             ActionOutput::Screenshot(cua_route::screenshot(handle, cua, remote, opts).await?)

@@ -87,15 +87,15 @@ fn write_json<T: serde::Serialize>(path: &PathBuf, value: &T) -> std::io::Result
     }
     let json = serde_json::to_string_pretty(value)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let plan = crate::fs_atomic::AtomicWritePlan {
+    let plan = cognia_core::fs_atomic::AtomicWritePlan {
         path: path.clone(),
         expected_mtime: None,
         tmp_suffix: "tmp".into(),
         backup_suffix: "bak".into(),
     };
-    crate::fs_atomic::atomic_write_with_mtime_check(&plan, json.as_bytes())
+    cognia_core::fs_atomic::atomic_write_with_mtime_check(&plan, json.as_bytes())
         .map(|_| {
-            crate::fs_atomic::rotate_backups(path, BACKUP_KEEP);
+            cognia_core::fs_atomic::rotate_backups(path, BACKUP_KEEP);
         })
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
 }
