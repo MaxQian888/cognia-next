@@ -39,7 +39,8 @@ beforeEach(async () => {
   await getDb().sharedLinks.clear()
   fetchMock = jest.fn()
   ;(globalThis as { fetch: unknown }).fetch = fetchMock
-})
+  // Cold Dexie open walks every schema version and can exceed 5s.
+}, 30_000)
 
 function mockFetchOnce(status: number, json: unknown): void {
   fetchMock.mockResolvedValueOnce({

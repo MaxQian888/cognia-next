@@ -54,6 +54,20 @@ const halfCores = Math.max(1, Math.ceil(os.cpus().length / 2))
 const ramBudgetedWorkers = Math.max(1, Math.floor((os.freemem() / 1e9 - 2) / 1.5))
 const coverageWorkers = Math.min(halfCores, ramBudgetedWorkers)
 
+// This config is loaded two ways depending on the Node version: ts-node
+// compiles it to CJS (`__dirname` defined), while Node ≥ 22.18's native
+// type-stripping `import()`s it as ESM (`__dirname` undefined, and
+// `import.meta` would be a syntax error under the CJS compile). The typeof
+// guard works in both worlds; jest is always invoked from the repo root, so
+// `process.cwd()` is the same directory.
+const CONFIG_DIR = typeof __dirname === "undefined" ? process.cwd() : __dirname
+
+// jest 30.4 stopped normalizing path separators when substituting `<rootDir>`
+// into testMatch globs, so on Windows the backslashed prefix breaks micromatch
+// and a `<rootDir>`-anchored project silently discovers ZERO tests. Anchor the
+// node project's globs on a posix-slashed absolute root instead.
+const POSIX_ROOT_DIR = CONFIG_DIR.replace(/\\/g, "/")
+
 // Directories whose plain-.ts tests default to the node environment. A new
 // top-level directory is NOT automatically node — it lands in the jsdom
 // project until it is added here, which is the safe direction.
@@ -397,8 +411,9 @@ const globalConfig: Config = {
   //   - global — app/* + components/* remainder; raise after the components/
   //     per-file coverage push.
   coverageThreshold: JSON.parse(
-    // `__dirname` (not import.meta) — jest-config compiles this file to CJS.
-    readFileSync(join(__dirname, "scripts/test/coverage-thresholds.json"), "utf8")
+    // `CONFIG_DIR`, not `__dirname`/import.meta — see the dual CJS/ESM
+    // loading note at the top of this file.
+    readFileSync(join(CONFIG_DIR, "scripts/test/coverage-thresholds.json"), "utf8")
   ) as Config["coverageThreshold"],
 
   // Cap workers at 50% so the deep-import suites (twin / plugin / agent
@@ -453,9 +468,12 @@ const createNodeProject = createJestConfig({
   testEnvironment: "node",
   // Plain-.ts (and .mts/.cts) tests in the node-safe trees. `.tsx` is
   // deliberately absent — React-rendering suites always need jsdom.
+  // POSIX_ROOT_DIR, not `<rootDir>` — jest 30.4's raw substitution leaves
+  // Windows backslashes in the glob, which micromatch treats as escapes and
+  // matches nothing (the whole node project vanished from discovery).
   testMatch: [
-    `<rootDir>/${NODE_ENV_DIRS}/**/__tests__/**/*.?([mc])ts`,
-    `<rootDir>/${NODE_ENV_DIRS}/**/?(*.)+(spec|test).?([mc])ts`,
+    `${POSIX_ROOT_DIR}/${NODE_ENV_DIRS}/**/__tests__/**/*.?([mc])ts`,
+    `${POSIX_ROOT_DIR}/${NODE_ENV_DIRS}/**/?(*.)+(spec|test).?([mc])ts`,
   ],
 })
 

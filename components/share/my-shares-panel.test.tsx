@@ -20,7 +20,8 @@ beforeEach(async () => {
   await getDb().sharedLinks.clear()
   jest.clearAllMocks()
   Object.assign(navigator, { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } })
-})
+  // Cold Dexie open walks every schema version and can exceed 5s.
+}, 30_000)
 
 async function seed(overrides: Partial<Parameters<typeof recordSharedLink>[0]> = {}) {
   await recordSharedLink({
