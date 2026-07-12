@@ -35,6 +35,22 @@ pub struct TerminalExecResult {
     pub timed_out: bool,
 }
 
+/// Wrap a full shell command line in the platform shell so `terminal_exec`
+/// can run history-style lines (pipes, `&&`, redirects) that a direct exec
+/// can't. `cmd.exe /C` on Windows, `/bin/sh -c` elsewhere — the lowest common
+/// denominator that exists on every host, deliberately NOT the user's
+/// configured default shell (a one-shot capture has no PTY/profile needs).
+pub fn shell_wrap(line: &str) -> (String, Vec<String>) {
+    #[cfg(target_os = "windows")]
+    {
+        ("cmd.exe".to_string(), vec!["/C".to_string(), line.to_string()])
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        ("/bin/sh".to_string(), vec!["-c".to_string(), line.to_string()])
+    }
+}
+
 /// Run `command` with `args` to completion, capturing stdout/stderr.
 ///
 /// `cwd` sets the working directory; `env` entries are layered onto the
@@ -125,16 +141,29 @@ pub async fn terminal_exec(
     args: Option<Vec<String>>,
     env: Option<HashMap<String, String>>,
     timeout_ms: Option<u64>,
+    shell: Option<bool>,
 ) -> Result<TerminalExecResult, String> {
-    terminal_exec_inner(
-        cwd,
-        command,
-        args.unwrap_or_default(),
-        env,
-        timeout_ms,
-        None,
-    )
-    .await
+    let args = args.unwrap_or_default();
+    let (command, args) = resolve_shell_mode(command, args, shell.unwrap_or(false))?;
+    terminal_exec_inner(cwd, command, args, env, timeout_ms, None).await
+}
+
+/// Apply the optional `shell` mode shared by the Tauri command and the
+/// Companion RPC arm: when set, `command` is a complete shell line and `args`
+/// must be empty (rejecting, rather than silently dropping or naively
+/// re-quoting, whatever the caller passed).
+pub fn resolve_shell_mode(
+    command: String,
+    args: Vec<String>,
+    shell: bool,
+) -> Result<(String, Vec<String>), String> {
+    if !shell {
+        return Ok((command, args));
+    }
+    if !args.is_empty() {
+        return Err("terminal_exec.args must be empty when shell=true".to_string());
+    }
+    Ok(shell_wrap(&command))
 }
 
 #[cfg(test)]
@@ -200,6 +229,45 @@ mod tests {
             .await
             .expect("exec ok");
         assert!(res.stdout.contains("marker42"));
+    }
+
+    #[test]
+    fn shell_wrap_targets_the_platform_shell() {
+        let (cmd, args) = shell_wrap("echo hi && echo bye");
+        if cfg!(windows) {
+            assert_eq!(cmd, "cmd.exe");
+            assert_eq!(args, vec!["/C".to_string(), "echo hi && echo bye".to_string()]);
+        } else {
+            assert_eq!(cmd, "/bin/sh");
+            assert_eq!(args, vec!["-c".to_string(), "echo hi && echo bye".to_string()]);
+        }
+    }
+
+    #[test]
+    fn resolve_shell_mode_passes_through_and_rejects_args_with_shell() {
+        let (cmd, args) =
+            resolve_shell_mode("git".to_string(), vec!["status".to_string()], false).unwrap();
+        assert_eq!(cmd, "git");
+        assert_eq!(args, vec!["status".to_string()]);
+
+        let err = resolve_shell_mode("git status".to_string(), vec!["-v".to_string()], true)
+            .unwrap_err();
+        assert!(err.contains("args must be empty"));
+
+        let (cmd, args) = resolve_shell_mode("git status".to_string(), vec![], true).unwrap();
+        assert!(args.iter().any(|a| a == "git status"));
+        assert!(cmd == "cmd.exe" || cmd == "/bin/sh");
+    }
+
+    #[tokio::test]
+    async fn shell_mode_runs_a_full_command_line() {
+        let (cmd, args) = resolve_shell_mode("echo shell-mode-ok".to_string(), vec![], true)
+            .expect("resolve");
+        let res = terminal_exec_inner(None, cmd, args, None, None, None)
+            .await
+            .expect("exec ok");
+        assert!(res.stdout.contains("shell-mode-ok"));
+        assert_eq!(res.exit_code, Some(0));
     }
 
     #[tokio::test]

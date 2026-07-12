@@ -1,4 +1,13 @@
-import { findProfile, nextProfileId, profileToSpawnFields, type TerminalProfile } from "./profiles"
+import {
+  findProfile,
+  formatProfileArgs,
+  formatProfileEnv,
+  nextProfileId,
+  parseProfileArgs,
+  parseProfileEnv,
+  profileToSpawnFields,
+  type TerminalProfile,
+} from "./profiles"
 
 const sample: TerminalProfile[] = [
   { id: "profile-1", name: "PowerShell", shell: "pwsh.exe" },
@@ -38,6 +47,40 @@ describe("terminal profiles", () => {
   it("profileToSpawnFields rejects a blank shell", () => {
     expect(profileToSpawnFields({ id: "x", name: "x", shell: "   " })).toBeNull()
     expect(profileToSpawnFields({ id: "x", name: "x", shell: "" })).toBeNull()
+  })
+
+  it("parseProfileArgs splits lines, trims, and drops blanks", () => {
+    expect(parseProfileArgs("-l\n\n  --login  \n")).toEqual(["-l", "--login"])
+    // Interior whitespace inside one line is preserved (a single argv entry).
+    expect(parseProfileArgs("-Command Get-ChildItem")).toEqual(["-Command Get-ChildItem"])
+    expect(parseProfileArgs("")).toBeUndefined()
+    expect(parseProfileArgs("  \n \n")).toBeUndefined()
+  })
+
+  it("formatProfileArgs round-trips with parseProfileArgs", () => {
+    expect(formatProfileArgs(["-l", "--login"])).toBe("-l\n--login")
+    expect(formatProfileArgs(undefined)).toBe("")
+    expect(parseProfileArgs(formatProfileArgs(["-NoLogo"]))).toEqual(["-NoLogo"])
+  })
+
+  it("parseProfileEnv parses KEY=VALUE lines and skips malformed ones", () => {
+    expect(parseProfileEnv("FOO=1\r\nBAR=two words")).toEqual({ FOO: "1", BAR: "two words" })
+    // Value keeps further `=` verbatim.
+    expect(parseProfileEnv("PATH=C:\\x=y")).toEqual({ PATH: "C:\\x=y" })
+    // An empty value is a legitimate entry (unsetting-style overrides).
+    expect(parseProfileEnv("EMPTY=")).toEqual({ EMPTY: "" })
+    // No `=`, empty key, and blank lines are skipped.
+    expect(parseProfileEnv("JUSTAKEY\n=novalue-key\n\nOK=1")).toEqual({ OK: "1" })
+    expect(parseProfileEnv("")).toBeUndefined()
+    expect(parseProfileEnv("garbage")).toBeUndefined()
+  })
+
+  it("formatProfileEnv round-trips with parseProfileEnv", () => {
+    expect(formatProfileEnv({ FOO: "1", BAR: "x=y" })).toBe("FOO=1\nBAR=x=y")
+    expect(formatProfileEnv(undefined)).toBe("")
+    expect(parseProfileEnv(formatProfileEnv({ NODE_ENV: "development" }))).toEqual({
+      NODE_ENV: "development",
+    })
   })
 
   it("nextProfileId avoids collisions with existing ids", () => {

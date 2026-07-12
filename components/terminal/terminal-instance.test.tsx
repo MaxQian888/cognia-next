@@ -14,6 +14,7 @@ const mockTermInstance: {
   write: jest.Mock
   onData: jest.Mock
   onSelectionChange: jest.Mock
+  onBell?: jest.Mock
   attachCustomKeyEventHandler: jest.Mock
   getSelection: jest.Mock
   paste: jest.Mock
@@ -209,6 +210,7 @@ beforeEach(() => {
   mockTermInstance.write = jest.fn()
   mockTermInstance.onData = jest.fn(() => ({ dispose: jest.fn() }))
   mockTermInstance.onSelectionChange = jest.fn(() => ({ dispose: jest.fn() }))
+  mockTermInstance.onBell = jest.fn(() => ({ dispose: jest.fn() }))
   mockTermInstance.attachCustomKeyEventHandler = jest.fn()
   mockTermInstance.getSelection = jest.fn(() => "")
   mockTermInstance.paste = jest.fn()
@@ -295,6 +297,49 @@ describe("TerminalInstance", () => {
     await flushAsync()
     captured.cb?.("ls\n")
     expect(sessionRegistry.current!.write).toHaveBeenCalledWith("ls\n")
+  })
+
+  describe("terminal bell", () => {
+    function captureBell() {
+      const captured: { cb: (() => void) | null } = { cb: null }
+      mockTermInstance.onBell = jest.fn((cb: () => void) => {
+        captured.cb = cb
+        return { dispose: jest.fn() }
+      })
+      return captured
+    }
+
+    it("flashes the container on BEL when the style is visual", async () => {
+      mockTerminalSettings = { bell: "visual" }
+      const captured = captureBell()
+      const { container } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const div = container.querySelector('[data-testid="terminal-instance"]') as HTMLElement
+      expect(div.style.boxShadow).toBe("")
+      act(() => captured.cb?.())
+      expect(div.style.boxShadow).toContain("inset")
+    })
+
+    it("ignores BEL when the style is none (default)", async () => {
+      const captured = captureBell()
+      const { container } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const div = container.querySelector('[data-testid="terminal-instance"]') as HTMLElement
+      act(() => captured.cb?.())
+      expect(div.style.boxShadow).toBe("")
+    })
+
+    it("does not throw for sound styles when AudioContext is unavailable", async () => {
+      mockTerminalSettings = { bell: "both" }
+      const captured = captureBell()
+      const { container } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const div = container.querySelector('[data-testid="terminal-instance"]') as HTMLElement
+      // jsdom has no AudioContext — the sound half must degrade silently
+      // while the visual half still fires ("both").
+      expect(() => act(() => captured.cb?.())).not.toThrow()
+      expect(div.style.boxShadow).toContain("inset")
+    })
   })
 
   it("disposes the Terminal on unmount", async () => {

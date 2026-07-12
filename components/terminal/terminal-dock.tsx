@@ -389,15 +389,6 @@ export function TerminalDock() {
   const emptyVariant: "desktop" | "mobile" | "unsupported" =
     transport === "tauri-channel" ? "desktop" : transport === "ws" ? "mobile" : "unsupported"
 
-  // Wrap each rendered tab in its own context-menu trigger by hooking the
-  // strip's onContextMenu — but the menu needs to render *inline* per tab
-  // so Radix's portal anchors correctly. We re-render the strip with the
-  // contextual menu wrapper applied to each TerminalTab.
-  // (TerminalTabStrip already iterates and renders TerminalTab; we use the
-  // onContextMenu callback to position the menu via DOM.)
-  // For simplicity v1 wires the menu as a per-tab wrapper via the strip's
-  // built-in onContextMenu prop AND a separate render layer.
-
   return (
     <div
       className="relative flex h-full w-full flex-col border-t bg-background"

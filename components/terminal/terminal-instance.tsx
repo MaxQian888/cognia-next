@@ -224,17 +224,7 @@ function cursorPixelPosition(term: unknown): { left: number; top: number } | nul
  * store). Kept in one place so the store reads and the option-apply agree.
  */
 type TerminalFontWeight =
-  | "normal"
-  | "bold"
-  | "100"
-  | "200"
-  | "300"
-  | "400"
-  | "500"
-  | "600"
-  | "700"
-  | "800"
-  | "900"
+  "normal" | "bold" | "100" | "200" | "300" | "400" | "500" | "600" | "700" | "800" | "900"
 
 const DEFAULT_FONT_FAMILY = '"JetBrains Mono", "Cascadia Code", "Menlo", "Consolas", monospace'
 const DEFAULT_FONT_SIZE = 13
@@ -409,6 +399,11 @@ function TerminalInstanceImpl(
   const stickyScrollEnabled = useSettingsStore(
     (s) => (s.settings?.terminal as { stickyScroll?: boolean } | undefined)?.stickyScroll ?? true
   )
+  const bellStyle = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { bell?: "none" | "visual" | "sound" | "both" } | undefined)?.bell ??
+      "none"
+  )
 
   const fontFamily =
     fontFamilyProp ??
@@ -444,10 +439,12 @@ function TerminalInstanceImpl(
   const quickFixesRef = useRef(quickFixesEnabled)
   const commandActionsRef = useRef(commandActionsEnabled)
   const stickyScrollRef = useRef(stickyScrollEnabled)
+  const bellRef = useRef(bellStyle)
   useEffect(() => {
     quickFixesRef.current = quickFixesEnabled
     commandActionsRef.current = commandActionsEnabled
     stickyScrollRef.current = stickyScrollEnabled
+    bellRef.current = bellStyle
   })
   // NB: no "clear on toggle-off" effect — each overlay is render-gated on its
   // setting in the JSX below, so flipping a feature off hides it immediately
@@ -795,6 +792,26 @@ function TerminalInstanceImpl(
         navigator.clipboard.writeText(sel).catch(() => {
           /* noop */
         })
+      })
+
+      // Terminal bell (BEL / 0x07). xterm swallows the character and fires
+      // `onBell`; the `terminal.bell` setting picks how we surface it — a
+      // brief visual flash on the container, a short WebAudio beep, both, or
+      // (default) nothing. Read through `bellRef` so toggling the setting
+      // never remounts the terminal. `onBell` is guarded — test fakes and
+      // older stubs may not expose it.
+      let bellFlashTimer: ReturnType<typeof setTimeout> | null = null
+      const bellDisposable: { dispose: () => void } | undefined = term.onBell?.(() => {
+        const style = bellRef.current
+        if (style === "visual" || style === "both") {
+          container.style.boxShadow = "inset 0 0 0 2px var(--ring)"
+          if (bellFlashTimer) clearTimeout(bellFlashTimer)
+          bellFlashTimer = setTimeout(() => {
+            container.style.boxShadow = ""
+            bellFlashTimer = null
+          }, 150)
+        }
+        if (style === "sound" || style === "both") playBellSound()
       })
 
       term.open(container)
@@ -1150,6 +1167,16 @@ function TerminalInstanceImpl(
         } catch {
           /* noop */
         }
+        try {
+          bellDisposable?.dispose()
+        } catch {
+          /* noop */
+        }
+        if (bellFlashTimer) {
+          clearTimeout(bellFlashTimer)
+          bellFlashTimer = null
+          container.style.boxShadow = ""
+        }
         offData()
         offIntegration()
         try {
@@ -1411,6 +1438,40 @@ export const TerminalInstance = forwardRef<TerminalInstanceHandle, TerminalInsta
 TerminalInstance.displayName = "TerminalInstance"
 
 export default TerminalInstance
+
+/**
+ * Short WebAudio beep for the `"sound"` / `"both"` bell styles — a 880 Hz
+ * sine with a fast gain decay (~120 ms), roughly VS Code's bell. One
+ * AudioContext is lazily created and shared across instances/bells; every
+ * step is guarded so a bell can never throw into the data path (jsdom and
+ * some WebViews have no AudioContext, and autoplay policies may suspend it).
+ */
+let bellAudioContext: AudioContext | null = null
+function playBellSound(): void {
+  try {
+    const Ctor =
+      typeof window !== "undefined"
+        ? (window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
+        : undefined
+    if (!Ctor) return
+    bellAudioContext ??= new Ctor()
+    const ctx = bellAudioContext
+    if (ctx.state === "suspended") void ctx.resume().catch(() => undefined)
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = "sine"
+    osc.frequency.value = 880
+    gain.gain.setValueAtTime(0.08, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start()
+    osc.stop(ctx.currentTime + 0.12)
+  } catch {
+    /* noop — the bell must never break the terminal */
+  }
+}
 
 /**
  * Open an OSC 8 hyperlink target. Prefer Tauri's `openExternal` (writes
