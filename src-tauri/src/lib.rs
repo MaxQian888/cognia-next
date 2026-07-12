@@ -21,7 +21,9 @@ pub mod fleet;
 mod fonts;
 mod fs_atomic;
 mod gateway;
-mod git;
+// ADR-0067 Phase 2 — extracted to `crates/cognia-git`; re-aliased so every
+// `crate::git::…` reference (incl. `generate_handler!` + `.manage()`) resolves.
+pub use cognia_git as git;
 mod github;
 pub mod headless;
 mod hooks;

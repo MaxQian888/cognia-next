@@ -8,7 +8,7 @@
 //! locale-fragile substring sniffing on a flat string.
 //!
 //! The serde shape is `{ "kind": "...", "detail": "..." }`. Every `detail`
-//! is passed through [`crate::git::exec::redact`] before it leaves the
+//! is passed through [`crate::exec::redact`] before it leaves the
 //! backend so a credentialed remote URL never lands in renderer logs.
 
 use serde::Serialize;

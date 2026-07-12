@@ -70,6 +70,10 @@ cognia-signaling-core = { path = "../services/signaling-server/core" }
 # `perf/mod.rs` re-exports its symbols so `crate::perf::guard` call sites are
 # unchanged, and the perf panel reads its shared global `REGISTRY`.
 cognia-instrument = { path = "../crates/cognia-instrument" }
+# ADR-0067 Phase 2 — Source Control subsystem (ADR-0038), extracted so the
+# git2/vendored-libgit2 C compile isolates. Re-aliased as `crate::git` in
+# lib.rs; its `commands::git_*` are referenced from `generate_handler!`.
+cognia-git = { path = "../crates/cognia-git" }
 log = "0.4"
 # `unstable` unlocks the built-in multi-webview API (`Window::add_child`,
 # `Manager::get_webview`) that powers the embedded in-app browser pane

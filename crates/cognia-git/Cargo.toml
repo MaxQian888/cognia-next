@@ -1,0 +1,39 @@
+# ADR-0067 Phase 2 — Source Control subsystem (ADR-0038), extracted from
+# `app_lib`'s `git/` module. Isolates the `git2`/vendored-libgit2 C compile so
+# an edit here recompiles ~5k LOC + a relink instead of the whole Tauri tree.
+# The command surface (`commands::git_*`) is referenced from the app's
+# `generate_handler!` via `cognia_git::commands::…`; `git2` remains in
+# `src-tauri` too (the `twin` module also uses it).
+[package]
+name = "cognia-git"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Source Control subsystem (ADR-0038) — VSCode-style Git panel backend."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_git"
+path = "src/lib.rs"
+
+[dependencies]
+# Span instrumentation (ADR-0067 Phase 1) — replaces the old `crate::perf::guard`.
+cognia-instrument = { path = "../cognia-instrument" }
+# The watch commands take `AppHandle`/`State` and `Emitter` the status-changed event.
+tauri = { version = "=2.11.1" }
+tokio = { version = "1", features = ["process", "fs", "io-util", "sync", "time", "rt-multi-thread", "macros"] }
+# `default-features = false` (no https/ssh) — mutating/network ops shell out to
+# system `git`; git2 is read-only here. Matches the `src-tauri` build exactly.
+git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+notify = "6"
+ignore = "0.4"
+regex = "1"
+once_cell = "1"
+parking_lot = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

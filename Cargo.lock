@@ -1747,6 +1747,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-git"
+version = "0.1.0"
+dependencies = [
+ "cognia-instrument",
+ "git2",
+ "ignore",
+ "notify",
+ "once_cell",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "cognia-instrument"
 version = "0.1.0"
 dependencies = [
@@ -1777,6 +1796,7 @@ dependencies = [
  "cbc 0.2.1",
  "chrono",
  "clap",
+ "cognia-git",
  "cognia-instrument",
  "cognia-signaling-core",
  "core-foundation 0.10.1",

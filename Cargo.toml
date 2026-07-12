@@ -29,6 +29,7 @@ members = [
   # monolithic `app_lib` so an edit recompiles ~2–15k LOC + a relink instead of
   # the whole 170k-LOC tree.
   "crates/cognia-instrument",
+  "crates/cognia-git",
 ]
 exclude = [
   "services/signaling-server",
