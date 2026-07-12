@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::ocr::{NativeBackend, NativeOcrError, NativeOcrInvokePayload, NativeOcrResult};
+use crate::{NativeBackend, NativeOcrError, NativeOcrInvokePayload, NativeOcrResult};
 
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 
@@ -201,7 +201,7 @@ fn truncate_log_field(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ocr::{NativeOcrError, NativeOcrInvokePayload};
+    use crate::{NativeOcrError, NativeOcrInvokePayload};
 
     fn payload(bytes: Vec<u8>, mime_type: &str, languages: Vec<&str>) -> NativeOcrInvokePayload {
         NativeOcrInvokePayload {

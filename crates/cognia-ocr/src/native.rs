@@ -27,8 +27,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub mod backend;
-pub mod msix;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -147,7 +145,7 @@ pub async fn ocr_extract_native(
     state: tauri::State<'_, NativeOcrRegistry>,
     payload: NativeOcrInvokePayload,
 ) -> Result<NativeOcrResult, String> {
-    let _perf = crate::perf::guard("ocr.extract");
+    let _perf = cognia_instrument::guard("ocr.extract");
     state.dispatch(&payload).await.map_err(|e| e.to_string())
 }
 
@@ -167,7 +165,7 @@ pub async fn ocr_list_native_backends(
 /// registration site from the command handlers so unit tests can construct
 /// a registry full of mocks.
 pub async fn install_default_backends(registry: &NativeOcrRegistry) {
-    use backend::install_platform_backends;
+    use crate::backend::install_platform_backends;
     install_platform_backends(registry).await
 }
 
@@ -193,35 +191,35 @@ pub struct ModelFileSpec {
 
 /// Static registry of model URLs per backend tag. Updated alongside the
 /// upstream model releases. URLs verified 2026-05-18. Mirroring the file
-/// names used by `backend::ocrs::*_MODEL_FILE` / `backend::paddle::*` so
+/// names used by `crate::backend::ocrs::*_MODEL_FILE` / `crate::backend::paddle::*` so
 /// downloader and loader agree.
 pub fn model_spec(backend: &str) -> Option<Vec<ModelFileSpec>> {
     match backend {
         "ocrs" => Some(vec![
             ModelFileSpec {
-                file_name: backend::ocrs::DETECTION_MODEL_FILE,
+                file_name: crate::backend::ocrs::DETECTION_MODEL_FILE,
                 url: "https://huggingface.co/robertknight/ocrs/resolve/main/text-detection.rten",
                 expected_bytes: 2_640_000,
             },
             ModelFileSpec {
-                file_name: backend::ocrs::RECOGNITION_MODEL_FILE,
+                file_name: crate::backend::ocrs::RECOGNITION_MODEL_FILE,
                 url: "https://huggingface.co/robertknight/ocrs/resolve/main/text-recognition.rten",
                 expected_bytes: 10_190_000,
             },
         ]),
         "paddle-ocr" => Some(vec![
             ModelFileSpec {
-                file_name: backend::paddle::DETECTION_MODEL_FILE,
+                file_name: crate::backend::paddle::DETECTION_MODEL_FILE,
                 url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det/resolve/main/inference.onnx",
                 expected_bytes: 4_700_000,
             },
             ModelFileSpec {
-                file_name: backend::paddle::RECOGNITION_MODEL_FILE,
+                file_name: crate::backend::paddle::RECOGNITION_MODEL_FILE,
                 url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec/resolve/main/inference.onnx",
                 expected_bytes: 11_300_000,
             },
             ModelFileSpec {
-                file_name: backend::paddle::DICTIONARY_FILE,
+                file_name: crate::backend::paddle::DICTIONARY_FILE,
                 url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec/resolve/main/ppocrv5_dict.txt",
                 expected_bytes: 220_000,
             },
@@ -234,8 +232,8 @@ pub fn model_spec(backend: &str) -> Option<Vec<ModelFileSpec>> {
 /// the same path each loader looks at.
 pub fn resolve_backend_model_dir(backend: &str) -> Result<PathBuf, String> {
     match backend {
-        "ocrs" => backend::ocrs::resolve_model_dir().map_err(|e| e.to_string()),
-        "paddle-ocr" => backend::paddle::resolve_model_dir().map_err(|e| e.to_string()),
+        "ocrs" => crate::backend::ocrs::resolve_model_dir().map_err(|e| e.to_string()),
+        "paddle-ocr" => crate::backend::paddle::resolve_model_dir().map_err(|e| e.to_string()),
         other => Err(format!(
             "model management not supported for backend `{other}`"
         )),
@@ -580,8 +578,8 @@ mod tests {
         let spec = model_spec("ocrs").expect("ocrs spec present");
         assert_eq!(spec.len(), 2);
         let names: Vec<&str> = spec.iter().map(|s| s.file_name).collect();
-        assert!(names.contains(&backend::ocrs::DETECTION_MODEL_FILE));
-        assert!(names.contains(&backend::ocrs::RECOGNITION_MODEL_FILE));
+        assert!(names.contains(&crate::backend::ocrs::DETECTION_MODEL_FILE));
+        assert!(names.contains(&crate::backend::ocrs::RECOGNITION_MODEL_FILE));
         // Every URL must be HTTPS so the renderer-side allowlist accepts it.
         for entry in &spec {
             assert!(
@@ -597,9 +595,9 @@ mod tests {
         let spec = model_spec("paddle-ocr").expect("paddle-ocr spec present");
         assert_eq!(spec.len(), 3);
         let names: Vec<&str> = spec.iter().map(|s| s.file_name).collect();
-        assert!(names.contains(&backend::paddle::DETECTION_MODEL_FILE));
-        assert!(names.contains(&backend::paddle::RECOGNITION_MODEL_FILE));
-        assert!(names.contains(&backend::paddle::DICTIONARY_FILE));
+        assert!(names.contains(&crate::backend::paddle::DETECTION_MODEL_FILE));
+        assert!(names.contains(&crate::backend::paddle::RECOGNITION_MODEL_FILE));
+        assert!(names.contains(&crate::backend::paddle::DICTIONARY_FILE));
         for entry in &spec {
             assert!(
                 entry.url.starts_with("https://"),
@@ -676,8 +674,8 @@ mod tests {
         assert_eq!(status.files.len(), 2);
         for f in &status.files {
             assert!(
-                f.file_name == backend::ocrs::DETECTION_MODEL_FILE
-                    || f.file_name == backend::ocrs::RECOGNITION_MODEL_FILE
+                f.file_name == crate::backend::ocrs::DETECTION_MODEL_FILE
+                    || f.file_name == crate::backend::ocrs::RECOGNITION_MODEL_FILE
             );
         }
     }

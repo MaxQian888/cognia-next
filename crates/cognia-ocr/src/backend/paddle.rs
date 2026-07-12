@@ -12,10 +12,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::ocr::NativeOcrError;
+use crate::NativeOcrError;
 
 #[cfg(feature = "ocr-paddle")]
-use crate::ocr::{
+use crate::{
     NativeBackend, NativeBoundingBox, NativeOcrBlock, NativeOcrInvokePayload, NativeOcrResult,
 };
 

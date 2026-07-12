@@ -19,7 +19,7 @@
 //! - `ocr-ocrs`      — pure-Rust ONNX-style pipeline via `ocrs` + RTen.
 //! - `ocr-paddle`    — PaddleOCR PP-OCRv5 via `oar-ocr` + `ort`.
 
-use crate::ocr::{NativeBackend, NativeOcrRegistry};
+use crate::{NativeBackend, NativeOcrRegistry};
 
 pub mod ocrs;
 pub mod paddle;
@@ -124,7 +124,7 @@ pub fn missing_binding_for(id: &'static str) -> Box<dyn NativeBackend> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ocr::{NativeOcrError, NativeOcrInvokePayload};
+    use crate::{NativeOcrError, NativeOcrInvokePayload};
 
     #[tokio::test]
     async fn install_default_backends_registers_all_known_ids() {

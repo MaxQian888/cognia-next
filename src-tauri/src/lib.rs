@@ -31,7 +31,9 @@ mod keyring_secrets;
 mod logging;
 mod mcp_oauth;
 mod mcp_server;
-mod ocr;
+// ADR-0067 Phase 3 — extracted to `crates/cognia-ocr`; re-aliased so
+// `crate::ocr::{NativeOcrRegistry, install_default_backends, commands::…}` resolve.
+pub use cognia_ocr as ocr;
 mod parse;
 mod perf;
 mod pet_window;
@@ -1045,10 +1047,10 @@ pub fn run() {
             git::commands::git_merge_abort,
             git::commands::git_watch_start,
             git::commands::git_watch_stop,
-            ocr::ocr_extract_native,
-            ocr::ocr_list_native_backends,
-            ocr::ocr_model_status,
-            ocr::ocr_download_model,
+            ocr::native::ocr_extract_native,
+            ocr::native::ocr_list_native_backends,
+            ocr::native::ocr_model_status,
+            ocr::native::ocr_download_model,
             ocr::msix::ocr_msix_status,
             // Native document parsing (liteparse / PDFium) — feature-gated;
             // the default build answers `unsupported` and TS falls back.

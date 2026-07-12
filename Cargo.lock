@@ -1798,6 +1798,7 @@ dependencies = [
  "clap",
  "cognia-git",
  "cognia-instrument",
+ "cognia-ocr",
  "cognia-signaling-core",
  "core-foundation 0.10.1",
  "core-foundation 0.9.4",
@@ -1821,7 +1822,6 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "ignore",
- "image",
  "jsonwebtoken",
  "keyring",
  "libc",
@@ -1834,12 +1834,9 @@ dependencies = [
  "mdns-sd",
  "minidumper",
  "notify",
- "oar-ocr",
  "objc2",
  "objc2-app-kit",
- "ocrs",
  "once_cell",
- "ort",
  "oslog",
  "parking_lot",
  "portable-pty",
@@ -1849,8 +1846,6 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest 0.12.28",
- "rten",
- "rten-imageproc",
  "ruma",
  "rusqlite",
  "rustls",
@@ -1913,6 +1908,32 @@ dependencies = [
  "wiremock",
  "xcap",
  "zip 2.4.2",
+]
+
+[[package]]
+name = "cognia-ocr"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cognia-instrument",
+ "dirs 6.0.0",
+ "futures-util",
+ "hex",
+ "image",
+ "oar-ocr",
+ "ocrs",
+ "once_cell",
+ "ort",
+ "reqwest 0.12.28",
+ "rten",
+ "rten-imageproc",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tauri",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

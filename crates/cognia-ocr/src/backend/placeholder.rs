@@ -7,7 +7,7 @@
 //! `extract` returns `MissingBinding` and the frontend surfaces that as
 //! "configure a different provider" guidance.
 
-use crate::ocr::{NativeBackend, NativeOcrError, NativeOcrInvokePayload, NativeOcrResult};
+use crate::{NativeBackend, NativeOcrError, NativeOcrInvokePayload, NativeOcrResult};
 
 pub struct PlaceholderBackend {
     id: &'static str,

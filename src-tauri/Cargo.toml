@@ -316,32 +316,13 @@ dial9-tokio-telemetry = "0.3"
 # connectivity win.
 webrtc = "0.17"
 
-# ADR-0024 — local OCR engines (opt-in via `ocr-ocrs` / `ocr-paddle` features).
-#
-# `ocrs` + `rten` form a pure-Rust ONNX-style OCR pipeline that needs no
-# system deps (no CMake, no onnxruntime DLLs). Models (~12 MB total) are
-# downloaded on first use into `<app_data>/cognia/ocr/ocrs/`. Note: `rten`
-# is unusable in dev profile without opt-level=3 per upstream README — see
-# the [profile.dev.package.rten] block below.
-ocrs           = { version = "0.12", optional = true }
-rten           = { version = "0.24", optional = true, default-features = false }
-# `rten-imageproc` is pulled transitively via `rten`/`ocrs` (its `RotatedRect`
-# type leaks through `find_text_lines`). Keeping it as an explicit optional
-# dep so backend code can `use rten_imageproc::*` directly without depending
-# on upstream re-export stability.
-rten-imageproc = { version = "0.24", optional = true }
-
-# `oar-ocr` wraps PaddleOCR PP-OCRv5 models through ONNX Runtime. Strong CJK
-# accuracy, ~17 MB models. Uses `ort` (still pre-1.0); pin EXACTLY to avoid
-# ABI drift between RCs across crate consumers. The `download-binaries`
-# feature pulls a prebuilt onnxruntime tarball at build time; `copy-dylibs`
-# copies the runtime DLL next to the binary so Tauri's bundle picks it up.
-oar-ocr        = { version = "0.6",  optional = true }
-ort            = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["download-binaries", "copy-dylibs"] }
-
-# Shared image decoder used by both OCR backends — feature-gated so it
-# doesn't get pulled into default builds.
-image          = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff"] }
+# ADR-0067 Phase 3 — native OCR subsystem (ADR-0024) lives in `crates/cognia-ocr`.
+# The optional ocrs/rten/rten-imageproc/oar-ocr/ort/image deps and the 5 `ocr-*`
+# features moved there; the `[features]` block below forwards them. Re-aliased as
+# `crate::ocr` in lib.rs; `ort`'s copy-dylibs still stages the onnxruntime DLL
+# into the shared target dir, so bundling is unchanged. The dev-profile
+# `[profile.dev.package.rten]` opt-level=3 override lives at the workspace root.
+cognia-ocr = { path = "../crates/cognia-ocr" }
 
 # Native PDF parsing with per-item bounding boxes (PDFium via pdfium-sys,
 # which downloads a prebuilt PDFium at build time and loads it through
@@ -487,21 +468,17 @@ default = []
 # Cross-platform Tesseract via the local `tesseract` CLI. The feature links
 # no native library; runtime availability depends on the executable being
 # installed on PATH or packaged by the app shell.
-ocr-tesseract = []
-# Windows.Media.Ocr via the `winocr` crate. Requires the running process to
-# have an MSIX package identity; see `tauri.conf.json` bundle targets.
-ocr-windows = []
-# Apple Vision via the Swift sidecar at `sidecars/apple-vision-ocr/`. The
-# binary is bundled through `tauri.conf.json` `bundle.externalBin`.
-ocr-apple = []
-# Pure-Rust OCR via `ocrs` + RTen. No system deps; models downloaded on
-# first use into `<app_data>/cognia/ocr/ocrs/`. English-biased — pair with
-# `ocr-paddle` for CJK coverage.
-ocr-ocrs = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
-# PaddleOCR PP-OCRv5 via `oar-ocr` + ONNX Runtime. Best open CJK accuracy;
-# ships an onnxruntime DLL alongside the executable (handled by `ort`'s
-# `copy-dylibs` feature).
-ocr-paddle = ["dep:oar-ocr", "dep:ort", "dep:image"]
+# ADR-0067 Phase 3 — these forward to the extracted `cognia-ocr` crate, which
+# owns the real ocrs/rten/oar-ocr/ort/image optional deps.
+ocr-tesseract = ["cognia-ocr/ocr-tesseract"]
+# Windows.Media.Ocr — requires MSIX package identity; see `tauri.conf.json`.
+ocr-windows = ["cognia-ocr/ocr-windows"]
+# Apple Vision via the Swift sidecar (bundled through `bundle.externalBin`).
+ocr-apple = ["cognia-ocr/ocr-apple"]
+# Pure-Rust OCR via `ocrs` + RTen. Models downloaded on first use.
+ocr-ocrs = ["cognia-ocr/ocr-ocrs"]
+# PaddleOCR PP-OCRv5 via `oar-ocr` + ONNX Runtime (ships an onnxruntime DLL).
+ocr-paddle = ["cognia-ocr/ocr-paddle"]
 # ADR-0059 R13 — ExecBackend::Container for per-workspace runner containers
 # (T2 topology). Off desktop builds: only the headless `cognia-server` image
 # enables it, so the Docker client never enters the Tauri binary.
