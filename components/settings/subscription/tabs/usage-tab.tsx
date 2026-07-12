@@ -52,6 +52,7 @@ import {
   GaugeIcon,
   RefreshCwIcon,
   RepeatIcon,
+  Share2Icon,
   UnfoldVerticalIcon,
 } from "lucide-react"
 
@@ -94,6 +95,7 @@ import { useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
 import { useAccounts } from "@/lib/subscription/core/hooks"
 import { ProviderQuotaPanel } from "@/components/settings/subscription/provider-quota-panel"
 import { WindowGaugeCard } from "@/components/settings/subscription/window-gauge-card"
+import { UsageShareDialog } from "@/components/settings/subscription/usage-share-dialog"
 import { UsageDisplayToggle } from "@/components/settings/subscription/usage-display-toggle"
 import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
 import { useCountUp } from "@/hooks/usage/use-count-up"
@@ -478,6 +480,21 @@ function UsageToolbar({
           </Button>
         </div>
         <UsageDisplayToggle />
+        <UsageShareDialog
+          rows={exportRows}
+          rangeLabel={t(`range.${range}`)}
+          trigger={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={exportRows.length === 0}
+              data-testid="usage-share-card-trigger"
+            >
+              <Share2Icon className="size-3.5" />
+              {t("shareCard.action")}
+            </Button>
+          }
+        />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

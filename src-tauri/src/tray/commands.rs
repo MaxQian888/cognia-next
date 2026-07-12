@@ -167,6 +167,47 @@ pub async fn tray_set_tooltip<R: Runtime>(
     }
 }
 
+/// Set (or clear, with `None`) the text rendered next to the tray icon.
+/// macOS shows it in the menu bar and Linux appindicators render it inline;
+/// Windows has no equivalent surface and Tauri no-ops there — the renderer
+/// offers the icon-badge mode instead (`lib/tray/icon-builder.ts`).
+#[tauri::command]
+pub async fn tray_set_title<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Arc<TrayMenuStateStore>>,
+    text: Option<String>,
+) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        state.set_title(text.clone());
+        // Main-thread dispatch — same AppKit off-main trap as `tray_set_menu`.
+        let handle = app.clone();
+        app.run_on_main_thread(move || match handle.tray_by_id(TRAY_ICON_ID) {
+            Some(tray) => {
+                if let Err(e) = tray.set_title(text.as_deref()) {
+                    log::warn!("tray: set_title failed: {e}");
+                }
+            }
+            None => log::warn!("tray: {TRAY_ICON_ID} not registered"),
+        })
+        .map_err(|e| e.to_string())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, state, text);
+        Err("tray not available on this platform".into())
+    }
+}
+
+/// Snapshot the title Rust currently holds — diagnostics counterpart of
+/// `tray_get_tooltip`.
+#[tauri::command]
+pub async fn tray_get_title(
+    state: State<'_, Arc<TrayMenuStateStore>>,
+) -> Result<Option<String>, String> {
+    Ok(state.title())
+}
+
 /// Snapshot the current items as the Rust side sees them — used by the
 /// renderer's hydration path to verify the bootstrap layout matches what it
 /// has persisted. Also useful for diagnostics.
@@ -249,6 +290,20 @@ mod tests {
     /// covers the command's only behaviour. Avoids spinning up a tauri
     /// mock app (the project doesn't enable Tauri's `test` feature; see
     /// `window_utils.rs:46`).
+    /// Same one-line-wrapper rationale as the tooltip getter below: the
+    /// `tray_set_title` / `tray_get_title` command bodies reduce to these
+    /// store calls plus a main-thread OS mutation we can't exercise without
+    /// Tauri's `test` feature.
+    #[test]
+    fn title_getter_round_trips_through_store() {
+        let store = TrayMenuStateStore::default();
+        assert!(store.title().is_none());
+        store.set_title(Some("42%".into()));
+        assert_eq!(store.title().as_deref(), Some("42%"));
+        store.set_title(None);
+        assert!(store.title().is_none());
+    }
+
     #[test]
     fn tooltip_getter_round_trips_through_store() {
         let store = TrayMenuStateStore::default();

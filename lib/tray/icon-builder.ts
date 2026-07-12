@@ -116,8 +116,22 @@ function camelToKebab(attrs: Record<string, string | number>): Record<string, st
   return out
 }
 
+/**
+ * Compact readout drawn onto the icon raster — the tray's "taskbar badge"
+ * (`TrayDisplayPrefs.taskbarUsageMode === "iconBadge"`). `color` should be
+ * the meter-status color so the badge doubles as a severity signal.
+ */
+export interface TrayIconBadge {
+  text: string
+  color: string
+}
+
 /** Rasterize the given SVG string to PNG bytes via an offscreen canvas. */
-export async function rasterizeSvgToPng(svg: string, size: number): Promise<Uint8Array> {
+export async function rasterizeSvgToPng(
+  svg: string,
+  size: number,
+  badge?: TrayIconBadge
+): Promise<Uint8Array> {
   if (typeof document === "undefined") {
     throw new Error("rasterizeSvgToPng requires a DOM (document undefined)")
   }
@@ -135,10 +149,46 @@ export async function rasterizeSvgToPng(svg: string, size: number): Promise<Uint
     ctx.imageSmoothingQuality = "high"
     ctx.clearRect(0, 0, size, size)
     ctx.drawImage(image, 0, 0, size, size)
+    if (badge) drawBadge(ctx, size, badge)
     return await canvasToPng(canvas)
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+/**
+ * Paint a rounded pill over the bottom-right quadrant carrying the compact
+ * usage readout ("42%" → drawn as "42"; balances keep their short form).
+ * Tray icons render at ~16-32 px, so the text is clamped to 3 glyphs —
+ * anything longer would be unreadable at that size.
+ *
+ * On macOS the icon is applied as a template image (alpha mask), so the
+ * badge shows as a solid knockout rather than the status color — usable,
+ * but the `title` taskbar mode is the better fit there (the settings UI
+ * says so).
+ */
+export function drawBadge(ctx: CanvasRenderingContext2D, size: number, badge: TrayIconBadge): void {
+  const text = badge.text.replace(/%$/, "").slice(0, 3)
+  if (!text) return
+  const height = size * 0.55
+  const width = size * (text.length >= 3 ? 0.8 : 0.66)
+  const x = size - width
+  const y = size - height
+  const radius = height * 0.3
+
+  ctx.save()
+  ctx.beginPath()
+  // roundRect is available in every WebView this app ships in (Chromium /
+  // WebKit ≥ 2021); jsdom's canvas mock in tests stubs it.
+  ctx.roundRect(x, y, width, height, radius)
+  ctx.fillStyle = badge.color
+  ctx.fill()
+  ctx.fillStyle = "#ffffff"
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+  ctx.font = `bold ${Math.round(height * 0.72)}px sans-serif`
+  ctx.fillText(text, x + width / 2, y + height / 2 + height * 0.05, width * 0.9)
+  ctx.restore()
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -174,14 +224,19 @@ async function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
 export async function rasterizeAndRegisterTrayIcons({
   color = "#000000",
   size = 32,
-}: { color?: string; size?: number } = {}): Promise<void> {
+  badge,
+}: { color?: string; size?: number; badge?: TrayIconBadge } = {}): Promise<void> {
   if (!isTauri()) return
   const states: TrayIconState[] = ["idle", "busy", "error", "muted"]
   await Promise.all(
     states.map(async (state) => {
       try {
         const svg = buildLucideSvg(STATE_NODES[state], color)
-        const png = await rasterizeSvgToPng(svg, size)
+        // The badge overlays every state so the readout survives busy/error
+        // flips; Rust re-applies the current state's raster on registration
+        // (`tray_register_icon`), so no extra `tray_set_icon_state` call is
+        // needed for the swap to take effect.
+        const png = await rasterizeSvgToPng(svg, size, badge)
         await invoke("tray_register_icon", { state, pngBytes: Array.from(png) })
       } catch (err) {
         loggers.tray.warn("tray icon raster failed", { state, error: String(err) })

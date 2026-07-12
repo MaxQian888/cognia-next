@@ -2,6 +2,8 @@
 // `src-tauri/src/tray/dto.rs`; keep the two in lockstep when extending the
 // menu schema.
 
+import type { LimitsMeterKind, LimitsMeterStatus } from "@/types/subscription"
+
 /**
  * Native window/app actions the tray can fire directly (Rust-handled).
  * Anything not in this list goes through the slash- or command-dispatch
@@ -124,4 +126,81 @@ export interface TrayStateSnapshot {
    * Needs are already lazily-decayed (same values the widget shows).
    */
   pet?: { enabled: boolean; energy: number; mood: number; bond: number } | null
+  /**
+   * Subscription-quota glance data (ADR-0025 unified limits), populated by
+   * `lib/tray/usage.ts:useTrayUsage` only while at least one tray usage
+   * surface (menu section / tooltip suffix / taskbar mode) is enabled.
+   * Absent/`null` keeps existing synthetic snapshots valid and hides every
+   * usage surface cleanly.
+   */
+  usage?: TrayUsageSnapshot | null
+}
+
+/**
+ * Compact projection of one `LimitsMeter` (`types/subscription/limits.ts`)
+ * carrying only what a tray row / badge / tooltip needs. Numbers stay raw —
+ * formatting happens in `lib/tray/usage.ts` so every surface renders the
+ * same text.
+ */
+export interface TrayUsageMeterSummary {
+  id: string
+  /** i18n key under `subscription.limits.meter.*` (resolved by the resilient translator). */
+  labelKey?: string
+  /** Literal label for custom sources (passed through the resilient translator). */
+  label?: string
+  kind: LimitsMeterKind
+  usedPct: number | null
+  status: LimitsMeterStatus
+  resetAt?: number | null
+  remaining?: number
+  unit?: string
+  currency?: string
+}
+
+/** One configured subscription account's quota glance. */
+export interface TrayUsageAccount {
+  /** Stable selection key — `provider:accountId` (or `provider:label` for custom sources). */
+  key: string
+  provider: string
+  accountLabel?: string
+  /** Highest-utilization meter — what compact surfaces (badge / title / tooltip) show. */
+  worst: TrayUsageMeterSummary | null
+  meters: TrayUsageMeterSummary[]
+  /** Present when the last refresh failed for this account. */
+  error?: string
+}
+
+/** Aggregated usage snapshot flowing through `TrayStateSnapshot.usage`. */
+export interface TrayUsageSnapshot {
+  accounts: TrayUsageAccount[]
+  /** Newest `fetchedAt` across accounts; `null` before the first refresh lands. */
+  fetchedAt: number | null
+  /** The account pinned to compact surfaces, or `null` for "worst across all". */
+  selectedKey: string | null
+}
+
+/** Where the compact usage readout surfaces outside the menu. */
+export type TrayTaskbarUsageMode = "off" | "iconBadge" | "title"
+
+/**
+ * User-tunable tray display preferences, persisted under
+ * `TRAY_DISPLAY_PREF` (`lib/tray/defaults.ts`) alongside the layout.
+ */
+export interface TrayDisplayPrefs {
+  /** Expand the `tray.usage` placeholder into the subscription-quota section. */
+  showUsageInMenu: boolean
+  /** Append the compact usage readout to the OS tooltip. */
+  showUsageInTooltip: boolean
+  /**
+   * Taskbar-adjacent readout: `iconBadge` rasterizes the percent onto the
+   * tray icon (all platforms), `title` sets the text next to the icon via
+   * `tray_set_title` (macOS menu bar; Linux appindicator; Windows no-op).
+   */
+  taskbarUsageMode: TrayTaskbarUsageMode
+  /** Pinned subscription (`TrayUsageAccount.key`) or `null` = worst across all. */
+  usageAccountKey: string | null
+  /** Auto-refresh cadence in minutes; `0` = manual refresh only. */
+  usageRefreshMinutes: number
+  /** Stroke color for the rasterized tray icons (ignored by macOS template mode). */
+  iconColor: string
 }

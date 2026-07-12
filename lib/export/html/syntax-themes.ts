@@ -28,6 +28,10 @@ export interface ThemeTokens {
 }
 
 export type ThemeId =
+  | "arknights"
+  | "cyberpunk"
+  | "terminal"
+  | "sakura"
   | "light"
   | "dark"
   | "sepia"
@@ -38,6 +42,60 @@ export type ThemeId =
   | "monokai"
 
 export const THEMES: Record<ThemeId, ThemeTokens> = {
+  // Rhodes Island / PRTS-inspired tactical-log palette. Pairs with the
+  // "arknights" style preset in `style-presets.ts` for the full look.
+  arknights: {
+    bg: "#0c0f14",
+    surface: "#141a23",
+    text: "#d6e2ee",
+    muted: "#6b7a8c",
+    border: "#26313f",
+    accent: "#23d5ff",
+    userBg: "#12293b",
+    assistantBg: "#10151d",
+    codeBg: "#080b10",
+    codeText: "#9fdcff",
+    detailBg: "#161e29",
+  },
+  cyberpunk: {
+    bg: "#0a0612",
+    surface: "#160d24",
+    text: "#efe6ff",
+    muted: "#8f7bb0",
+    border: "#3b2260",
+    accent: "#ff2ea6",
+    userBg: "#241040",
+    assistantBg: "#120a1e",
+    codeBg: "#07040d",
+    codeText: "#f7e94a",
+    detailBg: "#1b1030",
+  },
+  terminal: {
+    bg: "#040804",
+    surface: "#0a120a",
+    text: "#9dfc9d",
+    muted: "#4e7a4e",
+    border: "#1d3a1d",
+    accent: "#33ff66",
+    userBg: "#0e1f0e",
+    assistantBg: "#081008",
+    codeBg: "#020502",
+    codeText: "#baffba",
+    detailBg: "#0c180c",
+  },
+  sakura: {
+    bg: "#fdf3f5",
+    surface: "#fbe8ec",
+    text: "#4a2e38",
+    muted: "#a3798a",
+    border: "#f2cdd8",
+    accent: "#d4477a",
+    userBg: "#f9dbe4",
+    assistantBg: "#fcedf1",
+    codeBg: "#3c2530",
+    codeText: "#f7d9e3",
+    detailBg: "#f7dee6",
+  },
   light: {
     bg: "#ffffff",
     surface: "#f9fafb",
@@ -145,6 +203,10 @@ export const THEMES: Record<ThemeId, ThemeTokens> = {
 }
 
 export const THEME_LIST: { id: ThemeId; label: string }[] = [
+  { id: "arknights", label: "Arknights (PRTS)" },
+  { id: "cyberpunk", label: "Cyberpunk" },
+  { id: "terminal", label: "Terminal" },
+  { id: "sakura", label: "Sakura" },
   { id: "light", label: "Light" },
   { id: "dark", label: "Dark" },
   { id: "sepia", label: "Sepia" },

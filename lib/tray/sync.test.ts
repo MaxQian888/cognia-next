@@ -18,6 +18,18 @@ jest.mock("dexie-react-hooks", () => ({
 jest.mock("@/lib/db/goals", () => ({
   getOpenGoalForSession: jest.fn().mockResolvedValue(undefined),
 }))
+// The usage feed (consumed via useTrayStateSnapshot) would hit the real
+// subscription transport — stub it to a controllable mock.
+jest.mock("./usage", () => ({ useTrayUsage: jest.fn(() => null) }))
+jest.mock("@/lib/tauri/store", () => ({
+  getPref: jest.fn(),
+  setPref: jest.fn(() => Promise.resolve()),
+}))
+// Raster pushes go through canvas + IPC; observe the call instead.
+jest.mock("./icon-builder", () => ({
+  ...jest.requireActual("./icon-builder"),
+  rasterizeAndRegisterTrayIcons: jest.fn(() => Promise.resolve()),
+}))
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }
@@ -32,14 +44,37 @@ import {
 import { useTrayStore, __resetTrayStoreForTesting } from "./store"
 import { __resetTrayRegistryForTesting, registerTrayItem } from "./registry"
 import { DEFAULT_TRAY_ITEMS } from "./defaults"
+import { rasterizeAndRegisterTrayIcons } from "./icon-builder"
+import { useTrayUsage } from "./usage"
+
+const useTrayUsageMock = useTrayUsage as jest.Mock
+const rasterizeMock = rasterizeAndRegisterTrayIcons as jest.Mock
 
 beforeEach(() => {
   jest.useFakeTimers()
   invoke.mockReset()
   invoke.mockResolvedValue(undefined)
+  rasterizeMock.mockClear()
+  useTrayUsageMock.mockReturnValue(null)
   __resetTrayStoreForTesting()
   __resetTrayRegistryForTesting()
 })
+
+/** One configured account at 42% (ok) for the compact-surface tests. */
+function usageAt42() {
+  return {
+    accounts: [
+      {
+        key: "anthropic:a1",
+        provider: "anthropic",
+        accountLabel: "Claude Pro",
+        worst: { id: "session", kind: "window", usedPct: 42, status: "ok", resetAt: null },
+        meters: [],
+      },
+    ],
+    fetchedAt: 1,
+  }
+}
 
 afterEach(() => {
   jest.runOnlyPendingTimers()
@@ -141,6 +176,74 @@ describe("useSyncTrayToRust", () => {
     expect(invoke).toHaveBeenCalledWith("tray_set_tooltip", {
       text: "Cognia (busy)",
     })
+  })
+
+  it("appends the usage readout to the tooltip when the surface is enabled", () => {
+    useTrayUsageMock.mockReturnValue(usageAt42())
+    useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
+    useTrayStore.getState().setDisplay({ showUsageInTooltip: true })
+    renderHook(() => useSyncTrayToRust())
+    act(() => {
+      jest.advanceTimersByTime(200)
+    })
+    const tooltipCall = invoke.mock.calls.filter((c) => c[0] === "tray_set_tooltip").at(-1)
+    expect(tooltipCall?.[1]).toEqual({ text: "Cognia · Claude Pro · 42%" })
+  })
+
+  it("pushes tray_set_title in title mode and clears it when switched off", () => {
+    useTrayUsageMock.mockReturnValue(usageAt42())
+    useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
+    useTrayStore.getState().setDisplay({ taskbarUsageMode: "title" })
+    const { rerender } = renderHook(() => useSyncTrayToRust())
+    act(() => {
+      jest.advanceTimersByTime(200)
+    })
+    expect(invoke).toHaveBeenCalledWith("tray_set_title", { text: "42%" })
+
+    invoke.mockClear()
+    act(() => {
+      useTrayStore.getState().setDisplay({ taskbarUsageMode: "off" })
+    })
+    rerender()
+    act(() => {
+      jest.advanceTimersByTime(200)
+    })
+    expect(invoke).toHaveBeenCalledWith("tray_set_title", { text: null })
+  })
+
+  it("re-rasters the icons with a badge in iconBadge mode and on color changes", () => {
+    useTrayUsageMock.mockReturnValue(usageAt42())
+    useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
+    useTrayStore.getState().setDisplay({ taskbarUsageMode: "iconBadge" })
+    renderHook(() => useSyncTrayToRust())
+    act(() => {
+      jest.advanceTimersByTime(200)
+    })
+    expect(rasterizeMock).toHaveBeenCalledWith({
+      color: "#000000",
+      badge: { text: "42%", color: "#10b981" },
+    })
+
+    rasterizeMock.mockClear()
+    act(() => {
+      useTrayStore.getState().setDisplay({ iconColor: "#ff0000" })
+    })
+    act(() => {
+      jest.advanceTimersByTime(200)
+    })
+    expect(rasterizeMock).toHaveBeenCalledWith({
+      color: "#ff0000",
+      badge: { text: "42%", color: "#10b981" },
+    })
+  })
+
+  it("does not re-raster at boot when prefs match the tauri-provider defaults", () => {
+    useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
+    renderHook(() => useSyncTrayToRust())
+    act(() => {
+      jest.advanceTimersByTime(200)
+    })
+    expect(rasterizeMock).not.toHaveBeenCalled()
   })
 })
 

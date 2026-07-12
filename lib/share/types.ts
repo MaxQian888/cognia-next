@@ -13,6 +13,7 @@ export type ShareKind =
   | "chat-json"
   | "chat-text"
   | "workflow-png"
+  | "usage-card"
   | "backup"
   | "a2ui"
   | "discover-item"

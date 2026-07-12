@@ -60,7 +60,8 @@ export function SingleExportDialog({
   const tShare = useTranslations("share")
   const tPage = useTranslations("a2ui.interactivePage")
   const [format, setFormat] = useState<SingleExportFormat>(defaultFormat)
-  const [theme, setTheme] = useState<ThemeId>("light")
+  // Arknights (PRTS) is the flagship share style — default for HTML/animated.
+  const [theme, setTheme] = useState<ThemeId>("arknights")
   const [customThemeId, setCustomThemeId] = useState<string | null>(null)
   const [includeMetadata, setIncludeMetadata] = useState(true)
   const [includeTimestamps, setIncludeTimestamps] = useState(true)

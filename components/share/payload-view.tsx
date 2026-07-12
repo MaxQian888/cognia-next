@@ -30,6 +30,8 @@ import type { SharedDiscoverDefinition } from "@/lib/share/discover-item"
 export function PayloadView({ payload, className }: { payload: SharePayload; className?: string }) {
   switch (payload.kind) {
     case "chat-html":
+    // Usage cards are self-contained static HTML — same no-script sandbox.
+    case "usage-card":
       return <HtmlFrame html={payload.data} allowScripts={false} className={className} />
     case "chat-animated":
       return <HtmlFrame html={payload.data} allowScripts className={className} />

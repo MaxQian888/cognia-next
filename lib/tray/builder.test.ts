@@ -183,6 +183,59 @@ describe("buildTrayPayload", () => {
     })
   })
 
+  describe("usage placeholder", () => {
+    const placeholder: TrayMenuItem = {
+      kind: "submenu",
+      id: "tray.usage",
+      label: "tray.usage.title",
+      items: [],
+    }
+    const usage = {
+      accounts: [
+        {
+          key: "anthropic:acc-1",
+          provider: "anthropic",
+          accountLabel: "Claude Pro",
+          worst: {
+            id: "session",
+            kind: "window" as const,
+            usedPct: 42,
+            status: "ok" as const,
+            resetAt: null,
+          },
+          meters: [],
+        },
+      ],
+      fetchedAt: 1,
+      selectedKey: null,
+    }
+
+    it("hides while no usage data exists (pre-refresh / web / surfaces off)", () => {
+      expect(buildTrayPayload({ items: [placeholder], t, snapshot })).toEqual([])
+    })
+
+    it("expands into the usage section when data exists", () => {
+      const dto = buildTrayPayload({ items: [placeholder], t, snapshot: { ...snapshot, usage } })
+      expect(dto).toHaveLength(1)
+      const sub = dto[0]
+      if (sub.kind !== "submenu") throw new Error("expected submenu")
+      const ids = sub.items.map((i) => i.id)
+      expect(ids).toContain("tray.usage.account:anthropic:acc-1")
+      expect(ids).toContain("tray.usage.refresh")
+      expect(ids).toContain("tray.usage.open-settings")
+    })
+
+    it("is suppressed when the display pref turns the menu section off", () => {
+      const dto = buildTrayPayload({
+        items: [placeholder],
+        t,
+        snapshot: { ...snapshot, usage },
+        display: { showUsageInMenu: false },
+      })
+      expect(dto).toEqual([])
+    })
+  })
+
   it("fills the About placeholder with the version + action cluster", () => {
     const items: TrayMenuItem[] = [
       { kind: "submenu", id: "tray.about", label: "tray.about.title", items: [] },

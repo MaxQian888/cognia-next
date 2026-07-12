@@ -90,7 +90,46 @@ describe("exportToBeautifulHtml", () => {
   })
 })
 
+describe("exportToBeautifulHtml — style presets", () => {
+  it("injects the arknights banner, footer tag, and preset CSS", () => {
+    const html = exportToBeautifulHtml({ session, messages, exportedAt, theme: "arknights" })
+    expect(html).toContain('class="preset-banner">TACTICAL COMMUNICATION LOG')
+    expect(html).toContain("PRTS // RECORD SEALED")
+    expect(html).toContain(".preset-banner")
+    expect(html).toContain(THEMES.arknights.accent)
+  })
+
+  it("classic themes render without any preset chrome", () => {
+    const html = exportToBeautifulHtml({ session, messages, exportedAt, theme: "light" })
+    expect(html).not.toContain("preset-banner")
+  })
+
+  it("preset CSS uses custom tokens when a custom theme overrides a styled base", () => {
+    const html = exportToBeautifulHtml({
+      session,
+      messages,
+      exportedAt,
+      theme: "arknights",
+      customTheme: { ...THEMES.arknights, accent: "#123456" },
+    })
+    expect(html).toContain("#123456")
+    expect(html).toContain("preset-banner")
+  })
+
+  it("sakura preset has a banner but no footer tagline", () => {
+    const html = exportToBeautifulHtml({ session, messages, exportedAt, theme: "sakura" })
+    expect(html).toContain("HANAMI LOG")
+    expect(html).toMatch(/Exported from Cognia · [^·]*<\/footer>/)
+  })
+})
+
 describe("exportToAnimatedHtml", () => {
+  it("keeps the preset chrome from the base export", () => {
+    const html = exportToAnimatedHtml({ session, messages, exportedAt, theme: "arknights" })
+    expect(html).toContain("preset-banner")
+    expect(html).toContain("classList.add('show')")
+  })
+
   it("includes the animation script", () => {
     const html = exportToAnimatedHtml({ session, messages, exportedAt })
     expect(html).toContain("<script>")

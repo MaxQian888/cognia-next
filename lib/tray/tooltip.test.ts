@@ -77,4 +77,21 @@ describe("deriveTrayTooltip", () => {
     )
     expect(out).toBe("Cognia — Responding")
   })
+
+  it("appends the usage fragment when provided — idle and active alike", () => {
+    expect(deriveTrayTooltip(snap(), t, "Cognia", "Claude Pro · 42%")).toBe(
+      "Cognia · Claude Pro · 42%"
+    )
+    const active = deriveTrayTooltip(
+      snap({ chat: { streaming: true, hasActiveSession: true } }),
+      t,
+      "Cognia",
+      "Claude Pro · 42%"
+    )
+    expect(active).toBe("Cognia — Responding · Claude Pro · 42%")
+  })
+
+  it("ignores an absent usage fragment", () => {
+    expect(deriveTrayTooltip(snap(), t, "Cognia", null)).toBe("Cognia")
+  })
 })

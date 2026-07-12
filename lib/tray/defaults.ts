@@ -7,7 +7,7 @@
 // will report for the corresponding ids; if the user rebinds via the
 // settings UI, the renderer will rewrite the field before the next push.
 
-import type { TrayMenuItem } from "./types"
+import type { TrayDisplayPrefs, TrayMenuItem } from "./types"
 
 export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
   {
@@ -134,6 +134,16 @@ export const DEFAULT_TRAY_ITEMS: TrayMenuItem[] = [
   },
   { kind: "separator", id: "tray.sep-1" },
   {
+    // Synthetic placeholder — `lib/tray/builder.ts` fills the empty items
+    // with the live subscription-quota section (`lib/tray/usage-section.ts`)
+    // when `TrayDisplayPrefs.showUsageInMenu` is on and usage data exists.
+    // Hidden like any other entry via the settings UI.
+    kind: "submenu",
+    id: "tray.usage",
+    label: "tray.usage.title",
+    items: [],
+  },
+  {
     kind: "submenu",
     id: "tray.all-commands",
     label: "tray.allCommands",
@@ -199,3 +209,21 @@ export const TRAY_LAYOUT_PREF = "tray.layout.v1"
 
 /** Tooltip pref key. Defaults to "Cognia" until the user changes it. */
 export const TRAY_TOOLTIP_PREF = "tray.tooltip.v1"
+
+/** Display-preferences pref key (`TrayDisplayPrefs`). */
+export const TRAY_DISPLAY_PREF = "tray.display.v1"
+
+/**
+ * Conservative display defaults: the quota section shows in the menu (it only
+ * renders once usage data actually exists), but nothing leaks onto the icon /
+ * tooltip / menu-bar title until the user opts in — those are glanceable OS
+ * surfaces and quota percentages there are opinionated.
+ */
+export const DEFAULT_TRAY_DISPLAY: TrayDisplayPrefs = {
+  showUsageInMenu: true,
+  showUsageInTooltip: false,
+  taskbarUsageMode: "off",
+  usageAccountKey: null,
+  usageRefreshMinutes: 15,
+  iconColor: "#000000",
+}

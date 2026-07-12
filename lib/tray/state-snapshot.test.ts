@@ -36,10 +36,22 @@ jest.mock("@tauri-apps/api/event", () => ({
     return Promise.resolve(() => {})
   },
 }))
+// The usage feed hits the subscription transport when enabled — stub it so
+// this suite exercises snapshot assembly, not the limits stack (covered by
+// `usage.test.ts`). The tray store rides the mocked Tauri prefs.
+jest.mock("./usage", () => ({ useTrayUsage: jest.fn(() => null) }))
+jest.mock("@/lib/tauri/store", () => ({
+  getPref: jest.fn(),
+  setPref: jest.fn(() => Promise.resolve()),
+}))
 
 import { useTrayStateSnapshot } from "./state-snapshot"
 import { broadcastAutostartChanged } from "./autostart-control"
+import { useTrayUsage } from "./usage"
+import { useTrayStore, __resetTrayStoreForTesting } from "./store"
 import { createDefaultProfile } from "@/lib/pet/defaults"
+
+const useTrayUsageMock = useTrayUsage as jest.Mock
 
 beforeEach(() => {
   chatState = { status: "idle", activeSessionId: null }
@@ -50,6 +62,8 @@ beforeEach(() => {
   for (const k of Object.keys(listenHandlers)) delete listenHandlers[k]
   // `isMainAppWindow` reads the real Tauri internals; clear any pet label.
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+  useTrayUsageMock.mockReturnValue(null)
+  __resetTrayStoreForTesting()
 })
 
 describe("useTrayStateSnapshot", () => {
@@ -58,6 +72,18 @@ describe("useTrayStateSnapshot", () => {
     expect(result.current.goal).toEqual({ active: false, paused: false, title: undefined })
     expect(result.current.chat).toEqual({ streaming: false, hasActiveSession: false })
     expect(result.current.app.version).toEqual(expect.any(String))
+    expect(result.current.usage).toBeNull()
+  })
+
+  it("stamps the store's pinned key onto the usage feed", () => {
+    useTrayUsageMock.mockReturnValue({ accounts: [], fetchedAt: 42 })
+    useTrayStore.getState().setDisplay({ usageAccountKey: "anthropic:a1" })
+    const { result } = renderHook(() => useTrayStateSnapshot())
+    expect(result.current.usage).toEqual({
+      accounts: [],
+      fetchedAt: 42,
+      selectedKey: "anthropic:a1",
+    })
   })
 
   it("maps an active goal's redacted objective into the snapshot", () => {

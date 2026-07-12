@@ -46,6 +46,11 @@ export async function workflowImagePayload(blob: Blob, title: string): Promise<S
   }
 }
 
+/** A self-contained usage share-card HTML document → payload. */
+export function usageCardPayload(html: string, title: string): SharePayload {
+  return { kind: "usage-card", mime: "text/html", data: html, encoding: "utf8", title }
+}
+
 /** A serialized backup package (plaintext or already-encrypted JSON) → payload. */
 export function backupPayload(serialized: string, title: string): SharePayload {
   return { kind: "backup", mime: "application/json", data: serialized, encoding: "utf8", title }

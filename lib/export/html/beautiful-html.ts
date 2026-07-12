@@ -4,6 +4,7 @@
 import type { UIMessage } from "ai"
 import type { ChatSession, StoredMessage } from "@/lib/claude/types"
 import { THEMES, type ThemeId, type ThemeTokens } from "./syntax-themes"
+import { getStylePreset } from "./style-presets"
 
 export interface BeautifulHtmlOptions {
   session: ChatSession
@@ -30,6 +31,11 @@ export function exportToBeautifulHtml(options: BeautifulHtmlOptions): string {
     expandDetails = true,
   } = options
   const tokens = customTheme ?? THEMES[theme]
+  const preset = getStylePreset(theme)
+  const banner = preset?.bannerText
+    ? `<div class="preset-banner">${escapeHtml(preset.bannerText)}</div>\n`
+    : ""
+  const footerTag = preset?.footerText ? ` · ${escapeHtml(preset.footerText)}` : ""
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -37,15 +43,15 @@ export function exportToBeautifulHtml(options: BeautifulHtmlOptions): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(session.title)}</title>
-<style>${stylesheet(tokens)}</style>
+<style>${stylesheet(tokens)}${preset ? preset.css(tokens) : ""}</style>
 </head>
 <body>
 <main class="container">
-${renderHeader(session, exportedAt, includeMetadata)}
+${banner}${renderHeader(session, exportedAt, includeMetadata)}
 <section class="conversation">
 ${messages.map((m) => renderMessage(m, { includeTimestamps, expandDetails })).join("\n")}
 </section>
-<footer class="exported">Exported from Cognia · ${escapeHtml(exportedAt.toLocaleString())}</footer>
+<footer class="exported">Exported from Cognia · ${escapeHtml(exportedAt.toLocaleString())}${footerTag}</footer>
 </main>
 </body>
 </html>`

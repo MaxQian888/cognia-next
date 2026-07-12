@@ -23,6 +23,15 @@ describe("PayloadView", () => {
     expect(frame.getAttribute("srcdoc")).toContain("<p>hi</p>")
   })
 
+  it("renders usage-card in the same script-free sandbox as chat-html", () => {
+    render(
+      <PayloadView payload={payload({ kind: "usage-card", data: '<div class="ucard"></div>' })} />
+    )
+    const frame = screen.getByTitle("Shared conversation") as HTMLIFrameElement
+    expect(frame.getAttribute("sandbox")).toBe("")
+    expect(frame.getAttribute("srcdoc")).toContain("ucard")
+  })
+
   it("allows scripts only for chat-animated", () => {
     render(<PayloadView payload={payload({ kind: "chat-animated", data: "<p>x</p>" })} />)
     const frame = screen.getByTitle("Shared conversation") as HTMLIFrameElement

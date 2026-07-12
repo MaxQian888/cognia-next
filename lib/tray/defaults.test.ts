@@ -1,4 +1,4 @@
-import { DEFAULT_TRAY_ITEMS } from "./defaults"
+import { DEFAULT_TRAY_DISPLAY, DEFAULT_TRAY_ITEMS } from "./defaults"
 
 describe("DEFAULT_TRAY_ITEMS", () => {
   it("matches the locked layout shape from the system-tray plan", () => {
@@ -14,6 +14,7 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       "tray.new-chat",
       "tray.quick-goal",
       "tray.sep-1",
+      "tray.usage",
       "tray.all-commands",
       "tray.sep-2",
       "tray.autostart",
@@ -64,6 +65,26 @@ describe("DEFAULT_TRAY_ITEMS", () => {
     if (allCmd && allCmd.kind === "submenu") {
       expect(allCmd.items).toEqual([])
     }
+  })
+
+  it("contains an empty usage placeholder for the builder to expand", () => {
+    const usage = DEFAULT_TRAY_ITEMS.find((it) => it.kind === "submenu" && it.id === "tray.usage")
+    expect(usage).toBeDefined()
+    if (usage && usage.kind === "submenu") {
+      expect(usage.items).toEqual([])
+      expect(usage.label).toBe("tray.usage.title")
+    }
+  })
+
+  it("ships conservative display defaults — menu on, glanceable surfaces off", () => {
+    expect(DEFAULT_TRAY_DISPLAY).toEqual({
+      showUsageInMenu: true,
+      showUsageInTooltip: false,
+      taskbarUsageMode: "off",
+      usageAccountKey: null,
+      usageRefreshMinutes: 15,
+      iconColor: "#000000",
+    })
   })
 
   it("includes the desktop-pet toggle and click-through recovery entries", () => {

@@ -33,6 +33,8 @@ import { isMainAppWindow } from "@/lib/pet/window-role"
 import type { PetProfile } from "@/types/pet"
 
 import { onAutostartChanged } from "./autostart-control"
+import { useTrayStore } from "./store"
+import { useTrayUsage } from "./usage"
 import type { TrayStateSnapshot } from "./types"
 
 const ACTIVITY_WINDOW_MS = 8_000
@@ -156,6 +158,20 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
     }
   }, [])
 
+  // Subscription-quota glance. Fetching is gated on some usage surface being
+  // enabled (menu section / tooltip suffix / taskbar mode) so idle installs
+  // never poll provider usage endpoints; the hook itself no-ops outside Tauri.
+  const display = useTrayStore((s) => s.display)
+  const usageEnabled =
+    isTauri() &&
+    isMainAppWindow() &&
+    (display.showUsageInMenu || display.showUsageInTooltip || display.taskbarUsageMode !== "off")
+  const usageData = useTrayUsage(usageEnabled, display.usageRefreshMinutes)
+  const usage = useMemo(
+    () => (usageData ? { ...usageData, selectedKey: display.usageAccountKey } : null),
+    [usageData, display.usageAccountKey]
+  )
+
   return {
     goal,
     automation,
@@ -166,5 +182,6 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
     platform: { os: detectOs() },
     app: { autostart, version: APP_VERSION },
     pet,
+    usage,
   }
 }

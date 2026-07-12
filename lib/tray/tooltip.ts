@@ -17,20 +17,25 @@ export type TrayTooltipTranslator = (key: string) => string
 /**
  * Compose the tooltip string. Idle state returns the plain base ("Cognia");
  * any active state appends a localized status, plus the redacted goal
- * objective when one is open.
+ * objective when one is open. `usageText` (the pinned subscription's compact
+ * readout, see `lib/tray/usage.ts:usageTooltipFragment`) is appended last
+ * when the user enabled the tooltip usage surface.
  */
 export function deriveTrayTooltip(
   snapshot: TrayStateSnapshot,
   t: TrayTooltipTranslator,
-  base = "Cognia"
+  base = "Cognia",
+  usageText?: string | null
 ): string {
   const key = deriveStatusKey(snapshot)
-  if (key === "tray.status.idle") return base
-
-  let label = t(key)
-  const title = snapshot.goal.title?.trim()
-  if ((snapshot.goal.active || snapshot.goal.paused) && title) {
-    label = `${label}: ${truncateTitle(title, TOOLTIP_TITLE_MAX)}`
+  let text = base
+  if (key !== "tray.status.idle") {
+    let label = t(key)
+    const title = snapshot.goal.title?.trim()
+    if ((snapshot.goal.active || snapshot.goal.paused) && title) {
+      label = `${label}: ${truncateTitle(title, TOOLTIP_TITLE_MAX)}`
+    }
+    text = `${base} — ${label}`
   }
-  return `${base} — ${label}`
+  return usageText ? `${text} · ${usageText}` : text
 }

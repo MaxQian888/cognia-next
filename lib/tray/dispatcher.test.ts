@@ -1,10 +1,18 @@
-import { dispatchTrayClick, dispatchShortcut } from "./dispatcher"
+jest.mock("@/lib/tauri/store", () => ({
+  getPref: jest.fn(),
+  setPref: jest.fn(() => Promise.resolve()),
+}))
+
+import { dispatchTrayClick, dispatchShortcut, handleTrayUsageCommand } from "./dispatcher"
 import { registerSlashCommand, __resetSlashCommandsForTesting } from "@/lib/slash-commands/registry"
 import { registerCommand, __resetCommandRegistryForTesting } from "@/lib/plugin/commands/registry"
+import { onTrayUsageRefreshRequest } from "./usage-refresh-bus"
+import { useTrayStore, __resetTrayStoreForTesting } from "./store"
 
 afterEach(() => {
   __resetSlashCommandsForTesting()
   __resetCommandRegistryForTesting()
+  __resetTrayStoreForTesting()
 })
 
 describe("dispatchTrayClick", () => {
@@ -48,6 +56,53 @@ describe("dispatchTrayClick", () => {
     await expect(
       dispatchTrayClick({ kind: "command", commandId: "missing" })
     ).resolves.toBeUndefined()
+  })
+
+  it("swallows slash-handler failures (warning only)", async () => {
+    registerSlashCommand({
+      id: "boom",
+      name: "boom",
+      handler: () => {
+        throw new Error("kaput")
+      },
+    })
+    await expect(dispatchTrayClick({ kind: "slash", command: "boom" })).resolves.toBeUndefined()
+  })
+
+  it("swallows command-handler failures (warning only)", async () => {
+    registerCommand({
+      id: "explodes",
+      pluginId: null,
+      handler: () => {
+        throw new Error("kaput")
+      },
+    })
+    await expect(
+      dispatchTrayClick({ kind: "command", commandId: "explodes" })
+    ).resolves.toBeUndefined()
+  })
+
+  it("routes the usage-refresh command to the refresh bus, not the registry", async () => {
+    const listener = jest.fn()
+    const off = onTrayUsageRefreshRequest(listener)
+    await dispatchTrayClick({ kind: "command", commandId: "tray.usage.refresh" })
+    expect(listener).toHaveBeenCalledTimes(1)
+    off()
+  })
+
+  it("pins / unpins the displayed subscription via the select command", async () => {
+    await dispatchTrayClick({ kind: "command", commandId: "tray.usage.select:anthropic:a1" })
+    expect(useTrayStore.getState().display.usageAccountKey).toBe("anthropic:a1")
+
+    await dispatchTrayClick({ kind: "command", commandId: "tray.usage.select:" })
+    expect(useTrayStore.getState().display.usageAccountKey).toBeNull()
+  })
+})
+
+describe("handleTrayUsageCommand", () => {
+  it("declines ids outside the tray.usage namespace", () => {
+    expect(handleTrayUsageCommand("screenshot.capture")).toBe(false)
+    expect(handleTrayUsageCommand("tray.usage.unknown")).toBe(false)
   })
 })
 

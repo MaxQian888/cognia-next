@@ -63,6 +63,9 @@ struct TrayMenuStateInner {
     items: Vec<TrayMenuItem>,
     index: HashMap<String, TrayActionPayload>,
     tooltip: Option<String>,
+    /// Text next to the icon (macOS menu bar / Linux appindicator; Windows
+    /// ignores it). Used by the renderer's taskbar usage readout.
+    title: Option<String>,
 }
 
 #[cfg(desktop)]
@@ -88,6 +91,14 @@ impl TrayMenuStateStore {
     pub fn tooltip(&self) -> Option<String> {
         self.inner.lock().tooltip.clone()
     }
+
+    pub fn set_title(&self, title: Option<String>) {
+        self.inner.lock().title = title;
+    }
+
+    pub fn title(&self) -> Option<String> {
+        self.inner.lock().title.clone()
+    }
 }
 
 #[cfg(not(desktop))]
@@ -106,6 +117,10 @@ impl TrayMenuStateStore {
     }
     pub fn set_tooltip(&self, _tooltip: Option<String>) {}
     pub fn tooltip(&self) -> Option<String> {
+        None
+    }
+    pub fn set_title(&self, _title: Option<String>) {}
+    pub fn title(&self) -> Option<String> {
         None
     }
 }
@@ -354,5 +369,15 @@ mod tests {
         assert_eq!(store.tooltip().as_deref(), Some("Cognia (idle)"));
         store.set_tooltip(None);
         assert!(store.tooltip().is_none());
+    }
+
+    #[test]
+    fn title_round_trips_through_store() {
+        let store = TrayMenuStateStore::default();
+        assert!(store.title().is_none());
+        store.set_title(Some("42%".into()));
+        assert_eq!(store.title().as_deref(), Some("42%"));
+        store.set_title(None);
+        assert!(store.title().is_none());
     }
 }

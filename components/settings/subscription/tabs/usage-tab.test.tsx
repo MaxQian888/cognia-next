@@ -12,6 +12,13 @@ import type { SessionUsageRow } from "@/lib/db/session-usage"
 const isTauriMock = jest.fn(() => true)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 
+// Stub the share-card dialog — its ShareLinkDialog/html2canvas stack is
+// covered by usage-share-dialog.test.tsx and would drag stores into this
+// suite's module graph.
+jest.mock("@/components/settings/subscription/usage-share-dialog", () => ({
+  UsageShareDialog: ({ trigger }: { trigger?: React.ReactNode }) => <>{trigger}</>,
+}))
+
 const useAnthropicUsageMock = jest.fn()
 jest.mock("@/lib/subscription/anthropic/hooks", () => ({
   useAnthropicUsage: () => useAnthropicUsageMock(),
