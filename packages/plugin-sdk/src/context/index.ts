@@ -21,6 +21,7 @@ import type { PluginModalAPI as CtxPluginModalAPI } from "@/lib/plugin/api/modal
 import type { PluginChatAPI as CtxPluginChatAPI } from "@/lib/plugin/api/chat-api"
 import type { PluginCapabilitiesAPI as CtxPluginCapabilitiesAPI } from "@/lib/plugin/api/capabilities-api"
 import type { PluginConnectorsAPI as CtxPluginConnectorsAPI } from "@/lib/plugin/api/connectors-api"
+import type { PluginTeamAPI as CtxPluginTeamAPI } from "@/lib/plugin/api/team-api"
 import type { PluginGitAPI as CtxPluginGitAPI } from "@/lib/plugin/api/git-api"
 import type { PluginGoalAPI as CtxPluginGoalAPI } from "@/lib/plugin/api/goal-api"
 import type { PluginSubscriptionAPI as CtxPluginSubscriptionAPI } from "@/lib/plugin/api/subscription-api"
@@ -156,7 +157,23 @@ export type {
   PluginAdapterInstancePatch,
   PluginAdapterInstanceInput,
   PluginConnectorsA2UIBuilder,
+  PluginBoundSessionInfo,
+  PluginOutboundJobInfo,
+  SiblingConversation,
+  DispatchRuleHit,
+  AtGateDecision,
+  BootstrapConversationInput,
+  BootstrapConversationResult,
 } from "@/lib/plugin/api/connectors-api"
+export type {
+  PluginTeamAPI,
+  PluginTeamTaskCreateInput,
+  PluginTeamTaskPatch,
+  PluginTeamTeammateCreateInput,
+  PluginTeamTeammatePatch,
+  PluginTeamMoveResult,
+  PluginTeamRunStatus,
+} from "@/lib/plugin/api/team-api"
 export type {
   PluginGitAPI,
   PluginGitCommitOptions,
@@ -202,6 +219,7 @@ export type FullPluginContext = Omit<CtxPluginContext, "storage"> &
     terminal: CtxPluginTerminalAPI
     perf: CtxPluginPerfAPI
     connectors: CtxPluginConnectorsAPI
+    team: CtxPluginTeamAPI
     share: CtxPluginShareAPI
     backup: CtxPluginBackupAPI
     automation: CtxPluginAutomationAPI

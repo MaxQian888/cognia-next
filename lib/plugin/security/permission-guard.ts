@@ -159,14 +159,16 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "git:write": "Stage, commit, branch, push, stash, or discard changes in the active repository",
   "goal:read": "Read your goals and their progress",
   "goal:write": "Create, update, complete, and decompose your goals",
-  "team:read": "Read your agent teams and their task boards",
+  "team:read": "Read your agent teams, task boards, run events, and execution reports",
   "team:write":
-    "Create tasks, comment, and move cards on your agent-team boards (never starts runs)",
+    "Create/edit/assign tasks, comment, move cards, and manage non-lead teammates and team config on your agent-team boards (never starts runs)",
   "subscription:read": "Read subscription plan and usage metrics",
   "perf:read": "Read performance dashboard snapshots and the live sample stream",
-  "connectors:read": "List connector adapters and observe inbound platform events",
-  "connectors:send": "Send outbound messages through a connected platform",
-  "connectors:manage": "Create, reconfigure, enable, or delete your connected platform accounts",
+  "connectors:read":
+    "List connector adapters, bots, and conversation bindings; observe inbound platform events",
+  "connectors:send": "Send outbound messages through a connected platform (direct or queued)",
+  "connectors:manage":
+    "Create, reconfigure, enable, or delete your connected platform accounts; manage dispatch rules, chats, and contact lookups",
   "share:read": "Read your created public share links and their view stats",
   "share:create": "Create and revoke public share links (publishes data online)",
   "backup:read": "Build and read encrypted backups and the backup history",
