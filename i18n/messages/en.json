@@ -3207,6 +3207,8 @@
       "readAloud": "Read aloud",
       "regenerateLabel": "Regenerate",
       "regenerateTooltip": "Regenerate",
+      "shareCardLabel": "Share as card",
+      "shareCardTooltip": "Share as card",
       "shareDone": "Shared!",
       "shareLabel": "Share message",
       "shareTooltip": "Share",
@@ -5095,6 +5097,8 @@
     },
     "batchDescription": "Pick the sessions to bundle into a single ZIP archive.",
     "batchTitle": "Bulk export",
+    "downloadPng": "Download image (PNG)",
+    "downloadingPng": "Rendering…",
     "exportButton": "Export",
     "exporting": "Exporting…",
     "format": {
@@ -5123,9 +5127,12 @@
       "includeAllBranches": "Include all branches",
       "includeMetadata": "Include conversation info",
       "includeTimestamps": "Include timestamps",
-      "includeTokens": "Include token usage"
+      "includeTokens": "Include token usage",
+      "includeWallpaper": "Theme wallpaper"
     },
     "optionsLabel": "Options",
+    "pngError": "Failed to render the image. Try again.",
+    "pngTooLong": "This conversation is too long to render as one image — export HTML instead.",
     "singleDescription": "Export \"{title}\" to a file you can share or archive.",
     "singleTitle": "Export conversation",
     "theme": {
@@ -15574,6 +15581,12 @@
           "targetLabel": "WCAG contrast target"
         }
       },
+      "accent": {
+        "description": "Retint buttons and highlights without editing the full theme.",
+        "label": "Accent color",
+        "reset": "Reset",
+        "usingTheme": "Using theme accent"
+      },
       "advanced": {
         "description": "Inject your own CSS into the app. Remote @import / url(http) statements are stripped on save. Use carefully — bad CSS can hide UI elements.",
         "enabledLabel": "Enable custom CSS",
@@ -21442,6 +21455,7 @@
         "chat-html": "Conversation (HTML)",
         "chat-json": "Conversation (JSON)",
         "chat-md": "Conversation (Markdown)",
+        "chat-quote": "Message card",
         "chat-text": "Conversation (text)",
         "discover-item": "Discover item",
         "usage-card": "Usage card",
@@ -21451,8 +21465,10 @@
       "open": "Open",
       "passphraseBadge": "Passphrase",
       "revoke": "Revoke",
+      "statsError": "Could not load view stats.",
       "title": "My shared links",
-      "views": "{count} views"
+      "views": "{count} views",
+      "viewsAction": "Check views"
     },
     "notConfiguredBody": "Set your share worker URL and upload secret first.",
     "notConfiguredCta": "Open settings",
@@ -21461,6 +21477,18 @@
     "passphraseHelp": "Recipients must enter this to open the link.",
     "passphraseLabel": "Extra passphrase (optional)",
     "passphrasePlaceholder": "Shared separately, never in the link",
+    "quoteCard": {
+      "cardTitle": "Cognia message card",
+      "description": "Turn this message into a shareable card — download it as an image or publish an encrypted link.",
+      "downloadPng": "Download PNG",
+      "downloading": "Rendering…",
+      "pngError": "Failed to render the image. Try again.",
+      "previewTitle": "Card preview",
+      "shareLink": "Share via link",
+      "styleLabel": "Style",
+      "title": "Share as card",
+      "wallpaperLabel": "Theme wallpaper"
+    },
     "revoke": "Revoke",
     "revoked": "Link revoked",
     "revoking": "Revoking…",
@@ -21479,6 +21507,11 @@
       "urlPlaceholder": "https://share.example.com"
     },
     "shareAction": "Share via link",
+    "themeGallery": {
+      "label": "Style",
+      "selected": "Selected",
+      "wallpaperBadge": "Includes wallpaper"
+    },
     "ttl": {
       "d7": "In 7 days",
       "h1": "In 1 hour",
@@ -21492,7 +21525,11 @@
       "appTitle": "Shared app",
       "backupBody": "This is a cognia backup package. Download it, then import it from Settings → Data.",
       "backupTitle": "Shared backup",
+      "brand": "Cognia",
       "conversationTitle": "Shared conversation",
+      "copyImage": "Copy image",
+      "copyImageDone": "Copied",
+      "createYourOwn": "Make your own with Cognia",
       "discoverItem": {
         "content": "Skill instructions",
         "invalid": "This shared item could not be loaded.",
@@ -21514,6 +21551,7 @@
         "templateNote": "This describes the template's inputs; the generated workflow is built in the app."
       },
       "download": "Download",
+      "downloadImage": "Download image",
       "error": {
         "integrity": "This share failed its integrity check.",
         "invalidKey": "This link is invalid or its key is wrong.",
@@ -22957,7 +22995,8 @@
         "previewTitle": "Card preview",
         "shareLink": "Share via link",
         "styleLabel": "Style",
-        "title": "Share usage card"
+        "title": "Share usage card",
+        "wallpaperLabel": "Theme wallpaper"
       },
       "surface": {
         "agentTeam": "Agent Team",

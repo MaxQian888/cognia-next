@@ -3207,6 +3207,8 @@
       "readAloud": "朗读",
       "regenerateLabel": "重新生成",
       "regenerateTooltip": "重新生成",
+      "shareCardLabel": "分享为卡片",
+      "shareCardTooltip": "分享为卡片",
       "shareDone": "已分享！",
       "shareLabel": "分享消息",
       "shareTooltip": "分享",
@@ -5095,6 +5097,8 @@
     },
     "batchDescription": "选择要打包到一个 ZIP 中的会话。",
     "batchTitle": "批量导出",
+    "downloadPng": "下载图片（PNG）",
+    "downloadingPng": "渲染中…",
     "exportButton": "导出",
     "exporting": "导出中…",
     "format": {
@@ -5123,9 +5127,12 @@
       "includeAllBranches": "包含所有分支",
       "includeMetadata": "包含会话信息",
       "includeTimestamps": "包含时间戳",
-      "includeTokens": "包含令牌用量"
+      "includeTokens": "包含令牌用量",
+      "includeWallpaper": "主题壁纸"
     },
     "optionsLabel": "选项",
+    "pngError": "图片渲染失败，请重试。",
+    "pngTooLong": "此会话过长，无法渲染为单张图片——请改用 HTML 导出。",
     "singleDescription": "将“{title}”导出为可分享或归档的文件。",
     "singleTitle": "导出会话",
     "theme": {
@@ -15574,6 +15581,12 @@
           "targetLabel": "WCAG 对比度目标"
         }
       },
+      "accent": {
+        "description": "无需编辑完整主题即可为按钮与高亮重新着色。",
+        "label": "强调色",
+        "reset": "重置",
+        "usingTheme": "使用主题强调色"
+      },
       "advanced": {
         "description": "向应用注入自定义 CSS。保存时会移除远程 @import / url(http)。错误的 CSS 可能让界面显示异常，请谨慎使用。",
         "enabledLabel": "启用自定义 CSS",
@@ -21442,6 +21455,7 @@
         "chat-html": "对话（HTML）",
         "chat-json": "对话（JSON）",
         "chat-md": "对话（Markdown）",
+        "chat-quote": "消息卡片",
         "chat-text": "对话（文本）",
         "discover-item": "发现条目",
         "usage-card": "使用量卡片",
@@ -21451,8 +21465,10 @@
       "open": "打开",
       "passphraseBadge": "口令保护",
       "revoke": "撤销",
+      "statsError": "无法加载查看统计。",
       "title": "我的分享链接",
-      "views": "{count} 次查看"
+      "views": "{count} 次查看",
+      "viewsAction": "查看次数"
     },
     "notConfiguredBody": "请先设置分享 worker 地址和上传密钥。",
     "notConfiguredCta": "打开设置",
@@ -21461,6 +21477,18 @@
     "passphraseHelp": "对方需输入此口令才能打开链接。",
     "passphraseLabel": "额外口令（可选）",
     "passphrasePlaceholder": "单独告知对方，不会出现在链接里",
+    "quoteCard": {
+      "cardTitle": "Cognia 消息卡片",
+      "description": "把这条消息生成可分享卡片，可下载为图片或发布加密链接。",
+      "downloadPng": "下载 PNG",
+      "downloading": "渲染中…",
+      "pngError": "图片渲染失败，请重试。",
+      "previewTitle": "卡片预览",
+      "shareLink": "以链接分享",
+      "styleLabel": "风格",
+      "title": "分享为卡片",
+      "wallpaperLabel": "主题壁纸"
+    },
     "revoke": "撤销",
     "revoked": "链接已撤销",
     "revoking": "撤销中…",
@@ -21479,6 +21507,11 @@
       "urlPlaceholder": "https://share.example.com"
     },
     "shareAction": "生成分享链接",
+    "themeGallery": {
+      "label": "样式",
+      "selected": "已选择",
+      "wallpaperBadge": "含壁纸"
+    },
     "ttl": {
       "d7": "7 天后",
       "h1": "1 小时后",
@@ -21492,7 +21525,11 @@
       "appTitle": "分享的应用",
       "backupBody": "这是一个 cognia 备份包。下载后从「设置 → 数据」导入。",
       "backupTitle": "分享的备份",
+      "brand": "Cognia",
       "conversationTitle": "分享的对话",
+      "copyImage": "复制图片",
+      "copyImageDone": "已复制",
+      "createYourOwn": "用 Cognia 创建你自己的",
       "discoverItem": {
         "content": "技能说明",
         "invalid": "无法加载此分享条目。",
@@ -21514,6 +21551,7 @@
         "templateNote": "此处描述模板的输入项；生成的工作流在应用内构建。"
       },
       "download": "下载",
+      "downloadImage": "下载图片",
       "error": {
         "integrity": "此分享未通过完整性校验。",
         "invalidKey": "此链接无效，或密钥不正确。",
@@ -22957,7 +22995,8 @@
         "previewTitle": "卡片预览",
         "shareLink": "以链接分享",
         "styleLabel": "风格",
-        "title": "分享使用量卡片"
+        "title": "分享使用量卡片",
+        "wallpaperLabel": "主题壁纸"
       },
       "surface": {
         "agentTeam": "智能体团队",
