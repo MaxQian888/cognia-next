@@ -38,6 +38,25 @@ on:
       - "services/signaling-server/Dockerfile"
       - "services/share-server/Dockerfile"
       - ".github/workflows/images.yml"
+      # cognia-server compile inputs: the `check` stage COPYs these, so a PR
+      # touching them can break the image build without touching any
+      # Dockerfile (this exact gap shipped a broken tauri.conf.json resource
+      # once — sidecar/webclone/* landed unvalidated).
+      - "src-tauri/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "services/signaling-server/core/**"
+      - "plugins/computer-use/rust/**"
+      - "sidecar/package.json"
+      - "sidecar/*.mjs"
+      - "sidecar/vscode-ext-host/package.json"
+      - "sidecar/webclone/package.json"
+      - "hooks/builtin/**"
+      - "docs/api/*.openapi.yaml"
+      - "lib/browser/overlay.injected.js"
+      - "cli/src/serve/fixtures/**"
 
 concurrency:
   group: images-${{ github.ref }}

@@ -19,9 +19,11 @@ spec:
       containers:
         - name: cognia-server
           image: ghcr.io/maxqian888/cognia-server:latest-full
-          args: ["serve", "--port", "7890"]
+          # 27890 tracks companion_api::server::DEFAULT_PORT (7890 is the
+          # Clash mixed-port default). Keep args/probe/Service in sync.
+          args: ["serve", "--port", "27890"]
           ports:
-            - containerPort: 7890
+            - containerPort: 27890
               name: https
           env:
             - name: COGNIA_DATA_DIR
@@ -31,29 +33,60 @@ spec:
                 secretKeyRef:
                   name: cognia-secrets
                   key: COGNIA_MASTER_KEY
+            # REQUIRED (not optional): `cognia-server pair` run via kubectl
+            # exec falls back to https://127.0.0.1:<DEFAULT_PORT> when unset,
+            # which is never reachable from a paired device — every tenant
+            # must provide its public URL in the cognia-config ConfigMap.
             - name: COGNIA_PUBLIC_URL
               valueFrom:
                 configMapKeyRef:
                   name: cognia-config
                   key: publicUrl
-                  optional: true
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: cognia-secrets
                   key: ANTHROPIC_API_KEY
                   optional: true
+            # ── OIDC / Logto (ADR-0059 multi-user) — optional; OIDC turns on
+            # only when BOTH issuer and audience are set. The k8s topology is
+            # the multi-tenant rung, so wire these per tenant (see
+            # deploy/compose/LOGTO.md for the seed flow + issuer footgun).
+            - name: COGNIA_LOGTO_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: logtoIssuer
+                  optional: true
+            - name: COGNIA_LOGTO_AUDIENCE
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: logtoAudience
+                  optional: true
+            - name: COGNIA_LOGTO_REQUIRED_SCOPES
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: logtoRequiredScopes
+                  optional: true
+            - name: COGNIA_LOGTO_JWKS_TTL_SECS
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: logtoJwksTtlSecs
+                  optional: true
           readinessProbe:
             httpGet:
               path: /api/v1/healthz
-              port: 7890
+              port: 27890
               scheme: HTTPS
             initialDelaySeconds: 15
             periodSeconds: 15
           livenessProbe:
             httpGet:
               path: /api/v1/healthz
-              port: 7890
+              port: 27890
               scheme: HTTPS
             initialDelaySeconds: 60
             periodSeconds: 30
@@ -84,6 +117,6 @@ spec:
   selector:
     app: cognia-server
   ports:
-    - port: 7890
-      targetPort: 7890
+    - port: 27890
+      targetPort: 27890
       name: https

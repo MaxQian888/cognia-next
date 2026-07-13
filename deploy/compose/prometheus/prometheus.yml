@@ -22,4 +22,4 @@ scrape_configs:
       # network.
       insecure_skip_verify: true
     static_configs:
-      - targets: ["cognia-server:7890"]
+      - targets: ["cognia-server:27890"]

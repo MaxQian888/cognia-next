@@ -2,7 +2,7 @@
 #
 # Profiles carry the phase ladder — one file, no drift:
 #   (none)         signaling + share            → P0.4 tier-1 smoke
-#   server         + cognia-server (headless)   → W6 tier-2 smoke
+#   server         + cognia-server (headless, :27890)  → W6 tier-2 smoke
 #   tls            + Caddy ACME front door       → F2 tier-3 smoke
 #   observability  + Prometheus                  → D9
 #   logto          + Logto IdP (core+pg+redis)   → ADR-0059 multi-user OIDC auth
@@ -72,7 +72,7 @@ services:
       # missing, so an empty default is safe.
       COGNIA_MASTER_KEY: ${COGNIA_MASTER_KEY:-}
       # Public URL stamped into the pair payload; overridden by Caddy domain in the tls profile.
-      COGNIA_PUBLIC_URL: ${COGNIA_PUBLIC_URL:-https://127.0.0.1:7890}
+      COGNIA_PUBLIC_URL: ${COGNIA_PUBLIC_URL:-https://127.0.0.1:27890}
       # Provider creds for the sidecar chat turn (optional — smoke SKIPs the chat step without them).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Admit the smoke's stub ACP agent through SpawnPolicy (R11). Leave unset in production.
@@ -91,14 +91,16 @@ services:
     volumes:
       - cognia_data:/data
     ports:
-      # Published for Capacitor direct-connect (fingerprint-pinned). Browsers go through Caddy.
-      - "7890:7890"
+      # Published for Capacitor direct-connect (fingerprint-pinned). Browsers go
+      # through Caddy. 27890 tracks the companion DEFAULT_PORT — 7890 is the
+      # Clash mixed-port default and fails to bind on hosts running a proxy.
+      - "27890:27890"
     security_opt:
       # Tuned profile lets bwrap (ADR-0028 sandbox) create user namespaces in a
       # stock container. On AppArmor hosts (Ubuntu) also add: apparmor=unconfined.
       - seccomp=./seccomp/cognia-userns.json
     healthcheck:
-      test: ["CMD", "curl", "-kfsS", "https://localhost:7890/api/v1/healthz"]
+      test: ["CMD", "curl", "-kfsS", "https://localhost:27890/api/v1/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3

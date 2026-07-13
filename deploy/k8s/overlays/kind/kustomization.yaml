@@ -11,5 +11,11 @@ secretGenerator:
     literals:
       - COGNIA_MASTER_KEY=0000000000000000000000000000000000000000000000000000000000000001
       - SHARE_UPLOAD_SECRET=kind-smoke-secret
+configMapGenerator:
+  - name: cognia-config
+    literals:
+      # Matches the `kubectl port-forward svc/cognia-server 27890:27890`
+      # smoke recipe in deploy/k8s/README.md.
+      - publicUrl=https://127.0.0.1:27890
 generatorOptions:
   disableNameSuffixHash: true

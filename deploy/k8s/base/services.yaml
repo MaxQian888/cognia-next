@@ -21,6 +21,14 @@ spec:
           env:
             - name: PORT
               value: "7892"
+            # Comma-separated WebSocket Origin allowlist; unset allows all
+            # (same knob the compose suite exposes).
+            - name: SIGNALING_ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: signalingAllowedOrigins
+                  optional: true
           readinessProbe:
             httpGet:
               path: /healthz

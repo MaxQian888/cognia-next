@@ -13,6 +13,10 @@ out
 .next
 **/.next
 docs/.source
+# docs static export (hundreds of MB) — `out` above only matches the root.
+# Keep this a precise path: **/out would swallow the vscode-extension
+# template's out/extension.js, an include_str! target.
+docs/out
 target
 **/target
 cli/dist

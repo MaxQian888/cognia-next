@@ -11,18 +11,33 @@ tenant-template/  # per-tenant overlay — copy, set NAMESPACE + secrets, apply
 overlays/kind/    # local kind smoke (no sandboxed runtime, 1 replica)
 ```
 
+cognia-server serves HTTPS on **27890** (tracks the companion
+`DEFAULT_PORT`; 7890 is the Clash proxy default).
+
 ## Quick start (kind)
 
 ```bash
 kind create cluster --name cognia
 kustomize build deploy/k8s/overlays/kind | kubectl apply -f -
 kubectl -n cognia-kind wait --for=condition=ready pod -l app=cognia-server --timeout=300s
-kubectl -n cognia-kind port-forward svc/cognia-server 7890:7890
-node scripts/smoke/compose-smoke.mjs --tier server   # COGNIA_SERVER_URL=https://localhost:7890
+kubectl -n cognia-kind port-forward svc/cognia-server 27890:27890 &
+kubectl -n cognia-kind port-forward svc/signaling 7892:7892 &
+kubectl -n cognia-kind port-forward svc/share 8787:8787 &
+
+# Tier-2 smoke: COGNIA_SMOKE_EXEC reroutes the loopback-only steps
+# (pair, service token) from `docker compose exec` to `kubectl exec`.
+SHARE_UPLOAD_SECRET=kind-smoke-secret \
+COGNIA_SERVER_URL=https://localhost:27890 \
+COGNIA_SMOKE_EXEC="kubectl -n cognia-kind exec -i cognia-server-0 --" \
+  node scripts/smoke/compose-smoke.mjs --tier server
 ```
 
 ## Production notes (docs-only in D9)
 
+- **Public URL is mandatory**: the base wires `COGNIA_PUBLIC_URL` from the
+  `cognia-config` ConfigMap key `publicUrl` (kustomize `configMapGenerator`
+  in every overlay). `cognia-server pair` embeds it in the `cgnp2` payload;
+  leaving it unset used to advertise an unreachable loopback default.
 - **Sandboxed runtime**: apply `cluster/runtimeclass-gvisor.yaml` (or kata)
   and set `runtimeClassName: gvisor` on the cognia-server pod spec via the
   tenant overlay. Requires containerd + runsc on the nodes — see the gVisor
@@ -30,10 +45,16 @@ node scripts/smoke/compose-smoke.mjs --tier server   # COGNIA_SERVER_URL=https:/
 - **TLS/ACME**: terminate at your ingress controller (cert-manager +
   ingress-nginx or Caddy ingress), re-proxying to the cognia-server Service
   over its self-signed HTTPS exactly like `deploy/compose/Caddyfile` does.
+- **Multi-user auth (Logto)**: the T3 topology is the multi-tenant rung —
+  wire OIDC per tenant via the `cognia-config` keys `logtoIssuer` +
+  `logtoAudience` (+ optional `logtoRequiredScopes`, `logtoJwksTtlSecs`).
+  Both issuer AND audience must be set to turn OIDC on. Seed flow and the
+  issuer-consistency footgun: `deploy/compose/LOGTO.md`.
 - **Master key**: each tenant needs a `cognia-secrets` Secret with
   `COGNIA_MASTER_KEY` (64 hex). Rotation: `kubectl exec ... -- cognia-server
 rotate-master-key --new-key ...`, then update the Secret.
-- **Runners (T2-in-T3)**: `ExecBackend::Container` targets the Docker API;
-  on k8s the equivalent is the pods-create/exec Role in
-  `base/cognia-server-rbac.yaml` — the container backend's k8s flavor is
-  tracked with R13 follow-ups.
+- **Runners (T2-in-T3)**: `ExecBackend::Container` targets the Docker API
+  only (bollard) — there is **no k8s exec backend yet**. The pods-create/exec
+  Role in `base/cognia-server-rbac.yaml` is pre-provisioned but deliberately
+  NOT attached to the pod (no `serviceAccountName`); attach it in the same
+  change that lands the k8s backend (R13 follow-up).

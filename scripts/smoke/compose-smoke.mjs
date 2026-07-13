@@ -18,12 +18,20 @@
  *   SIGNALING_URL   default http://localhost:7892
  *   SHARE_URL       default http://localhost:8787
  *   SHARE_UPLOAD_SECRET   required for the share write/delete roundtrip
+ *   COGNIA_SERVER_URL     default https://localhost:27890
+ *   COMPOSE_FILE_PATH     compose file for in-container exec (resolved
+ *                         against the repo root, so cwd doesn't matter)
+ *   COGNIA_SMOKE_EXEC     override the in-container exec prefix entirely —
+ *                         lets tier 2 run on k8s, e.g.
+ *                         COGNIA_SMOKE_EXEC="kubectl -n cognia-kind exec -i cognia-server-0 --"
  */
 
 import process from "node:process"
 import { execFile as execFileCb } from "node:child_process"
 import { promisify } from "node:util"
 import { setTimeout as delay } from "node:timers/promises"
+import { fileURLToPath } from "node:url"
+import path from "node:path"
 
 const execFile = promisify(execFileCb)
 
@@ -207,16 +215,39 @@ async function tierServices() {
 // curl) because service tokens are loopback-gated by design.
 // ---------------------------------------------------------------------------
 
-const SERVER_URL = process.env.COGNIA_SERVER_URL ?? "https://localhost:7890"
-const COMPOSE_FILE = process.env.COMPOSE_FILE_PATH ?? "deploy/compose/docker-compose.yml"
+const SERVER_URL = process.env.COGNIA_SERVER_URL ?? "https://localhost:27890"
+// Resolve the compose file against the repo root (this file lives at
+// scripts/smoke/), so tiers 2/3 work from any cwd.
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
+const COMPOSE_FILE = path.resolve(
+  REPO_ROOT,
+  process.env.COMPOSE_FILE_PATH ?? "deploy/compose/docker-compose.yml"
+)
 
-/** `docker compose exec -T cognia-server <argv…>` → stdout. */
+/**
+ * Run a command INSIDE the cognia-server container → stdout.
+ * Default transport is `docker compose exec`; COGNIA_SMOKE_EXEC swaps the
+ * whole prefix so the same tier runs on k8s (kubectl exec) or anything else
+ * that can reach the container's loopback.
+ */
 async function composeExec(argv, { timeoutMs = 60_000 } = {}) {
-  const { stdout } = await execFile(
-    "docker",
-    ["compose", "-f", COMPOSE_FILE, "--profile", "server", "exec", "-T", "cognia-server", ...argv],
-    { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }
-  )
+  const prefix = process.env.COGNIA_SMOKE_EXEC
+    ? process.env.COGNIA_SMOKE_EXEC.split(/\s+/).filter(Boolean)
+    : [
+        "docker",
+        "compose",
+        "-f",
+        COMPOSE_FILE,
+        "--profile",
+        "server",
+        "exec",
+        "-T",
+        "cognia-server",
+      ]
+  const { stdout } = await execFile(prefix[0], [...prefix.slice(1), ...argv], {
+    timeout: timeoutMs,
+    maxBuffer: 4 * 1024 * 1024,
+  })
   return stdout
 }
 
@@ -238,7 +269,7 @@ async function containerRpc(name, args, token) {
     "-sk",
     "-X",
     "POST",
-    `https://127.0.0.1:7890/api/v1/_rpc/${name}`,
+    `https://127.0.0.1:27890/api/v1/_rpc/${name}`,
     "-H",
     `Authorization: Bearer ${token}`,
     "-H",

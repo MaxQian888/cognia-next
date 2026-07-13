@@ -17,7 +17,7 @@
 ##
 ## Usage:
 ##   docker build -f Dockerfile.cognia-server --target runtime-slim -t cognia-server .
-##   docker run --rm -v $HOME/cognia-data:/data -p 7890:7890 cognia-server
+##   docker run --rm -v $HOME/cognia-data:/data -p 27890:27890 cognia-server
 ##
 ## The container expects `/data` to be a writable volume so the SQLite store,
 ## the secret store, and the self-signed TLS cert persist across restarts.
@@ -77,11 +77,12 @@ COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-f
 COPY docs/api/mobile-companion-api.openapi.yaml docs/api/remote-control.openapi.yaml ./docs/api/
 COPY sidecar/claude-host.mjs sidecar/a2ui-mcp.mjs sidecar/mcp-oauth-helper.mjs sidecar/package.json ./sidecar/
 COPY sidecar/vscode-ext-host/package.json ./sidecar/vscode-ext-host/package.json
+COPY sidecar/webclone/package.json ./sidecar/webclone/package.json
 COPY hooks/builtin ./hooks/builtin
 # tauri-build also requires each resource GLOB to match >=1 file; the real
 # trees are desktop bundle content the headless bin never reads.
-RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder
-RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt
+RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder sidecar/webclone/dist sidecar/webclone/node_modules/cognia-placeholder
+RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/webclone/dist/keep.txt && echo placeholder > sidecar/webclone/node_modules/cognia-placeholder/keep.txt
 # container-exec (R13): the headless image ships the bollard-backed
 # ExecBackend::Container so COGNIA_EXEC_BACKEND=container works at T2.
 RUN cargo build --release --locked --bin cognia-server --features container-exec
@@ -101,11 +102,12 @@ COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-f
 COPY docs/api/mobile-companion-api.openapi.yaml docs/api/remote-control.openapi.yaml ./docs/api/
 COPY sidecar/claude-host.mjs sidecar/a2ui-mcp.mjs sidecar/mcp-oauth-helper.mjs sidecar/package.json ./sidecar/
 COPY sidecar/vscode-ext-host/package.json ./sidecar/vscode-ext-host/package.json
+COPY sidecar/webclone/package.json ./sidecar/webclone/package.json
 COPY hooks/builtin ./hooks/builtin
 # tauri-build also requires each resource GLOB to match >=1 file; the real
 # trees are desktop bundle content the headless bin never reads.
-RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder
-RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt
+RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder sidecar/webclone/dist sidecar/webclone/node_modules/cognia-placeholder
+RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/webclone/dist/keep.txt && echo placeholder > sidecar/webclone/node_modules/cognia-placeholder/keep.txt
 RUN cargo check --release --locked --bin cognia-server --features container-exec
 
 # ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
@@ -156,10 +158,12 @@ ENV COGNIA_DATA_DIR=/data \
     COGNIA_BRAIN_ENTRY=/app/brain/cli.mjs \
     COGNIA_SIDECAR_SCRIPT=/app/brain/sidecar/claude-host.mjs
 VOLUME /data
-EXPOSE 7890
+# 27890 tracks companion_api::server::DEFAULT_PORT — 7890/7891 are the Clash
+# mixed/SOCKS defaults and collide with a proxy on most dev hosts.
+EXPOSE 27890
 
 ENTRYPOINT ["/usr/local/bin/cognia-server"]
-CMD ["serve", "--port", "7890"]
+CMD ["serve", "--port", "27890"]
 
 # ── Runtime: full (external agent CLIs preinstalled + git) ──────────────────
 FROM runtime-slim AS runtime-full

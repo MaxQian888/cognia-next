@@ -23,11 +23,11 @@
 #   ACME_EMAIL     optional; add an `email` global option if you want
 #                  Let's Encrypt expiry mail.
 #
-# WebSocket upgrades (/ws/v1/events, /ws/v1/bridge, /ws/v1/terminal) are
-# proxied natively by reverse_proxy — no extra config.
+# WebSocket upgrades (/ws/v1/events, /ws/v1/bridge, /ws/v1/terminal,
+# /ws/v1/acp) are proxied natively by reverse_proxy — no extra config.
 
 {$COGNIA_DOMAIN:localhost} {
-	reverse_proxy https://cognia-server:7890 {
+	reverse_proxy https://cognia-server:27890 {
 		transport http {
 			tls
 			tls_trust_pool file /cognia-data/cognia/companion/tls.pem

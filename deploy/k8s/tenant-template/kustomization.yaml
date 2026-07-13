@@ -4,12 +4,25 @@
 #        --from-literal=COGNIA_MASTER_KEY=<64hex> \
 #        --from-literal=SHARE_UPLOAD_SECRET=<random> \
 #        [--from-literal=ANTHROPIC_API_KEY=...]
-#   3. (production) uncomment the gvisor patch below
+#   3. set `publicUrl` below to the tenant's ingress URL (REQUIRED — pair
+#      payloads advertise it; a wrong value produces dead cgnp2 payloads)
+#   4. (multi-user) add the Logto wiring: logtoIssuer + logtoAudience turn
+#      OIDC on (see deploy/compose/LOGTO.md for seeding + the issuer footgun)
+#   5. (production) uncomment the gvisor patch below
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: cognia-tenant-CHANGE-ME
 resources:
   - ../base
+configMapGenerator:
+  - name: cognia-config
+    literals:
+      - publicUrl=https://cognia-CHANGE-ME.example.com
+      # - logtoIssuer=https://logto.example.com/oidc
+      # - logtoAudience=https://cognia-CHANGE-ME.example.com/api
+      # - logtoRequiredScopes=brain:rpc
+generatorOptions:
+  disableNameSuffixHash: true
 # patches:
 #   - target:
 #       kind: StatefulSet

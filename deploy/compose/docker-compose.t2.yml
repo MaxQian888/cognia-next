@@ -6,10 +6,14 @@
 # cognia-server + the brain stay in the main container (the bridge couples
 # them tightly); external agents move to per-workspace cognia-runner
 # containers spawned via ExecBackend::Container (R13, feature
-# `container-exec`). The backend talks to Docker through a locked-down
-# socket proxy — never the raw socket: only container lifecycle + exec are
-# reachable, so a compromised server process cannot mount the host or
-# escalate via the Docker API surface.
+# `container-exec`). The backend creates ONE runner container per agent —
+# the agent binary is the container's PID 1, attached over stdio; there is
+# no warm pool and no `docker exec` (see external_agent/container_backend.rs).
+#
+# The backend talks to Docker through a locked-down socket proxy — never the
+# raw socket: only container lifecycle + image pull are reachable, so a
+# compromised server process cannot mount the host or escalate via the
+# Docker API surface.
 
 services:
   docker-socket-proxy:
@@ -17,10 +21,12 @@ services:
     image: tecnativa/docker-socket-proxy:0.3
     environment:
       # Default-deny; allow exactly what ExecBackend::Container needs.
-      CONTAINERS: "1" # create/inspect/start/stop
-      EXEC: "1" # exec agent processes into runners
+      CONTAINERS: "1" # create/attach/start/wait/kill/remove runners
+      IMAGES: "1" # auto-pull the runner image on first spawn
       POST: "1" # mutating verbs for the two above
-      IMAGES: "1" # resolve the runner image
+      # Exec stays denied: the backend never uses the exec API (one
+      # container per agent, agent as PID 1 — not exec-into-warm-runner).
+      EXEC: "0"
       # Everything else (volumes, networks, swarm, host info) stays denied.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -34,10 +40,19 @@ services:
       COGNIA_EXEC_BACKEND: container
       COGNIA_RUNNER_IMAGE: ${COGNIA_RUNNER_IMAGE:-ghcr.io/maxqian888/cognia-runner:latest}
       DOCKER_HOST: tcp://docker-socket-proxy:2375
-      # Workspaces live on a named volume shared with the runners.
+      # Workspaces live on a named volume shared with the runners. BOTH vars
+      # matter: COGNIA_WORKSPACES_DIR is where cognia-server sees the tree;
+      # COGNIA_WORKSPACES_VOLUME tells the backend to mount runner workspaces
+      # as subpaths of that VOLUME (volume + subpath) instead of bind-mounting
+      # a host path — the /workspaces path only exists inside this container,
+      # so a host bind would hand every runner an empty directory.
       COGNIA_WORKSPACES_DIR: /workspaces
+      COGNIA_WORKSPACES_VOLUME: cognia_workspaces
     volumes:
       - cognia_workspaces:/workspaces
 
 volumes:
   cognia_workspaces:
+    # Fixed name so COGNIA_WORKSPACES_VOLUME above matches regardless of the
+    # compose project name (`name: cognia` would otherwise prefix it).
+    name: cognia_workspaces
