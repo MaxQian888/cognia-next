@@ -15,7 +15,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::remote_control::server::known_targets;
+    use crate::server::known_targets;
     use std::collections::HashSet;
 
     fn read_spec() -> String {

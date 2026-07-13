@@ -56,7 +56,10 @@ mod pet_window;
 pub use cognia_plugin_runtime as plugin_api;
 mod plugins;
 mod proxy_config;
-mod remote_control;
+// ADR-0067 follow-up — extracted to `crates/cognia-remote-control`;
+// re-aliased so `crate::remote_control::…` (gateway, generate_handler!)
+// resolves unchanged.
+pub use cognia_remote_control as remote_control;
 pub use cognia_automation::sandbox;
 // ADR-0067 Phase 6 — scheduler/workflow/timing extracted to the
 // cognia-scheduling cluster; re-aliased so all three module paths resolve.

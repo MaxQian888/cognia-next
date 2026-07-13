@@ -47,6 +47,7 @@ members = [
   # ADR-0067 follow-up — remaining subsystem leaves.
   "crates/cognia-skills",
   "crates/cognia-tts",
+  "crates/cognia-remote-control",
 ]
 exclude = [
   "services/signaling-server",

@@ -96,7 +96,7 @@ pub async fn remote_control_query_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::remote_control::types::RemoteControlConfig;
+    use crate::types::RemoteControlConfig;
 
     #[tokio::test]
     async fn update_config_round_trips() {

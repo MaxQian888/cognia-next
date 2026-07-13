@@ -4,9 +4,9 @@
 //! Service namespace `"com.cognia.remote-control"`, fixed account names, no
 //! key rotation beyond "set / clear / read". Every read tolerates a missing
 //! entry so callers can use the helper as a get-or-default. Backed by
-//! [`crate::secret_store`] (single OS-keyring master key).
+//! [`cognia_secrets::secret_store`] (single OS-keyring master key).
 
-use crate::secret_store;
+use cognia_secrets::secret_store;
 
 const SERVICE: &str = "com.cognia.remote-control";
 const TOKEN_ACCOUNT: &str = "inbound-token";

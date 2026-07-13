@@ -91,6 +91,9 @@ cognia-plugin-runtime = { path = "../crates/cognia-plugin-runtime" }
 cognia-skills = { path = "../crates/cognia-skills" }
 # ADR-0067 follow-up — TTS subsystem. Re-aliased as `crate::tts`.
 cognia-tts = { path = "../crates/cognia-tts" }
+# ADR-0067 follow-up — remote-control LAN API. Re-aliased as
+# `crate::remote_control`.
+cognia-remote-control = { path = "../crates/cognia-remote-control" }
 # ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
 # uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/
@@ -175,6 +178,11 @@ parking_lot = "0.12"
 # ADR-0059 R13 — Docker API client for ExecBackend::Container. Optional:
 # compiled only under the `container-exec` feature (headless server image).
 bollard = { version = "0.20", optional = true }
+# ADR-0059 R13 (T3) — Kubernetes client for the k8s flavor of the container
+# exec backend (runner Pods instead of Docker containers). Optional: only the
+# headless `cognia-server` image enables it via the `k8s-exec` feature.
+kube = { version = "4", default-features = false, features = ["client", "ws", "runtime", "rustls-tls"], optional = true }
+k8s-openapi = { version = "0.28", features = ["v1_32"], optional = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 matrix-sdk-crypto = { version = "0.18.0", default-features = false }
 matrix-sdk-sqlite = { version = "0.18.0", default-features = false, features = ["crypto-store", "bundled"] }
@@ -496,6 +504,10 @@ ocr-paddle = ["cognia-ocr/ocr-paddle"]
 # (T2 topology). Off desktop builds: only the headless `cognia-server` image
 # enables it, so the Docker client never enters the Tauri binary.
 container-exec = ["dep:bollard"]
+# ADR-0059 R13 (T3) — kubernetes flavor of the exec backend: runner Pods with
+# attached stdio, PVC-subPath workspace mounts. In-cluster only; enabled in
+# the headless image alongside `container-exec`.
+k8s-exec = ["dep:kube", "dep:k8s-openapi"]
 # Native PDF parsing with bounding boxes via `liteparse` (PDFium). Needs
 # network at build time (pdfium-sys downloads a prebuilt PDFium); the
 # PDFium dynamic library must ship next to the executable — see
