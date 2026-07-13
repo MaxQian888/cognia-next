@@ -76,7 +76,7 @@ const STALE_TEAM_STATUSES = new Set(["planning", "executing", "paused"])
  * short-circuits when the persisted version already equals `PERSIST_VERSION`.
  */
 export function resetStaleTeamStatuses(
-  teams: Record<string, { status?: string } & Record<string, unknown>> | undefined
+  teams: Record<string, { status?: string }> | undefined
 ): void {
   if (!teams || typeof teams !== "object") return
   for (const team of Object.values(teams)) {
@@ -247,7 +247,7 @@ export function activateAgentTeamAccountStorage(accountId: string): void {
   // This read path bypasses `migrate` / `onRehydrateStorage`, so reset stale
   // statuses here too — an account switch must not surface a phantom run.
   const restored = readAgentTeamPersistedState(storageKey)
-  resetStaleTeamStatuses(restored.teams as Parameters<typeof resetStaleTeamStatuses>[0])
+  resetStaleTeamStatuses(restored.teams)
   useAgentTeamStore.setState({
     ...initialState,
     ...restored,
