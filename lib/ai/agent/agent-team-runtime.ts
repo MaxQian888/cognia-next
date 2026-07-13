@@ -389,10 +389,32 @@ export async function runTeamLifecycle(
           feedback,
           signal: ac.signal,
         })
+        // Publish the plan before waiting: the workspace PlanApprovalPanel
+        // renders (and enables Approve/Reject) only while the lead is
+        // `awaiting_approval` with a non-empty `proposedPlan`, and the
+        // pending-gates modal needs the `openApproval` push — without both
+        // producers this gate waits on a decision no UI can ever emit (the
+        // same hang the capability-audit comment above records).
+        deps.storeWriter.updateTeammate(lead.id, {
+          status: "awaiting_approval",
+          proposedPlan: planResult.planText,
+        })
+        notifier.notify({
+          level: "critical",
+          title: "Plan awaiting approval",
+          body: "The lead proposed a plan. Approve to start the run, or reject with feedback for another revision.",
+          runId,
+          teamId,
+          openApproval: { scope: "agent-team", id: teamId },
+          dedupeKey: `plan-approval:${runId}:${i}`,
+        })
         const decision = await waitForDecision(
           { scope: "agent-team", id: teamId },
           ac.signal
         ).catch(() => ({ outcome: "reject" as const, feedback: "aborted" }))
+        // Decision (or abort) received — lift the lead out of awaiting_approval
+        // so neither answer surface keeps rendering a live-looking gate.
+        deps.storeWriter.updateTeammate(lead.id, { status: "idle" })
         if (decision.outcome === "approve") {
           approved = true
           hooks.dispatchOnTeamPlanReady({

@@ -12,6 +12,7 @@ import {
   __resetForTesting,
   pendingCount,
 } from "@/lib/ai/agent/plan-approval-bus"
+import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
 jest.mock("next-intl", () => ({
@@ -138,6 +139,19 @@ describe("PlanApprovalPanel", () => {
     render(<PlanApprovalPanel team={team} />)
     expect(screen.getByText("noPlan")).toBeInTheDocument()
     expect(screen.getByTestId("plan-approval-approve")).toBeDisabled()
+  })
+
+  it("answering from the panel closes the matching pending-gates modal entry", () => {
+    usePendingGatesStore.getState().open({
+      key: { scope: "agent-team", id: "team-x" },
+      gateType: "plan",
+      title: "Plan awaiting approval",
+      runId: "run-1",
+      teamId: "team-x",
+    })
+    render(<PlanApprovalPanel team={team} lead={leadWithPlan} />)
+    fireEvent.click(screen.getByTestId("plan-approval-approve"))
+    expect(usePendingGatesStore.getState().gates).toHaveLength(0)
   })
 
   it("does not throw when no waiter is registered (just no-ops)", () => {

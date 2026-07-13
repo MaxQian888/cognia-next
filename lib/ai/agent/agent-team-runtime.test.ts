@@ -417,6 +417,51 @@ describe("runTeamLifecycle — plan-approval gate", () => {
     expect(result.reason).toMatch(/rejected/)
   })
 
+  it("publishes the plan to the board lead and opens the plan gate before waiting", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    const updateTeammate = jest.fn()
+    deps.storeWriter.updateTeammate = updateTeammate
+    const openGate = jest.fn()
+    deps.notifierDeps = { ...deps.notifierDeps, openGate }
+
+    const runPromise = runTeamLifecycle("team-1", deps)
+    await new Promise((r) => setTimeout(r, 30))
+
+    // While the gate is waiting: the lead carries the proposed plan and the
+    // awaiting_approval status the PlanApprovalPanel renders on, and the
+    // pending-gates modal has been opened for the same approval-bus key.
+    expect(updateTeammate).toHaveBeenCalledWith("lead-1", {
+      status: "awaiting_approval",
+      proposedPlan: expect.stringContaining("summary"),
+    })
+    expect(openGate).toHaveBeenCalledWith(
+      expect.objectContaining({ key: { scope: "agent-team", id: "team-1" } })
+    )
+
+    approve({ scope: "agent-team", id: "team-1" })
+    const result = await runPromise
+    expect(result.status).toBe("completed")
+    // Decision received → the lead must leave awaiting_approval.
+    expect(updateTeammate).toHaveBeenCalledWith("lead-1", { status: "idle" })
+  })
+
+  it("resets the lead out of awaiting_approval when the plan is rejected", async () => {
+    const deps = buildDeps(teamWithApproval(1), [task("t1")], [lead, worker("w1")])
+    const updateTeammate = jest.fn()
+    deps.storeWriter.updateTeammate = updateTeammate
+
+    const runPromise = runTeamLifecycle("team-1", deps)
+    await new Promise((r) => setTimeout(r, 30))
+    reject({ scope: "agent-team", id: "team-1" }, "no good")
+    const result = await runPromise
+    expect(result.status).toBe("failed")
+    expect(updateTeammate).toHaveBeenCalledWith("lead-1", { status: "idle" })
+  })
+
   it("fails fast when runLeadPlanning dep is missing", async () => {
     const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
     delete (deps as { runLeadPlanning?: unknown }).runLeadPlanning

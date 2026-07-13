@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { approve, reject } from "@/lib/ai/agent/plan-approval-bus"
+import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
 export interface PlanApprovalPanelProps {
@@ -27,6 +28,7 @@ export function PlanApprovalPanel({ team, lead }: PlanApprovalPanelProps) {
   const t = useTranslations("agentTeamsWorkspace.planApproval")
   const [feedback, setFeedback] = useState("")
   const prefersReducedMotion = useReducedMotion()
+  const closeGate = usePendingGatesStore((s) => s.close)
 
   const planText = lead?.proposedPlan ?? ""
 
@@ -64,6 +66,10 @@ export function PlanApprovalPanel({ team, lead }: PlanApprovalPanelProps) {
             variant="outline"
             onClick={() => {
               reject(team.id, feedback || undefined)
+              // The same gate may also be open as a pending-gates modal
+              // (runtime notify carries openApproval) — answering here must
+              // dismiss it too, or a dead dialog lingers.
+              closeGate({ scope: "agent-team", id: team.id })
               setFeedback("")
             }}
             disabled={!planText}
@@ -73,7 +79,10 @@ export function PlanApprovalPanel({ team, lead }: PlanApprovalPanelProps) {
           </Button>
           <Button
             size="sm"
-            onClick={() => approve(team.id)}
+            onClick={() => {
+              approve(team.id)
+              closeGate({ scope: "agent-team", id: team.id })
+            }}
             disabled={!planText}
             data-testid="plan-approval-approve"
           >
