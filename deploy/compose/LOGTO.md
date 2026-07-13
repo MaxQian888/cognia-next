@@ -91,8 +91,12 @@ Then restart with both profiles:
 docker compose --profile server --profile logto up -d --wait
 ```
 
-Protected companion routes (`/api/v1/_rpc/*`, `/ws/v1/*`, `/a2a`, `/connectors`)
+JWT-protected companion routes (`/api/v1/_rpc/*`, `/ws/v1/events`, `/a2a`)
 now accept Logto JWT access tokens **in addition to** local HS256 device tokens.
+Not on this list by design: `/connectors/webhook/*` sits OUTSIDE the JWT
+middleware (each platform's HMAC/signature is the auth), and `/ws/v1/bridge`
+additionally requires the loopback-minted service scope, which no Logto
+token carries.
 
 ## 5. Wire the client (`lib/logto`)
 

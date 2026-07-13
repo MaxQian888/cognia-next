@@ -17,6 +17,7 @@ These are project-level hard rules. They override any default behavior to the co
 3. **Every component ships with a unit test.** Any new file under `components/**`, `hooks/**`, `lib/**`, or `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) must have a co-located `*.test.ts(x)` / in-file `#[cfg(test)]` test. Coverage must stay ≥90% lines/branches/functions; verify with `pnpm test:coverage` before claiming done. Editing an existing component? Update or add tests in the same change.
 4. **Every frontend component is i18n-wired.** No hard-coded user-facing strings in `.tsx`. Use `useTranslations()` / `getTranslations()` from `next-intl`, add the new keys to **both** `i18n/messages/en.json` and `i18n/messages/zh-CN.json`, and run `pnpm lint:i18n` to confirm parity with the baseline. Aria labels, placeholders, toasts, and error messages count as user-facing.
 5. **Language convention.** Internal narration (status updates, tool-call rationale, end-of-turn summaries, code comments) is written in **English**. Questions to the user — clarifications, `AskUserQuestion` prompts, confirmation requests — are written in **Chinese**.
+6. **Record a changeset for every user-facing change.** After implementing a feature, fix, or behavior/breaking change that a user would notice, run `pnpm changeset` — select the **`cognia-next`** package, pick the semver bump (`patch` fix, `minor` feature, `major` breaking), and write a one-line summary. This creates a `.changeset/*.md` file you commit alongside the code. Skip it only for internal-only work (tests, refactors, docs, chore, CI). See **Versioning & Release** below for the full model.
 
 ## Development Commands
 
@@ -79,7 +80,7 @@ running** — use its MCP tools to author/preview stories, not as an always-on s
 | Package  | Path      | Port | Mode                                                         |
 | -------- | --------- | ---- | ------------------------------------------------------------ |
 | Main app | `/`       | 3000 | static export (`out/`) — consumed by Tauri **and** Capacitor |
-| Docs     | `docs/`   | 3001 | full Next.js server (Fumadocs)                               |
+| Docs     | `docs/`   | 3001 | static export (`docs/out/`, Fumadocs) — Cloudflare Pages     |
 | Mobile   | `mobile/` | —    | Capacitor 8 shell over `../out`                              |
 
 Install from repo root only — single `pnpm-lock.yaml`.
@@ -185,10 +186,20 @@ Husky is installed via the root `prepare` script — `pnpm install` once and the
 
 Never bypass with `--no-verify`. If a hook fails, fix the root cause, re-stage, and create a **new** commit (the failed commit was never created).
 
+## Versioning & Release (Changesets)
+
+The app is versioned as **one unit**: the root `package.json` `version` is the single source of truth, and [Changesets](https://github.com/changesets/changesets) manages both the version bump and `CHANGELOG.md`.
+
+- **During development** — for any user-facing change, run `pnpm changeset` and select the **`cognia-next`** package (Working Rule 6). Each run writes a `.changeset/*.md` entry that you commit with the code; they accumulate until the next release.
+- **At release time** — run `pnpm release:version`. This runs `changeset version` (consumes the pending `.changeset/*.md`, bumps the root version, prepends the aggregated entries to `CHANGELOG.md`) and then `pnpm version:sync`, which propagates the new version to every app artifact (`src-tauri/tauri.conf.json`, the three `Cargo.toml`s, `cli/`, `sidecar/`, `sidecar/vscode-ext-host/`, `mobile/`, `docs/`). Commit the result and tag it.
+- **Scope** — only the root `cognia-next` is Changesets-managed. `docs`, `mobile`, and every `@cognia/*` workspace package are in `ignore` (`.changeset/config.json`) and never versioned or published this way. The root is listed in `pnpm-workspace.yaml` **only** so Changesets can see it; pnpm still excludes it from recursive commands by default.
+- **No CI/publish step** — the flow is local-only and does not publish to npm; `access` is `restricted`. Do not add a `changeset publish` step or a release GitHub Action without confirming with the user first.
+- `pnpm changeset:status` shows what would be released.
+
 ## Critical Notes
 
 - **pnpm only** — install from repo root
-- **Do not remove `output: "export"` in `next.config.ts`** — Tauri and Capacitor builds both consume `out/`. `docs/next.config.ts` is full server; keep separate
+- **Do not remove `output: "export"` in `next.config.ts`** — Tauri and Capacitor builds both consume `out/`. `docs/next.config.ts` is also a static export (`docs/out/`); keep the two configs separate
 - **Native vector store**: sqlite-vec at `<app_data>/cognia/vectors.sqlite`. Web mode hides the native option and forces cloud
 - **Rust toolchain**: 1.77.2+
 - shadcn/ui: "new-york" style, RSC mode

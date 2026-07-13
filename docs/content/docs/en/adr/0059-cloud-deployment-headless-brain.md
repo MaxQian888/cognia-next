@@ -5,8 +5,23 @@ description: "Defines the cloud deployment strategy: keep the desktop's proven t
 
 # ADR-0059 — Cloud Deployment — Headless Brain & Frontend/Backend Separation
 
-**Status**: Proposed (2026-07-02)
+**Status**: Accepted — Phases 0–1 landed, Phase 2 partial (2026-07-13; proposed 2026-07-02)
 **Authors**: Max Qian + Claude
+
+> **Implementation status (2026-07-13, `dev`)**: Phase 0 is fully landed —
+> `deploy.yml` is the real gated deploy workflow (P0.1), `images.yml`
+> publishes/compile-checks all four GHCR images (P0.2), the service
+> workflows push on `dev` too (P0.3), and the compose suite exists with the
+> tuned seccomp profile (P0.4). Phase 1 (W1–W6) is landed: the headless
+> binary supervises brain + sidecar, the server secret store is env-keyed,
+> and `compose-e2e.yml` runs the tier-2 smoke in CI. From Phase 2, F2 (Caddy
+> ACME front door) and F4 (public connector webhooks) are shipped, plus
+> Logto OIDC multi-user auth on the gateway. From Phase 3,
+> `ExecBackend::Container` (R13, bollard + `docker-compose.t2.yml`) and the
+> `deploy/k8s` kustomize tree (D9/T3) exist; the k8s flavor of the exec
+> backend is still open. The companion default port moved to **27890**
+> (Clash collision) and the whole deploy suite tracks it. The "Context"
+> section below describes the world as of 2026-07-02 and is kept as-is.
 **Builds on**: ADR-0012 (transport abstraction), ADR-0014/0015 (companion API, Phase D skeleton), ADR-0021 (signaling), ADR-0025 (unified subscription), ADR-0028 (sandbox), ADR-0037 (share server), ADR-0043 (provider execution), ADR-0048/0049/0051 (external agents), ADR-0054 (local multi-account)
 
 ## Context
