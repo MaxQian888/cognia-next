@@ -5,7 +5,7 @@ description: "The Tauri backend is 170k LOC of Rust in a single crate (`app_lib`
 
 # ADR-0067 — src-tauri crate decomposition & build-speed program
 
-**Status**: Accepted (2026-07-13) — **Tier A landed** (7 crates extracted); Tier B still Proposed
+**Status**: Accepted (2026-07-13) — **Tier A landed** (7 crates); **Tier B + follow-up landed** (13 more crates, 2026-07-13); app shell (Tier C) remains
 **Authors**: Max Qian + Claude Opus 4.8
 **Builds on**: the existing workspace split pattern (`crates/cognia-cli`, `crates/cognia-sandbox-runner` — the latter explicitly extracted "so `cargo check -p cognia-sandbox-runner` compiles only a few crates instead of the whole Tauri tree"), the release/test profile overrides in the root `Cargo.toml`, and the per-module `commands.rs` "thin Tauri adapter" convention already present across the backend.
 
@@ -154,6 +154,47 @@ everything short of LLVM codegen + link.
 sccache) and W3 feature-gating — the user opted to leave the default build untouched; and **Tier B**
 (`connectors`/matrix-sdk, `terminal`, `subscription`, `plugin_api`/wasmtime) which needs the dependency
 inversions above and is gated on review.
+
+## Implementation status (Tier B + follow-up — landed 2026-07-13, macOS session)
+
+Thirteen more crates extracted (~58.5k LOC), one commit per crate, each gated by
+`cargo test -p <crate>` + `cargo check -p cognia-next` (test failures cross-checked against the
+pre-move `app_lib` test binary — every failure reproduced pre-move, i.e. pre-existing macOS/platform
+failures, none introduced). `app_lib` is now **65,780 LOC** (from ~113k post-Tier-A and 170k
+pre-ADR). The macOS baseline also surfaced a Tier-A gap: `cognia-scheduling` was missing the
+mac-only `dirs`/`libc` deps (extracted on Windows where `scheduler/macos.rs` never compiles) — fixed.
+
+| Crate | LOC | What moved / isolates | Inversion needed |
+| --- | --- | --- | --- |
+| `cognia-secrets` | 1.2k | `secret_store` + `keyring_secrets` + `api_key`; keyring + aes-gcm | none — command shells stay app-side; `test-inmemory` feature replaces the `cfg(test)` in-memory global (cfg(test) does not cross crates; dependents enable it from dev-deps) |
+| `cognia-net` | 2.1k | `proxy_config` (state/detect/wsproxy); reqwest kept off `cognia-core` | none — `proxy_config/` stays as app-side facade with the command shells |
+| `cognia-terminal` | 4.8k | terminal subsystem; `portable-pty` | `set_managed_cli_dirs_provider` (cli_bridge registry), registered in `run()` |
+| `cognia-subscription` | 6.4k | vault + anthropic/codex/opencode providers (ADR-0025) | none — the 17-command top-level IPC surface stays app-side (owns the sidecar-restart seam) |
+| `cognia-connectors` | 6.1k | webhook/WS ingress, sigverify, Matrix E2EE stack | `BusEventEmitter` impl (its one construction site) relocated to `companion_api::server` behind the crate's own `EventEmitter` trait |
+| `cognia-plugin-runtime` | 15.2k | plugin runtime; **wasmtime/cranelift** | `set_sidecar_dir_resolver` (claude::sidecar), registered in `run()`; canonical WIT stays at `src-tauri/wit/` (bindgen uses a relative path — the plugin-sdk sync/gate scripts depend on that location) |
+| `cognia-skills` | 2.1k | skills scan/install/registry | none (zero coupling) |
+| `cognia-tts` | 0.9k | Edge TTS, provider keyring, proxied fetch | none |
+| `cognia-remote-control` | 2.0k | LAN control API primitives | none |
+| `cognia-gateway` | 6.6k | OpenAI-compatible local gateway | none (reuses cognia-remote-control) |
+| `cognia-ccswitch` | 2.4k | provider-relay switcher | none (uses cognia-subscription discovery) |
+| `cognia-mcp-server` | 3.9k | embedded MCP server (streamable HTTP) | none (uses cognia-automation dispatcher) |
+| `cognia-external-agent` | 4.9k | exec backends; **bollard**/**kube** behind crate features (`container-exec`/`k8s-exec` now forward from app_lib) | `BusAgentEmitter` impl relocated to `companion_api::rpc` behind the crate's `AgentEventEmitter` trait; env-mutating tests got a crate-local lock replacing the borrowed `ws_bridge` test lock |
+
+**What deliberately stays app-side (Tier C):** `companion_api` (28.2k — the orchestrator hub, per
+Non-goals), `fleet` (5.7k — tray/window/monitor coupling), `claude` (3.1k — sidecar lifecycle wired
+to hooks/companion_api/api_key), `cli_bridge` (2.7k — depends on companion_api), the
+`logging`/`crash`/`perf` telemetry remainder (5.3k — tauri/app wiring around the extracted
+`cognia-instrument` core), windowing/app shell (`pet_window`, `tray`, `menu`, `shortcuts`,
+`browser` — the embedded-webview pane rides tauri's unstable API, `window_*`), `headless`/`bin`
+assembly, the facade modules holding command shells (`subscription/commands.rs`, `proxy_config/`,
+`keyring_secrets.rs`), and sub-1k leaves (`agents`, `github`, `twin`, `parse`, `wallpaper`,
+`capture`, `canvas`, `plugins`, `a2ui_bridge`) where a workspace member's overhead outweighs the
+compile-unit win. `files.rs` (2.2k) and `settings.rs` are app-level by design.
+
+**Gates run:** per-crate suites (≈1,100 tests across the 13 new crates), targeted app_lib suites
+over every moved seam, `cargo check --workspace` green (0 errors), and
+`cargo check -p cognia-next --features container-exec` for the feature-forwarding path. As with
+Tier A, the final app-binary link is covered by CI / `pnpm tauri build`, not re-run locally.
 
 ## Consequences
 
