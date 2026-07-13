@@ -11,7 +11,7 @@ use std::time::Duration;
 use reqwest::header::{HeaderName, HeaderValue};
 
 use super::types::ConnectorMediaUploadRequest;
-use crate::proxy_config;
+use cognia_net::proxy_config;
 
 /// Hard cap on the bytes loaded into memory for a single outbound upload. The
 /// source (remote URL or local file) is streamed/checked against this so a

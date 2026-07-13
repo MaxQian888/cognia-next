@@ -293,7 +293,7 @@ async fn run_bridge(app: tauri::AppHandle, adapter_id: String, socket: WebSocket
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connectors::axum_app::build_unresolved_router;
+    use crate::axum_app::build_unresolved_router;
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;
@@ -402,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_onebot_without_bearer_rejects_fail_closed() {
-        if !crate::connectors::keyring_available() {
+        if !crate::keyring_available() {
             return;
         }
         // No bearer and no opt-in configured for this adapter → reject.
@@ -435,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_onebot_unauthenticated_optin_is_accepted() {
-        if !crate::connectors::keyring_available() {
+        if !crate::keyring_available() {
             return;
         }
         // Explicit opt-in restores unauthenticated acceptance for trusted
@@ -468,7 +468,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_onebot_with_wrong_token_returns_401() {
-        if !crate::connectors::keyring_available() {
+        if !crate::keyring_available() {
             return;
         }
         // Set a bearer token in the real keyring.

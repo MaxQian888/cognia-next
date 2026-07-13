@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use reqwest::Client;
 
 use super::types::{TauriHttpRequest, TauriHttpResponse};
-use crate::proxy_config;
+use cognia_net::proxy_config;
 
 // ---------------------------------------------------------------------------
 // Simple token-bucket rate limiter (per host)

@@ -41,8 +41,8 @@ use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::{client_async_tls, tungstenite::Message};
 use uuid::Uuid;
 
-use crate::proxy_config;
-use crate::proxy_config::wsproxy::{AsyncReadWrite, ProxyStream};
+use cognia_net::proxy_config;
+use cognia_net::proxy_config::wsproxy::{AsyncReadWrite, ProxyStream};
 
 const ENDPOINT_URL: &str = "https://open.feishu.cn/callback/ws/endpoint";
 

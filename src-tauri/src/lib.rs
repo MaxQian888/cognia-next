@@ -20,7 +20,10 @@ mod cli_bridge;
 pub use cognia_core::command_error;
 mod commands;
 pub mod companion_api;
-mod connectors;
+// ADR-0067 Tier B — extracted to `crates/cognia-connectors` (isolates the
+// matrix-sdk E2EE stack); re-aliased so `crate::connectors::…` (companion_api,
+// plugin_api, headless, generate_handler! + .manage()) resolves unchanged.
+pub use cognia_connectors as connectors;
 pub mod crash;
 pub use cognia_automation::cua_sandbox;
 mod external_agent;

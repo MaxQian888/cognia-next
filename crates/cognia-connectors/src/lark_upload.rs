@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use reqwest::multipart::{Form, Part};
 
-use crate::proxy_config;
+use cognia_net::proxy_config;
 
 const LARK_API_BASE: &str = "https://open.feishu.cn/open-apis";
 

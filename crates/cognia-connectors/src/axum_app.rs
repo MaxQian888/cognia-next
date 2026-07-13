@@ -52,21 +52,6 @@ impl EventEmitter for AppHandleEmitter {
     }
 }
 
-/// Headless emitter (ADR-0059 F4/R12) — publishes onto the companion
-/// EventBus so the brain (and any other `/ws/v1/events` subscriber) receives
-/// `connectors://webhook/<adapter_id>` with the same payloads the desktop
-/// WebView listener sees.
-pub struct BusEventEmitter(pub Arc<crate::companion_api::event_bus::EventBus>);
-
-impl EventEmitter for BusEventEmitter {
-    fn emit_webhook(&self, adapter_id: &str, payload: &serde_json::Value) {
-        self.0.publish(
-            format!("connectors://webhook/{adapter_id}"),
-            payload.clone(),
-        );
-    }
-}
-
 /// Cheap wrapper so `Arc<dyn EventEmitter>` can ride an axum `Extension`
 /// (which requires `Clone`).
 #[derive(Clone)]
@@ -486,7 +471,7 @@ fn error_response(status: StatusCode, msg: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connectors::types::AdapterRegistration;
+    use crate::types::AdapterRegistration;
     use axum::body::to_bytes;
     use axum::http::Request;
     use parking_lot::Mutex;
@@ -567,7 +552,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn keyring_available() -> bool {
-        crate::connectors::keyring_available()
+        crate::keyring_available()
     }
 
     #[tokio::test]

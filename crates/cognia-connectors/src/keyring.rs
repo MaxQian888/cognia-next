@@ -3,10 +3,10 @@
 //! Service: `"com.cognia.platforms"`.
 //! Account naming: `"<adapterId>:<credentialName>"` — e.g. `"tg-personal:botToken"`.
 //!
-//! Backed by [`crate::secret_store`] (single OS-keyring master key); a missing
+//! Backed by [`cognia_secrets::secret_store`] (single OS-keyring master key); a missing
 //! entry maps to `None` on reads, and delete is idempotent.
 
-use crate::secret_store;
+use cognia_secrets::secret_store;
 
 const SERVICE: &str = "com.cognia.platforms";
 

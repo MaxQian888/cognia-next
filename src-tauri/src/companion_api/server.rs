@@ -290,6 +290,23 @@ pub fn build_router(state: SharedState) -> Router {
     // because the fleet router is stateless (process-global runtime).
     router = router.merge(crate::fleet::routes::router());
 
+    // Headless emitter (ADR-0059 F4/R12) — publishes onto the companion
+    // EventBus so the brain (and any other `/ws/v1/events` subscriber)
+    // receives `connectors://webhook/<adapter_id>` with the same payloads
+    // the desktop WebView listener sees. Lives app-side (ADR-0067 Tier B):
+    // the extracted connectors crate defines the `EventEmitter` seam, and
+    // this is the one impl that needs the companion EventBus.
+    struct BusEventEmitter(std::sync::Arc<crate::companion_api::event_bus::EventBus>);
+
+    impl crate::connectors::axum_app::EventEmitter for BusEventEmitter {
+        fn emit_webhook(&self, adapter_id: &str, payload: &serde_json::Value) {
+            self.0.publish(
+                format!("connectors://webhook/{adapter_id}"),
+                payload.clone(),
+            );
+        }
+    }
+
     // Public connector webhook ingress (ADR-0059 F4 / R12) — headless only.
     // Deliberately OUTSIDE the JWT middleware: webhook auth is the platform
     // HMAC/signature + replay guard inside `connectors::axum_app`. It still
@@ -300,9 +317,7 @@ pub fn build_router(state: SharedState) -> Router {
     // router carries its own (already-resolved) `ConnectorsState`.
     if let Some(services) = crate::headless::headless_services() {
         let emitter: std::sync::Arc<dyn crate::connectors::axum_app::EventEmitter> =
-            std::sync::Arc::new(crate::connectors::axum_app::BusEventEmitter(
-                std::sync::Arc::clone(&services.event_bus),
-            ));
+            std::sync::Arc::new(BusEventEmitter(std::sync::Arc::clone(&services.event_bus)));
         let connectors_router = crate::connectors::axum_app::build_router(
             services.connectors.clone(),
             emitter,

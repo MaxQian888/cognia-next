@@ -31,7 +31,7 @@ impl ConnectorsState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connectors::types::AdapterRegistration;
+    use crate::types::AdapterRegistration;
 
     #[test]
     fn registers_and_unregisters() {

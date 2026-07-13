@@ -1790,6 +1790,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-connectors"
+version = "0.1.0"
+dependencies = [
+ "aes 0.9.1",
+ "aes-gcm",
+ "axum 0.8.9",
+ "base64 0.22.1",
+ "bytes",
+ "cbc 0.2.1",
+ "chrono",
+ "cognia-instrument",
+ "cognia-net",
+ "cognia-secrets",
+ "dirs 6.0.0",
+ "ed25519-dalek",
+ "flate2",
+ "futures-util",
+ "hex",
+ "hmac 0.13.0",
+ "log",
+ "matrix-sdk-crypto",
+ "matrix-sdk-sqlite",
+ "once_cell",
+ "parking_lot",
+ "prost 0.13.5",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "ruma",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
+ "subtle",
+ "tauri",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.24.0",
+ "tower 0.5.3",
+ "tower-http",
+ "url",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "cognia-core"
 version = "0.1.0"
 dependencies = [
@@ -1863,6 +1910,7 @@ dependencies = [
  "chrono",
  "clap",
  "cognia-automation",
+ "cognia-connectors",
  "cognia-core",
  "cognia-git",
  "cognia-instrument",

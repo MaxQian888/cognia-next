@@ -202,7 +202,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn keyring_available() -> bool {
-        crate::connectors::keyring_available()
+        crate::keyring_available()
     }
 
     #[test]
