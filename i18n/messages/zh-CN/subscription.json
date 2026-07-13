@@ -559,7 +559,8 @@
       "previewTitle": "卡片预览",
       "shareLink": "以链接分享",
       "styleLabel": "风格",
-      "title": "分享使用量卡片"
+      "title": "分享使用量卡片",
+      "wallpaperLabel": "主题壁纸"
     },
     "surface": {
       "agentTeam": "智能体团队",

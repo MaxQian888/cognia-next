@@ -9,6 +9,7 @@ import { aggregateByModel, effectiveCostUsd } from "@/lib/usage/session-analytic
 import { formatCost, formatDuration, formatTokens } from "@/types/system/usage"
 import { THEMES, type ThemeId, type ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { getStylePreset } from "@/lib/export/html/style-presets"
+import { buildCardWallpaperCss } from "@/lib/export/html/theme-wallpaper"
 
 export interface UsageCardStats {
   totalTokens: number
@@ -89,6 +90,8 @@ export interface UsageCardOptions {
   ownerName?: string
   /** Human label of the aggregated range, e.g. "Last 7 days". */
   rangeLabel?: string
+  /** Inlined theme wallpaper data-URL backdrop (resolved by the caller). */
+  wallpaperDataUrl?: string
   generatedAt: Date
 }
 
@@ -161,8 +164,11 @@ export function renderUsageCardFragment(options: UsageCardOptions): string {
     ? `<div class="ucard-model"><span>${escapeHtml(labels.topModel)}</span><strong>${escapeHtml(s.topModel)}</strong></div>`
     : ""
   const footerTag = preset?.footerText ? `${escapeHtml(preset.footerText)} · ` : ""
+  const wallpaperCss = options.wallpaperDataUrl
+    ? buildCardWallpaperCss(options.wallpaperDataUrl, t)
+    : ""
 
-  return `<style>${cardStylesheet(t)}${preset ? presetOverrides(theme, t) : ""}</style>
+  return `<style>${cardStylesheet(t)}${preset ? presetOverrides(theme, t) : ""}${wallpaperCss}</style>
 <div class="ucard" data-theme="${escapeHtml(theme)}">
   <div class="ucard-banner"><span>${escapeHtml(banner)}</span>${rangeTag}</div>
   <h1 class="ucard-title">${escapeHtml(title)}</h1>
@@ -245,6 +251,30 @@ function presetOverrides(theme: ThemeId, t: ThemeTokens): string {
 .ucard { border-radius: 22px; }
 .ucard-tile { border-radius: 14px; }
 .ucard-title::after { content: " ✿"; }
+`
+    case "catppuccin-mocha":
+      return `
+.ucard { border-radius: 18px; }
+.ucard-title { border-bottom: 2px solid ${alpha(t.accent)}; padding-bottom: 4px; }
+.ucard-tile { border-radius: 12px; }
+`
+    case "aurora":
+      return `
+.ucard { border-radius: 20px; box-shadow: 0 4px 24px ${alpha(t.accent)}; }
+.ucard-title { text-shadow: 0 0 14px ${alpha(t.accent)}; }
+.ucard-tile { border-radius: 14px; }
+`
+    case "genshin":
+      return `
+.ucard { font-family: Georgia, "Iowan Old Style", "Songti SC", serif; border-radius: 10px; border-top: 3px solid ${t.accent}; }
+.ucard-title::after { content: " ✦"; }
+.ucard-tile { border-radius: 8px; }
+`
+    case "honkai":
+      return `
+.ucard { border-radius: 10px; background-image: radial-gradient(${alpha(t.accent)} 1px, transparent 1px); background-size: 20px 20px; }
+.ucard-title { text-shadow: 0 0 12px ${alpha(t.accent)}; }
+.ucard-tile { border-radius: 8px; }
 `
     default:
       return ""

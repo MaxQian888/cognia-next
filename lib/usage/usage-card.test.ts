@@ -131,6 +131,23 @@ describe("renderUsageCardFragment", () => {
     })
     expect(frag).toContain("#654321")
   })
+
+  it("inlines a wallpaper backdrop on the card when provided", () => {
+    const url = "data:image/webp;base64,QUJD"
+    const frag = renderUsageCardFragment({
+      stats,
+      theme: "honkai",
+      wallpaperDataUrl: url,
+      generatedAt: new Date(T0),
+    })
+    expect(frag).toContain(".ucard, .qcard")
+    expect(frag).toContain(`url("${url}")`)
+  })
+
+  it("renders no wallpaper backdrop by default", () => {
+    const frag = renderUsageCardFragment({ stats, generatedAt: new Date(T0) })
+    expect(frag).not.toContain("data:image/webp")
+  })
 })
 
 describe("buildUsageCardHtml", () => {

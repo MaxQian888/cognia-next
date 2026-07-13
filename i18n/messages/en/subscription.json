@@ -559,7 +559,8 @@
       "previewTitle": "Card preview",
       "shareLink": "Share via link",
       "styleLabel": "Style",
-      "title": "Share usage card"
+      "title": "Share usage card",
+      "wallpaperLabel": "Theme wallpaper"
     },
     "surface": {
       "agentTeam": "Agent Team",

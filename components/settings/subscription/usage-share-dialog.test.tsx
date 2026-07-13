@@ -34,6 +34,11 @@ jest.mock("@/lib/logging", () => ({
   createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
 }))
 
+// Keep the heavy generated wallpaper map out of the test; the resolver reads it.
+jest.mock("@/lib/export/html/wallpapers.generated", () => ({
+  THEME_WALLPAPERS: { arknights: "data:image/webp;base64,FAKEWALL" },
+}))
+
 const T0 = Date.UTC(2026, 0, 10, 12, 0, 0)
 
 function row(overrides: Partial<SessionUsageRow> = {}): SessionUsageRow {
@@ -119,6 +124,24 @@ describe("UsageShareDialog", () => {
     open([])
     expect(screen.getByTestId("usage-card-download")).toBeDisabled()
     expect(screen.getByTestId("usage-card-share-link")).toBeDisabled()
+  })
+
+  it("renders the visual theme gallery", () => {
+    open()
+    expect(screen.getByTestId("theme-gallery")).toBeInTheDocument()
+    expect(screen.getByTestId("theme-swatch-arknights")).toBeInTheDocument()
+    expect(screen.getByTestId("theme-swatch-genshin")).toBeInTheDocument()
+  })
+
+  it("injects the theme wallpaper into the preview when enabled", async () => {
+    open()
+    const toggle = screen.getByTestId("usage-card-wallpaper")
+    expect(toggle).toBeInTheDocument()
+    fireEvent.click(toggle)
+    await waitFor(() => {
+      const frame = screen.getByTestId("usage-card-preview") as HTMLIFrameElement
+      expect(frame.getAttribute("srcdoc") ?? "").toContain("data:image/webp;base64,FAKEWALL")
+    })
   })
 
   it("hands the share dialog a usage-card payload", async () => {

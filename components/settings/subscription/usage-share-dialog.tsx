@@ -5,12 +5,13 @@
 // two quick-share paths — download as PNG (html2canvas) and publish through
 // the existing zero-knowledge ShareLinkDialog (`usage-card` kind).
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import html2canvas from "html2canvas"
 import { ImageDownIcon, Link2Icon, Share2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Dialog,
   DialogContent,
@@ -20,21 +21,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
+import { ThemeGallery } from "@/components/share/theme-gallery"
 import { usageCardPayload } from "@/lib/share/payload"
 import {
   buildUsageCardHtml,
   collectUsageCardStats,
   renderUsageCardFragment,
 } from "@/lib/usage/usage-card"
-import { THEMES, THEME_LIST, type ThemeId } from "@/lib/export/html/syntax-themes"
+import { THEMES, type ThemeId } from "@/lib/export/html/syntax-themes"
+import { themeHasWallpaper, resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { downloadBlob } from "@/lib/files/download"
 import { createLogger } from "@/lib/logging"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
@@ -53,8 +49,22 @@ interface Props {
 export function UsageShareDialog({ rows, rangeLabel, trigger, open, onOpenChange }: Props) {
   const t = useTranslations("subscription.usage.shareCard")
   const [theme, setTheme] = useState<ThemeId>("arknights")
+  const [withWallpaper, setWithWallpaper] = useState(false)
+  const [wallpaperDataUrl, setWallpaperDataUrl] = useState<string>()
   const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Resolve the (lazy-imported) wallpaper out of render so the card builders
+  // stay synchronous. Feeds both the live preview and the PNG capture.
+  useEffect(() => {
+    let live = true
+    void resolveThemeWallpaper(theme, withWallpaper).then((url) => {
+      if (live) setWallpaperDataUrl(url)
+    })
+    return () => {
+      live = false
+    }
+  }, [theme, withWallpaper])
 
   const stats = useMemo(() => collectUsageCardStats(rows), [rows])
   const cardOptions = useMemo(
@@ -63,9 +73,10 @@ export function UsageShareDialog({ rows, rangeLabel, trigger, open, onOpenChange
       theme,
       title: t("cardTitle"),
       rangeLabel,
+      wallpaperDataUrl,
       generatedAt: new Date(),
     }),
-    [stats, theme, rangeLabel, t]
+    [stats, theme, rangeLabel, wallpaperDataUrl, t]
   )
   const html = useMemo(() => buildUsageCardHtml(cardOptions), [cardOptions])
 
@@ -114,19 +125,19 @@ export function UsageShareDialog({ rows, rangeLabel, trigger, open, onOpenChange
         <div className="space-y-3 py-1">
           <div className="space-y-1">
             <Label className="text-xs">{t("styleLabel")}</Label>
-            <Select value={theme} onValueChange={(v) => setTheme(v as ThemeId)}>
-              <SelectTrigger data-testid="usage-card-style">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {THEME_LIST.map((th) => (
-                  <SelectItem key={th.id} value={th.id}>
-                    {th.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ThemeGallery value={theme} onChange={setTheme} />
           </div>
+
+          {themeHasWallpaper(theme) && (
+            <label className="flex items-center justify-between text-sm">
+              <span>{t("wallpaperLabel")}</span>
+              <Switch
+                checked={withWallpaper}
+                onCheckedChange={setWithWallpaper}
+                data-testid="usage-card-wallpaper"
+              />
+            </label>
+          )}
 
           <iframe
             className="h-[420px] w-full rounded-lg border border-border"
