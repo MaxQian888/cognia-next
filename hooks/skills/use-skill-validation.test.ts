@@ -3,10 +3,10 @@
  */
 import { renderHook, waitFor } from "@testing-library/react"
 
-const skillRowRef: { current: import("@/lib/claude/types").Skill | undefined } = {
+const skillRowRef: { current: import("@cognia/agent-config-types").Skill | undefined } = {
   current: undefined,
 }
-const resourcesRef: { current: import("@/lib/claude/types").SkillResource[] } = {
+const resourcesRef: { current: import("@cognia/agent-config-types").SkillResource[] } = {
   current: [],
 }
 const updateSkillMock = jest.fn()
@@ -33,7 +33,7 @@ jest.mock("@/lib/db/skill-resources", () => ({
 }))
 
 import { useSkillValidation } from "./use-skill-validation"
-import type { Skill, SkillResource } from "@/lib/claude/types"
+import type { Skill, SkillResource } from "@cognia/agent-config-types"
 
 beforeEach(() => {
   skillRowRef.current = undefined

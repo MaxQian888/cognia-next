@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { listGoalEvents } from "@/lib/db/goals"

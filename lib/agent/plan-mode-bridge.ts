@@ -19,7 +19,7 @@
 // the chat header reads the same id back. Phase 1 is in-memory only —
 // reload wipes the synthetic team. Persistence is a Phase 2 concern.
 
-import type { SDKAssistantMessage, SDKMessage, BetaToolUseBlock } from "@/lib/claude/types"
+import type { SDKAssistantMessage, SDKMessage, BetaToolUseBlock } from "@cognia/agent-config-types"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam, AgentTeamTask, TeamTaskStatus } from "@/types/agent/agent-team"
 

@@ -35,7 +35,7 @@ import {
 import { isBinaryDocumentType } from "@cognia/document/support-matrix"
 import { detectLanguage } from "@cognia/document/parsers/code-parser"
 import type { DocumentType } from "@/types/document"
-import type { SendContent, SendContentBlock } from "@/lib/claude/types"
+import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
 
 /**
  * The longest edge (px) we downscale large images to before base64-encoding.

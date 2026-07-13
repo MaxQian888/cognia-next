@@ -13,7 +13,7 @@
 import { useCallback } from "react"
 import { toast } from "sonner"
 
-import type { ChatSession, SystemPromptPreset } from "@/lib/claude/types"
+import type { ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
 import { buildPresetApplicationPlan } from "@/lib/presets/apply-to-session"
 import { useRecordPresetUsage, useUpdateSession } from "@/lib/data-hooks/context"
 import { useChatStore } from "@/stores/chat/chat-store"

@@ -20,7 +20,7 @@ import {
 import { getTwinChunksByVectorDocIds } from "@/lib/db/twin-chunks"
 import { backfillStyleSampleEmbeddings, getTwinProfile } from "@/lib/db/twin-profile"
 import { getTwinSourcesByIds } from "@/lib/db/twin-sources"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import type { IVectorStore } from "@cognia/vector/store"
 import type { StyleSample, TwinChunk, TwinSource, TwinSettings, VectorBackend } from "@/types/twin"
 import { DEFAULT_TWIN_SETTINGS } from "@/types/twin"

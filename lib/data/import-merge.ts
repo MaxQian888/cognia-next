@@ -18,7 +18,7 @@
 // behaviour is unchanged for that path.
 
 import type { ImportedConversation } from "./importers/types"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 
 type Db = ReturnType<typeof getDb>

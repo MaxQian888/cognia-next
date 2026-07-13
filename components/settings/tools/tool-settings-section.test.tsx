@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react"
 
 import { ToolSettingsSection } from "./tool-settings-section"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
 const setBuiltinToolEnabled = jest.fn()
 const setWebToolsEnabled = jest.fn()

@@ -4,7 +4,7 @@
 import { render, screen } from "@testing-library/react"
 
 import { TeamCard } from "./team-card"
-import type { Team } from "@/lib/claude/types"
+import type { Team } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,

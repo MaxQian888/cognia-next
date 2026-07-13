@@ -6,7 +6,7 @@ import { UsersIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
-import type { Team } from "@/lib/claude/types"
+import type { Team } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 export interface TeamCardProps {

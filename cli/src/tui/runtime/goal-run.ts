@@ -15,7 +15,7 @@
  * is its interactive counterpart.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { Goal } from "@/types/goal"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"

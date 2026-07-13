@@ -7,7 +7,7 @@
 // seeder can be re-run idempotently via Dexie's `bulkPut`. The seeder never
 // touches user-created rows, only re-puts the built-ins.
 
-import type { SystemPromptPreset } from "@/lib/claude/types"
+import type { SystemPromptPreset } from "@cognia/agent-config-types"
 
 /**
  * Construct the 12 built-in preset rows with the supplied timestamp. Exposed

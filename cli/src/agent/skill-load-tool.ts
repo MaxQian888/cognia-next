@@ -13,7 +13,7 @@
  * channels (Anthropic + ai-sdk), exactly like the dispatch tool.
  */
 import { getSkill as defaultGetSkill } from "@/lib/db/skills"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import type { PluginToolExecRequest, PluginToolExecResponse } from "@/lib/claude/plugin-tool-ipc"
 

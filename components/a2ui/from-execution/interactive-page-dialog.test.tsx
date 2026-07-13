@@ -10,7 +10,7 @@ import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
 import type { ExecutionPageSource } from "@/lib/a2ui/from-execution"
 import type { VisualWorkflow, WorkflowRunEventRow, WorkflowRunRow } from "@/types/workflow/visual"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 const processMessages = jest.fn()
 const deleteSurface = jest.fn()

@@ -3,11 +3,11 @@
  */
 import { runCliSubagent } from "./subagent-runner"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { createPermissionGate } from "./permission-gate"
 
 // Mock the live-sidecar default collaborators so the "no injected deps" path —

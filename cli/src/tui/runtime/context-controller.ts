@@ -9,7 +9,7 @@
  * back to the estimate-only report. Never throws.
  */
 import { getSessionContextUsage } from "@/lib/claude/ipc"
-import type { SdkContextUsage } from "@/lib/claude/types"
+import type { SdkContextUsage } from "@cognia/agent-config-types"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
 import { buildContextReport, formatSdkContextBreakdown } from "../commands/context-report"

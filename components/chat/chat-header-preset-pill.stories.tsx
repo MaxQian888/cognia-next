@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { ChatHeaderPresetPill } from "./chat-header-preset-pill"
-import type { ChatSession, SystemPromptPreset } from "@/lib/claude/types"
+import type { ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
 
 // Fully props-driven header pill. Renders the active-preset badge; clicking it
 // opens a searchable grouped Popover (favorites / recent / category). Stories

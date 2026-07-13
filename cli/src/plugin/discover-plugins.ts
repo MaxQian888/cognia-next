@@ -8,7 +8,7 @@
 import nodeFs from "node:fs/promises"
 import path from "node:path"
 
-import type { McpTransport } from "@/lib/claude/types"
+import type { McpTransport } from "@cognia/agent-config-types"
 import type { PluginType } from "@/types/plugin/plugin"
 import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
 

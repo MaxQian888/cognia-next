@@ -12,7 +12,7 @@ import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SettingsCard } from "@/components/settings/common/settings-section"
-import type { McpServer, Skill } from "@/lib/claude/types"
+import type { McpServer, Skill } from "@cognia/agent-config-types"
 
 import type { PresetEditorState } from "../preset-editor-state"
 
@@ -92,6 +92,7 @@ export function ToolsSection({
           <Input
             value={allowText}
             onChange={(e) => handleAllowChange(e.target.value)}
+            // i18n-exempt: literal tool identifiers, must match real tool names
             placeholder="Bash, Read, WebSearch"
             className="font-mono text-xs"
           />
@@ -103,6 +104,7 @@ export function ToolsSection({
           <Input
             value={denyText}
             onChange={(e) => handleDenyChange(e.target.value)}
+            // i18n-exempt: literal tool identifier, must match a real tool name
             placeholder="Bash"
             className="font-mono text-xs"
           />
@@ -198,7 +200,7 @@ function ItemMultiSelect({
       )}
       <div className="flex flex-wrap gap-1.5">
         {items.length === 0 ? (
-          <p className="text-[11px] italic text-muted-foreground">(none defined yet)</p>
+          <p className="text-[11px] italic text-muted-foreground">{tSection("noneDefined")}</p>
         ) : (
           items.map((it) => {
             const active = selectedIds.includes(it.id)
@@ -227,7 +229,7 @@ function ItemMultiSelect({
       </div>
       {selectedIds.length > 1 && (
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <span className="text-[11px] text-muted-foreground">Reorder:</span>
+          <span className="text-[11px] text-muted-foreground">{tSection("reorderLabel")}</span>
           {selectedIds.map((id) => {
             const it = items.find((x) => x.id === id)
             if (!it) return null

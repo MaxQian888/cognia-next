@@ -45,7 +45,7 @@ import type {
   SendContent,
   Team,
   TeamMember,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import { subSessionId, decodeSubSession } from "@/lib/claude/team-session-id"
 import { steerBlocksOf, steerTextOf } from "@/lib/claude/steer"
 import { senderIdOf, tagBranchSiblings, teamBranchGroupId } from "@/lib/chat/branch-regen"

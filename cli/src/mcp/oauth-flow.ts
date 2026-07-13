@@ -13,7 +13,7 @@
  * opener, callback server, connection, RNG) is injectable so the orchestration
  * is unit-tested without sockets or a real browser.
  */
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 import { createMcpConnection, type McpClientLike, type OpenedMcp } from "./mcp-client"
 import { startCallbackServer, type CallbackServer } from "./oauth-callback-server"

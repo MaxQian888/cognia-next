@@ -4,7 +4,7 @@
 // ready-to-edit name / description / body / category / tags — the user always
 // reviews and saves through the normal editor flow.
 
-import type { Skill, SkillCategory } from "@/lib/claude/types"
+import type { Skill, SkillCategory } from "@cognia/agent-config-types"
 
 export interface SkillTemplate {
   id: string

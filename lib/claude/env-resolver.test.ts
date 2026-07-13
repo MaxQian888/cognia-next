@@ -2,7 +2,7 @@
 // tests run without a real Tauri host.
 
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "./env-resolver"
-import type { AppSettings, Character, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
 
 jest.mock("@/lib/tauri", () => ({
   transport: {

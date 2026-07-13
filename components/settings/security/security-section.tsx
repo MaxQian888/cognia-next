@@ -22,8 +22,8 @@ import { SettingsCard, SettingsToggle } from "@/components/settings/common/setti
 import { AutoLockControl } from "@/components/settings/security/auto-lock-control"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsStore } from "@/stores/settings"
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
-import type { BiometricGuardPolicy } from "@/lib/claude/types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
+import type { BiometricGuardPolicy } from "@cognia/agent-config-types"
 import { STAGGER_CONTAINER, STAGGER_CHILD, useReducedMotionVariants } from "@/lib/ui/motion"
 
 const GUARD_ROWS: { key: keyof BiometricGuardPolicy; testid: string }[] = [

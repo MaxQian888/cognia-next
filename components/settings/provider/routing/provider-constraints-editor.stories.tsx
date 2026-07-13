@@ -9,7 +9,7 @@ import {
   makeRoutingConfig,
 } from "@/lib/storybook/fixtures/settings-provider"
 import type { ProviderConstraint } from "@cognia/provider-types/model-mapping"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Per-provider constraint rows: daily budget (USD, advisory), RPM/TPM ceilings,
 // enabled flag. Provider <Select> options come from configured providers; the

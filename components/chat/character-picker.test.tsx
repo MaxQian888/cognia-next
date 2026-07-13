@@ -16,7 +16,7 @@ import type { ReactNode } from "react"
 import { CharacterPicker } from "./character-picker"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 function makeAdapter(characters: Character[]): DataAdapter {
   return {

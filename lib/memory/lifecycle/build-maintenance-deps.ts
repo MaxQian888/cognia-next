@@ -7,7 +7,7 @@
  * skipped). Split into its own module so `maintenance.ts` can lazy-import it.
  */
 
-import type { ChatSession, AppSettings } from "@/lib/claude/types"
+import type { ChatSession, AppSettings } from "@cognia/agent-config-types"
 import type { MemoryConfig } from "@/types/memory/memory"
 import type { MemoryMaintenanceDeps } from "./maintenance"
 

@@ -14,7 +14,7 @@ import { useTranslations } from "next-intl"
 
 import { Card, CardContent } from "@/components/ui/card"
 import { listSessions } from "@/lib/claude/ipc"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 export interface RemoteSessionsListProps {
   onSelect: (sessionId: string) => void

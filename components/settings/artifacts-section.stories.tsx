@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { ArtifactsSection } from "./artifacts-section"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // `ArtifactsSection` reads `settings.artifacts` (auto-create, min-lines slider,
 // enabled-types grid, default panel mode, persistence/review toggles), falling

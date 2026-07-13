@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { SingleExportDialog } from "./single-export-dialog"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 jest.mock("@/hooks/data/use-single-export", () => ({
   useSingleExport: () => ({ run: jest.fn(), busy: false }),

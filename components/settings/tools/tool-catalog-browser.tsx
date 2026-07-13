@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select"
 
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import type { ToolFilterConfig, ToolFilterMode } from "@/lib/claude/types"
+import type { ToolFilterConfig, ToolFilterMode } from "@cognia/agent-config-types"
 import {
   getToolCatalog,
   searchToolCatalog,

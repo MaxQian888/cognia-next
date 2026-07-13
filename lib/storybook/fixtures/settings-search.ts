@@ -5,7 +5,7 @@
 // search-related fields the panels actually touch. The full `AppSettings` type
 // is large; we build the subset the search UI reads and cast through `unknown`,
 // mirroring the pattern in `components/chat/composer/web-search-toggle.stories.tsx`.
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import {
   type SearchProviderType,
   type SearchProviderSettings,

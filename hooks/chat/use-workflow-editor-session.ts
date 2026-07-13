@@ -21,7 +21,7 @@
 import { useEffect, useState } from "react"
 import { useChatStore } from "@/stores/chat"
 import { getDb } from "@/lib/db/schema"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 export interface UseWorkflowEditorSessionResult {
   /** Stable id for the pinned ChatSession (`workflow:${workflowId}`). */

@@ -61,7 +61,7 @@ import { McpMyServersTab } from "./mcp-my-servers-tab"
 import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { updateMcpServer } from "@/lib/db/mcp-servers"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 const server = (id: string): McpServer =>
   ({

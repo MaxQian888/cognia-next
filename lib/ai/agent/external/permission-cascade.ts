@@ -1,5 +1,5 @@
 import type { AcpCapabilities, AcpPermissionMode } from "@/types/agent/external-agent"
-import type { SandboxResourcePolicy } from "@/lib/claude/types"
+import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
 
 /**

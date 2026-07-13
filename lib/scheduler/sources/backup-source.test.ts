@@ -1,5 +1,5 @@
 import { BACKUP_SOURCE_ID, createBackupSource, toUnifiedBackup } from "./backup-source"
-import type { BackupAutoSchedule } from "@/lib/claude/types"
+import type { BackupAutoSchedule } from "@cognia/agent-config-types"
 
 function makeConfig(overrides: Partial<BackupAutoSchedule> = {}): BackupAutoSchedule {
   return {

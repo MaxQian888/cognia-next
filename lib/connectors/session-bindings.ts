@@ -17,7 +17,7 @@
  * keep working unchanged.
  */
 
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import { parseConversationKey } from "@/types/connectors/event"

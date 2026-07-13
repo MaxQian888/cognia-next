@@ -35,7 +35,7 @@ import {
   syncToAgent,
 } from "./sync"
 import type { AgentReadResult, AgentWriteResult } from "./ipc"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import { A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
 
 const mIsTauri = isTauri as jest.Mock

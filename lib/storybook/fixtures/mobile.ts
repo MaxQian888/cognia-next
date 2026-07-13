@@ -3,7 +3,7 @@
 // fully-valid object with realistic defaults; spread `over` to vary a field.
 import type { UIMessage } from "ai"
 
-import type { Character, PendingApproval, Skill } from "@/lib/claude/types"
+import type { Character, PendingApproval, Skill } from "@cognia/agent-config-types"
 
 let characterSeq = 0
 let messageSeq = 0

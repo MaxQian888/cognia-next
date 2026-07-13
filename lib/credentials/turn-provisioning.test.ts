@@ -8,7 +8,7 @@ import {
   provisionIceServers,
   saveProviderSecret,
 } from "./turn-provisioning"
-import type { TurnProviderConfig } from "@/lib/claude/types"
+import type { TurnProviderConfig } from "@cognia/agent-config-types"
 
 // ---------------------------------------------------------------------------
 // fetch double

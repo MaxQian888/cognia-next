@@ -18,7 +18,7 @@
  * Interval loops fire through the scheduler queue and are NOT exclusive.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { Loop, LoopConfig, LoopDefaults, LoopStatus } from "@/types/loop"
 import { isTerminalLoopStatus } from "@/types/loop"
 import {

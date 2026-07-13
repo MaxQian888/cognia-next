@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 interface AdapterStats {
   adapter: AdapterInstanceRow

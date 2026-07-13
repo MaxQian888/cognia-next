@@ -18,7 +18,7 @@ import {
   pendingApprovalCount,
   __resetApprovalRegistryForTesting,
 } from "./approval-registry"
-import type { PermissionRequestEvent } from "@/lib/claude/types"
+import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { ConversationReference } from "@/types/connectors/event"
 
 const REF: ConversationReference = { platform: "telegram", adapterId: "tg-1" }

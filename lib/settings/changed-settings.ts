@@ -10,7 +10,7 @@
  * is also resettable.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { SETTINGS_NAV } from "@/components/settings/settings-nav-config"
 import { DEFAULTS } from "@/lib/db/settings"

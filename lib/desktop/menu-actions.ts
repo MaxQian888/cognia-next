@@ -26,7 +26,7 @@ import { loggers } from "@cognia/logging"
 import { desktop as automation } from "@/lib/automation/client"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useUIStore } from "@/stores/ui/ui-store"
-import type { AppLanguage, AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppLanguage, AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 const log = loggers.ui
 

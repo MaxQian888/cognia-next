@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import type { ChatSession, SystemPromptPreset } from "@/lib/claude/types"
+import type { ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
 import { groupPresets } from "@/lib/presets/group-presets"
 import { cn } from "@/lib/utils"
 

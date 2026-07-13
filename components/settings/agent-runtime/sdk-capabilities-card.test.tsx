@@ -19,7 +19,7 @@ jest.mock("@/hooks/chat/use-sdk-session-capabilities", () => ({
 }))
 
 import { render, screen } from "@testing-library/react"
-import type { SdkModelInfo, SdkSlashCommand } from "@/lib/claude/types"
+import type { SdkModelInfo, SdkSlashCommand } from "@cognia/agent-config-types"
 import { SdkCapabilitiesCard } from "./sdk-capabilities-card"
 
 const models: SdkModelInfo[] = [

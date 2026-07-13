@@ -2,7 +2,7 @@
 // fade and slide in on load and assistant text types out character-by-character.
 // One self-contained `<script>` block; no runtime dependencies.
 
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import { exportToBeautifulHtml, type BeautifulHtmlOptions } from "./beautiful-html"
 
 export interface AnimatedHtmlOptions extends BeautifulHtmlOptions {

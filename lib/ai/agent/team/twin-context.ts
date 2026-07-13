@@ -23,7 +23,7 @@
  * M6 inject-log ring buffer so the Twin settings UI can surface them.
  */
 
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import type { ApplyTwinContextDeps } from "@/lib/twin/runtime/apply-twin-context"
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 import type { TwinSettings } from "@/types/twin"

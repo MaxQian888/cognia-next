@@ -2,7 +2,7 @@
 // maybeAutoUploadNow (hydrate → dirty check → shared sync-now pipeline with
 // an "auto" history row; never throws).
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 let settings: Partial<AppSettings> = {}
 

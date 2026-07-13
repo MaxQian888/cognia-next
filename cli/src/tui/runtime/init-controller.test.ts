@@ -15,7 +15,7 @@ import {
 } from "./init-controller"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 import type { TuiAction } from "../state/types"
 
 describe("agentsTemplate", () => {

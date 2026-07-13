@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 // useLiveQuery is mocked to INVOKE its querier (so the ids-gating ternary runs)
 // then return whatever rows the test stages — `undefined` simulates the initial

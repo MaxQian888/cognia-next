@@ -1,9 +1,9 @@
-import type { AppSettings, BuiltinToolsConfig } from "@/lib/claude/types"
+import type { AppSettings, BuiltinToolsConfig } from "@cognia/agent-config-types"
 import {
   DEFAULT_BIOMETRIC_GUARD,
   DEFAULT_BUILTIN_TOOLS,
   DEFAULT_USER_PROFILE,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import { DEFAULT_TTS_SETTINGS } from "@cognia/tts/types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,

@@ -38,7 +38,7 @@ import {
   updateResource,
   type SkillResourceDraft,
 } from "@/lib/db/skill-resources"
-import type { SkillResource, SkillResourceKind } from "@/lib/claude/types"
+import type { SkillResource, SkillResourceKind } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
 
 interface Props {

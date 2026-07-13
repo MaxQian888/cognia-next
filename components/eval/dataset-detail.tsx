@@ -13,7 +13,7 @@ import { DownloadIcon, PlayIcon, UploadIcon, HistoryIcon, ShieldCheckIcon } from
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalDataset } from "@/types/eval/eval"
 import { toJsonl, toCsv } from "@/lib/ai/eval/export"
 import { useEvalCases } from "@/hooks/eval/use-eval-data"

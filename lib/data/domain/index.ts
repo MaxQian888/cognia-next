@@ -10,14 +10,14 @@ import type {
   SkillResource,
   SystemPromptPreset,
   Team,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import type {
   PluginAnalyticsRow,
   PluginPermissionRow,
   PluginRow,
   PluginScheduledJobRow,
 } from "@/lib/db/plugin-types"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 import { applyBackupPackage } from "@/lib/data/apply-package"
 import {

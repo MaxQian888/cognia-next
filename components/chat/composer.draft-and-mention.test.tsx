@@ -41,7 +41,7 @@ import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { setDraft } from "@/lib/db/chat-drafts"
-import type { ChatSession, Character } from "@/lib/claude/types"
+import type { ChatSession, Character } from "@cognia/agent-config-types"
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
   return {

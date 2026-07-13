@@ -44,7 +44,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { useState } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 

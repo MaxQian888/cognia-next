@@ -4,7 +4,7 @@
  * Pure function under test, no Dexie or registry plumbing.
  */
 
-import type { Character, PackPristineSnapshot } from "@/lib/claude/types"
+import type { Character, PackPristineSnapshot } from "@cognia/agent-config-types"
 import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
 import { buildPristineSnapshot, diffPackUpdate, PACK_MANAGED_FIELD_LIST } from "./diff-pack-update"
 

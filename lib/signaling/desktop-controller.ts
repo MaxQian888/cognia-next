@@ -52,7 +52,7 @@ import {
 // Leaf `types` module (constants only) — avoids the `@/lib/signaling` barrel
 // and its TDZ cycle described above.
 import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 interface DeviceRegistration {
   deviceId: string

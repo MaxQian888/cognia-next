@@ -19,8 +19,8 @@ import { transport } from "@/lib/tauri"
 import { isTauri } from "@/lib/tauri"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 
-import type { AutomationPolicy } from "@/lib/claude/types"
-import { DEFAULT_AUTOMATION_POLICY } from "@/lib/claude/types"
+import type { AutomationPolicy } from "@cognia/agent-config-types"
+import { DEFAULT_AUTOMATION_POLICY } from "@cognia/agent-config-types"
 
 /** Fetch the policy currently held in Rust state. */
 export async function getAutomationPolicy(): Promise<AutomationPolicy> {

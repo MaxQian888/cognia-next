@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import {
   createFeatureProviderModel,
   createProviderSettingsSnapshot,
@@ -18,8 +18,7 @@ export function buildTeamClaudeRuntimeModel(
     const snapshot = createProviderSettingsSnapshot({
       defaultProvider: settings.defaultProvider,
       providerSettings: settings.providerSettings as
-        | Record<string, ProviderSettingsEntry>
-        | undefined,
+        Record<string, ProviderSettingsEntry> | undefined,
       customProviders: settings.customProviders as RichCustomProviderEntry[] | undefined,
     })
     const resolution = resolveFeatureProvider(

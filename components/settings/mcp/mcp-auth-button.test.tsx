@@ -16,7 +16,7 @@ jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 import { isTauri } from "@/lib/tauri"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import { McpAuthButton } from "./mcp-auth-button"
 
 const isTauriMock = isTauri as jest.Mock

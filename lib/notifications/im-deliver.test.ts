@@ -4,7 +4,7 @@
 
 import { createImDeliver } from "./im-deliver"
 import type { NotificationRecord } from "@/types/notifications"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 function rec(over: Partial<NotificationRecord> = {}): NotificationRecord {
   return {

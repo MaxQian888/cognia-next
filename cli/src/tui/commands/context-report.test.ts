@@ -1,7 +1,7 @@
 import { buildContextReport } from "./context-report"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
-import type { BuiltinToolsConfig } from "@/lib/claude/types"
+import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
 const config: ResolvedConfig = {

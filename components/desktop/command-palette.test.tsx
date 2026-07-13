@@ -3,7 +3,7 @@
  */
 import { render, screen, waitFor, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { Character, ChatSession, Team } from "@/lib/claude/types"
+import type { Character, ChatSession, Team } from "@cognia/agent-config-types"
 
 const logInfo = jest.fn()
 const logError = jest.fn()

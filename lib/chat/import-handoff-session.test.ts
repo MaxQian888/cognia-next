@@ -5,7 +5,7 @@ import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 import { getSession } from "@/lib/db/sessions"
 import { listMessages } from "@/lib/db/messages"
 import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 beforeEach(async () => {
   await getDb().delete()

@@ -1,7 +1,7 @@
 // ADR-0028 Phase 6 — buildReplayPrompt unit tests.
 
 import { buildReplayPrompt, flattenMessageText } from "./replay"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 
 function msg(
   role: "user" | "assistant" | "system",

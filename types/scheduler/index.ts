@@ -3,7 +3,7 @@
  * Types for scheduled tasks, cron expressions, and task execution
  */
 
-import type { BuiltinToolsConfig, SendOptions } from "@/lib/claude/types"
+import type { BuiltinToolsConfig, SendOptions } from "@cognia/agent-config-types"
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
 import type { GoalConfig } from "@/types/goal"
 
@@ -62,22 +62,10 @@ export type ScheduledTaskType =
 
 // Task execution status
 export type TaskExecutionStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "skipped"
+  "pending" | "running" | "completed" | "failed" | "cancelled" | "skipped"
 
 export type TaskExecutionTriggerSource =
-  | "schedule"
-  | "run-now"
-  | "retry"
-  | "event"
-  | "dependency"
-  | "catch-up"
-  | "remote"
-  | "backfill"
+  "schedule" | "run-now" | "retry" | "event" | "dependency" | "catch-up" | "remote" | "backfill"
 
 export type TaskExecutionTerminalReason =
   | "completed"

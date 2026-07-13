@@ -7,7 +7,7 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-const skillsRef: { current: import("@/lib/claude/types").Skill[] } = { current: [] }
+const skillsRef: { current: import("@cognia/agent-config-types").Skill[] } = { current: [] }
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => skillsRef.current,
 }))
@@ -38,7 +38,7 @@ describe("SkillChipRow", () => {
         createdAt: 0,
         updatedAt: 0,
         source: "custom",
-      } as import("@/lib/claude/types").Skill,
+      } as import("@cognia/agent-config-types").Skill,
     ]
     render(<SkillChipRow ids={["s1"]} onRemove={jest.fn()} />)
     expect(screen.getByText("Alpha")).toBeInTheDocument()
@@ -53,7 +53,7 @@ describe("SkillChipRow", () => {
         createdAt: 0,
         updatedAt: 0,
         source: "custom",
-      } as import("@/lib/claude/types").Skill,
+      } as import("@cognia/agent-config-types").Skill,
     ]
     const onRemove = jest.fn()
     render(<SkillChipRow ids={["s1"]} onRemove={onRemove} />)
@@ -70,7 +70,7 @@ describe("SkillChipRow", () => {
         createdAt: 0,
         updatedAt: 0,
         source: "custom",
-      } as import("@/lib/claude/types").Skill,
+      } as import("@cognia/agent-config-types").Skill,
     ]
     render(<SkillChipRow ids={["s1"]} onRemove={jest.fn()} disabledIds={["s1"]} />)
     const inertChip = screen.getByTitle(/inertChip/)

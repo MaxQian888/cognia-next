@@ -7,7 +7,7 @@
  * poll (Esc) never stops the desktop run.
  */
 import { getTeam, listTeams } from "@/lib/db/teams"
-import type { AppSettings, ChatSession, Team } from "@/lib/claude/types"
+import type { AppSettings, ChatSession, Team } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { getSession } from "@/lib/db/sessions"
 import {

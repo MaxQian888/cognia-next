@@ -21,7 +21,7 @@ import { PlusIcon, Trash2Icon, PlayIcon, Loader2Icon, ScaleIcon, SettingsIcon } 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { buildConfiguredRunDeps } from "@/lib/ai/eval/browser-deps"
 import { runEvalService, type EvalProgress } from "@/lib/ai/eval/service"
 import { resolveEvalSettings } from "@/lib/ai/eval/settings"

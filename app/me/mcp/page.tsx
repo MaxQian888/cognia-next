@@ -26,7 +26,7 @@ import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { Badge } from "@/components/ui/badge"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { listMcpServers } from "@/lib/db/mcp-servers"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 function McpBody() {
   const t = useTranslations("mobile.mcp")

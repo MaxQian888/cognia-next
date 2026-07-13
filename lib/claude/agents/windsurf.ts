@@ -3,7 +3,7 @@
 // (via `normalizeMcpEntry({ urlKey: "serverUrl" })`) and re-stamp it back to
 // `serverUrl` on write.
 
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import type { McpImportDraft } from "@/lib/db/mcp-servers"
 import type { McpAgentAdapter } from "./index"
 import { denormalizeMcpEntry, dropInvalidDrafts, normalizeMcpEntry } from "./shared"

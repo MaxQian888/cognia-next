@@ -4,7 +4,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 
 const logInfo = jest.fn()

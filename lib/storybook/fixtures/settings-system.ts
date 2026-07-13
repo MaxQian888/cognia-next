@@ -4,7 +4,7 @@
 // `AppSettings`-shaped blob covering only the fields the panel under test reads.
 // The full `AppSettings` type is large; we build the subset and cast through
 // `unknown`, mirroring `lib/storybook/fixtures/settings-search.ts`.
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { AutomationAuditLogRow } from "@/lib/automation/audit"
 
 /**

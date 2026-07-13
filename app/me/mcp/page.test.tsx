@@ -5,7 +5,7 @@ import { render, screen } from "@testing-library/react"
 
 import MobileMcpPage from "./page"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 jest.mock("@/hooks/companion/use-companion-config")
 

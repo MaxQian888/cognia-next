@@ -6,7 +6,7 @@ import {
   withCliAutoApprovedTools,
   withCliDisabledMcpTools,
 } from "./tool-suppression"
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 
 describe("withCliAutoApprovedTools", () => {
   it("merges the full auto-approve set, preserving existing suppressions + extras", () => {

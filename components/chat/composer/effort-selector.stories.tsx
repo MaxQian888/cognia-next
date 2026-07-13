@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { EffortSelector } from "./effort-selector"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 // EffortSelector self-gates to `null` unless there is a session AND the active
 // model supports reasoning effort (`modelSupportsEffort`). On the Anthropic path

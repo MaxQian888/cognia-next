@@ -15,7 +15,7 @@
 // result elision) is a follow-up — the V1 cost is only paid once per
 // sidecar restart per session, not per send.
 
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 
 export interface BuildReplayPromptOptions {
   /** Drop the oldest turns when the total exceeds this many characters. */

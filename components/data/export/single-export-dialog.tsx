@@ -37,7 +37,7 @@ import { CustomThemeEditor } from "./custom-theme-editor"
 import { type ThemeId } from "@/lib/export/html/syntax-themes"
 import { themeHasWallpaper, resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { useCustomThemeStore } from "@/stores/theme"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { SingleExportFormat } from "@/lib/export/single"
 import { createLogger } from "@cognia/logging"
 

@@ -7,7 +7,7 @@ import {
   makeProviderSettingsMap,
   makeCustomProviderSettings,
 } from "@/lib/storybook/fixtures/settings-provider"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Full provider-management surface: sidebar (all built-in catalog providers +
 // customs) and a detail panel of Config / Models / Cost / Advanced tabs. Reads

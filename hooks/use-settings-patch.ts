@@ -18,7 +18,7 @@ import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { useSettingsStore } from "@/stores/settings"
 
 export type SettingsPatchFn = (patch: Partial<AppSettings>) => Promise<void>

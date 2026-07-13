@@ -3,7 +3,7 @@ import { useState } from "react"
 import { fn } from "storybook/test"
 
 import { ModelOverrideFields, type ProviderOption } from "./model-override-fields"
-import type { UtilityModelConfig } from "@/lib/claude/types"
+import type { UtilityModelConfig } from "@cognia/agent-config-types"
 
 // Pure props: a provider select (configured providers + "use chat default")
 // plus a free-text model id. Used by conversation-title / timeline-label /

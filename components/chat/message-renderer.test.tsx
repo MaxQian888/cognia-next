@@ -675,7 +675,7 @@ describe("team speaker display", () => {
   it("shows speaker name when characterById resolves senderId", () => {
     const characterById = new Map([
       ["char_1", { id: "char_1", name: "Alice", systemPrompt: "" }],
-    ]) as unknown as Map<string, import("@/lib/claude/types").Character>
+    ]) as unknown as Map<string, import("@cognia/agent-config-types").Character>
     const msg: UIMessage = {
       id: "sp1",
       role: "assistant",
@@ -695,7 +695,7 @@ describe("mention highlighting", () => {
     const characterById = new Map([
       ["char_alice", { id: "char_alice", name: "Alice", systemPrompt: "" }],
       ["char_bob", { id: "char_bob", name: "Bob", systemPrompt: "" }],
-    ]) as unknown as Map<string, import("@/lib/claude/types").Character>
+    ]) as unknown as Map<string, import("@cognia/agent-config-types").Character>
 
     const msg: UIMessage = {
       id: "u-mentions",
@@ -714,7 +714,7 @@ describe("mention highlighting", () => {
   it("preserves mention chips when the same message re-renders with identical text", () => {
     const characterById = new Map([
       ["char_alice", { id: "char_alice", name: "Alice", systemPrompt: "" }],
-    ]) as unknown as Map<string, import("@/lib/claude/types").Character>
+    ]) as unknown as Map<string, import("@cognia/agent-config-types").Character>
 
     const msg: UIMessage = {
       id: "u-mention-stable",

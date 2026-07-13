@@ -5,7 +5,7 @@ import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
 import { makeRoutingConfig } from "@/lib/storybook/fixtures/settings-provider"
 import type { RoutingCircuitBreakerSettings } from "@cognia/provider-types/model-mapping"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Circuit-breaker reliability settings (global enable, absolute vs failure-rate
 // trip mode, cooldown clamps) + a read-only view of the active pre-call filter

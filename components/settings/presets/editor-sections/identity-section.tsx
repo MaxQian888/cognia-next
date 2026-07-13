@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select"
 import { SettingsCard } from "@/components/settings/common/settings-section"
 import { PRESET_CATEGORIES } from "@/lib/presets/categories"
-import type { PresetCategory } from "@/lib/claude/types"
+import type { PresetCategory } from "@cognia/agent-config-types"
 
 import { COLOR_PALETTE } from "./constants"
 import type { PresetEditorState } from "../preset-editor-state"

@@ -8,7 +8,7 @@ jest.mock("./targets/chat", () => ({
   defaultChatTargetDeps: jest.fn(() => ({})),
 }))
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { buildBrowserRunDeps, buildConfiguredRunDeps } from "./browser-deps"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 

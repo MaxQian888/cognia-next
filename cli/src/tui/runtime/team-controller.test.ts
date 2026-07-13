@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 import { formatTeamDoc, teamAuto, teamList, teamRun, teamShow } from "./team-controller"
-import type { Team } from "@/lib/claude/types"
+import type { Team } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { TuiAction } from "../state/types"
 import type { ResolvedConfig } from "../../config/schema"

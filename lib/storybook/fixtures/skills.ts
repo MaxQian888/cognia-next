@@ -1,7 +1,7 @@
 // Fixture builders for Skills stories. Spread `over` to vary a single field;
 // every required column gets a realistic default so the object is valid both
 // for component props and for `bulkPut` into the Dexie `skills` table.
-import type { Skill, SkillResource, SkillValidationError } from "@/lib/claude/types"
+import type { Skill, SkillResource, SkillValidationError } from "@cognia/agent-config-types"
 import type { SkillsShAudit } from "@/lib/skills/marketplace-skillssh"
 import type { SkillsShFileTreeNode } from "@/lib/skills/skillssh-install"
 import type { MarketplaceItem } from "@/lib/skills/marketplace-types"

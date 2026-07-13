@@ -19,7 +19,7 @@ import type { UIMessage } from "ai"
 import { useSettingsStore } from "@/stores/settings"
 import { canAutoPlayTTS } from "@cognia/tts/auto-play-gates"
 import { speakChatMessage } from "@/lib/tts/speak-chat-message"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
 
 type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"

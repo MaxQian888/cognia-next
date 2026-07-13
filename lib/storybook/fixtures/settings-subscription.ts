@@ -7,7 +7,7 @@
 // `AccountUsageChips`, which reads `listCharacters()` / `listSessions()` from
 // Dexie; the builders below produce type-safe rows for that story.
 
-import type { Character, ChatSession } from "@/lib/claude/types"
+import type { Character, ChatSession } from "@cognia/agent-config-types"
 
 let charSeq = 0
 let sessionSeq = 0

@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { WebSearchToggle } from "./web-search-toggle"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // The toggle derives its enabled/active state from two stores:
 //  - settings: `searchEnabled` + at least one configured+enabled provider

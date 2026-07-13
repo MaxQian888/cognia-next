@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react"
 
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 import { useConversationListModel } from "./use-conversation-list-model"
 

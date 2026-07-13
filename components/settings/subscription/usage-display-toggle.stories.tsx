@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { UsageDisplayToggle } from "./usage-display-toggle"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // `UsageDisplayToggle` reflects the global `AppSettings.usageDisplayMode.mode`
 // via `useUsageDisplayMode` (a `useSettingsStore` selector). Reset the store

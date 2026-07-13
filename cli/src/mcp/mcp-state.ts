@@ -10,7 +10,7 @@
 import nodeFs from "node:fs"
 import path from "node:path"
 
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 export interface McpStateFs {
   exists(path: string): boolean

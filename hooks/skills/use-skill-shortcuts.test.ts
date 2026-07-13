@@ -6,7 +6,7 @@ import { renderHook } from "@testing-library/react"
 import { fireEvent } from "@testing-library/react"
 import { useSkillShortcuts } from "./use-skill-shortcuts"
 import { useSkillsStore } from "@/stores/skills"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 const skills: Skill[] = [
   { id: "a", name: "Alpha", content: "", createdAt: 0, updatedAt: 0 } as Skill,

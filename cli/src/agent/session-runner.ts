@@ -23,12 +23,12 @@ import {
   type CaptureStreamEvent,
 } from "@/lib/claude/run-and-capture"
 import { setSessionMode as defaultSetSessionMode } from "@/lib/claude/ipc"
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 
 /** A concrete permission mode value (excludes `undefined`). */
 type PermissionModeValue = NonNullable<SendOptions["permissionMode"]>
 
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 import { buildAttachmentContent, type BuiltAttachmentContent } from "./attachments/build"
 import { resolveHome } from "../config/load"
@@ -82,7 +82,7 @@ export interface AgentSessionParams {
    * desktop Workflow Copilot agent — `resolveSendOptions` then swaps the prompt
    * + `wf_*` tool whitelist and injects the live editor-store snapshot.
    */
-  sessionKind?: import("@/lib/claude/types").SessionKind
+  sessionKind?: import("@cognia/agent-config-types").SessionKind
   home?: string
   bootstrap?: (cwd: string) => Promise<SidecarBootstrap>
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>

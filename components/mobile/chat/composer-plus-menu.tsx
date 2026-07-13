@@ -28,7 +28,7 @@ import { pickMultiplePhotos, pickPhoto } from "@/lib/capacitor/camera"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { showToast } from "@/lib/capacitor/toast"
 import { makeDefaultLoader, withPlugin } from "@/lib/capacitor/_shared"
-import type { SendContent, SendContentBlock } from "@/lib/claude/types"
+import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 export type ComposerAttachment =

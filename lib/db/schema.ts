@@ -21,7 +21,7 @@ import type {
   StoredMessage,
   SystemPromptPreset,
   Team,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import type { ProjectChunk } from "@/types/project-knowledge"
 import type { TrustedWorkspace } from "./trusted-workspaces"

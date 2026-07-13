@@ -31,7 +31,7 @@ import type {
   UrgentChannel,
 } from "@/types/connectors"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution, setStatus, setSlaDue } from "@/lib/db/conversation-overrides"

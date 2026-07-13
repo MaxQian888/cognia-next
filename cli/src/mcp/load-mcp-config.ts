@@ -14,7 +14,7 @@ import nodeFs from "node:fs"
 import path from "node:path"
 
 import { normalizeMcpEntry } from "@/lib/claude/agents/shared"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 export interface McpFs {
   exists(path: string): boolean

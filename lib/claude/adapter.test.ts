@@ -14,7 +14,7 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
   SendContent,
-} from "./types"
+} from "@cognia/agent-config-types"
 
 function asAssistant(message: BetaMessage, uuid = "evt-1"): SDKAssistantMessage {
   return { type: "assistant", message, uuid } as unknown as SDKAssistantMessage

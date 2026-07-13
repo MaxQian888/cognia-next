@@ -9,7 +9,7 @@ import {
   makeModelMappingEntry,
   makeProviderSettingsMap,
 } from "@/lib/storybook/fixtures/settings-provider"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Dialog editor for a single model-alias mapping. Edits a local draft and
 // persists through `useSettingsStore.upsertModelMapping`. Provider options for

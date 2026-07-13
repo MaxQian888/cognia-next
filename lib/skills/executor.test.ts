@@ -4,7 +4,7 @@ jest.mock("@/lib/db/skills", () => ({
 
 import { executeSkill, skillsExecutor, buildProgressiveSkillsPrompt } from "./executor"
 import { renderSkillsSection } from "@/lib/db/skills"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 const mockedRender = renderSkillsSection as unknown as jest.Mock
 

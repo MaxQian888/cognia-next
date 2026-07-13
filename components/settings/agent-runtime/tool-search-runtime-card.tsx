@@ -27,7 +27,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
 import { useSettingsStore } from "@/stores/settings"
-import type { ToolSearchRuntimeConfig } from "@/lib/claude/types"
+import type { ToolSearchRuntimeConfig } from "@cognia/agent-config-types"
 import { BUILTIN_SERVER_NAME } from "@/lib/settings/builtin-tools"
 import { getToolCatalog, PLUGIN_TOOLS_SERVER_NAME } from "@/lib/tools/tool-catalog"
 

@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { SKILL_CATEGORIES } from "@/lib/skills/categories"
 import { validateSkill } from "@/lib/skills/validate"
-import type { Skill, SkillCategory, SkillValidationError } from "@/lib/claude/types"
+import type { Skill, SkillCategory, SkillValidationError } from "@cognia/agent-config-types"
 import type { SkillDraft } from "@/lib/db/skills"
 import { SkillEditorAiPopup } from "./skill-editor-ai-popup"
 
@@ -211,6 +211,7 @@ export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAi
           <Input
             value={form.license}
             onChange={(e) => setForm({ ...form, license: e.target.value })}
+            // i18n-exempt: SPDX license identifier example
             placeholder="MIT"
           />
         </Field>

@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { QuickActionGrid } from "./quick-action-grid"
 import { resetStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // 4-tile quick actions (theme / language / computer-use / scan). Reads
 // `useSettingsStore` for the language + computer-use state and next-themes

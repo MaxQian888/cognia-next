@@ -7,7 +7,7 @@ import {
   DEFAULT_SEMANTIC_TOOL_ROUTING,
   type SemanticToolRoutingSettings,
 } from "@/types/routing/tool-route"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Opt-in semantic tool routing: prune the exposed plugin-tool manifest to the
 // top-K semantic matches plus pinned tools. Reads + writes

@@ -7,7 +7,7 @@ import {
 } from "./builtins"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
-import type { BuiltinToolsConfig } from "@/lib/claude/types"
+import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 
 const base: ResolvedConfig = {
   ...DEFAULT_RESOLVED_CONFIG,

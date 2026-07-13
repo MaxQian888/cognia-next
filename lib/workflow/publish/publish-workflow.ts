@@ -18,7 +18,7 @@ import type { VisualWorkflow, WorkflowInterface } from "@/types/workflow/visual"
 import { getWorkflow, updateWorkflow } from "@/lib/db/workflows"
 import { getDb } from "@/lib/db/schema"
 import { createSkill, updateSkill, deleteSkill } from "@/lib/db/skills"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 /** Canonical id of the skill-catalog entry backing a published workflow. */
 export function workflowSkillCanonicalId(workflowId: string): string {

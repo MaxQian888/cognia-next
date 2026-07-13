@@ -30,7 +30,7 @@ import {
   namespaced,
   type BuiltinToolCategoryId,
 } from "@/lib/settings/builtin-tools"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
 export function PermissionsToolsTab() {
   const t = useTranslations("settings.agentRuntimeSection.permissions")

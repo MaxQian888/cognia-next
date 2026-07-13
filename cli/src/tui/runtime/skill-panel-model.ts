@@ -6,7 +6,7 @@
  * a render; the component (`components/SkillPanel.tsx`) owns only query +
  * highlight.
  */
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 import { skillOriginLabel } from "../../skill/discover-skills"
 import { fuzzyFilter } from "./fuzzy-filter"

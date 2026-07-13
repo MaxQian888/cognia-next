@@ -4,7 +4,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { EffortSelector } from "./effort-selector"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { updateSession } from "@/lib/db/sessions"
 
 // The selector persists effort through the Dexie sessions table.

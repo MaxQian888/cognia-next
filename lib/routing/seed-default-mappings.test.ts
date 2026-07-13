@@ -1,4 +1,4 @@
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { computeEnabledProviderIds, seedDefaultMappingsIfNeeded } from "./seed-default-mappings"
 
 function makeSettings(p: Partial<AppSettings> = {}): AppSettings {

@@ -14,7 +14,7 @@ import {
   type SkillUpdateStatus,
 } from "@/lib/skills/skillssh-updates"
 import { useSkillsStore } from "@/stores/skills/skills-store"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 export interface UseSkillUpdate {
   /** skillId → status, populated by the last `checkAll` run. */

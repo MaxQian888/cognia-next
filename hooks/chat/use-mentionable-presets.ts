@@ -13,7 +13,7 @@
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import type { SystemPromptPreset } from "@/lib/claude/types"
+import type { SystemPromptPreset } from "@cognia/agent-config-types"
 import { listPresets } from "@/lib/db/prompt-presets"
 
 export function useMentionablePresets(enabled = true): SystemPromptPreset[] {

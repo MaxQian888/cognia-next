@@ -11,7 +11,7 @@ import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 type ComposerBehavior = NonNullable<AppSettings["composerBehavior"]>
 

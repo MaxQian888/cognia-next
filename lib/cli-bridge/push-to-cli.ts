@@ -11,7 +11,7 @@
  * logic every other agent uses.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { syncToAgent, type SyncResult } from "@/lib/claude/sync"
 
 import { resolveCliHome } from "./home"

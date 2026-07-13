@@ -11,7 +11,7 @@ import {
   registerDensityPresetsForPlugin,
   __resetDensityPresetRegistryForTesting,
 } from "./density-preset-registry"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { DensitySettings } from "@/types/appearance"
 
 const baseSettings = {

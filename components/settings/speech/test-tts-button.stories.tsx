@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { TestTtsButton } from "./test-tts-button"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // `TestTtsButton` drives the `useTTS` hook (idle → Play, loading → spinner,
 // playing → Stop). At rest it renders the Play affordance with the

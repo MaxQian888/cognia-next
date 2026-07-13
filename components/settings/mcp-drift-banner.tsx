@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button"
 import { isTauri } from "@/lib/tauri"
 import { syncToAgent } from "@/lib/claude/sync"
 import { useAgentStatuses } from "@/hooks/agent"
-import type { AgentId } from "@/lib/claude/types"
+import type { AgentId } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 export function McpDriftBanner() {

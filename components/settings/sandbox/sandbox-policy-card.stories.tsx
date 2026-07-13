@@ -4,7 +4,7 @@ import { SandboxPolicyCard } from "./sandbox-policy-card"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
 import { makeAppSettings } from "@/lib/storybook/fixtures/settings-system"
-import type { SandboxResourcePolicy } from "@/lib/claude/types"
+import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 
 // Store-reading: edits `settings.sandboxPolicy` (CPU / memory / network ceiling
 // + writable roots). The network "allowlist" mode reveals the hosts textarea.

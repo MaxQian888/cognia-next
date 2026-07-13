@@ -1,5 +1,5 @@
 import { migrateLspSettings } from "./migrate-settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 type Slice = Pick<AppSettings, "lsp" | "developer">
 

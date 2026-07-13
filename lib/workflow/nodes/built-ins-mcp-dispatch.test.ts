@@ -40,7 +40,7 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import "./built-ins"
 import { getExecutor } from "./registry"
 import { getPluginEventHooks } from "@/lib/plugin"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import type { StepExecutionContext, TriggerEvent, WorkflowNodeKind } from "@/types/workflow/visual"
 
 const trigger: TriggerEvent = {

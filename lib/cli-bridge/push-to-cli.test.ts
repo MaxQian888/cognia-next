@@ -1,5 +1,5 @@
 import { countPushErrors, countPushSuccesses, pushToCli, type PushToCliDeps } from "./push-to-cli"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { SyncResult } from "@/lib/claude/sync"
 
 // Mocks back the `?? default` delegations exercised by the no-deps test below;

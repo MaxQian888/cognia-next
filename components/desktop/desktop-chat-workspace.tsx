@@ -32,7 +32,12 @@ import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
 import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
 import { WorkspaceTrustGate } from "@/components/chat/workspace-trust-gate"
 import type { ComposerHandle } from "@/components/chat/composer"
-import type { ApprovalDecision, Character, PendingApproval, SendContent } from "@/lib/claude/types"
+import type {
+  ApprovalDecision,
+  Character,
+  PendingApproval,
+  SendContent,
+} from "@cognia/agent-config-types"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { usePlatform } from "@/hooks/use-platform"

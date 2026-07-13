@@ -22,7 +22,7 @@ import "fake-indexeddb/auto"
 import { getBus, __resetBusForTesting } from "./bus"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { NormalizedInboundEvent } from "@/types/connectors"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 
 beforeEach(async () => {
   await getDb().delete()

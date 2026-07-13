@@ -18,15 +18,15 @@ import type {
   SendContent,
   SendOptions,
   SessionControlMethod,
-} from "./types"
+} from "@cognia/agent-config-types"
 import {
   isControlResponseEvent,
   isPluginToolExecEvent,
   isProtocolAdapterCancelEvent,
-} from "./types"
+} from "@cognia/agent-config-types"
 import type { PluginToolExecResponse } from "./plugin-tool-ipc"
 import type { ProtocolAdapterExecEvent } from "./protocol-adapter-ipc"
-import type { ProtocolAdapterCancelEvent } from "./types"
+import type { ProtocolAdapterCancelEvent } from "@cognia/agent-config-types"
 
 const SIDECAR_EVENT = "claude://message"
 

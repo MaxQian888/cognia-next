@@ -101,7 +101,7 @@ jest.mock("@/stores/settings", () => {
 })
 
 import { ChatPane } from "./chat-view"
-import type { ChatSession, SendContent } from "@/lib/claude/types"
+import type { ChatSession, SendContent } from "@cognia/agent-config-types"
 
 const mockSession = { id: "s1", title: "Test" } as unknown as ChatSession
 

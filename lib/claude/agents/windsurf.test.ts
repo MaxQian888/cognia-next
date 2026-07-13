@@ -1,4 +1,4 @@
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 import { WINDSURF_AGENT } from "./windsurf"
 

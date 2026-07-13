@@ -32,7 +32,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import type { CharacterDraft } from "@/lib/db/characters"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 export interface CharacterDetailSheetProps {

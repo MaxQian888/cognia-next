@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { McpPicker } from "./mcp-picker"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 // `serversForTesting` bypasses the Dexie fetch so the picker renders
 // deterministically. Two enabled servers + one disabled (greyed out, can't be

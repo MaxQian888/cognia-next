@@ -4,7 +4,7 @@
 import { render, screen, fireEvent } from "@testing-library/react"
 
 import { ToolApprovalDialog } from "./tool-approval-dialog"
-import type { PendingApproval } from "@/lib/claude/types"
+import type { PendingApproval } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>

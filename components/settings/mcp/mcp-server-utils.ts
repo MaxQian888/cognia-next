@@ -6,7 +6,7 @@
  * implementation instead of each re-deriving it.
  */
 
-import type { McpServer, McpTransport } from "@/lib/claude/types"
+import type { McpServer, McpTransport } from "@cognia/agent-config-types"
 import type { McpTestRequest } from "@/lib/claude/ipc"
 
 export interface KvRow {

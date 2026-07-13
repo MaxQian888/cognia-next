@@ -8,7 +8,7 @@ import { markSent } from "@/lib/db/outbound-jobs"
 import "./built-ins"
 import { getExecutor } from "./registry"
 import { registerSkill, __resetSkillsForTesting } from "@/lib/plugin/registries/skill-registry"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type {
   StepExecutionContext,
   StepExecutionResult,

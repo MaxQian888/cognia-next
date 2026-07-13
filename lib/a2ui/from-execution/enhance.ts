@@ -14,7 +14,7 @@
  */
 
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { loggers } from "@cognia/logging"
 

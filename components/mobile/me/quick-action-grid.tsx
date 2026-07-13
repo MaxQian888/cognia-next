@@ -37,7 +37,7 @@ import { MobileServerScanSheet } from "@/components/mobile/connection-state-shee
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
-import type { AppLanguage, AppTheme } from "@/lib/claude/types"
+import type { AppLanguage, AppTheme } from "@cognia/agent-config-types"
 
 const THEME_CYCLE: AppTheme[] = ["system", "light", "dark"]
 const LANGUAGE_CYCLE: AppLanguage[] = ["en", "zh-CN"]

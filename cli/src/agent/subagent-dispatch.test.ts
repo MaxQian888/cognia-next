@@ -18,7 +18,7 @@ import type { AgentSummary } from "./discover-agents"
 import type { PluginToolExecRequest } from "@/lib/claude/plugin-tool-ipc"
 import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 import { DEFAULT_RESOLVED_CONFIG } from "../config/schema"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { createPermissionGate } from "./permission-gate"
 import {
   __clearAllCliBackgroundRunsForTesting,

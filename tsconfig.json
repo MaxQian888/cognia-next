@@ -58,7 +58,9 @@
       "@cognia/tts": ["./packages/tts/src/index.ts"],
       "@cognia/tts/*": ["./packages/tts/src/*"],
       "@cognia/logging": ["./packages/logging/src/index.ts"],
-      "@cognia/logging/*": ["./packages/logging/src/*"]
+      "@cognia/logging/*": ["./packages/logging/src/*"],
+      "@cognia/agent-config-types": ["./packages/agent-config-types/src/index.ts"],
+      "@cognia/agent-config-types/*": ["./packages/agent-config-types/src/*"]
     }
   },
   "include": [

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { act, fireEvent, render, screen } from "@testing-library/react"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { __resetThemeRegistryForTesting, registerPluginTheme } from "@/lib/theme/theme-registry"
 
 const setTheme = jest.fn()

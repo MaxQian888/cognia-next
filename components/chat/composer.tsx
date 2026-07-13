@@ -47,7 +47,7 @@ import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
 import { formatArtifactSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
-import type { SendContent, ChatSession, Character } from "@/lib/claude/types"
+import type { SendContent, ChatSession, Character } from "@cognia/agent-config-types"
 import {
   buildSendContent,
   INLINE_TOKEN_CEILING,

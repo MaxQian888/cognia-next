@@ -2,7 +2,7 @@ import { render } from "@testing-library/react"
 import { svgSkin } from "./svg-skin"
 import { useSettingsStore } from "@/stores/settings"
 import type { PetBones, PetSkinRenderProps } from "@/types/pet"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 function makeBones(overrides: Partial<PetBones> = {}): PetBones {
   return {

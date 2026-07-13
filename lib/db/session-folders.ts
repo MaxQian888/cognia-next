@@ -1,6 +1,6 @@
 import Dexie from "dexie"
 
-import type { SessionFolder } from "@/lib/claude/types"
+import type { SessionFolder } from "@cognia/agent-config-types"
 
 import { getDb } from "./schema"
 import { resolveScopeProjectId } from "./project-scope"

@@ -1,5 +1,5 @@
 import { buildChatSharePayload } from "./chat-export"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 const sortBy = jest.fn().mockResolvedValue([{ id: "m1" }])
 jest.mock("@/lib/db/schema", () => ({

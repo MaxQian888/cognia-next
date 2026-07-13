@@ -3,7 +3,7 @@
 // stable, deduplicated grouping: favorites first, then default presets not
 // already in favorites, then per-category groups, then everything else.
 
-import type { SystemPromptPreset } from "@/lib/claude/types"
+import type { SystemPromptPreset } from "@cognia/agent-config-types"
 import { PRESET_CATEGORIES } from "@/lib/presets/categories"
 
 export interface PresetGroup {

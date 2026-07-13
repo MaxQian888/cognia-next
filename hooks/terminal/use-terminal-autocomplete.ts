@@ -30,7 +30,7 @@ import {
   ensureBuiltinCompletionProviders,
 } from "@/lib/terminal/completion/builtins"
 import { getCompletions } from "@/lib/terminal/completion/registry"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { AcceptEdit, TerminalCompletionSuggestion } from "@/lib/terminal/completion/types"
 
 const MIN_DEBOUNCE = 50

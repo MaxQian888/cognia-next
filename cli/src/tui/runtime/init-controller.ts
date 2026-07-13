@@ -23,7 +23,7 @@ import {
   resolveSendOptions as defaultResolveSendOptions,
   type BuildOptionsContext,
 } from "@/lib/claude/build-options"
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 
 import { runHeadlessTurn } from "../../agent/run"
 import { createPermissionGate } from "../../agent/permission-gate"

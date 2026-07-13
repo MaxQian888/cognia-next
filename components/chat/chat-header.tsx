@@ -21,7 +21,7 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { SessionInsightsSheet } from "@/components/chat/session-insights/session-insights-sheet"
 import { useUIStore } from "@/stores/ui"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 interface Props {
   session: ChatSession

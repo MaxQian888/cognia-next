@@ -6,7 +6,7 @@
 import { exportToBeautifulHtml } from "./beautiful-html"
 import { exportToAnimatedHtml } from "./animated-html"
 import { THEMES } from "./syntax-themes"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 const session: ChatSession = {
   id: "s1",

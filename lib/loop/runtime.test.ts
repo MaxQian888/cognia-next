@@ -22,7 +22,7 @@ import {
   getLoopRuntime,
   resolveLoopConfig,
 } from "./runtime"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 beforeEach(async () => {
   await getDb().delete()

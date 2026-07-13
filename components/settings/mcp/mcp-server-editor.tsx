@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { McpTransport } from "@/lib/claude/types"
+import type { McpTransport } from "@cognia/agent-config-types"
 import { KvEditor } from "./kv-editor"
 import {
   MCP_TRANSPORT_VALUES,

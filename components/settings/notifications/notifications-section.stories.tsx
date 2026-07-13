@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { NotificationsSection } from "./notifications-section"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // `NotificationsSection` resolves `notificationPreferences` through
 // `resolvePreferences` (so an empty store still renders the full default

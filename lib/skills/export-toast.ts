@@ -1,7 +1,7 @@
 "use client"
 
 import { toast } from "sonner"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import { serializeSkill, skillFilename } from "@/lib/claude/skills-io"
 import { pickDirectory, saveFilesToDir } from "@/lib/files/file-bridge"
 import { loggers } from "@cognia/logging"

@@ -10,7 +10,7 @@
  * {@link UtilityModelConfig} override shape onto it.
  */
 
-import type { AppSettings, ChatSession, UtilityModelConfig } from "@/lib/claude/types"
+import type { AppSettings, ChatSession, UtilityModelConfig } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 

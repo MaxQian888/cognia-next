@@ -17,7 +17,7 @@
  * runtime path stays silent so a stale pack doesn't spam the console.
  */
 
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
 import { type SpeechSettings, type TTSProvider, TTS_PROVIDERS } from "@cognia/tts/types"
 

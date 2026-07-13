@@ -1,5 +1,5 @@
 import { SidecarIssueLoopDriver } from "./sidecar-driver"
-import type { ClaudeEvent, SendContent, SendOptions } from "@/lib/claude/types"
+import type { ClaudeEvent, SendContent, SendOptions } from "@cognia/agent-config-types"
 
 describe("SidecarIssueLoopDriver", () => {
   function setup() {

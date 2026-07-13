@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 import { buildSendContent, extractImageRefs } from "./image-input"
-import type { SendContentBlock } from "@/lib/claude/types"
+import type { SendContentBlock } from "@cognia/agent-config-types"
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47])
 

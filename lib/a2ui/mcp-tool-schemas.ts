@@ -8,7 +8,7 @@
 // 2. `sidecar/a2ui-mcp.mjs` (Phase E) → reads these schemas to advertise the
 //    same tools over a stand-alone stdio transport.
 
-import type { AgentId, McpServer } from "@/lib/claude/types"
+import type { AgentId, McpServer } from "@cognia/agent-config-types"
 
 export const A2UI_BRIDGE_SERVER_ID = "builtin:a2ui-bridge"
 export const A2UI_BRIDGE_SERVER_NAME = "a2ui-bridge"

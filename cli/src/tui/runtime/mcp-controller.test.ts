@@ -31,7 +31,7 @@ import os from "node:os"
 import path from "node:path"
 
 import type { McpProbeResult } from "../../mcp/probe-mcp-server"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import type { TuiAction } from "../state/types"
 
 const ok = (over: Partial<McpProbeResult> = {}): McpProbeResult => ({

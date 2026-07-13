@@ -18,7 +18,7 @@
  */
 
 import { interruptSession, onClaudeMessage, sendPrompt } from "@/lib/claude/ipc"
-import type { ClaudeEvent } from "@/lib/claude/types"
+import type { ClaudeEvent } from "@cognia/agent-config-types"
 import type { IssueLoopDriver } from "../workflow/issue-loop"
 import { buildIssueSystemPrompt, buildIssueUserPrompt, extractSummary } from "./system-prompt"
 

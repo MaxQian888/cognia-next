@@ -435,7 +435,7 @@ export interface AgentTeamConfig {
    * further-restrict this (writable roots narrow, network tightens, caps lower)
    * via `clampSandboxPolicy`. Only consulted when the sandbox resolves enabled.
    */
-  sandboxPolicy?: import("@/lib/claude/types").SandboxResourcePolicy
+  sandboxPolicy?: import("@cognia/agent-config-types").SandboxResourcePolicy
   /** Max result tokens before auto-summarization (context isolation) */
   maxResultTokens?: number
   /** Auto-clean shared memory when team completes */
@@ -768,7 +768,7 @@ export interface TeammateConfig {
    * — a teammate can only narrow, never widen. Only meaningful when the sandbox
    * resolves enabled.
    */
-  sandboxPolicy?: import("@/lib/claude/types").SandboxResourcePolicy
+  sandboxPolicy?: import("@cognia/agent-config-types").SandboxResourcePolicy
 }
 
 /**

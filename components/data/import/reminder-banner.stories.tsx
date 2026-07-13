@@ -4,7 +4,7 @@ import { ReminderBanner } from "./reminder-banner"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
 import { seedDb } from "@/lib/storybook/seed-db"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Soft "back up your data" reminder. Visible only when `backupReminderDays` is
 // set and the last successful backup (Dexie `backupHistory`) is older than that

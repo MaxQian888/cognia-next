@@ -3,7 +3,7 @@
  */
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 
 // ---------------------------------------------------------------------------
 // Mocks

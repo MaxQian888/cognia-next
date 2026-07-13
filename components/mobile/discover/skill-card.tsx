@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/item"
 import { setSkillStatus } from "@/lib/db/skills"
 import { MobileSkillSheet } from "@/components/mobile/skills/mobile-skill-sheet"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 export interface SkillCardProps {

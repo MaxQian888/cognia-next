@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { McpAgentChipGroup } from "./mcp-agent-chip-group"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 // `McpAgentChipGroup` renders one chip per known external coding agent for a
 // given MCP server, reflecting whether the server is projected into that agent's

@@ -1,0 +1,28 @@
+{
+  "name": "@cognia/agent-config-types",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cognia agent configuration type hub: AppSettings / SendOptions / ClaudeEvent and their guards — the repo's widest compile boundary (~750 importers), plus the LSP-config, compression, and pet-settings type leaves it depends on.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "cognia-source": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "ai": "*"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -14,7 +14,7 @@ import {
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { avatarColor } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 interface Props {
   open: boolean

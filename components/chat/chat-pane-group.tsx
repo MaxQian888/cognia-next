@@ -17,7 +17,12 @@ import { ToolApprovalDialog } from "./tool-approval-dialog"
 import type { ComposerHandle } from "./composer"
 import type { RecentSessionEntry } from "./empty-state"
 import { useChatStore, useSessionPendingApprovals } from "@/stores/chat"
-import type { ApprovalDecision, Character, ChatSession, SendContent } from "@/lib/claude/types"
+import type {
+  ApprovalDecision,
+  Character,
+  ChatSession,
+  SendContent,
+} from "@cognia/agent-config-types"
 
 export interface ChatPaneGroupProps {
   /** All sessions (for resolving tab titles / character ids). */
@@ -32,7 +37,7 @@ export interface ChatPaneGroupProps {
   regenerate: (sessionId: string) => Promise<void> | void
   editResend: (messageId: string, content: SendContent, sessionId: string) => Promise<void> | void
   respondToApproval: (
-    approval: import("@/lib/claude/types").PendingApproval,
+    approval: import("@cognia/agent-config-types").PendingApproval,
     decision: ApprovalDecision
   ) => Promise<void> | void
   /** Close a session's pane (sidecar teardown + store slice removal). */
@@ -59,7 +64,7 @@ function PaneApprovalGate({
 }: {
   sessionId: string
   onRespond: (
-    approval: import("@/lib/claude/types").PendingApproval,
+    approval: import("@cognia/agent-config-types").PendingApproval,
     decision: ApprovalDecision
   ) => Promise<void> | void
 }) {

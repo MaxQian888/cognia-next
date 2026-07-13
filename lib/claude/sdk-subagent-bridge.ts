@@ -33,7 +33,7 @@ import type {
   SDKAssistantMessage,
   SDKUserMessage,
   BetaContentBlock,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 
 /** tool_use_id (the spawning Task tool_use) → task_id (our node key). */
 const toolUseToTask = new Map<string, string>()

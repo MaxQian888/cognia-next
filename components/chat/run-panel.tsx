@@ -59,7 +59,7 @@ import {
   resolveRunStatusBarSettings,
   type RunBarUsageTotals,
 } from "@/lib/chat/run-bar-metrics"
-import type { RunStatusBarSettings } from "@/lib/claude/types"
+import type { RunStatusBarSettings } from "@cognia/agent-config-types"
 import {
   formatCostInCurrency,
   formatTokens,

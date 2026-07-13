@@ -1,4 +1,4 @@
-import type { ChatSession, SessionFolder } from "@/lib/claude/types"
+import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 
 import {
   buildConversationSections,

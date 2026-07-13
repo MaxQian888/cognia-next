@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { ComposerAssistanceCard } from "./composer-assistance-card"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // `ComposerAssistanceCard` reads the optional `composerAssistance` block from
 // the settings store: prompt enhancement, ghost-text autocomplete (+ debounce

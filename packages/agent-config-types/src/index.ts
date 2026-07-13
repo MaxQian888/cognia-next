@@ -17,21 +17,21 @@ import type {
   SearchUsageEntry,
   CustomSearchSource,
 } from "@cognia/web-search/types"
-import type { PetSettings } from "@/types/pet"
+import type { PetSettings } from "./pet-settings"
 import type {
   ModelMapping,
   ModelMappingEntry,
   RoutingConfig,
 } from "@cognia/provider-types/model-mapping"
 import type { RoutingStrategy } from "@cognia/provider-types/auto-router"
-import type { LspServerConfig, LspSettings, LspSendOptions } from "@/types/lsp/config"
+import type { LspServerConfig, LspSettings, LspSendOptions } from "./lsp-config"
 import type {
   CompressionSettings,
   CompressionStrategy,
   CompressionTrigger,
   OpticalCompactionOptions,
   SessionCompressionOverrides,
-} from "@/types/system/compression"
+} from "./compression"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 

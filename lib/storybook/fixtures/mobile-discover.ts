@@ -4,7 +4,7 @@
 // realistic default so the object is valid to render or to `bulkPut` into
 // Dexie. See `lib/claude/types.ts` (Character / Skill / Team) and
 // `types/twin/index.ts` (TwinDraft) for the canonical shapes.
-import type { Character, Skill, Team } from "@/lib/claude/types"
+import type { Character, Skill, Team } from "@cognia/agent-config-types"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 import type { TwinDraft } from "@/types/twin"
 

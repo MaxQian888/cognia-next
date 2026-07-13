@@ -3,7 +3,7 @@
  */
 import { renderHook, act } from "@testing-library/react"
 
-import type { AppSettings, UserProfile } from "@/lib/claude/types"
+import type { AppSettings, UserProfile } from "@cognia/agent-config-types"
 
 import { resolveAvatarUrl, resolveDisplayName, useUserProfile } from "./use-user-profile"
 

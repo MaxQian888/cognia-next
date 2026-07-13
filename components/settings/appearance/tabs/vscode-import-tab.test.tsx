@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // jsdom 26 ships `File.arrayBuffer()` but not `File.text()` — polyfill via
 // FileReader so the component's `file.text()` call resolves the synthetic

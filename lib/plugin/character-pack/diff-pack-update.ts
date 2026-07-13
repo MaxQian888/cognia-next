@@ -24,7 +24,7 @@
  * leak through the reference.
  */
 
-import type { Character, PackPristineSnapshot, SendOptions } from "@/lib/claude/types"
+import type { Character, PackPristineSnapshot, SendOptions } from "@cognia/agent-config-types"
 import type {
   PluginCharacterAvatarImage,
   PluginCharacterDef,
@@ -144,8 +144,7 @@ export function buildPristineSnapshot(overlay: PluginCharacterDef): PackPristine
     a2uiCatalogId: overlay.a2uiCatalogId,
     platformDefaults: cloneJson(overlay.platformDefaults) as Character["platformDefaults"],
     availableOnPlatforms: cloneArray(overlay.availableOnPlatforms) as
-      | PluginRuntimeProfile[]
-      | undefined,
+      PluginRuntimeProfile[] | undefined,
     avatarImage: cloneJson(overlay.avatarImage) as PluginCharacterAvatarImage | undefined,
     persona: cloneJson(overlay.persona) as PluginCharacterPersona | undefined,
     voiceProfile: cloneJson(overlay.voiceProfile) as PluginCharacterVoiceProfile | undefined,

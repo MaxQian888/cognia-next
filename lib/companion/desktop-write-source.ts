@@ -32,7 +32,7 @@ import {
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getDb } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
-import type { AppSettings, StoredMessage } from "@/lib/claude/types"
+import type { AppSettings, StoredMessage } from "@cognia/agent-config-types"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { isCapabilityId } from "@/lib/platform/capabilities"

@@ -44,7 +44,7 @@ import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useApprovalJournalStore } from "@/stores/agent/approval-journal-store"
 import { fleetStreamStore } from "@/lib/fleet/fleet-stream-store"
 import { FLEET_UPDATE_EVENT } from "@/lib/fleet/types"
-import type { PendingApproval } from "@/lib/claude/types"
+import type { PendingApproval } from "@cognia/agent-config-types"
 
 const approval = (requestId: string, over: Partial<PendingApproval> = {}): PendingApproval =>
   ({

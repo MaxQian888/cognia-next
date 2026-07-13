@@ -10,7 +10,7 @@ import type {
 } from "@/lib/db/connector-types"
 import type { ConversationLabelRow } from "@/lib/db/crm-types"
 import type { AuditEntry } from "@/types/connectors/audit"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 
 let draftSeq = 0

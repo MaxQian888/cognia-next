@@ -10,7 +10,7 @@
  * does. The returned `redacted` flag lets the caller toast the user.
  */
 
-import type { SkillCategory } from "@/lib/claude/types"
+import type { SkillCategory } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { SKILL_CATEGORIES } from "@/lib/skills/categories"

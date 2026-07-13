@@ -9,7 +9,7 @@ import type {
   PresetCategory,
   SendOptions,
   SystemPromptPreset,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 
 import { COLOR_PALETTE } from "./editor-sections/constants"
 

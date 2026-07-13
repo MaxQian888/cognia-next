@@ -19,7 +19,7 @@
 import { useMemo, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import type { Character, McpServer, Skill, Team } from "@/lib/claude/types"
+import type { Character, McpServer, Skill, Team } from "@cognia/agent-config-types"
 import { FAVORITES_CATEGORY, type DiscoverView } from "@/lib/discover/categories"
 import { favoriteKey } from "@/hooks/discover/use-discover-favorites"
 import type { PluginRow } from "@/lib/db/plugin-types"

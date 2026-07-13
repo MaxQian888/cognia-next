@@ -20,7 +20,7 @@ import { convertToModelMessages, streamText, type UIMessage } from "ai"
 import { composeSystem } from "@/lib/ai/agent/agent-executor"
 import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
-import type { ClaudeEvent, SendOptions } from "@/lib/claude/types"
+import type { ClaudeEvent, SendOptions } from "@cognia/agent-config-types"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { resolveStandaloneProvider } from "./resolve-standalone-provider"

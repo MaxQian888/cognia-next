@@ -15,7 +15,7 @@ import type {
   SDKUserMessage,
   SendContent,
   SendContentBlock,
-} from "./types"
+} from "@cognia/agent-config-types"
 import type {
   A2UIPart,
   ArtifactPart,

@@ -8,7 +8,7 @@ import {
   makeModelMappingEntry,
   makeProviderSettingsMap,
 } from "@/lib/storybook/fixtures/settings-provider"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // One provider:model entry inside the alias editor — picker + optional weight +
 // per-entry condition popover + reorder/remove controls. Driven by props; the

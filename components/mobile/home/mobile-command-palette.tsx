@@ -37,7 +37,7 @@ import { listCharacters } from "@/lib/db/characters"
 import { listTeams } from "@/lib/db/teams"
 import { listWorkflows } from "@/lib/db/workflows"
 import { loggers } from "@cognia/logging"
-import type { Character, Team } from "@/lib/claude/types"
+import type { Character, Team } from "@cognia/agent-config-types"
 import type { WorkflowRow } from "@/types/workflow/visual"
 
 const log = loggers.ui

@@ -9,7 +9,7 @@
 // Every collaborator is injectable (`deps`) so this is unit-tested without a
 // model, IndexedDB, or the twin/vector stack; production uses the defaults.
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { MemoryRetrieverDeps } from "@/lib/memory/retrieve/retriever"
 import type { PetOneShot, PetProfile } from "@/types/pet"

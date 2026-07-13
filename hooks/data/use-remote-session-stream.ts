@@ -35,7 +35,7 @@ import type {
   ClaudeEvent,
   PendingApproval,
   SDKEventEnvelope,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import { listMessages } from "@/lib/db/messages"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"

@@ -28,8 +28,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { BiometricGuardPolicy } from "@/lib/claude/types"
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import type { BiometricGuardPolicy } from "@cognia/agent-config-types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import { useSettingsStore } from "@/stores/settings"
 

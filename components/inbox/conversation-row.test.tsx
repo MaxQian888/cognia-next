@@ -14,7 +14,7 @@ jest.mock("./unread-pill", () => ({
 }))
 
 import { ConversationRow, type ConversationRowItem } from "./conversation-row"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 
 function makeItem(overrides: Partial<ConversationRowItem> = {}): ConversationRowItem {

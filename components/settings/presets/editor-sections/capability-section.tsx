@@ -18,7 +18,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { SettingsCard } from "@/components/settings/common/settings-section"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
-import type { AppSettings, SendOptions } from "@/lib/claude/types"
+import type { AppSettings, SendOptions } from "@cognia/agent-config-types"
 
 import { EFFORT_LEVELS } from "./constants"
 import type { PresetEditorState } from "../preset-editor-state"

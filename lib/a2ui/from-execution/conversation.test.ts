@@ -1,4 +1,4 @@
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 import { buildConversationPage, extractMessageText, previewText, toolNameOf } from "./conversation"
 import type { ExecutionPageLabels } from "./types"

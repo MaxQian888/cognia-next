@@ -13,7 +13,7 @@
 import { sendPrompt } from "@/lib/claude/ipc"
 import { useChatStore, type LastSendCacheEntry } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import {
   classifyProviderErrorInfo,

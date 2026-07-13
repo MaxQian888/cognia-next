@@ -13,7 +13,7 @@ import {
   listSiblingConversations,
 } from "./session-bindings"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
 beforeEach(async () => {

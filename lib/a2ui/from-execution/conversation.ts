@@ -10,7 +10,7 @@
  */
 
 import { createAppMessages, type GeneratedApp } from "@/lib/a2ui/app-generator"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { A2UIChartDataPoint, A2UITableColumn } from "@/types/a2ui/schema"
 
 import { PageAssembler } from "./builders"

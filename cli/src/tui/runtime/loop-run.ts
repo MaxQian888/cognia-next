@@ -14,7 +14,7 @@
  *     (no scheduler task) and stop on the iteration cap or the 7-day expiry.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { Loop } from "@/types/loop"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import { DEFAULT_LOOP_CONFIG, getLoopRuntime, LoopGoalConflict } from "@/lib/loop/runtime"

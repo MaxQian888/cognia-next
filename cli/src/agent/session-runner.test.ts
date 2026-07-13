@@ -8,11 +8,11 @@ import {
   CLI_AUTO_APPROVED_TOOLS,
   type AttachmentSummary,
 } from "./session-runner"
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 import { createPermissionGate } from "./permission-gate"
 import { readTranscript, type TranscriptFs } from "./transcript"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { SidecarBootstrap } from "../runtime/bootstrap"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import { getCliSubagentContext } from "./subagent-dispatch"

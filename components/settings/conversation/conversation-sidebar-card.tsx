@@ -5,7 +5,7 @@ import { PanelLeftIcon } from "lucide-react"
 
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore, SIDEBAR_WIDTH_DEFAULT } from "@/stores/ui"
-import type { ConversationSidebarSettings } from "@/lib/claude/types"
+import type { ConversationSidebarSettings } from "@cognia/agent-config-types"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"

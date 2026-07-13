@@ -57,10 +57,13 @@ import {
 } from "@dnd-kit/core"
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import type { ConversationSidebarDensity, ConversationSearchScope } from "@/lib/claude/types"
+import type {
+  ConversationSidebarDensity,
+  ConversationSearchScope,
+} from "@cognia/agent-config-types"
 import { conversationSectionKey } from "@/lib/chat/conversation-list-model"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
-import type { Character, ChatSession, SessionFolder, Team } from "@/lib/claude/types"
+import type { Character, ChatSession, SessionFolder, Team } from "@cognia/agent-config-types"
 import {
   ArchiveIcon,
   ChevronDownIcon,

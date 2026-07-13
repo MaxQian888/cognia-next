@@ -16,7 +16,7 @@ import type {
   StoredMessage,
   SystemPromptPreset,
   Team,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import type {

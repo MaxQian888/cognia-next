@@ -12,7 +12,7 @@
 
 import { useSyncExternalStore } from "react"
 import { onClaudeMessage } from "@/lib/claude/ipc"
-import type { ReadyEvent } from "@/lib/claude/types"
+import type { ReadyEvent } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 
 export interface SidecarInfo {

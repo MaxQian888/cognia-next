@@ -34,7 +34,7 @@ import {
 } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useCharacter } from "@/lib/data-hooks/context"
-import type { Character, ChatSession, SendContent } from "@/lib/claude/types"
+import type { Character, ChatSession, SendContent } from "@cognia/agent-config-types"
 import { toast } from "sonner"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"

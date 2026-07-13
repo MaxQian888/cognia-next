@@ -8,7 +8,7 @@
 
 import { useMemo } from "react"
 import { useSettingsStore } from "@/stores/settings"
-import type { UtilityModelConfig } from "@/lib/claude/types"
+import type { UtilityModelConfig } from "@cognia/agent-config-types"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import {

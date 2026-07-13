@@ -7,7 +7,7 @@
  * model turns through the sidecar.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { GoalTaskPayload, ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"

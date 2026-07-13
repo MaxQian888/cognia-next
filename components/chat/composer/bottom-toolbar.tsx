@@ -19,7 +19,7 @@ import { ContextUsageIndicator } from "@/components/chat/context-usage-indicator
 import { useSdkContextUsage } from "@/hooks/chat/use-sdk-context-usage"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { WebSearchToggle } from "./web-search-toggle"
 import { ModelPicker } from "./model-picker"

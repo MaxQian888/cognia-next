@@ -8,7 +8,7 @@
  * which agent.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 
 import { pushToCli, type PushReport } from "./push-to-cli"

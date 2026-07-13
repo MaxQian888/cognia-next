@@ -5,7 +5,7 @@
  * exact shape `to-build-context` synthesises (via the shared `buildCliSession`).
  */
 import { getDb } from "@/lib/db/schema"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 import { buildCliSession } from "../config/to-build-context"
 import type { ResolvedConfig } from "../config/schema"

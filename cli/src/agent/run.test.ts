@@ -5,7 +5,7 @@ import { runHeadlessTurn, mintSessionId } from "./run"
 import { readTranscript, type TranscriptFs } from "./transcript"
 import { createPermissionGate } from "./permission-gate"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { SidecarBootstrap } from "../runtime/bootstrap"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 

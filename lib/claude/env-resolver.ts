@@ -11,7 +11,7 @@
 
 import { transport } from "@/lib/tauri"
 import { useAccountStore } from "@/stores/account/account-store"
-import type { AppSettings, Character, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
 
 /**
  * Walk the ADR-0028 precedence chain to pick the accountId for this turn:

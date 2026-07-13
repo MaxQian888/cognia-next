@@ -35,7 +35,7 @@ import { updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { collectOptions } from "@/components/inbox/provider-model-switcher"
 import { TeamPicker } from "./_shared/team-picker"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import type { AppSettings, Character } from "@/lib/claude/types"
+import type { AppSettings, Character } from "@cognia/agent-config-types"
 
 /** Radix Select forbids `""` item values — sentinel for "use the default". */
 const DEFAULT_VALUE = "__default__"

@@ -6,7 +6,7 @@ jest.mock("./marketplace-skillssh", () => {
   }
 })
 
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import { fetchSkillsShDetail } from "./marketplace-skillssh"
 import { computeSkillsShFilesHash } from "./skillssh-install"
 import {

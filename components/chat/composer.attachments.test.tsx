@@ -41,7 +41,7 @@ import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
 import { buildSendContent } from "@/lib/chat/attachments/dispatch"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 const buildSendContentMock = buildSendContent as jest.Mock
 

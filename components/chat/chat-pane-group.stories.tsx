@@ -7,7 +7,7 @@ import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { resetStore } from "@/lib/storybook/seed-stores"
 import { useChatStore } from "@/stores/chat"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 // Concurrent-chat pane layout: the open-session tab strip plus one or two live
 // ChatPanes (split view), each bound to its own session slice.

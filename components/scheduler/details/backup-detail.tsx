@@ -13,7 +13,7 @@ import { InspectRow } from "./_shared/inspect-row"
 import { BackupScheduleDialog } from "../backup-schedule-dialog"
 import { useUnifiedRecentRuns } from "@/hooks/scheduler/use-unified-recent-runs"
 import { getSettings } from "@/lib/db/settings"
-import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@/lib/claude/types"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@cognia/agent-config-types"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
 export interface BackupDetailProps {

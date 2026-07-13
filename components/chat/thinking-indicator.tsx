@@ -31,7 +31,7 @@ import { MotionCollapse, useFlowMotion } from "@/components/chat/motion/motion-r
 import { ThinkingTips } from "@/components/chat/thinking-tips"
 import { useThinkingPhase } from "@/hooks/chat/use-thinking-phase"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 export interface ChatThinkingIndicatorProps {

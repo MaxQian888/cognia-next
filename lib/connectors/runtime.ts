@@ -30,7 +30,12 @@ import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
 import { matchDispatchRule, resolveEffectiveRouting } from "./dispatch-rules"
-import type { SendContent, StoredMessage, AppSettings, ChatSession } from "@/lib/claude/types"
+import type {
+  SendContent,
+  StoredMessage,
+  AppSettings,
+  ChatSession,
+} from "@cognia/agent-config-types"
 import type { AuditKind } from "@/types/connectors/audit"
 import type { InboxSendPolicy } from "@/lib/claude/build-options"
 import { getDb } from "@/lib/db/schema"
@@ -181,7 +186,7 @@ function isInboundTextPiiSafe(event: NormalizedInboundEvent): boolean {
 export type RunAndCaptureFn = (
   sessionId: string,
   prompt: SendContent,
-  options?: import("@/lib/claude/types").SendOptions,
+  options?: import("@cognia/agent-config-types").SendOptions,
   /**
    * Optional capture controls. The runtime passes `onPartial` here when the
    * target adapter implements `streamReply`, so the assistant's incremental
@@ -400,7 +405,7 @@ export async function insertInboundMessage(
  * single reason without branching at the call site.
  */
 function suppressedReasonToAuditKind(
-  reason: NonNullable<import("@/lib/claude/types").SendOptions["suppressedReason"]>
+  reason: NonNullable<import("@cognia/agent-config-types").SendOptions["suppressedReason"]>
 ): AuditKind {
   switch (reason) {
     case "quiet_hours":

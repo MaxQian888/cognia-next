@@ -1,7 +1,7 @@
 // Common shape used by both marketplace adapters (registry + skills.sh).
 // The UI consumes this; adapters normalise their wire formats to it.
 
-import type { SkillCategory } from "@/lib/claude/types"
+import type { SkillCategory } from "@cognia/agent-config-types"
 
 export type MarketplaceSourceId = "registry" | "skillssh"
 

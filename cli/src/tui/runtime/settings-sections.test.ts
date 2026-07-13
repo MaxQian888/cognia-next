@@ -5,7 +5,7 @@ import {
   type SettingsRow,
 } from "./settings-sections"
 import type { ResolvedConfig } from "../../config/schema"
-import type { BuiltinToolsConfig } from "@/lib/claude/types"
+import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
 
 type CfgOver = Partial<Omit<ResolvedConfig, "builtinTools">> & {

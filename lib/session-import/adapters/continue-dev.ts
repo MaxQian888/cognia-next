@@ -10,7 +10,7 @@
 
 import { joinPath } from "@/lib/claude/instructions/paths"
 import type { ImportedConversation } from "@/lib/data/importers/types"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import { walkFiles } from "../fs"
 import {
   buildMessage,

@@ -7,7 +7,7 @@
  */
 import { computeContextWindowUsage } from "@/lib/claude/usage"
 import type { UsageInfo } from "@/lib/claude/adapter"
-import type { SdkContextUsage } from "@/lib/claude/types"
+import type { SdkContextUsage } from "@cognia/agent-config-types"
 
 import { describeBuiltinTools } from "./builtins"
 import { cacheHitRatio, contextComposition, formatTokens } from "../format/usage"

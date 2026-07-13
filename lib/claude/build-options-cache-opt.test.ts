@@ -26,7 +26,7 @@ jest.mock("@/lib/twin/runtime", () => ({
 
 import { resolveSendOptions } from "./build-options"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import type { AppSettings, Character, ChatSession } from "./types"
+import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
 
 const MEMORY_SECTION = "## Memory\n\nRECALLED_FACT_FOR_THIS_TURN"
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 
 import { isTauri } from "@/lib/tauri"
 import { mcpOAuthStatus } from "@/lib/mcp/oauth-tauri"
-import type { McpTransport } from "@/lib/claude/types"
+import type { McpTransport } from "@cognia/agent-config-types"
 
 export type McpOAuthUiStatus = "loading" | "none" | "authorized" | "expired" | "unsupported"
 

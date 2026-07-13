@@ -12,7 +12,7 @@
  *   - create / delete: not applicable — the row is a singleton config
  */
 
-import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@/lib/claude/types"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@cognia/agent-config-types"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { runOnce as runBackupOnce } from "@/components/providers/backup-scheduler-provider"
 import {

@@ -11,7 +11,7 @@
 //    branches and `allBranches` is on, one line is emitted per distinct
 //    root→leaf path.
 
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 
 interface BranchMeta {

@@ -6,7 +6,7 @@ import {
   skillSummary,
   type SkillPanelRow,
 } from "./skill-panel-model"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 const skill = (over: Partial<Skill> = {}): Skill =>
   ({

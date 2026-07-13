@@ -12,7 +12,7 @@ import {
   compactBoundaryFromInner,
   type CaptureStreamEvent,
 } from "./run-and-capture"
-import type { ClaudeEvent } from "./types"
+import type { ClaudeEvent } from "@cognia/agent-config-types"
 import {
   registerChatMiddleware,
   __resetChatMiddlewareRegistryForTesting,

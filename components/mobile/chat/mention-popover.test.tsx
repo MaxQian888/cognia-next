@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { MentionPopover } from "./mention-popover"
 
 const mkCharacter = (overrides: Partial<Character> = {}): Character => ({

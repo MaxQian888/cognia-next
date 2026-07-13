@@ -13,7 +13,7 @@
  * It mirrors `cli/src/config/schema.ts:credentialsFileSchema`.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 import { getAccount, getActiveAccount } from "@/lib/subscription/core/transport"
 

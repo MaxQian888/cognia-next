@@ -19,7 +19,7 @@
 // Frontend code never deals with file paths; that's resolved per-OS in Rust
 // (see src-tauri/src/agents/paths.rs).
 
-import type { AgentId, McpServer } from "@/lib/claude/types"
+import type { AgentId, McpServer } from "@cognia/agent-config-types"
 import type { McpImportDraft } from "@/lib/db/mcp-servers"
 import { CLAUDE_CODE_AGENT } from "./claude-code"
 import { CLAUDE_DESKTOP_AGENT } from "./claude-desktop"

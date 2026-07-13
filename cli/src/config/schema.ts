@@ -17,7 +17,7 @@
  */
 
 import { z } from "zod"
-import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@cognia/agent-config-types"
 
 /** AI SDK protocol families the sidecar's dispatch table understands. Mirrors
  *  BUILTIN_PROTOCOL_NAMES in sidecar/dispatch/protocol-adapters/provider-protocol.mjs. */
@@ -442,8 +442,7 @@ export const DEFAULT_COAUTHOR_TRAILER =
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 /** The PR-body footer drafted PRs historically ended with. */
-export const DEFAULT_PR_FOOTER =
-  "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+export const DEFAULT_PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 
 /** Baseline git-workflow preferences — the historic hard-coded behavior. */
 export const GIT_WORKFLOW_DEFAULTS: ResolvedGitWorkflowConfig = {

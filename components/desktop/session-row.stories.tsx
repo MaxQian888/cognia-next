@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { SessionRow } from "./session-row"
-import type { ChatSession, SessionFolder } from "@/lib/claude/types"
+import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 
 // The channel-list session row: icon + title (double-click to rename inline),
 // optional pin/branch indicators + unread badge, and a hover actions menu.

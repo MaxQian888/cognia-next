@@ -17,7 +17,7 @@
  */
 
 import { isTauri } from "@/lib/platform/detect"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import type { UIMessage } from "@/types"
 import { getDb } from "./schema"
 

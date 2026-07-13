@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import type { SandboxResourcePolicy } from "@/lib/claude/types"
+import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 import { saveSettings } from "@/lib/db/settings"
 import { useSettingsStore } from "@/stores/settings"
 

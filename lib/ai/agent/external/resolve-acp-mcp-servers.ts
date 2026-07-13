@@ -24,7 +24,7 @@
  * `url`) are dropped rather than shipped malformed.
  */
 
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import type { AcpMcpServerConfig } from "@/types/agent/external-agent"
 
 function toNameValuePairs(record: unknown): Array<{ name: string; value: string }> | undefined {

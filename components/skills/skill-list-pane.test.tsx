@@ -59,7 +59,7 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { SkillListPane } from "./skill-list-pane"
 import { DEFAULT_SKILL_PANEL_PREFS } from "@/lib/skills/preferences"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 const skills = [
   { id: "s1", name: "Alpha", content: "", source: "custom", createdAt: 0, updatedAt: 0 },

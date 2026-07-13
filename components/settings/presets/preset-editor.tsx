@@ -15,7 +15,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import type { McpServer, Skill } from "@/lib/claude/types"
+import type { McpServer, Skill } from "@cognia/agent-config-types"
 
 import { IdentitySection } from "./editor-sections/identity-section"
 import { CapabilitySection } from "./editor-sections/capability-section"

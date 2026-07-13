@@ -13,7 +13,7 @@
  * upsert so recalled memories are semantically searchable.
  */
 
-import type { ChatSession, AppSettings } from "@/lib/claude/types"
+import type { ChatSession, AppSettings } from "@cognia/agent-config-types"
 import type { MemoryConfig, MemoryProvenance, MemoryScope, MemoryType } from "@/types/memory/memory"
 import { assessSalience } from "@/lib/memory/extract/salience"
 import {

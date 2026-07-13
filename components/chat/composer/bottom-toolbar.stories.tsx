@@ -4,7 +4,7 @@ import { BottomToolbar } from "./bottom-toolbar"
 import { PromptInputProvider } from "@/components/ai-elements/prompt-input"
 import { useSettingsStore } from "@/stores/settings"
 import { useChatStore } from "@/stores/chat"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 // BottomToolbar is the aggregate composer toolbar. The generic variant pulls
 // from several stores and the PromptInput controller (the Enhance button reads

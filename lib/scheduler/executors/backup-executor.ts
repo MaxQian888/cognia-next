@@ -29,7 +29,7 @@ import {
 } from "@/lib/data/build-package"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { appendBackupHistory, type BackupHistoryEncryption } from "@/lib/db/backup-history"
-import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@/lib/claude/types"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@cognia/agent-config-types"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"

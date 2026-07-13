@@ -7,7 +7,7 @@ import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { resetStore } from "@/lib/storybook/seed-stores"
 import { useChatStore } from "@/stores/chat"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 // The full chat composer: textarea + toolbar (model / permission / effort /
 // attachments / skills / voice) + the slash-command & @mention popovers. It is

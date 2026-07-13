@@ -4,7 +4,7 @@
 import { render, screen } from "@testing-library/react"
 
 import { SessionInsightsSheet } from "./session-insights-sheet"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { SessionReport } from "@/lib/analysis/session-report"
 
 jest.mock("next-intl", () => ({

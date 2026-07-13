@@ -4394,6 +4394,7 @@
       "filterChip": "筛选：{value}",
       "sortChip": "排序：{value}"
     },
+    "badgePlugin": "插件",
     "builtInBadge": "内置",
     "card": {
       "twinDraftFallbackName": "{kind} 草稿",
@@ -4594,6 +4595,9 @@
       "shareOriginal": "仍按原文分享",
       "shareRedacted": "移除后继续"
     },
+    "shellDesktop": "桌面",
+    "shellMobile": "移动",
+    "shellWeb": "网页",
     "skillMarketplace": {
       "browse": "浏览技能",
       "title": "技能市场"
@@ -12450,6 +12454,8 @@
         },
         "tools": {
           "description": "工具白名单、有序的技能栈与 MCP 服务器子集。",
+          "noneDefined": "（尚未定义）",
+          "reorderLabel": "重新排序：",
           "title": "工具"
         }
       },

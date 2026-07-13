@@ -3,7 +3,7 @@
  * `/about`). Kept out of the Ink component so the App router can produce notice
  * text deterministically and the logic is unit-tested without rendering.
  */
-import type { BuiltinToolsConfig } from "@/lib/claude/types"
+import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 
 import { resolveActiveModel } from "../../config/active-model"
 import type { ResolvedConfig } from "../../config/schema"

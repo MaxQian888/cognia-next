@@ -3,7 +3,7 @@
  */
 import { ensureSessionRow } from "./cli-session-store"
 import { DEFAULT_RESOLVED_CONFIG } from "../config/schema"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 function fakeTable() {
   const rows = new Map<string, ChatSession>()

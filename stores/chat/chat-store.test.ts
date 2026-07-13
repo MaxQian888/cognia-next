@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import type { UIMessage } from "ai"
-import type { PendingApproval, SendOptions } from "@/lib/claude/types"
+import type { PendingApproval, SendOptions } from "@cognia/agent-config-types"
 import {
   useChatStore,
   MAX_CONCURRENT_STREAMS,

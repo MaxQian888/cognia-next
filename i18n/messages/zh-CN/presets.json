@@ -134,7 +134,9 @@
       },
       "tools": {
         "description": "工具白名单、有序的技能栈与 MCP 服务器子集。",
-        "title": "工具"
+        "title": "工具",
+        "noneDefined": "（尚未定义）",
+        "reorderLabel": "重新排序："
       }
     },
     "setDefault": "设为默认",

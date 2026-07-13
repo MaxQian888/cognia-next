@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 import { probeMcpTools } from "./probe-mcp-tools"
 

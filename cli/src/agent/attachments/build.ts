@@ -6,7 +6,7 @@
  * non-media turns keep the exact original wire shape. Async because rich-doc
  * extraction and OCR are async. Every handler is injected for unit testing.
  */
-import type { SendContent, SendContentBlock } from "@/lib/claude/types"
+import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
 import { encodeImageBlock as realEncodeImageBlock } from "../image-input"
 import { classifyRef, extractFileRefs } from "./classify"
 import { extractRichDocBlock as realExtractRich, type RichDocResult } from "./documents"

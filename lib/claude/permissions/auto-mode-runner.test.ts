@@ -1,6 +1,6 @@
 import { runAutoModeForTool } from "./auto-mode-runner"
 import { __resetJudgeCache } from "./command-judge"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
 function settings(over: Partial<NonNullable<AppSettings["agentPermissions"]>>): AppSettings {

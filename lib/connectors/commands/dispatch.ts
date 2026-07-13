@@ -19,7 +19,7 @@ import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/conne
 import type { ConnectorMode } from "@/types/connectors/policy"
 import type { ResolvedBinding } from "./../policy-resolve"
 import { resolveEffectiveTeamBinding } from "./../policy-resolve"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { appendAudit } from "@/lib/connectors/audit"
 import { newIdempotencyKey } from "@/types/connectors/outbound"

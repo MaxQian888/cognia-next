@@ -5,7 +5,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 
 import { DiscoverGrid } from "./discover-grid"

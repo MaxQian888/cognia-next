@@ -11,7 +11,7 @@ import { deleteMcpServer, updateMcpServer } from "@/lib/db/mcp-servers"
 import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { loggers } from "@cognia/logging"
-import type { AgentId, McpServer } from "@/lib/claude/types"
+import type { AgentId, McpServer } from "@cognia/agent-config-types"
 
 interface Props {
   /** Full server list; the bar operates on the subset in `selection`. */

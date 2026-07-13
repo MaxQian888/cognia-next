@@ -15,7 +15,7 @@ import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { isTauri } from "@/lib/tauri"
 import { getSettings, saveSettings } from "@/lib/db/settings"
-import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@/lib/claude/types"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@cognia/agent-config-types"
 import {
   buildBackupPackage,
   defaultExportFileName,

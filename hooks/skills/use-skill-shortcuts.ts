@@ -15,7 +15,7 @@
 
 import { useEffect } from "react"
 import { useSkillsStore } from "@/stores/skills"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 /** True when focus sits in an editable surface where the keys should type. */
 function isEditableTarget(el: EventTarget | null): boolean {

@@ -4394,6 +4394,7 @@
       "filterChip": "Filter: {value}",
       "sortChip": "Sort: {value}"
     },
+    "badgePlugin": "plugin",
     "builtInBadge": "Built-in",
     "card": {
       "twinDraftFallbackName": "{kind} draft",
@@ -4594,6 +4595,9 @@
       "shareOriginal": "Share anyway",
       "shareRedacted": "Remove and continue"
     },
+    "shellDesktop": "desktop",
+    "shellMobile": "mobile",
+    "shellWeb": "web",
     "skillMarketplace": {
       "browse": "Browse skills",
       "title": "Skill marketplace"
@@ -12450,6 +12454,8 @@
         },
         "tools": {
           "description": "Tool whitelists, ordered skill stack, and MCP server subset.",
+          "noneDefined": "(none defined yet)",
+          "reorderLabel": "Reorder:",
           "title": "Tools"
         }
       },

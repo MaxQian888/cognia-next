@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { ModelPicker } from "./model-picker"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 // Seed the settings store with a couple of enabled providers so the popover
 // renders grouped, capability-annotated model lists. `collectModelOptions`

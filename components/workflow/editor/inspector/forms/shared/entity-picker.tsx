@@ -39,7 +39,7 @@ import { listTwins } from "@/lib/db/twins"
 import { listAdapterInstances } from "@/lib/db/adapter-instances"
 import { testMcpServer, type McpTestRequest } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 export interface EntityOption {
   value: string

@@ -13,7 +13,7 @@
  * Plugin event hooks are intentionally NOT fired here — each caller owns its
  * hook semantics. The helper is a pure tool-invoke seam with injectable deps.
  */
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 import { type McpClientInfo, openMcpClient } from "./transport"
 

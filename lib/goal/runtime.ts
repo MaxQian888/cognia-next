@@ -28,7 +28,7 @@
  * through React props or context.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { ContinuationGate, Goal, GoalConfig, GoalDefaults, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"

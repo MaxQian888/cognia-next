@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 import { createPermissionGate } from "./permission-gate"
-import type { PermissionRequestEvent } from "@/lib/claude/types"
+import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 
 function req(toolName: string): PermissionRequestEvent {
   return {

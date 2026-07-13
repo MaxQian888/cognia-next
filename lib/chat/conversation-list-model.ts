@@ -1,6 +1,6 @@
 import { differenceInCalendarDays } from "date-fns"
 
-import type { ChatSession, SessionFolder } from "@/lib/claude/types"
+import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 
 /**
  * Conversation-list model — the single, pure, exhaustively-testable source of

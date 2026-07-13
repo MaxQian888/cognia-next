@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { TtsCard } from "./tts-card"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // `TtsCard` reads the full TTS slice of `AppSettings`. When `ttsEnabled` is
 // false it collapses to the master toggle; enabling it reveals the provider

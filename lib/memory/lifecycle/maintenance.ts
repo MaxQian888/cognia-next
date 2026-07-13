@@ -8,7 +8,7 @@
  * schedules the work off the hot path.
  */
 
-import type { ChatSession, AppSettings } from "@/lib/claude/types"
+import type { ChatSession, AppSettings } from "@cognia/agent-config-types"
 import type { MemoryConfig, MemoryProvenance, MemoryScope } from "@/types/memory/memory"
 import {
   runEpisodicDistill,

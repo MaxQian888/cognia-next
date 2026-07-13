@@ -5,7 +5,7 @@ import { WorkflowRowActionsSheet } from "./workflow-row-actions-sheet"
 import { makeWorkflow } from "@/lib/storybook/fixtures/mobile-workflow"
 import { resetStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Long-press action sheet for a workflow row (Run / Pause / Pin / Graph /
 // Delete). Reads `useSettingsStore` for the pinned set to label the Pin

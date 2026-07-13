@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
-import type { SDKMessage } from "@/lib/claude/types"
+import type { SDKMessage } from "@cognia/agent-config-types"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { __resetPlanRuntimeForTesting, getPlanRuntime } from "./runtime"
 import {

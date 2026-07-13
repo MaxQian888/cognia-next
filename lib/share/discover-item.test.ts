@@ -8,7 +8,7 @@ import {
   type SharedTeamDef,
   type SharedWorkflowTemplateDef,
 } from "./discover-item"
-import type { Character, Skill, Team } from "@/lib/claude/types"
+import type { Character, Skill, Team } from "@cognia/agent-config-types"
 import type { WorkflowCopilotTemplate } from "@/lib/workflow/copilot-templates"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 

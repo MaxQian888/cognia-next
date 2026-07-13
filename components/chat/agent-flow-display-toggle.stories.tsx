@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite"
 
 import { AgentFlowDisplayToggle } from "./agent-flow-display-toggle"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { AgentFlowMode } from "@/types/appearance"
 
 // Seed the settings store with a given flow mode and stub `save` so clicking a

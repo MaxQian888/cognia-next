@@ -110,7 +110,7 @@ import { usePlatform } from "@/hooks/use-platform"
 import { executeShell } from "@/lib/shell/exec"
 import { isTauri } from "@/lib/tauri"
 import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 
 const mockUsePlatform = usePlatform as jest.Mock

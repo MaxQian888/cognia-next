@@ -13,7 +13,7 @@
 import nodeFs from "node:fs"
 import path from "node:path"
 
-import type { SendContentBlock } from "@/lib/claude/types"
+import type { SendContentBlock } from "@cognia/agent-config-types"
 import { encodeImageBlock as realEncodeImageBlock } from "../image-input"
 import { modelSupportsImageInput } from "./model-modalities"
 import { ocrExtractText, type OcrRunResult } from "./ocr"

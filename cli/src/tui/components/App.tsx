@@ -123,7 +123,7 @@ import {
   type SettingsRow,
   type SettingsApplyTarget,
 } from "../runtime/settings-sections"
-import type { BuiltinToolsConfig } from "@/lib/claude/types"
+import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 import type { ListDir } from "../commands/file-completer"
 import type {
   ResolvedConfig,

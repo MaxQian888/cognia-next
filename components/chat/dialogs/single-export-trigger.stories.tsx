@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { within, userEvent, waitFor, expect } from "storybook/test"
 
 import { SingleExportTrigger } from "./single-export-trigger"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 // `SingleExportTrigger` is a thin header affordance that opens the
 // `SingleExportDialog` for the active session. It renders nothing when there's

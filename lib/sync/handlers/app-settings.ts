@@ -2,7 +2,7 @@ import type { Table } from "dexie"
 
 import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 import type { SyncCursor, SyncOutcome } from "../types"
 import { runSyncHandler } from "./base"

@@ -23,7 +23,7 @@ import {
 } from "@/lib/claude/ipc"
 import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
 import { dispatchProtocolAdapterExec } from "@/lib/claude/protocol-adapter-ipc"
-import type { PluginToolExecEvent } from "@/lib/claude/types"
+import type { PluginToolExecEvent } from "@cognia/agent-config-types"
 
 const mockSubscribe = subscribePluginToolExec as jest.Mock
 const mockSend = sendPluginToolResponse as jest.Mock
@@ -74,8 +74,8 @@ describe("PluginToolDispatchProvider", () => {
 
   it("cancels an in-flight protocol adapter execution when the sidecar cancels it", async () => {
     let execHandler:
-      | ((req: { type: "protocol_adapter_exec"; sessionId: string; execId: string }) => void)
-      | null = null
+      ((req: { type: "protocol_adapter_exec"; sessionId: string; execId: string }) => void) | null =
+      null
     let cancelHandler:
       | ((req: {
           type: "protocol_adapter_cancel"

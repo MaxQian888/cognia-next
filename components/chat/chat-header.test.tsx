@@ -77,7 +77,7 @@ const mockCredentialStatus = useCredentialStatus as unknown as jest.Mock
 const mockIsTauri = isTauri as unknown as jest.Mock
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
-import type { ChatSession, Character, SystemPromptPreset, Skill } from "@/lib/claude/types"
+import type { ChatSession, Character, SystemPromptPreset, Skill } from "@cognia/agent-config-types"
 
 // Stable empty references — chat-header has `useMemo(() => presetsRaw ?? [],
 // [presetsRaw])` and similar memoised derivations that infinite-loop if the

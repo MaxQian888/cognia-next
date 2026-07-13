@@ -8,7 +8,7 @@
 // CRUD ops (e.g. importing 10 servers in a loop) results in one file write
 // per agent.
 
-import type { AgentId } from "@/lib/claude/types"
+import type { AgentId } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 import {
   bulkImportMcpServers,

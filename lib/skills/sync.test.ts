@@ -32,7 +32,7 @@ import { skillsInstallMirrored, skillsScanNative } from "@/lib/claude/ipc"
 import { bulkImportSkills, getSkill, listSkills, updateSkill } from "@/lib/db/skills"
 import { listResourcesForSkill, replaceResourcesForSkill } from "@/lib/db/skill-resources"
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
-import type { Skill, SkillResource } from "@/lib/claude/types"
+import type { Skill, SkillResource } from "@cognia/agent-config-types"
 
 const mockedIsTauri = isTauri as unknown as jest.Mock
 const mockedInstall = skillsInstallMirrored as unknown as jest.Mock

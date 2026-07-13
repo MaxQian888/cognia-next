@@ -36,7 +36,7 @@ import {
   type ProvisionerHandle,
 } from "@/lib/credentials/turn-provisioning-cache"
 import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const DEFAULT_STUN: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },

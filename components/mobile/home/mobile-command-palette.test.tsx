@@ -3,7 +3,7 @@
  */
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { Character, ChatSession, Team } from "@/lib/claude/types"
+import type { Character, ChatSession, Team } from "@cognia/agent-config-types"
 import type { WorkflowRow } from "@/types/workflow/visual"
 
 jest.mock("next-intl", () => ({

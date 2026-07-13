@@ -4,7 +4,7 @@ import { fn } from "storybook/test"
 
 import { ToolsSection } from "./tools-section"
 import { emptyEditorState, type PresetEditorState } from "../preset-editor-state"
-import type { McpServer, Skill } from "@/lib/claude/types"
+import type { McpServer, Skill } from "@cognia/agent-config-types"
 
 // Tools section: allow/deny tool lists + skill + MCP-server multi-selects.
 // Controlled via `state` + `onPatch`, with skill/MCP catalogs supplied by the

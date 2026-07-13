@@ -4,7 +4,7 @@
  * Pure function — no AppSettings, no orchestrator, no DOM.
  */
 
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { resolveCharacterVoice } from "./character-voice"
 
 function makeCharacter(overrides: Partial<Character> = {}): Character {

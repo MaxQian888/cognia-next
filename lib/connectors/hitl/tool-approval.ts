@@ -15,7 +15,7 @@
  * promise via `bus.dispatchConnectorCallback`'s `tool_approve` short-circuit.
  */
 
-import type { PermissionRequestEvent } from "@/lib/claude/types"
+import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { ConversationReference } from "@/types/connectors/event"
 import type { A2UISegmentContent } from "@/types/connectors/segment"

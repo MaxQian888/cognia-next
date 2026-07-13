@@ -6,7 +6,7 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 
 import { useRemoteSessionStream } from "./use-remote-session-stream"
 import { toast } from "sonner"
-import type { ClaudeEvent } from "@/lib/claude/types"
+import type { ClaudeEvent } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,

@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { inferCategory, inferSource, listSkills } from "@/lib/db/skills"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import { useSkillsStore, type SkillFilters } from "@/stores/skills"
 
 export interface SkillsView {

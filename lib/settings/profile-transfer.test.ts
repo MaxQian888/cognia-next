@@ -7,7 +7,7 @@ import {
   SETTINGS_PROFILE_VERSION,
 } from "./profile-transfer"
 import { DEFAULTS } from "@/lib/db/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const NOW = "2026-06-15T00:00:00.000Z"
 

@@ -3,7 +3,7 @@ import { fn } from "storybook/test"
 
 import { ChatPayloadEditor } from "./chat-payload-editor"
 import type { ChatLikeDraft } from "./types"
-import type { Character, Skill, Team } from "@/lib/claude/types"
+import type { Character, Skill, Team } from "@cognia/agent-config-types"
 
 // Structured editor for chat / agent / skill tasks. The `*ForTesting` props
 // bypass the Dexie fetches so the selects render deterministic options.

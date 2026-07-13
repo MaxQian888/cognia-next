@@ -83,7 +83,7 @@ import { SessionSettingsSheet } from "./session-settings-sheet"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
-import type { ChatSession, Character, SystemPromptPreset, Skill } from "@/lib/claude/types"
+import type { ChatSession, Character, SystemPromptPreset, Skill } from "@cognia/agent-config-types"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { Project } from "@/types"
 

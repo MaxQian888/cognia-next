@@ -19,7 +19,7 @@ import {
   type SessionUsageRow,
 } from "./session-usage"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
-import type { SDKResultMessage } from "@/lib/claude/types"
+import type { SDKResultMessage } from "@cognia/agent-config-types"
 
 beforeEach(async () => {
   await getDb().delete()

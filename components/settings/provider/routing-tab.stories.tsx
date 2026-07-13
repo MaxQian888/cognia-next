@@ -8,7 +8,7 @@ import {
   makeModelMapping,
   makeProviderSettingsMap,
 } from "@/lib/storybook/fixtures/settings-provider"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Thin wrapper around RoutingConfigPanel — the GLOBAL routing surface (strategy,
 // presets, alias mappings, constraints, reliability, semantic/difficulty

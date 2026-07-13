@@ -4,7 +4,7 @@
 import "fake-indexeddb/auto"
 import { applyImportedMerged, mergeImportedSession } from "./import-merge"
 import type { ImportedConversation } from "./importers/types"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 
 function makeConv(

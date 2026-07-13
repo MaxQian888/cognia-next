@@ -23,7 +23,7 @@ jest.mock("@/hooks/use-biometric-guard", () => ({
 }))
 
 import { SecuritySection } from "./security-section"
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 
 beforeEach(() => {
   saveMock.mockReset()

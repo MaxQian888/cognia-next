@@ -53,7 +53,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { setDraft } from "@/lib/db/chat-drafts"
 import { recordInput } from "@/lib/db/chat-input-history"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
   return {

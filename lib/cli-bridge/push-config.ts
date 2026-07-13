@@ -12,7 +12,7 @@
  * mirror `cli/src/config/schema.ts`.
  */
 
-import type { AppSettings, BuiltinToolsConfig } from "@/lib/claude/types"
+import type { AppSettings, BuiltinToolsConfig } from "@cognia/agent-config-types"
 import { readTextFile } from "@/lib/claude/ipc"
 
 import { resolveCliHome, writeCliHomeFile } from "./home"

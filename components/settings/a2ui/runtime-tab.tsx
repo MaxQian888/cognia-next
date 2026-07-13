@@ -19,7 +19,7 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { CATEGORY_KEYS } from "@/lib/a2ui/constants"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { A2UIWidgetHostStrategy, A2UIWidgetTheme } from "@/types/a2ui/schema"
 
 const HOST_STRATEGIES: A2UIWidgetHostStrategy[] = [

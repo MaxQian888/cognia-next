@@ -1,6 +1,6 @@
 import { runContextReport } from "./context-controller"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../../config/schema"
-import type { SdkContextUsage } from "@/lib/claude/types"
+import type { SdkContextUsage } from "@cognia/agent-config-types"
 import type { TuiAction } from "../state/types"
 
 const config: ResolvedConfig = {

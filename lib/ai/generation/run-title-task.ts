@@ -13,7 +13,7 @@
  * dependency, so tests mock it and drive the whole flow with a fake client.
  */
 
-import type { AppSettings, ChatSession, UtilityModelConfig } from "@/lib/claude/types"
+import type { AppSettings, ChatSession, UtilityModelConfig } from "@cognia/agent-config-types"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { generateConversationTitle } from "@/lib/ai/generation/title"
 

@@ -1,4 +1,4 @@
-import type { ClaudeEvent, SendOptions } from "@/lib/claude/types"
+import type { ClaudeEvent, SendOptions } from "@cognia/agent-config-types"
 
 import { streamText } from "ai"
 

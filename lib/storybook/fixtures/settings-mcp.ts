@@ -2,7 +2,7 @@
 // (`components/settings/mcp/**`). Kept dependency-light: it imports only the
 // shared domain types so importing it from a story never drags a store/db graph
 // into the bundle. Stories pass overrides to shape each scenario.
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import type { McpAuditLogRow } from "@/types/wiki"
 
 let seq = 0

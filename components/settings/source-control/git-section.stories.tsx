@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { GitSection } from "./git-section"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // `GitSection` reads `gitSettings.commitMessageAI` from the settings store. When
 // the AI commit toggle is on it reveals the Conventional Commits switch, custom

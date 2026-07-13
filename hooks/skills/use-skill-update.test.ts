@@ -19,7 +19,7 @@ jest.mock("@/lib/skills/marketplace-install", () => ({
   installMarketplaceItem: (item: unknown) => installMock(item),
 }))
 
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import { useSkillUpdate } from "./use-skill-update"
 
 const SKILL = { id: "s1", name: "find-skills", content: "x" } as Skill

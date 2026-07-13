@@ -52,7 +52,7 @@ jest.mock("./skill-sync-section", () => ({
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SkillDetail } from "./skill-detail"
 import { useSkillsStore } from "@/stores/skills"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 const skill = {
   id: "s1",

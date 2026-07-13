@@ -3,7 +3,7 @@
  */
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (k: string) => k,

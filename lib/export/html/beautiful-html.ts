@@ -2,7 +2,7 @@
 // for collapsible sections; no external network requests at view time.
 
 import type { UIMessage } from "ai"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import { THEMES, type ThemeId, type ThemeTokens } from "./syntax-themes"
 import { getStylePreset } from "./style-presets"
 import { buildWallpaperBackdropCss } from "./theme-wallpaper"

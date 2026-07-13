@@ -27,7 +27,7 @@ import {
   sanitizeGhost,
   type GhostMessage,
 } from "@/lib/chat/completion/ghost-prompt"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 const MIN_DEBOUNCE = 200
 const MAX_DEBOUNCE = 2000

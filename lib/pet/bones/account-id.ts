@@ -9,7 +9,7 @@
 // `petAccountIdFrom` is pure (used by tests and the render path). `ensure...`
 // is the small side-effecting edge that persists a fresh install UUID.
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 /** Pure: the account id to seed bones from, or null if none is available yet. */
 export function petAccountIdFrom(settings: AppSettings | null | undefined): string | null {

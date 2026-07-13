@@ -3,7 +3,7 @@
 // Display labels are sourced from i18n (`settings.general.model.*` and
 // `settings.general.permission.*`) — this file holds only the canonical values.
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 export const MODEL_PRESET_VALUES = [
   "claude-opus-4-8",

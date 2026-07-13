@@ -10,7 +10,7 @@ import {
 import { usePetStore } from "@/stores/pet/pet-store"
 import type { PetProfile, ProactiveState } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const complete = jest.fn()
 const buildUtilityLlmClient = jest.fn()

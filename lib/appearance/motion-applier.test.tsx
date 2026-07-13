@@ -1,7 +1,7 @@
 import { act, render } from "@testing-library/react"
 import { useSettingsStore } from "@/stores/settings"
 import { MotionApplier, resolveMotionState } from "./motion-applier"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { MotionSettings } from "@/types/appearance"
 
 const baseSettings = {

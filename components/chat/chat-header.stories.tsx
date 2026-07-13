@@ -7,7 +7,7 @@ import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { resetStore } from "@/lib/storybook/seed-stores"
 import { useChatStore } from "@/stores/chat"
-import type { Character, ChatSession } from "@/lib/claude/types"
+import type { Character, ChatSession } from "@cognia/agent-config-types"
 
 // Slim chat header: identity + ambient status (live cost, plan-mode tasks,
 // no-API-key warning) + the chat.header plugin slot + a settings trigger.

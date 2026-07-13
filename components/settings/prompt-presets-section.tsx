@@ -71,7 +71,7 @@ import {
   togglePresetFavorite,
   updatePreset,
 } from "@/lib/db/prompt-presets"
-import type { PresetCategory, SystemPromptPreset } from "@/lib/claude/types"
+import type { PresetCategory, SystemPromptPreset } from "@cognia/agent-config-types"
 import { PRESET_CATEGORIES } from "@/lib/presets/categories"
 import {
   applyDomainImport,

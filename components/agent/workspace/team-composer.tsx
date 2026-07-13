@@ -25,7 +25,7 @@ import { Loader2Icon, SquareIcon } from "lucide-react"
 import { Composer, type ComposerHandle } from "@/components/chat/composer"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { SendContent } from "@/lib/claude/types"
+import type { SendContent } from "@cognia/agent-config-types"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 
 export interface TeamComposerProps {

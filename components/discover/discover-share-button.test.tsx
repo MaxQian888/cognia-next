@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event"
 
 import { DiscoverShareButton } from "./discover-share-button"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,

@@ -6,7 +6,7 @@
 import { useCallback, useState } from "react"
 import { renderSingleExport } from "@/lib/export/single"
 import type { SingleExportFormat } from "@/lib/export/single"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { getDb } from "@/lib/db/schema"

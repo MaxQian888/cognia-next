@@ -9,7 +9,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { useCharacters } from "@/lib/data-hooks/context"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { isOverlayCharacterId } from "@/lib/plugin/registries/character-pack-registry"

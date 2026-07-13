@@ -29,7 +29,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
 import { McpBatchActionsBar } from "./mcp-batch-actions-bar"
 import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 const servers: McpServer[] = [
   {

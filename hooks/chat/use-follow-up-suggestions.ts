@@ -18,7 +18,7 @@ import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { suggestFollowUps } from "@/lib/chat/completion/suggestions"
 import type { GhostMessage } from "@/lib/chat/completion/ghost-prompt"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 const RECENT = 6
 

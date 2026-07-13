@@ -13,7 +13,7 @@ import {
   Sparkles,
   type LucideIcon,
 } from "lucide-react"
-import type { SkillCategory, SkillSource } from "@/lib/claude/types"
+import type { SkillCategory, SkillSource } from "@cognia/agent-config-types"
 
 export interface CategoryMeta {
   id: SkillCategory

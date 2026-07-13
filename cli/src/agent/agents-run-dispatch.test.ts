@@ -3,7 +3,7 @@
  */
 import { buildAgentsRunDispatch } from "./agents-run-dispatch"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { runCliSubagent } from "./subagent-runner"
 import { loadMcpServers } from "../mcp/load-mcp-config"

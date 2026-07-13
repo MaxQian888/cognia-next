@@ -8,7 +8,7 @@ import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsStore } from "@/stores/settings"
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 
 jest.mock("@/hooks/companion/use-companion-config")
 jest.mock("@/hooks/use-settings-patch")

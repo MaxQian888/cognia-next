@@ -9,7 +9,7 @@ import {
 } from "@/lib/storybook/fixtures/settings-provider"
 import { BUILT_IN_PRESETS } from "@cognia/provider-routing/built-in-presets"
 import type { RoutingPresetsState } from "@cognia/provider-types/routing-presets"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // One-click preset activation cards (Budget / Performance / Reliability) and the
 // revert affordance. Reads `settings.routingPresets`; the preview dialog reads

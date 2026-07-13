@@ -16,7 +16,7 @@
 
 import { useCallback } from "react"
 
-import type { UserProfile } from "@/lib/claude/types"
+import type { UserProfile } from "@cognia/agent-config-types"
 import { useActiveAnthropicCredential } from "@/lib/subscription/anthropic/hooks"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 

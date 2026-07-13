@@ -19,7 +19,7 @@
 
 import { CONVERSATION_SUMMARY_SYSTEM_PROMPT } from "@/lib/ai/generation/summarizer"
 import { AUTO_COMPACT_FRACTION } from "@/lib/claude/usage"
-import type { ResolvedCompaction } from "@/lib/claude/types"
+import type { ResolvedCompaction } from "@cognia/agent-config-types"
 import {
   DEFAULT_COMPRESSION_SETTINGS,
   type CompressionSettings,

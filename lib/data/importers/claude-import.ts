@@ -4,7 +4,7 @@
 // ChatGPT's tree. Roles are `human` / `assistant`; we map `human` → `user`.
 
 import type { ImportedConversation, ChatImportOptions } from "./types"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 interface ClaudeConversation {
   uuid: string

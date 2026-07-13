@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { HeaderAccountSwitcher } from "./header-account-switcher"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 // Chat-header account badge + switcher (ADR-0028). Hidden when the active
 // provider has ≤1 account. `testAccounts` force-passes a list and skips the IPC

@@ -42,7 +42,7 @@ import type {
   UpdatePlanInput,
 } from "@/types/agent/plan"
 import type { StepExecutionContext, WorkflowTriggeredFrom } from "@/types/workflow/visual"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import { registerNodeExecutor } from "./registry"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
 import { respondToWebhook } from "@/lib/workflow/runtime/tauri-bridge"

@@ -6,7 +6,7 @@
  * `event-mapper.ts`, the `markdown/*` and `format/*` modules, each with its own
  * co-located test.
  */
-import type { PermissionRequestEvent } from "@/lib/claude/types"
+import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { AskUserRequest } from "@/lib/claude/ask-user-tool"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "@/lib/claude/adapter"

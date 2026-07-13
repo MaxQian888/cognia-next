@@ -9,7 +9,7 @@
  * capabilities (JSON-RPC "Method not found") contributes an empty list instead
  * of degrading the whole probe to "failed".
  */
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 import { openMcpClient, type OpenMcpOptions, type OpenedMcp } from "./mcp-client"
 import type { McpToolInfo } from "./probe-mcp-tools"

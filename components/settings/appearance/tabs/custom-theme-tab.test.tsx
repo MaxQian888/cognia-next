@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 
 jest.mock("next-intl", () => ({

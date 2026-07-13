@@ -3,7 +3,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
-import type { SandboxResourcePolicy } from "@/lib/claude/types"
+import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 
 import { findForbiddenWritableRoot, parseHostList, SandboxPolicyCard } from "./sandbox-policy-card"
 

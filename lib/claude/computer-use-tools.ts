@@ -25,7 +25,7 @@ import {
   clearActiveComputerUseSettings,
   setActiveComputerUseSettings,
 } from "@/lib/claude/computer-use-active-settings"
-import type { Character, SendOptions } from "@/lib/claude/types"
+import type { Character, SendOptions } from "@cognia/agent-config-types"
 
 /**
  * ADR-0020 W3 — plugin tool names that the chat-side `canUseTool` modal

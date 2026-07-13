@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { ToolApprovalDialog } from "./tool-approval-dialog"
-import type { PendingApproval } from "@/lib/claude/types"
+import type { PendingApproval } from "@cognia/agent-config-types"
 
 // Tool-aware approval dialog. Shell commands render as a bash block, edit/write
 // payloads as a diff/content preview; anything else falls back to a JSON dump.

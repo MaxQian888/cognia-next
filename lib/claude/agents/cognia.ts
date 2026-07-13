@@ -7,7 +7,7 @@
 // sse/http), so we keep the `type` discriminator on serialize and never force
 // a transport — this is the closest adapter to our own canonical shape.
 
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import type { McpImportDraft } from "@/lib/db/mcp-servers"
 import type { McpAgentAdapter } from "./index"
 import { denormalizeMcpEntry, dropInvalidDrafts, normalizeMcpEntry } from "./shared"

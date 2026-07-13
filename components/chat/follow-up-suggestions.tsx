@@ -10,7 +10,7 @@
 import { useTranslations } from "next-intl"
 import { SparklesIcon, XIcon } from "lucide-react"
 import { useFollowUpSuggestions } from "@/hooks/chat/use-follow-up-suggestions"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 interface FollowUpSuggestionsProps {

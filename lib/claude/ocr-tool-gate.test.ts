@@ -1,5 +1,5 @@
 import { isOcrToolAllowed } from "./ocr-tool-gate"
-import type { Character } from "./types"
+import type { Character } from "@cognia/agent-config-types"
 
 const char = (enableOcr?: boolean) => ({ enableOcr }) as Pick<Character, "enableOcr">
 

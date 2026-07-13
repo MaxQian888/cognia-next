@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react"
 import { useSettingsStore } from "@/stores/settings"
 import { RadiusApplier, resolveRadiusVar } from "./radius-applier"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { RadiusSettings } from "@/types/appearance"
 
 const baseSettings = {

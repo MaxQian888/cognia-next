@@ -1,5 +1,5 @@
 import { exportToJsonlPerMessage, exportToJsonlChat, enumerateBranchPaths } from "./index"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 
 function msg(
   id: string,

@@ -5,7 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { getSkill, updateSkill } from "@/lib/db/skills"
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
 import { validateSkill } from "@/lib/skills/validate"
-import type { SkillValidationError } from "@/lib/claude/types"
+import type { SkillValidationError } from "@cognia/agent-config-types"
 
 /**
  * Recompute `Skill.validationErrors` whenever the persisted skill or its

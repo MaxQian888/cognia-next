@@ -30,7 +30,7 @@ jest.mock("@/hooks/mcp/use-mcp-server-logs", () => ({
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
 import { McpServerCard } from "./mcp-server-card"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 const server: McpServer = {
   id: "mcp_1",

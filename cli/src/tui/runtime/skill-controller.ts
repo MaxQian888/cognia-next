@@ -13,7 +13,7 @@ import {
   listSkills,
   upsertSkillByCanonicalId,
 } from "@/lib/db/skills"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 import { buildSkillRows } from "./skill-panel-model"
 

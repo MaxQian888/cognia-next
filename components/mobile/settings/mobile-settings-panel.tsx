@@ -33,8 +33,8 @@ import {
 } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { AppLanguage, AppTheme, BiometricGuardPolicy } from "@/lib/claude/types"
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import type { AppLanguage, AppTheme, BiometricGuardPolicy } from "@cognia/agent-config-types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { localeNames, locales } from "@/lib/i18n/config"
 import { useSettingsStore } from "@/stores/settings"
 

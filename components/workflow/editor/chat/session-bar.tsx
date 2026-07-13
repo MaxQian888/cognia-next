@@ -65,7 +65,7 @@ import {
   createWorkflowEditorSession,
   workflowSessionId,
 } from "@/hooks/chat/use-workflow-editor-session"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 export interface SessionBarProps {

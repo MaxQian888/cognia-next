@@ -5,7 +5,7 @@ import { LayersIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { SKILL_CATEGORIES, SKILL_SOURCES } from "@/lib/skills/categories"
 import { useSkillsStore } from "@/stores/skills"
-import type { SkillCategory, SkillSource } from "@/lib/claude/types"
+import type { SkillCategory, SkillSource } from "@cognia/agent-config-types"
 
 interface Props {
   total: number

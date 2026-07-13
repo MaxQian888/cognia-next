@@ -26,7 +26,7 @@ jest.mock("next/link", () => ({
 }))
 
 import { ChatHeaderPresetPill, resolveActivePreset } from "./chat-header-preset-pill"
-import type { ChatSession, SystemPromptPreset } from "@/lib/claude/types"
+import type { ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
 
 function preset(overrides: Partial<SystemPromptPreset>): SystemPromptPreset {
   return {

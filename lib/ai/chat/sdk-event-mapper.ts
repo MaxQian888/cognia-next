@@ -27,7 +27,7 @@
 //   { type: "user", message: { content: [{ type: "tool_result", ... }] }, ... }
 //   { type: "result", subtype, session_id, usage, total_cost_usd, duration_ms, num_turns }
 
-import type { SDKMessage } from "@/lib/claude/types"
+import type { SDKMessage } from "@cognia/agent-config-types"
 
 const randomUUID = (): string => globalThis.crypto.randomUUID()
 

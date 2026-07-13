@@ -16,7 +16,7 @@
  * notification runtime, the pet hook, and settings forms alike.
  */
 
-import type { UserProfile } from "@/lib/claude/types"
+import type { UserProfile } from "@cognia/agent-config-types"
 
 /** The device's IANA timezone (e.g. "America/New_York"), "UTC" on failure. */
 export function deviceTimeZone(): string {

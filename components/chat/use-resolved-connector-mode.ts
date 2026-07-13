@@ -11,7 +11,7 @@
  */
 
 import { useState, useEffect } from "react"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { getCharacter } from "@/lib/db/characters"

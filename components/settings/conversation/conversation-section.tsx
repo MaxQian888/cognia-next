@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl"
 import { MessagesSquareIcon, KeyboardIcon, AudioLinesIcon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
-import type { ConversationTimelineSettings, UtilityModelConfig } from "@/lib/claude/types"
+import type { ConversationTimelineSettings, UtilityModelConfig } from "@cognia/agent-config-types"
 import { SettingsCard, SettingsDivider } from "../common/settings-section"
 import { ModelOverrideFields, useUtilityProviderOptions } from "../common/model-override-fields"
 import { CompactionSettings } from "./compaction-settings"

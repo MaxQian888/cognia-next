@@ -28,7 +28,7 @@ import {
   CommandItem,
 } from "@/components/ui/command"
 import { getDb } from "@/lib/db/schema"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { PlatformBadge } from "./platform-badge"
 

@@ -4,7 +4,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import { BottomToolbar } from "./bottom-toolbar"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 // Mock next-intl translations.
 jest.mock("next-intl", () => ({

@@ -27,7 +27,7 @@ import {
   type RunAndCaptureOptions,
   type RunAndCaptureResult,
 } from "@/lib/claude/run-and-capture"
-import type { SendContent, SendOptions } from "@/lib/claude/types"
+import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 import { appendAudit } from "@/lib/connectors/audit"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { recordConnectorUsage, swallowUsageWrite } from "@/lib/db/session-usage"

@@ -25,7 +25,7 @@ import {
 import { renderProposalDoc } from "@/lib/ai/agent/team/auto/preview-doc"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 import { defaultCouncilRunPrompt } from "@/lib/ai/council/run-council"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { getSession } from "@/lib/db/sessions"
 

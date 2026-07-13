@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 import type { OpenedMcp } from "./mcp-client"
 import { isUnauthorized, probeMcpServer } from "./probe-mcp-server"

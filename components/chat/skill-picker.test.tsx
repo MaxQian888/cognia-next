@@ -6,7 +6,7 @@
 // i18n/messages/en.json). Inline override removed — this suite asserts on fixture skill
 // names, not translation strings.
 
-const skillsRef: { current: import("@/lib/claude/types").Skill[] } = { current: [] }
+const skillsRef: { current: import("@cognia/agent-config-types").Skill[] } = { current: [] }
 // Invoke the querier so the open-gating (listSkills vs Promise.resolve([])) is
 // actually exercised, then return the staged rows for rendering.
 jest.mock("dexie-react-hooks", () => ({
@@ -28,7 +28,7 @@ beforeEach(() => {
   listSkillsMock.mockClear()
 })
 
-function makeSkill(over: Partial<import("@/lib/claude/types").Skill>) {
+function makeSkill(over: Partial<import("@cognia/agent-config-types").Skill>) {
   return {
     id: "s1",
     name: "Alpha",
@@ -37,7 +37,7 @@ function makeSkill(over: Partial<import("@/lib/claude/types").Skill>) {
     updatedAt: 0,
     source: "custom",
     ...over,
-  } as import("@/lib/claude/types").Skill
+  } as import("@cognia/agent-config-types").Skill
 }
 
 describe("SkillPicker", () => {

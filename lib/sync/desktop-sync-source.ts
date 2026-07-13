@@ -15,7 +15,13 @@
  * primitives carries the answer all the way back.
  */
 
-import type { Skill, StoredMessage, ChatSession, Character, McpServer } from "@/lib/claude/types"
+import type {
+  Skill,
+  StoredMessage,
+  ChatSession,
+  Character,
+  McpServer,
+} from "@cognia/agent-config-types"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
 import { getDb } from "@/lib/db/schema"

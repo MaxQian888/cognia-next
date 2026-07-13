@@ -119,7 +119,7 @@ import {
 } from "@/lib/usage/session-analytics"
 import type { SessionUsageRow, UsageSurface } from "@/lib/db/session-usage"
 import type { SubscriptionUsageRow } from "@/types/subscription"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 
 const DAY_MS = 86_400_000

@@ -12,7 +12,7 @@
 import os from "node:os"
 
 import { listSkills as dbListSkills, upsertSkillByCanonicalId } from "@/lib/db/skills"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 import { completeAtPath, type ListDir } from "../commands/file-completer"
 import {

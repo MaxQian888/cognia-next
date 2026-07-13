@@ -38,7 +38,7 @@ import { getDb } from "@/lib/db/schema"
 import { updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { TeamPicker } from "./_shared/team-picker"
 import type { AdapterInstanceRow, DispatchRule, DispatchRuleMatch } from "@/lib/db/connector-types"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 /** Radix Select forbids `""` item values — sentinels for the "any"/"none" entries. */
 const ANY_CHANNEL = "__any__"

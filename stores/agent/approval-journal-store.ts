@@ -16,7 +16,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { PendingApproval } from "@/lib/claude/types"
+import type { PendingApproval } from "@cognia/agent-config-types"
 
 export type PersistedApprovalStatus = "pending" | "interrupted" | "settled"
 

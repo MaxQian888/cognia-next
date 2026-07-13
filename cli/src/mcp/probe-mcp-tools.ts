@@ -12,7 +12,7 @@
  * never completes its handshake aborts the client (killing the child / socket)
  * instead of hanging the session.
  */
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 import { openMcpClient } from "./mcp-client"
 

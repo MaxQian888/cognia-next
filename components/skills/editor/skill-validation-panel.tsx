@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { validateSkill, type ValidatableSkill } from "@/lib/skills/validate"
 import { SkillValidationSection } from "../skill-validation-section"
-import type { SkillResource } from "@/lib/claude/types"
+import type { SkillResource } from "@cognia/agent-config-types"
 
 interface Props {
   draft: ValidatableSkill

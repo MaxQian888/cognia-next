@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import { act } from "@testing-library/react"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   createDefaultSearchUsageEntry,

@@ -14,7 +14,7 @@ jest.mock("@/lib/claude/instructions/load", () => ({
 
 import { resolveSendOptions } from "./build-options"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import type { Character, ChatSession } from "./types"
+import type { Character, ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 
 beforeEach(async () => {

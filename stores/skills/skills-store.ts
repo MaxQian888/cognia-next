@@ -9,7 +9,7 @@ import type {
   SkillSource,
   SkillStatus,
   SkillValidationError,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import type { MonacoLanguage } from "@/components/skills/editor/language-from-path"
 import type { SkillResourceDraft } from "@/lib/db/skill-resources"
 import type { LastSkillView, SkillPanelPrefs } from "@/lib/skills/preferences"
@@ -76,7 +76,7 @@ interface SkillsStoreState {
    * template). Only read while `editorTarget.mode === "create"`; cleared when
    * the editor closes.
    */
-  createSeed: import("@/lib/claude/types").Skill | null
+  createSeed: import("@cognia/agent-config-types").Skill | null
   /** When non-null, show the import dialog with these draft entries staged. */
   importStaging: ImportStaging | null
   /** When non-null, show the delete confirmation. */
@@ -111,7 +111,7 @@ interface SkillsStoreState {
   closeDetail: () => void
   setFilterSheetOpen: (open: boolean) => void
   setCategorySheetOpen: (open: boolean) => void
-  openCreate: (seed?: import("@/lib/claude/types").Skill) => void
+  openCreate: (seed?: import("@cognia/agent-config-types").Skill) => void
   closeEditor: () => void
   setImportStaging: (staging: ImportStaging | null) => void
   setDeleteTarget: (target: { skillId: string; name: string } | null) => void

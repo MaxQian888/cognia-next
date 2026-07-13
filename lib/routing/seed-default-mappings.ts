@@ -10,7 +10,7 @@
  * persist-only-if-changed pattern as `repairImportedVscodeThemes`.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { generateDefaultMappings } from "@cognia/provider-routing/default-mappings"
 
 /**

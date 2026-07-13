@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppFontScale, AppLanguage } from "@/lib/claude/types"
+import type { AppFontScale, AppLanguage } from "@cognia/agent-config-types"
 import { responsiveSelectClass } from "@/lib/utils"
 import { DEFAULT_TYPOGRAPHY_EXT, type TypographyExtSettings } from "@/types/appearance"
 import { FontFamilyPicker } from "../components/font-family-picker"

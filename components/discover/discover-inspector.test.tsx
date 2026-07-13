@@ -5,7 +5,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import type { Character, Skill, Team } from "@/lib/claude/types"
+import type { Character, Skill, Team } from "@cognia/agent-config-types"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { TwinDraft, TwinProfile, TwinSource } from "@/types/twin"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"

@@ -9,7 +9,7 @@
 // resolved on another device) and `background` (points at a wallpaper id that
 // won't exist elsewhere). Everything else is portable.
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const SCHEMA_URL = "https://cognia.dev/schemas/appearance-config/v1.json"
 const FORMAT_VERSION = "v1"

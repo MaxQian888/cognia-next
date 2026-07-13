@@ -8,7 +8,7 @@
 // config file should not fail the whole restore.
 
 import { isTauri } from "@/lib/tauri"
-import type { AgentId } from "@/lib/claude/types"
+import type { AgentId } from "@cognia/agent-config-types"
 import { syncToAgent, type SyncResult } from "@/lib/claude/sync"
 import type { SyncProjectionReport } from "./types"
 

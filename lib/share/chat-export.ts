@@ -7,7 +7,7 @@ import { getDb } from "@/lib/db/schema"
 import { resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { chatExportPayload } from "./payload"
 import type { SharePayload } from "./types"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 
 export interface BuildChatShareArgs {

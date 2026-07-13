@@ -179,7 +179,7 @@ import type {
   SDKEventEnvelope,
   SendContent,
   SendOptions,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import { isSubSessionId } from "@/lib/claude/team-session-id"
 import { useChatStore } from "@/stores/chat"
 import { getExecutionBroker } from "@/lib/execution/broker"

@@ -8,7 +8,7 @@
 // Mutations are one-shot Promises. Callers that don't await (toast UX) can
 // `void adapter.recordPresetUsage(id)` exactly as they did with the raw helpers.
 
-import type { Character, ChatSession, Skill, SystemPromptPreset } from "@/lib/claude/types"
+import type { Character, ChatSession, Skill, SystemPromptPreset } from "@cognia/agent-config-types"
 
 /** Patch type accepted by `updateSession`. Mirrors the shape that
  * `lib/db/sessions.ts:updateSession` already accepts so callers don't need to

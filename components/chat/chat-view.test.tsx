@@ -90,7 +90,7 @@ import { render } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
 import { MessageList } from "./message-list"
-import type { ChatSession, SendContent } from "@/lib/claude/types"
+import type { ChatSession, SendContent } from "@cognia/agent-config-types"
 
 const mockSession = { id: "s1", title: "Test" } as unknown as ChatSession
 
@@ -192,8 +192,7 @@ describe("ChatPane", () => {
     const props = makeProps()
     render(<ChatPane {...props} />)
     const onRegenerate = MockList.mock.calls[0]?.[0]?.onRegenerate as
-      | (() => void | Promise<void>)
-      | undefined
+      (() => void | Promise<void>) | undefined
     expect(onRegenerate).toBeDefined()
     await onRegenerate?.()
     expect(props.onRegenerate).toHaveBeenCalled()
@@ -205,8 +204,7 @@ describe("ChatPane", () => {
     const props = makeProps()
     render(<ChatPane {...props} />)
     const onEditResend = MockList.mock.calls[0]?.[0]?.onEditResend as
-      | ((id: string, content: unknown) => void | Promise<void>)
-      | undefined
+      ((id: string, content: unknown) => void | Promise<void>) | undefined
     expect(onEditResend).toBeDefined()
     await onEditResend?.("msg-1", { text: "edited" })
     expect(props.onEditResend).toHaveBeenCalledWith("msg-1", { text: "edited" })

@@ -5,7 +5,7 @@ import { ProviderModelCombobox } from "./provider-model-combobox"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
 import { makeProviderSettingsMap } from "@/lib/storybook/fixtures/settings-provider"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Reusable provider:model picker. Option universe comes from the settings store
 // (`providerSettings` + `customProviders` via `collectOptions`). Props control

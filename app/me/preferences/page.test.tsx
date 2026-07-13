@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen } from "@testing-library/react"
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 
 const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
 const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)

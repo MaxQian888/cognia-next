@@ -37,7 +37,7 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { useSettingsStore } from "@/stores/settings"
 import {
   CARTESIA_TTS_VOICES,

@@ -4,7 +4,7 @@ import {
   buildConversationSections,
   type ConversationListModel,
 } from "@/lib/chat/conversation-list-model"
-import type { ChatSession, SessionFolder } from "@/lib/claude/types"
+import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 
 const EMPTY_FOLDERS: readonly SessionFolder[] = []
 const EMPTY_COLLAPSED: ReadonlySet<string> = new Set<string>()

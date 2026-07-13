@@ -24,7 +24,7 @@ import { ToolPicker } from "./tool-picker"
 import { McpPicker } from "./mcp-picker"
 import { ExternalAgentPayloadEditor } from "./external-agent-payload-editor"
 import type { ExternalAgentDraft } from "./types"
-import type { BuiltinToolsConfig, McpServer } from "@/lib/claude/types"
+import type { BuiltinToolsConfig, McpServer } from "@cognia/agent-config-types"
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,

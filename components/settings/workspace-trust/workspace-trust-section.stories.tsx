@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { WorkspaceTrustSection } from "./workspace-trust-section"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // `WorkspaceTrustSection` reads the two trust toggles from `useSettingsStore`
 // and lists trusted folders from Dexie (`listTrustedWorkspaces`). With an empty

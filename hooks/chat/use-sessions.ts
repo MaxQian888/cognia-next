@@ -28,7 +28,7 @@ import { getDb } from "@/lib/db/schema"
 import { closeSession } from "@/lib/claude/ipc"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
-import type { ChatSession, SessionFolder } from "@/lib/claude/types"
+import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 

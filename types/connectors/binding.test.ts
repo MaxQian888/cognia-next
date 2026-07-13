@@ -1,5 +1,5 @@
 import type { PlatformBinding } from "./binding"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 describe("PlatformBinding", () => {
   it("attaches to ChatSession via platformBinding optional", () => {

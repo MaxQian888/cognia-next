@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite"
 
 import { ChatThinkingIndicator } from "./thinking-indicator"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 // The indicator is phase-driven by timers: avatar pulse → (≥3s) skeleton →
 // (≥4s) rotating tip. Leave a story open a few seconds to watch it advance.

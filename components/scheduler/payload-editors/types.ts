@@ -17,7 +17,7 @@ import type {
   ScheduledTaskType,
   SkillTaskPayload,
 } from "@/types/scheduler"
-import type { BuiltinToolsConfig, SendOptions } from "@/lib/claude/types"
+import type { BuiltinToolsConfig, SendOptions } from "@cognia/agent-config-types"
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
 
 /**

@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 import { createMentionProviders, skillMentionSlug } from "./providers"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type { DirEntry } from "../commands/file-completer"
 import type { AgentSummary } from "../../agent/discover-agents"
 

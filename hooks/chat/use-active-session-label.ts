@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { getCharacter } from "@/lib/db/characters"
 import { getSession } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat/chat-store"
-import type { Character, ChatSession } from "@/lib/claude/types"
+import type { Character, ChatSession } from "@cognia/agent-config-types"
 
 export interface ActiveSessionLabel {
   /** The active chat session id, or null when nothing is open. */

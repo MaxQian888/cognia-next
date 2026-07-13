@@ -18,7 +18,7 @@ jest.mock("@cognia/provider-embedding/embedding", () => ({
 import { resolveSendOptions } from "./build-options"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { readTwinInjectLog, __resetTwinInjectLog } from "@/lib/twin/runtime/inject-log"
-import type { Character } from "./types"
+import type { Character } from "@cognia/agent-config-types"
 import type { TwinRuntimeDepsForBuild } from "./build-options"
 
 beforeEach(async () => {

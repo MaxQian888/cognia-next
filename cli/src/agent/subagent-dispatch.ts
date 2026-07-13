@@ -30,7 +30,7 @@ import {
   type PluginToolExecRequest,
   type PluginToolExecResponse,
 } from "@/lib/claude/plugin-tool-ipc"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 import { type ResolvedConfig } from "../config/schema"
 import { type AgentSummary } from "./discover-agents"

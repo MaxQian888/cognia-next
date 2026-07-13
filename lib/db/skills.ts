@@ -1,4 +1,4 @@
-import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@/lib/claude/types"
+import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@cognia/agent-config-types"
 import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
 import { getDb } from "./schema"
 import {
@@ -529,20 +529,18 @@ export async function seedBuiltInSkills(): Promise<void> {
     // lib/skills/surface-activation.ts) rather than added to every plain chat.
     // Seeding them as rows still lets users see + manually enable them in
     // Settings, and the read-merge below preserves any such user override.
-    ...BUILT_IN_SKILL_CATALOG.map(
-      (entry): Skill => ({
-        ...baseDefaults,
-        status: "disabled" as SkillStatus,
-        id: builtinSkillId(entry),
-        name: entry.name,
-        description: entry.description,
-        content: entry.content,
-        tags: entry.tags,
-        category: entry.category as SkillCategory | undefined,
-        allowedTools: entry.allowedTools,
-        canonicalId: `builtin:${entry.id}`,
-      })
-    ),
+    ...BUILT_IN_SKILL_CATALOG.map((entry): Skill => ({
+      ...baseDefaults,
+      status: "disabled" as SkillStatus,
+      id: builtinSkillId(entry),
+      name: entry.name,
+      description: entry.description,
+      content: entry.content,
+      tags: entry.tags,
+      category: entry.category as SkillCategory | undefined,
+      allowedTools: entry.allowedTools,
+      canonicalId: `builtin:${entry.id}`,
+    })),
   ]
   // Use `put` so newly-added defaults are applied to existing rows, but
   // never clobber user-added tags / status overrides on built-ins. Read first,

@@ -15,7 +15,7 @@
  * section's owned keys.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { DEFAULTS } from "@/lib/db/settings"
 
 export const SETTINGS_PROFILE_SCHEMA = "cognia-settings" as const
@@ -46,8 +46,7 @@ export interface SettingsProfile {
 }
 
 export type ImportResult =
-  | { ok: true; patch: Partial<AppSettings> }
-  | { ok: false; errorKey: string }
+  { ok: true; patch: Partial<AppSettings> } | { ok: false; errorKey: string }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)

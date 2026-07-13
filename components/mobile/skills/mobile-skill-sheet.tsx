@@ -16,7 +16,7 @@ import { SkillResourceManager } from "@/components/skills/skill-resource-manager
 import { SkillUpdateBanner } from "@/components/skills/skill-detail"
 import { SkillValidationSection } from "@/components/skills/skill-validation-section"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 interface Props {

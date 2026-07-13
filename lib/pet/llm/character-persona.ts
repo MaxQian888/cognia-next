@@ -8,7 +8,7 @@
 // only reads the stored summary. The line is capped so the pet's tiny token
 // budget isn't blown, and the caller PII-gates the result before sending.
 
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { getTwinProfile } from "@/lib/db/twin-profile"
 

@@ -13,7 +13,7 @@
 
 import { toast } from "sonner"
 import type { PopoverItem } from "@/components/chat/composer-popover"
-import type { SystemPromptPreset, ChatSession } from "@/lib/claude/types"
+import type { SystemPromptPreset, ChatSession } from "@cognia/agent-config-types"
 import type { ContextRef } from "./types"
 
 /** Kinds the registry owns (mention-style picks). */

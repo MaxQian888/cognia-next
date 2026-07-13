@@ -27,7 +27,7 @@
  *     (entries may use legacy `url` or plural `urls`).
  */
 
-import type { TurnProviderConfig } from "@/lib/claude/types"
+import type { TurnProviderConfig } from "@cognia/agent-config-types"
 import { createKeyringStore, type KeyringStore } from "./keyring-store"
 import { keyIdOfSentinel } from "./turn-credentials"
 

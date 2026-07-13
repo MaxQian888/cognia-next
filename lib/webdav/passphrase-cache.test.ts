@@ -3,7 +3,7 @@
 // ONLY when rememberPassphrase === true, hydration never throws, and
 // forget wipes both copies.
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 let settings: Partial<AppSettings> = {}
 

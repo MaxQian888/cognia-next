@@ -35,7 +35,7 @@ import type { Cell, PermissionMode, TuiAction } from "../state/types"
 export type CreateSession = (params: {
   config: ResolvedConfig
   sessionId?: string
-  sessionKind?: import("@/lib/claude/types").SessionKind
+  sessionKind?: import("@cognia/agent-config-types").SessionKind
 }) => AgentSession
 
 /** What a `/rewind` restores: the conversation, the files touched since the

@@ -59,7 +59,7 @@ import {
 import { __resetTwinBm25Cache, keywordSearch } from "./bm25-index"
 import { buildExpandedKeywordQuery } from "@/lib/ai/retrieval/query-expansion"
 import { generateHypotheticalAnswer } from "@cognia/rag/query-expansion"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import type { IVectorStore, VectorSearchResult, SearchOptions } from "@cognia/vector/store"
 
 beforeEach(async () => {

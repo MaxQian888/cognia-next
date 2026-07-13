@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { EnhanceButton } from "./enhance-button"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 // EnhanceButton is a Wand trigger opening a menu of rewrite modes (improve /
 // concise / detailed / …). Picking one runs `enhancePrompt` through the

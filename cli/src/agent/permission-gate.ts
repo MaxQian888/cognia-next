@@ -13,7 +13,7 @@
  * the CLI reuses the desktop's exact approval round-trip.
  */
 
-import type { PermissionRequestEvent } from "@/lib/claude/types"
+import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 
 export type PermissionResponder = (

@@ -1,4 +1,4 @@
-import type { AgentId, McpServer, McpTransport } from "@/lib/claude/types"
+import type { AgentId, McpServer, McpTransport } from "@cognia/agent-config-types"
 import { CLAUDE_CODE_AGENT } from "@/lib/claude/agents/claude-code"
 import { getDb } from "./schema"
 

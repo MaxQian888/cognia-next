@@ -23,7 +23,7 @@ import type {
   CustomExporter,
 } from "@/types/plugin/plugin"
 import type { Session, UIMessage } from "@/types"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 /**
  * Normalise a plugin-facing `Session` into the persistence-shaped

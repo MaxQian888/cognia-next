@@ -15,7 +15,7 @@
  * stable, dismissable entry.
  */
 
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 import { loggers } from "@cognia/logging"
 

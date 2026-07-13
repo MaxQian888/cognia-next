@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { mcpOAuthAuthenticate, mcpOAuthClear } from "@/lib/mcp/oauth-tauri"
 import { useMcpOAuthStatus } from "@/hooks/mcp/use-mcp-oauth-status"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 export interface McpAuthButtonProps {
   server: McpServer

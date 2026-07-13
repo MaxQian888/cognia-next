@@ -4,7 +4,7 @@ import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { listSkills } from "@/lib/db/skills"
 import { inferCategory, inferSource } from "@/lib/db/skills"
-import type { Skill, SkillCategory, SkillSource } from "@/lib/claude/types"
+import type { Skill, SkillCategory, SkillSource } from "@cognia/agent-config-types"
 
 export interface SkillAnalytics {
   loading: boolean

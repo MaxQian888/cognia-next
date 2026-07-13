@@ -49,7 +49,7 @@ import type {
   ChatSession,
   ClaudeEvent,
   SendOptions,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import { createSession, getSession } from "@/lib/db/sessions"
 import { getSettings } from "@/lib/db/settings"
 import { listEnabledMcpServers, buildMcpServerMap } from "@/lib/db/mcp-servers"

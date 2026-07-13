@@ -11,7 +11,7 @@ import {
   setDisabledTool,
   type McpStateFs,
 } from "./mcp-state"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 function memFs(seed: Record<string, string> = {}): McpStateFs & { files: Record<string, string> } {
   const files = { ...seed }

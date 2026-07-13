@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/sheet"
 import { useSessionReport } from "@/hooks/analysis/use-session-report"
 import { SessionReportView } from "@/components/chat/session-insights/session-report-view"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 interface Props {
   session: ChatSession

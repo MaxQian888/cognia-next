@@ -12,7 +12,7 @@
  */
 
 import { extractUsage, type UsageInfo } from "@/lib/claude/adapter"
-import type { SDKResultMessage } from "@/lib/claude/types"
+import type { SDKResultMessage } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
 
 /**

@@ -31,8 +31,8 @@ import {
   type ResolvedRenderConfig,
 } from "../../config/schema"
 import { DEFAULT_LAYOUT } from "../layout-mode"
-import type { BuiltinToolsConfig } from "@/lib/claude/types"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
 import { THEME_CHOICES } from "../theme/resolve"
 import { DEFAULT_THEME_NAME } from "../theme/builtins"
@@ -595,7 +595,11 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         id: "gitPrFooter",
         label: "PR body footer",
         value:
-          gitCfg.prFooter === null ? "off" : gitCfg.prFooter === DEFAULT_PR_FOOTER ? "on" : "custom",
+          gitCfg.prFooter === null
+            ? "off"
+            : gitCfg.prFooter === DEFAULT_PR_FOOTER
+              ? "on"
+              : "custom",
         control: {
           type: "boolean",
           current: gitCfg.prFooter !== null,

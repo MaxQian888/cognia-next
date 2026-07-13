@@ -4,7 +4,7 @@
 
 import { act, renderHook } from "@testing-library/react"
 
-import type { Character, Skill, Team } from "@/lib/claude/types"
+import type { Character, Skill, Team } from "@cognia/agent-config-types"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { TwinDraft } from "@/types/twin"
 

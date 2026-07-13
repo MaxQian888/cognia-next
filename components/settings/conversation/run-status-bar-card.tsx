@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl"
 import { GaugeIcon } from "lucide-react"
 
 import { useSettingsStore } from "@/stores/settings"
-import type { RunStatusBarSettings } from "@/lib/claude/types"
+import type { RunStatusBarSettings } from "@cognia/agent-config-types"
 import { resolveRunStatusBarSettings } from "@/lib/chat/run-bar-metrics"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"

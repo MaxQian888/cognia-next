@@ -5,7 +5,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { useCharacter } from "@/lib/data-hooks/context"
 import { resolveCharacterById } from "@/lib/db/characters"
 import type { Project } from "@/types"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 jest.mock("@/lib/data-hooks/context", () => ({ useCharacter: jest.fn() }))
 jest.mock("@/lib/db/characters", () => ({ resolveCharacterById: jest.fn() }))

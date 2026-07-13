@@ -38,7 +38,7 @@ import type {
   ChatSession,
   ConversationSidebarDensity,
   SessionFolder,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 
 import { SwipeRow } from "@/components/interactions/swipe-row"
 import { LongPress } from "@/components/interactions/long-press"

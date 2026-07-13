@@ -134,7 +134,9 @@
       },
       "tools": {
         "description": "Tool whitelists, ordered skill stack, and MCP server subset.",
-        "title": "Tools"
+        "title": "Tools",
+        "noneDefined": "(none defined yet)",
+        "reorderLabel": "Reorder:"
       }
     },
     "setDefault": "Set as default",

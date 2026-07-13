@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { SecuritySection } from "./security-section"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // `SecuritySection` renders the per-action biometric guard policy
 // (`biometricRequiredFor`) as four toggles plus the account auto-lock <select>

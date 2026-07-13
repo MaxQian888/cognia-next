@@ -29,7 +29,7 @@ import { useChatStore } from "@/stores/chat/chat-store"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { fleetStreamStore } from "@/lib/fleet/fleet-stream-store"
 import { FLEET_UPDATE_EVENT } from "@/lib/fleet/types"
-import type { PendingApproval } from "@/lib/claude/types"
+import type { PendingApproval } from "@cognia/agent-config-types"
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 

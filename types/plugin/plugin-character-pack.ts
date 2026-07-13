@@ -23,7 +23,7 @@
  * `{ ns, key }` here because no other manifest field follows that pattern.
  */
 
-import type { Character, SendOptions } from "@/lib/claude/types"
+import type { Character, SendOptions } from "@cognia/agent-config-types"
 import type { CharacterPlatformDefaults } from "@/types/connectors/binding"
 import type { TTSProvider } from "@cognia/tts/types"
 import type { PluginRuntimeProfile } from "./plugin"

@@ -1,4 +1,4 @@
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 let settings: Partial<AppSettings> = {}
 const secrets = new Map<string, string>()

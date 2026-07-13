@@ -7,7 +7,7 @@ import {
   DEFAULT_DIFFICULTY_ROUTING,
   type DifficultyRoutingSettings,
 } from "@/types/routing/tool-route"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Opt-in heuristic strong/weak difficulty routing. Reads + writes
 // `settings.difficultyRouting`. Inputs are disabled until the master switch is

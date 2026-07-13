@@ -15,7 +15,7 @@
 
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import type { ConnectorMode, TriggerPolicy } from "@/types/connectors/policy"
 
 export interface BindingResolutionInput {

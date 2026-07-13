@@ -17,7 +17,7 @@
 
 import type { SkillDraft } from "@/lib/db/skills"
 import type { SkillResourceDraft } from "@/lib/db/skill-resources"
-import type { SkillValidationError } from "@/lib/claude/types"
+import type { SkillValidationError } from "@cognia/agent-config-types"
 import { parseBundleManifest, type BundleFlavor } from "./parse"
 import type { CodexOpenaiMeta } from "./codex-yaml"
 import { readBundleArchive } from "./walk-zip"

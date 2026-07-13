@@ -4,7 +4,7 @@ import {
   MCP_LOG_UNKNOWN_SERVER,
   __resetMcpLogModuleTracking,
 } from "./log-bridge"
-import type { McpLogEvent } from "@/lib/claude/types"
+import type { McpLogEvent } from "@cognia/agent-config-types"
 
 const childLogger = {
   error: jest.fn(),

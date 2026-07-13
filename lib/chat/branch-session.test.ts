@@ -3,7 +3,7 @@ import "fake-indexeddb/auto"
 import { branchSessionAtMessage, renderTranscript } from "./branch-session"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 import { listMessages } from "@/lib/db/messages"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
 
 beforeEach(async () => {

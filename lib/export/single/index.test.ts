@@ -11,7 +11,7 @@ jest.mock("@/lib/export/html/animated-html", () => ({
 }))
 
 import { renderSingleExport } from "./index"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import * as md from "@/lib/export/text/rich-markdown"
 import * as bh from "@/lib/export/html/beautiful-html"
 import * as ah from "@/lib/export/html/animated-html"

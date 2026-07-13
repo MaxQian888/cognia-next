@@ -8,7 +8,7 @@
  *      build pipeline gate on the SAME predicate (a single source of truth for
  *      which models honour `effort`).
  */
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 

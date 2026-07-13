@@ -14,7 +14,7 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { suggestStarters } from "@/lib/chat/completion/suggestions"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 export interface StarterPersona {
   name?: string

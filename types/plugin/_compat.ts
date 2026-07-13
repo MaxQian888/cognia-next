@@ -11,7 +11,7 @@
 // these subsystems for real, this file is the single point that needs to
 // change — the plugin types stay frozen.
 
-import type { ChatSession, StoredMessage, Skill } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage, Skill } from "@cognia/agent-config-types"
 import type { WorkspaceRoot } from "@/types/workspace"
 
 // Workspace roots are owned by `types/workspace`; re-export so the plugin

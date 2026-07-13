@@ -7,7 +7,7 @@ import {
   groupServers,
   MCP_TRANSPORT_VALUES,
 } from "./mcp-server-utils"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 function srv(patch: Partial<McpServer>): McpServer {
   return {

@@ -12,7 +12,7 @@
 // agents into cognia's own cost totals.
 
 import type { UsageInfo } from "@/lib/claude/adapter"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
 
 /** What an imported assistant message carries under `metadata`. */

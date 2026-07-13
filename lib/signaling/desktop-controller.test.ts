@@ -14,7 +14,7 @@ import {
   normalizeServers,
 } from "./desktop-controller"
 import { transport } from "@/lib/tauri/transport-instance"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const mockCall = transport.call as jest.Mock
 

@@ -8,7 +8,7 @@
  * `import { … } from "./session-runner"` call sites stay unchanged.
  */
 
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 import { listBuiltinTools, namespaced } from "@/lib/settings/builtin-tools"
 
 /**

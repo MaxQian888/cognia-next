@@ -29,7 +29,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { getDb } from "@/lib/db/schema"
 import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 interface ProviderModelSwitcherProps {
   conversationKey: string

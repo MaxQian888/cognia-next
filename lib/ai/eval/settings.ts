@@ -5,7 +5,7 @@
  * the defaults live in exactly one place.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalSettings } from "@/types/eval/settings"
 import { DEFAULT_EVAL_SETTINGS } from "@/types/eval/settings"
 import { sanitizeScorerIds } from "./scorers/catalog"

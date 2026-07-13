@@ -7,7 +7,7 @@ import type {
   SendContent,
   SendContentBlock,
   SendOptions,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import type { ArtifactSelectionRef } from "@/types/artifact/artifact"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 import { decodeSubSession } from "@/lib/claude/team-session-id"

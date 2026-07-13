@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { BackupReminderBanner } from "./backup-reminder-banner"
 import { resetStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Soft "back up your data" nudge. Visibility comes from `shouldShowReminder`
 // (settings.backupReminderDays + last successful backup + dismissedAt). The

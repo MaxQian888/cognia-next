@@ -15,7 +15,7 @@ import {
   skillShow,
   skillToggle,
 } from "./skill-controller"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type { TuiAction } from "../state/types"
 
 function recorder() {

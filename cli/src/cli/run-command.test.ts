@@ -11,7 +11,7 @@ import {
 import { parseArgv } from "./args"
 import type { OutputSink } from "./output"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
 function sink() {
   const stdout: string[] = []

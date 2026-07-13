@@ -3,7 +3,7 @@ import type { UIMessage } from "ai"
 
 import { ContextUsageIndicator } from "./context-usage-indicator"
 import { useChatStore } from "@/stores/chat"
-import type { SdkContextUsage } from "@/lib/claude/types"
+import type { SdkContextUsage } from "@cognia/agent-config-types"
 
 // The single token / context-window read-out shown under the composer. It reads
 // the chat store (messages → latest + session usage) and computes the fill ring;

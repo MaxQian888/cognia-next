@@ -25,7 +25,7 @@ import { ensureTwinProfile } from "./twin-profile"
 import { createTwinDraft } from "./twin-drafts"
 import { createTwinJob } from "./twin-jobs"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { syncTwinCronToScheduler } from "@/lib/twin/cron/cron-bridge"
 
 // `deleteTwin` reaches outside the twin Dexie DB to clean up scheduler cron

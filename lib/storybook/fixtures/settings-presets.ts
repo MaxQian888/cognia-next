@@ -2,7 +2,7 @@
 // (preset cards, list toolbar, editor + editor sections). Mirrors the cast-
 // through-`unknown` pattern of the other settings fixtures: we build only the
 // fields the components read.
-import type { SystemPromptPreset } from "@/lib/claude/types"
+import type { SystemPromptPreset } from "@cognia/agent-config-types"
 
 /**
  * Build a `SystemPromptPreset` with sensible defaults. Pass overrides to vary

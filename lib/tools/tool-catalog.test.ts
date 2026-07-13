@@ -8,7 +8,7 @@ import {
   type ToolCatalogEntry,
 } from "./tool-catalog"
 import { BUILTIN_SERVER_NAME } from "@/lib/settings/builtin-tools"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 describe("buildBuiltinCatalogEntries", () => {
   const entries = buildBuiltinCatalogEntries()

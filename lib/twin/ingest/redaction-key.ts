@@ -22,7 +22,7 @@
 import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import { getSecret, setSecret, clearSecret } from "@/lib/keyring"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const KEYRING_REF = { namespace: "twin-redaction", key: "master" } as const
 

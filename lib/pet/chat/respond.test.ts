@@ -2,7 +2,7 @@ import { respondAsPet, type PetChatDeps, type RespondAsPetInput } from "./respon
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { PetProfile } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const view = {
   effectiveBones: { rarity: "rare", species: "cat" },

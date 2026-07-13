@@ -85,7 +85,7 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 import { MobileSettingsPanel } from "./mobile-settings-panel"
-import type { BiometricGuardPolicy } from "@/lib/claude/types"
+import type { BiometricGuardPolicy } from "@cognia/agent-config-types"
 
 // ---------------------------------------------------------------------------
 

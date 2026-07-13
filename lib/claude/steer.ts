@@ -11,7 +11,7 @@
  * (`cli/src/tui/runtime/driven-turns.ts`).
  */
 
-import type { SendContent, SendContentBlock } from "@/lib/claude/types"
+import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
 
 /** A queued steer's payload shape — framing text plus any non-text content
  * blocks (attachments) that must survive the replay. Structurally matches the

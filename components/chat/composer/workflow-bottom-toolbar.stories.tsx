@@ -8,7 +8,7 @@ import {
 } from "@/lib/workflow/editor/workflow-editor-context"
 import { createEditorStore } from "@/lib/workflow/editor/store"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
 // WorkflowBottomToolbar is the workflow-editor variant of the composer toolbar:

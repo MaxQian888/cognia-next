@@ -74,7 +74,7 @@ import {
   type AdapterRuntimeStateSnapshot,
 } from "@/lib/connectors/outbound-runner"
 import type { AdapterInstanceRow, DispatchRule, OutboundJobRow } from "@/lib/db/connector-types"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type {
   OutboundRequest,
   OutboundResult,

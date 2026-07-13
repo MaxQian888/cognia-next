@@ -5,7 +5,7 @@
 // and there is no Project model yet — we use a lightweight stub.
 import { buildProjectContext } from "@cognia/document/knowledge-rag"
 import { buildProgressiveSkillsPrompt } from "@/lib/skills/executor"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 
 export interface GlobalCustomInstructionsInput {

@@ -6,7 +6,7 @@ import { NextIntlClientProvider } from "next-intl"
 import { ModelPicker, __testing__ } from "./model-picker"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { updateSession } from "@/lib/db/sessions"
 import { useSettingsStore } from "@/stores/settings"
 

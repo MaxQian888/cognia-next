@@ -11,7 +11,7 @@
  * sandbox through that plugin, the clamp cannot be bypassed.
  */
 
-import type { SandboxResourcePolicy } from "@/lib/claude/types"
+import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 
 /** The clampable subset of the plugin's `PolicyRequest` (network + caps). */
 export interface ClampableRequest {

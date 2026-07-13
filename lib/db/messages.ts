@@ -1,5 +1,5 @@
 import type { UIMessage } from "ai"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
 import { resolveScopeProjectId } from "./project-scope"
 

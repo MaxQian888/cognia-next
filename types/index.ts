@@ -17,6 +17,6 @@ export * from "./workspace"
 export type { Session, UIMessage, Project, KnowledgeFile } from "./plugin/_compat"
 
 // `Skill` is intentionally NOT re-exported here. Always import it from
-// `@/lib/claude/types` (cognia-next's authoritative shape) so we don't
+// `@cognia/agent-config-types` (cognia-next's authoritative shape) so we don't
 // fork the model. See `lib/skills/executor.ts` for the bridge to the
 // External Agent instruction stack.

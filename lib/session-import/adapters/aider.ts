@@ -10,7 +10,7 @@
 // text turns. One file → one imported (continuous) session.
 
 import type { ImportedConversation } from "@/lib/data/importers/types"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import { buildMessage, buildSession, deriveTitle, importedSessionId, textPart } from "../to-parts"
 import type {
   AgentSessionSourceAdapter,

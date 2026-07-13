@@ -11,7 +11,7 @@ import {
 } from "./provider-config"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // The per-provider config panels each read their sub-slice of `AppSettings`
 // from the settings store and fall back to sensible defaults, so an empty

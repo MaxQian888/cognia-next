@@ -17,7 +17,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { useCharacter } from "@/lib/data-hooks/context"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 type SessionCwdFields = Pick<ChatSession, "workingDir" | "characterId">
 

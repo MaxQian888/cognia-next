@@ -18,7 +18,7 @@ import { useAttentionItems, useAttentionCount } from "./use-attention"
 import { resetAttentionForTests } from "@/lib/attention/attention-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
-import type { PendingApproval } from "@/lib/claude/types"
+import type { PendingApproval } from "@cognia/agent-config-types"
 
 const approval = (requestId: string, over: Partial<PendingApproval> = {}): PendingApproval =>
   ({

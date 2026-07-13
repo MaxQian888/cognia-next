@@ -33,7 +33,7 @@ import type {
   ChatSession,
   McpServer,
   SessionKind,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 
 import { resolveActiveModel } from "./active-model"

@@ -86,7 +86,7 @@ import { getTeam } from "@/lib/db/teams"
 import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { guildFromSession } from "@/lib/claude/guild"
 import { loggers } from "@cognia/logging"
-import type { Character, SendContent, Team } from "@/lib/claude/types"
+import type { Character, SendContent, Team } from "@cognia/agent-config-types"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { impact, notify } from "@/lib/capacitor/haptics"
 

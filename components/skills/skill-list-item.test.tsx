@@ -15,7 +15,7 @@ jest.mock("@/lib/tauri", () => ({
 import { fireEvent, render, screen } from "@testing-library/react"
 import { SkillListItem, DEFAULT_LIST_DISPLAY, type SkillListDisplay } from "./skill-list-item"
 import { useSkillsStore } from "@/stores/skills/skills-store"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 const display = (over: Partial<SkillListDisplay> = {}): SkillListDisplay => ({
   ...DEFAULT_LIST_DISPLAY,

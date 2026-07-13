@@ -56,7 +56,7 @@ import {
 } from "@/lib/db/sessions"
 import { getDb } from "@/lib/db/schema"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 
 interface RowSummary {

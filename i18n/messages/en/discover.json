@@ -233,5 +233,9 @@
     "compact": "Compact",
     "grid": "Grid",
     "list": "List"
-  }
+  },
+  "badgePlugin": "plugin",
+  "shellDesktop": "desktop",
+  "shellMobile": "mobile",
+  "shellWeb": "web"
 }

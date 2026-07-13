@@ -1,5 +1,5 @@
 import { composePersonaLine, resolveCharacterPersona } from "./character-persona"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 function makeCharacter(overrides: Partial<Character> = {}): Character {
   return {

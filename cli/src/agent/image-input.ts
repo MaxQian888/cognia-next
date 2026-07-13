@@ -17,7 +17,7 @@
 import nodeFs from "node:fs"
 import path from "node:path"
 
-import type { SendContent, SendContentBlock } from "@/lib/claude/types"
+import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
 
 /** Extension → Anthropic `media_type`. Only formats the vision models accept. */
 const IMAGE_MEDIA_TYPES: Record<string, string> = {

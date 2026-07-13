@@ -6,7 +6,7 @@
 
 import { useCallback, useState } from "react"
 import { exportBatch } from "@/lib/export/batch/batch-export"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { SingleExportFormat } from "@/lib/export/single"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { saveExport, type SaveExportOutcome } from "@/lib/files/save-export"

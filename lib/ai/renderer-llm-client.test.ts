@@ -5,7 +5,7 @@ jest.mock("@/lib/twin/distill/llm", () => ({
 }))
 
 import { buildRendererLlmClient } from "./renderer-llm-client"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 /**
  * Exercises the real provider-resolution chain

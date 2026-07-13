@@ -33,7 +33,7 @@ import {
   type BuiltinToolRiskLevel,
   namespaced,
 } from "@/lib/settings/builtin-tools"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
 import { AlwaysAllowList } from "./always-allow-list"
 import { ToolCatalogBrowser } from "./tool-catalog-browser"

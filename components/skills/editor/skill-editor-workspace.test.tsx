@@ -23,10 +23,10 @@ jest.mock("@monaco-editor/react", () => ({
   loader: { config: jest.fn() },
 }))
 
-const skillRef: { current: import("@/lib/claude/types").Skill | undefined } = {
+const skillRef: { current: import("@cognia/agent-config-types").Skill | undefined } = {
   current: undefined,
 }
-const resourcesRef: { current: import("@/lib/claude/types").SkillResource[] } = {
+const resourcesRef: { current: import("@cognia/agent-config-types").SkillResource[] } = {
   current: [],
 }
 let liveQueryIdx = 0

@@ -12,7 +12,7 @@
 // file→file. Structural markers (step-start/-finish, snapshot, patch) drop.
 
 import type { ImportedConversation } from "@/lib/data/importers/types"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import { importedUsageMetadata } from "../usage"
 import {

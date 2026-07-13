@@ -35,7 +35,7 @@ import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { setDraft } from "@/lib/db/chat-drafts"
 import { createSession, listSessions } from "@/lib/db/sessions"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 export default function ShareTargetPage() {
   return (

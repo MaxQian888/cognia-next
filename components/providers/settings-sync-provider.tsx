@@ -3,7 +3,7 @@
 import { useEffect } from "react"
 import { useTheme } from "next-themes"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppFontScale } from "@/lib/claude/types"
+import type { AppFontScale } from "@cognia/agent-config-types"
 import { applyZoom, DEFAULT_ZOOM } from "@/lib/tauri/webview-zoom"
 import { getPetWindowRole } from "@/lib/pet/window-role"
 

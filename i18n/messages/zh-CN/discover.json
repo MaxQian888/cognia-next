@@ -233,5 +233,9 @@
     "compact": "紧凑",
     "grid": "网格",
     "list": "列表"
-  }
+  },
+  "badgePlugin": "插件",
+  "shellDesktop": "桌面",
+  "shellMobile": "移动",
+  "shellWeb": "网页"
 }

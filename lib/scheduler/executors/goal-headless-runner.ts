@@ -26,7 +26,7 @@
  * turns use the turn-driver's generated continuation messages.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { isTerminalGoalStatus, type GoalStatus } from "@/types/goal"
 import { getGoal } from "@/lib/db/goals"
 import { getSession } from "@/lib/db/sessions"

@@ -3,7 +3,7 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import {
   WorkflowEditorProvider,

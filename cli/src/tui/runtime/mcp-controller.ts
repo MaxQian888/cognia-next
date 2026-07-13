@@ -7,7 +7,7 @@
 import nodeFs from "node:fs"
 import path from "node:path"
 
-import type { McpServer, McpTransport } from "@/lib/claude/types"
+import type { McpServer, McpTransport } from "@cognia/agent-config-types"
 
 import { loadMcpServers } from "../../mcp/load-mcp-config"
 import {

@@ -61,7 +61,7 @@ import {
   DEFAULT_TURN_PROVIDER,
   type TurnProviderConfig,
   type TurnProviderKind,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 
 const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },

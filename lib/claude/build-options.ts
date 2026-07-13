@@ -62,7 +62,7 @@ import type {
   Skill,
   Team,
   TeamMember,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { resolveMemoryConfig } from "@/types/memory/memory"

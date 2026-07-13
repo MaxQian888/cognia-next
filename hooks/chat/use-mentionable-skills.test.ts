@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 const rowsRef: { current: Skill[] | undefined } = { current: [] }
 const listSkillsMock = jest.fn(async () => rowsRef.current ?? [])

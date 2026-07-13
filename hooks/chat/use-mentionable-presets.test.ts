@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import type { SystemPromptPreset } from "@/lib/claude/types"
+import type { SystemPromptPreset } from "@cognia/agent-config-types"
 
 const rowsRef: { current: SystemPromptPreset[] | undefined } = { current: [] }
 jest.mock("dexie-react-hooks", () => ({

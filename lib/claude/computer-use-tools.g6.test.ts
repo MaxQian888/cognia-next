@@ -7,7 +7,7 @@ import {
   getActiveComputerUseSettings,
   __resetForTesting as resetActiveComputerUseSettings,
 } from "./computer-use-active-settings"
-import type { Character, SendOptions } from "./types"
+import type { Character, SendOptions } from "@cognia/agent-config-types"
 
 jest.mock("@/lib/plugin/registries/native-anthropic-tool-registry", () => {
   return {

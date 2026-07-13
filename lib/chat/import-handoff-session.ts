@@ -16,7 +16,7 @@
 
 import type { UIMessage } from "ai"
 
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 import { persistMessages, invalidatePersistSnapshot } from "@/lib/db/messages"
 import { resolveScopeProjectId } from "@/lib/db/project-scope"

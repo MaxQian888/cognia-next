@@ -35,7 +35,7 @@ import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import {
   isPermissionModeEscalation,
   type PermissionMode,

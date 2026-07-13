@@ -72,7 +72,7 @@ jest.mock("@/lib/files/download", () => ({
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { CharacterEditor, CharactersSection, type EditorState } from "./characters-section"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 // Narrow view of the EditorOutput payload the assertions read.
 type SavePayload = {

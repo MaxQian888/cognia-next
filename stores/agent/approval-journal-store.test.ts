@@ -6,7 +6,7 @@ import {
   migrateApprovalJournal,
   type PersistedApproval,
 } from "./approval-journal-store"
-import type { PendingApproval } from "@/lib/claude/types"
+import type { PendingApproval } from "@cognia/agent-config-types"
 
 function reset() {
   useApprovalJournalStore.setState({ entries: [] })

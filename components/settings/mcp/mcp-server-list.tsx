@@ -5,7 +5,7 @@ import { motion, useReducedMotion } from "motion/react"
 
 import { cn } from "@/lib/utils"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import { McpServerCard } from "./mcp-server-card"
 import { groupServers, type McpGroupBy } from "./mcp-server-utils"
 

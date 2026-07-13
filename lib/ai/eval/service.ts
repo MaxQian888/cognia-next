@@ -6,7 +6,7 @@
  * per-case saves out into an `onProgress` callback. Engine untouched.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalReport } from "@/types/eval/eval"
 import type { EvalRunConfig } from "@/types/eval/run-config"
 import type { GateResult } from "@/types/eval/gate"

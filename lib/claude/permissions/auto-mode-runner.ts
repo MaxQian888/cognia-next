@@ -6,7 +6,7 @@
  * decision.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractCommand } from "./command-from-tool"
 import { evaluateAutoDecision, type AutoDecision, type AutoModeConfig } from "./auto-mode"

@@ -11,7 +11,7 @@
  * loads `@modelcontextprotocol/sdk` and connects. The SDK is loaded lazily
  * (`await import`) so the static-exported renderer never bundles it.
  */
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 /** Identity reported to the MCP server during `initialize`. */
 export interface McpClientInfo {

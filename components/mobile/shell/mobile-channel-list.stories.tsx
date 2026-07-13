@@ -3,7 +3,7 @@ import { fn } from "storybook/test"
 
 import { MobileChannelList } from "./mobile-channel-list"
 import { seedDb } from "@/lib/storybook/seed-db"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 // Mobile conversation list: search + archive toggle + new, with date-bucketed /
 // pinned sections built by the shared `useConversationListModel`. Sessions are a

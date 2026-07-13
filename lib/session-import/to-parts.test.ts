@@ -10,7 +10,7 @@ import {
   textPart,
   toolPart,
 } from "./to-parts"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 
 describe("to-parts builders", () => {
   it("builds text and reasoning parts with done state", () => {

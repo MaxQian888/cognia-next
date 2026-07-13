@@ -3,7 +3,7 @@
  */
 import { toBuildContext } from "./to-build-context"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "./schema"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
 function cfg(p: Partial<ResolvedConfig> = {}): ResolvedConfig {
   const base: ResolvedConfig = {
@@ -198,8 +198,7 @@ describe("toBuildContext — session + appSettings shaping", () => {
       }),
     })
     const settings = ctx.appSettings?.providerSettings as
-      | Record<string, { apiKey?: string }>
-      | undefined
+      Record<string, { apiKey?: string }> | undefined
     expect(settings?.["opencode-go"]?.apiKey).toBe("sub-tok")
   })
 
@@ -210,8 +209,7 @@ describe("toBuildContext — session + appSettings shaping", () => {
       config: cfg({ provider: "anthropic", providers: { anthropic: { authToken: "oauth" } } }),
     })
     const settings = ctx.appSettings?.providerSettings as
-      | Record<string, { apiKey?: string }>
-      | undefined
+      Record<string, { apiKey?: string }> | undefined
     expect(settings?.anthropic?.apiKey).toBeUndefined()
     expect(ctx.preloadedEnv).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "oauth" })
   })

@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/utils"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
-import type { ChatSession, SessionFolder } from "@/lib/claude/types"
+import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,

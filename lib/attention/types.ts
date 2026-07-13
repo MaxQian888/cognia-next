@@ -10,7 +10,7 @@
  * renders the union.
  */
 
-import type { PendingApproval } from "@/lib/claude/types"
+import type { PendingApproval } from "@cognia/agent-config-types"
 import type { PendingGate } from "@/stores/agent/pending-gates-store"
 import type { FleetSession } from "@/lib/fleet/types"
 

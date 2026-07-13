@@ -5,7 +5,7 @@ import { SingleExportDialog } from "./single-export-dialog"
 import { Button } from "@/components/ui/button"
 import { resetStore } from "@/lib/storybook/seed-stores"
 import { useCustomThemeStore } from "@/stores/theme"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 const session = {
   id: "ses_1",

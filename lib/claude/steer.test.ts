@@ -6,7 +6,7 @@ import {
   steerBlocksOf,
   steerTextOf,
 } from "./steer"
-import type { SendContentBlock } from "@/lib/claude/types"
+import type { SendContentBlock } from "@cognia/agent-config-types"
 
 const img = (data: string): SendContentBlock => ({
   type: "image",

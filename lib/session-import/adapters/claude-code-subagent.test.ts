@@ -6,7 +6,7 @@ import {
   deriveSubagentFinalResponse,
   deriveSubagentTokenUsage,
 } from "./claude-code-subagent"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 
 function msg(role: StoredMessage["role"], parts: unknown[], metadata?: unknown): StoredMessage {
   return {

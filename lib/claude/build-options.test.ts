@@ -158,7 +158,14 @@ import {
   resolveSendOptions,
 } from "./build-options"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
-import type { AppSettings, Character, ChatSession, Skill, Team, TeamMember } from "./types"
+import type {
+  AppSettings,
+  Character,
+  ChatSession,
+  Skill,
+  Team,
+  TeamMember,
+} from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 
 const mGetCharacter = resolveCharacterById as jest.Mock

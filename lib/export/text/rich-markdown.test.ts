@@ -9,7 +9,7 @@ import {
   exportToPlainText,
   type RichExportData,
 } from "./rich-markdown"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 const session: ChatSession = {
   id: "s1",

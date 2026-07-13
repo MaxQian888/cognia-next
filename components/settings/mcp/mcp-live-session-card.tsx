@@ -30,7 +30,7 @@ import {
   reconnectSessionMcpServer,
   toggleSessionMcpServer,
 } from "@/lib/claude/ipc"
-import type { SdkMcpServerStatus } from "@/lib/claude/types"
+import type { SdkMcpServerStatus } from "@cognia/agent-config-types"
 import { mcpServerLogsHref, useMcpServerLogs } from "@/hooks/mcp/use-mcp-server-logs"
 
 const STATUS_STYLE: Record<SdkMcpServerStatus["status"], string> = {

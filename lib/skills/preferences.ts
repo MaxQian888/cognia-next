@@ -7,11 +7,11 @@
  * the raw value is stored as an all-optional partial on `AppSettings`, and
  * defaults are applied here at read time so existing installs pick up new
  * fields without a Dexie migration. This module is a **leaf** — it imports only
- * base types (`@/lib/claude/types`) and type-only literals from the skills
+ * base types (`@cognia/agent-config-types`) and type-only literals from the skills
  * store, so `lib/claude/types.ts` can stay import-free of the store.
  */
 
-import type { SkillCategory, SkillSource, SkillStatus } from "@/lib/claude/types"
+import type { SkillCategory, SkillSource, SkillStatus } from "@cognia/agent-config-types"
 // Type-only imports — erased at compile time, so no runtime coupling to the
 // Zustand store (and no import cycle through `AppSettings`).
 import type { SkillPanelTab, SkillSortMode } from "@/stores/skills"

@@ -2,7 +2,7 @@
 // user turn. Kept dependency-free so they can be unit-tested without React,
 // IndexedDB, or Tauri.
 
-import type { Character, Team, TeamMember } from "@/lib/claude/types"
+import type { Character, Team, TeamMember } from "@cognia/agent-config-types"
 
 /**
  * Parse `@Name` mentions out of `text`, matched against `members` by name.

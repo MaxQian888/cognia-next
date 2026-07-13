@@ -1,4 +1,4 @@
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { DEFAULTS } from "@/lib/db/settings"
 import {
   valuesEqual,

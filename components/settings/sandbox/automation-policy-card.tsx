@@ -23,7 +23,7 @@ import {
   DEFAULT_AUTOMATION_POLICY,
   type AutomationPolicy,
   type ScreenRect,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 
 /**
  * Save debounce. Edits land in Rust + Dexie after 400ms of quiet so

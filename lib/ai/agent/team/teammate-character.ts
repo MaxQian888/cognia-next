@@ -16,7 +16,7 @@
  * the team-context subagent registry.
  */
 
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import type { AgentTeam, AgentTeammate, ResolvedCapabilities } from "@/types/agent/agent-team"
 import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
 

@@ -1,5 +1,5 @@
 import { mcpServerToAcpConfig, resolveAcpMcpServers } from "./resolve-acp-mcp-servers"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 
 jest.mock("@/lib/db/mcp-servers", () => ({

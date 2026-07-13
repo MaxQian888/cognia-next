@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 type ComposerAssistance = NonNullable<AppSettings["composerAssistance"]>
 

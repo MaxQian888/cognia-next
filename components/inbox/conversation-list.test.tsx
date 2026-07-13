@@ -85,7 +85,7 @@ jest.mock("@/components/ui/sidebar", () => ({
 // Build fake enriched data (mimic what useLiveQuery returns)
 // ---------------------------------------------------------------------------
 
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 
 interface EnrichedSession {

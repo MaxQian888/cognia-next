@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import type { ChatSession, SystemPromptPreset } from "@/lib/claude/types"
+import type { ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
 
 const updateSessionMock = jest.fn(async (_id: string, _patch: Record<string, unknown>) => {})
 const recordUsageMock = jest.fn(async (_id: string) => {})

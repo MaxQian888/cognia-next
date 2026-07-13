@@ -10,7 +10,7 @@ import { fetchSkillsShDetail, fetchSkillsShSkillContent } from "./marketplace-sk
 import { computeSkillsShFilesHash, filesToBundleResult } from "./skillssh-install"
 import { validateSkill } from "./validate"
 import type { FetchSkillContent, MarketplaceItem } from "./marketplace-types"
-import type { Skill, SkillStatus, SkillValidationError } from "@/lib/claude/types"
+import type { Skill, SkillStatus, SkillValidationError } from "@cognia/agent-config-types"
 
 /** Options for a marketplace install. */
 export interface MarketplaceInstallOptions {

@@ -4,7 +4,7 @@ import { DeveloperFlagsCard } from "./developer-flags-card"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
 import { makeAppSettings } from "@/lib/storybook/fixtures/settings-system"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Store-reading: two developer toggles read from `settings.debugMode` and
 // `settings.developer.chatMiddlewareExecution`. An unseeded store renders both

@@ -3,7 +3,7 @@
  */
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { AdapterInstanceRow, DispatchRule } from "@/lib/db/connector-types"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 const mockUpdate = jest.fn().mockResolvedValue(undefined)
 

@@ -4,7 +4,7 @@
 // database — built-in presets shouldn't take up storage space and should
 // version with the app.
 
-import type { McpTransport } from "./types"
+import type { McpTransport } from "@cognia/agent-config-types"
 
 export interface McpPresetField {
   /** The key under which the user's value lives. For env vars: env name.

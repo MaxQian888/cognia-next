@@ -13,7 +13,7 @@
 
 import { useChatStore, type ChatStatus } from "@/stores/chat"
 import { buildSteerPayload } from "@/lib/claude/steer"
-import type { SendContent } from "@/lib/claude/types"
+import type { SendContent } from "@cognia/agent-config-types"
 
 /** Sessions whose imminent settle must drain the steer queue even if the turn
  * ended via interrupt/error (set by `interruptAndSteer`). A natural clean end

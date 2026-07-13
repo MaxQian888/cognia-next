@@ -113,6 +113,12 @@
     "lines": 75,
     "statements": 75
   },
+  "./packages/agent-config-types/src/index.ts": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
   "./hooks/**/*.{ts,tsx}": {
     "branches": 50,
     "functions": 30,

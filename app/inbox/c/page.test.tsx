@@ -67,7 +67,7 @@ jest.mock("@/hooks/chat", () => ({
   }),
 }))
 
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 let mockSession: ChatSession | null | undefined = undefined
 

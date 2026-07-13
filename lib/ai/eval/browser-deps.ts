@@ -7,7 +7,7 @@
  * deterministic tier only and flags `deterministicOnly` so the UI can say so.
  */
 
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 import { getDataset, listCases } from "@/lib/db/eval-datasets"
 import { saveRun } from "@/lib/db/eval-runs"

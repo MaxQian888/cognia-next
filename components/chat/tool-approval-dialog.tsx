@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { DiffPreview } from "@/components/chat/message-parts/mcp-renderers/diff-preview"
-import type { ApprovalDecision, PendingApproval } from "@/lib/claude/types"
+import type { ApprovalDecision, PendingApproval } from "@cognia/agent-config-types"
 import { ShieldAlertIcon } from "lucide-react"
 
 interface Props {

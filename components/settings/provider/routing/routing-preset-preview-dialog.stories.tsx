@@ -6,7 +6,7 @@ import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
 import { makeProviderSettingsMap } from "@/lib/storybook/fixtures/settings-provider"
 import { BUILT_IN_PRESETS } from "@cognia/provider-routing/built-in-presets"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Preview-before-apply dialog for a built-in routing preset: shows alias chains
 // adapted to currently-enabled providers, a merge/overwrite choice, and the

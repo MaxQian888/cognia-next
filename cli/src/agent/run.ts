@@ -21,7 +21,7 @@ import {
   type RunAndCaptureResult,
   type CaptureStreamEvent,
 } from "@/lib/claude/run-and-capture"
-import type { McpServer, SendOptions } from "@/lib/claude/types"
+import type { McpServer, SendOptions } from "@cognia/agent-config-types"
 
 import type { UnlistenFn } from "@tauri-apps/api/event"
 

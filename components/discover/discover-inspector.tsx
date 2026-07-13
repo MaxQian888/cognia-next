@@ -32,7 +32,7 @@ import type {
   DiscoverExternalAgentPreset,
   DiscoverTeamTemplate,
 } from "@/hooks/discover/use-discover-query"
-import type { Character, McpServer, Skill, Team } from "@/lib/claude/types"
+import type { Character, McpServer, Skill, Team } from "@cognia/agent-config-types"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { ConnectorMeta } from "@/lib/connectors/adapter-metadata"
 import type { DiscoverCategoryId, DiscoverView } from "@/lib/discover/categories"
@@ -488,7 +488,7 @@ function McpServerInspector({ server }: { server: McpServer }) {
     <>
       <div className="flex flex-wrap gap-2">
         <Badge variant="outline">{server.transport}</Badge>
-        {server.pluginId ? <Badge variant="secondary">plugin</Badge> : null}
+        {server.pluginId ? <Badge variant="secondary">{t("badgePlugin")}</Badge> : null}
       </div>
       <label className="flex items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
         <span className="text-sm">
@@ -545,7 +545,9 @@ function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
         <Badge variant={connector.status === "stable" ? "outline" : "secondary"}>
           {t(`connectorStatus.${connector.status}`)}
         </Badge>
+        {/* i18n-exempt: OAuth is a protocol proper noun */}
         {connector.oauth ? <Badge variant="outline">OAuth</Badge> : null}
+        {/* i18n-exempt: A2UI is a protocol proper noun */}
         {connector.richMessages ? <Badge variant="outline">A2UI</Badge> : null}
       </div>
       {!planned && !githubDelivery ? (
@@ -582,9 +584,9 @@ function OcrProviderInspector({ provider }: { provider: OcrProvider }) {
     <>
       <div className="flex flex-wrap gap-2">
         <Badge variant="outline">{t(`ocrCategories.${provider.category}`)}</Badge>
-        {provider.shells.tauri ? <Badge variant="secondary">desktop</Badge> : null}
-        {provider.shells.capacitor ? <Badge variant="secondary">mobile</Badge> : null}
-        {provider.shells.browser ? <Badge variant="secondary">web</Badge> : null}
+        {provider.shells.tauri ? <Badge variant="secondary">{t("shellDesktop")}</Badge> : null}
+        {provider.shells.capacitor ? <Badge variant="secondary">{t("shellMobile")}</Badge> : null}
+        {provider.shells.browser ? <Badge variant="secondary">{t("shellWeb")}</Badge> : null}
       </div>
       {provider.credentialKeys.length > 0 ? (
         <p className="text-xs text-muted-foreground">

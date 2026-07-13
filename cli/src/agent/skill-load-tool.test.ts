@@ -9,7 +9,7 @@ import {
   parseLoadSkillArgs,
   renderLoadedSkill,
 } from "./skill-load-tool"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type { PluginToolExecRequest } from "@/lib/claude/plugin-tool-ipc"
 
 function skill(over: Partial<Skill> = {}): Skill {

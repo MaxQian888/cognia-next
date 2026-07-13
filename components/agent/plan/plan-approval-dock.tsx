@@ -31,7 +31,7 @@ import { resolvePlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { materializeSteps } from "@/lib/agent/plan/steps"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { useSettingsStore } from "@/stores/settings"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { AgentPlan, CreatePlanStepInput, PlanRefinementType } from "@/types/agent/plan"
 
 /** The synthetic turn injected after a plan is approved. */

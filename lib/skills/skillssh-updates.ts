@@ -8,7 +8,7 @@
 // (`computeSkillsShFilesHash`), so install-time and check-time values are
 // directly comparable regardless of token presence.
 
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type { MarketplaceItem } from "./marketplace-types"
 import { fetchSkillsShDetail, parseSkillsShTriple } from "./marketplace-skillssh"
 import { computeSkillsShFilesHash } from "./skillssh-install"

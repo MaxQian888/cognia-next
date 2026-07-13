@@ -21,7 +21,7 @@ import {
   ModelOverrideFields,
   useUtilityProviderOptions,
 } from "@/components/settings/common/model-override-fields"
-import type { UtilityModelConfig } from "@/lib/claude/types"
+import type { UtilityModelConfig } from "@cognia/agent-config-types"
 import type { PetControlsProps } from "./pet-appearance-controls"
 
 const PROACTIVE_TIERS: PetProactiveTier[] = ["quiet", "normal", "chatty"]

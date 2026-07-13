@@ -1,6 +1,6 @@
 import { startTurnProvisioner } from "./turn-provisioning-cache"
 import type { ProvisionResult } from "./turn-provisioning"
-import type { TurnProviderConfig } from "@/lib/claude/types"
+import type { TurnProviderConfig } from "@cognia/agent-config-types"
 
 const PROVIDER: TurnProviderConfig = {
   kind: "cloudflare-calls",

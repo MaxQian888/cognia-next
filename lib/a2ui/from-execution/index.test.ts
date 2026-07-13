@@ -1,4 +1,4 @@
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { VisualWorkflow, WorkflowRunEventRow, WorkflowRunRow } from "@/types/workflow/visual"
 
 import { applyEnhancement, buildExecutionPage, buildSourceDigest } from "./index"

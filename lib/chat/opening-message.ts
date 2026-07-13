@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai"
 
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 /**
  * Build the seed assistant greeting for a character (ADR-0030

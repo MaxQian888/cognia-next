@@ -7,7 +7,7 @@
 // The full `AppSettings` type is large; we build the subset the agent UIs touch
 // and cast through `unknown`, mirroring the established pattern in
 // `lib/storybook/fixtures/settings-search.ts` and the stt-card story.
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 /**
  * Build an `AppSettings`-shaped object from a shallow patch. Pass only the

@@ -2,7 +2,7 @@
 // recommended filename. Used by the chat-header trigger and from the
 // settings tab's "Quick session export" card.
 
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import {
   exportToRichMarkdown,
   exportToRichJSON,

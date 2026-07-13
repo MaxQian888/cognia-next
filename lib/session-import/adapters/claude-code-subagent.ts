@@ -9,7 +9,7 @@
 // renderer changes. It takes `StoredMessage[]`, never raw records, so it has no
 // dependency on the adapter (no import cycle).
 
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import type { SubagentPart } from "@/lib/claude/parts-extensions"
 import type { SubAgentToolCall, SubAgentTokenUsage } from "@/types/agent/sub-agent"
 

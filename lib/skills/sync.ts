@@ -25,7 +25,7 @@ import {
 import { parseSkillMarkdown, serializeSkill, skillFilename } from "@/lib/claude/skills-io"
 import { isTauri } from "@/lib/tauri"
 import { resolveSkillBundleMirrors, useSettingsStore } from "@/stores/settings/settings-store"
-import type { Skill, SkillResource } from "@/lib/claude/types"
+import type { Skill, SkillResource } from "@cognia/agent-config-types"
 
 export interface SyncResult {
   pushed: number

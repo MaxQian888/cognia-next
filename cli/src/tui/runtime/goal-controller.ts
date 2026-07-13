@@ -9,7 +9,7 @@
  * per-token streaming seam, so progress shows as an activity pill + a final
  * summary rather than live transcript turns.
  */
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { Goal } from "@/types/goal"
 import { getActiveGoalForSession, listGoalsBySession } from "@/lib/db/goals"
 import { getGoalRuntime } from "@/lib/goal/runtime"

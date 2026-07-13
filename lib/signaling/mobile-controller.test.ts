@@ -18,7 +18,7 @@ import {
 } from "@/lib/tauri/transport-companion"
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import type { NetworkStatus } from "@/lib/capacitor/network"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 class FakeTransport {
   readonly enableCalls: Array<{

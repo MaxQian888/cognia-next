@@ -16,7 +16,7 @@
  * {@link CalibrationNoJudgeError}.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalCase, EvalSample, Scorer } from "@/types/eval/eval"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 import { makeJudgeScorer } from "@/lib/ai/eval/scorers/judge"

@@ -22,7 +22,7 @@
 
 import { messageRepository } from "@/lib/db"
 import { getDb } from "@/lib/db/schema"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { UIMessage } from "@/types"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"

@@ -8,7 +8,7 @@ import "fake-indexeddb/auto"
 
 import { resolveSendOptions } from "./build-options"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import type { AppSettings, Character } from "./types"
+import type { AppSettings, Character } from "@cognia/agent-config-types"
 import type { Memory } from "@/types/memory/memory"
 import type { ApplyMemoryContextDeps } from "@/lib/memory/runtime/apply-memory-context"
 

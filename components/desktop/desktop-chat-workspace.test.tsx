@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, waitFor, act } from "@testing-library/react"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 
 const logInfo = jest.fn()

@@ -8,7 +8,7 @@
  */
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
-import type { PermissionRequestEvent } from "@/lib/claude/types"
+import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 
 import { captureEventToActions } from "../state/event-mapper"
 import { classifyError } from "../format/error-classify"

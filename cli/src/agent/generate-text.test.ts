@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 import { lockdownTextOptions, generateText } from "./generate-text"
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import type { ResolvedConfig } from "../config/schema"
 

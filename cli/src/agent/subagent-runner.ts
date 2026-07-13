@@ -33,7 +33,7 @@ import {
 } from "@/lib/claude/run-and-capture"
 import { closeSession as defaultCloseSession } from "@/lib/claude/ipc"
 import type { UsageInfo } from "@/lib/claude/adapter"
-import type { McpServer, SendOptions } from "@/lib/claude/types"
+import type { McpServer, SendOptions } from "@cognia/agent-config-types"
 import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 

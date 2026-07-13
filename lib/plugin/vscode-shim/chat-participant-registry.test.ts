@@ -16,7 +16,7 @@ import {
   handleDisposeChatParticipant,
   handleRegisterChatVariableResolver,
 } from "./chat-participant-registry"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 function makeMemoryStore() {
   const characters = new Map<string, Character>()

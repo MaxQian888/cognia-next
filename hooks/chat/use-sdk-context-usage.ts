@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import { isTauri } from "@/lib/tauri"
 import { getSessionContextUsage } from "@/lib/claude/ipc"
-import type { SdkContextUsage } from "@/lib/claude/types"
+import type { SdkContextUsage } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 
 /** Statuses during which a turn is in flight (no fresh context to read yet). */

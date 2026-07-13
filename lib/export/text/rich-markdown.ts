@@ -3,7 +3,7 @@
 // round-trips through any standard renderer (GitHub, Obsidian, etc).
 
 import type { UIMessage } from "ai"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 export interface RichExportData {
   session: ChatSession

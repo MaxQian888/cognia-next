@@ -18,7 +18,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
-import type { ApprovalDecision, PendingApproval } from "@/lib/claude/types"
+import type { ApprovalDecision, PendingApproval } from "@cognia/agent-config-types"
 
 export interface ApprovalCardProps {
   approval: PendingApproval

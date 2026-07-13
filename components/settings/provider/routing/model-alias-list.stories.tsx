@@ -9,7 +9,7 @@ import {
   makeProviderSettingsMap,
 } from "@/lib/storybook/fixtures/settings-provider"
 import type { ModelMapping } from "@cognia/provider-types/model-mapping"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Model-alias mapping CRUD list. Each row shows the alias, its distribution
 // badge, the fallback chain, and edit/delete controls. Reads

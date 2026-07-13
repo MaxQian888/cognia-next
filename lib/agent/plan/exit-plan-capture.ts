@@ -16,7 +16,7 @@
  * `applyPlanModeBridge`.
  */
 
-import type { SDKAssistantMessage, SDKMessage, BetaToolUseBlock } from "@/lib/claude/types"
+import type { SDKAssistantMessage, SDKMessage, BetaToolUseBlock } from "@cognia/agent-config-types"
 import type {
   AgentPlan,
   CreatePlanInput,

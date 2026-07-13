@@ -15,7 +15,7 @@
  */
 
 import { provisionIceServers, type ProvisionResult } from "./turn-provisioning"
-import type { TurnProviderConfig } from "@/lib/claude/types"
+import type { TurnProviderConfig } from "@cognia/agent-config-types"
 
 export interface ProvisionerHandle {
   /** Latest provisioned ICE servers; `[]` before the first success. */

@@ -7,7 +7,7 @@ import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { resetStore } from "@/lib/storybook/seed-stores"
 import { useChatStore } from "@/stores/chat"
-import type { Character, ChatSession, Skill } from "@/lib/claude/types"
+import type { Character, ChatSession, Skill } from "@cognia/agent-config-types"
 
 // Consolidated "⚙ Session" sheet: low-frequency, session-scoped settings +
 // lifecycle actions. Controlled via open / onOpenChange.

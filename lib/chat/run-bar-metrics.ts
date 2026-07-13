@@ -9,7 +9,7 @@
 import type { UIMessage } from "ai"
 
 import type { UsageInfo } from "@/lib/claude/adapter"
-import type { RunStatusBarSettings } from "@/lib/claude/types"
+import type { RunStatusBarSettings } from "@cognia/agent-config-types"
 import { computeContextWindowUsage, getLatestUsage } from "@/lib/claude/usage"
 
 /**

@@ -39,7 +39,7 @@ import {
 import { CharacterPackUpdateDialog } from "@/components/settings/character-pack-update-dialog"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listSkills } from "@/lib/db/skills"
-import type { AppSettings, Character, McpServer, Skill } from "@/lib/claude/types"
+import type { AppSettings, Character, McpServer, Skill } from "@cognia/agent-config-types"
 // ADR-0020 W2 — Computer Use sub-settings UI reads the live native-tool
 // registry so allowedToolIds is a real picker (one checkbox per
 // registered tool) instead of a free-form text field. `listEntries`

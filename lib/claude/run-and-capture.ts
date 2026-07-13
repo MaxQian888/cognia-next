@@ -36,7 +36,7 @@ import type {
   ToolResultReviewEvent,
   SendContent,
   SendOptions,
-} from "./types"
+} from "@cognia/agent-config-types"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import { extractUsage, type UsageInfo } from "./adapter"
 import { runChatMiddlewareChain } from "@/lib/claude/chat-middleware/runner"

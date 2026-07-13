@@ -35,7 +35,7 @@
 
 import { listEnabledSkillsByIds } from "@/lib/db/skills"
 import { getSkill, getSkillEntry } from "@/lib/plugin/registries/skill-registry"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
 import { resolveSkillMarkdown } from "./skills-io"
 

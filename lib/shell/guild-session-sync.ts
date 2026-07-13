@@ -1,4 +1,4 @@
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 import { guildFromSession } from "@/lib/claude/guild"
 

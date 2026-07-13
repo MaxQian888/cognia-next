@@ -29,7 +29,7 @@ import {
   type ProviderSettingsEntry,
   type CustomProviderDefinition,
 } from "@/lib/ai/provider-consumption"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { DispatchContext } from "@/lib/claude/agents/dispatch-context-registry"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"

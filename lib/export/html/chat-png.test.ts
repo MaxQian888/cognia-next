@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { renderChatToPng, pngBackground, ChatPngTooLongError, MAX_PNG_HEIGHT_PX } from "./chat-png"
 import { THEMES } from "./syntax-themes"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 const mockHtml2canvas = jest.fn()
 jest.mock("html2canvas", () => ({

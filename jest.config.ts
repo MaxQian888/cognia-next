@@ -146,6 +146,7 @@ const projectCommon: Config = {
     "^@cognia/web-search(.*)$": "<rootDir>/packages/web-search/src$1",
     "^@cognia/tts(.*)$": "<rootDir>/packages/tts/src$1",
     "^@cognia/logging(.*)$": "<rootDir>/packages/logging/src$1",
+    "^@cognia/agent-config-types(.*)$": "<rootDir>/packages/agent-config-types/src$1",
 
     // cheerio's package exports prefer the ESM browser build under jsdom.
     // The HTML parser uses dynamic import("cheerio"), so map Jest to the CJS
@@ -300,6 +301,11 @@ const globalConfig: Config = {
     // coverage-collected (provider-types precedent), so it is excluded.
     "packages/logging/src/**/*.{ts,tsx}",
     "!packages/logging/src/types/**",
+    // agent-config-types' hub came from lib/claude/types.ts (coverage-
+    // collected: it carries runtime event guards + default tables). The
+    // lsp-config/compression/pet-settings leaves came from types/**, which
+    // was never coverage-collected (provider-types precedent).
+    "packages/agent-config-types/src/index.ts",
     "!packages/plugin-sdk/src/context/**/*.ts",
     "!packages/plugin-sdk/src/hooks/index.ts",
     "!packages/plugin-sdk/src/permissions/index.ts",

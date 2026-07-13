@@ -1,5 +1,5 @@
 import { render, fireEvent } from "@testing-library/react"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 // ── Mocks ────────────────────────────────────────────────────────────────
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))

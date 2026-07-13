@@ -19,7 +19,7 @@ import { listTeams } from "@/lib/db/teams"
 import { loggers } from "@cognia/logging"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useUIStore } from "@/stores/ui"
-import type { Team } from "@/lib/claude/types"
+import type { Team } from "@cognia/agent-config-types"
 import {
   EllipsisIcon,
   EyeOffIcon,

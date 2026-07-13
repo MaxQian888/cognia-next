@@ -7,7 +7,7 @@ import { maybeHandleControlCommand, isCommandAllowed, type ControlCommandDeps } 
 import type { NormalizedInboundEvent, ChannelKind } from "@/types/connectors/event"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type { ResolvedBinding } from "../policy-resolve"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 function makeEvent(over: Partial<NormalizedInboundEvent> = {}): NormalizedInboundEvent {
   return {

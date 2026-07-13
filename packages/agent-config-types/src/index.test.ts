@@ -2,8 +2,8 @@
 // runtime export is `DEFAULT_BACKUP_AUTO_SCHEDULE`, so we sanity-check its
 // shape so the file isn't excluded from the coverage corpus.
 
-import { DEFAULT_BACKUP_AUTO_SCHEDULE, isPluginToolExecEvent } from "./types"
-import type { ClaudeEvent, SendContentBlock } from "./types"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE, isPluginToolExecEvent } from "./index"
+import type { ClaudeEvent, SendContentBlock } from "./index"
 
 describe("SendContentBlock", () => {
   it("accepts text, image, and document base64 blocks", () => {

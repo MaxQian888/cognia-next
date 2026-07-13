@@ -8,7 +8,7 @@
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { attemptRoutingFallback, classifyError } from "./routing-fallback"
-import type { SendOptions } from "./types"
+import type { SendOptions } from "@cognia/agent-config-types"
 
 const sendPromptMock = jest.fn<Promise<void>, unknown[]>()
 

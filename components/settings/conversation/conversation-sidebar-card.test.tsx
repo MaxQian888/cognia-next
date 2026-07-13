@@ -3,7 +3,7 @@
  */
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { ConversationSidebarSettings } from "@/lib/claude/types"
+import type { ConversationSidebarSettings } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,

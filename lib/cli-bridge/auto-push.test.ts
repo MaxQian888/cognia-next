@@ -1,6 +1,6 @@
 import { maybeAutoPushToCli } from "./auto-push"
 import { pushToCli, type PushReport } from "./push-to-cli"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const ON = { id: "singleton", cliBridge: { autoSync: true } } as AppSettings
 const OFF = { id: "singleton", cliBridge: { autoSync: false } } as AppSettings

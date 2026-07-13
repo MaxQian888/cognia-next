@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/select"
 import { useBatchExport } from "@/hooks/data/use-batch-export"
 import { notifyExportOutcome } from "@/lib/files/export-feedback"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { SingleExportFormat } from "@/lib/export/single"
 import { listSessions } from "@/lib/db/sessions"
 import { createLogger } from "@cognia/logging"

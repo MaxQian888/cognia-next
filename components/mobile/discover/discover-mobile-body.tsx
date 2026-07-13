@@ -53,7 +53,7 @@ import { useSearchHotkey } from "@/hooks/discover/use-search-hotkey"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { setSkillStatus } from "@/lib/db/skills"
 import { runSyncDown } from "@/lib/sync/companion-sync"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import {
   FAVORITES_CATEGORY,
   FORYOU_CATEGORY,

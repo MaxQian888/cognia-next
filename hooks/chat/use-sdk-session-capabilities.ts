@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import { isTauri } from "@/lib/tauri"
 import { getSessionSupportedCommands, getSessionSupportedModels } from "@/lib/claude/ipc"
-import type { SdkModelInfo, SdkSlashCommand } from "@/lib/claude/types"
+import type { SdkModelInfo, SdkSlashCommand } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 
 function isBusy(status: string | undefined): boolean {

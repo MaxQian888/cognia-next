@@ -29,7 +29,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { enhancePrompt, ENHANCE_MODES, type EnhanceMode } from "@/lib/chat/completion/enhance"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 interface EnhanceButtonProps {

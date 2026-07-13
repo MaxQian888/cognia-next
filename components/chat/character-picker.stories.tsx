@@ -4,7 +4,7 @@ import { fn } from "storybook/test"
 import { CharacterPicker } from "./character-picker"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 // The picker is a CommandDialog (open via the `open` prop) that lists every
 // resolvable character grouped into Built-in / per-plugin / user buckets. It

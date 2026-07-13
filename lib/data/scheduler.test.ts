@@ -1,7 +1,7 @@
 // Pure-function tests for the scheduling and reminder helpers.
 
 import { shouldRunScheduledBackup, shouldShowReminder, pruneScheduledBackups } from "./scheduler"
-import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@/lib/claude/types"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@cognia/agent-config-types"
 
 const DAY = 24 * 60 * 60 * 1000
 

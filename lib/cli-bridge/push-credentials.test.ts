@@ -1,5 +1,5 @@
 import { buildCredentialsFile, gatherCredentials, pushCredentialsToCli } from "./push-credentials"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const isTauriMock = jest.fn(() => true)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))

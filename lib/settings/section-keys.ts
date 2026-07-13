@@ -17,7 +17,7 @@
  * settings key can never silently fall through the cracks.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { DEFAULTS } from "@/lib/db/settings"
 import { SECRET_KEYS, NON_TRANSFERABLE_KEYS } from "./profile-transfer"

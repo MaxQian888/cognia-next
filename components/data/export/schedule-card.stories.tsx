@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { ScheduleCard } from "./schedule-card"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 // Auto-backup schedule settings card. Reads the schedule + retention from the
 // settings store (falls back to defaults). Folder picking is Tauri-only.

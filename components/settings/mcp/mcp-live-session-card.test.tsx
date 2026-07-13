@@ -36,7 +36,7 @@ const EMPTY_LOGS = { logs: [], lastEntry: null, lastError: null, errorCount: 0, 
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
-import type { SdkMcpServerStatus } from "@/lib/claude/types"
+import type { SdkMcpServerStatus } from "@cognia/agent-config-types"
 import { McpLiveSessionCard } from "./mcp-live-session-card"
 
 const mockToast = toast as unknown as { success: jest.Mock; error: jest.Mock }

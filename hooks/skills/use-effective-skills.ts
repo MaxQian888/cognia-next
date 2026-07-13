@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { listSkillsByIds, resolveEffectiveSkills, type EffectiveSkillRef } from "@/lib/db/skills"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 /** A resolved effective-skill entry with its hydrated Dexie row. */
 export interface EffectiveSkillItem extends EffectiveSkillRef {

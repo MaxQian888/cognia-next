@@ -22,7 +22,7 @@ import type {
   AppSettings,
   ConversationTimelineSettings,
   UtilityModelConfig,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import { useSettingsStore } from "@/stores/settings"
 
 type ComposerBehavior = NonNullable<AppSettings["composerBehavior"]>

@@ -33,7 +33,7 @@ import {
   type LspClientAdapter,
 } from "./lsp-registry"
 import { syncUserLspServers } from "./lsp-user-servers"
-import type { UserLspServerEntry } from "@/lib/claude/types"
+import type { UserLspServerEntry } from "@cognia/agent-config-types"
 
 interface BridgeCall {
   extensionId: string

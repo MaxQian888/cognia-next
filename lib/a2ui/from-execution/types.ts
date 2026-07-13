@@ -7,7 +7,7 @@
  * hub (save/edit) and the zero-knowledge share pipeline (read-only collab).
  */
 
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { VisualWorkflow, WorkflowRunEventRow, WorkflowRunRow } from "@/types/workflow/visual"
 
 /** A completed (or terminal) workflow run plus its event log. */
