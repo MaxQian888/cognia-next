@@ -173,6 +173,7 @@ function ItemMultiSelect({
   allowEmpty,
   emptyHint,
 }: MultiSelectProps) {
+  const tSection = useTranslations("presets.editor.sections.tools")
   const toggle = (id: string) => {
     if (selectedIds.includes(id)) {
       onChange(selectedIds.filter((x) => x !== id))
