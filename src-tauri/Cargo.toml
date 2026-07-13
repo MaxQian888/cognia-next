@@ -66,6 +66,14 @@ serde = { version = "1.0", features = ["derive"] }
 cognia-signaling-core = { path = "../services/signaling-server/core" }
 # ADR-0067 — foundation utilities (fs_atomic). Re-aliased as `crate::fs_atomic`.
 cognia-core = { path = "../crates/cognia-core" }
+# ADR-0067 Tier B prep — secret_store/keyring_secrets/api_key foundation.
+# Re-aliased as crate::{secret_store,api_key}; keyring_secrets keeps an
+# app-side facade for its command shells. The `test-inmemory` feature is
+# enabled from [dev-dependencies] so unit tests never touch the OS keyring.
+cognia-secrets = { path = "../crates/cognia-secrets" }
+# ADR-0067 Tier B prep — proxy_config foundation (state + detection + WSS
+# dialer); `proxy_config/` stays as an app-side facade for the command shells.
+cognia-net = { path = "../crates/cognia-net" }
 # ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
 # uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/
@@ -436,6 +444,10 @@ syslog = "7"
 # filter) moved to `crates/cognia-automation`.
 
 [dev-dependencies]
+# Keep app_lib's own test suite hermetic: the secret store's file+keyring
+# global becomes in-memory when tests build (dev-dep feature unification);
+# production builds never see the feature.
+cognia-secrets = { path = "../crates/cognia-secrets", features = ["test-inmemory"] }
 # HTTP mock server for connectors::http_client and attachments tests.
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)

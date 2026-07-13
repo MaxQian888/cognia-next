@@ -16,9 +16,9 @@
 //! key touches the OS keyring at runtime, so a launch prompts **once** (and
 //! zero times once code signing is stable).
 //!
-//! Crypto recipe mirrors [`crate::connectors::attachments`]: `Aes256Gcm`, a
+//! Crypto recipe mirrors `connectors::attachments` (app-side): `Aes256Gcm`, a
 //! random 12-byte nonce prepended to the ciphertext, master key auto-generated
-//! with `OsRng` on first use. Atomic disk writes reuse [`crate::fs_atomic`].
+//! with `OsRng` on first use. Atomic disk writes reuse [`cognia_core::fs_atomic`].
 //!
 //! ## Legacy migration
 //!
@@ -54,10 +54,10 @@ use rand::RngCore;
 
 /// Keyring service holding the single master key. (Only the production global
 /// touches the keyring; the test global is in-memory.)
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-inmemory")))]
 const MASTER_KEY_SERVICE: &str = "com.cognia.secret-store";
 /// Keyring account holding the single master key.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-inmemory")))]
 const MASTER_KEY_ACCOUNT: &str = "master-key";
 /// File name under `<dataDir>/cognia/` for the encrypted blob.
 const STORE_FILE_NAME: &str = "secret-store.enc";
@@ -118,8 +118,8 @@ fn decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, String> {
 
 /// One encrypted secret store. When `path` is `Some`, mutations are persisted
 /// to that file; when `None` the store is purely in-memory (used by the
-/// `#[cfg(test)]` process global so unit tests never touch disk or the OS
-/// keyring).
+/// `cfg(test)` / `test-inmemory`-feature process global so unit tests never
+/// touch disk or the OS keyring).
 struct SecretStore {
     path: Option<PathBuf>,
     key: [u8; 32],
@@ -214,16 +214,16 @@ impl SecretStore {
         let plaintext =
             serde_json::to_vec(&self.cache).map_err(|e| format!("serialize secret-store: {e}"))?;
         let ciphertext = encrypt(&self.key, &plaintext)?;
-        let plan = crate::fs_atomic::AtomicWritePlan {
+        let plan = cognia_core::fs_atomic::AtomicWritePlan {
             path: path.clone(),
             expected_mtime: None,
             tmp_suffix: "tmp".into(),
             backup_suffix: "bak".into(),
         };
-        crate::fs_atomic::atomic_write_with_mtime_check(&plan, &ciphertext)
+        cognia_core::fs_atomic::atomic_write_with_mtime_check(&plan, &ciphertext)
             .map_err(|e| format!("persist secret-store: {e}"))?;
         // One encrypted backup is plenty for recovery; prune the rest.
-        crate::fs_atomic::rotate_backups(path, 1);
+        cognia_core::fs_atomic::rotate_backups(path, 1);
         // Ciphertext or not, the blob guards every credential — keep it
         // owner-only where the platform can express that.
         #[cfg(unix)]
@@ -263,7 +263,7 @@ fn global() -> &'static RwLock<SecretStore> {
 /// resolving the key or opening the file degrades to an empty **in-memory**
 /// store (path `None`) — that keeps the app running and, crucially, never
 /// overwrites a good on-disk store with data encrypted under a fallback key.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-inmemory")))]
 fn build_global() -> SecretStore {
     let key = match load_or_create_master_key() {
         Ok(key) => key,
@@ -288,12 +288,12 @@ fn build_global() -> SecretStore {
 
 /// Test global: in-memory, fixed key, no disk or keyring. Every rerouted
 /// module's tests run against this so the suite stays hermetic.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-inmemory"))]
 fn build_global() -> SecretStore {
     SecretStore::in_memory([7u8; 32])
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-inmemory")))]
 fn default_store_path() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("cognia").join(STORE_FILE_NAME))
 }
@@ -304,7 +304,7 @@ fn default_store_path() -> Option<PathBuf> {
 /// 2. `COGNIA_MASTER_KEY_FILE` — a file containing the 64 hex chars.
 /// 3. The OS keyring, generating + storing one on first use (the single
 ///    runtime keyring touch; desktop path).
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-inmemory")))]
 fn load_or_create_master_key() -> Result<[u8; 32], String> {
     if let Some(key) = resolve_master_key_from_env()? {
         return Ok(key);
@@ -433,7 +433,7 @@ pub fn generate_master_key() -> [u8; 32] {
 // Legacy per-subsystem keyring fallback (production) / stub (tests)
 // ---------------------------------------------------------------------------
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-inmemory")))]
 fn legacy_keyring_get(service: &str, account: &str) -> Result<Option<String>, String> {
     let entry =
         keyring::Entry::new(service, account).map_err(|e| format!("legacy keyring init: {e}"))?;
@@ -444,19 +444,19 @@ fn legacy_keyring_get(service: &str, account: &str) -> Result<Option<String>, St
     }
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-inmemory")))]
 fn legacy_keyring_delete(service: &str, account: &str) {
     if let Ok(entry) = keyring::Entry::new(service, account) {
         let _ = entry.delete_credential();
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-inmemory"))]
 fn legacy_keyring_get(_service: &str, _account: &str) -> Result<Option<String>, String> {
     Ok(None)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-inmemory"))]
 fn legacy_keyring_delete(_service: &str, _account: &str) {}
 
 // ---------------------------------------------------------------------------

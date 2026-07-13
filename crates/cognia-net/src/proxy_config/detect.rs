@@ -88,7 +88,7 @@ const VERGE_API_PORT: u16 = 9097;
 ///
 /// The kind here is the *initial guess*; for 7890/7891 we may upgrade to
 /// `Clash` after the controller probe confirms a Clash-compatible core.
-pub(crate) const KNOWN_PORTS: &[(u16, CandidateKind, &str)] = &[
+pub const KNOWN_PORTS: &[(u16, CandidateKind, &str)] = &[
     (7890, CandidateKind::Http, "Clash mixed port"),
     (7891, CandidateKind::Socks5, "Clash SOCKS port"),
     (1080, CandidateKind::Socks5, "SOCKS proxy"),

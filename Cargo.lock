@@ -1829,6 +1829,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-net"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "dirs 6.0.0",
+ "futures-util",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sysinfo 0.33.1",
+ "tempfile",
+ "tokio",
+ "tokio-socks",
+ "url",
+]
+
+[[package]]
 name = "cognia-next"
 version = "0.1.0"
 dependencies = [
@@ -1849,8 +1866,10 @@ dependencies = [
  "cognia-core",
  "cognia-git",
  "cognia-instrument",
+ "cognia-net",
  "cognia-ocr",
  "cognia-scheduling",
+ "cognia-secrets",
  "cognia-signaling-core",
  "cognia-vector",
  "core-foundation 0.10.1",
@@ -2019,6 +2038,23 @@ dependencies = [
  "tokio",
  "tower-http",
  "uuid",
+]
+
+[[package]]
+name = "cognia-secrets"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "cognia-core",
+ "dirs 6.0.0",
+ "hex",
+ "keyring",
+ "log",
+ "parking_lot",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

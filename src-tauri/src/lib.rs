@@ -1,7 +1,10 @@
 mod a2ui_bridge;
 mod account_auth;
 mod agents;
-mod api_key;
+// ADR-0067 Tier B prep — extracted to `crates/cognia-secrets`; re-aliased so
+// `crate::api_key::ApiKeyState` (claude, subscription, companion_api, headless)
+// resolves unchanged.
+pub use cognia_secrets::api_key;
 // ADR-0067 Phase 5 — automation/sandbox/cua_sandbox extracted to the
 // `crates/cognia-automation` cluster; re-aliased so all three module paths
 // (generate_handler! + .manage()) resolve unchanged.
@@ -52,7 +55,12 @@ pub use cognia_automation::sandbox;
 // ADR-0067 Phase 6 — scheduler/workflow/timing extracted to the
 // cognia-scheduling cluster; re-aliased so all three module paths resolve.
 pub use cognia_scheduling::scheduler;
-mod secret_store;
+// ADR-0067 Tier B prep — extracted to `crates/cognia-secrets`; re-aliased so
+// every `crate::secret_store::…` call site (subscription, connectors, gateway,
+// remote_control, tts, plugin_api, companion_api, mcp_oauth, headless) resolves
+// unchanged. `keyring_secrets`/`proxy_config` stay as app-side facades because
+// they keep their `#[tauri::command]` shells.
+pub use cognia_secrets::secret_store;
 mod session_import;
 mod session_import_watch;
 mod settings;

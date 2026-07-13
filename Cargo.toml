@@ -35,6 +35,10 @@ members = [
   "crates/cognia-vector",
   "crates/cognia-automation",
   "crates/cognia-scheduling",
+  # ADR-0067 Tier-B — foundation crates unblocking the subscription/
+  # connectors/terminal/plugin_api extractions.
+  "crates/cognia-secrets",
+  "crates/cognia-net",
 ]
 exclude = [
   "services/signaling-server",
