@@ -28,7 +28,10 @@ pub mod companion_api;
 pub use cognia_connectors as connectors;
 pub mod crash;
 pub use cognia_automation::cua_sandbox;
-mod external_agent;
+// ADR-0067 follow-up — extracted to `crates/cognia-external-agent` (isolates
+// the optional bollard/kube stacks); re-aliased so `crate::external_agent::…`
+// (companion_api rpc, headless, claude, generate_handler!) resolves unchanged.
+pub use cognia_external_agent as external_agent;
 mod files;
 pub mod fleet;
 mod fonts;

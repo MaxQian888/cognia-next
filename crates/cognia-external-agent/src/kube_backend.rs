@@ -534,7 +534,7 @@ mod tests {
 
     #[tokio::test]
     async fn options_from_env_parse_and_default() {
-        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        let _guard = crate::test_env_lock::env_lock().await;
         std::env::remove_var(RUNNER_NAMESPACE_ENV);
         std::env::remove_var(RUNNER_NODE_NAME_ENV);
         std::env::remove_var(RUNNER_RUNTIME_CLASS_ENV);

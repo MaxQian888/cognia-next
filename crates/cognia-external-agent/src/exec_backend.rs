@@ -72,18 +72,6 @@ pub trait AgentEventEmitter: Send + Sync + 'static {
     fn emit(&self, channel: &str, payload: Value);
 }
 
-/// Headless emitter: publishes into the companion EventBus so every
-/// `/ws/v1/events` subscriber (the brain's acp-client, phones) receives the
-/// frozen payloads.
-#[allow(dead_code)] // constructed by the headless RPC arms (R11).
-pub struct BusAgentEmitter(pub Arc<crate::companion_api::event_bus::EventBus>);
-
-impl AgentEventEmitter for BusAgentEmitter {
-    fn emit(&self, channel: &str, payload: Value) {
-        self.0.publish(channel.to_string(), payload);
-    }
-}
-
 /// [`ExternalAgentEventSink`] that forwards reader/supervisor events through
 /// an [`AgentEventEmitter`] with the frozen shapes. Replaces the old
 /// Tauri-only `TauriEventSink`.
@@ -332,24 +320,6 @@ mod tests {
         assert_eq!(events[3].1["code"], 2);
     }
 
-    #[test]
-    fn bus_emitter_publishes_the_frozen_payload() {
-        let bus = crate::companion_api::event_bus::EventBus::new();
-        let emitter = BusAgentEmitter(Arc::clone(&bus));
-        emitter.emit(STDOUT_CHANNEL, stdout_payload("a1", "hello"));
-        match bus.subscribe(Some(0), 0) {
-            crate::companion_api::event_bus::SubscribeResult::Ok { replay, .. } => {
-                assert_eq!(replay.len(), 1);
-                assert_eq!(replay[0].event_type, STDOUT_CHANNEL);
-                assert_eq!(
-                    replay[0].payload,
-                    json!({ "agentId": "a1", "data": "hello" })
-                );
-            }
-            _ => panic!("subscribe failed"),
-        }
-    }
-
     // ── spawn_with_events choreography ────────────────────────────────────────
 
     #[tokio::test]
@@ -377,7 +347,7 @@ mod tests {
     /// Skips gracefully when Node is missing.
     #[tokio::test]
     async fn local_backend_delegates_the_full_lifecycle() {
-        if !crate::external_agent::command_resolver::check_command_exists("node") {
+        if !crate::command_resolver::check_command_exists("node") {
             eprintln!("skip: node not on PATH");
             return;
         }

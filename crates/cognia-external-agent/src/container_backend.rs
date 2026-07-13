@@ -957,8 +957,8 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::FakeContainerApi;
     use super::*;
-    use crate::external_agent::exec_backend::test_support::RecordingAgentEmitter;
-    use crate::external_agent::exec_backend::{
+    use crate::exec_backend::test_support::RecordingAgentEmitter;
+    use crate::exec_backend::{
         spawn_with_events, EXIT_CHANNEL, SPAWN_CHANNEL, STATE_CHANGE_CHANNEL, STDERR_CHANNEL,
         STDOUT_CHANNEL,
     };
@@ -1057,7 +1057,7 @@ mod tests {
         let backend = ContainerBackend::new(api, test_config(Some("v")));
         let mut config = spawn_config("evil");
         config.cwd = Some("/etc".into());
-        let sink = crate::external_agent::exec_backend::EmitterEventSink::new(
+        let sink = crate::exec_backend::EmitterEventSink::new(
             RecordingAgentEmitter::new(),
         );
         let err = backend.spawn(config, sink).await.unwrap_err();
@@ -1070,7 +1070,7 @@ mod tests {
         let backend = ContainerBackend::new(api, test_config(Some("v")));
         let mut config = spawn_config("no-cwd");
         config.cwd = None;
-        let sink = crate::external_agent::exec_backend::EmitterEventSink::new(
+        let sink = crate::exec_backend::EmitterEventSink::new(
             RecordingAgentEmitter::new(),
         );
         let err = backend.spawn(config, sink).await.unwrap_err();
@@ -1225,7 +1225,7 @@ mod tests {
         spawn_with_events(backend.as_ref(), emitter.clone(), spawn_config("dup"))
             .await
             .unwrap();
-        let sink = crate::external_agent::exec_backend::EmitterEventSink::new(emitter.clone());
+        let sink = crate::exec_backend::EmitterEventSink::new(emitter.clone());
         let err = backend.spawn(spawn_config("dup"), sink).await.unwrap_err();
         assert!(err.contains("already exists"), "{err}");
 
@@ -1293,7 +1293,7 @@ mod tests {
     async fn set_running_and_set_failed_transition_state() {
         let api = FakeContainerApi::new();
         let backend = ContainerBackend::new(api, test_config(Some("v")));
-        let sink = crate::external_agent::exec_backend::EmitterEventSink::new(
+        let sink = crate::exec_backend::EmitterEventSink::new(
             RecordingAgentEmitter::new(),
         );
         backend.spawn(spawn_config("s1"), sink).await.unwrap();
@@ -1332,11 +1332,13 @@ mod tests {
         );
     }
 
-    // Env-based tests mutate process env — serialize via the shared slot lock.
+    // Env-based tests mutate process env — serialize them via the crate's
+    // shared test lock (see `crate::test_env_lock`).
+    use crate::test_env_lock::env_lock;
 
     #[tokio::test]
     async fn config_from_env_requires_image_and_workspace() {
-        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        let _guard = env_lock().await;
         std::env::remove_var(RUNNER_IMAGE_ENV);
         std::env::remove_var(WORKSPACES_DIR_ENV);
         assert!(ContainerBackendConfig::from_env()
@@ -1375,7 +1377,7 @@ mod tests {
 
     #[tokio::test]
     async fn exec_backend_from_env_selection() {
-        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        let _guard = env_lock().await;
         std::env::remove_var(EXEC_BACKEND_ENV);
         assert_eq!(
             exec_backend_from_env().expect("default").kind(),
@@ -1410,8 +1412,8 @@ mod tests {
 #[cfg(all(test, feature = "container-exec"))]
 mod docker_integration {
     use super::*;
-    use crate::external_agent::exec_backend::test_support::RecordingAgentEmitter;
-    use crate::external_agent::exec_backend::{spawn_with_events, EXIT_CHANNEL, STDOUT_CHANNEL};
+    use crate::exec_backend::test_support::RecordingAgentEmitter;
+    use crate::exec_backend::{spawn_with_events, EXIT_CHANNEL, STDOUT_CHANNEL};
 
     #[tokio::test]
     async fn echo_roundtrip_against_a_real_daemon() {

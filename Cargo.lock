@@ -1893,6 +1893,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-external-agent"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bollard",
+ "futures-util",
+ "k8s-openapi",
+ "kube",
+ "libc",
+ "log",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "cognia-gateway"
 version = "0.1.0"
 dependencies = [
@@ -2001,7 +2020,6 @@ dependencies = [
  "axum 0.8.9",
  "axum-server",
  "base64 0.22.1",
- "bollard",
  "bytes",
  "cbc 0.2.1",
  "chrono",
@@ -2010,6 +2028,7 @@ dependencies = [
  "cognia-ccswitch",
  "cognia-connectors",
  "cognia-core",
+ "cognia-external-agent",
  "cognia-gateway",
  "cognia-git",
  "cognia-instrument",
@@ -2047,9 +2066,7 @@ dependencies = [
  "hmac 0.13.0",
  "ignore",
  "jsonwebtoken",
- "k8s-openapi",
  "keyring",
- "kube",
  "libc",
  "libsystemd",
  "liteparse",
