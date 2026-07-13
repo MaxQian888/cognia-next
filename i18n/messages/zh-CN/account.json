@@ -72,6 +72,14 @@
     "title": "本地账户",
     "updatedAtLabel": "更新于"
   },
+  "passwordStrength": {
+    "aria": "密码强度",
+    "fair": "一般",
+    "good": "良好",
+    "strong": "强",
+    "tooShort": "太短",
+    "weak": "弱"
+  },
   "switcher": {
     "active": "当前账户：{name}",
     "activeBadge": "当前",

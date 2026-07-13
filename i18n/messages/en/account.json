@@ -72,6 +72,14 @@
     "title": "Local accounts",
     "updatedAtLabel": "Updated"
   },
+  "passwordStrength": {
+    "aria": "Password strength",
+    "fair": "Fair",
+    "good": "Good",
+    "strong": "Strong",
+    "tooShort": "Too short",
+    "weak": "Weak"
+  },
   "switcher": {
     "active": "Active account: {name}",
     "activeBadge": "Active",

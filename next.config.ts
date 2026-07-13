@@ -51,6 +51,16 @@ const internalHost = process.env.TAURI_DEV_HOST || "localhost"
 // Relative path: Turbopack on Windows rejects absolute paths in resolveAlias.
 const browserStub = "./lib/browser-stubs/empty.js"
 
+// `os` is the one Node built-in that gets a non-empty browser stub. Unlike the
+// rest of NODE_ONLY_MODULES (read by nobody in the browser), some third-party
+// deps call `os` at *module eval* — notably `@vercel/oidc` (dragged in by `ai`
+// → `@ai-sdk/gateway`) computes a User-Agent constant from `os.platform()` /
+// `os.arch()` / `os.hostname()`. Against the empty `{}` stub those throw
+// `TypeError: os.platform is not a function` and crash any bundle that merely
+// evaluates a module importing `"ai"`. The shim returns inert browser values.
+const osShimStubRel = "./lib/browser-stubs/os-shim.js"
+const osShimStubAbs = path.resolve(process.cwd(), "lib/browser-stubs/os-shim.js")
+
 // pixi.js's package entry (`lib/index.mjs`) is an un-bundled barrel that
 // re-exports from hundreds of `lib/**` source modules. The Live2D pet pulls the
 // whole graph in (the canvas `import("pixi.js")`s it and
@@ -112,6 +122,19 @@ const NODE_ONLY_MODULES = [
   // (cross-spawn → ... → events, etc.) reaches for it.
   "events",
   "node:events",
+  // First-party node-only helper that is statically reachable from the client
+  // module graph but only ever executes in the Node sidecar / Tauri main
+  // process — never in the WebView: `lib/skills/built-in/lark/exec-lark-cli`
+  // spawns the lark-cli binary and pulls in `util`/`os`/`path` alongside the
+  // already-listed `child_process`/`fs`. Webpack tolerates the omission via its
+  // default client fallbacks, but Turbopack's `resolveAlias` only stubs modules
+  // named here, so all three must be listed for the dev bundle to stay clean.
+  "util",
+  "node:util",
+  "os",
+  "node:os",
+  "path",
+  "node:path",
 ]
 
 // Enable static export for Tauri production builds.
@@ -185,8 +208,20 @@ const nextConfig: NextConfig = {
     // potentially resolving modules from the wrong tree.
     root: __dirname,
     resolveAlias: {
-      ...Object.fromEntries(NODE_ONLY_MODULES.map((m) => [m, browserStub])),
-      // Collapse pixi.js to its pre-bundled single file (see above).
+      // `{ browser: … }` conditional form, NOT a bare string: unlike the
+      // webpack branch below (gated on `!isServer`), Turbopack applies
+      // `resolveAlias` to EVERY compile context — including the app-rsc
+      // server bundle, where Next's own `shared/lib/isomorphic/path.js` →
+      // `lib/metadata/get-metadata-route.js` needs the real `path` on every
+      // route render (`path.parse` on the empty stub crashed `/` in dev).
+      // The condition scopes the stubs to the browser bundle only.
+      ...Object.fromEntries(NODE_ONLY_MODULES.map((m) => [m, { browser: browserStub }])),
+      // `os` gets the non-empty shim instead of the empty stub (see above). The
+      // spread above already mapped both forms; these keys win.
+      os: { browser: osShimStubRel },
+      "node:os": { browser: osShimStubRel },
+      // Collapse pixi.js to its pre-bundled single file (see above). Applies
+      // in every context on purpose — the barrel is the problem everywhere.
       "pixi.js": PIXI_PREBUNDLED_REL,
     },
   },
@@ -196,6 +231,12 @@ const nextConfig: NextConfig = {
       config.resolve.fallback = {
         ...config.resolve.fallback,
         ...Object.fromEntries(NODE_ONLY_MODULES.map((m) => [m, false])),
+        // `os` resolves to the non-empty shim on the client, not the empty
+        // `false` fallback: deps like `@vercel/oidc` (via `ai`) probe it at
+        // eval and would otherwise crash the WebView/Capacitor bundle. The
+        // server keeps the real Node `os` (this branch is client-only).
+        os: osShimStubAbs,
+        "node:os": osShimStubAbs,
       }
     }
     // Same pixi collapse for the production export consumed by Tauri/Capacitor,
