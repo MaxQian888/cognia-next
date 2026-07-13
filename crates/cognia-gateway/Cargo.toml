@@ -1,0 +1,42 @@
+# ADR-0067 follow-up — OpenAI-compatible local API gateway (chat/responses/
+# embeddings surface, API-key store, keyed rate limiting, execute/translate
+# pipeline) extracted from app_lib's `gateway/` module. Re-aliased as
+# `crate::gateway`. Reuses cognia-remote-control's allowlist + fixed-window
+# rate-limiter primitives.
+[package]
+name = "cognia-gateway"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Local OpenAI-compatible API gateway — api keys, rate limiting, execute/translate pipeline."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_gateway"
+path = "src/lib.rs"
+
+[dependencies]
+cognia-secrets = { path = "../cognia-secrets" }
+cognia-remote-control = { path = "../cognia-remote-control" }
+cognia-instrument = { path = "../cognia-instrument" }
+tauri = { version = "=2.11.1" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+axum = { version = "0.8", features = ["macros", "ws"] }
+tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
+futures-util = { version = "0.3", default-features = false }
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+parking_lot = "0.12"
+log = "0.4"
+thiserror = "2"
+subtle = "2"
+rand = "0.8"
+
+[dev-dependencies]
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+tower = { version = "0.5", features = ["util", "limit", "timeout"] }

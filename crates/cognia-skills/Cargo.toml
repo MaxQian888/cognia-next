@@ -1,0 +1,28 @@
+# ADR-0067 follow-up — Skills subsystem (scan/install/registry for Claude
+# Code, Codex and native skill dirs) extracted from app_lib's `skills/`
+# module. Zero cross-module coupling; re-aliased as `crate::skills`.
+[package]
+name = "cognia-skills"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Skills subsystem — scanning, install/mirror/trash lifecycle, registry."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_skills"
+path = "src/lib.rs"
+
+[dependencies]
+tauri = { version = "=2.11.1" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+regex = "1"
+dirs = "6"
+tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
+tokio = { version = "1", features = ["sync", "time", "fs"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -1,0 +1,36 @@
+# ADR-0067 follow-up — Remote Control subsystem (LAN HTTP control surface:
+# allowlist, fixed-window rate limiting, idempotency, bearer keyring)
+# extracted from app_lib's `remote_control/` module. Re-aliased as
+# `crate::remote_control`; cognia-gateway reuses its allowlist/rate-limit
+# primitives.
+[package]
+name = "cognia-remote-control"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Remote-control LAN API — allowlist, rate limiting, idempotency, bearer keyring."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_remote_control"
+path = "src/lib.rs"
+
+[dependencies]
+cognia-secrets = { path = "../cognia-secrets" }
+tauri = { version = "=2.11.1" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+axum = { version = "0.8", features = ["macros", "ws"] }
+tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+parking_lot = "0.12"
+log = "0.4"
+thiserror = "2"
+subtle = "2"
+
+[dev-dependencies]
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+tower = { version = "0.5", features = ["util", "limit", "timeout"] }

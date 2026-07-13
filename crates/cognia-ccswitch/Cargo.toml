@@ -1,0 +1,35 @@
+# ADR-0067 follow-up — CCSwitch provider-relay switcher (Claude Code /
+# Codex / OpenCode config file management, provider DB, drift watcher)
+# extracted from app_lib's `ccswitch/` module. Re-aliased as
+# `crate::ccswitch`.
+[package]
+name = "cognia-ccswitch"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "CCSwitch — provider-relay switching for Claude Code/Codex/OpenCode config files."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_ccswitch"
+path = "src/lib.rs"
+
+[dependencies]
+cognia-core = { path = "../cognia-core" }
+cognia-subscription = { path = "../cognia-subscription" }
+tauri = { version = "=2.11.1" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "6"
+log = "0.4"
+parking_lot = "0.12"
+thiserror = "2"
+notify = "6"
+rusqlite = { version = "0.37", features = ["bundled"] }
+tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
+# Codex config.toml enrichment.
+toml_edit = { version = "0.22", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"

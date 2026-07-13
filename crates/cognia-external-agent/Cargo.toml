@@ -1,0 +1,44 @@
+# ADR-0067 follow-up — external agent exec backends (local process groups,
+# docker containers via bollard, kubernetes runner pods) extracted from
+# app_lib's `external_agent/` module. Isolates the optional bollard/kube
+# stacks. Re-aliased as `crate::external_agent`; the companion EventBus
+# emitter impl (BusAgentEmitter) stays app-side in companion_api::rpc.
+[package]
+name = "cognia-external-agent"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "External agent exec backends — local process, container (bollard), kubernetes (kube)."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_external_agent"
+path = "src/lib.rs"
+
+[features]
+# Docker flavor of the exec backend (headless server image).
+container-exec = ["dep:bollard"]
+# Kubernetes flavor (runner Pods); enabled alongside container-exec in the
+# headless image.
+k8s-exec = ["dep:kube", "dep:k8s-openapi"]
+
+[dependencies]
+tauri = { version = "=2.11.1" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+async-trait = "0.1"
+parking_lot = "0.12"
+log = "0.4"
+futures-util = { version = "0.3", default-features = false }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "sync", "time", "io-util"] }
+bollard = { version = "0.20", optional = true }
+kube = { version = "4", default-features = false, features = ["client", "ws", "runtime", "rustls-tls"], optional = true }
+k8s-openapi = { version = "0.28", features = ["v1_32"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+# Process-group kills for the local backend.
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
