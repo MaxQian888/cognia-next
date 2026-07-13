@@ -50,7 +50,10 @@ pub use cognia_ocr as ocr;
 mod parse;
 mod perf;
 mod pet_window;
-mod plugin_api;
+// ADR-0067 Tier B — extracted to `crates/cognia-plugin-runtime` (isolates
+// wasmtime/cranelift); re-aliased so `crate::plugin_api::…` (companion_api,
+// cli_bridge, generate_handler! + .manage()) resolves unchanged.
+pub use cognia_plugin_runtime as plugin_api;
 mod plugins;
 mod proxy_config;
 mod remote_control;
@@ -204,6 +207,10 @@ pub fn run() {
     // managed-download registry; hand it the snapshot provider before any
     // terminal can spawn.
     terminal::commands::set_managed_cli_dirs_provider(cli_bridge::detect::managed_dirs_snapshot);
+
+    // ADR-0067 Tier B — the extracted plugin runtime can't reach
+    // claude::sidecar; hand its vscode LSP host the sidecar-dir resolver.
+    plugin_api::vscode::commands::set_sidecar_dir_resolver(claude::sidecar::sidecar_dir);
 
     let mut builder = tauri::Builder::default();
 

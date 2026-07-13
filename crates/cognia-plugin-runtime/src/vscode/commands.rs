@@ -64,7 +64,7 @@ pub struct VscodeCommandError {
     pub code: String,
     pub message: String,
     /// Whether retrying the same call may succeed. Additive on the wire —
-    /// aligns this envelope with `crate::command_error::CommandError` so
+    /// aligns this envelope with `cognia_core::command_error::CommandError` so
     /// `lib/tauri/command-error.ts` `parseInvokeError` decodes both.
     pub retryable: bool,
 }
@@ -163,11 +163,28 @@ fn lsp_host_script_path(sidecar_dir: &Path) -> PathBuf {
         .join("host.js")
 }
 
+/// ADR-0067 Tier-B inversion: the sidecar-directory resolver lives app-side
+/// in `claude::sidecar` (it owns the resource-dir vs manifest-walk split).
+/// The app shell registers it at startup, before any `plugin_load_vscode` /
+/// LSP-host spawn can run.
+static SIDECAR_DIR_RESOLVER: std::sync::OnceLock<fn(&AppHandle) -> Result<PathBuf, String>> =
+    std::sync::OnceLock::new();
+
+/// Register the app-side sidecar-directory resolver. First registration wins;
+/// later calls are no-ops.
+pub fn set_sidecar_dir_resolver(resolver: fn(&AppHandle) -> Result<PathBuf, String>) {
+    let _ = SIDECAR_DIR_RESOLVER.set(resolver);
+}
+
 /// Resolve the absolute path to `sidecar/vscode-ext-host/dist/host.js` in
-/// both dev and release builds. Reuses `claude::sidecar::sidecar_dir`, which
-/// already handles the resource-dir (release) vs manifest-walk (dev) split.
+/// both dev and release builds. Delegates to the registered app-side
+/// resolver (`claude::sidecar::sidecar_dir`), which already handles the
+/// resource-dir (release) vs manifest-walk (dev) split.
 fn resolve_lsp_host_script(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = crate::claude::sidecar::sidecar_dir(app)?;
+    let resolver = SIDECAR_DIR_RESOLVER
+        .get()
+        .ok_or_else(|| "sidecar dir resolver not registered".to_string())?;
+    let dir = resolver(app)?;
     let candidate = lsp_host_script_path(&dir);
     if candidate.exists() {
         return Ok(candidate);

@@ -34,7 +34,7 @@ use discover::Interpreter;
 use events::EventSink;
 use protocol::{HostOptions, PluginHost, CALL_TIMEOUT};
 
-use crate::plugin_api::{PluginError, Result};
+use crate::{PluginError, Result};
 
 /// Runtime-wide call statistics surfaced by `plugin_python_runtime_info`.
 #[derive(Default)]

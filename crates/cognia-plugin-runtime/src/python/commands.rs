@@ -22,7 +22,7 @@ use tauri::State;
 use super::discover::{discover_interpreter, Interpreter};
 use super::protocol::{PluginHost, CALL_TIMEOUT, CONTROL_TIMEOUT};
 use super::PythonRuntimeState;
-use crate::plugin_api::{PluginError, PluginRuntimeState, Result};
+use crate::{PluginError, PluginRuntimeState, Result};
 
 /// Embedded host script, written to `<python_dir>/host.py` at initialize.
 const HOST_SCRIPT: &str = include_str!("host.py");
@@ -680,7 +680,7 @@ async fn unload_inner(state: &PythonRuntimeState, plugin_id: &str) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin_api::PermissionGrant;
+    use crate::PermissionGrant;
     use tempfile::TempDir;
 
     fn py_state(tmp: &TempDir) -> PythonRuntimeState {
@@ -1512,6 +1512,7 @@ def rewrite(payload):
         };
 
         let demo_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
             .join("..")
             .join("plugins")
             .join("cognia-python-demo");

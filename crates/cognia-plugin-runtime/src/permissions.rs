@@ -107,7 +107,7 @@ pub async fn plugin_permission_revoke(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin_api::PluginRuntimeState;
+    use crate::PluginRuntimeState;
     use std::path::PathBuf;
     use tempfile::TempDir;
 

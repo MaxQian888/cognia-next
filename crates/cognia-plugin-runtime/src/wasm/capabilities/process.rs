@@ -9,7 +9,7 @@
 //!    declared `shellCommands` allowlist (mirrored into `HostState` at
 //!    activation). This is full parity with the TS `ctx.shell.execute` gate
 //!    (`PluginRuntimeState::shell_command_allowed`); both share the
-//!    `crate::plugin_api::program_in_allowlist` stem-matcher.
+//!    `crate::program_in_allowlist` stem-matcher.
 
 use super::super::store::HostState;
 
@@ -44,7 +44,7 @@ pub fn check(state: &HostState) -> Result<(), String> {
 /// `git.exe`, and `/usr/bin/git` all match a declared `git`, but an undeclared
 /// program is refused — even when the capability is granted.
 pub fn check_program_allowed(state: &HostState, program: &str) -> Result<(), String> {
-    if crate::plugin_api::program_in_allowlist(&state.shell_allowlist, program) {
+    if crate::program_in_allowlist(&state.shell_allowlist, program) {
         Ok(())
     } else {
         Err(format!(

@@ -25,7 +25,7 @@ use tokio::sync::{oneshot, Mutex, Semaphore};
 
 use super::discover::Interpreter;
 use super::events::{EventSink, PythonEvent};
-use crate::plugin_api::{PluginError, Result};
+use crate::{PluginError, Result};
 
 /// Timeout for cheap control calls (ping, get_tools, get_info).
 pub const CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -69,7 +69,7 @@ pub struct HostOptions {
 pub fn python_host_scope(
     host_script: &Path,
     interpreter_program: &str,
-) -> crate::sandbox::launcher::LaunchScope {
+) -> cognia_automation::sandbox::launcher::LaunchScope {
     let mut readable: Vec<String> = Vec::new();
     if let Some(dir) = host_script.parent() {
         readable.push(dir.to_string_lossy().into_owned());
@@ -78,7 +78,7 @@ pub fn python_host_scope(
         readable.push(prefix);
     }
     let scratch = std::env::temp_dir().to_string_lossy().into_owned();
-    crate::sandbox::launcher::LaunchScope {
+    cognia_automation::sandbox::launcher::LaunchScope {
         cwd: scratch.clone(),
         writable: vec![scratch],
         readable,
@@ -154,7 +154,7 @@ fn python_launch_prefix(host_script: &Path, program: &str) -> Option<Vec<String>
     // one-shot Linux backend).
     let empty_dir = std::env::temp_dir().join("cognia-sandbox-empty");
     let _ = std::fs::create_dir_all(&empty_dir);
-    Some(crate::sandbox::launcher::bwrap_prefix(
+    Some(cognia_automation::sandbox::launcher::bwrap_prefix(
         &bwrap,
         &python_host_scope(host_script, program),
         &empty_dir,
@@ -167,7 +167,7 @@ fn python_launch_prefix(host_script: &Path, program: &str) -> Option<Vec<String>
 /// child processes it spawns. Unsandboxed hosts are unchanged.
 fn scrub_host_env(sandboxed: bool, env: HashMap<String, String>) -> Vec<(String, String)> {
     env.into_iter()
-        .filter(|(k, _)| !(sandboxed && crate::sandbox::env::is_dangerous_env_key(k)))
+        .filter(|(k, _)| !(sandboxed && cognia_automation::sandbox::env::is_dangerous_env_key(k)))
         .collect()
 }
 
@@ -176,7 +176,7 @@ fn python_launch_prefix(host_script: &Path, program: &str) -> Option<Vec<String>
     if !Path::new("/usr/bin/sandbox-exec").exists() {
         return None;
     }
-    Some(crate::sandbox::launcher::sandbox_exec_prefix(
+    Some(cognia_automation::sandbox::launcher::sandbox_exec_prefix(
         &python_host_scope(host_script, program),
     ))
 }
@@ -532,13 +532,12 @@ fn dispatch_reply(pending: &PendingMap, plugin_id: &str, reply: &Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin_api::python::discover::discover_interpreter;
+    use crate::python::discover::discover_interpreter;
     use std::path::PathBuf;
 
     fn host_script() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("src")
-            .join("plugin_api")
             .join("python")
             .join("host.py")
     }

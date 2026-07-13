@@ -196,7 +196,10 @@ impl PluginRuntimeState {
             .is_some_and(|cmds| program_in_allowlist(cmds, program))
     }
 
-    pub(crate) fn plugin_dir(&self, plugin_id: &str) -> PathBuf {
+    /// Install directory for one plugin. `pub` (not `pub(crate)`) because the
+    /// app-side cli_bridge install/uninstall handlers resolve target dirs
+    /// through it (ADR-0067 extraction widened this from crate-private).
+    pub fn plugin_dir(&self, plugin_id: &str) -> PathBuf {
         self.plugin_install_dir.join(sanitize_plugin_id(plugin_id))
     }
 

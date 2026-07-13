@@ -83,6 +83,10 @@ cognia-subscription = { path = "../crates/cognia-subscription" }
 # ADR-0067 Tier B — Platform Connectors (matrix E2EE stack). Re-aliased as
 # `crate::connectors`; the BusEventEmitter impl stays in companion_api.
 cognia-connectors = { path = "../crates/cognia-connectors" }
+# ADR-0067 Tier B — plugin runtime (wasmtime/cranelift). Re-aliased as
+# `crate::plugin_api`; the vscode LSP host's sidecar-dir resolver is
+# registered from run().
+cognia-plugin-runtime = { path = "../crates/cognia-plugin-runtime" }
 # ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
 # uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/

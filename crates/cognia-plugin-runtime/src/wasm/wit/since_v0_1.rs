@@ -26,7 +26,10 @@ use super::super::capabilities::{ai, clipboard, logger, notification, process, s
 use super::super::store::HostState;
 
 wasmtime::component::bindgen!({
-    path: "wit/cognia-plugin.wit",
+    // The canonical WIT stays at src-tauri/wit/ (the plugin-sdk sync/gate
+    // scripts treat that path as the source of truth); this crate reaches it
+    // relative to its own manifest dir (ADR-0067 extraction).
+    path: "../../src-tauri/wit/cognia-plugin.wit",
     world: "cognia-plugin",
     async: true,
 });
@@ -116,19 +119,19 @@ impl cognia::plugin::secrets::Host for HostState {
     async fn get(&mut self, key: String) -> Result<Option<String>, String> {
         secrets::check_read(self)?;
         let service = secrets::service_id(&self.plugin_id);
-        crate::secret_store::get(&service, &key)
+        cognia_secrets::secret_store::get(&service, &key)
     }
 
     async fn set(&mut self, key: String, value: String) -> Result<(), String> {
         secrets::check_write(self)?;
         let service = secrets::service_id(&self.plugin_id);
-        crate::secret_store::set(&service, &key, &value)
+        cognia_secrets::secret_store::set(&service, &key, &value)
     }
 
     async fn delete(&mut self, key: String) -> Result<(), String> {
         secrets::check_write(self)?;
         let service = secrets::service_id(&self.plugin_id);
-        crate::secret_store::delete(&service, &key)
+        cognia_secrets::secret_store::delete(&service, &key)
     }
 }
 

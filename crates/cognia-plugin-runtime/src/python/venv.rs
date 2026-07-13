@@ -16,7 +16,7 @@ use tokio::process::Command;
 
 use super::discover::Interpreter;
 use super::events::{EventSink, PythonEvent};
-use crate::plugin_api::{PluginError, Result};
+use crate::{PluginError, Result};
 
 /// Marker file proving the venv was created (and finished) by us.
 pub const VENV_MARKER: &str = ".cognia-venv.json";
@@ -232,7 +232,7 @@ pub async fn install_deps(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin_api::python::discover::discover_interpreter;
+    use crate::python::discover::discover_interpreter;
     use parking_lot::Mutex;
     use std::sync::Arc;
     use tempfile::TempDir;

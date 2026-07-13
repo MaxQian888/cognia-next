@@ -4,7 +4,7 @@
 //! The renderer is the policy authority (permission consent, binary trust,
 //! argv template substitution, cwd policy); this command is defense in
 //! depth plus the actual spawn, delegating to
-//! [`crate::terminal::exec::terminal_exec_inner`] (no shell, kill_on_drop,
+//! [`cognia_terminal::exec::terminal_exec_inner`] (no shell, kill_on_drop,
 //! CREATE_NO_WINDOW, 600s hard ceiling). Backstops here:
 //!
 //!   * `program` must be a plain executable path — no shell metacharacters
@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::terminal::exec::terminal_exec_inner;
+use cognia_terminal::exec::terminal_exec_inner;
 
 /// Default per-stream output cap (1 MB).
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 1_000_000;

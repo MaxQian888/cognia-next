@@ -644,7 +644,7 @@ fn handle_secrets(
     match op {
         "get" => {
             let key = payload_str(payload, "key")?;
-            let value = crate::keyring_secrets::get(&ns, &key)
+            let value = cognia_secrets::keyring_secrets::get(&ns, &key)
                 .map_err(|e| PluginApiError::internal(format!("secrets:get: {e}")))?;
             Ok(match value {
                 Some(v) => Value::String(v),
@@ -654,13 +654,13 @@ fn handle_secrets(
         "set" => {
             let key = payload_str(payload, "key")?;
             let value = payload_str(payload, "value")?;
-            crate::keyring_secrets::set(&ns, &key, &value)
+            cognia_secrets::keyring_secrets::set(&ns, &key, &value)
                 .map_err(|e| PluginApiError::internal(format!("secrets:set: {e}")))?;
             Ok(Value::Null)
         }
         "delete" => {
             let key = payload_str(payload, "key")?;
-            crate::keyring_secrets::clear(&ns, &key)
+            cognia_secrets::keyring_secrets::clear(&ns, &key)
                 .map_err(|e| PluginApiError::internal(format!("secrets:delete: {e}")))?;
             Ok(Value::Null)
         }
@@ -794,7 +794,7 @@ async fn handle_network(
     op: &str,
     payload: &Value,
 ) -> std::result::Result<Value, PluginApiError> {
-    use crate::connectors::types::TauriHttpRequest;
+    use cognia_connectors::types::TauriHttpRequest;
     match op {
         "fetch" => {
             let url = payload_str(payload, "url")?;
@@ -820,7 +820,7 @@ async fn handle_network(
                 body,
                 timeout_ms: None,
             };
-            let resp = crate::connectors::http_client::http_request(req)
+            let resp = cognia_connectors::http_client::http_request(req)
                 .await
                 .map_err(|e| PluginApiError::internal(format!("network:fetch: {e}")))?;
             let ok = (200..300).contains(&resp.status);
@@ -1373,7 +1373,7 @@ pub async fn plugin_set_network_allowlist(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin_api::{PluginRecord, PluginRuntimeSnapshot, PluginRuntimeState};
+    use crate::{PluginRecord, PluginRuntimeSnapshot, PluginRuntimeState};
     use tempfile::TempDir;
 
     fn seeded_state(tmp: &TempDir) -> PluginRuntimeState {
@@ -1945,7 +1945,7 @@ mod tests {
 
     #[test]
     fn has_permission_reflects_a_written_manifest_grant() {
-        use crate::plugin_api::{permissions::read_ledger, PermissionGrant};
+        use crate::{permissions::read_ledger, PermissionGrant};
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
         assert!(!state.has_permission("demo", "filesystem:read"));

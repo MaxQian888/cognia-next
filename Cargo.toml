@@ -43,6 +43,7 @@ members = [
   "crates/cognia-terminal",
   "crates/cognia-subscription",
   "crates/cognia-connectors",
+  "crates/cognia-plugin-runtime",
 ]
 exclude = [
   "services/signaling-server",
