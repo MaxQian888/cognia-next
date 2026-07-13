@@ -2,13 +2,13 @@
 //
 // Service name is namespaced to "com.cognia.tts" and the entry account is the
 // provider id (`openai`, `google`, `elevenlabs`, etc.). Backed by
-// [`crate::secret_store`] (single OS-keyring master key), so the
+// [`cognia_secrets::secret_store`] (single OS-keyring master key), so the
 // `list_providers` enumeration below is an in-memory map scan — not seven
 // separate Keychain prompts.
 //
 // The frontend hits these via `tts_keyring_get/set/delete/list_providers`.
 
-use crate::secret_store;
+use cognia_secrets::secret_store;
 
 const SERVICE: &str = "com.cognia.tts";
 

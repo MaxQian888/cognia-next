@@ -60,7 +60,7 @@ fn build_headers(map: &HashMap<String, String>) -> Result<HeaderMap, String> {
 pub async fn tts_proxy_fetch(request: ProxyRequest) -> Result<ProxyResponse, String> {
     use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 
-    let proxy_cfg = crate::proxy_config::current();
+    let proxy_cfg = cognia_net::proxy_config::current();
     let mut client_builder = reqwest::Client::builder().user_agent("cognia-next-tts/1.0");
     if proxy_cfg.is_active() && !proxy_cfg.should_bypass(&request.url) {
         if let Some(proxy) = proxy_cfg.build_reqwest_proxy() {

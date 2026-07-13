@@ -82,7 +82,9 @@ mod supervision_backoff;
 // generate_handler! + .manage()) resolves unchanged.
 pub use cognia_terminal as terminal;
 pub use cognia_scheduling::timing;
-mod tts;
+// ADR-0067 follow-up — extracted to `crates/cognia-tts`; re-aliased so
+// `crate::tts::…` (generate_handler!) resolves unchanged.
+pub use cognia_tts as tts;
 mod twin;
 // ADR-0067 Phase 4 — extracted to `crates/cognia-vector`; re-aliased so
 // `crate::vector::{VectorState, VectorRegistry, commands::…}` resolve.
