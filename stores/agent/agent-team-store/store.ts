@@ -66,6 +66,26 @@ function agentTeamAccountStorageKey(accountId: string): string {
 /** Non-terminal team statuses that cannot survive a process restart. */
 const STALE_TEAM_STATUSES = new Set(["planning", "executing", "paused"])
 
+/**
+ * Reset every team left in a non-terminal status to `idle` — its live
+ * controller does not survive a reload/account-switch, so the status is a
+ * phantom "running" that would otherwise stick until the next incompatible
+ * version bump. Mutates in place; safe on any `teams` map (missing/other keys
+ * are ignored). Applied by BOTH `migrate` (cross-version) and
+ * `onRehydrateStorage` (every boot, incl. same-version), because `migrate`
+ * short-circuits when the persisted version already equals `PERSIST_VERSION`.
+ */
+export function resetStaleTeamStatuses(
+  teams: Record<string, { status?: string } & Record<string, unknown>> | undefined
+): void {
+  if (!teams || typeof teams !== "object") return
+  for (const team of Object.values(teams)) {
+    if (team && typeof team === "object" && typeof team.status === "string") {
+      if (STALE_TEAM_STATUSES.has(team.status)) team.status = "idle"
+    }
+  }
+}
+
 interface V1DefaultConfigShape {
   governancePolicy?: unknown
   capabilities?: unknown
@@ -146,11 +166,7 @@ export function migrateAgentTeamPersisted(
   if (!raw.teams || typeof raw.teams !== "object") {
     raw.teams = {}
   } else {
-    for (const team of Object.values(raw.teams)) {
-      if (team && typeof team === "object" && typeof team.status === "string") {
-        if (STALE_TEAM_STATUSES.has(team.status)) team.status = "idle"
-      }
-    }
+    resetStaleTeamStatuses(raw.teams)
   }
   if (!raw.teammates || typeof raw.teammates !== "object") {
     raw.teammates = {}
@@ -212,6 +228,13 @@ export const useAgentTeamStore = create<AgentTeamState>()(
       version: PERSIST_VERSION,
       partialize: partializeAgentTeamState,
       migrate: migrateAgentTeamPersisted,
+      // `migrate` resets stale statuses only across a version bump. A plain
+      // same-version reload skips it, so a team persisted mid-run would
+      // rehydrate as a phantom "executing". Reset again here on EVERY boot.
+      onRehydrateStorage: () => (state) => {
+        if (!state) return
+        resetStaleTeamStatuses(state.teams)
+      },
     }
   )
 )
@@ -221,9 +244,13 @@ export function activateAgentTeamAccountStorage(accountId: string): void {
   const storageKey = agentTeamAccountStorageKey(accountId)
   adoptLegacyAgentTeamStorage(storageKey)
   useAgentTeamStore.persist.setOptions({ name: storageKey })
+  // This read path bypasses `migrate` / `onRehydrateStorage`, so reset stale
+  // statuses here too — an account switch must not surface a phantom run.
+  const restored = readAgentTeamPersistedState(storageKey)
+  resetStaleTeamStatuses(restored.teams as Parameters<typeof resetStaleTeamStatuses>[0])
   useAgentTeamStore.setState({
     ...initialState,
-    ...readAgentTeamPersistedState(storageKey),
+    ...restored,
   })
 }
 

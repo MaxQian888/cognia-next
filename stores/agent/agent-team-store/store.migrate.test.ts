@@ -12,7 +12,7 @@
 
 import "fake-indexeddb/auto"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
-import { migrateAgentTeamPersisted } from "./store"
+import { migrateAgentTeamPersisted, resetStaleTeamStatuses } from "./store"
 
 describe("migrateAgentTeamPersisted", () => {
   it("returns non-object input as-is", () => {
@@ -120,5 +120,29 @@ describe("migrateAgentTeamPersisted", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const out = migrateAgentTeamPersisted(v1, undefined) as any
     expect(out.defaultConfig.governancePolicy).toEqual(DEFAULT_TEAM_CONFIG.governancePolicy)
+  })
+
+  it("resets a team persisted at the CURRENT version out of a non-terminal status", () => {
+    // A same-version snapshot skips `migrate` entirely, so the reset must not
+    // depend on it — this is what `onRehydrateStorage` calls.
+    const teams = {
+      t1: { id: "t1", status: "executing" },
+      t2: { id: "t2", status: "planning" },
+      t3: { id: "t3", status: "paused" },
+      t4: { id: "t4", status: "completed" },
+      t5: { id: "t5", status: "idle" },
+    }
+    resetStaleTeamStatuses(teams)
+    expect(teams.t1.status).toBe("idle")
+    expect(teams.t2.status).toBe("idle")
+    expect(teams.t3.status).toBe("idle")
+    // Terminal / already-idle statuses are untouched.
+    expect(teams.t4.status).toBe("completed")
+    expect(teams.t5.status).toBe("idle")
+  })
+
+  it("resetStaleTeamStatuses tolerates missing / malformed maps", () => {
+    expect(() => resetStaleTeamStatuses(undefined)).not.toThrow()
+    expect(() => resetStaleTeamStatuses({ x: {} as { status?: string } })).not.toThrow()
   })
 })
