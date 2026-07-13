@@ -39,7 +39,7 @@
       "languages": "typescript, javascript",
       "name": "ESLint",
       "rootMarkers": "package.json, tsconfig.json",
-      "settings": "{ \"rust-analyzer\": { \"cargo\": { \"features\": \"all\" } } }"
+      "settings": "'{' \"rust-analyzer\": '{' \"cargo\": '{' \"features\": \"all\" '}' '}' '}'"
     },
     "save": "保存",
     "submit": "添加",

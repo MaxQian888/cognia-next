@@ -29,7 +29,7 @@
   },
   "formatHint": {
     "jsonl": "每行一个 JSON 对象——用于归档，保留所有重新生成的分支。",
-    "jsonlChat": "每行一段对话 {messages:[…]}——用于 OpenAI/Anthropic 训练与互通。"
+    "jsonlChat": "每行一段对话 '{'messages:[…]'}'——用于 OpenAI/Anthropic 训练与互通。"
   },
   "formatLabel": "格式",
   "location": {

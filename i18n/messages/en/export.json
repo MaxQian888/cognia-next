@@ -29,7 +29,7 @@
   },
   "formatHint": {
     "jsonl": "One JSON object per line — archival; preserves every regeneration branch.",
-    "jsonlChat": "One conversation per line as {messages:[…]} — OpenAI/Anthropic training & interop."
+    "jsonlChat": "One conversation per line as '{'messages:[…]'}' — OpenAI/Anthropic training & interop."
   },
   "formatLabel": "Format",
   "location": {

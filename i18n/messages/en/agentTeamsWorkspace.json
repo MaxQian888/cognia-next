@@ -806,7 +806,7 @@
       "compare": "Compare",
       "delete": "Delete"
     },
-    "description": "Branches produced by isolated runs (agent/<run>/<teammate>/<task>) — the durable record once worktrees are reclaimed. Review, check out, or delete them.",
+    "description": "Branches produced by isolated runs (agent/'<'run>/'<'teammate>/'<'task>) — the durable record once worktrees are reclaimed. Review, check out, or delete them.",
     "desktopOnly": {
       "description": "Worktree isolation needs the desktop app and a git repository as the team's working directory.",
       "title": "Desktop only"

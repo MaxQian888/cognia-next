@@ -94,7 +94,7 @@
     "headersJson": {
       "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
       "label": "Headers JSON（可选）",
-      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\" }"
+      "placeholder": "'{' \"HTTP-Referer\": \"https://app.example\" '}'"
     },
     "hint": {
       "label": "辅助说明（可选）"
@@ -121,9 +121,9 @@
   },
   "aiCouncil": {
     "councillorsJson": {
-      "hint": "{ name, modelAlias, systemPrompt? } 对象数组。modelAlias 使用「设置 -> 路由」中的别名。",
+      "hint": "'{' name, modelAlias, systemPrompt? '}' 对象数组。modelAlias 使用「设置 -> 路由」中的别名。",
       "label": "议会成员 JSON",
-      "placeholder": "[\n  { \"name\": \"Reviewer\", \"modelAlias\": \"smart\" },\n  { \"name\": \"Fast pass\", \"modelAlias\": \"fast\" }\n]"
+      "placeholder": "[\n  '{' \"name\": \"Reviewer\", \"modelAlias\": \"smart\" '}',\n  '{' \"name\": \"Fast pass\", \"modelAlias\": \"fast\" '}'\n]"
     },
     "executionMode": {
       "label": "执行模式",
@@ -202,7 +202,7 @@
     "headersJson": {
       "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
       "label": "Headers JSON（可选）",
-      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\" }"
+      "placeholder": "'{' \"HTTP-Referer\": \"https://app.example\" '}'"
     },
     "hint": {
       "label": "辅助说明（可选）"
@@ -250,12 +250,12 @@
     "headersJson": {
       "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
       "label": "Headers JSON（可选）",
-      "placeholder": "{ \"HTTP-Referer\": \"https://app.example\", \"X-Title\": \"Cognia\" }"
+      "placeholder": "'{' \"HTTP-Referer\": \"https://app.example\", \"X-Title\": \"Cognia\" '}'"
     },
     "jsonSchema": {
       "hint": "希望模型匹配的示例形状，会注入到提示词中。",
       "label": "JSON 形状（可选）",
-      "placeholder": "{\n  \"title\": \"string\",\n  \"score\": \"number\"\n}"
+      "placeholder": "'{'\n  \"title\": \"string\",\n  \"score\": \"number\"\n'}'"
     },
     "mode": {
       "explicit": "指定提供方",
@@ -337,7 +337,7 @@
     }
   },
   "catch": {
-    "intro": "仅在工作流终态失败时运行。可在下游通过 {{ $node['id'].error }} 读取错误并驱动恢复/通知路径。",
+    "intro": "仅在工作流终态失败时运行。可在下游通过 '{{' $node[''id''].error '}}' 读取错误并驱动恢复/通知路径。",
     "scope": {
       "hint": "保留项——当前对任意终态失败都会运行。",
       "label": "范围",
@@ -599,8 +599,8 @@
     },
     "cardJson": {
       "label": "A2UI 卡片 JSON（可选）",
-      "hint": "A2UI surface 对象（{components, dataModel, rootId, …}）。设置后发送交互卡片，消息内容作为纯文本降级。",
-      "placeholder": "{\"components\": {...}, \"dataModel\": {}, \"rootId\": \"root\"}"
+      "hint": "A2UI surface 对象（'{'components, dataModel, rootId, …'}'）。设置后发送交互卡片，消息内容作为纯文本降级。",
+      "placeholder": "'{'\"components\": '{'...'}', \"dataModel\": '{}', \"rootId\": \"root\"'}'"
     }
   },
   "connectorWaitReply": {
