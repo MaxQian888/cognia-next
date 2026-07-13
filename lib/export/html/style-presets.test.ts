@@ -5,8 +5,8 @@ import type { ThemeId } from "./syntax-themes"
 describe("STYLE_PRESETS", () => {
   const presetIds = Object.keys(STYLE_PRESETS) as ThemeId[]
 
-  it("covers the four styled themes and only real theme ids", () => {
-    expect(new Set(presetIds)).toEqual(new Set(["arknights", "cyberpunk", "terminal", "sakura"]))
+  it("covers every theme id (all themes ship decorative chrome)", () => {
+    expect(new Set(presetIds)).toEqual(new Set(Object.keys(THEMES)))
     for (const id of presetIds) {
       expect(THEMES[id]).toBeDefined()
     }
@@ -37,10 +37,10 @@ describe("STYLE_PRESETS", () => {
 describe("getStylePreset", () => {
   it("returns the preset for styled themes", () => {
     expect(getStylePreset("arknights")).toBe(STYLE_PRESETS.arknights)
+    expect(getStylePreset("light")).toBe(STYLE_PRESETS.light)
   })
 
-  it("returns undefined for classic themes and undefined input", () => {
-    expect(getStylePreset("light")).toBeUndefined()
+  it("returns undefined for undefined input", () => {
     expect(getStylePreset(undefined)).toBeUndefined()
   })
 })

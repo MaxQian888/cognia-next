@@ -8,8 +8,15 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 // the network half and keep the real Dexie mark so useLiveQuery refreshes. The
 // full client behaviour is covered in lib/share/client.test.ts.
 const revokeShareLink = jest.fn((code: string) => markSharedLinkRevoked(code))
+const getShareStats = jest.fn()
 jest.mock("@/lib/share/client", () => ({
   revokeShareLink: (code: string) => revokeShareLink(code),
+  getShareStats: (code: string) => getShareStats(code),
+}))
+
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: { success: jest.fn(), error: (...a: unknown[]) => toastError(...a) },
 }))
 
 beforeEach(async () => {
@@ -62,6 +69,50 @@ describe("MySharesPanel", () => {
     )
   })
 
+  it("fetches and shows the view count on demand", async () => {
+    getShareStats.mockResolvedValue({ viewCount: 7, revoked: false })
+    await seed()
+    render(<MySharesPanel />)
+    await screen.findByText("My chat")
+    fireEvent.click(screen.getByRole("button", { name: "Check views" }))
+    await waitFor(() => expect(getShareStats).toHaveBeenCalledWith("AbC"))
+    expect(await screen.findByText("7 views")).toBeInTheDocument()
+  })
+
+  it("toasts an error when stats come back null", async () => {
+    getShareStats.mockResolvedValue(null)
+    await seed()
+    render(<MySharesPanel />)
+    await screen.findByText("My chat")
+    fireEvent.click(screen.getByRole("button", { name: "Check views" }))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+  })
+
+  it("toasts an error when stats fetch throws", async () => {
+    getShareStats.mockRejectedValue(new Error("network"))
+    await seed()
+    render(<MySharesPanel />)
+    await screen.findByText("My chat")
+    fireEvent.click(screen.getByRole("button", { name: "Check views" }))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+  })
+
+  it("shows the expiry timestamp for an expiring link", async () => {
+    await seed({ expiresAt: 1_800_000_000_000 })
+    render(<MySharesPanel />)
+    const name = await screen.findByText("My chat")
+    const meta = name.closest("li")?.querySelector("p")
+    // The expiry branch renders a date, not the "Never" fallback.
+    expect(meta?.textContent).not.toContain("Never")
+  })
+
+  it("labels a titleless link by its kind", async () => {
+    await seed({ title: undefined, kind: "usage-card" })
+    render(<MySharesPanel />)
+    // Both the name slot and the badge show the kind label.
+    expect(await screen.findAllByText("Usage card")).not.toHaveLength(0)
+  })
+
   it("revokes a link and the list drops it", async () => {
     await seed()
     render(<MySharesPanel />)
@@ -71,5 +122,16 @@ describe("MySharesPanel", () => {
     await waitFor(() =>
       expect(screen.getByText("You haven’t created any share links yet.")).toBeInTheDocument()
     )
+  })
+
+  it("keeps the row when revoking fails", async () => {
+    revokeShareLink.mockRejectedValueOnce(new Error("network"))
+    await seed()
+    render(<MySharesPanel />)
+    await screen.findByText("My chat")
+    fireEvent.click(screen.getByRole("button", { name: "Revoke" }))
+    await waitFor(() => expect(revokeShareLink).toHaveBeenCalledWith("AbC"))
+    // Revoke failed → the row stays.
+    expect(screen.getByText("My chat")).toBeInTheDocument()
   })
 })

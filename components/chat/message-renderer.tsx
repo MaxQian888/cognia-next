@@ -70,10 +70,12 @@ import {
   CheckIcon,
   CopyIcon,
   GitBranchIcon,
+  ImageIcon,
   PencilIcon,
   RefreshCcwIcon,
   Share2Icon,
 } from "lucide-react"
+import { QuoteCardDialog } from "@/components/share/quote-card-dialog"
 import type { ToolUIPart, UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import { UsageBreakdown } from "@/components/chat/usage-breakdown"
@@ -185,6 +187,10 @@ function MessageRendererInner({
   const [draft, setDraft] = useState("")
   const [shared, setShared] = useState(false)
   const [branchOpen, setBranchOpen] = useState(false)
+  const [cardOpen, setCardOpen] = useState(false)
+  // Stable "now" for messages that carry no createdAt (impure Date read kept
+  // out of render via a lazy state initializer).
+  const [nowFallback] = useState(() => new Date())
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const branchSessionId =
     (typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId === "string"
@@ -208,6 +214,9 @@ function MessageRendererInner({
   // `message.parts` so it doesn't re-run on every token or on unrelated local
   // state (editing/draft/shared/branchOpen) before the memoized children skip.
   const segments = useMemo(() => groupAgentParts(message.parts), [message.parts])
+
+  // Plain text of the message, for the "share as card" action + gate.
+  const messageText = useMemo(() => extractText(message), [message])
 
   // Mention highlighting pattern over known character names. Honor longest
   // match first so e.g. `@Alice Smith` wins over `@Alice`.
@@ -488,6 +497,16 @@ function MessageRendererInner({
               <Share2Icon className="size-3.5" />
             </MessageAction>
 
+            {messageText.trim() && (
+              <MessageAction
+                tooltip={t("shareCardTooltip")}
+                label={t("shareCardLabel")}
+                onClick={() => setCardOpen(true)}
+              >
+                <ImageIcon className="size-3.5" />
+              </MessageAction>
+            )}
+
             <MessageAction
               tooltip={isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
               label={t("bookmarkLabel")}
@@ -547,6 +566,22 @@ function MessageRendererInner({
             messageId={message.id}
             open={branchOpen}
             onOpenChange={setBranchOpen}
+          />
+        )}
+
+        {cardOpen && (
+          <QuoteCardDialog
+            open={cardOpen}
+            onOpenChange={setCardOpen}
+            role={message.role}
+            authorName={speaker?.name}
+            text={messageText}
+            model={(message as { metadata?: { model?: string } }).metadata?.model}
+            timestamp={((): Date => {
+              const createdAt = (message as { metadata?: { createdAt?: number } }).metadata
+                ?.createdAt
+              return createdAt != null ? new Date(createdAt) : nowFallback
+            })()}
           />
         )}
       </Message>

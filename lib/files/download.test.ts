@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { downloadBlob, downloadFile, downloadFromUrl } from "./download"
+import { downloadBlob, downloadFile, downloadFromUrl, copyBlobToClipboard } from "./download"
 
 describe("download helpers", () => {
   let createObjectURL: jest.Mock
@@ -115,6 +115,47 @@ describe("download helpers", () => {
       await expect(
         downloadFromUrl("https://example.com/missing", "x", { fetchAsBlob: true })
       ).rejects.toThrow(/404 Not Found/)
+    })
+  })
+
+  describe("copyBlobToClipboard", () => {
+    const blob = new Blob(["png"], { type: "image/png" })
+
+    it("writes an image ClipboardItem and returns true when supported", async () => {
+      const write = jest.fn().mockResolvedValue(undefined)
+      ;(globalThis as { ClipboardItem?: unknown }).ClipboardItem = class {
+        constructor(public items: Record<string, Blob>) {}
+      }
+      Object.defineProperty(navigator, "clipboard", { value: { write }, configurable: true })
+
+      expect(await copyBlobToClipboard(blob)).toBe(true)
+      expect(write).toHaveBeenCalledTimes(1)
+    })
+
+    it("defaults a typeless blob to image/png", async () => {
+      let captured: Record<string, Blob> = {}
+      const write = jest.fn().mockResolvedValue(undefined)
+      ;(globalThis as { ClipboardItem?: unknown }).ClipboardItem = class {
+        constructor(items: Record<string, Blob>) {
+          captured = items
+        }
+      }
+      Object.defineProperty(navigator, "clipboard", { value: { write }, configurable: true })
+
+      expect(await copyBlobToClipboard(new Blob(["x"]))).toBe(true)
+      expect(Object.keys(captured)).toEqual(["image/png"])
+    })
+
+    it("returns false when the clipboard image API is unavailable", async () => {
+      delete (globalThis as { ClipboardItem?: unknown }).ClipboardItem
+      Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true })
+      expect(await copyBlobToClipboard(blob)).toBe(false)
+    })
+
+    it("returns false when clipboard.write is missing", async () => {
+      ;(globalThis as { ClipboardItem?: unknown }).ClipboardItem = class {}
+      Object.defineProperty(navigator, "clipboard", { value: {}, configurable: true })
+      expect(await copyBlobToClipboard(blob)).toBe(false)
     })
   })
 })

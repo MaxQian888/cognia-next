@@ -32,6 +32,10 @@ export type ThemeId =
   | "cyberpunk"
   | "terminal"
   | "sakura"
+  | "catppuccin-mocha"
+  | "aurora"
+  | "genshin"
+  | "honkai"
   | "light"
   | "dark"
   | "sepia"
@@ -95,6 +99,62 @@ export const THEMES: Record<ThemeId, ThemeTokens> = {
     codeBg: "#3c2530",
     codeText: "#f7d9e3",
     detailBg: "#f7dee6",
+  },
+  // Catppuccin Mocha — the community-favourite soft-dark pastel palette.
+  "catppuccin-mocha": {
+    bg: "#1e1e2e",
+    surface: "#313244",
+    text: "#cdd6f4",
+    muted: "#a6adc8",
+    border: "#45475a",
+    accent: "#cba6f7",
+    userBg: "#45475a",
+    assistantBg: "#181825",
+    codeBg: "#11111b",
+    codeText: "#cdd6f4",
+    detailBg: "#313244",
+  },
+  // Aurora — deep teal night sky with a luminous mint-cyan aurora accent.
+  aurora: {
+    bg: "#071a1c",
+    surface: "#0e2a2d",
+    text: "#e6fff7",
+    muted: "#6fa89e",
+    border: "#17403f",
+    accent: "#4fe3c1",
+    userBg: "#10383a",
+    assistantBg: "#0b2427",
+    codeBg: "#041214",
+    codeText: "#a7f3d0",
+    detailBg: "#103032",
+  },
+  // Genshin — a Teyvat adventurer's parchment journal, teal-and-gold trim.
+  genshin: {
+    bg: "#f3ead3",
+    surface: "#fbf5e6",
+    text: "#4a3f2e",
+    muted: "#9c8a68",
+    border: "#ddceac",
+    accent: "#3d8ca3",
+    userBg: "#e6dcc0",
+    assistantBg: "#fbf5e6",
+    codeBg: "#2e4a52",
+    codeText: "#d8ecef",
+    detailBg: "#ede0c4",
+  },
+  // Honkai — Astral Express deep-space navy with a trailblazing gold accent.
+  honkai: {
+    bg: "#0b0a1a",
+    surface: "#16142e",
+    text: "#ece9ff",
+    muted: "#8781b0",
+    border: "#2a2652",
+    accent: "#e9b949",
+    userBg: "#201b46",
+    assistantBg: "#110f26",
+    codeBg: "#070613",
+    codeText: "#f3d98a",
+    detailBg: "#1c1838",
   },
   light: {
     bg: "#ffffff",
@@ -207,6 +267,10 @@ export const THEME_LIST: { id: ThemeId; label: string }[] = [
   { id: "cyberpunk", label: "Cyberpunk" },
   { id: "terminal", label: "Terminal" },
   { id: "sakura", label: "Sakura" },
+  { id: "catppuccin-mocha", label: "Catppuccin Mocha" },
+  { id: "aurora", label: "Aurora" },
+  { id: "genshin", label: "Genshin (Teyvat)" },
+  { id: "honkai", label: "Honkai: Star Rail" },
   { id: "light", label: "Light" },
   { id: "dark", label: "Dark" },
   { id: "sepia", label: "Sepia" },

@@ -4,6 +4,7 @@
 
 import { renderSingleExport, type SingleExportFormat } from "@/lib/export/single"
 import { getDb } from "@/lib/db/schema"
+import { resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { chatExportPayload } from "./payload"
 import type { SharePayload } from "./types"
 import type { ChatSession } from "@/lib/claude/types"
@@ -17,6 +18,8 @@ export interface BuildChatShareArgs {
   includeMetadata?: boolean
   includeTimestamps?: boolean
   includeTokens?: boolean
+  /** Lay the theme's real wallpaper behind the export (HTML/animated only). */
+  withWallpaper?: boolean
 }
 
 export async function buildChatSharePayload(args: BuildChatShareArgs): Promise<SharePayload> {
@@ -24,6 +27,7 @@ export async function buildChatSharePayload(args: BuildChatShareArgs): Promise<S
     .messages.where("sessionId")
     .equals(args.session.id)
     .sortBy("createdAt")
+  const wallpaperDataUrl = await resolveThemeWallpaper(args.theme, args.withWallpaper ?? false)
   const rendered = renderSingleExport({
     format: args.format,
     session: args.session,
@@ -33,6 +37,7 @@ export async function buildChatSharePayload(args: BuildChatShareArgs): Promise<S
     includeMetadata: args.includeMetadata,
     includeTimestamps: args.includeTimestamps,
     includeTokens: args.includeTokens,
+    wallpaperDataUrl,
   })
   return chatExportPayload(rendered, args.format, args.session.title || "Conversation")
 }

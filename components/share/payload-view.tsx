@@ -17,9 +17,11 @@
  * to navigate or exfiltrate.
  */
 
-import { useEffect, useId, useMemo } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { DownloadIcon, CopyIcon, CheckIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { downloadBlob, copyBlobToClipboard } from "@/lib/files/download"
 import { useA2UIStore } from "@/stores/a2ui"
 import { createA2UISurface } from "@/lib/a2ui/parser"
 import { A2UISurface } from "@/components/a2ui/a2ui-surface"
@@ -30,8 +32,10 @@ import type { SharedDiscoverDefinition } from "@/lib/share/discover-item"
 export function PayloadView({ payload, className }: { payload: SharePayload; className?: string }) {
   switch (payload.kind) {
     case "chat-html":
-    // Usage cards are self-contained static HTML — same no-script sandbox.
+    // Usage cards and message quote cards are self-contained static HTML —
+    // same no-script sandbox.
     case "usage-card":
+    case "chat-quote":
       return <HtmlFrame html={payload.data} allowScripts={false} className={className} />
     case "chat-animated":
       return <HtmlFrame html={payload.data} allowScripts className={className} />
@@ -232,6 +236,20 @@ function ImageView({
   className?: string
 }) {
   const t = useTranslations("share.view")
+  const [copied, setCopied] = useState(false)
+  const blob = useMemo(
+    () => new Blob([base64ToBytes(dataB64) as BlobPart], { type: mime || "image/png" }),
+    [dataB64, mime]
+  )
+  const filename = `${slug(title) || "cognia-image"}.${mime.includes("png") ? "png" : "img"}`
+
+  const onCopy = async () => {
+    if (await copyBlobToClipboard(blob)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
+  }
+
   return (
     <div className={cn("mx-auto flex w-full max-w-4xl flex-col items-center gap-4", className)}>
       {title ? <h1 className="text-xl font-semibold text-foreground">{title}</h1> : null}
@@ -241,6 +259,24 @@ function ImageView({
         alt={title ?? t("workflowAlt")}
         src={`data:${mime};base64,${dataB64}`}
       />
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => downloadBlob(blob, filename)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+        >
+          <DownloadIcon className="size-3.5" />
+          {t("downloadImage")}
+        </button>
+        <button
+          type="button"
+          onClick={() => void onCopy()}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+        >
+          {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+          {copied ? t("copyImageDone") : t("copyImage")}
+        </button>
+      </div>
     </div>
   )
 }

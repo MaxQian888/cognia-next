@@ -731,6 +731,8 @@
     "readAloud": "朗读",
     "regenerateLabel": "重新生成",
     "regenerateTooltip": "重新生成",
+    "shareCardLabel": "分享为卡片",
+    "shareCardTooltip": "分享为卡片",
     "shareDone": "已分享！",
     "shareLabel": "分享消息",
     "shareTooltip": "分享",

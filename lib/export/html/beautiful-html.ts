@@ -5,6 +5,7 @@ import type { UIMessage } from "ai"
 import type { ChatSession, StoredMessage } from "@/lib/claude/types"
 import { THEMES, type ThemeId, type ThemeTokens } from "./syntax-themes"
 import { getStylePreset } from "./style-presets"
+import { buildWallpaperBackdropCss } from "./theme-wallpaper"
 
 export interface BeautifulHtmlOptions {
   session: ChatSession
@@ -17,6 +18,12 @@ export interface BeautifulHtmlOptions {
   includeTimestamps?: boolean
   /** Show <details> blocks for tool calls / reasoning. Default true. */
   expandDetails?: boolean
+  /**
+   * Inlined theme wallpaper data-URL. When present, a photo backdrop (with a
+   * legibility scrim) is laid behind the export. Resolved by the caller via
+   * `resolveThemeWallpaper` so this module stays pure/sync.
+   */
+  wallpaperDataUrl?: string
 }
 
 export function exportToBeautifulHtml(options: BeautifulHtmlOptions): string {
@@ -29,6 +36,7 @@ export function exportToBeautifulHtml(options: BeautifulHtmlOptions): string {
     includeMetadata = true,
     includeTimestamps = true,
     expandDetails = true,
+    wallpaperDataUrl,
   } = options
   const tokens = customTheme ?? THEMES[theme]
   const preset = getStylePreset(theme)
@@ -36,6 +44,9 @@ export function exportToBeautifulHtml(options: BeautifulHtmlOptions): string {
     ? `<div class="preset-banner">${escapeHtml(preset.bannerText)}</div>\n`
     : ""
   const footerTag = preset?.footerText ? ` · ${escapeHtml(preset.footerText)}` : ""
+  // Wallpaper backdrop is appended LAST so its transparent-body rule wins over
+  // the base `body{background:${t.bg}}` while the preset chrome layers on top.
+  const wallpaperCss = wallpaperDataUrl ? buildWallpaperBackdropCss(wallpaperDataUrl, tokens) : ""
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -43,7 +54,7 @@ export function exportToBeautifulHtml(options: BeautifulHtmlOptions): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(session.title)}</title>
-<style>${stylesheet(tokens)}${preset ? preset.css(tokens) : ""}</style>
+<style>${stylesheet(tokens)}${preset ? preset.css(tokens) : ""}${wallpaperCss}</style>
 </head>
 <body>
 <main class="container">

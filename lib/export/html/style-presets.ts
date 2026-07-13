@@ -66,6 +66,125 @@ header h1 { font-size: 20px; }
 header h1::after { content: " ✿"; color: ${t.accent}; }
 `,
   },
+  "catppuccin-mocha": {
+    bannerText: "MOCHA LOG",
+    footerText: "brewed slow",
+    css: (t) => `
+.preset-banner { margin: 0 0 14px; padding: 6px 14px; display: inline-block; border-radius: 999px; background: ${t.surface}; border: 1px solid ${t.border}; color: ${t.accent}; font-size: 12px; letter-spacing: 0.16em; }
+header h1 { border-bottom: 2px solid ${hairline(t.accent)}; padding-bottom: 6px; display: inline-block; }
+.message { border-radius: 12px; }
+.message-user { border-color: ${t.accent}; }
+`,
+  },
+  aurora: {
+    bannerText: "AURORA STREAM",
+    footerText: "fades to black",
+    css: (t) => `
+.preset-banner { margin: 0 0 14px; padding: 7px 14px; display: inline-block; border-radius: 999px; background: ${t.surface}; border: 1px solid ${t.accent}; color: ${t.accent}; font-size: 12px; letter-spacing: 0.2em; box-shadow: 0 0 16px ${hairline(t.accent)}; }
+header h1 { text-shadow: 0 0 14px ${hairline(t.accent)}; }
+.message { border-radius: 16px; box-shadow: 0 4px 22px ${hairline(t.accent)}; }
+`,
+  },
+  genshin: {
+    bannerText: "TEYVAT ADVENTURE LOG",
+    footerText: "safe travels, Traveler",
+    css: (t) => `
+body { font-family: Georgia, "Iowan Old Style", "Songti SC", serif; }
+.preset-banner { margin: 0 0 14px; padding: 8px 14px; border-top: 2px solid ${t.accent}; border-bottom: 2px solid ${t.accent}; color: ${t.accent}; font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; text-align: center; }
+header h1 { letter-spacing: 0.02em; }
+header h1::after { content: " ✦"; color: ${t.accent}; }
+.message { border-radius: 10px; border-left: 3px solid ${hairline(t.accent)}; }
+.message-user { border-left-color: ${t.accent}; }
+`,
+  },
+  honkai: {
+    bannerText: "ASTRAL EXPRESS LOG",
+    footerText: "trailblaze on",
+    css: (t) => `
+body { background-image: radial-gradient(${hairline(t.accent)} 1px, transparent 1px); background-size: 22px 22px; }
+.preset-banner { margin: 0 0 14px; padding: 8px 12px; border: 1px solid ${t.border}; border-left: 3px solid ${t.accent}; background: ${t.surface}; color: ${t.accent}; font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; }
+header h1 { text-shadow: 0 0 12px ${hairline(t.accent)}; letter-spacing: 0.04em; }
+.message { border-radius: 8px; }
+.message .role { color: ${t.accent}; letter-spacing: 0.14em; }
+`,
+  },
+  light: {
+    bannerText: "CONVERSATION",
+    footerText: "Exported with Cognia",
+    css: (t) => `
+.preset-banner { margin: 0 0 14px; padding: 6px 14px; display: inline-block; border-radius: 999px; background: ${t.surface}; border: 1px solid ${t.border}; color: ${t.muted}; font-size: 11px; font-weight: 600; letter-spacing: 0.18em; }
+.message { border-radius: 14px; box-shadow: 0 1px 2px ${hairline(t.text)}; }
+.message-user { border-color: ${hairline(t.accent)}; }
+`,
+  },
+  dark: {
+    bannerText: "CONVERSATION",
+    footerText: "Exported with Cognia",
+    css: (t) => `
+body { background-image: radial-gradient(120% 60% at 50% 0, ${hairline(t.accent)}, transparent 60%); }
+.preset-banner { margin: 0 0 14px; padding: 6px 14px; display: inline-block; border-radius: 999px; background: ${t.surface}; border: 1px solid ${t.border}; color: ${t.muted}; font-size: 11px; font-weight: 600; letter-spacing: 0.18em; }
+.message { border-radius: 12px; border-left: 2px solid ${t.border}; }
+.message-user { border-left-color: ${t.accent}; }
+`,
+  },
+  sepia: {
+    bannerText: "READING COPY",
+    footerText: "Set in warm paper",
+    css: (t) => `
+body { font-family: Georgia, "Iowan Old Style", "Songti SC", serif; }
+.container { max-width: 760px; }
+.preset-banner { margin: 0 0 16px; padding: 6px 0; border-top: 1px solid ${t.border}; border-bottom: 3px double ${t.border}; color: ${t.muted}; font-size: 12px; letter-spacing: 0.24em; text-transform: uppercase; }
+.message { border-radius: 4px; }
+`,
+  },
+  github: {
+    bannerText: "THREAD",
+    footerText: "Rendered like a PR",
+    css: (t) => `
+.preset-banner { margin: 0 0 14px; padding: 8px 12px; border: 1px solid ${t.border}; border-radius: 6px; background: ${t.surface}; color: ${t.muted}; font-size: 12px; font-weight: 600; letter-spacing: 0.12em; }
+.preset-banner::before { content: "● "; color: ${t.accent}; }
+.message { border-radius: 6px; }
+.message .role { font-family: ${MONO_STACK}; font-size: 12px; }
+`,
+  },
+  dracula: {
+    bannerText: "NOCTURNE LOG",
+    footerText: "Night session",
+    css: (t) => `
+.preset-banner { margin: 0 0 14px; padding: 7px 14px; display: inline-block; border-radius: 8px; background: ${t.surface}; border: 1px solid ${t.border}; color: ${t.accent}; font-size: 12px; letter-spacing: 0.18em; }
+header h1 { text-shadow: 0 0 8px ${hairline(t.accent)}; }
+.message { border-radius: 10px; }
+`,
+  },
+  nord: {
+    bannerText: "FROST LOG",
+    footerText: "Kept frosty",
+    css: (t) => `
+.preset-banner { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; padding: 6px 12px; color: ${t.accent}; font-size: 12px; letter-spacing: 0.24em; text-transform: uppercase; }
+.preset-banner::after { content: ""; flex: 1; height: 1px; background: repeating-linear-gradient(90deg, ${t.muted} 0 4px, transparent 4px 10px); opacity: 0.5; }
+.message { border-radius: 10px; }
+`,
+  },
+  solarized: {
+    bannerText: "SESSION",
+    footerText: "Precision palette",
+    css: (t) => `
+body { background-image: linear-gradient(${hairline(t.accent)} 1px, transparent 1px), linear-gradient(90deg, ${hairline(t.accent)} 1px, transparent 1px); background-size: 32px 32px; }
+.preset-banner { margin: 0 0 14px; font-family: ${MONO_STACK}; color: ${t.accent}; font-size: 12px; letter-spacing: 0.28em; text-transform: uppercase; }
+.message { border-radius: 6px; }
+`,
+  },
+  monokai: {
+    bannerText: "// TRANSCRIPT",
+    footerText: "/* fin */",
+    css: (t) => `
+body { font-family: ${MONO_STACK}; }
+.preset-banner { margin: 0 0 14px; color: ${t.accent}; font-size: 12px; letter-spacing: 0.14em; }
+.message { border-radius: 2px; }
+.message .role { color: ${t.accent}; }
+pre, details.tool, details.reasoning { border-radius: 2px; }
+`,
+  },
 }
 
 /** Preset for a theme id, or undefined for classic themes. */

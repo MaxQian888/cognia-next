@@ -31,6 +31,7 @@
       "chat-html": "Conversation (HTML)",
       "chat-json": "Conversation (JSON)",
       "chat-md": "Conversation (Markdown)",
+      "chat-quote": "Message card",
       "chat-text": "Conversation (text)",
       "discover-item": "Discover item",
       "usage-card": "Usage card",
@@ -40,8 +41,10 @@
     "open": "Open",
     "passphraseBadge": "Passphrase",
     "revoke": "Revoke",
+    "statsError": "Could not load view stats.",
     "title": "My shared links",
-    "views": "{count} views"
+    "views": "{count} views",
+    "viewsAction": "Check views"
   },
   "notConfiguredBody": "Set your share worker URL and upload secret first.",
   "notConfiguredCta": "Open settings",
@@ -50,6 +53,18 @@
   "passphraseHelp": "Recipients must enter this to open the link.",
   "passphraseLabel": "Extra passphrase (optional)",
   "passphrasePlaceholder": "Shared separately, never in the link",
+  "quoteCard": {
+    "cardTitle": "Cognia message card",
+    "description": "Turn this message into a shareable card — download it as an image or publish an encrypted link.",
+    "downloadPng": "Download PNG",
+    "downloading": "Rendering…",
+    "pngError": "Failed to render the image. Try again.",
+    "previewTitle": "Card preview",
+    "shareLink": "Share via link",
+    "styleLabel": "Style",
+    "title": "Share as card",
+    "wallpaperLabel": "Theme wallpaper"
+  },
   "revoke": "Revoke",
   "revoked": "Link revoked",
   "revoking": "Revoking…",
@@ -68,6 +83,11 @@
     "urlPlaceholder": "https://share.example.com"
   },
   "shareAction": "Share via link",
+  "themeGallery": {
+    "label": "Style",
+    "selected": "Selected",
+    "wallpaperBadge": "Includes wallpaper"
+  },
   "ttl": {
     "d7": "In 7 days",
     "h1": "In 1 hour",
@@ -81,7 +101,12 @@
     "appTitle": "Shared app",
     "backupBody": "This is a cognia backup package. Download it, then import it from Settings → Data.",
     "backupTitle": "Shared backup",
+    "brand": "Cognia",
     "conversationTitle": "Shared conversation",
+    "copyImage": "Copy image",
+    "copyImageDone": "Copied",
+    "createYourOwn": "Make your own with Cognia",
+    "downloadImage": "Download image",
     "discoverItem": {
       "content": "Skill instructions",
       "invalid": "This shared item could not be loaded.",

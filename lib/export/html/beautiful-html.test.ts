@@ -99,9 +99,17 @@ describe("exportToBeautifulHtml — style presets", () => {
     expect(html).toContain(THEMES.arknights.accent)
   })
 
-  it("classic themes render without any preset chrome", () => {
+  it("every theme now ships preset chrome (light renders its banner)", () => {
     const html = exportToBeautifulHtml({ session, messages, exportedAt, theme: "light" })
-    expect(html).not.toContain("preset-banner")
+    expect(html).toContain('class="preset-banner">CONVERSATION')
+    expect(html).toContain("Exported with Cognia")
+  })
+
+  it("renders the new immersive theme banners", () => {
+    const gen = exportToBeautifulHtml({ session, messages, exportedAt, theme: "genshin" })
+    expect(gen).toContain("TEYVAT ADVENTURE LOG")
+    const hk = exportToBeautifulHtml({ session, messages, exportedAt, theme: "honkai" })
+    expect(hk).toContain("ASTRAL EXPRESS LOG")
   })
 
   it("preset CSS uses custom tokens when a custom theme overrides a styled base", () => {
@@ -123,7 +131,42 @@ describe("exportToBeautifulHtml — style presets", () => {
   })
 })
 
+describe("exportToBeautifulHtml — theme wallpaper backdrop", () => {
+  const dataUrl = "data:image/webp;base64,QUJD"
+
+  it("inlines the wallpaper with a scrim and transparent body when provided", () => {
+    const html = exportToBeautifulHtml({
+      session,
+      messages,
+      exportedAt,
+      theme: "arknights",
+      wallpaperDataUrl: dataUrl,
+    })
+    expect(html).toContain(`url("${dataUrl}")`)
+    expect(html).toContain("background-color: transparent")
+    expect(html).toContain("linear-gradient(rgba(")
+  })
+
+  it("renders no backdrop when no wallpaper is provided", () => {
+    const html = exportToBeautifulHtml({ session, messages, exportedAt, theme: "arknights" })
+    expect(html).not.toContain("data:image/webp")
+    expect(html).not.toContain("background-color: transparent")
+  })
+})
+
 describe("exportToAnimatedHtml", () => {
+  it("inherits the wallpaper backdrop from the base export", () => {
+    const html = exportToAnimatedHtml({
+      session,
+      messages,
+      exportedAt,
+      theme: "aurora",
+      wallpaperDataUrl: "data:image/webp;base64,WFla",
+    })
+    expect(html).toContain("data:image/webp;base64,WFla")
+    expect(html).toContain("classList.add('show')")
+  })
+
   it("keeps the preset chrome from the base export", () => {
     const html = exportToAnimatedHtml({ session, messages, exportedAt, theme: "arknights" })
     expect(html).toContain("preset-banner")

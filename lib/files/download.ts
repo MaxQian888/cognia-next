@@ -40,6 +40,21 @@ export function downloadBlob(blob: Blob, filename: string): void {
 }
 
 /**
+ * Copy an image (or any) Blob to the system clipboard. Returns true on success,
+ * false when the platform lacks async-clipboard image support (Firefox, some
+ * Tauri/webview builds) — callers should keep a "download" fallback. Never
+ * throws for the unsupported case; only a genuine write failure rejects.
+ */
+export async function copyBlobToClipboard(blob: Blob): Promise<boolean> {
+  const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined
+  if (!clipboard || typeof clipboard.write !== "function" || typeof ClipboardItem === "undefined") {
+    return false
+  }
+  await clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })])
+  return true
+}
+
+/**
  * Trigger a download from a remote URL. If `fetchAsBlob` is true (the default for
  * cross-origin or hashed assets that wouldn't honor the `download` attribute),
  * the asset is fetched first and saved via {@link downloadBlob}. Otherwise the

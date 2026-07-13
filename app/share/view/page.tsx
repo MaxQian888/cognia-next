@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { resolveShareEndpoint } from "@/lib/share/config"
@@ -61,15 +62,30 @@ export function ShareView() {
   return (
     <main className="flex min-h-[100dvh] flex-col bg-background text-foreground">
       <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-gradient-to-b from-primary/10 to-transparent"
+      />
+      <header className="relative flex items-center justify-between px-4 py-3 sm:px-8">
+        <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
+          <span className="grid size-6 place-items-center rounded-md bg-primary text-xs text-primary-foreground">
+            C
+          </span>
+          {t("brand")}
+        </Link>
+      </header>
+      <div
         className={cn(
-          "flex flex-1 justify-center p-4 sm:p-8",
+          "relative flex flex-1 justify-center p-4 sm:p-8",
           state.status === "ready" ? "items-start" : "items-center"
         )}
       >
         <Body state={state} onState={setState} />
       </div>
-      <footer className="border-t border-border px-4 py-3 text-center text-xs text-muted-foreground">
-        {t("footer")}
+      <footer className="relative flex flex-col items-center gap-1 border-t border-border px-4 py-3 text-center text-xs text-muted-foreground">
+        <span>{t("footer")}</span>
+        <Link href="/" className="font-medium text-primary hover:underline">
+          {t("createYourOwn")}
+        </Link>
       </footer>
     </main>
   )

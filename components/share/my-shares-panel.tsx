@@ -6,11 +6,11 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CopyIcon, ExternalLinkIcon, Trash2Icon } from "lucide-react"
+import { CopyIcon, ExternalLinkIcon, EyeIcon, Trash2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { listSharedLinks } from "@/lib/db/shared-links"
-import { revokeShareLink } from "@/lib/share/client"
+import { revokeShareLink, getShareStats } from "@/lib/share/client"
 import { toast } from "sonner"
 import { createLogger } from "@/lib/logging"
 
@@ -21,10 +21,27 @@ export function MySharesPanel() {
   // Reactive: revoking a link flips its Dexie row and this list re-renders.
   const rows = useLiveQuery(() => listSharedLinks(), [])
   const [revoking, setRevoking] = useState<string | null>(null)
+  // Lazily fetched per-link view counts (avoid N network calls on mount).
+  const [views, setViews] = useState<Record<string, number>>({})
+  const [loadingStats, setLoadingStats] = useState<string | null>(null)
 
   const onCopy = async (url: string) => {
     await navigator.clipboard.writeText(url)
     toast.success(t("copy"))
+  }
+
+  const onStats = async (code: string) => {
+    setLoadingStats(code)
+    try {
+      const stats = await getShareStats(code)
+      if (stats) setViews((prev) => ({ ...prev, [code]: stats.viewCount }))
+      else toast.error(t("statsError"))
+    } catch (err) {
+      log.error("stats-failed", { error: err instanceof Error ? err.message : String(err) })
+      toast.error(t("statsError"))
+    } finally {
+      setLoadingStats(null)
+    }
   }
 
   const onRevoke = async (code: string) => {
@@ -74,6 +91,21 @@ export function MySharesPanel() {
                 {row.expiresAt ? new Date(row.expiresAt).toLocaleString() : t("never")}
               </p>
             </div>
+            {views[row.code] !== undefined ? (
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {t("views", { count: views[row.code] })}
+              </span>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={t("viewsAction")}
+                disabled={loadingStats === row.code}
+                onClick={() => void onStats(row.code)}
+              >
+                <EyeIcon className="size-4" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"

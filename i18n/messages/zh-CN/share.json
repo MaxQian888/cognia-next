@@ -31,6 +31,7 @@
       "chat-html": "对话（HTML）",
       "chat-json": "对话（JSON）",
       "chat-md": "对话（Markdown）",
+      "chat-quote": "消息卡片",
       "chat-text": "对话（文本）",
       "discover-item": "发现条目",
       "usage-card": "使用量卡片",
@@ -40,8 +41,10 @@
     "open": "打开",
     "passphraseBadge": "口令保护",
     "revoke": "撤销",
+    "statsError": "无法加载查看统计。",
     "title": "我的分享链接",
-    "views": "{count} 次查看"
+    "views": "{count} 次查看",
+    "viewsAction": "查看次数"
   },
   "notConfiguredBody": "请先设置分享 worker 地址和上传密钥。",
   "notConfiguredCta": "打开设置",
@@ -50,6 +53,18 @@
   "passphraseHelp": "对方需输入此口令才能打开链接。",
   "passphraseLabel": "额外口令（可选）",
   "passphrasePlaceholder": "单独告知对方，不会出现在链接里",
+  "quoteCard": {
+    "cardTitle": "Cognia 消息卡片",
+    "description": "把这条消息生成可分享卡片，可下载为图片或发布加密链接。",
+    "downloadPng": "下载 PNG",
+    "downloading": "渲染中…",
+    "pngError": "图片渲染失败，请重试。",
+    "previewTitle": "卡片预览",
+    "shareLink": "以链接分享",
+    "styleLabel": "风格",
+    "title": "分享为卡片",
+    "wallpaperLabel": "主题壁纸"
+  },
   "revoke": "撤销",
   "revoked": "链接已撤销",
   "revoking": "撤销中…",
@@ -68,6 +83,11 @@
     "urlPlaceholder": "https://share.example.com"
   },
   "shareAction": "生成分享链接",
+  "themeGallery": {
+    "label": "样式",
+    "selected": "已选择",
+    "wallpaperBadge": "含壁纸"
+  },
   "ttl": {
     "d7": "7 天后",
     "h1": "1 小时后",
@@ -81,7 +101,12 @@
     "appTitle": "分享的应用",
     "backupBody": "这是一个 cognia 备份包。下载后从「设置 → 数据」导入。",
     "backupTitle": "分享的备份",
+    "brand": "Cognia",
     "conversationTitle": "分享的对话",
+    "copyImage": "复制图片",
+    "copyImageDone": "已复制",
+    "createYourOwn": "用 Cognia 创建你自己的",
+    "downloadImage": "下载图片",
     "discoverItem": {
       "content": "技能说明",
       "invalid": "无法加载此分享条目。",

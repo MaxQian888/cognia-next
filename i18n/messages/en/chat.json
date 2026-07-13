@@ -731,6 +731,8 @@
     "readAloud": "Read aloud",
     "regenerateLabel": "Regenerate",
     "regenerateTooltip": "Regenerate",
+    "shareCardLabel": "Share as card",
+    "shareCardTooltip": "Share as card",
     "shareDone": "Shared!",
     "shareLabel": "Share message",
     "shareTooltip": "Share",

@@ -12,6 +12,7 @@ export type ShareKind =
   | "chat-md"
   | "chat-json"
   | "chat-text"
+  | "chat-quote"
   | "workflow-png"
   | "usage-card"
   | "backup"
