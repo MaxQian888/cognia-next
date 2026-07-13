@@ -103,6 +103,47 @@ export interface InstallConnectorRuntimeOptions {
    * seams for companion-RPC ones and passes `true`.
    */
   skipHostGate?: boolean
+  /**
+   * Acquire the cross-context "only one connector runtime" lock, returning
+   * whether THIS caller owns it. The whole runtime (adapters, outbound, WS
+   * reap) assumes a single `main`-role webview; a second one would double-send,
+   * double-fire, and cross-reap the first's sockets. Default: a
+   * `navigator.locks` exclusive lock (shared across a Tauri app's same-origin
+   * webviews), held until `signal` aborts. Returns `true` when Web Locks is
+   * unavailable (no guard possible → don't block boot). Test seam.
+   */
+  acquireRuntimeLock?: (signal: AbortSignal) => Promise<boolean>
+}
+
+/** The Web Locks name — one exclusive holder per origin across all webviews. */
+export const CONNECTOR_RUNTIME_LOCK = "cognia-connector-runtime"
+
+/**
+ * Default singleton guard via the Web Locks API. Acquires an exclusive lock and
+ * holds it (callback promise stays pending) until `signal` aborts, so a second
+ * webview's `ifAvailable` request resolves to `null` → `false`. Degrades to
+ * `true` when Web Locks is absent (SSR / older webview) — no guard, but boot
+ * must not be blocked.
+ */
+function defaultAcquireRuntimeLock(signal: AbortSignal): Promise<boolean> {
+  const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks
+  if (!locks?.request) return Promise.resolve(true)
+  return new Promise<boolean>((resolveAcquired) => {
+    void locks
+      .request(CONNECTOR_RUNTIME_LOCK, { ifAvailable: true }, (lock) => {
+        if (!lock) {
+          resolveAcquired(false)
+          return
+        }
+        resolveAcquired(true)
+        // Hold the lock for the runtime's lifetime.
+        return new Promise<void>((release) => {
+          if (signal.aborted) return release()
+          signal.addEventListener("abort", () => release(), { once: true })
+        })
+      })
+      .catch(() => resolveAcquired(true))
+  })
 }
 
 const consoleLog = (level: ConnectorRuntimeLogLevel, message: string): void => {
@@ -245,6 +286,22 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
   }
 
   void (async () => {
+    // Single-runtime guard: the entire runtime assumes exactly one main-role
+    // webview owns it. If another already holds the lock, do NOT boot a second
+    // instance (it would double-send outbound, double-fire schedules, and
+    // cross-reap the first's WS sockets). Runs before the WS reap for the same
+    // reason — a second webview must not reap the owner's live sockets.
+    const acquire = opts.acquireRuntimeLock ?? defaultAcquireRuntimeLock
+    const owns = await acquire(ac.signal)
+    if (cancelled) return
+    if (!owns) {
+      log(
+        "warn",
+        "[connector-bus] another window already owns the connector runtime; not starting a second instance"
+      )
+      return
+    }
+
     // Reap any connector WS / Lark long-connection sockets leaked by a
     // PREVIOUS webview load (hard reload / Fast-Refresh full reload / crash)
     // whose React cleanup never ran. The Rust core process survives a webview

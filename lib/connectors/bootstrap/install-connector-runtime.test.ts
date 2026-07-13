@@ -264,6 +264,23 @@ describe("installConnectorRuntime", () => {
     expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
   })
 
+  it("does not start a second runtime when the singleton lock is already held", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow()
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(makeFakeAdapter(row.id))
+
+    // Another window owns the runtime → this instance loses the lock.
+    install({ acquireRuntimeLock: async () => false })
+    await new Promise((r) => setTimeout(r, 50))
+
+    // Nothing boots: no reap, no adapters, no outbound runner.
+    expect(mockResetAllWs).not.toHaveBeenCalled()
+    expect(mockListEnabled).not.toHaveBeenCalled()
+    expect(mockRegisterAdapter).not.toHaveBeenCalled()
+    expect(mockStartOutboundRunner).not.toHaveBeenCalled()
+  })
+
   it("registers multiple adapters when multiple rows are enabled", async () => {
     mockedIsTauri.mockReturnValue(true)
     const row1 = makeTelegramRow("cai_tg_1")
