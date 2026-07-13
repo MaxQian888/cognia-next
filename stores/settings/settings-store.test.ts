@@ -158,6 +158,7 @@ describe("load", () => {
         astGrep: false,
         codeGraph: false,
         dependencyResearch: false,
+        webclone: false,
       },
       updates: { autoCheck: true },
       canvasCodeSandboxEnabled: true,
@@ -400,6 +401,7 @@ describe("setBuiltinToolEnabled", () => {
         astGrep: false,
         codeGraph: false,
         dependencyResearch: false,
+        webclone: false,
       },
     })
     expect(useSettingsStore.getState().settings?.builtinTools.process).toBe(true)
@@ -440,6 +442,7 @@ describe("setBuiltinToolEnabled", () => {
         astGrep: false,
         codeGraph: false,
         dependencyResearch: false,
+        webclone: false,
       },
     })
   })
@@ -1598,6 +1601,59 @@ describe("appearance setters", () => {
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({
       background: { ...DEFAULT_BACKGROUND_SETTINGS, blurPx: 8, opacity: 0.7 },
     })
+  })
+
+  it("setActivePluginTheme sets the plugin pointer, nulls the custom one, and emits", () => {
+    useSettingsStore.setState({ settings: baseSettings({ activeCustomThemeId: "ct-1" }) })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    act(() => {
+      useSettingsStore.getState().setActivePluginTheme("demo.neon")
+    })
+    const s = useSettingsStore.getState()
+    expect(s.settings?.activePluginThemeId).toBe("demo.neon")
+    expect(s.settings?.activeCustomThemeId).toBeNull()
+    // Flat projection kept in sync by the `set` wrapper.
+    expect(s.activePluginThemeId).toBe("demo.neon")
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      activePluginThemeId: "demo.neon",
+      activeCustomThemeId: null,
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(messageBus.SystemEvents.THEME_CHANGED, {
+      activePluginThemeId: "demo.neon",
+    })
+  })
+
+  it("setAccentColor persists the override and emits THEME_CHANGED", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().setAccentColor("#ff0000")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ accentColor: "#ff0000" })
+    expect(useSettingsStore.getState().accentColor).toBe("#ff0000")
+    expect(mockedEmit).toHaveBeenCalledWith(messageBus.SystemEvents.THEME_CHANGED, {
+      accentColor: "#ff0000",
+    })
+  })
+
+  it("setAccentColor(null) clears the override", async () => {
+    useSettingsStore.setState({ settings: baseSettings({ accentColor: "#ff0000" }) })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().setAccentColor(null)
+    })
+    expect(useSettingsStore.getState().accentColor).toBeNull()
+  })
+
+  it("setActiveCustomTheme nulls a live plugin theme pointer (mutual exclusion)", () => {
+    useSettingsStore.setState({ settings: baseSettings({ activePluginThemeId: "demo.neon" }) })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    act(() => {
+      useSettingsStore.getState().setActiveCustomTheme("ct-1")
+    })
+    const s = useSettingsStore.getState()
+    expect(s.settings?.activeCustomThemeId).toBe("ct-1")
+    expect(s.settings?.activePluginThemeId).toBeNull()
   })
 
   it("addWallpaper ignores duplicates by id", async () => {

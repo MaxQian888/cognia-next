@@ -482,6 +482,28 @@ describe("TerminalInstance", () => {
     spy.mockRestore()
   })
 
+  it("auto scheme follows the app --accent for the selection highlight", async () => {
+    const realGCS = window.getComputedStyle.bind(window)
+    const spy = jest.spyOn(window, "getComputedStyle").mockImplementation(((
+      el: Element,
+      pseudo?: string | null
+    ) => {
+      const inline = (el as HTMLElement).style?.color
+      if (inline === "var(--background)") return { color: "rgb(18, 18, 18)" } as CSSStyleDeclaration
+      if (inline === "var(--foreground)")
+        return { color: "rgb(230, 230, 230)" } as CSSStyleDeclaration
+      if (inline === "var(--accent)") return { color: "rgb(124, 58, 237)" } as CSSStyleDeclaration
+      return realGCS(el, pseudo ?? undefined)
+    }) as typeof window.getComputedStyle)
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      theme: { selectionBackground: string }
+    }
+    expect(opts.theme.selectionBackground).toBe("rgba(124, 58, 237, 0.35)")
+    spy.mockRestore()
+  })
+
   it("does not override a named scheme even when app tokens resolve", async () => {
     mockTerminalSettings = { colorScheme: "dracula" }
     const realGCS = window.getComputedStyle.bind(window)

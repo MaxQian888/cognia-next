@@ -22,6 +22,7 @@ export interface ShellSyncAppearanceState {
   colorTheme: ColorThemePreset
   activeCustomThemeId: string | null
   customThemes: CustomTheme[]
+  accentColor?: string | null
 }
 
 export interface ShellColors {
@@ -81,6 +82,7 @@ export function getShellColors(
     resolvedTheme: variant,
     activeCustomThemeId: state.activeCustomThemeId,
     customThemes: state.customThemes,
+    accentColor: state.accentColor,
   })
 
   const backgroundHex = toHexOrNull(resolved.colors.background) ?? fallback.backgroundHex

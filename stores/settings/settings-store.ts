@@ -250,6 +250,8 @@ interface SettingsState {
   language: AppLanguage
   customThemes: CustomTheme[]
   activeCustomThemeId: string | null
+  activePluginThemeId: string | null
+  accentColor: string | null
   defaultProvider: string
   providerSettings: Record<string, UserProviderSettings>
   customProviders: CustomProviderSettings[]
@@ -267,6 +269,14 @@ interface SettingsState {
   updateCustomTheme: (id: string, updates: Partial<CustomTheme>) => void
   deleteCustomTheme: (id: string) => void
   setActiveCustomTheme: (id: string | null) => void
+  /**
+   * Activate a registered plugin theme by registry id (or null to clear).
+   * Mutually exclusive with `activeCustomThemeId` — activating one nulls the
+   * other. Applied live by `PluginThemeApplier`.
+   */
+  setActivePluginTheme: (id: string | null) => void
+  /** Set (or clear, with null) the standalone accent color override. */
+  setAccentColor: (color: string | null) => Promise<void>
 
   // ---- Alias routing (model mappings / strategy / presets) ----
   /** Merge a patch into `routingConfig` (strategy, constraints, timeouts). */
@@ -503,6 +513,8 @@ interface FlatPluginFields {
   language: AppLanguage
   customThemes: CustomTheme[]
   activeCustomThemeId: string | null
+  activePluginThemeId: string | null
+  accentColor: string | null
   defaultProvider: string
   providerSettings: Record<string, UserProviderSettings>
   customProviders: CustomProviderSettings[]
@@ -537,6 +549,8 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
     language: s?.language ?? "en",
     customThemes: s?.customThemes ?? [],
     activeCustomThemeId: s?.activeCustomThemeId ?? null,
+    activePluginThemeId: s?.activePluginThemeId ?? null,
+    accentColor: s?.accentColor ?? null,
     defaultProvider: s?.defaultProvider ?? "",
     providerSettings: s?.providerSettings ?? {},
     customProviders: s?.customProviders ?? [],
@@ -1116,10 +1130,30 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
 
     setActiveCustomTheme: (id) => {
       const cur = get().settings
-      set({ settings: { ...(cur ?? DEFAULTS), activeCustomThemeId: id } })
-      void saveSettings({ activeCustomThemeId: id }).catch((err) =>
+      // Activating a custom theme (or a preset via null) clears any live
+      // plugin theme so the two active pointers never both apply.
+      const patch = { activeCustomThemeId: id, activePluginThemeId: null }
+      set({ settings: { ...(cur ?? DEFAULTS), ...patch } })
+      void saveSettings(patch).catch((err) =>
         console.warn("setActiveCustomTheme persist failed", err)
       )
+    },
+
+    setActivePluginTheme: (id) => {
+      const cur = get().settings
+      // Mutually exclusive with the custom-theme pointer (see above).
+      const patch = { activePluginThemeId: id, activeCustomThemeId: null }
+      set({ settings: { ...(cur ?? DEFAULTS), ...patch } })
+      void saveSettings(patch).catch((err) =>
+        console.warn("setActivePluginTheme persist failed", err)
+      )
+      emitSystemBusEvent(SystemEvents.THEME_CHANGED, { activePluginThemeId: id })
+    },
+
+    setAccentColor: async (color) => {
+      const next = await saveSettings({ accentColor: color })
+      set({ settings: next })
+      emitSystemBusEvent(SystemEvents.THEME_CHANGED, { accentColor: color })
     },
 
     // ---- Alias routing (model mappings / strategy / presets) ----

@@ -46,6 +46,15 @@ export interface PluginTheme {
   isDark?: boolean
   /** Human-readable plugin name for source badges in the UI. */
   pluginName?: string
+  /**
+   * Raw CSS custom-property map for a `cssVariables` contribution
+   * (ADR-0026 §3 §D), pre-sanitized by the themes-bridge. Present ONLY for
+   * CSS-var themes; structured/VSCode themes leave this undefined and are
+   * fully described by `colors` / `variables`. Consumers that clone or apply
+   * a CSS-var theme must carry this map through verbatim — the `colors`
+   * field is only a best-effort structured projection for swatch rendering.
+   */
+  cssVars?: Record<string, string>
 }
 
 const registry = new Map<string, PluginTheme>()

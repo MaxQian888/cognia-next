@@ -78,6 +78,7 @@ import {
   TypographyApplier,
 } from "@/lib/appearance"
 import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
+import { PluginThemeApplier } from "@/lib/appearance/plugin-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
@@ -246,6 +247,11 @@ export default async function RootLayout({
                                           <BackgroundApplier />
                                           <ComponentStyleApplier />
                                           <CustomThemeApplier />
+                                          {/* Applies a directly-activated plugin theme as a
+                                  <style data-plugin-theme> block. Mutually
+                                  exclusive with CustomThemeApplier's inline
+                                  vars (see plugin-theme-applier.tsx). */}
+                                          <PluginThemeApplier />
                                           <ConnectorBusProvider>
                                             <ConnectorDeepLinkRouter>
                                               <SubscriptionUsageProvider>

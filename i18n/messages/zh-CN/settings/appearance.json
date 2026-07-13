@@ -108,6 +108,12 @@
       "system": "跟随系统"
     }
   },
+  "accent": {
+    "label": "强调色",
+    "description": "无需编辑完整主题即可为按钮与高亮重新着色。",
+    "usingTheme": "使用主题强调色",
+    "reset": "重置"
+  },
   "colorPresetLabel": "配色预设",
   "colorPresets": {
     "amber": "琥珀",

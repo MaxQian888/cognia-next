@@ -14,18 +14,13 @@
  */
 
 import type { ColorThemePreset, ThemeColors, CustomTheme } from "@/types/plugin/plugin"
+import { PRESET_META, PRESET_IDS } from "./preset-meta"
 
-/** Available built-in color presets. Mirrors `ColorThemePreset`. */
-export const COLOR_PRESETS: readonly ColorThemePreset[] = [
-  "default",
-  "ocean",
-  "forest",
-  "sunset",
-  "lavender",
-  "rose",
-  "slate",
-  "amber",
-] as const
+/**
+ * Available built-in color presets. Derived from the single-source
+ * `PRESET_META` so the id list, palettes, and swatches never drift.
+ */
+export const COLOR_PRESETS: readonly ColorThemePreset[] = PRESET_IDS
 
 /** A single light/dark palette pair for one preset. */
 interface PresetPair {
@@ -97,43 +92,33 @@ const NEUTRAL_DARK: ThemeColors = {
   sidebarRing: "#60a5fa",
 }
 
-const PRESETS: Record<ColorThemePreset, PresetPair> = {
-  default: { light: NEUTRAL_LIGHT, dark: NEUTRAL_DARK },
-  ocean: {
-    light: { ...NEUTRAL_LIGHT, primary: "#0284c7", accent: "#0ea5e9", ring: "#0284c7" },
-    dark: { ...NEUTRAL_DARK, primary: "#38bdf8", accent: "#7dd3fc", ring: "#38bdf8" },
-  },
-  forest: {
-    light: { ...NEUTRAL_LIGHT, primary: "#16a34a", accent: "#22c55e", ring: "#16a34a" },
-    dark: { ...NEUTRAL_DARK, primary: "#4ade80", accent: "#86efac", ring: "#4ade80" },
-  },
-  sunset: {
-    light: { ...NEUTRAL_LIGHT, primary: "#ea580c", accent: "#f97316", ring: "#ea580c" },
-    dark: { ...NEUTRAL_DARK, primary: "#fb923c", accent: "#fdba74", ring: "#fb923c" },
-  },
-  lavender: {
-    light: { ...NEUTRAL_LIGHT, primary: "#7c3aed", accent: "#8b5cf6", ring: "#7c3aed" },
-    dark: { ...NEUTRAL_DARK, primary: "#a78bfa", accent: "#c4b5fd", ring: "#a78bfa" },
-  },
-  rose: {
-    light: { ...NEUTRAL_LIGHT, primary: "#e11d48", accent: "#f43f5e", ring: "#e11d48" },
-    dark: { ...NEUTRAL_DARK, primary: "#fb7185", accent: "#fda4af", ring: "#fb7185" },
-  },
-  slate: {
-    light: { ...NEUTRAL_LIGHT, primary: "#475569", accent: "#64748b", ring: "#475569" },
-    dark: { ...NEUTRAL_DARK, primary: "#94a3b8", accent: "#cbd5e1", ring: "#94a3b8" },
-  },
-  amber: {
-    light: { ...NEUTRAL_LIGHT, primary: "#d97706", accent: "#f59e0b", ring: "#d97706" },
-    dark: { ...NEUTRAL_DARK, primary: "#fbbf24", accent: "#fcd34d", ring: "#fbbf24" },
-  },
-}
+// Build each preset pair by spreading the shared neutral surface and applying
+// the preset's accent triple (primary / accent / ring) for each variant. The
+// accent values are owned by the single-source `PRESET_META`.
+const PRESETS: Record<ColorThemePreset, PresetPair> = Object.fromEntries(
+  PRESET_META.map((meta) => [
+    meta.id,
+    {
+      light: { ...NEUTRAL_LIGHT, ...meta.light },
+      dark: { ...NEUTRAL_DARK, ...meta.dark },
+    },
+  ])
+) as Record<ColorThemePreset, PresetPair>
 
 export interface ResolveActiveThemeArgs {
   colorTheme: ColorThemePreset
   resolvedTheme: "light" | "dark"
   activeCustomThemeId: string | null
   customThemes: CustomTheme[]
+  /**
+   * Standalone accent override (a single hex/oklch color). When set, it
+   * replaces `primary` / `accent` / `ring` on top of whatever preset or
+   * custom theme resolved, so the user can retint the app without opening the
+   * full custom-theme editor. The derived sidebar accents follow through
+   * `deriveSidebarFromCore`. Undefined / null leaves the resolved palette
+   * untouched.
+   */
+  accentColor?: string | null
 }
 
 export interface ResolvedTheme {
@@ -201,8 +186,18 @@ function deriveSidebarFromCore(colors: ThemeColors, variant: "light" | "dark"): 
  * `tokens` is absent — so unmigrated rows keep working while Task 8
  * ships the Dexie v16 migration.
  */
+/**
+ * Apply a standalone accent override onto a resolved palette. Retints
+ * `primary` / `accent` / `ring`; the sidebar accents follow via
+ * `deriveSidebarFromCore`. A blank / undefined color is a no-op.
+ */
+function applyAccentOverride(colors: ThemeColors, accentColor?: string | null): ThemeColors {
+  if (typeof accentColor !== "string" || accentColor.length === 0) return colors
+  return { ...colors, primary: accentColor, accent: accentColor, ring: accentColor }
+}
+
 export function resolveActiveThemeColors(args: ResolveActiveThemeArgs): ResolvedTheme {
-  const { colorTheme, resolvedTheme, activeCustomThemeId, customThemes } = args
+  const { colorTheme, resolvedTheme, activeCustomThemeId, customThemes, accentColor } = args
   const presetPair = PRESETS[colorTheme] ?? PRESETS.default
   const presetColors = presetPair[resolvedTheme]
 
@@ -228,12 +223,16 @@ export function resolveActiveThemeColors(args: ResolveActiveThemeArgs): Resolved
             ? presetPair.light
             : presetColors
 
+      const merged = applyAccentOverride({ ...baseline, ...(customColors ?? {}) }, accentColor)
       return {
-        colors: deriveSidebarFromCore({ ...baseline, ...(customColors ?? {}) }, resolvedTheme),
+        colors: deriveSidebarFromCore(merged, resolvedTheme),
         themeSource: "custom",
       }
     }
   }
 
-  return { colors: deriveSidebarFromCore(presetColors, resolvedTheme), themeSource: "preset" }
+  return {
+    colors: deriveSidebarFromCore(applyAccentOverride(presetColors, accentColor), resolvedTheme),
+    themeSource: "preset",
+  }
 }

@@ -81,6 +81,7 @@ beforeEach(() => {
   // Reset the relevant flat-projected fields on the real settings store.
   useSettingsStore.setState({
     activeCustomThemeId: null,
+    activePluginThemeId: null,
     customThemes: [],
     colorTheme: "default",
   })
@@ -177,6 +178,58 @@ describe("CustomThemeApplier", () => {
       expect(html.style.getPropertyValue(cssVar)).toBe("")
     }
     removeSpy.mockRestore()
+    result?.unmount()
+  })
+
+  it("applies a cloned theme's extra cssVars after the structured tokens", async () => {
+    const theme = makeCustomTheme({
+      id: "ct-css",
+      cssVars: { "--custom-glow": "#ff00ff", "--radius-plugin": "1rem" },
+    })
+    useSettingsStore.setState({
+      activeCustomThemeId: theme.id,
+      customThemes: [theme],
+      colorTheme: "default",
+    })
+    await act(async () => {
+      render(<CustomThemeApplier />)
+    })
+    const html = document.documentElement
+    await waitFor(() => {
+      expect(html.style.getPropertyValue("--custom-glow")).toBe("#ff00ff")
+    })
+    expect(html.style.getPropertyValue("--radius-plugin")).toBe("1rem")
+    // Structured tokens still applied alongside the extras.
+    expect(html.style.getPropertyValue("--primary")).toBe("#ff00ff")
+  })
+
+  it("yields inline vars while a plugin theme is active (PluginThemeApplier owns the cascade)", async () => {
+    const theme = makeCustomTheme()
+    useSettingsStore.setState({
+      activeCustomThemeId: theme.id,
+      customThemes: [theme],
+      colorTheme: "default",
+    })
+    let result: ReturnType<typeof render> | undefined
+    await act(async () => {
+      result = render(<CustomThemeApplier />)
+    })
+    const html = document.documentElement
+    await waitFor(() => {
+      expect(html.style.getPropertyValue("--background")).toBe("#0b0b0b")
+    })
+
+    // Activate a plugin theme: CustomThemeApplier must clear its inline vars so
+    // the <style data-plugin-theme> block (inline > stylesheet) is not shadowed.
+    await act(async () => {
+      useSettingsStore.setState({ activePluginThemeId: "demo.neon", activeCustomThemeId: null })
+    })
+    await waitFor(() => {
+      expect(html.style.getPropertyValue("--background")).toBe("")
+    })
+    for (const cssVar of CSS_VAR_KEYS) {
+      expect(html.style.getPropertyValue(cssVar)).toBe("")
+    }
     result?.unmount()
   })
 

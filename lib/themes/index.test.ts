@@ -318,3 +318,59 @@ describe("resolveActiveThemeColors — sidebar derives from core tokens", () => 
     expect(result.colors.sidebarForeground).toBe(result.colors.foreground)
   })
 })
+
+describe("resolveActiveThemeColors — accent override", () => {
+  it("retints primary/accent/ring on the preset path when accentColor is set", () => {
+    const result = resolveActiveThemeColors({
+      colorTheme: "ocean",
+      resolvedTheme: "light",
+      activeCustomThemeId: null,
+      customThemes: [],
+      accentColor: "#ff0000",
+    })
+    expect(result.colors.primary).toBe("#ff0000")
+    expect(result.colors.accent).toBe("#ff0000")
+    expect(result.colors.ring).toBe("#ff0000")
+    // Sidebar accents derive from the retinted core tokens.
+    expect(result.colors.sidebarPrimary).toBe("#ff0000")
+    expect(result.colors.sidebarRing).toBe("#ff0000")
+    // Non-accent tokens are untouched.
+    expect(result.colors.background).toBe("#ffffff")
+  })
+
+  it("retints on top of an active custom theme too", () => {
+    const custom: CustomTheme = {
+      id: "c1",
+      name: "C",
+      baseVariant: "light",
+      tokens: { light: buildTokens({ primary: "#111111" }), dark: buildTokens() },
+    }
+    const result = resolveActiveThemeColors({
+      colorTheme: "default",
+      resolvedTheme: "light",
+      activeCustomThemeId: "c1",
+      customThemes: [custom],
+      accentColor: "#00ff00",
+    })
+    expect(result.colors.primary).toBe("#00ff00")
+  })
+
+  it("is a no-op for empty or null accentColor", () => {
+    const base = resolveActiveThemeColors({
+      colorTheme: "forest",
+      resolvedTheme: "dark",
+      activeCustomThemeId: null,
+      customThemes: [],
+    })
+    for (const accent of [null, undefined, ""]) {
+      const result = resolveActiveThemeColors({
+        colorTheme: "forest",
+        resolvedTheme: "dark",
+        activeCustomThemeId: null,
+        customThemes: [],
+        accentColor: accent,
+      })
+      expect(result.colors.primary).toBe(base.colors.primary)
+    }
+  })
+})

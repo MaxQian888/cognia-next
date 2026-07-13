@@ -1,0 +1,352 @@
+// Curated, fully-designed built-in themes.
+//
+// Unlike the 8 color PRESETS (which are accent tints over a shared neutral
+// surface), each theme here ships a complete, hand-authored 27-token palette
+// with its own surfaces, borders, and signal colors — the "more styles and
+// systems" the appearance system was missing. They surface in the same
+// unified theme grid as the built-in VSCode presets and, on activation, are
+// cloned into a persistent `customThemes` row (structured, full-fidelity).
+//
+// Every theme authors BOTH variants explicitly (light + dark), pairing the
+// canonical community counterparts (Nord ↔ Nord Light, Catppuccin Mocha ↔
+// Latte, Rosé Pine ↔ Dawn, Gruvbox dark ↔ light, Solarized dark ↔ light), so
+// toggling the app between light and dark shows the theme's intended other
+// half — not an algorithmic inversion. Both variants pass the WCAG AA
+// contrast audit (see `built-in-themes.test.ts`).
+
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
+
+export type BuiltInDesignedTheme = Omit<CustomTheme, "id">
+
+function designed(
+  name: string,
+  baseVariant: "light" | "dark",
+  light: ThemeColors,
+  dark: ThemeColors
+): BuiltInDesignedTheme {
+  return {
+    name,
+    baseVariant,
+    tokens: { light, dark },
+    isDark: baseVariant === "dark",
+    colors: baseVariant === "dark" ? dark : light,
+  }
+}
+
+// ── Nord ─────────────────────────────────────────────────────────────────────
+const NORD_DARK: ThemeColors = {
+  background: "#2e3440",
+  foreground: "#eceff4",
+  primary: "#88c0d0",
+  primaryForeground: "#2e3440",
+  secondary: "#434c5e",
+  secondaryForeground: "#eceff4",
+  accent: "#81a1c1",
+  accentForeground: "#2e3440",
+  muted: "#3b4252",
+  mutedForeground: "#d8dee9",
+  card: "#3b4252",
+  cardForeground: "#eceff4",
+  popover: "#3b4252",
+  popoverForeground: "#eceff4",
+  input: "#434c5e",
+  border: "#434c5e",
+  ring: "#88c0d0",
+  destructive: "#bf616a",
+  destructiveForeground: "#eceff4",
+  sidebar: "#2e3440",
+  sidebarForeground: "#d8dee9",
+  sidebarPrimary: "#88c0d0",
+  sidebarPrimaryForeground: "#2e3440",
+  sidebarAccent: "#3b4252",
+  sidebarAccentForeground: "#eceff4",
+  sidebarBorder: "#3b4252",
+  sidebarRing: "#88c0d0",
+}
+
+const NORD_LIGHT: ThemeColors = {
+  background: "#eceff4",
+  foreground: "#2e3440",
+  primary: "#5e81ac",
+  primaryForeground: "#eceff4",
+  secondary: "#d8dee9",
+  secondaryForeground: "#2e3440",
+  accent: "#5e81ac",
+  accentForeground: "#eceff4",
+  muted: "#e5e9f0",
+  mutedForeground: "#4c566a",
+  card: "#ffffff",
+  cardForeground: "#2e3440",
+  popover: "#ffffff",
+  popoverForeground: "#2e3440",
+  input: "#d8dee9",
+  border: "#d8dee9",
+  ring: "#5e81ac",
+  destructive: "#bf616a",
+  destructiveForeground: "#ffffff",
+  sidebar: "#e5e9f0",
+  sidebarForeground: "#2e3440",
+  sidebarPrimary: "#5e81ac",
+  sidebarPrimaryForeground: "#eceff4",
+  sidebarAccent: "#d8dee9",
+  sidebarAccentForeground: "#2e3440",
+  sidebarBorder: "#d8dee9",
+  sidebarRing: "#5e81ac",
+}
+
+// ── Rosé Pine ─────────────────────────────────────────────────────────────────
+const ROSE_PINE: ThemeColors = {
+  background: "#191724",
+  foreground: "#e0def4",
+  primary: "#9ccfd8",
+  primaryForeground: "#191724",
+  secondary: "#26233a",
+  secondaryForeground: "#e0def4",
+  accent: "#c4a7e7",
+  accentForeground: "#191724",
+  muted: "#26233a",
+  mutedForeground: "#908caa",
+  card: "#1f1d2e",
+  cardForeground: "#e0def4",
+  popover: "#1f1d2e",
+  popoverForeground: "#e0def4",
+  input: "#26233a",
+  border: "#403d52",
+  ring: "#9ccfd8",
+  destructive: "#eb6f92",
+  destructiveForeground: "#191724",
+  sidebar: "#191724",
+  sidebarForeground: "#e0def4",
+  sidebarPrimary: "#9ccfd8",
+  sidebarPrimaryForeground: "#191724",
+  sidebarAccent: "#26233a",
+  sidebarAccentForeground: "#e0def4",
+  sidebarBorder: "#26233a",
+  sidebarRing: "#9ccfd8",
+}
+
+const ROSE_PINE_DAWN: ThemeColors = {
+  background: "#faf4ed",
+  foreground: "#575279",
+  primary: "#286983",
+  primaryForeground: "#ffffff",
+  secondary: "#f2e9e1",
+  secondaryForeground: "#575279",
+  accent: "#907aa9",
+  accentForeground: "#ffffff",
+  muted: "#f2e9e1",
+  mutedForeground: "#625d72",
+  card: "#fffaf3",
+  cardForeground: "#575279",
+  popover: "#fffaf3",
+  popoverForeground: "#575279",
+  input: "#f2e9e1",
+  border: "#dfdad9",
+  ring: "#286983",
+  destructive: "#b4637a",
+  destructiveForeground: "#ffffff",
+  sidebar: "#f2e9e1",
+  sidebarForeground: "#575279",
+  sidebarPrimary: "#286983",
+  sidebarPrimaryForeground: "#ffffff",
+  sidebarAccent: "#dfdad9",
+  sidebarAccentForeground: "#575279",
+  sidebarBorder: "#dfdad9",
+  sidebarRing: "#286983",
+}
+
+// ── Catppuccin ────────────────────────────────────────────────────────────────
+const CATPPUCCIN_MOCHA: ThemeColors = {
+  background: "#1e1e2e",
+  foreground: "#cdd6f4",
+  primary: "#89b4fa",
+  primaryForeground: "#1e1e2e",
+  secondary: "#313244",
+  secondaryForeground: "#cdd6f4",
+  accent: "#cba6f7",
+  accentForeground: "#1e1e2e",
+  muted: "#313244",
+  mutedForeground: "#a6adc8",
+  card: "#181825",
+  cardForeground: "#cdd6f4",
+  popover: "#181825",
+  popoverForeground: "#cdd6f4",
+  input: "#45475a",
+  border: "#45475a",
+  ring: "#89b4fa",
+  destructive: "#f38ba8",
+  destructiveForeground: "#1e1e2e",
+  sidebar: "#181825",
+  sidebarForeground: "#cdd6f4",
+  sidebarPrimary: "#89b4fa",
+  sidebarPrimaryForeground: "#1e1e2e",
+  sidebarAccent: "#313244",
+  sidebarAccentForeground: "#cdd6f4",
+  sidebarBorder: "#313244",
+  sidebarRing: "#89b4fa",
+}
+
+const CATPPUCCIN_LATTE: ThemeColors = {
+  background: "#eff1f5",
+  foreground: "#4c4f69",
+  primary: "#1e66f5",
+  primaryForeground: "#ffffff",
+  secondary: "#ccd0da",
+  secondaryForeground: "#4c4f69",
+  accent: "#8839ef",
+  accentForeground: "#ffffff",
+  muted: "#e6e9ef",
+  mutedForeground: "#5c5f77",
+  card: "#ffffff",
+  cardForeground: "#4c4f69",
+  popover: "#ffffff",
+  popoverForeground: "#4c4f69",
+  input: "#ccd0da",
+  border: "#bcc0cc",
+  ring: "#1e66f5",
+  destructive: "#d20f39",
+  destructiveForeground: "#ffffff",
+  sidebar: "#e6e9ef",
+  sidebarForeground: "#4c4f69",
+  sidebarPrimary: "#1e66f5",
+  sidebarPrimaryForeground: "#ffffff",
+  sidebarAccent: "#ccd0da",
+  sidebarAccentForeground: "#4c4f69",
+  sidebarBorder: "#bcc0cc",
+  sidebarRing: "#1e66f5",
+}
+
+// ── Gruvbox ───────────────────────────────────────────────────────────────────
+const GRUVBOX_DARK: ThemeColors = {
+  background: "#282828",
+  foreground: "#ebdbb2",
+  primary: "#fabd2f",
+  primaryForeground: "#282828",
+  secondary: "#504945",
+  secondaryForeground: "#ebdbb2",
+  accent: "#8ec07c",
+  accentForeground: "#282828",
+  muted: "#3c3836",
+  mutedForeground: "#bdae93",
+  card: "#3c3836",
+  cardForeground: "#ebdbb2",
+  popover: "#3c3836",
+  popoverForeground: "#ebdbb2",
+  input: "#504945",
+  border: "#504945",
+  ring: "#fabd2f",
+  destructive: "#fb4934",
+  destructiveForeground: "#282828",
+  sidebar: "#282828",
+  sidebarForeground: "#ebdbb2",
+  sidebarPrimary: "#fabd2f",
+  sidebarPrimaryForeground: "#282828",
+  sidebarAccent: "#3c3836",
+  sidebarAccentForeground: "#ebdbb2",
+  sidebarBorder: "#3c3836",
+  sidebarRing: "#fabd2f",
+}
+
+const GRUVBOX_LIGHT: ThemeColors = {
+  background: "#fbf1c7",
+  foreground: "#3c3836",
+  primary: "#af3a03",
+  primaryForeground: "#ffffff",
+  secondary: "#ebdbb2",
+  secondaryForeground: "#3c3836",
+  accent: "#427b58",
+  accentForeground: "#ffffff",
+  muted: "#ebdbb2",
+  mutedForeground: "#665c54",
+  card: "#fbf1c7",
+  cardForeground: "#3c3836",
+  popover: "#fbf1c7",
+  popoverForeground: "#3c3836",
+  input: "#ebdbb2",
+  border: "#d5c4a1",
+  ring: "#af3a03",
+  destructive: "#9d0006",
+  destructiveForeground: "#ffffff",
+  sidebar: "#ebdbb2",
+  sidebarForeground: "#3c3836",
+  sidebarPrimary: "#af3a03",
+  sidebarPrimaryForeground: "#ffffff",
+  sidebarAccent: "#d5c4a1",
+  sidebarAccentForeground: "#3c3836",
+  sidebarBorder: "#d5c4a1",
+  sidebarRing: "#af3a03",
+}
+
+// ── Solarized ─────────────────────────────────────────────────────────────────
+const SOLARIZED_DARK: ThemeColors = {
+  background: "#002b36",
+  foreground: "#93a1a1",
+  primary: "#268bd2",
+  primaryForeground: "#002b36",
+  secondary: "#073642",
+  secondaryForeground: "#93a1a1",
+  accent: "#2aa198",
+  accentForeground: "#002b36",
+  muted: "#073642",
+  mutedForeground: "#93a1a1",
+  card: "#073642",
+  cardForeground: "#93a1a1",
+  popover: "#073642",
+  popoverForeground: "#93a1a1",
+  input: "#073642",
+  border: "#586e75",
+  ring: "#268bd2",
+  destructive: "#dc322f",
+  destructiveForeground: "#fdf6e3",
+  sidebar: "#002b36",
+  sidebarForeground: "#93a1a1",
+  sidebarPrimary: "#268bd2",
+  sidebarPrimaryForeground: "#002b36",
+  sidebarAccent: "#073642",
+  sidebarAccentForeground: "#93a1a1",
+  sidebarBorder: "#073642",
+  sidebarRing: "#268bd2",
+}
+
+const SOLARIZED_LIGHT: ThemeColors = {
+  background: "#fdf6e3",
+  foreground: "#586e75",
+  primary: "#268bd2",
+  primaryForeground: "#fdf6e3",
+  secondary: "#eee8d5",
+  secondaryForeground: "#586e75",
+  accent: "#2aa198",
+  accentForeground: "#002b36",
+  muted: "#eee8d5",
+  mutedForeground: "#465857",
+  card: "#fdf6e3",
+  cardForeground: "#586e75",
+  popover: "#fdf6e3",
+  popoverForeground: "#586e75",
+  input: "#eee8d5",
+  border: "#93a1a1",
+  ring: "#268bd2",
+  destructive: "#dc322f",
+  destructiveForeground: "#fdf6e3",
+  sidebar: "#eee8d5",
+  sidebarForeground: "#465857",
+  sidebarPrimary: "#268bd2",
+  sidebarPrimaryForeground: "#fdf6e3",
+  sidebarAccent: "#93a1a1",
+  sidebarAccentForeground: "#002b36",
+  sidebarBorder: "#93a1a1",
+  sidebarRing: "#268bd2",
+}
+
+/**
+ * Curated designed themes, ordered for the picker. Names are unique and do not
+ * collide with the built-in VSCode presets (Dracula / One Dark Pro / Tokyo
+ * Night Dark / GitHub Light Default).
+ */
+export const BUILT_IN_DESIGNED_THEMES: ReadonlyArray<BuiltInDesignedTheme> = [
+  designed("Nord", "dark", NORD_LIGHT, NORD_DARK),
+  designed("Rosé Pine", "dark", ROSE_PINE_DAWN, ROSE_PINE),
+  designed("Catppuccin", "dark", CATPPUCCIN_LATTE, CATPPUCCIN_MOCHA),
+  designed("Gruvbox", "dark", GRUVBOX_LIGHT, GRUVBOX_DARK),
+  designed("Solarized", "light", SOLARIZED_LIGHT, SOLARIZED_DARK),
+]

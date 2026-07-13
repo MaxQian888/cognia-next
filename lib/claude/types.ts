@@ -2956,6 +2956,20 @@ export interface AppSettings {
   customThemes?: import("@/types/plugin/plugin").CustomTheme[]
   /** Currently active custom theme id; null when a preset is in use. */
   activeCustomThemeId?: string | null
+  /**
+   * Registry id (`<pluginId>.<contributionId>`) of a directly-activated
+   * plugin theme, or null. Mutually exclusive with `activeCustomThemeId`:
+   * activating one clears the other. Applied live by `PluginThemeApplier`
+   * via a `<style data-plugin-theme>` block; falls back to the preset when
+   * the owning plugin is disabled.
+   */
+  activePluginThemeId?: string | null
+  /**
+   * Standalone accent color override (hex or oklch). Retints primary / accent
+   * / ring on top of the active preset or custom theme without opening the
+   * full custom-theme editor. Null / undefined uses the theme's own accents.
+   */
+  accentColor?: string | null
 
   /** Active default AI provider id (e.g. "openai", "anthropic", "google"). */
   defaultProvider?: string

@@ -28,7 +28,11 @@ jest.mock("../vscode-import-dialog", () => ({
 
 const save = jest.fn()
 const setActiveCustom = jest.fn()
-const createCustomTheme = jest.fn(() => "ct_new")
+const setActivePlugin = jest.fn()
+const setAccentColor = jest.fn()
+const createCustomTheme = jest.fn(
+  (_seed?: Partial<import("@/types/plugin/plugin").CustomTheme>) => "ct_new"
+)
 const deleteCustomTheme = jest.fn()
 const removeImportedTheme = jest.fn()
 const storeState: { settings: Partial<AppSettings>; activeCustomThemeId: string | null } = {
@@ -41,6 +45,8 @@ const buildState = () => ({
   activeCustomThemeId: storeState.activeCustomThemeId,
   save,
   setActiveCustomTheme: setActiveCustom,
+  setActivePluginTheme: setActivePlugin,
+  setAccentColor,
   createCustomTheme,
   deleteCustomTheme,
   removeImportedTheme,
@@ -59,6 +65,8 @@ beforeEach(() => {
   setTheme.mockClear()
   save.mockClear()
   setActiveCustom.mockClear()
+  setActivePlugin.mockClear()
+  setAccentColor.mockClear()
   createCustomTheme.mockClear()
   deleteCustomTheme.mockClear()
   removeImportedTheme.mockClear()
@@ -113,6 +121,46 @@ describe("ThemeTab", () => {
     expect(screen.getByText("One Dark Pro")).toBeInTheDocument()
     expect(screen.getByText("Tokyo Night Dark")).toBeInTheDocument()
     expect(screen.getByText("GitHub Light Default")).toBeInTheDocument()
+  })
+
+  it("renders the curated designed themes in the grid", () => {
+    render(<ThemeTab />)
+    expect(screen.getByText("Nord")).toBeInTheDocument()
+    expect(screen.getByText("Catppuccin")).toBeInTheDocument()
+    expect(screen.getByText("Gruvbox")).toBeInTheDocument()
+  })
+
+  it("cloning a designed theme preserves both authored variants (no re-derive)", () => {
+    render(<ThemeTab />)
+    act(() => {
+      fireEvent.click(screen.getByText("Nord"))
+    })
+    expect(createCustomTheme).toHaveBeenCalledTimes(1)
+    const seed = createCustomTheme.mock.calls[0]?.[0]
+    expect(seed?.tokens?.light).toBeDefined()
+    expect(seed?.tokens?.dark).toBeDefined()
+    // Authored → no algorithmic opposite marker.
+    expect(seed?.derivedVariant).toBeUndefined()
+    expect(seed?.sourceBuiltinName).toBe("Nord")
+  })
+
+  it("accent picker writes the chosen color and can be reset", () => {
+    storeState.settings = {
+      theme: "system",
+      colorTheme: "default",
+      activeCustomThemeId: null,
+      accentColor: "#ff0000",
+    }
+    render(<ThemeTab />)
+    const swatch = screen.getByLabelText("accent.label") as HTMLInputElement
+    act(() => {
+      fireEvent.change(swatch, { target: { value: "#00ff00" } })
+    })
+    expect(setAccentColor).toHaveBeenCalledWith("#00ff00")
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "accent.reset" }))
+    })
+    expect(setAccentColor).toHaveBeenCalledWith(null)
   })
 
   it("clicking a built-in preset clones it as a persistent CustomTheme and activates it", () => {
@@ -206,6 +254,49 @@ describe("ThemeTab", () => {
     expect(screen.getByText("Violet Glow")).toBeInTheDocument()
     // Source badge text comes through the mocked `t()` with `params.name`.
     expect(screen.getByText("fromPlugin:Plugin P")).toBeInTheDocument()
+  })
+
+  it("clicking a plugin card activates it live (no clone) via setActivePluginTheme", () => {
+    registerPluginTheme({
+      id: "p.violet",
+      name: "Violet Glow",
+      variables: { "--background": "#111" },
+      cssVars: { "--background": "#111" },
+      source: "plugin",
+      pluginId: "p",
+      pluginName: "Plugin P",
+      colors: { background: "#111", foreground: "#eee", primary: "#7c3aed" } as never,
+      isDark: true,
+    })
+    render(<ThemeTab />)
+    act(() => {
+      fireEvent.click(screen.getByText("Violet Glow"))
+    })
+    // Direct activation — no persistent clone row is created.
+    expect(setActivePlugin).toHaveBeenCalledWith("p.violet")
+    expect(createCustomTheme).not.toHaveBeenCalled()
+  })
+
+  it("marks a directly-activated plugin card as active", () => {
+    storeState.settings = {
+      theme: "system",
+      colorTheme: "default",
+      activeCustomThemeId: null,
+      activePluginThemeId: "p.violet",
+    }
+    registerPluginTheme({
+      id: "p.violet",
+      name: "Violet Glow",
+      variables: {},
+      source: "plugin",
+      pluginId: "p",
+      pluginName: "Plugin P",
+      colors: { background: "#111", foreground: "#eee", primary: "#7c3aed" } as never,
+      isDark: true,
+    })
+    render(<ThemeTab />)
+    const card = screen.getByText(/Violet Glow/).closest("button")
+    expect(card?.getAttribute("aria-pressed")).toBe("true")
   })
 
   it("re-renders when a plugin theme is registered after mount (subscribe wiring)", () => {

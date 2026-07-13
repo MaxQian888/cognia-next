@@ -35,6 +35,8 @@ import {
   vscodeThemeToCustomTheme,
   type VscodeThemeJson,
 } from "@/lib/appearance/vscode-theme/parse-json"
+import { DEFAULT_FALLBACKS, THEME_COLOR_KEYS } from "@/lib/appearance/vscode-theme/token-mapping"
+import { themeKeyToCssVar } from "@/lib/appearance/css-var"
 import { loggers } from "@/lib/plugin/core/logger"
 
 export interface ThemesBridgeError {
@@ -133,6 +135,26 @@ function sanitizeCssVariables(
 export { sanitizeCssVariables as __sanitizeCssVariablesForTesting }
 
 /**
+ * Project a sanitized CSS-variable map onto the full 27-token `ThemeColors`
+ * shape. Starts from the light/dark neutral fallback so every slot is
+ * populated (swatch synthesis, preview, and shell-sync all assume a complete
+ * palette), then overrides each token whose matching `--kebab` variable is
+ * present in the map. Replaces the earlier 2-key `{background, foreground}`
+ * fabrication that left swatches and the clone path degraded.
+ */
+function cssVariablesToThemeColors(vars: Record<string, string>, isDark: boolean): ThemeColors {
+  const base = isDark ? DEFAULT_FALLBACKS.dark : DEFAULT_FALLBACKS.light
+  const out: ThemeColors = { ...base }
+  for (const key of THEME_COLOR_KEYS) {
+    const value = vars[themeKeyToCssVar(key)]
+    if (typeof value === "string" && value.length > 0) {
+      out[key] = value
+    }
+  }
+  return out
+}
+
+/**
  * Resolve a single contribution to a structured `ThemeColors` + `isDark` pair.
  * Throws on hard errors so the caller can collect them per-contribution.
  */
@@ -147,12 +169,10 @@ async function resolveContribution(
     // legacy fallback path stays well-defined) and pass the sanitized
     // variable map through for the runtime injection layer.
     const sanitized = sanitizeCssVariables(contribution.cssVariables, pluginId ?? "<unknown>")
+    const isDark = contribution.isDark === true
     return {
-      colors: {
-        background: sanitized["--background"] ?? "#000",
-        foreground: sanitized["--foreground"] ?? "#fff",
-      } as unknown as ThemeColors,
-      isDark: contribution.isDark === true,
+      colors: cssVariablesToThemeColors(sanitized, isDark),
+      isDark,
       cssVariables: sanitized,
     }
   }
@@ -237,6 +257,10 @@ export class PluginThemesBridge {
           pluginName,
           colors,
           isDark,
+          // Only CSS-var contributions carry a raw override map; keep it so
+          // the clone path and PluginThemeApplier can inject every variable
+          // the author declared (not just the structured projection).
+          ...(cssVariables ? { cssVars: cssVariables } : {}),
         }
         registerPluginTheme(theme)
         registered += 1

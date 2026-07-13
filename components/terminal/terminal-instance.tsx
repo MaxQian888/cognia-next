@@ -251,7 +251,15 @@ function clampFontSize(size: number): number {
  * scheme matching the surrounding `bg-background` chrome under any theme —
  * including user custom themes that retune the oklch tokens in `globals.css`.
  */
-function readAppAutoTokens(): Pick<TerminalTheme, "background" | "foreground" | "cursor"> | null {
+/** Convert `rgb(r, g, b)` to `rgba(r, g, b, a)`; passes other formats through. */
+function rgbToRgba(color: string, alpha: number): string {
+  const m = color.match(/^rgb\(([^)]+)\)$/)
+  return m ? `rgba(${m[1]}, ${alpha})` : color
+}
+
+function readAppAutoTokens(): Partial<
+  Pick<TerminalTheme, "background" | "foreground" | "cursor" | "selectionBackground">
+> | null {
   if (typeof document === "undefined" || !document.body) return null
   const resolveVar = (varName: string): string | null => {
     const probe = document.createElement("span")
@@ -265,7 +273,14 @@ function readAppAutoTokens(): Pick<TerminalTheme, "background" | "foreground" | 
   const background = resolveVar("--background")
   const foreground = resolveVar("--foreground")
   if (!background || !foreground) return null
-  return { background, foreground, cursor: foreground }
+  const out: Partial<
+    Pick<TerminalTheme, "background" | "foreground" | "cursor" | "selectionBackground">
+  > = { background, foreground, cursor: foreground }
+  // Follow the app accent for the selection highlight so the terminal reflects
+  // the active custom theme / accent override, not just the neutral surface.
+  const accent = resolveVar("--accent") ?? resolveVar("--primary")
+  if (accent) out.selectionBackground = rgbToRgba(accent, 0.35)
+  return out
 }
 
 function makeTheme(isDark: boolean, schemeId?: string) {

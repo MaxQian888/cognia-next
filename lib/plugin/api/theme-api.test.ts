@@ -9,12 +9,14 @@ import {
   __resetThemeApiOwnershipForTesting,
 } from "./theme-api"
 import { initializePluginPermissions } from "./permission-api"
+import { registerPluginTheme, __resetThemeRegistryForTesting } from "@/lib/theme/theme-registry"
 import type { CustomTheme } from "@/types/plugin/plugin"
 
 // Mock settings store
 let mockTheme = "light"
 let mockColorTheme = "default"
 let mockActiveCustomThemeId: string | null = null
+let mockActivePluginThemeId: string | null = null
 let mockCreateCounter = 0
 const mockCustomThemes: CustomTheme[] = []
 const mockSubscribers: Array<(state: unknown) => void> = []
@@ -25,6 +27,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
       theme: mockTheme,
       colorTheme: mockColorTheme,
       activeCustomThemeId: mockActiveCustomThemeId,
+      activePluginThemeId: mockActivePluginThemeId,
       customThemes: mockCustomThemes,
       setTheme: jest.fn((mode) => {
         mockTheme = mode
@@ -54,6 +57,11 @@ jest.mock("@/stores/settings/settings-store", () => ({
       }),
       setActiveCustomTheme: jest.fn((id) => {
         mockActiveCustomThemeId = id
+        mockActivePluginThemeId = null
+      }),
+      setActivePluginTheme: jest.fn((id) => {
+        mockActivePluginThemeId = id
+        mockActiveCustomThemeId = null
       }),
     })),
     subscribe: jest.fn((callback) => {
@@ -130,10 +138,12 @@ describe("Theme API", () => {
     mockTheme = "light"
     mockColorTheme = "default"
     mockActiveCustomThemeId = null
+    mockActivePluginThemeId = null
     mockCustomThemes.length = 0
     mockSubscribers.length = 0
     mockCreateCounter = 0
     __resetThemeApiOwnershipForTesting()
+    __resetThemeRegistryForTesting()
   })
 
   describe("createThemeAPI", () => {
@@ -154,6 +164,7 @@ describe("Theme API", () => {
       expect(typeof api.deleteCustomTheme).toBe("function")
       expect(typeof api.getCustomThemes).toBe("function")
       expect(typeof api.activateCustomTheme).toBe("function")
+      expect(typeof api.activateRegisteredTheme).toBe("function")
       expect(typeof api.onThemeChange).toBe("function")
       expect(typeof api.applyScopedColors).toBe("function")
     })
@@ -402,6 +413,53 @@ describe("Theme API", () => {
 
       expect(mockActiveCustomThemeId).toBe("custom-theme-id")
     })
+
+    it("persists the dual-variant tokens shape and stamps ownerPluginId", () => {
+      const api = createThemeAPI(testPluginId)
+      const light = { primary: "#111", background: "#fff", foreground: "#000" }
+      const dark = { primary: "#eee", background: "#000", foreground: "#fff" }
+      const id = api.registerCustomTheme({
+        name: "Dual",
+        baseVariant: "dark",
+        tokens: { light, dark } as CustomTheme["tokens"],
+      })
+      const row = mockCustomThemes.find((t) => t.id === id)!
+      expect(row.tokens?.light.primary).toBe("#111")
+      expect(row.tokens?.dark.background).toBe("#000")
+      expect(row.baseVariant).toBe("dark")
+      expect(row.ownerPluginId).toBe(testPluginId)
+    })
+  })
+
+  describe("plugin theme direct activation", () => {
+    it("activateRegisteredTheme sets the plugin pointer and clears the custom one", () => {
+      mockActiveCustomThemeId = "custom-x"
+      const api = createThemeAPI(testPluginId)
+      api.activateRegisteredTheme("test-plugin.neon")
+      expect(mockActivePluginThemeId).toBe("test-plugin.neon")
+      expect(mockActiveCustomThemeId).toBeNull()
+    })
+
+    it("getTheme reflects the active plugin theme's palette", () => {
+      registerPluginTheme({
+        id: "test-plugin.neon",
+        name: "Neon",
+        pluginId: "test-plugin",
+        variant: "dark",
+        variables: {},
+        colors: {
+          primary: "#a855f7",
+          background: "#101014",
+          foreground: "#fafafa",
+        } as CustomTheme["colors"] as never,
+      })
+      mockActivePluginThemeId = "test-plugin.neon"
+      const api = createThemeAPI(testPluginId)
+      const state = api.getTheme()
+      expect(state.themeSource).toBe("plugin")
+      expect(state.activePluginThemeId).toBe("test-plugin.neon")
+      expect(state.colors.primary).toBe("#a855f7")
+    })
   })
 
   describe("onThemeChange", () => {
@@ -542,6 +600,31 @@ describe("Theme API", () => {
 
     it("does not throw when the plugin never registered anything", () => {
       expect(() => clearCustomThemesForPluginContext("ghost-plugin")).not.toThrow()
+    })
+
+    it("clears a live plugin theme owned by the disabled plugin", () => {
+      mockActivePluginThemeId = "plugin-a.neon"
+      clearCustomThemesForPluginContext("plugin-a")
+      expect(mockActivePluginThemeId).toBeNull()
+    })
+
+    it("leaves another plugin's live theme untouched", () => {
+      mockActivePluginThemeId = "plugin-b.neon"
+      clearCustomThemesForPluginContext("plugin-a")
+      expect(mockActivePluginThemeId).toBe("plugin-b.neon")
+    })
+
+    it("garbage-collects persisted rows by ownerPluginId even without in-memory tracking", () => {
+      // Simulate a row that outlived the session's in-memory ownership map
+      // (e.g. after a restart) — only the persisted ownerPluginId remains.
+      mockCustomThemes.push({
+        id: "orphan",
+        name: "Orphan",
+        ownerPluginId: "plugin-a",
+        colors: { primary: "#000", background: "#fff", foreground: "#000" },
+      })
+      clearCustomThemesForPluginContext("plugin-a")
+      expect(mockCustomThemes.find((t) => t.id === "orphan")).toBeUndefined()
     })
 
     it("stops tracking ids after `deleteCustomTheme` so subsequent clears skip them", () => {

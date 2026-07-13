@@ -2,9 +2,9 @@
   "id": "cognia-appearance-demo",
   "name": "Appearance Demo",
   "version": "0.1.0",
-  "description": "Reference plugin exercising the appearance contribution surfaces: a theme pack (one-click bundle), a gradient wallpaper, and a named density preset.",
+  "description": "Reference plugin exercising the appearance contribution surfaces: a CSS-variable theme, a theme pack (one-click bundle), a gradient wallpaper, and a named density preset.",
   "type": "frontend",
-  "capabilities": ["theme-pack", "wallpapers", "density-preset"],
+  "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
@@ -18,6 +18,32 @@
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
     "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
   },
+  "themes": [
+    {
+      "id": "neon-noir",
+      "name": "Neon Noir",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "oklch(0.16 0.02 275)",
+        "--foreground": "oklch(0.96 0.01 275)",
+        "--primary": "oklch(0.72 0.19 305)",
+        "--primary-foreground": "oklch(0.16 0.02 275)",
+        "--secondary": "oklch(0.5 0.08 285)",
+        "--secondary-foreground": "oklch(0.96 0.01 275)",
+        "--accent": "oklch(0.7 0.17 195)",
+        "--accent-foreground": "oklch(0.16 0.02 275)",
+        "--card": "oklch(0.2 0.02 275)",
+        "--card-foreground": "oklch(0.96 0.01 275)",
+        "--popover": "oklch(0.2 0.02 275)",
+        "--popover-foreground": "oklch(0.96 0.01 275)",
+        "--muted": "oklch(0.24 0.02 275)",
+        "--muted-foreground": "oklch(0.72 0.02 275)",
+        "--border": "oklch(0.32 0.03 285)",
+        "--input": "oklch(0.28 0.03 285)",
+        "--ring": "oklch(0.72 0.19 305)"
+      }
+    }
+  ],
   "wallpapers": [
     {
       "id": "demo-aurora",

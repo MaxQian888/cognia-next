@@ -878,6 +878,12 @@ const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "motion",
     "typographyExt",
     "a11y",
+    // Theme system enhancement — the standalone accent-color override and the
+    // directly-activated plugin theme pointer. Both are non-credential
+    // presentation prefs written by the embedded `<AppearanceSection/>` theme
+    // tab on `/me/appearance`; without these the phone 400's on those writes.
+    "accentColor",
+    "activePluginThemeId",
     // ADR-0056 — agent-default preferences. Editable from the phone's
     // `/me/agent` page only in PAIRED mode (the standalone engine has no agent
     // loop). `permissionMode` escalations are additionally biometric-gated on
@@ -4642,6 +4648,9 @@ mod tests {
             "motion",
             "typographyExt",
             "a11y",
+            // Theme system enhancement — accent override + plugin theme pointer.
+            "accentColor",
+            "activePluginThemeId",
         ] {
             assert!(
                 APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),

@@ -3624,6 +3624,27 @@ export interface CustomTheme {
    * exclusive with `sourcePluginId`.
    */
   sourceBuiltinName?: string
+
+  /**
+   * Extra CSS custom properties beyond the 27 standard `ThemeColors` tokens,
+   * carried verbatim from a plugin's `cssVariables` theme contribution
+   * (ADR-0026 §3 §D). Applied inline after the structured token pass by
+   * `CustomThemeApplier` so a cloned CSS-var plugin theme keeps ALL of its
+   * variables — not just the two the structured swatch path captures. Each
+   * key is a full custom-property name (`--foo`); values are pre-sanitized by
+   * the themes-bridge. Undefined for hand-built / VSCode-imported themes.
+   */
+  cssVars?: Record<string, string>
+
+  /**
+   * Plugin id that created this row through the imperative `ctx.theme` API.
+   * Persisted (unlike the in-memory ownership map) so
+   * `clearCustomThemesForPluginContext` can garbage-collect orphan rows after
+   * a restart. Distinct from `sourcePluginId`, which merely records where a
+   * user-activated preset originated; `ownerPluginId` means the plugin owns
+   * the row's lifecycle and it is removed when the plugin is disabled.
+   */
+  ownerPluginId?: string
 }
 
 /**
@@ -3634,7 +3655,9 @@ export interface ThemeState {
   resolvedMode: "light" | "dark"
   colorPreset: ColorThemePreset
   customThemeId: string | null
-  themeSource?: "preset" | "custom"
+  /** Id of the directly-activated plugin theme (registry id), or null. */
+  activePluginThemeId?: string | null
+  themeSource?: "preset" | "custom" | "plugin"
   colors: ThemeColors
 }
 
@@ -3680,6 +3703,16 @@ export interface PluginThemeAPI {
 
   /** Activate a custom theme */
   activateCustomTheme: (id: string) => void
+
+  /**
+   * Activate a theme registered in the in-memory plugin theme registry
+   * (`manifest.themes`) directly, without cloning it into `customThemes`.
+   * The theme applies live via a `<style data-plugin-theme>` block and is
+   * cleared automatically when the owning plugin is disabled. Pass `null`
+   * to deactivate and fall back to the preset / custom theme. The id is the
+   * fully-qualified registry id (`<pluginId>.<contributionId>`).
+   */
+  activateRegisteredTheme: (themeId: string | null) => void
 
   /** Subscribe to theme changes */
   onThemeChange: (handler: (theme: ThemeState) => void) => () => void

@@ -108,6 +108,12 @@
       "system": "Follow system"
     }
   },
+  "accent": {
+    "label": "Accent color",
+    "description": "Retint buttons and highlights without editing the full theme.",
+    "usingTheme": "Using theme accent",
+    "reset": "Reset"
+  },
   "colorPresetLabel": "Color preset",
   "colorPresets": {
     "amber": "Amber",

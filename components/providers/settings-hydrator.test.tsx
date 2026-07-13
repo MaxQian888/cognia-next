@@ -101,6 +101,44 @@ describe("SettingsHydrator", () => {
     })
   })
 
+  it("mirrors non-default layout knobs (radius/density) even for the default preset", async () => {
+    useSettingsStore.setState({
+      settings: {
+        id: "singleton",
+        radius: { base: 1 },
+        density: { global: "spacious" },
+      } as never,
+      loaded: true,
+      colorTheme: "default",
+      activeCustomThemeId: null,
+    })
+    render(<SettingsHydrator />)
+    await waitFor(() => {
+      expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).not.toBeNull()
+    })
+    const mirror = JSON.parse(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY) ?? "{}")
+    expect(mirror.vars["--radius"]).toBe("1rem")
+    expect(mirror.attrs["data-density"]).toBe("spacious")
+    // Default preset ⇒ no color vars in the mirror.
+    expect(mirror["--background"]).toBeUndefined()
+  })
+
+  it("skips color mirroring while a plugin theme is directly active", async () => {
+    useSettingsStore.setState({
+      settings: { id: "singleton" } as never,
+      loaded: true,
+      colorTheme: "ocean",
+      activeCustomThemeId: null,
+      activePluginThemeId: "demo.neon",
+    })
+    render(<SettingsHydrator />)
+    // A plugin theme paints via <style>, so no inline color mirror; and with
+    // no non-default layout knobs the mirror is cleared entirely.
+    await waitFor(() => {
+      expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).toBeNull()
+    })
+  })
+
   it("does not write the mirror until next-themes has resolved", () => {
     mockResolvedTheme = undefined
     render(<SettingsHydrator />)
