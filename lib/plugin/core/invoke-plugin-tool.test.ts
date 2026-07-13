@@ -54,12 +54,14 @@ function makeTool(overrides?: Partial<PluginTool>): PluginTool {
 function makeDeps(config: DepsConfig = {}): InvokePluginToolDeps & {
   activationEvents: string[]
   consentRequests: Array<{ pluginId: string; permission: PluginPermission; reason?: string }>
+  toolUseRefreshes: string[]
 } {
   const plugins: Record<string, FakePluginState> = config.plugins ?? {
     "plug-a": { status: "enabled", config: { apiKey: "secret" } },
   }
   const tools = config.tools ?? [makeTool()]
   const activationEvents: string[] = []
+  const toolUseRefreshes: string[] = []
   const consentRequests: Array<{
     pluginId: string
     permission: PluginPermission
@@ -76,6 +78,7 @@ function makeDeps(config: DepsConfig = {}): InvokePluginToolDeps & {
   return {
     activationEvents,
     consentRequests,
+    toolUseRefreshes,
     getManager: () => ({
       getPlugin: (pluginId: string) => {
         const state = plugins[pluginId]
@@ -92,6 +95,9 @@ function makeDeps(config: DepsConfig = {}): InvokePluginToolDeps & {
       handleActivationEvent: async (event: `onTool:${string}`) => {
         activationEvents.push(event)
         config.onActivationEvent?.(event)
+      },
+      recordPluginToolUse: (pluginId: string) => {
+        toolUseRefreshes.push(pluginId)
       },
     }),
     getGuard: () => ({
@@ -175,6 +181,18 @@ describe("invokePluginTool", () => {
       { q: "x" },
       expect.objectContaining({ config: { apiKey: "secret" } })
     )
+    // Tool use refreshes the idle-suspend clock so the plugin isn't suspended mid-run.
+    expect(deps.toolUseRefreshes).toEqual(["plug-a"])
+  })
+
+  it("does not refresh the idle clock when the plugin is disabled (throws before use)", async () => {
+    const deps = makeDeps({ plugins: { "plug-a": { status: "disabled" } } })
+    __setInvokePluginToolDepsForTesting(deps)
+    await expectInvocationError(
+      invokePluginTool("plug-a", "demo_tool", {}, { autoActivate: false }),
+      "plugin-disabled"
+    )
+    expect(deps.toolUseRefreshes).toEqual([])
   })
 
   it("threads sessionId, messageId, and the AbortSignal into the tool context", async () => {

@@ -61,6 +61,15 @@ const IDLE_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 
 /** Upper bound for a plugin's `activate()` (W6.1). */
 const ACTIVATE_TIMEOUT_MS = 30_000
+
+/**
+ * Upper bound for a lifecycle hook (`onSuspend` / `onResume` / `onDisable` /
+ * `onUnload` / `onUninstall`). Without it a hook that never resolves wedges the
+ * caller: a hung `onSuspend` in particular would stall the sequential idle
+ * sweep and leave the plugin stuck `enabled` with no teardown. Same order as
+ * `ACTIVATE_TIMEOUT_MS` — a lifecycle hook that runs longer is a bug.
+ */
+const LIFECYCLE_HOOK_TIMEOUT_MS = 30_000
 import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
@@ -557,6 +566,9 @@ export class PluginManager {
   }
   private warnedActivationEvents: Set<string> = new Set()
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null
+  /** Guards against overlapping idle sweeps — one slow suspend must not let the
+   * next interval tick start a second concurrent sweep on the same plugins. */
+  private idleSweepRunning = false
   private initialized = false
   private compatibilityMode: "warn" | "block"
   private pluginPointGovernanceMode: PluginPointGovernanceMode
@@ -2581,23 +2593,25 @@ export class PluginManager {
     hook: "onDisable" | "onUnload" | "onUninstall" | "onSuspend" | "onResume"
   ): Promise<void> {
     try {
-      switch (hook) {
-        case "onDisable":
-          await this.hooksManager.dispatchOnDisable(pluginId)
-          break
-        case "onUnload":
-          await this.hooksManager.dispatchOnUnload(pluginId)
-          break
-        case "onUninstall":
-          await this.hooksManager.dispatchOnUninstall(pluginId)
-          break
-        case "onSuspend":
-          await this.hooksManager.dispatchOnSuspend(pluginId)
-          break
-        case "onResume":
-          await this.hooksManager.dispatchOnResume(pluginId)
-          break
+      // Bound every hook: a hook that never resolves must not wedge the caller
+      // (a hung `onSuspend` would otherwise stall the sequential idle sweep and
+      // strand the plugin `enabled`). withTimeout rejects → the catch below
+      // records a silent failure and the lifecycle transition continues.
+      const dispatch = (): Promise<void> => {
+        switch (hook) {
+          case "onDisable":
+            return this.hooksManager.dispatchOnDisable(pluginId)
+          case "onUnload":
+            return this.hooksManager.dispatchOnUnload(pluginId)
+          case "onUninstall":
+            return this.hooksManager.dispatchOnUninstall(pluginId)
+          case "onSuspend":
+            return this.hooksManager.dispatchOnSuspend(pluginId)
+          case "onResume":
+            return this.hooksManager.dispatchOnResume(pluginId)
+        }
       }
+      await withTimeout(dispatch(), LIFECYCLE_HOOK_TIMEOUT_MS, `plugin.${hook}:${pluginId}`)
     } catch (error) {
       loggers.manager.warn(`[plugin:${pluginId}] ${hook} hook threw (ignored):`, error)
       recordSilentFailure(
@@ -2653,6 +2667,13 @@ export class PluginManager {
    * plugin is currently enabled. Resume happens on the next activation event.
    */
   async suspendPlugin(pluginId: string, reason: string = "idle"): Promise<void> {
+    // Serialize with every other lifecycle transition (enable/disable/unload
+    // and resume) so the status check-and-act is atomic — otherwise a suspend
+    // can interleave with an in-flight tool call or a concurrent resume.
+    return this.withLifecycleLock(pluginId, () => this.suspendPluginInner(pluginId, reason))
+  }
+
+  private async suspendPluginInner(pluginId: string, reason: string): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
     if (!plugin || plugin.status !== "enabled") {
@@ -2690,6 +2711,15 @@ export class PluginManager {
    * No-op unless the plugin is currently suspended.
    */
   async resumePlugin(pluginId: string, reason: string = "activation"): Promise<void> {
+    // Serialize with every other lifecycle transition. This is the fix for the
+    // double-wake race: two concurrent activation triggers both used to observe
+    // `status === "suspended"` before either flipped to `enabled`, double-
+    // loading the module. Under the lock the second call sees `enabled` and
+    // no-ops.
+    return this.withLifecycleLock(pluginId, () => this.resumePluginInner(pluginId, reason))
+  }
+
+  private async resumePluginInner(pluginId: string, reason: string): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
     if (!plugin || plugin.status !== "suspended") {
@@ -2757,9 +2787,23 @@ export class PluginManager {
     )
     if (!anyOptIn || typeof setInterval !== "function") return
     this.idleSweepTimer = setInterval(() => {
-      void this.suspendIdlePlugins()
+      if (this.idleSweepRunning) return
+      this.idleSweepRunning = true
+      void this.suspendIdlePlugins().finally(() => {
+        this.idleSweepRunning = false
+      })
     }, IDLE_SWEEP_INTERVAL_MS)
     ;(this.idleSweepTimer as { unref?: () => void }).unref?.()
+  }
+
+  /**
+   * Refresh the idle-suspend clock for a plugin (records "used now"). Called by
+   * the tool-invocation seam on every dispatch so a plugin driven purely by
+   * agent tools isn't idle-suspended mid-use — the slash-command handler does
+   * the same on command invocation. No-op for an unknown plugin.
+   */
+  recordPluginToolUse(pluginId: string): void {
+    usePluginStore.getState().updateLastUsedAt(pluginId)
   }
 
   /** Stop the periodic idle sweep (lifecycle teardown / tests). Idempotent. */
@@ -3074,7 +3118,14 @@ export class PluginManager {
         continue
       }
 
-      if (!this.shouldActivateForEvent(plugin.manifest, event)) {
+      // A suspended plugin is an already-enabled plugin whose runtime was
+      // reclaimed to save memory — ANY activation event should transparently
+      // wake it. The `shouldActivateForEvent` gate governs disabled→enabled
+      // LAZY activation only; applying it to a suspended plugin would leave one
+      // that declared just `startup` permanently unreachable via tools/views
+      // after it idle-suspends.
+      const isSuspended = plugin.status === "suspended"
+      if (!isSuspended && !this.shouldActivateForEvent(plugin.manifest, event)) {
         continue
       }
 

@@ -4325,6 +4325,63 @@ describe("PluginManager", () => {
         jest.useRealTimers()
       }
     })
+
+    it("wakes a suspended plugin on ANY activation event, even one it never declared", async () => {
+      // A plugin that declared only `startup` and then idle-suspended must
+      // still wake on an onTool event — suspension is internal, not a declared-
+      // activation gate.
+      const store = {
+        plugins: {
+          // builtin source → bypasses the frontend-trust gate so the test
+          // isolates the suspended-wake bypass, not the trust check.
+          p: mkPlugin(
+            "p",
+            "suspended",
+            { activationEvents: ["startup"] },
+            {
+              source: "builtin" as never,
+            }
+          ),
+        },
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const resumeSpy = jest.spyOn(manager, "resumePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("onTool:some_tool")
+
+      expect(resumeSpy).toHaveBeenCalledWith("p", "activation:onTool:some_tool")
+      resumeSpy.mockRestore()
+    })
+
+    it("does NOT lazy-activate a DISABLED plugin for an undeclared event", async () => {
+      // The suspended-wake bypass must not leak to disabled plugins — those
+      // still lazy-activate only for their declared events.
+      const store = {
+        plugins: {
+          p: mkPlugin("p", "disabled", { activationEvents: ["onCommand:foo"] }),
+        },
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const resumeSpy = jest.spyOn(manager, "resumePlugin").mockResolvedValue(undefined)
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("onTool:some_tool")
+
+      expect(resumeSpy).not.toHaveBeenCalled()
+      expect(enableSpy).not.toHaveBeenCalled()
+      resumeSpy.mockRestore()
+      enableSpy.mockRestore()
+    })
+
+    it("recordPluginToolUse refreshes the plugin's idle-suspend clock", () => {
+      const updateLastUsedAt = jest.fn()
+      mockGetState.mockReturnValue({ plugins: {}, updateLastUsedAt })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      manager.recordPluginToolUse("p")
+      expect(updateLastUsedAt).toHaveBeenCalledWith("p")
+    })
   })
 })
 

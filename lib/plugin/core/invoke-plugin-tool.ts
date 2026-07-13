@@ -108,6 +108,9 @@ export interface InvokePluginToolDeps {
       | undefined
     getRegistry: () => { getTool: (name: string) => PluginTool | undefined }
     handleActivationEvent: (event: `onTool:${string}`) => Promise<void>
+    /** Refresh the plugin's idle-suspend clock on tool use (optional so test
+     * fixtures may omit it). */
+    recordPluginToolUse?: (pluginId: string) => void
   }
   getGuard: () => {
     getTier: (pluginId: string, permission: PluginPermission) => "silent" | "confirm" | "forbid"
@@ -252,6 +255,11 @@ export async function invokePluginTool(
       `plugin ${pluginId} is not enabled (status: ${plugin.status})`
     )
   }
+
+  // Refresh the idle-suspend clock: a plugin driven purely by agent tools must
+  // not be suspended out from under an active run (the slash-command handler
+  // does the same on command invocation).
+  manager.recordPluginToolUse?.(pluginId)
 
   const tool = manager.getRegistry().getTool(toolName)
   // Ownership check: a caller naming plugin A must not execute plugin B's
