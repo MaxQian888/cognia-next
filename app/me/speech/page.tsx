@@ -50,7 +50,7 @@ import {
   OPENAI_TTS_VOICES,
   XIAOMI_TTS_VOICES,
   type TTSProvider,
-} from "@/types/media/tts"
+} from "@cognia/tts/types"
 
 /** TTS providers (mirrors the union in `lib/claude/types.ts`). */
 const TTS_PROVIDERS = [

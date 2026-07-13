@@ -6,7 +6,7 @@
  */
 
 import type { Character } from "@/lib/claude/types"
-import type { TTSProvider } from "@/types/media/tts"
+import type { TTSProvider } from "@cognia/tts/types"
 import { isOverlayCharacterId } from "@/lib/plugin/registries/character-pack-registry"
 import type {
   PluginCharacterDef,

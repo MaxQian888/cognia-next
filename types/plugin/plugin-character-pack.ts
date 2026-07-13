@@ -25,7 +25,7 @@
 
 import type { Character, SendOptions } from "@/lib/claude/types"
 import type { CharacterPlatformDefaults } from "@/types/connectors/binding"
-import type { TTSProvider } from "@/types/media/tts"
+import type { TTSProvider } from "@cognia/tts/types"
 import type { PluginRuntimeProfile } from "./plugin"
 
 /**

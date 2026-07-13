@@ -20755,6 +20755,11 @@
         "showKey": "显示密钥"
       },
       "provider": {
+        "apiKeyPlaceholder": {
+          "elevenlabs": "sk_…",
+          "generic": "sk-…",
+          "google": "AIza…"
+        },
         "audioFormat": "音频格式",
         "cartesiaEmotion": "情感",
         "cartesiaEmotionPlaceholder": "例如：positivity:high、sadness:medium",

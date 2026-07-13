@@ -104,7 +104,7 @@ import type { ModelsDevCatalogRow } from "./models-dev-catalog"
 import type { OpenRouterCatalogRow } from "./openrouter-catalog"
 import type { SessionStateRow } from "./session-state"
 import type { TrustedPublisherRow } from "./trusted-publishers"
-import type { TtsProviderKeyRow } from "@/types/media/tts"
+import type { TtsProviderKeyRow } from "@cognia/tts/types"
 import type {
   OpenVsxCacheRow,
   VscodeExtensionRuntimeRow,
@@ -2413,7 +2413,7 @@ export type { ModelsDevCatalogRow } from "./models-dev-catalog"
 export type { OpenRouterCatalogRow } from "./openrouter-catalog"
 export type { SessionStateRow } from "./session-state"
 export type { TrustedPublisherRow } from "./trusted-publishers"
-export type { TtsProviderKeyRow } from "@/types/media/tts"
+export type { TtsProviderKeyRow } from "@cognia/tts/types"
 export type {
   OpenVsxCacheRow,
   VscodeExtensionRuntimeRow,

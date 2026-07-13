@@ -144,6 +144,7 @@ const projectCommon: Config = {
     "^@cognia/plugin-sdk(.*)$": "<rootDir>/packages/plugin-sdk/src$1",
     "^@cognia/redact(.*)$": "<rootDir>/packages/redact/src$1",
     "^@cognia/web-search(.*)$": "<rootDir>/packages/web-search/src$1",
+    "^@cognia/tts(.*)$": "<rootDir>/packages/tts/src$1",
 
     // cheerio's package exports prefer the ESM browser build under jsdom.
     // The HTML parser uses dynamic import("cheerio"), so map Jest to the CJS
@@ -289,6 +290,10 @@ const globalConfig: Config = {
     "packages/redact/src/**/*.{ts,tsx}",
     // web-search was lifted out of lib/search (coverage-collected).
     "packages/web-search/src/**/*.{ts,tsx}",
+    // tts was lifted out of lib/tts (coverage-collected). types.ts came from
+    // types/media/tts.ts, which carried runtime tables (TTS_PROVIDERS,
+    // getTTSError) and its own test, so it stays collected too.
+    "packages/tts/src/**/*.{ts,tsx}",
     "!packages/plugin-sdk/src/context/**/*.ts",
     "!packages/plugin-sdk/src/hooks/index.ts",
     "!packages/plugin-sdk/src/permissions/index.ts",
@@ -329,7 +334,7 @@ const globalConfig: Config = {
     "!lib/memory/external/types.ts",
     "!lib/execution/types.ts",
     "!lib/pet/live2d/types.ts",
-    "!lib/tts/providers/adapter.ts",
+    "!packages/tts/src/providers/adapter.ts",
     "!components/editor/diagnostics/types.ts",
     // The ACP / OpenCode external-agent protocol adapters are 1.5k–2.5k LOC
     // of stdio + JSON-RPC + Tauri-IPC plumbing that only runs against a real

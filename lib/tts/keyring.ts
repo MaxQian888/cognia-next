@@ -8,18 +8,11 @@
 
 import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
-import { KEYED_TTS_PROVIDERS, type TTSProvider } from "@/types/media/tts"
+import { KEYED_TTS_PROVIDERS, type TTSProvider } from "@cognia/tts/types"
 
 /** Stable provider keys understood by the keyring backend. */
 export type KeyringProviderId =
-  | "openai"
-  | "google"
-  | "elevenlabs"
-  | "lmnt"
-  | "hume"
-  | "cartesia"
-  | "deepgram"
-  | "xiaomi"
+  "openai" | "google" | "elevenlabs" | "lmnt" | "hume" | "cartesia" | "deepgram" | "xiaomi"
 
 export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "openai",

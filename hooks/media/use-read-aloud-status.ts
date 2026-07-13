@@ -15,7 +15,7 @@
 import { useCallback, useSyncExternalStore } from "react"
 
 import { ttsOrchestrator, type TTSOrchestratorState } from "@/lib/tts/tts-orchestrator"
-import type { TTSPlaybackState } from "@/types/media/tts"
+import type { TTSPlaybackState } from "@cognia/tts/types"
 
 export interface ReadAloudStatus {
   /** True when this message id owns the orchestrator's active playback. */

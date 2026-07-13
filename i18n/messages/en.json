@@ -20755,6 +20755,11 @@
         "showKey": "Show key"
       },
       "provider": {
+        "apiKeyPlaceholder": {
+          "elevenlabs": "sk_…",
+          "generic": "sk-…",
+          "google": "AIza…"
+        },
         "audioFormat": "Audio format",
         "cartesiaEmotion": "Emotion",
         "cartesiaEmotionPlaceholder": "e.g. positivity:high, sadness:medium",

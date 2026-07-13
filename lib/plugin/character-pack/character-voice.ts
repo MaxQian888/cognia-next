@@ -19,7 +19,7 @@
 
 import type { Character } from "@/lib/claude/types"
 import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
-import { type SpeechSettings, type TTSProvider, TTS_PROVIDERS } from "@/types/media/tts"
+import { type SpeechSettings, type TTSProvider, TTS_PROVIDERS } from "@cognia/tts/types"
 
 /** Per-provider voice-id field on {@link SpeechSettings}. */
 const PROVIDER_VOICE_FIELD: Record<TTSProvider, keyof SpeechSettings> = {

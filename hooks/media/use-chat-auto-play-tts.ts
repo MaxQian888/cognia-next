@@ -17,7 +17,7 @@ import { useEffect, useRef } from "react"
 import type { UIMessage } from "ai"
 
 import { useSettingsStore } from "@/stores/settings"
-import { canAutoPlayTTS } from "@/lib/tts/auto-play-gates"
+import { canAutoPlayTTS } from "@cognia/tts/auto-play-gates"
 import { speakChatMessage } from "@/lib/tts/speak-chat-message"
 import type { Character } from "@/lib/claude/types"
 import { loggers } from "@/lib/logging"

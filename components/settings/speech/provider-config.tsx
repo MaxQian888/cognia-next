@@ -42,7 +42,7 @@ import {
   XIAOMI_TTS_VOICES,
   XIAOMI_TTS_MODELS,
   XIAOMI_TTS_STYLES,
-} from "@/types/media/tts"
+} from "@cognia/tts/types"
 import { ApiKeyInput } from "./api-key-input"
 
 // -- Generic helper for a labelled slider value ------------------------------
@@ -148,7 +148,11 @@ export function OpenAiConfig() {
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="openai" label={t("label.openai")} placeholder="sk-…" />
+      <ApiKeyInput
+        provider="openai"
+        label={t("label.openai")}
+        placeholder={t("apiKeyPlaceholder.generic")}
+      />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ openaiVoice: v })}>
@@ -231,7 +235,11 @@ export function GeminiConfig() {
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="google" label={t("label.google")} placeholder="AIza…" />
+      <ApiKeyInput
+        provider="google"
+        label={t("label.google")}
+        placeholder={t("apiKeyPlaceholder.google")}
+      />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ geminiVoice: v })}>
@@ -298,6 +306,7 @@ export function EdgeConfig() {
           <Input
             value={pitch}
             onChange={(e) => void save({ edgePitch: e.target.value })}
+            // i18n-exempt: locale-invariant Edge TTS pitch format literal
             placeholder="+0Hz"
           />
         </div>
@@ -306,6 +315,7 @@ export function EdgeConfig() {
         {t("edgeFormatHintBefore")}
         <code>+/-N%</code>
         {t("edgeFormatHintMid")}
+        {/* i18n-exempt: locale-invariant Edge TTS pitch format literal */}
         <code>+/-NHz</code>
         {t("edgeFormatHintAfter")}
       </p>
@@ -326,7 +336,11 @@ export function ElevenLabsConfig() {
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="elevenlabs" label={t("label.elevenlabs")} placeholder="sk_…" />
+      <ApiKeyInput
+        provider="elevenlabs"
+        label={t("label.elevenlabs")}
+        placeholder={t("apiKeyPlaceholder.elevenlabs")}
+      />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ elevenlabsVoice: v })}>
@@ -588,7 +602,11 @@ export function XiaomiConfig() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">{t("xiaomiIntro")}</p>
-      <ApiKeyInput provider="xiaomi" label={t("label.xiaomi")} placeholder="sk-…" />
+      <ApiKeyInput
+        provider="xiaomi"
+        label={t("label.xiaomi")}
+        placeholder={t("apiKeyPlaceholder.generic")}
+      />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ xiaomiVoice: v })}>
@@ -663,7 +681,11 @@ export function OpenAiRealtimeConfig() {
         <p className="text-xs text-amber-600 dark:text-amber-500">{t("realtimeDesktopOnly")}</p>
       )}
       <p className="text-xs text-muted-foreground">{t("realtimeIntro")}</p>
-      <ApiKeyInput provider="openai" label={t("label.openai")} placeholder="sk-…" />
+      <ApiKeyInput
+        provider="openai"
+        label={t("label.openai")}
+        placeholder={t("apiKeyPlaceholder.generic")}
+      />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ realtimeVoice: v })}>
@@ -709,7 +731,7 @@ export function OpenAiRealtimeConfig() {
 
 // -- Mapping -----------------------------------------------------------------
 
-import type { TTSProvider } from "@/types/media/tts"
+import type { TTSProvider } from "@cognia/tts/types"
 
 export const PROVIDER_CONFIG_COMPONENTS: Record<TTSProvider, () => React.ReactElement> = {
   system: SystemConfig,

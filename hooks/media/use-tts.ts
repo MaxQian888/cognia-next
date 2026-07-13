@@ -24,7 +24,7 @@ import {
   type SpeechSettings,
   type TTSPlaybackState,
   type TTSProvider,
-} from "@/types/media/tts"
+} from "@cognia/tts/types"
 
 export interface UseTTSOptions {
   /** Use settings from store (default: true). False uses defaults only. */

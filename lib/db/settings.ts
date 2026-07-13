@@ -4,12 +4,12 @@ import {
   DEFAULT_BUILTIN_TOOLS,
   DEFAULT_USER_PROFILE,
 } from "@/lib/claude/types"
-import { DEFAULT_TTS_SETTINGS } from "@/types/media/tts"
+import { DEFAULT_TTS_SETTINGS } from "@cognia/tts/types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
   createDefaultSearchUsageStats,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"

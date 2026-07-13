@@ -74,7 +74,7 @@ jest.mock("@/stores/settings", () => ({
   ) => selector({ settings: undefined, save: jest.fn() }),
 }))
 
-jest.mock("@/lib/tts/speech", () => ({
+jest.mock("@cognia/tts/speech", () => ({
   DEFAULT_SPEECH_LANGUAGE: "en-US",
   SPEECH_LANGUAGES: [
     { code: "en-US", name: "English", flag: "🇺🇸" },

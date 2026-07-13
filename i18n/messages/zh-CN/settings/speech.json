@@ -48,7 +48,12 @@
     "xiaomiIntro": "小米 MiMo TTS，支持风格标签和方言。V2.5 新增声音设计和声音克隆。",
     "xiaomiStyle": "风格",
     "xiaomiStyleHint": "风格标签：开心、悲伤、生气、东北话、四川话、粤语、台湾腔、变快、变慢、唱歌、孙悟空、林黛玉",
-    "xiaomiStylePlaceholder": "无风格"
+    "xiaomiStylePlaceholder": "无风格",
+    "apiKeyPlaceholder": {
+      "elevenlabs": "sk_…",
+      "generic": "sk-…",
+      "google": "AIza…"
+    }
   },
   "stt": {
     "description": "组合输入框的语音输入按钮使用浏览器的 Web Speech API。请选择你常说的语言以及偏好的麦克风。",
