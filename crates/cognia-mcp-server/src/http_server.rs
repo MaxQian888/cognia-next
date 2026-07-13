@@ -293,7 +293,7 @@ fn error_body(status: StatusCode, message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp_server::sidecar::spawn_echo_for_tests;
+    use crate::sidecar::spawn_echo_for_tests;
 
     /// An empty session registry backed by the echo spawner (tests).
     fn echo_sessions() -> Arc<SessionRegistry> {

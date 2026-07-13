@@ -47,13 +47,13 @@ use tokio::task::JoinHandle;
 // The socket-auth + rate-limit shell is shared with `orchestration_proxy`.
 use super::proxy_common::{generate_token, token_matches, RateLimitOutcome, RateLimiter};
 
-use crate::automation::dispatcher::{run_gated_enf, Enforcement, GateContext};
-use crate::automation::permission::Surface;
-use crate::automation::types::{
+use cognia_automation::automation::dispatcher::{run_gated_enf, Enforcement, GateContext};
+use cognia_automation::automation::permission::Surface;
+use cognia_automation::automation::types::{
     AutomationError, ButtonTransition, ClickOpts, ClickTarget, DragOpts, KeyChord, Locator,
     MouseButton, Point, ScreenshotOpts, ScrollOpts, ScrollTarget, TreeOpts, TypeOpts, WindowOp,
 };
-use crate::automation::worker::AutomationHandle;
+use cognia_automation::automation::worker::AutomationHandle;
 
 /// Live proxy handle. Drop aborts the listener task; closing the listener
 /// frees the bound port.
@@ -496,7 +496,7 @@ fn stringify_err(err: AutomationError) -> String {
 #[serde(rename_all = "camelCase")]
 struct ReadTreeArgs {
     #[serde(default)]
-    root: Option<crate::automation::types::ElementRef>,
+    root: Option<cognia_automation::automation::types::ElementRef>,
     #[serde(default)]
     opts: Option<TreeOpts>,
 }
@@ -566,7 +566,7 @@ struct MouseButtonArgs {
 
 #[derive(Deserialize)]
 struct WindowOpArgs {
-    target: crate::automation::types::ElementRef,
+    target: cognia_automation::automation::types::ElementRef,
     op: WindowOp,
 }
 
@@ -577,13 +577,13 @@ struct WindowOpArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automation::audit::AuditRing;
-    use crate::automation::backend::StubBackend;
-    use crate::automation::consent::ConsentBroker;
-    use crate::automation::permission::{AutomationSettings, PermissionGate, Tier};
-    use crate::automation::policy::PolicyState;
-    use crate::automation::types::Platform;
-    use crate::automation::worker::Worker;
+    use cognia_automation::automation::audit::AuditRing;
+    use cognia_automation::automation::backend::StubBackend;
+    use cognia_automation::automation::consent::ConsentBroker;
+    use cognia_automation::automation::permission::{AutomationSettings, PermissionGate, Tier};
+    use cognia_automation::automation::policy::PolicyState;
+    use cognia_automation::automation::types::Platform;
+    use cognia_automation::automation::worker::Worker;
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
 

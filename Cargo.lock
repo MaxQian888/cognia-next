@@ -1950,6 +1950,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-mcp-server"
+version = "0.1.0"
+dependencies = [
+ "axum 0.8.9",
+ "chrono",
+ "cognia-automation",
+ "futures-util",
+ "log",
+ "parking_lot",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tauri",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower 0.5.3",
+ "tower-http",
+ "uuid",
+]
+
+[[package]]
 name = "cognia-net"
 version = "0.1.0"
 dependencies = [
@@ -1990,6 +2013,7 @@ dependencies = [
  "cognia-gateway",
  "cognia-git",
  "cognia-instrument",
+ "cognia-mcp-server",
  "cognia-net",
  "cognia-ocr",
  "cognia-plugin-runtime",

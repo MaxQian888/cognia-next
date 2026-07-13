@@ -50,6 +50,7 @@ members = [
   "crates/cognia-remote-control",
   "crates/cognia-gateway",
   "crates/cognia-ccswitch",
+  "crates/cognia-mcp-server",
 ]
 exclude = [
   "services/signaling-server",

@@ -7,7 +7,7 @@ use tauri::State;
 
 use super::types::{McpServerError, McpServerStatus};
 use super::McpServerState;
-use crate::automation::commands::AutomationState;
+use cognia_automation::automation::commands::AutomationState;
 
 /// Start the MCP HTTP server.
 ///
@@ -40,7 +40,7 @@ pub async fn mcp_server_start(
             sidecar_path,
             Some((
                 automation.handle.clone(),
-                crate::automation::dispatcher::Enforcement::from_state(&automation),
+                cognia_automation::automation::dispatcher::Enforcement::from_state(&automation),
             )),
             Some(app),
         )
@@ -77,7 +77,7 @@ pub async fn mcp_server_restart(
             sidecar_path,
             Some((
                 automation.handle.clone(),
-                crate::automation::dispatcher::Enforcement::from_state(&automation),
+                cognia_automation::automation::dispatcher::Enforcement::from_state(&automation),
             )),
             Some(app),
         )
@@ -182,7 +182,7 @@ mod tests {
     /// This test requires `node` on PATH to successfully start once.
     #[tokio::test]
     async fn double_start_returns_already_running() {
-        use crate::mcp_server::sidecar::spawn_echo_for_tests;
+        use crate::sidecar::spawn_echo_for_tests;
         use std::sync::Arc;
 
         let Ok(sidecar) = spawn_echo_for_tests().await else {
@@ -194,7 +194,7 @@ mod tests {
         // Inject a running handle directly, bypassing sidecar spawn.
         {
             let (tx, _rx) = tokio::sync::watch::channel(());
-            let handle = crate::mcp_server::http_server::ServerHandle {
+            let handle = crate::http_server::ServerHandle {
                 bound_port: 12345,
                 shutdown: tx,
             };

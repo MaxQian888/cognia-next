@@ -46,14 +46,14 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use tauri::AppHandle;
 
-use crate::automation::dispatcher::Enforcement;
+use cognia_automation::automation::dispatcher::Enforcement;
 use automation_proxy::AutomationProxy;
 use http_server::{spawn_server, ServerHandle};
 use orchestration_proxy::{OrchestrationProxy, OrchestrationReply};
 use sidecar::SidecarProcess;
 use types::{ExternalBridgeSettings, McpServerError, McpServerStatus};
 
-use crate::automation::worker::AutomationHandle;
+use cognia_automation::automation::worker::AutomationHandle;
 
 // ---------------------------------------------------------------------------
 // State

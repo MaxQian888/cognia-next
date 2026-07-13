@@ -47,7 +47,9 @@ mod hooks;
 mod keyring_secrets;
 mod logging;
 mod mcp_oauth;
-mod mcp_server;
+// ADR-0067 follow-up — extracted to `crates/cognia-mcp-server`; re-aliased so
+// `mcp_server::…` (generate_handler! + .manage()) resolves unchanged.
+pub use cognia_mcp_server as mcp_server;
 // ADR-0067 Phase 3 — extracted to `crates/cognia-ocr`; re-aliased so
 // `crate::ocr::{NativeOcrRegistry, install_default_backends, commands::…}` resolve.
 pub use cognia_ocr as ocr;

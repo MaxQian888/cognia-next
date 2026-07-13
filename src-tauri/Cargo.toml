@@ -100,6 +100,8 @@ cognia-gateway = { path = "../crates/cognia-gateway" }
 # ADR-0067 follow-up — CCSwitch provider-relay switcher. Re-aliased as
 # `crate::ccswitch`.
 cognia-ccswitch = { path = "../crates/cognia-ccswitch" }
+# ADR-0067 follow-up — embedded MCP server. Re-aliased as `crate::mcp_server`.
+cognia-mcp-server = { path = "../crates/cognia-mcp-server" }
 # ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
 # uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/
