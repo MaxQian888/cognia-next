@@ -14,10 +14,12 @@
 //!
 //! Layering (Windows-testable ≥90% without a daemon):
 //!
-//! - [`ContainerApi`] — the five daemon primitives this backend needs,
-//!   modeled as channels. [`test_support::FakeContainerApi`] scripts them
-//!   in-memory; the bollard implementation lives behind the `container-exec`
-//!   cargo feature so desktop builds never compile the Docker client.
+//! - [`ContainerApi`] — the daemon primitives this backend needs (run /
+//!   pull / kill / remove), modeled as channels.
+//!   [`test_support::FakeContainerApi`] scripts them in-memory; the bollard
+//!   implementation lives behind the `container-exec` cargo feature so
+//!   desktop builds never compile the Docker client. A missing runner image
+//!   is pulled once and the spawn retried (first spawn on a fresh daemon).
 //! - [`ContainerBackend`] — the [`ExecBackend`] state machine (registry,
 //!   line-buffering, event choreography). Feature-free, unit-tested here.
 //! - A real-daemon integration test runs only under `COGNIA_TEST_DOCKER=1`
@@ -190,12 +192,33 @@ pub struct RunningRunner {
     pub stdin: mpsc::UnboundedSender<Vec<u8>>,
 }
 
-/// The five daemon primitives the backend needs. Implemented by bollard
+/// Why a runner failed to start — the backend retries exactly one case.
+#[derive(Debug)]
+pub enum RunnerRunError {
+    /// The runner image is absent on the daemon. First spawn on a fresh
+    /// host hits this: nothing in the compose suite runs the runner image
+    /// as a service, so nothing ever pulled it.
+    ImageMissing(String),
+    Other(String),
+}
+
+impl RunnerRunError {
+    pub fn into_message(self) -> String {
+        match self {
+            Self::ImageMissing(msg) | Self::Other(msg) => msg,
+        }
+    }
+}
+
+/// The daemon primitives the backend needs. Implemented by bollard
 /// (feature `container-exec`) and by the in-memory fake (tests).
 #[async_trait]
 pub trait ContainerApi: Send + Sync + 'static {
     /// Create + attach (before start, so no output is lost) + start.
-    async fn run(&self, spec: RunnerSpec) -> Result<RunningRunner, String>;
+    async fn run(&self, spec: RunnerSpec) -> Result<RunningRunner, RunnerRunError>;
+    /// Pull `image` from its registry (`/images/create`); resolves when the
+    /// pull stream completes. The T2 socket proxy allows this (IMAGES+POST).
+    async fn pull_image(&self, image: &str) -> Result<(), String>;
     async fn kill(&self, container_id: &str) -> Result<(), String>;
     /// Best-effort cleanup; idempotent.
     async fn remove(&self, container_id: &str) -> Result<(), String>;
@@ -348,7 +371,20 @@ impl ExecBackend for ContainerBackend {
             network_mode: self.config.network_mode.clone(),
         };
 
-        let running = self.api.run(spec).await?;
+        let running = match self.api.run(spec.clone()).await {
+            Ok(running) => running,
+            Err(RunnerRunError::ImageMissing(_)) => {
+                // Pull once, retry once. A second miss (or a pull failure)
+                // is terminal — no loop, no backoff: spawn latency is user-
+                // visible and the caller can retry.
+                self.api.pull_image(&self.config.image).await?;
+                self.api
+                    .run(spec)
+                    .await
+                    .map_err(RunnerRunError::into_message)?
+            }
+            Err(err) => return Err(err.into_message()),
+        };
         let container_id = running.container_id.clone();
         self.agents.lock().insert(
             id.clone(),
@@ -552,8 +588,9 @@ pub mod bollard_api {
         ContainerCreateBody, HostConfig, Mount, MountTypeEnum, MountVolumeOptions,
     };
     use bollard::query_parameters::{
-        AttachContainerOptionsBuilder, CreateContainerOptionsBuilder, KillContainerOptionsBuilder,
-        RemoveContainerOptionsBuilder, StartContainerOptions, WaitContainerOptionsBuilder,
+        AttachContainerOptionsBuilder, CreateContainerOptionsBuilder, CreateImageOptionsBuilder,
+        KillContainerOptionsBuilder, RemoveContainerOptionsBuilder, StartContainerOptions,
+        WaitContainerOptionsBuilder,
     };
     use bollard::Docker;
     use futures_util::StreamExt;
@@ -601,7 +638,7 @@ pub mod bollard_api {
 
     #[async_trait]
     impl ContainerApi for BollardContainerApi {
-        async fn run(&self, spec: RunnerSpec) -> Result<RunningRunner, String> {
+        async fn run(&self, spec: RunnerSpec) -> Result<RunningRunner, RunnerRunError> {
             let mut security_opt = vec!["no-new-privileges:true".to_string()];
             if let Some(json) = &spec.seccomp_json {
                 security_opt.push(format!("seccomp={json}"));
@@ -631,11 +668,21 @@ pub mod bollard_api {
             let options = CreateContainerOptionsBuilder::default()
                 .name(&spec.name)
                 .build();
-            let created = self
-                .docker
-                .create_container(Some(options), body)
-                .await
-                .map_err(|e| format!("create_container failed: {e}"))?;
+            let created = match self.docker.create_container(Some(options), body).await {
+                Ok(created) => created,
+                // 404 on create = image absent (name conflicts are 409) —
+                // classified so the backend can pull-and-retry once.
+                Err(bollard::errors::Error::DockerResponseServerError {
+                    status_code: 404,
+                    message,
+                }) => {
+                    return Err(RunnerRunError::ImageMissing(format!(
+                        "runner image {} not present on the daemon: {message}",
+                        spec.image
+                    )))
+                }
+                Err(e) => return Err(RunnerRunError::Other(format!("create_container failed: {e}"))),
+            };
             let container_id = created.id;
 
             // Attach BEFORE start so the first output bytes are never lost.
@@ -650,12 +697,12 @@ pub mod bollard_api {
                 .docker
                 .attach_container(&container_id, Some(attach_options))
                 .await
-                .map_err(|e| format!("attach_container failed: {e}"))?;
+                .map_err(|e| RunnerRunError::Other(format!("attach_container failed: {e}")))?;
 
             self.docker
                 .start_container(&container_id, None::<StartContainerOptions>)
                 .await
-                .map_err(|e| format!("start_container failed: {e}"))?;
+                .map_err(|e| RunnerRunError::Other(format!("start_container failed: {e}")))?;
 
             let (event_tx, event_rx) = mpsc::unbounded_channel::<RunnerEvent>();
             let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<Vec<u8>>();
@@ -709,6 +756,17 @@ pub mod bollard_api {
                 events: event_rx,
                 stdin: stdin_tx,
             })
+        }
+
+        async fn pull_image(&self, image: &str) -> Result<(), String> {
+            let options = CreateImageOptionsBuilder::default().from_image(image).build();
+            // Drain the progress stream to completion; any frame-level error
+            // aborts the pull (no partial-success semantics).
+            let mut stream = self.docker.create_image(Some(options), None, None);
+            while let Some(item) = stream.next().await {
+                item.map_err(|e| format!("pull {image} failed: {e}"))?;
+            }
+            Ok(())
         }
 
         async fn kill(&self, container_id: &str) -> Result<(), String> {
@@ -767,6 +825,10 @@ pub(crate) mod test_support {
         /// Handles for containers started through this fake, by container id.
         pub handles: Mutex<HashMap<String, FakeHandle>>,
         pub fail_run: Mutex<Option<String>>,
+        /// When true, `run` reports ImageMissing until `pull_image` succeeds.
+        pub missing_image: Mutex<bool>,
+        pub pulls: Mutex<Vec<String>>,
+        pub fail_pull: Mutex<Option<String>>,
         counter: Mutex<u64>,
     }
 
@@ -783,6 +845,9 @@ pub(crate) mod test_support {
                 removes: Mutex::new(Vec::new()),
                 handles: Mutex::new(HashMap::new()),
                 fail_run: Mutex::new(None),
+                missing_image: Mutex::new(false),
+                pulls: Mutex::new(Vec::new()),
+                fail_pull: Mutex::new(None),
                 counter: Mutex::new(0),
             })
         }
@@ -810,9 +875,15 @@ pub(crate) mod test_support {
 
     #[async_trait]
     impl ContainerApi for FakeContainerApi {
-        async fn run(&self, spec: RunnerSpec) -> Result<RunningRunner, String> {
+        async fn run(&self, spec: RunnerSpec) -> Result<RunningRunner, RunnerRunError> {
+            if *self.missing_image.lock() {
+                return Err(RunnerRunError::ImageMissing(format!(
+                    "No such image: {}",
+                    spec.image
+                )));
+            }
             if let Some(err) = self.fail_run.lock().clone() {
-                return Err(err);
+                return Err(RunnerRunError::Other(err));
             }
             let container_id = {
                 let mut counter = self.counter.lock();
@@ -834,6 +905,15 @@ pub(crate) mod test_support {
                 events: event_rx,
                 stdin: stdin_tx,
             })
+        }
+
+        async fn pull_image(&self, image: &str) -> Result<(), String> {
+            if let Some(err) = self.fail_pull.lock().clone() {
+                return Err(err);
+            }
+            self.pulls.lock().push(image.to_string());
+            *self.missing_image.lock() = false;
+            Ok(())
         }
 
         async fn kill(&self, container_id: &str) -> Result<(), String> {
@@ -1136,6 +1216,42 @@ mod tests {
         assert!(backend.set_running("ghost").await.is_err());
         assert!(backend.set_failed("ghost").await.is_err());
         assert!(backend.status("ghost").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn missing_image_is_pulled_once_then_spawn_retries() {
+        let api = FakeContainerApi::new();
+        *api.missing_image.lock() = true;
+        let backend = ContainerBackend::new(api.clone(), test_config(Some("v")));
+        let emitter = RecordingAgentEmitter::new();
+        let id = spawn_with_events(backend.as_ref(), emitter.clone(), spawn_config("pull-1"))
+            .await
+            .expect("spawn after auto-pull");
+        assert_eq!(id, "pull-1");
+        assert_eq!(
+            api.pulls.lock().clone(),
+            vec!["ghcr.io/example/cognia-runner:test".to_string()]
+        );
+        // The retry actually created the runner.
+        assert_eq!(api.specs.lock().len(), 1);
+        assert_eq!(backend.is_running(&id).await, Ok(true));
+    }
+
+    #[tokio::test]
+    async fn failed_pull_fails_the_spawn() {
+        let api = FakeContainerApi::new();
+        *api.missing_image.lock() = true;
+        *api.fail_pull.lock() = Some("registry unreachable".into());
+        let backend = ContainerBackend::new(api.clone(), test_config(Some("v")));
+        let emitter = RecordingAgentEmitter::new();
+        let err = spawn_with_events(backend.as_ref(), emitter.clone(), spawn_config("pull-2"))
+            .await
+            .unwrap_err();
+        assert!(err.contains("registry unreachable"), "{err}");
+        assert!(api.pulls.lock().is_empty());
+        let events = emitter.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1["state"], "Failed");
     }
 
     #[tokio::test]
