@@ -49,6 +49,7 @@ members = [
   "crates/cognia-tts",
   "crates/cognia-remote-control",
   "crates/cognia-gateway",
+  "crates/cognia-ccswitch",
 ]
 exclude = [
   "services/signaling-server",

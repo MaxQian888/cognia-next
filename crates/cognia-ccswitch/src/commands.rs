@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::fs_atomic::{self, AtomicWriteError, AtomicWritePlan, DRIFT_DETECTED_TAG};
+use cognia_core::fs_atomic::{self, AtomicWriteError, AtomicWritePlan, DRIFT_DETECTED_TAG};
 
 use super::db::{
     counts, list_mcp_servers as db_list_mcp_servers, list_prompts as db_list_prompts,
@@ -436,7 +436,7 @@ fn apply_gemini_env_updates(
 pub fn write_opencode_auth_env(
     env_updates: HashMap<String, Option<String>>,
 ) -> Result<OpencodeAuthWriteResult, String> {
-    let path = crate::subscription::opencode::discovery::opencode_auth_file_path()
+    let path = cognia_subscription::opencode::discovery::opencode_auth_file_path()
         .ok_or_else(|| "could not resolve OpenCode auth.json path".to_string())?;
     let dir = path
         .parent()

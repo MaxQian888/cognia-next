@@ -1784,6 +1784,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-ccswitch"
+version = "0.1.0"
+dependencies = [
+ "cognia-core",
+ "cognia-subscription",
+ "dirs 6.0.0",
+ "log",
+ "notify",
+ "parking_lot",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml_edit 0.22.27",
+]
+
+[[package]]
 name = "cognia-cli"
 version = "0.1.0"
 dependencies = [
@@ -1964,6 +1984,7 @@ dependencies = [
  "chrono",
  "clap",
  "cognia-automation",
+ "cognia-ccswitch",
  "cognia-connectors",
  "cognia-core",
  "cognia-gateway",

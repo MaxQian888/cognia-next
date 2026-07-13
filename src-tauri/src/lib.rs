@@ -12,7 +12,9 @@ pub use cognia_automation::automation;
 mod browser;
 mod canvas;
 mod capture;
-mod ccswitch;
+// ADR-0067 follow-up — extracted to `crates/cognia-ccswitch`; re-aliased so
+// `ccswitch::…` (generate_handler! + .manage()) resolves unchanged.
+pub use cognia_ccswitch as ccswitch;
 mod claude;
 mod cli_bridge;
 // ADR-0067 Phase 6 — extracted to cognia-core; re-aliased so `crate::command_error`
