@@ -74,6 +74,9 @@ cognia-secrets = { path = "../crates/cognia-secrets" }
 # ADR-0067 Tier B prep — proxy_config foundation (state + detection + WSS
 # dialer); `proxy_config/` stays as an app-side facade for the command shells.
 cognia-net = { path = "../crates/cognia-net" }
+# ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased
+# as `crate::terminal`; commands referenced from generate_handler!.
+cognia-terminal = { path = "../crates/cognia-terminal" }
 # ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
 # uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/

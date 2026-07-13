@@ -68,7 +68,10 @@ mod shell;
 mod skills;
 mod subscription;
 mod supervision_backoff;
-mod terminal;
+// ADR-0067 Tier B — extracted to `crates/cognia-terminal`; re-aliased so
+// `crate::terminal::…` (companion_api rpc/ws_terminal, plugin_api cli_exec,
+// generate_handler! + .manage()) resolves unchanged.
+pub use cognia_terminal as terminal;
 pub use cognia_scheduling::timing;
 mod tts;
 mod twin;
@@ -193,6 +196,11 @@ pub fn run() {
     // ADR-0067 Phase 4 — install the vector credential store before any command
     // (or the managed VectorRegistry) can touch provider credentials.
     vector::install_credential_store(Box::new(KeyringVectorCredentialStore));
+
+    // ADR-0067 Tier B — the extracted terminal crate can't reach cli_bridge's
+    // managed-download registry; hand it the snapshot provider before any
+    // terminal can spawn.
+    terminal::commands::set_managed_cli_dirs_provider(cli_bridge::detect::managed_dirs_snapshot);
 
     let mut builder = tauri::Builder::default();
 

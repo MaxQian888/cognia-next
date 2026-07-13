@@ -1,0 +1,38 @@
+# ADR-0067 Tier B — integrated terminal subsystem (ADR-0031/0033) extracted
+# from app_lib's `terminal/` module. Isolates `portable-pty`. Re-aliased as
+# `crate::terminal`; its `commands::terminal_*` / `exec::terminal_exec` /
+# `complete::…` / `headless::…` shells are referenced from generate_handler!.
+# The one upward edge (cli_bridge::detect::managed_dirs_snapshot) is inverted:
+# the app shell registers a provider via `set_managed_cli_dirs_provider` at
+# startup.
+[package]
+name = "cognia-terminal"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Integrated terminal subsystem — portable-pty + xterm.js bridge (ADR-0031/0033)."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_terminal"
+path = "src/lib.rs"
+
+[dependencies]
+# Sandbox launch policy (bwrap/sandbox-exec prefixes, dangerous-env filter).
+cognia-automation = { path = "../cognia-automation" }
+# perf span guards (terminal.exec).
+cognia-instrument = { path = "../cognia-instrument" }
+tauri = { version = "=2.11.1" }
+portable-pty = "0.8"
+parking_lot = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["process", "sync", "io-util", "time"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+dirs = "6"
+log = "0.4"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"

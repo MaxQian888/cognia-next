@@ -35,7 +35,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 // Re-export the public session API so downstream Rust consumers (e.g.
-// the LAN-only WS handler in `lib/api/v1/`) can `use crate::terminal::*`
+// the LAN-only WS handler in `lib/api/v1/`) can `use …::terminal::*`
 // without reaching into a sub-module. The unused-import lint fires for
 // the types this crate itself doesn't reference today — they're still
 // part of the module's stable surface.

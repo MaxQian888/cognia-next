@@ -39,6 +39,8 @@ members = [
   # connectors/terminal/plugin_api extractions.
   "crates/cognia-secrets",
   "crates/cognia-net",
+  # ADR-0067 Tier-B subsystem crates.
+  "crates/cognia-terminal",
 ]
 exclude = [
   "services/signaling-server",

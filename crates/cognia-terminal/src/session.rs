@@ -31,7 +31,7 @@ use uuid::Uuid;
 use super::integration::{self, ShellKind};
 use super::osc633::{IntegrationEvent, Osc633Parser};
 use super::replay::ReplayBuffer;
-use crate::sandbox::launcher::LaunchScope;
+use cognia_automation::sandbox::launcher::LaunchScope;
 
 /// Where the bytes ultimately came from. `Local` = Tauri Channel
 /// consumer in the same process; `Remote` = LAN WebSocket consumer
@@ -394,7 +394,7 @@ fn sandbox_home_readable() -> Vec<String> {
 /// their env through unchanged.
 fn sandbox_scrub_env(sandboxed: bool, env: &HashMap<String, String>) -> Vec<(&String, &String)> {
     env.iter()
-        .filter(|(k, _)| !(sandboxed && crate::sandbox::env::is_dangerous_env_key(k)))
+        .filter(|(k, _)| !(sandboxed && cognia_automation::sandbox::env::is_dangerous_env_key(k)))
         .collect()
 }
 
@@ -432,7 +432,7 @@ fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String
         // them — mirrors the one-shot Linux backend.
         let empty_dir = std::env::temp_dir().join("cognia-sandbox-empty");
         let _ = std::fs::create_dir_all(&empty_dir);
-        Ok(Some(crate::sandbox::launcher::bwrap_prefix(
+        Ok(Some(cognia_automation::sandbox::launcher::bwrap_prefix(
             &bwrap.to_string_lossy(),
             &scope,
             &empty_dir,
@@ -443,7 +443,7 @@ fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String
         if !Path::new("/usr/bin/sandbox-exec").exists() {
             return Err("sandboxed terminal requested but /usr/bin/sandbox-exec is missing".into());
         }
-        Ok(Some(crate::sandbox::launcher::sandbox_exec_prefix(&scope)))
+        Ok(Some(cognia_automation::sandbox::launcher::sandbox_exec_prefix(&scope)))
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {

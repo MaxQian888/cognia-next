@@ -190,7 +190,7 @@ impl Default for ReplayBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal::osc633::IntegrationEvent;
+    use crate::osc633::IntegrationEvent;
 
     fn data(n: usize) -> TerminalEvent {
         TerminalEvent::Data {

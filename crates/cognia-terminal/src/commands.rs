@@ -13,6 +13,7 @@
 //! every retainable session truth lives in the store.
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -33,9 +34,17 @@ pub(super) fn resolve_script_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
             return dir;
         }
     }
-    // Dev fallback — the file may be a relative path from CARGO_MANIFEST_DIR.
+    // Dev fallback — the scripts live under src-tauri/resources/terminal/;
+    // CARGO_MANIFEST_DIR is crates/cognia-terminal, two hops below the
+    // workspace root (ADR-0067 extraction).
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest.join("resources").join("terminal")
+    manifest
+        .ancestors()
+        .nth(2)
+        .map(|root| root.join("src-tauri"))
+        .unwrap_or(manifest)
+        .join("resources")
+        .join("terminal")
 }
 
 /// Locate a directory that contains the `cognia` plugin-author CLI shipped
@@ -54,9 +63,10 @@ fn resolve_cli_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
             return Some(candidate);
         }
     }
-    // Dev fallback — the workspace target dir, sibling of `src-tauri/`.
+    // Dev fallback — the workspace target dir at the repo root;
+    // CARGO_MANIFEST_DIR is crates/cognia-terminal, two hops below it.
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let root = manifest.parent()?;
+    let root = manifest.ancestors().nth(2)?;
     for profile in ["release", "debug"] {
         let dir = root.join("target").join(profile);
         if dir.join(cognia_bin_filename()).exists() {
@@ -72,8 +82,28 @@ fn resolve_cli_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 ///     install wins), then a dev/bundled `cli` dir if present;
 ///   * append  — `~/.cargo/bin` as a low-priority fallback for a
 ///     `cargo install`ed copy.
+/// ADR-0067 Tier-B inversion: the app-managed CLI-dir registry lives app-side
+/// in `cli_bridge::detect`. The app shell registers a snapshot provider at
+/// startup (before any terminal spawn); when unset — crate unit tests, or a
+/// shell that has no managed downloads — there are simply no managed dirs.
+static MANAGED_CLI_DIRS_PROVIDER: OnceLock<fn() -> Vec<PathBuf>> = OnceLock::new();
+
+/// Register the app-side provider for `cli_bridge`-managed CLI directories.
+/// First registration wins; later calls are no-ops (the provider is a plain
+/// fn pointer, so there is nothing to tear down).
+pub fn set_managed_cli_dirs_provider(provider: fn() -> Vec<PathBuf>) {
+    let _ = MANAGED_CLI_DIRS_PROVIDER.set(provider);
+}
+
+fn managed_dirs_snapshot() -> Vec<PathBuf> {
+    MANAGED_CLI_DIRS_PROVIDER
+        .get()
+        .map(|provider| provider())
+        .unwrap_or_default()
+}
+
 pub(super) fn build_cli_path_injection<R: Runtime>(app: &AppHandle<R>) -> PathInjection {
-    let mut prepend = crate::cli_bridge::detect::managed_dirs_snapshot();
+    let mut prepend = managed_dirs_snapshot();
     if let Some(dir) = resolve_cli_dir(app) {
         prepend.push(dir);
     }

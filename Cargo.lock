@@ -1871,6 +1871,7 @@ dependencies = [
  "cognia-scheduling",
  "cognia-secrets",
  "cognia-signaling-core",
+ "cognia-terminal",
  "cognia-vector",
  "core-foundation 0.10.1",
  "core-foundation 0.9.4",
@@ -2063,6 +2064,24 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "cognia-terminal"
+version = "0.1.0"
+dependencies = [
+ "cognia-automation",
+ "cognia-instrument",
+ "dirs 6.0.0",
+ "log",
+ "parking_lot",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
