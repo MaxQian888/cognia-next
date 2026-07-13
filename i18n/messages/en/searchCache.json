@@ -8,5 +8,6 @@
   "maxEntries": "Max entries",
   "misses": "Misses",
   "title": "Cache",
-  "ttl": "TTL"
+  "ttl": "TTL",
+  "ttlMinutes": "{minutes} min"
 }

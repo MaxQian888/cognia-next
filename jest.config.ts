@@ -143,6 +143,7 @@ const projectCommon: Config = {
     "^@cognia/plugin-sdk/define/(.*)$": "<rootDir>/packages/plugin-sdk/src/define/define-$1",
     "^@cognia/plugin-sdk(.*)$": "<rootDir>/packages/plugin-sdk/src$1",
     "^@cognia/redact(.*)$": "<rootDir>/packages/redact/src$1",
+    "^@cognia/web-search(.*)$": "<rootDir>/packages/web-search/src$1",
 
     // cheerio's package exports prefer the ESM browser build under jsdom.
     // The HTML parser uses dynamic import("cheerio"), so map Jest to the CJS
@@ -286,6 +287,8 @@ const globalConfig: Config = {
     // redact was lifted out of lib/twin/ingest (coverage-collected), so keep
     // it collected.
     "packages/redact/src/**/*.{ts,tsx}",
+    // web-search was lifted out of lib/search (coverage-collected).
+    "packages/web-search/src/**/*.{ts,tsx}",
     "!packages/plugin-sdk/src/context/**/*.ts",
     "!packages/plugin-sdk/src/hooks/index.ts",
     "!packages/plugin-sdk/src/permissions/index.ts",
@@ -340,7 +343,7 @@ const globalConfig: Config = {
     // has its own co-located test, but exercising every dispatch leg here
     // would just duplicate those — it's a routing surface with very low
     // branch density.
-    "!lib/search/search-type-router.ts",
+    "!packages/web-search/src/search-type-router.ts",
     // Storybook stories are dev-preview artifacts, not production source — they
     // would otherwise count as uncovered code and sink the ≥90% gate.
     "!**/*.stories.{js,jsx,ts,tsx}",

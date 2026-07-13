@@ -1,0 +1,28 @@
+{
+  "name": "@cognia/web-search",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cognia framework-agnostic web-search core: 11 provider adapters (Tavily/Exa/Brave/…), unified search service with health-ordered fallback, result cache, type router, query optimizer, source verification, and the standalone cited-answer pipeline.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "cognia-source": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "ai": "*"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

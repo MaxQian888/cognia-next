@@ -16,7 +16,7 @@
 import { useEffect } from "react"
 import { installConnectorRuntime } from "@/lib/connectors/bootstrap/install-connector-runtime"
 
-export function ConnectorBusProvider({ children }: { children: React.ReactNode }) {
+export function ConnectorBusProvider({ children }: { children?: React.ReactNode }) {
   useEffect(() => installConnectorRuntime(), [])
 
   return <>{children}</>

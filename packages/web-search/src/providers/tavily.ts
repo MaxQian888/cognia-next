@@ -7,7 +7,7 @@
  * functional surface as Cognia's port.
  */
 
-import type { SearchOptions, SearchResponse, SearchResult } from "@/lib/search/types"
+import type { SearchOptions, SearchResponse, SearchResult } from "../types"
 import { tavilyFetch } from "../proxy-search-fetch"
 import { log } from "../log"
 

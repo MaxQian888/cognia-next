@@ -7,7 +7,7 @@
  * UI components compile unchanged.
  */
 
-import type { SearchProviderSettings, SearchProviderType } from "@/lib/search/types"
+import type { SearchProviderSettings, SearchProviderType } from "./types"
 import { testProviderConnection as testProviderConnectionDirect } from "./search-service"
 
 export async function testProviderConnection(

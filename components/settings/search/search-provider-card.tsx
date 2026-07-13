@@ -28,7 +28,7 @@ import {
   isProviderConfigured,
   validateApiKey,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import { cn } from "@/lib/utils"
 import { createLogger } from "@/lib/logging"
 
@@ -320,8 +320,12 @@ export function SearchProviderCard({
               </div>
               {config.pricing && (
                 <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                  {config.pricing.freeCredits && <>{config.pricing.freeCredits} free • </>}
-                  {config.pricing.pricePerSearch && <>${config.pricing.pricePerSearch}/search</>}
+                  {config.pricing.freeCredits && (
+                    <>{t("pricingFreeCredits", { credits: config.pricing.freeCredits })} </>
+                  )}
+                  {config.pricing.pricePerSearch && (
+                    <>{t("pricingPerSearch", { price: config.pricing.pricePerSearch })}</>
+                  )}
                 </span>
               )}
             </div>

@@ -3,7 +3,7 @@
  * LRU cache for search results with TTL support
  */
 
-import type { SearchResponse, SearchOptions, SearchProviderType } from "@/lib/search/types"
+import type { SearchResponse, SearchOptions, SearchProviderType } from "./types"
 import { log } from "./log"
 
 export interface SearchCacheOptions {

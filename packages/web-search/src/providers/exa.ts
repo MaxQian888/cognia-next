@@ -3,7 +3,7 @@
  * Neural search engine with semantic understanding
  */
 
-import type { SearchOptions, SearchResponse, SearchResult } from "@/lib/search/types"
+import type { SearchOptions, SearchResponse, SearchResult } from "../types"
 import { exaFetch } from "../proxy-search-fetch"
 import { log } from "../log"
 

@@ -48,5 +48,7 @@
   "selected": "已选择",
   "sourceNamePlaceholder": "来源名称",
   "testConnection": "测试",
-  "title": "联网搜索"
+  "title": "联网搜索",
+  "pricingFreeCredits": "{credits} 次免费 •",
+  "pricingPerSearch": "${price}/次"
 }

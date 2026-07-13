@@ -14714,7 +14714,8 @@
     "maxEntries": "Max entries",
     "misses": "Misses",
     "title": "Cache",
-    "ttl": "TTL"
+    "ttl": "TTL",
+    "ttlMinutes": "{minutes} min"
   },
   "searchDefaults": {
     "academic": "Academic",
@@ -14799,6 +14800,8 @@
     "maxResults": "Max results",
     "noMatchingProviders": "No matching providers",
     "noProviders": "No providers configured",
+    "pricingFreeCredits": "{credits} free •",
+    "pricingPerSearch": "${price}/search",
     "primary": "Primary",
     "priority": "Priority",
     "providers": "Search providers",
@@ -14815,6 +14818,7 @@
   "searchUsage": {
     "avgResponse": "Avg time",
     "description": "Per-provider counts and response times.",
+    "errCount": "{count} err",
     "errors": "errors",
     "mostUsed": "Most used",
     "noData": "No usage data yet.",

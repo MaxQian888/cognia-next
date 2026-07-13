@@ -48,5 +48,7 @@
   "selected": "selected",
   "sourceNamePlaceholder": "Source name",
   "testConnection": "Test",
-  "title": "Web search"
+  "title": "Web search",
+  "pricingFreeCredits": "{credits} free •",
+  "pricingPerSearch": "${price}/search"
 }

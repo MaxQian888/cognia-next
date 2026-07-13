@@ -13,7 +13,7 @@
  * reload, which is fine for a transient reliability signal.
  */
 
-import type { SearchProviderType, SearchProviderHealth } from "@/lib/search/types"
+import type { SearchProviderType, SearchProviderHealth } from "./types"
 
 export type CircuitState = "closed" | "open" | "half-open"
 

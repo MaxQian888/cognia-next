@@ -11,13 +11,16 @@ import {
   SEARCH_PROVIDERS,
   createDefaultSearchUsageStats,
   type SearchProviderType,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.search.usage")
 
 export function SearchUsagePanel() {
   const tu = useTranslations("searchSettings.usage")
+  // Live top-level namespace (i18n/messages/*/searchUsage.json) — the dotted
+  // "searchSettings.usage" namespace above predates the split-source layout.
+  const tUsageNs = useTranslations("searchUsage")
   const stats = useSettingsStore(
     (s) => s.settings?.searchUsageStats ?? createDefaultSearchUsageStats()
   )
@@ -129,7 +132,7 @@ export function SearchUsagePanel() {
                         </Badge>
                         {errors > 0 && (
                           <Badge variant="destructive" className="text-[10px] px-1 py-0">
-                            {errors} err
+                            {tUsageNs("errCount", { count: errors })}
                           </Badge>
                         )}
                       </div>

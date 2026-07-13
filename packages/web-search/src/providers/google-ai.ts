@@ -4,7 +4,7 @@
  * https://ai.google.dev/gemini-api/docs/google-search
  */
 
-import type { SearchOptions, SearchResponse, SearchResult } from "@/lib/search/types"
+import type { SearchOptions, SearchResponse, SearchResult } from "../types"
 import { googleAIFetch } from "../proxy-search-fetch"
 import { log } from "../log"
 

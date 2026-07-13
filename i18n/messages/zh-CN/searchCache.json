@@ -8,5 +8,6 @@
   "maxEntries": "最大条目数",
   "misses": "未命中",
   "title": "缓存",
-  "ttl": "有效期"
+  "ttl": "有效期",
+  "ttlMinutes": "{minutes} 分钟"
 }

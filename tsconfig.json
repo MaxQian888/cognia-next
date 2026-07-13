@@ -52,7 +52,9 @@
       "@cognia/plugin-sdk/define/*": ["./packages/plugin-sdk/src/define/define-*.ts"],
       "@cognia/plugin-sdk/*": ["./packages/plugin-sdk/src/*"],
       "@cognia/redact": ["./packages/redact/src/index.ts"],
-      "@cognia/redact/*": ["./packages/redact/src/*"]
+      "@cognia/redact/*": ["./packages/redact/src/*"],
+      "@cognia/web-search": ["./packages/web-search/src/index.ts"],
+      "@cognia/web-search/*": ["./packages/web-search/src/*"]
     }
   },
   "include": [

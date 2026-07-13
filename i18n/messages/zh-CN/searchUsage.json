@@ -6,5 +6,6 @@
   "noData": "暂无数据。",
   "reset": "重置",
   "title": "使用统计",
-  "totalSearches": "总搜索数"
+  "totalSearches": "总搜索数",
+  "errCount": "{count} 个错误"
 }

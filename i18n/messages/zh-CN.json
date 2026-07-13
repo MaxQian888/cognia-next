@@ -14714,7 +14714,8 @@
     "maxEntries": "最大条目数",
     "misses": "未命中",
     "title": "缓存",
-    "ttl": "有效期"
+    "ttl": "有效期",
+    "ttlMinutes": "{minutes} 分钟"
   },
   "searchDefaults": {
     "academic": "学术",
@@ -14799,6 +14800,8 @@
     "maxResults": "最大结果数",
     "noMatchingProviders": "无匹配的 Provider",
     "noProviders": "尚未配置任何 Provider",
+    "pricingFreeCredits": "{credits} 次免费 •",
+    "pricingPerSearch": "${price}/次",
     "primary": "主要",
     "priority": "优先级",
     "providers": "搜索 Providers",
@@ -14815,6 +14818,7 @@
   "searchUsage": {
     "avgResponse": "平均耗时",
     "description": "各 Provider 的调用次数与响应时间。",
+    "errCount": "{count} 个错误",
     "errors": "错误",
     "mostUsed": "最常用",
     "noData": "暂无数据。",

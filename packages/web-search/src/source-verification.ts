@@ -10,7 +10,7 @@
  * whereas the UI-side types use a slightly different taxonomy.
  */
 
-import type { SearchResult, SearchResponse } from "@/lib/search/types"
+import type { SearchResult, SearchResponse } from "./types"
 
 export type CredibilityLevel = "high" | "medium" | "low" | "unknown"
 

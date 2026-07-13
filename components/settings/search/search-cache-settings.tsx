@@ -17,14 +17,17 @@ import {
 } from "@/components/ui/select"
 import { SettingsToggle } from "@/components/settings/common/settings-section"
 import { useSettingsStore } from "@/stores/settings"
-import { getSearchCache } from "@/lib/search/search-cache"
-import { DEFAULT_SEARCH_PROVIDER_SETTINGS } from "@/lib/search/types"
+import { getSearchCache } from "@cognia/web-search/search-cache"
+import { DEFAULT_SEARCH_PROVIDER_SETTINGS } from "@cognia/web-search/types"
 import { createLogger } from "@/lib/logging"
 
 const log = createLogger("settings.search.cache")
 
 export function SearchCacheSettings() {
   const tc = useTranslations("searchSettings.cache")
+  // Live top-level namespace (i18n/messages/*/searchCache.json) — the dotted
+  // "searchSettings.cache" namespace above predates the split-source layout.
+  const tCacheNs = useTranslations("searchCache")
   const [stats, setStats] = useState(() => getSearchCache().getStats())
   const [selectedProvider, setSelectedProvider] = useState<string>("all")
 
@@ -90,7 +93,7 @@ export function SearchCacheSettings() {
         <>
           <div className="space-y-2">
             <Label className="text-sm">
-              {tc("ttl")}: {ttlMinutes} min
+              {tc("ttl")}: {tCacheNs("ttlMinutes", { minutes: ttlMinutes })}
             </Label>
             <Slider
               value={[searchCacheTTL]}

@@ -6,5 +6,6 @@
   "noData": "No usage data yet.",
   "reset": "Reset",
   "title": "Usage statistics",
-  "totalSearches": "Total"
+  "totalSearches": "Total",
+  "errCount": "{count} err"
 }

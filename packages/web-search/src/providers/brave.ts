@@ -10,7 +10,7 @@ import type {
   SearchResult,
   SearchImage,
   SearchRecency,
-} from "@/lib/search/types"
+} from "../types"
 import { braveFetch } from "../proxy-search-fetch"
 import { log } from "../log"
 

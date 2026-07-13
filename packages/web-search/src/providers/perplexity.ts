@@ -3,7 +3,7 @@
  * High-quality search with recency and geo filters
  */
 
-import type { SearchOptions, SearchResponse, SearchResult, SearchRecency } from "@/lib/search/types"
+import type { SearchOptions, SearchResponse, SearchResult, SearchRecency } from "../types"
 import { perplexityFetch } from "../proxy-search-fetch"
 import { log } from "../log"
 

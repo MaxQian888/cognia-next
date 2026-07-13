@@ -9,8 +9,8 @@ import type {
   SearchType,
   SearchProviderType,
   SearchProviderSettings,
-} from "@/lib/search/types"
-import { getEnabledProviders } from "@/lib/search/types"
+} from "./types"
+import { getEnabledProviders } from "./types"
 
 import {
   searchWithBrave,
