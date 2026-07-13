@@ -257,6 +257,11 @@ describe("agent-team onRehydrateStorage stale-status reset", () => {
     expect(teams.t_done?.status).toBe("completed")
   })
 
+  it("rehydrates without throwing when there is no persisted state", async () => {
+    localStorage.clear()
+    await expect(useAgentTeamStore.persist.rehydrate()).resolves.not.toThrow()
+  })
+
   it("purges only the requested account bucket", () => {
     localStorage.setItem("cognia-agent-teams:acct_a", "A")
     localStorage.setItem("cognia-agent-teams:acct_b", "B")

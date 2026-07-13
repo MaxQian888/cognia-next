@@ -86,6 +86,18 @@ export function resetStaleTeamStatuses(
   }
 }
 
+/**
+ * `onRehydrateStorage` callback body — resets stale team statuses on every
+ * boot. Extracted (and exported) so both branches are directly testable; the
+ * `!state` guard covers a rehydrate that restored nothing.
+ */
+export function rehydrateResetStaleTeams(
+  state: { teams?: Record<string, { status?: string }> } | undefined
+): void {
+  if (!state) return
+  resetStaleTeamStatuses(state.teams)
+}
+
 interface V1DefaultConfigShape {
   governancePolicy?: unknown
   capabilities?: unknown
@@ -231,10 +243,7 @@ export const useAgentTeamStore = create<AgentTeamState>()(
       // `migrate` resets stale statuses only across a version bump. A plain
       // same-version reload skips it, so a team persisted mid-run would
       // rehydrate as a phantom "executing". Reset again here on EVERY boot.
-      onRehydrateStorage: () => (state) => {
-        if (!state) return
-        resetStaleTeamStatuses(state.teams)
-      },
+      onRehydrateStorage: () => rehydrateResetStaleTeams,
     }
   )
 )

@@ -12,7 +12,11 @@
 
 import "fake-indexeddb/auto"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
-import { migrateAgentTeamPersisted, resetStaleTeamStatuses } from "./store"
+import {
+  migrateAgentTeamPersisted,
+  resetStaleTeamStatuses,
+  rehydrateResetStaleTeams,
+} from "./store"
 
 describe("migrateAgentTeamPersisted", () => {
   it("returns non-object input as-is", () => {
@@ -144,5 +148,15 @@ describe("migrateAgentTeamPersisted", () => {
   it("resetStaleTeamStatuses tolerates missing / malformed maps", () => {
     expect(() => resetStaleTeamStatuses(undefined)).not.toThrow()
     expect(() => resetStaleTeamStatuses({ x: {} as { status?: string } })).not.toThrow()
+  })
+
+  it("rehydrateResetStaleTeams resets team statuses and no-ops on a missing state", () => {
+    // No-op branch: a rehydrate that restored nothing.
+    expect(() => rehydrateResetStaleTeams(undefined)).not.toThrow()
+    // Reset branch.
+    const state = { teams: { a: { status: "executing" }, b: { status: "completed" } } }
+    rehydrateResetStaleTeams(state)
+    expect(state.teams.a.status).toBe("idle")
+    expect(state.teams.b.status).toBe("completed")
   })
 })
