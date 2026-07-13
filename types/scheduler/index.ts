@@ -83,6 +83,11 @@ export type TaskExecutionTerminalReason =
   | "max-runs-reached"
   | "ended"
   | "auto-paused"
+  // The app restarted while this execution was still `running`/`pending`. Its
+  // in-memory controller did not survive, so a boot reconcile cancels the
+  // orphaned row instead of leaving it "running" forever (see
+  // `SchedulerDatabase.interruptStaleExecutions`).
+  | "interrupted-on-restart"
 
 /**
  * How a due fire interacts with an already-running execution of the same task.

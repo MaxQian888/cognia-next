@@ -296,6 +296,31 @@ class SchedulerDatabase extends Dexie {
     return oldIds.length
   }
 
+  /**
+   * Boot reconciliation: flip orphaned `running` / `pending` executions to
+   * `cancelled`. Their in-memory controllers (`runningByTask`,
+   * `executionControllers`) live only for the process that started them, so a
+   * reload or crash leaves the Dexie row stuck "running" forever — the missed-
+   * task sweep reconciles *tasks*, never *executions*. Mirrors
+   * `interruptBackgroundTasksOnBoot` for the scheduler's execution table.
+   *
+   * Returns the number of rows reconciled. Called once at scheduler startup.
+   */
+  async interruptStaleExecutions(now: Date = new Date()): Promise<number> {
+    const nowIso = now.toISOString()
+    const stale = await this.executions.where("status").anyOf("running", "pending").toArray()
+    if (stale.length === 0) return 0
+    const patched = stale.map((e) => ({
+      ...e,
+      status: "cancelled" as const,
+      terminalReason: "interrupted-on-restart" as const,
+      error: e.error ?? "Interrupted by app restart",
+      completedAt: e.completedAt ?? nowIso,
+    }))
+    await this.executions.bulkPut(patched)
+    return patched.length
+  }
+
   // ========== Statistics ==========
 
   /**

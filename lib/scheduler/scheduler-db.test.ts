@@ -276,6 +276,42 @@ describe("SchedulerDatabase", () => {
       expect(remaining.length).toBe(1)
       expect(remaining[0].id).toBe("recent-exec")
     })
+
+    it("interruptStaleExecutions cancels orphaned running/pending rows and leaves terminal ones", async () => {
+      await schedulerDb.createExecution(
+        createMockExecution("task-boot", { id: "run-1", status: "running", completedAt: undefined })
+      )
+      await schedulerDb.createExecution(
+        createMockExecution("task-boot", {
+          id: "pend-1",
+          status: "pending",
+          completedAt: undefined,
+        })
+      )
+      await schedulerDb.createExecution(
+        createMockExecution("task-boot", { id: "done-1", status: "completed" })
+      )
+
+      const reconciled = await schedulerDb.interruptStaleExecutions()
+      expect(reconciled).toBe(2)
+
+      const run = await schedulerDb.getExecution("run-1")
+      const pend = await schedulerDb.getExecution("pend-1")
+      const done = await schedulerDb.getExecution("done-1")
+      expect(run!.status).toBe("cancelled")
+      expect(run!.terminalReason).toBe("interrupted-on-restart")
+      expect(run!.completedAt).toBeInstanceOf(Date)
+      expect(pend!.status).toBe("cancelled")
+      // A terminal row is never touched.
+      expect(done!.status).toBe("completed")
+    })
+
+    it("interruptStaleExecutions is a no-op when nothing is running", async () => {
+      await schedulerDb.createExecution(
+        createMockExecution("task-boot", { id: "done-2", status: "completed" })
+      )
+      expect(await schedulerDb.interruptStaleExecutions()).toBe(0)
+    })
   })
 
   describe("Statistics", () => {

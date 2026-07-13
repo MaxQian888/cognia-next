@@ -45,6 +45,7 @@ jest.mock("./scheduler-db", () => ({
     updateExecution: jest.fn().mockResolvedValue(undefined),
     getTaskExecutions: jest.fn().mockResolvedValue([]),
     cleanupOldExecutions: jest.fn().mockResolvedValue(0),
+    interruptStaleExecutions: jest.fn().mockResolvedValue(0),
   },
 }))
 
@@ -106,6 +107,11 @@ describe("TaskScheduler", () => {
       mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([])
       await initTaskScheduler()
       expect(mockSchedulerDb.getTasksByStatus).toHaveBeenCalledWith("active")
+    })
+
+    it("reconciles stale executions once on boot before scheduling", async () => {
+      await initTaskScheduler()
+      expect(mockSchedulerDb.interruptStaleExecutions).toHaveBeenCalledTimes(1)
     })
   })
 

@@ -116,6 +116,9 @@ class TaskSchedulerImpl {
   private queues: Map<string, QueuedStart[]> = new Map()
   private retryChains: Set<string> = new Set()
   private isInitialized = false
+  /** Guards the one-shot boot reconcile so multiple authority transitions in a
+   * single process don't re-cancel executions repeatedly. */
+  private staleExecutionsReconciled = false
   private checkInterval: ReturnType<typeof setInterval> | null = null
   private cleanupInterval: ReturnType<typeof setInterval> | null = null
   private leaderUnsubscribe: (() => void) | null = null
@@ -252,6 +255,24 @@ class TaskSchedulerImpl {
    * Schedule all active tasks (called on init and when becoming leader)
    */
   private async scheduleAllActiveTasks(): Promise<void> {
+    // Boot reconcile (once per process, at the first authority transition):
+    // cancel executions left `running`/`pending` by a previous process. Their
+    // in-memory controllers didn't survive the reload/crash, so the Dexie rows
+    // would otherwise show "running" forever. Only the timing authority reaches
+    // this method (daemon, or the leader tab), so a non-leader tab can never
+    // cancel the live leader's in-flight executions.
+    if (!this.staleExecutionsReconciled) {
+      this.staleExecutionsReconciled = true
+      try {
+        const reconciled = await schedulerDb.interruptStaleExecutions()
+        if (reconciled > 0) {
+          log.info(`Reconciled ${reconciled} stale scheduler execution(s) on boot`)
+        }
+      } catch (err) {
+        log.error("Failed to reconcile stale executions on boot:", err)
+      }
+    }
+
     const tasks = await schedulerDb.getTasksByStatus("active")
     log.info(`Found ${tasks.length} active tasks to schedule`)
     for (const task of tasks) {
@@ -560,6 +581,8 @@ class TaskSchedulerImpl {
     this.executionChannel = null
 
     this.isInitialized = false
+    // A stop → start cycle is a fresh boot; reconcile orphaned executions again.
+    this.staleExecutionsReconciled = false
     log.info("Task scheduler stopped")
   }
 
