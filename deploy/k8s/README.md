@@ -53,8 +53,17 @@ COGNIA_SMOKE_EXEC="kubectl -n cognia-kind exec -i cognia-server-0 --" \
 - **Master key**: each tenant needs a `cognia-secrets` Secret with
   `COGNIA_MASTER_KEY` (64 hex). Rotation: `kubectl exec ... -- cognia-server
 rotate-master-key --new-key ...`, then update the Secret.
-- **Runners (T2-in-T3)**: `ExecBackend::Container` targets the Docker API
-  only (bollard) — there is **no k8s exec backend yet**. The pods-create/exec
-  Role in `base/cognia-server-rbac.yaml` is pre-provisioned but deliberately
-  NOT attached to the pod (no `serviceAccountName`); attach it in the same
-  change that lands the k8s backend (R13 follow-up).
+- **Runners (T2-in-T3)**: external agents run as **runner Pods** via the k8s
+  exec backend (`COGNIA_EXEC_BACKEND=kubernetes`, `k8s-exec` build feature —
+  in the published `cognia-server` images). Enable per tenant: uncomment the
+  `runners/` resource + patch + the `execBackend`/`runnerImage`/
+  `workspacesPvc` literals in `tenant-template/kustomization.yaml`. Each
+  agent gets one pod (agent as the container's only process, stdio over pod
+  attach), mounting ONLY its workspace as a `subPath` of the shared
+  `cognia-workspaces` PVC. Runner pods are pinned to the server's node
+  (downward API) so an RWO PVC works; with RWX storage the pinning is
+  unnecessary. Not mapped from the Docker flavor by design: seccomp profile
+  (use the gvisor RuntimeClass), pids limit (kubelet config), network mode
+  (NetworkPolicy in `guardrails.yaml`). The pods-create/attach Role in
+  `base/cognia-server-rbac.yaml` is attached via the `cognia-server`
+  ServiceAccount and is inert while the backend is off.

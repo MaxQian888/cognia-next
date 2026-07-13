@@ -17,9 +17,11 @@ description: "Defines the cloud deployment strategy: keep the desktop's proven t
 > and `compose-e2e.yml` runs the tier-2 smoke in CI. From Phase 2, F2 (Caddy
 > ACME front door) and F4 (public connector webhooks) are shipped, plus
 > Logto OIDC multi-user auth on the gateway. From Phase 3,
-> `ExecBackend::Container` (R13, bollard + `docker-compose.t2.yml`) and the
-> `deploy/k8s` kustomize tree (D9/T3) exist; the k8s flavor of the exec
-> backend is still open. The companion default port moved to **27890**
+> `ExecBackend::Container` (R13, bollard + `docker-compose.t2.yml`), its
+> Kubernetes flavor (`k8s-exec` feature — runner Pods with attached stdio
+> and PVC-subPath workspaces, opt-in via `tenant-template/runners/`), and
+> the `deploy/k8s` kustomize tree (D9/T3) all exist.
+> The companion default port moved to **27890**
 > (Clash collision) and the whole deploy suite tracks it. The "Context"
 > section below describes the world as of 2026-07-02 and is kept as-is.
 **Builds on**: ADR-0012 (transport abstraction), ADR-0014/0015 (companion API, Phase D skeleton), ADR-0021 (signaling), ADR-0025 (unified subscription), ADR-0028 (sandbox), ADR-0037 (share server), ADR-0043 (provider execution), ADR-0048/0049/0051 (external agents), ADR-0054 (local multi-account)

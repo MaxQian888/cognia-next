@@ -16,6 +16,9 @@ spec:
     spec:
       # Production: set `runtimeClassName: gvisor` via the tenant overlay
       # (cluster/runtimeclass-gvisor.yaml must be applied first).
+      # Grants pods create/attach for the k8s exec backend (runner Pods);
+      # inert while COGNIA_EXEC_BACKEND stays local-process.
+      serviceAccountName: cognia-server
       containers:
         - name: cognia-server
           image: ghcr.io/maxqian888/cognia-server:latest-full
@@ -76,6 +79,37 @@ spec:
                   name: cognia-config
                   key: logtoJwksTtlSecs
                   optional: true
+            # ── k8s exec backend (ADR-0059 R13, runner Pods) — inert unless
+            # the tenant overlay sets execBackend=kubernetes and applies the
+            # runners patch (workspaces PVC + mount). Downward API pins
+            # runner pods to this pod's namespace/node so an RWO workspaces
+            # PVC can be shared.
+            - name: COGNIA_EXEC_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: execBackend
+                  optional: true
+            - name: COGNIA_RUNNER_IMAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: runnerImage
+                  optional: true
+            - name: COGNIA_WORKSPACES_VOLUME
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: workspacesPvc
+                  optional: true
+            - name: COGNIA_RUNNER_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: COGNIA_RUNNER_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           readinessProbe:
             httpGet:
               path: /api/v1/healthz

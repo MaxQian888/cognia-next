@@ -83,9 +83,10 @@ COPY hooks/builtin ./hooks/builtin
 # trees are desktop bundle content the headless bin never reads.
 RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder sidecar/webclone/dist sidecar/webclone/node_modules/cognia-placeholder
 RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/webclone/dist/keep.txt && echo placeholder > sidecar/webclone/node_modules/cognia-placeholder/keep.txt
-# container-exec (R13): the headless image ships the bollard-backed
-# ExecBackend::Container so COGNIA_EXEC_BACKEND=container works at T2.
-RUN cargo build --release --locked --bin cognia-server --features container-exec
+# container-exec + k8s-exec (R13): the headless image ships both flavors of
+# the container backend, so COGNIA_EXEC_BACKEND=container works at T2
+# (Docker socket proxy) and =kubernetes at T3 (runner Pods, in-cluster).
+RUN cargo build --release --locked --bin cognia-server --features container-exec,k8s-exec
 
 # PR CI target: type/borrow-check the whole graph without codegen or linking.
 FROM deps AS check
@@ -108,7 +109,7 @@ COPY hooks/builtin ./hooks/builtin
 # trees are desktop bundle content the headless bin never reads.
 RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder sidecar/webclone/dist sidecar/webclone/node_modules/cognia-placeholder
 RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/webclone/dist/keep.txt && echo placeholder > sidecar/webclone/node_modules/cognia-placeholder/keep.txt
-RUN cargo check --release --locked --bin cognia-server --features container-exec
+RUN cargo check --release --locked --bin cognia-server --features container-exec,k8s-exec
 
 # ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
 # Full (non-slim) image: node-gyp needs python3/make/g++ for the sidecar's

@@ -1,0 +1,13 @@
+# Workspaces PVC shared between cognia-server and its runner Pods
+# (ADR-0059 R13 k8s exec backend). RWO is fine because runner pods are
+# pinned to the server's node via the downward API (COGNIA_RUNNER_NODE_NAME);
+# switch to ReadWriteMany + drop the pinning if your storage class offers it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cognia-workspaces
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi

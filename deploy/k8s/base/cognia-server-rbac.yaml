@@ -1,11 +1,8 @@
-# DORMANT — narrow RBAC for the future k8s exec backend (R13 follow-up):
-# the server may create/inspect runner pods and exec into them — nothing else.
-# The shipped ExecBackend::Container speaks the Docker API only (bollard;
-# `exec_backend_from_env` accepts `container` | `local-process`), so this
-# ServiceAccount is deliberately NOT attached to the StatefulSet yet — the
-# pod runs as `default` with zero API grants. Add `serviceAccountName:
-# cognia-server` to cognia-server.yaml in the same change that lands the
-# k8s flavor of the backend, never before.
+# Narrow RBAC for the k8s exec backend (ADR-0059 R13, `k8s-exec` feature):
+# the server may create/inspect runner pods and attach to them — nothing
+# else. Attached via `serviceAccountName: cognia-server` in
+# cognia-server.yaml; the backend itself activates only when the tenant
+# overlay sets `execBackend=kubernetes` (see tenant-template/).
 apiVersion: v1
 kind: ServiceAccount
 metadata:

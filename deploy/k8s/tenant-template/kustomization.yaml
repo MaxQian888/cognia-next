@@ -8,12 +8,19 @@
 #      payloads advertise it; a wrong value produces dead cgnp2 payloads)
 #   4. (multi-user) add the Logto wiring: logtoIssuer + logtoAudience turn
 #      OIDC on (see deploy/compose/LOGTO.md for seeding + the issuer footgun)
-#   5. (production) uncomment the gvisor patch below
+#   5. (external agents) uncomment the `runners/` resource, the runners patch
+#      entry, and the execBackend/runnerImage/workspacesPvc literals — runner
+#      Pods spawn via the k8s exec backend (COGNIA_EXEC_BACKEND=kubernetes)
+#   6. (production) uncomment the gvisor patch entry
+#
+# NOTE: both optional patches live in the SINGLE `patches:` block below —
+# YAML rejects (or silently drops) a duplicated `patches:` key.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: cognia-tenant-CHANGE-ME
 resources:
   - ../base
+  # - runners/pvc.yaml
 configMapGenerator:
   - name: cognia-config
     literals:
@@ -21,9 +28,13 @@ configMapGenerator:
       # - logtoIssuer=https://logto.example.com/oidc
       # - logtoAudience=https://cognia-CHANGE-ME.example.com/api
       # - logtoRequiredScopes=brain:rpc
+      # - execBackend=kubernetes
+      # - runnerImage=ghcr.io/maxqian888/cognia-runner:latest
+      # - workspacesPvc=cognia-workspaces
 generatorOptions:
   disableNameSuffixHash: true
 # patches:
+#   - path: runners/statefulset-patch.yaml
 #   - target:
 #       kind: StatefulSet
 #       name: cognia-server
