@@ -339,6 +339,7 @@ const globalConfig: Config = {
     "!lib/tauri/transport-types.ts",
     "!hooks/a2ui/app-builder/types.ts",
     "!lib/data-hooks/types.ts",
+    "!lib/code-adoption/types.ts",
     "!lib/db/a2ui-types.ts",
     "!lib/db/plugin-types.ts",
     "!lib/db/connector-types.ts",

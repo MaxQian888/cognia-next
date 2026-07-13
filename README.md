@@ -239,8 +239,9 @@ pnpm docs:build
 ```
 
 Optional OCR backends are gated by Cargo feature flags — see `src-tauri/Cargo.toml` for
-`ocr-tesseract`, `ocr-windows`, `ocr-apple`, `ocr-ocrs`, `ocr-paddle`. The default build ships
-placeholder backends so the dispatch table compiles everywhere.
+`ocr-tesseract`, `ocr-windows`, `ocr-ocrs`, `ocr-paddle`. The default build ships placeholder
+backends so the dispatch table compiles everywhere; the exception is `apple-vision`, which is
+always real on macOS targets (in-process Vision.framework, no feature flag).
 
 ## Tech stack
 

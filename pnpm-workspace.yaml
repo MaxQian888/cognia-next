@@ -1,4 +1,8 @@
 packages:
+  # The repo root is listed so Changesets can version the app as a single
+  # unit (its version lives in the root package.json). pnpm still excludes the
+  # root from recursive commands unless --include-workspace-root is passed.
+  - "."
   - docs
   - mobile
   - packages/*

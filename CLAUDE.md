@@ -159,6 +159,7 @@ One line per subsystem — the **full detail lives in the ADR** under `docs/cont
 | Content capture            | `lib/capture/`, `types/capture/`, `components/capture/`, `stores/capture/`, `hooks/capture/`, `lib/db/captured-items.ts`, `src-tauri/src/capture/`                                                 | Dexie v97                | 0060             |
 | Agent session import       | `lib/session-import/`, `hooks/session-import/`, `components/session-import/`, `src-tauri/src/session_import.rs`, `lib/plugin/api/import-api.ts`                                                    | reuses sessions/messages | 0062             |
 | Optical compaction         | `sidecar/dispatch/optical/`, `sidecar/dispatch/compaction*.mjs`, `lib/db/optical-archives.ts`, `lib/claude/optical-archive-persist.ts`, `components/chat/message-parts/optical-archive-dialog.tsx` | Dexie v101               | 0063             |
+| Long-term memory           | `lib/memory/` (`api/` = shared external surface), `types/memory/`, `lib/db/memories.ts`, `components/memory/`, `app/memory/`, `lib/plugin/api/memory-api.ts`, `lib/external-bridge/handlers/memory.ts`  | Dexie v65                | 0069             |
 
 ### Cross-cutting hooks (reuse, don't reinvent)
 
