@@ -140,7 +140,7 @@ import { detectInteractiveCommand } from "@/lib/claude/permissions/interactive-c
 import { isTauri } from "@/lib/tauri"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
 import { useUpdateSession } from "@/lib/data-hooks/context"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { impact, notify } from "@/lib/capacitor/haptics"
 import { hideKeyboard } from "@/lib/capacitor/keyboard"
 import { MentionPopover } from "@/components/mobile/chat/mention-popover"

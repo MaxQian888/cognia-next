@@ -12,7 +12,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
 import { allRootPaths } from "@/lib/workspace/roots"
 import { useProjectStore } from "@/stores/project/project-store"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("files.allowed-roots-sync")
 

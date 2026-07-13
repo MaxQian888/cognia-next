@@ -34,8 +34,8 @@ import {
 } from "@/components/ui/context-menu"
 import { AGENT_TRACE_MODULE } from "@cognia/agent-trace/log-adapter"
 import { LIVE_TRACE_EVENT_ICONS, LIVE_TRACE_EVENT_COLORS } from "@/lib/agent"
-import { LEVEL_THEME, ALL_LEVELS } from "@/lib/logging/level-theme"
-import type { StructuredLogEntry } from "@/lib/logging"
+import { LEVEL_THEME, ALL_LEVELS } from "@cognia/logging/level-theme"
+import type { StructuredLogEntry } from "@cognia/logging"
 import type { AgentTraceEventType } from "@/types/agent/agent-trace"
 
 export { LEVEL_THEME, ALL_LEVELS }

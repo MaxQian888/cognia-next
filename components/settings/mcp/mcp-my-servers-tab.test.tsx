@@ -15,7 +15,7 @@ jest.mock("@/lib/db/mcp-servers", () => ({
   updateMcpServer: jest.fn().mockResolvedValue(undefined),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { mcp: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } },
   // The live-session card pulls in `@/stores/chat` → `lib/execution/broker`,
   // which calls `createLogger` at module load; stub it so the suite can import.

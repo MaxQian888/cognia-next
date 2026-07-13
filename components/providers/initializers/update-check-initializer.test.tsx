@@ -14,7 +14,7 @@ jest.mock("@/lib/tauri/updater", () => ({
   downloadAndInstallUpdate: (...a: unknown[]) => downloadAndInstallMock(...a),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { app: { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() } },
 }))
 
@@ -38,7 +38,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
 }))
 
 import { toast } from "sonner"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { UpdateCheckInitializer, __resetAutoCheckThrottle } from "./update-check-initializer"
 
 const toastMock = toast as unknown as {

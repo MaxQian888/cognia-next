@@ -57,7 +57,7 @@ jest.mock("./cron-parser", () => ({
   getNextCronTime: jest.fn().mockReturnValue(new Date(Date.now() + 60000)),
 }))
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const stub = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
   return {
     loggers: {

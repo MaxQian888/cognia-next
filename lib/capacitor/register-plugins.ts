@@ -1,7 +1,7 @@
 "use client"
 
 import { detectNativePlatform } from "./_shared"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
 

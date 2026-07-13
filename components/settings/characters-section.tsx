@@ -116,7 +116,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { characterToPackDef, filterCharacters } from "@/lib/plugin/character-pack/editor-projection"
 import { serializeLocalPackFile } from "@/lib/plugin/character-pack/schema"
 import { downloadBlob } from "@/lib/files/download"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 import { useUIStore } from "@/stores/ui/ui-store"
 

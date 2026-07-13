@@ -12,7 +12,7 @@ jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: { getState: () => ({ load: mockLoad }) },
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { shell: { warn: mockWarn } },
 }))
 

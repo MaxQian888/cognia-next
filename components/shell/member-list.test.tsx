@@ -19,7 +19,7 @@ jest.mock("next-intl", () => ({
 // namespace (with a `.child()` that recurses) so the module graph loads no
 // matter which loggers the transitive imports touch; the `ui` namespace stays
 // wired to the assertion spies.
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const makeLogger = (): Record<string, unknown> => ({
     debug: jest.fn(),
     info: jest.fn(),

@@ -28,7 +28,7 @@ import { buildQuoteCardHtml, renderQuoteCardFragment } from "@/lib/export/html/q
 import { THEMES, type ThemeId } from "@/lib/export/html/syntax-themes"
 import { themeHasWallpaper, resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { downloadBlob } from "@/lib/files/download"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("quote-card-share")
 

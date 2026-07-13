@@ -30,7 +30,7 @@ import {
 } from "@/lib/logging"
 import { cleanupTauriLogBridge, initTauriLogBridge } from "@/lib/native/tauri-log-bridge"
 import { getNativeLoggingReadiness } from "@/lib/native/native-logging"
-import { installGlobalErrorHandlers } from "@/lib/logging/global-error-handlers"
+import { installGlobalErrorHandlers } from "@cognia/logging/global-error-handlers"
 import { isTauri } from "@/lib/tauri"
 
 // Re-export types for backward compatibility.

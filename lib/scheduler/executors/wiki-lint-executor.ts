@@ -9,7 +9,7 @@
 
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { runWikiLint } from "@/lib/wiki/lint/lint-runner"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

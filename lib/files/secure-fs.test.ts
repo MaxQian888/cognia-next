@@ -12,13 +12,13 @@ jest.mock("@/lib/file/file-operations", () => ({
   exists: jest.fn(),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { files: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } },
 }))
 
 import { SecureFileSystem, createSecureFs, FileAccessError } from "./secure-fs"
 import { getFileAudit, resetFileAuditForTest } from "./audit"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import * as fileOps from "@/lib/file/file-operations"
 import type { FileAccessPolicy } from "@/types/files"
 

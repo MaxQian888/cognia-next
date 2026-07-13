@@ -58,7 +58,7 @@ import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { listEnabledSkillsByIds, renderSkillsSection } from "@/lib/db/skills"
 import { executeOnExternalAgent } from "@/lib/ai/agent/external/manager"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 
 const log = loggers.scheduler

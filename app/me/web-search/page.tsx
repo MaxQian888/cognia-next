@@ -25,7 +25,7 @@ import { MeSection } from "@/components/mobile/me/me-section"
 import { SearchProviderKeyList } from "@/components/mobile/me/search-provider-key-list"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
-import { SEARCH_PROVIDERS, type SearchProviderType } from "@/lib/search/types"
+import { SEARCH_PROVIDERS, type SearchProviderType } from "@cognia/web-search/types"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import {
   Select,

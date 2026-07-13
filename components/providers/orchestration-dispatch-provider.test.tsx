@@ -15,7 +15,7 @@ jest.mock("@/lib/external-bridge/handlers/orchestration", () => ({
   runOrchestrationExec: (...a: unknown[]) => runOrchestrationExecMock(...a),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { app: { error: jest.fn() } },
 }))
 

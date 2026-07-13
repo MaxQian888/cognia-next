@@ -7,7 +7,7 @@ import {
   initLogger,
   removeTransport,
   updateLoggerConfig,
-} from "./core"
+} from "@cognia/logging/core"
 import { DEFAULT_UNIFIED_CONFIG } from "@/types/logging"
 import type {
   LogLevel,
@@ -22,7 +22,7 @@ import type {
   LoggingRetentionSettings,
   LoggingBootstrapState,
 } from "@/types/logging"
-import { configureSampling } from "./sampling"
+import { configureSampling } from "@cognia/logging/sampling"
 import {
   AgentTraceTransport,
   createAgentTraceTransport,

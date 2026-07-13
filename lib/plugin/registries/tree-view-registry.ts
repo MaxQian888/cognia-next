@@ -13,7 +13,7 @@
  */
 
 import type { ResolvedPluginView } from "@/types/plugin/plugin-view"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const views = new Map<string, ResolvedPluginView>()
 

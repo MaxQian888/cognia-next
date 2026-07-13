@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { pickAndReadFiles } from "@/lib/files/file-bridge"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import {
   applyImported,
   importChatExport,

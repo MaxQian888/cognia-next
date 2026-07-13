@@ -26,7 +26,7 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), warning: jest.fn() },
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { skills: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } },
 }))
 

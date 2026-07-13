@@ -6,7 +6,7 @@ jest.mock("@/lib/radar/radar-runner", () => {
   class NoRadarModelError extends Error {}
   return { runRadarReport: jest.fn(), NoRadarModelError }
 })
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { scheduler: { info: jest.fn(), error: jest.fn() } },
 }))
 

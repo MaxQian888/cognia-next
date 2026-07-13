@@ -20,7 +20,7 @@ jest.mock("@/lib/native/utils", () => ({
   canUseTauriInvoke: () => canUseTauriInvokeMock(),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { plugin: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 

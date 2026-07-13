@@ -10,7 +10,7 @@ import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { PluginTreeNode, TreeDataProvider } from "@/types/plugin/plugin-view"
 import { executeCommand } from "@/lib/plugin/commands/registry"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { ResolvedRailIcon } from "@/components/shell/plugin-view-container-panel"
 
 const ROOT = "__root__"

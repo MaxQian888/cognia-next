@@ -33,7 +33,7 @@ import {
 import { clearAll, clearTables, type ClearableTable } from "@/lib/data/clear"
 import { useSettingsStore } from "@/stores/settings"
 import { toast } from "sonner"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.data.maintenance")
 import { RotateCcwIcon, ShieldAlertIcon, ShieldIcon, Trash2Icon } from "lucide-react"
@@ -206,6 +206,7 @@ function ClearBlock() {
               <Input
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
+                // i18n-exempt: type-to-confirm token must match the required literal input
                 placeholder="DELETE"
                 autoFocus
               />

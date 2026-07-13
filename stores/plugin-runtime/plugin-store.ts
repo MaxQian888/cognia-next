@@ -31,7 +31,7 @@ import type { PluginPointGovernanceMode } from "@/lib/plugin/contracts/plugin-po
 import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
 import { grantPluginPermission } from "@/lib/plugin/core/transport"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { resolvePluginIcon } from "@/lib/plugin/utils/icon"
 
 const PLUGIN_POLICY_STORAGE_KEY = "cognia.plugins.policy"

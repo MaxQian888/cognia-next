@@ -5,7 +5,7 @@
 // a plugin only ever receives URLs addressed to its own id.
 
 import type { ParsedDeepLink } from "./parse-deep-link"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export type UriHandler = (uri: ParsedDeepLink) => void | Promise<void>
 

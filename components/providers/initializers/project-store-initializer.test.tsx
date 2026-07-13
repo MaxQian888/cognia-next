@@ -7,7 +7,7 @@ const loadMock = jest.fn(async () => undefined)
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { getState: () => ({ load: loadMock }) },
 }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { shell: { warn: jest.fn(), info: jest.fn(), error: jest.fn() } },
 }))
 

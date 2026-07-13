@@ -29,7 +29,7 @@ const copy = jest.fn()
 jest.mock("@/hooks/ui/use-copy", () => ({
   useCopy: () => ({ copied: false, copy }),
 }))
-jest.mock("@/lib/logging", () => ({ loggers: { chat: {} } }))
+jest.mock("@cognia/logging", () => ({ loggers: { chat: {} } }))
 
 const SAMPLE = ["@@ -1,2 +1,2 @@", " context", "-const a = 1", "+const a = 2"].join("\n")
 

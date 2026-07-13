@@ -19,7 +19,7 @@ jest.mock("@/lib/claude/ipc", () => ({ testMcpServer: (...a: unknown[]) => testM
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { mcp: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } },
 }))
 

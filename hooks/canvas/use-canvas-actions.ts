@@ -21,7 +21,7 @@ import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-provider"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
 import { useSettingsStore } from "@/stores/settings"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export interface CanvasActionInvocation {
   actionType: CanvasActionType

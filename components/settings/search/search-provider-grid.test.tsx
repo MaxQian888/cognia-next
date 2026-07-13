@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import { testProviderConnection } from "@/lib/search/provider-test"
+import { testProviderConnection } from "@cognia/web-search/provider-test"
 
 const mocks = {
   setSearchProviderEnabled: jest.fn(),
@@ -12,7 +12,7 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings, ...mocks }),
 }))
 
-jest.mock("@/lib/search/provider-test", () => ({
+jest.mock("@cognia/web-search/provider-test", () => ({
   testProviderConnection: jest.fn(),
 }))
 
@@ -35,7 +35,7 @@ jest.mock("next-intl", () => ({
 }))
 
 const mockLogInfo = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({
     info: (...args: unknown[]) => mockLogInfo(...args),
     error: jest.fn(),

@@ -14,7 +14,7 @@ const childLogger = {
 }
 const childFn = jest.fn((..._args: unknown[]) => childLogger)
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { mcp: { child: (...args: unknown[]) => childFn(...args) } },
 }))
 

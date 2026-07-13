@@ -1,4 +1,4 @@
-import { ALL_LEVELS } from "@/lib/logging/level-theme"
+import { ALL_LEVELS } from "@cognia/logging/level-theme"
 import type { ParsedError, ParsedNode } from "../types"
 
 const LEVEL_PATTERN = new RegExp(`^\\s*(${ALL_LEVELS.join("|")})[\\s:]`, "i")

@@ -4,8 +4,8 @@ import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { SettingsToggle } from "@/components/settings/common/settings-section"
 import { useSettingsStore } from "@/stores/settings"
-import type { SafeSearchLevel } from "@/lib/search/types"
-import { createLogger } from "@/lib/logging"
+import type { SafeSearchLevel } from "@cognia/web-search/types"
+import { createLogger } from "@cognia/logging"
 import { SegmentedControl, type SegmentedOption } from "./_shared/segmented-control"
 
 const log = createLogger("settings.search.safety")

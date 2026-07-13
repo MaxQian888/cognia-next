@@ -16,7 +16,7 @@
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import type { AppSettings, ChatSession } from "@/lib/claude/types"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const SYSTEM_PROMPT =
   "You are a concise analyst. Given a digest of an automated execution " +

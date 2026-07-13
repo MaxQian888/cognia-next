@@ -4,7 +4,7 @@
 
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { network: { warn: jest.fn(), debug: jest.fn() } },
 }))
 

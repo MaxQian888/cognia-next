@@ -36,10 +36,10 @@ import {
   SEARCH_PROVIDERS,
   isProviderConfigured,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
-} from "@/lib/search/types"
-import { SEARCH_SOURCES } from "@/lib/search/search-constants"
+} from "@cognia/web-search/types"
+import { SEARCH_SOURCES } from "@cognia/web-search/search-constants"
 import { cn } from "@/lib/utils"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import { SourcePill } from "./_shared/source-pill"
 
 const log = createLogger("settings.search.global")

@@ -26,7 +26,7 @@ import {
   isProviderConfigured,
   validateApiKey,
   type SearchProviderType,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import { useSettingsStore } from "@/stores/settings"
 
 const PROVIDER_IDS = Object.keys(SEARCH_PROVIDERS) as SearchProviderType[]

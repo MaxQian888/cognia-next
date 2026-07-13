@@ -34,7 +34,7 @@ jest.mock("sonner", () => ({
   },
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { tts: { info: jest.fn(), error: jest.fn() } },
 }))
 

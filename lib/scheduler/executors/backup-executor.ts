@@ -32,7 +32,7 @@ import { appendBackupHistory, type BackupHistoryEncryption } from "@/lib/db/back
 import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@/lib/claude/types"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { dispatchBackupDestination } from "@/lib/data/destinations"
 import { encryptSnapshotBody, webdavSnapshotName } from "@/lib/data/destinations/webdav"
 import { getSyncPassphrase } from "@/lib/webdav/passphrase-cache"

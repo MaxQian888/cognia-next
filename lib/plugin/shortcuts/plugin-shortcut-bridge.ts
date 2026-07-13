@@ -20,7 +20,7 @@
  * silent failure) while the action stays reachable via palette/tray.
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import type { ShortcutOptions } from "@/types/plugin"
 import { executeCommand, registerCommand, unregisterCommand } from "@/lib/plugin/commands/registry"

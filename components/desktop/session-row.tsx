@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import type { ChatSession, SessionFolder } from "@/lib/claude/types"
 import {

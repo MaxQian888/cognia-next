@@ -7067,6 +7067,7 @@
     },
     "settingsDescription": "Configure log levels, transports, and retention policies",
     "settingsTitle": "Logging Configuration",
+    "statusSr": "status: {status}",
     "timeline": {
       "clear": "Clear",
       "empty": "No data yet",
@@ -12475,6 +12476,7 @@
       "hasSkills": "Has Skills",
       "recent": "Recently used"
     },
+    "moreActions": "More actions",
     "pickWorkingDir": "Select working directory",
     "readOnlyDeleteTooltip": "Built-in presets can't be deleted",
     "readOnlyTooltip": "Built-in preset — duplicate to edit",
@@ -21014,7 +21016,9 @@
         "save": "Save",
         "searchPlaceholder": "Search templates...",
         "title": "Templates",
-        "updatedToast": "Updated \"{name}\"."
+        "updatedToast": "Updated \"{name}\".",
+        "variableCount": "{count, plural, =1 {1 variable} other {# variables}}",
+        "variableIndex": "Variable {index}"
       },
       "title": "Sub-agents"
     },

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl"
 import { useActiveSessionLabel } from "@/hooks/chat/use-active-session-label"
 import { isTauri } from "@/lib/tauri"
 import { isMainAppWindow } from "@/lib/pet/window-role"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.ui
 

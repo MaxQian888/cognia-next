@@ -20,9 +20,9 @@ import {
   SEARCH_PROVIDERS,
   isProviderConfigured,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
-} from "@/lib/search/types"
-import type { SearchResponse } from "@/lib/search/types"
-import { createLogger } from "@/lib/logging"
+} from "@cognia/web-search/types"
+import type { SearchResponse } from "@cognia/web-search/types"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.search.compare")
 

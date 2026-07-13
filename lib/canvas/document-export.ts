@@ -14,7 +14,7 @@ import type {
   CanvasDocument,
 } from "@/types/artifact/artifact"
 import { getArtifactExportFormats } from "@/components/artifacts/runtime-adapters"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { canvasDocumentToArtifact } from "./artifact-projection"
 
 /** Downloadable file formats we know how to serialize from a Canvas buffer. */

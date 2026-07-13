@@ -49,7 +49,7 @@ import {
   type SlashGroup,
 } from "./composer-popover-groups"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import {
   AgentMentionRow,
   SubagentMentionRow,
@@ -757,6 +757,7 @@ function BashHint({ query }: { query: string }) {
   return (
     <div className="px-3 py-3 text-sm text-muted-foreground">
       <p className="mb-1">
+        {/* i18n-exempt: keyboard key cap, locale-invariant */}
         {t("bashHintPrefix")} <kbd>Enter</kbd> {t("bashHintSuffix")}
       </p>
       <code className="block truncate rounded bg-muted px-2 py-1 font-mono text-xs">

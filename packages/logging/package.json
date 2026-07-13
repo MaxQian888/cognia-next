@@ -1,0 +1,25 @@
+{
+  "name": "@cognia/logging",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cognia framework-agnostic structured logging core: logger registry with module loggers, trace-context correlation, sampling/rate limiting, redaction, and console/IndexedDB/remote/OTel transports. App-coupled transports and bootstrap wiring stay in lib/logging.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "cognia-source": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

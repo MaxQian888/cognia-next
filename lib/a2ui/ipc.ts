@@ -9,7 +9,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { isTauri } from "@/lib/tauri"
 import { useA2UIStore } from "@/stores/a2ui"
 import type { A2UIDispatchMessage } from "@/types/a2ui/schema"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const A2UI_EVENT = "a2ui://dispatch"
 

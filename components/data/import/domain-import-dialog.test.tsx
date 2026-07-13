@@ -28,7 +28,7 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }))
 // Silence the expected-failure log lines in test output.
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({ error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() }),
 }))
 

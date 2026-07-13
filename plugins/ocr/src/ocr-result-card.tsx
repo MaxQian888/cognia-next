@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import { ImageBlock } from "@/components/chat/renderers/image-block"
 import { COMPOSER_APPEND_EVENT } from "@/components/chat/composer"
 import { useCopy } from "@/hooks/ui/use-copy"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/platform/detect"
 
 function isOcrResultPart(part: unknown): part is OcrResultPart {

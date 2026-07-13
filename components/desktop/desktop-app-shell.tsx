@@ -38,7 +38,7 @@ import { usePlatform } from "@/hooks/use-platform"
 import { PageLoading } from "@/components/ui/loading-states"
 import { loadSystemFonts } from "@/lib/appearance/load-system-fonts"
 import { whenSeeded } from "@/lib/db/schema"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { useUIStore } from "@/stores/ui/ui-store"
 
 const log = loggers.shell

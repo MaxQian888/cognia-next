@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react"
 
 import { detectPlatform } from "@/lib/platform/detect"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 
 const log = loggers.plugin

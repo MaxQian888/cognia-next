@@ -41,7 +41,7 @@ jest.mock("@/lib/tauri/os", () => ({
 }))
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn().mockResolvedValue("ok") }))
 jest.mock("@tauri-apps/api/path", () => ({ appDataDir: jest.fn().mockResolvedValue("/data") }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { app: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
 }))
 jest.mock("sonner", () => ({

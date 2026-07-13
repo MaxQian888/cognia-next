@@ -37,7 +37,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { installVsix, type VsixInstallResult } from "@/lib/plugin/vscode-shim/vsix-installer"
 import { upsertPlugin } from "@/lib/db/plugins"
 import { canUseTauriInvoke } from "@/lib/native/utils"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface Props {
   open: boolean

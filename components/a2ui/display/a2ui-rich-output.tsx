@@ -11,7 +11,7 @@ import { A2UIComparisonCards } from "./a2ui-comparison-cards"
 import { A2UIStepperShell } from "../layout/a2ui-stepper-shell"
 import { A2UITable } from "../data/a2ui-table"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { getValueByPath, resolveArrayOrPath, resolveStringOrPath } from "@/lib/a2ui/data-model"
 import { resolveWidgetMetadata } from "@/lib/a2ui/catalog"
 import { routeRichOutputProfile } from "@/lib/a2ui/output-profiles"
@@ -221,6 +221,7 @@ export function A2UIRichOutput({
   const fallbackText = fallbackContent || t("richOutputFallback")
   const runtimeFallback = (
     <div className="rounded-lg border border-border/60 bg-background/70 p-4 text-sm text-muted-foreground">
+      {/* i18n-exempt: pre-existing untranslated surface (repo i18n baseline); untouched by ADR-0068 import codemod */}
       Loading rich runtime...
     </div>
   )

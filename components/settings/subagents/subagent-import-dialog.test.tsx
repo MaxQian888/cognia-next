@@ -46,7 +46,7 @@ jest.mock(
   { virtual: true }
 )
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({
     info: jest.fn(),
     warn: jest.fn(),

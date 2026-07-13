@@ -15,7 +15,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({ info: jest.fn(), error: jest.fn() }),
 }))
 

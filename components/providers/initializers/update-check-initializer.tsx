@@ -14,7 +14,7 @@ import { toast } from "sonner"
 
 import { isTauri } from "@/lib/tauri"
 import { checkForUpdate, downloadAndInstallUpdate } from "@/lib/tauri/updater"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 /** Re-check every 6 hours so long-running desktop sessions still notice. */

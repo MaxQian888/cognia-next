@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import type { StructuredLogEntry } from "@/types/logging"
+import type { StructuredLogEntry } from "@cognia/logging/types"
 
 // We mock the langfuse-client module that the transport lazy-imports.
 const mockSpan = {

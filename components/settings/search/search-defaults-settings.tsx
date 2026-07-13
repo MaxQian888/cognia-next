@@ -13,8 +13,8 @@ import {
 } from "@/components/ui/select"
 import { SettingsGrid, SettingsToggle } from "@/components/settings/common/settings-section"
 import { useSettingsStore } from "@/stores/settings"
-import type { SearchType, SearchDepth, SearchRecency } from "@/lib/search/types"
-import { createLogger } from "@/lib/logging"
+import type { SearchType, SearchDepth, SearchRecency } from "@cognia/web-search/types"
+import { createLogger } from "@cognia/logging"
 import { DomainListInput } from "./_shared/domain-list-input"
 import { SegmentedControl, type SegmentedOption } from "./_shared/segmented-control"
 

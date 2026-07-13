@@ -191,5 +191,6 @@
   "validation": {
     "contentRequired": "系统提示词不能为空。",
     "nameRequired": "预设名称不能为空。"
-  }
+  },
+  "moreActions": "更多操作"
 }

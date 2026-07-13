@@ -13,7 +13,7 @@
 
 import { dispatchSlashCommand } from "@/lib/slash-commands/registry"
 import { executeCommand, getCommand } from "@/lib/plugin/commands/registry"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 import { useTrayStore } from "./store"
 import { requestTrayUsageRefresh } from "./usage-refresh-bus"

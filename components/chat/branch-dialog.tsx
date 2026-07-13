@@ -30,7 +30,7 @@ import { getSession } from "@/lib/db/sessions"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { summarizeConversation } from "@/lib/ai/generation/summarizer"
 import { branchSessionAtMessage, type BranchMode } from "@/lib/chat/branch-session"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("chat-branch")
 

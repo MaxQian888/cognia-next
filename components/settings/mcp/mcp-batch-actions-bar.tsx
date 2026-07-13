@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card"
 import { deleteMcpServer, updateMcpServer } from "@/lib/db/mcp-servers"
 import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { AgentId, McpServer } from "@/lib/claude/types"
 
 interface Props {

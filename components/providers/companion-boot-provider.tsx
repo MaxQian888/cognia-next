@@ -42,7 +42,7 @@ import {
 import { installRemoteStepServer } from "@/lib/companion/remote-step-server"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import { getSettings } from "@/lib/db/settings"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 // Onboarding routes where the boot provider must NOT redirect (the chooser /
 // pair / oauth flows own navigation there).

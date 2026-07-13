@@ -74,7 +74,7 @@ import { HookGroupEditor, validateMatcher } from "./hook-group-editor"
 import { validateHandler } from "./hook-handler-form"
 import { BuiltinHooksCard } from "./builtin-hooks-card"
 import { FleetMonitorCard } from "./fleet-monitor-card"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,

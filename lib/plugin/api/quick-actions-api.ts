@@ -15,7 +15,7 @@
 
 "use client"
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type {
   PluginCapability,
   PluginQuickActionInput,

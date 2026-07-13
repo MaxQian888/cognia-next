@@ -22,7 +22,7 @@ jest.mock("@/lib/git/commands", () => ({
 jest.mock("@/components/source-control/compare-refs-sheet", () => ({
   CompareRefsSheet: () => null,
 }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({ warn: jest.fn(), info: jest.fn(), error: jest.fn() }),
 }))
 

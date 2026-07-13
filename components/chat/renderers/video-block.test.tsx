@@ -14,13 +14,13 @@ jest.mock("@/lib/files/download", () => ({
 jest.mock("@/lib/tauri/opener", () => ({
   openExternal: jest.fn(async () => undefined),
 }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { chat: { warn: jest.fn() } },
 }))
 
 import { openExternal } from "@/lib/tauri/opener"
 import { downloadFromUrl } from "@/lib/files/download"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const mockOpenExternal = openExternal as jest.Mock
 const mockDownload = downloadFromUrl as jest.Mock

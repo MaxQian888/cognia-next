@@ -8,7 +8,7 @@
  * fallback whenever the Rust alarm daemon is unavailable (browser, mobile).
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 import type { LeaderAwareTimingDriver, TaskDueCallback } from "@/types/scheduler"
 

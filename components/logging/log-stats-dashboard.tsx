@@ -43,9 +43,9 @@ import {
 import { cn } from "@/lib/utils"
 import { StatCard } from "@/components/observability/stat-card"
 import { TOOLTIP_STYLE, CHART_MARGINS } from "@/lib/observability/chart-config"
-import { LEVEL_THEME } from "@/lib/logging/level-theme"
+import { LEVEL_THEME } from "@cognia/logging/level-theme"
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
-import type { StructuredLogEntry, LogLevel } from "@/lib/logging"
+import type { StructuredLogEntry, LogLevel } from "@cognia/logging"
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
 
 export interface LogStatsDashboardProps {

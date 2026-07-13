@@ -20,8 +20,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { LEVEL_THEME } from "@/lib/logging/level-theme"
-import type { LogLevel, TransportHealthSnapshot } from "@/lib/logging"
+import { LEVEL_THEME } from "@cognia/logging/level-theme"
+import type { LogLevel, TransportHealthSnapshot } from "@cognia/logging"
 import type { UseTransportHealthResult } from "@/hooks/logging"
 
 const TRANSPORT_TILE_VISIBLE_LIMIT = 3
@@ -258,6 +258,7 @@ function TransportHealthTile({
   onClick,
   icon,
 }: TransportHealthTileProps) {
+  const t = useTranslations("logging")
   const now = useNow()
   const relative = formatRelativeTime(lastEventAt, now)
   return (
@@ -298,7 +299,7 @@ function TransportHealthTile({
       <span className="text-muted-foreground text-[9px]" title={lastEventAt}>
         {relative}
       </span>
-      <span className="sr-only">status: {status}</span>
+      <span className="sr-only">{t("statusSr", { status })}</span>
     </button>
   )
 }

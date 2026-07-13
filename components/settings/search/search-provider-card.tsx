@@ -30,7 +30,7 @@ import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
 } from "@cognia/web-search/types"
 import { cn } from "@/lib/utils"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.search.provider")
 

@@ -22,7 +22,7 @@ import { saveExport } from "@/lib/files/save-export"
 import { saveGeneratedDocument, type DocFormat } from "@/lib/files/document-writer"
 import { writeText as clipboardWriteText } from "@/lib/capacitor/clipboard"
 import { getArtifactExtension, canPreview } from "@/lib/artifacts"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import {
   getArtifactRuntimeAdapter,
   getPreferredArtifactExportFormat,

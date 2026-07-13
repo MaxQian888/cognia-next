@@ -28,7 +28,7 @@ import {
 } from "@/lib/db/twin-jobs"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import { createVectorStore, type IVectorStore, type VectorStoreConfig } from "@cognia/vector/store"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { TwinJob, TwinJobKind, TwinSource, VectorBackend } from "@/types/twin"
 import { type EmbeddingConfig } from "./ingest/embed"
 import { type RawSource } from "./ingest/parse"

@@ -16,7 +16,7 @@ import { useChatStore } from "@/stores/chat"
 import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
 import { tagsAcrossSkills, unionTag, withoutTag } from "@/lib/skills/batch-tags"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /**
  * Floating action bar shown when the user has selected one or more skills.

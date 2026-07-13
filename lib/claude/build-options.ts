@@ -50,7 +50,7 @@ import {
   resolveCompactInstructions,
 } from "@/lib/claude/compact-instructions"
 import { getCompactionStrategy } from "@/lib/plugin/registries/compaction-strategy-registry"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { startRootTrace } from "@/lib/agent-trace/trace-context"
 import type { SpanSurface } from "@/types/agent-trace/span"
 import type { TraceContext } from "@/types/agent-trace/trace-context"

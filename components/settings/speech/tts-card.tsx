@@ -25,7 +25,7 @@ import { ORDERED_TTS_PROVIDERS, TTS_PROVIDERS, type TTSProvider } from "@cognia/
 import { generateSSML } from "@cognia/tts/tts-text-utils"
 import { TestTtsButton } from "./test-tts-button"
 import { PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 // -- SSML Preview (Edge / System) --------------------------------------------
 

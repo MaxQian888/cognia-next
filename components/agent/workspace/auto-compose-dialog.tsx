@@ -82,7 +82,7 @@ import { defaultCouncilRunPrompt } from "@/lib/ai/council/run-council"
 import type { AutoOrchestrationProposal, CapabilityCatalog } from "@/lib/ai/agent/team/auto/types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { AgentTeamConfig, TeamExecutionPattern } from "@/types/agent/agent-team"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 import {
   AutoComposeAdvancedOptions,

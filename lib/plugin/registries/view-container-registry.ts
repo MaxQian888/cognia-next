@@ -14,7 +14,7 @@
  */
 
 import type { PluginViewContainerDef } from "@/types/plugin/plugin-view-container"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { createOverlayRegistry } from "./createOverlayRegistry"
 
 export interface ViewContainerEntry {

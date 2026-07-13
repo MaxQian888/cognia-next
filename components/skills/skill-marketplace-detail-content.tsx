@@ -14,7 +14,7 @@ import type { MarketplaceItem } from "@/lib/skills/marketplace-types"
 import type { AuditEntry, FileTreeEntry } from "@/hooks/skills"
 import { SkillAuditBadges } from "./skill-audit-badges"
 import { SkillFilePreview } from "./skill-file-preview"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface Props {
   item: MarketplaceItem

@@ -22,7 +22,7 @@ import {
   sendOrchestrationResponse,
 } from "@/lib/external-bridge/orchestration-ipc"
 import { runOrchestrationExec } from "@/lib/external-bridge/handlers/orchestration"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export function OrchestrationDispatchProvider() {
   useEffect(() => {

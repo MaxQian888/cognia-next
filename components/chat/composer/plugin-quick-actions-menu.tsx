@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { usePluginQuickActions } from "@/hooks/plugins/use-plugin-quick-actions"
 import { runQuickAction } from "@/lib/plugin/registries/quick-action-registry"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export function PluginQuickActionsMenu({ disabled }: { disabled?: boolean }) {
   const t = useTranslations("chat.composer.toolbar")

@@ -12,7 +12,7 @@ import { AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CHART_COLORS } from "@/lib/artifacts"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { ChartDataPoint } from "@/types"
 import {
   LineChart,

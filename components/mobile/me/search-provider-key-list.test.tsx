@@ -3,7 +3,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react"
 
-import type { SearchProviderSettings, SearchProviderType } from "@/lib/search/types"
+import type { SearchProviderSettings, SearchProviderType } from "@cognia/web-search/types"
 
 const setApiKeyMock = jest.fn(async (_id: string, _key: string) => undefined)
 const setEnabledMock = jest.fn(async (_id: string, _v: boolean) => undefined)

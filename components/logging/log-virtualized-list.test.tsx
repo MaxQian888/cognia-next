@@ -53,7 +53,7 @@ jest.mock("./log-entry", () => ({
 }))
 
 import { VirtualizedLogList } from "./log-virtualized-list"
-import type { StructuredLogEntry } from "@/lib/logging"
+import type { StructuredLogEntry } from "@cognia/logging"
 
 function makeLog(id: string, overrides: Partial<StructuredLogEntry> = {}): StructuredLogEntry {
   return {

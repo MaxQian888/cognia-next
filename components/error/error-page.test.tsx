@@ -7,7 +7,7 @@ jest.mock("@/lib/logging/crash-log", () => ({
   exportCrashLogBundleNow: jest.fn(),
 }))
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const fakeLogger = () => ({
     trace: jest.fn(),
     debug: jest.fn(),
@@ -39,9 +39,9 @@ jest.mock("@/hooks/use-network-status", () => ({
 }))
 
 import { exportCrashLogBundleNow } from "@/lib/logging/crash-log"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { toast } from "sonner"
-import { recordRecentErrorLog, resetRecentErrorLogsForTest } from "@/lib/logging/recent-errors"
+import { recordRecentErrorLog, resetRecentErrorLogsForTest } from "@cognia/logging/recent-errors"
 import type { StructuredLogEntry } from "@/types/logging"
 
 const exportMock = exportCrashLogBundleNow as jest.MockedFunction<typeof exportCrashLogBundleNow>

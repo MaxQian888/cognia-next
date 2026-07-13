@@ -22,7 +22,7 @@ import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
 import { emitSchedulerEvent } from "@/lib/scheduler/event-integration"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type {
   EmitEventRequest,
   RemoteCommand,

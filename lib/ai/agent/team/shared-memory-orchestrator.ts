@@ -29,7 +29,7 @@ import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 import { getSharedMemoryAdapter } from "@/lib/plugin/registries/shared-memory-adapter-registry"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 // Re-exported so build-options and other consumers share one ACL predicate.
 export {

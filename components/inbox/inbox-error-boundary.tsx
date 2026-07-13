@@ -17,7 +17,7 @@
 
 import React, { Component, type ReactNode } from "react"
 import { StateCard } from "./state/state-card"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export interface InboxErrorBoundaryProps {
   children: ReactNode

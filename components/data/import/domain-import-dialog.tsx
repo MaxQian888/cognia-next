@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { pickAndReadFiles } from "@/lib/files/file-bridge"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import {
   applyDomainImport,
   detectDomainFile,

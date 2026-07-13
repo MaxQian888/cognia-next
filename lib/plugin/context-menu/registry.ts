@@ -15,7 +15,7 @@
  * item target". `undefined` targets every zone.
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { evaluateContextWhen } from "@/lib/plugin/context-keys/context-key-store"
 import type { ContextMenuContext, ContextMenuItem } from "@/types/plugin"
 

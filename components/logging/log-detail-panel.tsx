@@ -54,8 +54,8 @@ import {
 } from "@/lib/agent"
 import { formatCost } from "@cognia/agent-trace/cost-formatter"
 import type { AgentTraceEventType } from "@/types/agent/agent-trace"
-import type { StructuredLogEntry } from "@/lib/logging"
-import { LEVEL_THEME } from "@/lib/logging/level-theme"
+import type { StructuredLogEntry } from "@cognia/logging"
+import { LEVEL_THEME } from "@cognia/logging/level-theme"
 
 export interface LogDetailPanelProps {
   log: StructuredLogEntry
@@ -120,6 +120,7 @@ function parseStackTrace(stack: string): { fn: string; file: string; line: strin
 
 function JsonPrimitive({ value }: { value: unknown }) {
   if (typeof value === "string") {
+    // i18n-exempt: JSON syntax literal in the raw log value renderer
     return <span className="text-chart-2">&quot;{value}&quot;</span>
   }
   if (typeof value === "number") {
@@ -129,6 +130,7 @@ function JsonPrimitive({ value }: { value: unknown }) {
     return <span className="text-chart-1">{String(value)}</span>
   }
   if (value === null) {
+    // i18n-exempt: JSON syntax literal in the raw log value renderer
     return <span className="text-chart-1">null</span>
   }
   return <span>{String(value)}</span>
@@ -160,6 +162,7 @@ function JsonTreeNode({
       <div className="font-mono text-xs leading-5" style={{ paddingLeft: depth * 12 }}>
         {label ? (
           <>
+            {/* i18n-exempt: JSON syntax literal in the raw log value renderer */}
             <span className="text-chart-4">&quot;{label}&quot;</span>
             <span>: </span>
           </>
@@ -177,6 +180,7 @@ function JsonTreeNode({
       <div style={{ paddingLeft: depth * 12 }}>
         <CollapsibleTrigger className="flex items-center gap-1 text-xs font-mono hover:text-foreground">
           {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          {/* i18n-exempt: JSON syntax literal in the raw log value renderer */}
           {label ? <span className="text-chart-4">&quot;{label}&quot;:</span> : null}
           <span>{wrapperOpen}</span>
           <span className="text-muted-foreground">{entries.length}</span>

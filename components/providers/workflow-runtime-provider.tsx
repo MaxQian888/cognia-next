@@ -19,7 +19,7 @@ import { isTauri } from "@/lib/tauri"
 import { listWorkflows } from "@/lib/db/workflows"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
 import { resumeInFlightRuns } from "@/lib/workflow/runtime/resume-controller"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

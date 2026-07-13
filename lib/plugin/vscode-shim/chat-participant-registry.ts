@@ -17,7 +17,7 @@
 
 import type { Character } from "@/lib/claude/types"
 import { getDb } from "@/lib/db/schema"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const chatLogger = loggers.plugin.child("vscode-chat")
 

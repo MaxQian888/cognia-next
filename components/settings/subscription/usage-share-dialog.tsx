@@ -32,7 +32,7 @@ import {
 import { THEMES, type ThemeId } from "@/lib/export/html/syntax-themes"
 import { themeHasWallpaper, resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { downloadBlob } from "@/lib/files/download"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
 
 const log = createLogger("usage-share")

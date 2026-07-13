@@ -22,7 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import {
   pickFolder,
   summarizeFolder,

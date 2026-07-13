@@ -11,7 +11,7 @@
  */
 
 import type { ResolvedPluginWebview, PluginWebviewMessage } from "@/types/plugin/plugin-webview"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const webviews = new Map<string, ResolvedPluginWebview>()
 /** Host-installed posters: push a message into a webview's iframe. */

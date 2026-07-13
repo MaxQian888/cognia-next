@@ -21,7 +21,7 @@ import {
   Copy,
   CheckCircle2,
 } from "lucide-react"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"

@@ -9,7 +9,7 @@ import {
 } from "./document-export"
 import type { ArtifactLanguage, CanvasDocument } from "@/types/artifact/artifact"
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { canvas: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() } },
 }))
 

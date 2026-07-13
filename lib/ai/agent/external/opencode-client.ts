@@ -26,7 +26,7 @@ import type {
   Pty as OcPty,
 } from "@opencode-ai/sdk/client"
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/utils"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import type {

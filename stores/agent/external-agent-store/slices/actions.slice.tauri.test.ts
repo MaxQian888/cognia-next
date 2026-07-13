@@ -9,7 +9,7 @@
  * (success + error) without touching real IPC.
  */
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

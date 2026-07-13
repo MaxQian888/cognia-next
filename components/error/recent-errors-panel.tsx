@@ -18,8 +18,8 @@ import { useEffect, useState } from "react"
 import { ChevronDown } from "lucide-react"
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { getRecentErrorLogs, subscribeRecentErrorLogs } from "@/lib/logging/recent-errors"
-import { LEVEL_THEME } from "@/lib/logging/level-theme"
+import { getRecentErrorLogs, subscribeRecentErrorLogs } from "@cognia/logging/recent-errors"
+import { LEVEL_THEME } from "@cognia/logging/level-theme"
 import { cn } from "@/lib/utils"
 import type { StructuredLogEntry } from "@/types/logging"
 

@@ -20,7 +20,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { canAutoPlayTTS } from "@cognia/tts/auto-play-gates"
 import { speakChatMessage } from "@/lib/tts/speak-chat-message"
 import type { Character } from "@/lib/claude/types"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
 

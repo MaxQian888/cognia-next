@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: {
       info: (...args: unknown[]) => logInfo(...args),

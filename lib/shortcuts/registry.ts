@@ -15,7 +15,7 @@
 
 import { create } from "zustand"
 import { invoke } from "@tauri-apps/api/core"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import { getPref, setPref } from "@/lib/tauri/store"
 

@@ -16,7 +16,7 @@ import type {
   SourceVerificationSettings,
   SearchUsageEntry,
   CustomSearchSource,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import type { PetSettings } from "@/types/pet"
 import type {
   ModelMapping,

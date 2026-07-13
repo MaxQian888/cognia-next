@@ -23,7 +23,7 @@ import { createPiiRedactionGate, defineContextProvider } from "@cognia/plugin-sd
 // lib/document. The plugin layer only adapts the call to the plugin boundary
 // (reads the settings store / plugin config and passes them in).
 import { webFetch as coreWebFetch, webSearch as coreWebSearch } from "@/lib/web/web-tools-core"
-import type { SearchProviderType } from "@/lib/search/types"
+import type { SearchProviderType } from "@cognia/web-search/types"
 import { useSettingsStore } from "@/stores/settings"
 
 /** How `web_fetch` should present the response body. */

@@ -10,7 +10,7 @@ jest.mock("next-intl", () => ({
 }))
 
 const errorMock = jest.fn()
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const stub = () => jest.fn()
   return {
     loggers: {

@@ -27,7 +27,7 @@ import {
   isBuiltinHookEnabled,
   type BuiltinHookOverrides,
 } from "@/lib/claude/hooks/builtin-hooks"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.hooks.builtin")
 

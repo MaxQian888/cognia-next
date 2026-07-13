@@ -24,7 +24,7 @@ jest.mock("@/lib/notifications/runtime", () => ({
   notify: jest.fn().mockResolvedValue("center-id"),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     app: {
       info: jest.fn(),

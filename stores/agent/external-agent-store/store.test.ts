@@ -7,7 +7,7 @@
  * - `migrate` — the function passed to `persist({ migrate })`
  */
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

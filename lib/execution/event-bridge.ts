@@ -22,7 +22,7 @@ import { getExecutionBroker } from "./broker"
 import type { ExecutionBroker } from "./broker"
 import type { ExecutionLegKind } from "./types"
 import { emitSchedulerEvent, type SchedulerEventType } from "@/lib/scheduler/event-integration"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("execution")
 

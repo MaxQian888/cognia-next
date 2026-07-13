@@ -20,7 +20,7 @@ jest.mock("@/lib/ai/agent/agent-team", () => ({
   },
 }))
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

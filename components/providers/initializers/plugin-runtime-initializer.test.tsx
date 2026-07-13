@@ -10,7 +10,7 @@ jest.mock("@/lib/platform/detect", () => ({
   detectPlatform: jest.fn(() => "web"),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     plugin: { debug: jest.fn(), info: jest.fn(), warn: jest.fn() },
   },
@@ -163,7 +163,7 @@ describe("PluginRuntimeInitializer", () => {
 
     await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
     // No throw — the warn logger absorbed it (asserted via the mock).
-    const { loggers } = jest.requireMock("@/lib/logging") as {
+    const { loggers } = jest.requireMock("@cognia/logging") as {
       loggers: { plugin: { warn: jest.Mock } }
     }
     await waitFor(() => expect(loggers.plugin.warn).toHaveBeenCalled())

@@ -12,7 +12,7 @@ jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 const mockIsTauri = jest.fn(() => true)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { mcp: { info: jest.fn(), error: jest.fn() } },
 }))
 

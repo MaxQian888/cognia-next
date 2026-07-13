@@ -56,7 +56,9 @@
       "@cognia/web-search": ["./packages/web-search/src/index.ts"],
       "@cognia/web-search/*": ["./packages/web-search/src/*"],
       "@cognia/tts": ["./packages/tts/src/index.ts"],
-      "@cognia/tts/*": ["./packages/tts/src/*"]
+      "@cognia/tts/*": ["./packages/tts/src/*"],
+      "@cognia/logging": ["./packages/logging/src/index.ts"],
+      "@cognia/logging/*": ["./packages/logging/src/*"]
     }
   },
   "include": [

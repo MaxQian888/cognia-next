@@ -29,7 +29,7 @@ jest.mock("@cognia/agent-trace/cost-formatter", () => ({
 }))
 
 import { LogDetailPanel } from "./log-detail-panel"
-import type { StructuredLogEntry } from "@/lib/logging"
+import type { StructuredLogEntry } from "@cognia/logging"
 
 beforeAll(() => {
   Object.defineProperty(navigator, "clipboard", {

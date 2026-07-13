@@ -1,52 +1,19 @@
 /**
- * Unified Logger System
+ * Unified Logger System — app barrel (ADR-0068 E4).
  *
- * Provides a centralized, configurable logging system with:
- * - Structured JSON logging
- * - Multiple transports (console, IndexedDB, remote)
- * - Session and trace ID correlation
- * - Log sampling and rate limiting
- * - Async batching for performance
- *
- * @example
- * ```typescript
- * import { logger, createLogger } from '@/lib/logging';
- *
- * // Use default app logger
- * logger.info('Application started');
- *
- * // Create module-specific logger
- * const authLogger = createLogger('auth');
- * authLogger.debug('User login attempt', { userId: '123' });
- *
- * // With trace ID for request correlation
- * import { logContext } from '@/lib/logging';
- * logContext.newTraceId();
- * logger.info('Processing request');
- * ```
+ * The framework-agnostic core (logger registry, context, sampling, redaction,
+ * console/IndexedDB/remote/OTel transports, `logger`/`loggers`/`log`
+ * singletons) lives in `@cognia/logging`; this barrel re-exports it plus the
+ * app-coupled surface that stays here — bootstrap wiring, the native/
+ * breadcrumb/agent-trace/OTLP/Langfuse transports, and the crash-log types.
+ * Existing `@/lib/logging` importers keep the exact pre-extraction surface;
+ * new code that only needs the core should import `@cognia/logging` directly
+ * so its module graph stays off the app-side bootstrap.
  */
 
-// Core exports
-export {
-  createLogger,
-  initLogger,
-  addTransport,
-  removeTransport,
-  getTransport,
-  getTransports,
-  getTransportHealth,
-  getTransportHealthSnapshot,
-  emitLoggerDiagnostic,
-  updateLoggerConfig,
-  getLoggerConfig,
-  getRegisteredModules,
-  getLoggerStats,
-  flushLogs,
-  shutdownLogger,
-} from "./core"
-export { clearRecentErrorLogs, getRecentErrorLogs, subscribeRecentErrorLogs } from "./recent-errors"
+export * from "@cognia/logging"
 
-// Bootstrap exports
+// Bootstrap exports (app-side: native-logging + settings-store wiring)
 export {
   bootstrapLogger,
   applyLoggingSettings,
@@ -61,114 +28,23 @@ export {
   type LoggingTransportSettings,
 } from "./bootstrap"
 
-// Context exports
-export { logContext, generateTraceId, traced } from "./context"
-
+// App-coupled transports (native bridge, crash breadcrumbs, agent-trace
+// Dexie sink, OTLP with PII redaction, Langfuse client)
 export {
-  createLogRuntimeContext,
-  normalizeLogOrigin,
-  normalizeLogRuntime,
-  withLogRuntimeContext,
-} from "./runtime"
-
-// Sampling exports
-export { logSampler, configureSampling, samplingRate } from "./sampling"
-
-// Type exports
-export type {
-  Logger,
-  LogLevel,
-  LogOrigin,
-  LogRuntime,
-  StructuredLogEntry,
-  Transport,
-  TransportHealthStatus,
-  TransportHealthSnapshot,
-  TransportDiagnosticEvent,
-  UnifiedLoggerConfig,
-  LoggerRedactionConfig,
-  LogFilter,
-  LogStats,
-} from "@/types/logging"
-
-export { LEVEL_PRIORITY, DEFAULT_UNIFIED_CONFIG } from "@/types/logging"
-
-// Transport exports
-export {
-  ConsoleTransport,
-  createConsoleTransport,
-  IndexedDBTransport,
-  createIndexedDBTransport,
-  RemoteTransport,
-  createRemoteTransport,
   NativeTransport,
   createNativeTransport,
-  IndexedDBRemoteRetryQueueStore,
-  createRemoteRetryQueueStore,
-  sentryTransform,
-  logglyTransform,
-  type ConsoleTransportOptions,
-  type IndexedDBTransportOptions,
-  type RemoteTransportOptions,
   type NativeTransportOptions,
-  type RemoteRetryQueueStore,
-  type RemoteRetryQueueBatch,
-  type RemoteRetryQueueStats,
-  type RemoteRetryQueueLimits,
-  type RemoteRetryQueueEnqueueResult,
+  LangfuseTransport,
+  createLangfuseTransport,
+  type LangfuseTransportOptions,
+  BreadcrumbTransport,
+  createBreadcrumbTransport,
+  type BreadcrumbTransportOptions,
+  AgentTraceTransport,
+  createAgentTraceTransport,
+  type AgentTraceTransportOptions,
+  OtlpHttpTransport,
+  createOtlpHttpTransport,
+  grafanaCloudHeaders,
+  type OtlpHttpTransportOptions,
 } from "./transports"
-
-// Re-export legacy types for backward compatibility
-export type { AppLogLevel, LogEntry, LoggerConfig, LogTransport } from "@/types/logging"
-
-/**
- * Default application logger
- */
-import { createLogger } from "./core"
-export const logger = createLogger("app")
-
-/**
- * Create pre-configured module loggers
- */
-export const loggers = {
-  app: logger,
-  ai: createLogger("ai"),
-  chat: createLogger("chat"),
-  agent: createLogger("agent"),
-  mcp: createLogger("mcp"),
-  plugin: createLogger("plugin"),
-  native: createLogger("native"),
-  ui: createLogger("ui"),
-  store: createLogger("store"),
-  files: createLogger("files"),
-  network: createLogger("network"),
-  auth: createLogger("auth"),
-  error: createLogger("error"),
-  media: createLogger("media"),
-  scheduler: createLogger("scheduler"),
-  search: createLogger("search"),
-  document: createLogger("document"),
-  export: createLogger("export"),
-  skills: createLogger("skills"),
-  sync: createLogger("sync"),
-  screenshot: createLogger("screenshot"),
-  tts: createLogger("tts"),
-  shell: createLogger("shell"),
-  canvas: createLogger("canvas"),
-  a2ui: createLogger("a2ui"),
-  tray: createLogger("tray"),
-}
-
-/**
- * Quick logging functions (use default app logger)
- */
-export const log = {
-  trace: (message: string, data?: Record<string, unknown>) => logger.trace(message, data),
-  debug: (message: string, data?: Record<string, unknown>) => logger.debug(message, data),
-  info: (message: string, data?: Record<string, unknown>) => logger.info(message, data),
-  warn: (message: string, data?: Record<string, unknown>) => logger.warn(message, data),
-  error: (message: string, error?: Error | unknown, data?: Record<string, unknown>) =>
-    logger.error(message, error, data),
-  fatal: (message: string, error?: Error | unknown, data?: Record<string, unknown>) =>
-    logger.fatal(message, error, data),
-}

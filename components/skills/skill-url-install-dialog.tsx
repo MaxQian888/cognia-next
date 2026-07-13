@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { URL_INSTALL_INVALID, useUrlInstall } from "@/hooks/skills"
 import { useSkillsStore } from "@/stores/skills/skills-store"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /**
  * "Install from URL" dialog: paste a skills.sh page link, an

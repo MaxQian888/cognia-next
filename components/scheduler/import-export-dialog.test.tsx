@@ -28,7 +28,7 @@ jest.mock("sonner", () => ({
 
 const logInfo = jest.fn()
 const logError = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     scheduler: {
       info: (...a: unknown[]) => logInfo(...a),

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { scanAndRegisterLocalPacks } from "@/lib/plugin/character-pack/local-pack-store"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.plugin
 

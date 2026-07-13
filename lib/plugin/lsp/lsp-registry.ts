@@ -29,7 +29,7 @@
  * integration).
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { PluginLspServerDef } from "@/types/plugin"
 import {
   evaluateLspBinary,

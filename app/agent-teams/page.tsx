@@ -75,7 +75,7 @@ import { type AgentTeamTemplate } from "@/types/agent/agent-team"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createSampleTeam } from "@/lib/ai/agent/sample-team"
 import { AutoComposeDialog } from "@/components/agent/workspace/auto-compose-dialog"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import {
   getTemplateWarnings,
   listAgentTeamTemplateEntries,

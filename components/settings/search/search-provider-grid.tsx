@@ -18,10 +18,10 @@ import {
   SEARCH_PROVIDERS,
   isProviderConfigured,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
-} from "@/lib/search/types"
-import { testProviderConnection } from "@/lib/search/provider-test"
+} from "@cognia/web-search/types"
+import { testProviderConnection } from "@cognia/web-search/provider-test"
 import { SearchProviderCard, type ProviderTestState } from "./search-provider-card"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.search.providers")
 

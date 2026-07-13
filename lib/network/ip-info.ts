@@ -14,7 +14,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.network
 

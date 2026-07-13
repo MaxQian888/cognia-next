@@ -60,7 +60,7 @@ import {
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubAgentTemplate, SubAgentPriority } from "@/types/agent/sub-agent"
 import { SUB_AGENT_PRIORITY_CONFIG } from "@/types/agent/sub-agent"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import { SubagentImportDialog } from "./subagent-import-dialog"
 import { ProviderModelCombobox } from "@/components/settings/provider/routing/provider-model-combobox"
 import type { ProviderName } from "@cognia/provider-types/provider"
@@ -430,7 +430,7 @@ function TemplateRow({
           )}
           {(template.variables?.length ?? 0) > 0 && (
             <span className="text-[11px] text-muted-foreground">
-              {template.variables!.length} variable{template.variables!.length !== 1 ? "s" : ""}
+              {t("variableCount", { count: template.variables!.length })}
             </span>
           )}
         </div>
@@ -624,7 +624,9 @@ function TemplateEditor({ initial, submitLabel, onCancel, onSave }: EditorProps)
           data-testid={`editor-variable-row-${i}`}
         >
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-medium text-muted-foreground">Variable {i + 1}</span>
+            <span className="text-[10px] font-medium text-muted-foreground">
+              {t("variableIndex", { index: i + 1 })}
+            </span>
             <Button
               variant="ghost"
               size="icon"

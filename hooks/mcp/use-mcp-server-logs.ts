@@ -9,7 +9,7 @@
 import { useMemo } from "react"
 
 import { useLogStream } from "@/hooks/logging/use-log-stream"
-import type { StructuredLogEntry } from "@/lib/logging"
+import type { StructuredLogEntry } from "@cognia/logging"
 
 /** The unified-logger module a server's bridged logs are written under. */
 export function mcpServerModule(server: string): string {

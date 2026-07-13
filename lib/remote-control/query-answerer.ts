@@ -16,7 +16,7 @@
 import type { RemoteControlQueryEvent } from "@/types/remote-control"
 import { remoteControlQueryResponse } from "@/lib/tauri/remote-control"
 import { hasNoLeakingPii } from "@cognia/redact"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

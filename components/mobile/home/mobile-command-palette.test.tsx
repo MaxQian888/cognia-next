@@ -16,7 +16,7 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
   createLogger: () => ({
     debug: jest.fn(),

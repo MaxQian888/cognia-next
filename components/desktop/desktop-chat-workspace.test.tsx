@@ -20,7 +20,7 @@ jest.mock("next/navigation", () => ({
   usePathname: () => "/",
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     shell: {
       info: (...args: unknown[]) => logInfo(...args),

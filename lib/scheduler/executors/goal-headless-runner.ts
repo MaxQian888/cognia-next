@@ -34,7 +34,7 @@ import { resolveSendOptions } from "@/lib/claude/build-options"
 import { runAndCaptureAssistantReply, RunAndCaptureError } from "@/lib/claude/run-and-capture"
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

@@ -27,7 +27,7 @@ jest.mock("@/components/share/share-link-dialog", () => ({
   },
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
 }))
 

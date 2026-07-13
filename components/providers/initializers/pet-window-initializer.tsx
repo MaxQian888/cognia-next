@@ -8,7 +8,7 @@ import { isTauri } from "@/lib/platform/detect"
 import { getPetWindowRole } from "@/lib/pet/window-role"
 import { openPetWindow } from "@/lib/tauri/pet-window"
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
 

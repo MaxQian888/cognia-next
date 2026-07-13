@@ -24,9 +24,9 @@ import {
   type SearchResponse,
   type SearchResult,
   type SourceVerificationSettings,
-} from "@/lib/search/types"
-import { optimizeSearchQuery } from "@/lib/search/search-query-optimizer"
-import { verifySource, sortByCredibility } from "@/lib/search/source-verification"
+} from "@cognia/web-search/types"
+import { optimizeSearchQuery } from "@cognia/web-search/search-query-optimizer"
+import { verifySource, sortByCredibility } from "@cognia/web-search/source-verification"
 import { parseHTML } from "@cognia/document/parsers/html-parser"
 import { fetchCacheKey, type FetchCacheLike } from "@/lib/web/fetch-cache"
 import { scrapePlatform } from "@/lib/web/reader/dispatch"

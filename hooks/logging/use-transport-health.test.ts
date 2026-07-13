@@ -4,7 +4,7 @@
 import { act, renderHook } from "@testing-library/react"
 
 const getSnapshotMock = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   getTransportHealthSnapshot: () => getSnapshotMock(),
 }))
 

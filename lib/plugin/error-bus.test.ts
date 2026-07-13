@@ -9,7 +9,7 @@ import {
   type PluginErrorEventDetail,
 } from "./error-bus"
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     plugin: {
       warn: jest.fn(),
@@ -18,7 +18,7 @@ jest.mock("@/lib/logging", () => ({
   },
 }))
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const warnMock = loggers.plugin.warn as unknown as jest.Mock
 const errorMock = loggers.plugin.error as unknown as jest.Mock

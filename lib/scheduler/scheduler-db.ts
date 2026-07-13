@@ -11,7 +11,7 @@ import type {
   TaskFilter,
   TaskStatistics,
 } from "@/types/scheduler"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.app
 

@@ -10,7 +10,7 @@ import { resolveCliHome, writeCliHomeFile } from "./home"
 
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
-jest.mock("@/lib/logging", () => ({ loggers: { tray: { warn: jest.fn() } } }))
+jest.mock("@cognia/logging", () => ({ loggers: { tray: { warn: jest.fn() } } }))
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }

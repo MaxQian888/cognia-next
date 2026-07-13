@@ -14,7 +14,7 @@
 import type { Goal } from "@/types/goal"
 import { renderGoalSystemSection } from "./prompts"
 import { hasNoLeakingPii } from "@cognia/redact"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /**
  * If `goal` is in the `active` state, returns the new value for

@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { writeText as capWriteText } from "@/lib/capacitor/clipboard"
 
 export interface UseCopyOptions {

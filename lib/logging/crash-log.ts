@@ -14,7 +14,7 @@ import { downloadFile } from "@/lib/files/download"
 import {
   CRASH_LOG_KEY_HINTS,
   CRASH_LOG_TEXT_REDACTION_PATTERNS,
-} from "@/lib/logging/redaction-patterns"
+} from "@cognia/logging/redaction-patterns"
 
 export type {
   WindowDiagnosticsSnapshot,
@@ -380,7 +380,7 @@ export async function exportCrashLogBundleNow(
     { getLocalRuntimeDiagnostics },
     { getWindowDiagnostics },
   ] = await Promise.all([
-    import("./recent-errors"),
+    import("@cognia/logging/recent-errors"),
     import("./bootstrap"),
     import("@/lib/native/native-logging"),
     import("@/lib/native/local-runtime"),

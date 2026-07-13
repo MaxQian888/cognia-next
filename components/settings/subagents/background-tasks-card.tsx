@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useSettingsStore } from "@/stores/settings"
 import type { ToolRules } from "@/lib/claude/permissions/ruleset"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.backgroundTasks")
 

@@ -70,7 +70,7 @@ import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { toast } from "sonner"
 import type { AppSettings, ChatSession, SystemPromptPreset } from "@/lib/claude/types"
 

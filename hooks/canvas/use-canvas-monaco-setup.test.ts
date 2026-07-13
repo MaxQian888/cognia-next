@@ -68,7 +68,7 @@ jest.mock("@/lib/editor-workbench/monaco-workbench", () => ({
     mountWorkbenchMock(editor, monaco, spec),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { canvas: { warn: jest.fn(), error: jest.fn(), info: jest.fn() } },
 }))
 

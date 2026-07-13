@@ -17,7 +17,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { ParsedError, ParsedNode } from "@cognia/error-parsers/types"
 import { normalizeErrorText, resolvePreset } from "@cognia/error-parsers"
-import { LEVEL_THEME } from "@/lib/logging/level-theme"
+import { LEVEL_THEME } from "@cognia/logging/level-theme"
 import { ExternalLink } from "@/components/shared/external-link"
 import { JsonTree } from "@/components/shared/json-tree"
 import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"

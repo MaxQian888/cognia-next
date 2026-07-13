@@ -5,8 +5,8 @@
 // of trace groups, and entries with `data` / `stack` / `source` so the panel,
 // timeline, dashboard, trace-view, and detail components all render meaningful
 // content. Times are relative to an injectable `now`.
-import type { StructuredLogEntry } from "@/lib/logging"
-import type { LogLevel } from "@/types/logging/log-level"
+import type { StructuredLogEntry } from "@cognia/logging"
+import type { LogLevel } from "@cognia/logging/types/log-level"
 
 const MIN = 60_000
 

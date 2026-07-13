@@ -21,7 +21,7 @@ jest.mock("@/stores/settings", () => ({
   ): T => selector({ settings: { canvasCodeSandboxEnabled: canvasSandboxRef.current } }),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { canvas: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 

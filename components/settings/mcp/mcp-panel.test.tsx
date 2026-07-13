@@ -8,7 +8,7 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
-jest.mock("@/lib/logging", () => ({ loggers: { mcp: { info: jest.fn(), error: jest.fn() } } }))
+jest.mock("@cognia/logging", () => ({ loggers: { mcp: { info: jest.fn(), error: jest.fn() } } }))
 
 // Faithful useLiveQuery stand-in: returns undefined on first render, resolves
 // the querier async, and retains the stale previous value across dep changes —

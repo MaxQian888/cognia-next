@@ -97,7 +97,7 @@ jest.mock(
   { virtual: true }
 )
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: {
       info: jest.fn(),

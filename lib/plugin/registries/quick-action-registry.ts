@@ -16,7 +16,7 @@
  */
 
 import type { PluginQuickActionInput, PluginQuickActionSurface } from "@/types/plugin"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { registerCommand } from "@/lib/plugin/commands/registry"
 import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
 import { createOverlayRegistry } from "./createOverlayRegistry"

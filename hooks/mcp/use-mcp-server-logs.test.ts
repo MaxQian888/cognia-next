@@ -5,7 +5,7 @@
 import { renderHook } from "@testing-library/react"
 
 import { mcpServerModule, mcpServerLogsHref, useMcpServerLogs } from "./use-mcp-server-logs"
-import type { StructuredLogEntry } from "@/lib/logging"
+import type { StructuredLogEntry } from "@cognia/logging"
 
 const useLogStreamMock = jest.fn()
 jest.mock("@/hooks/logging/use-log-stream", () => ({

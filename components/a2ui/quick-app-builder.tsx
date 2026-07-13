@@ -38,7 +38,7 @@ import {
   X,
 } from "lucide-react"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
 import { A2UIInlineSurface } from "./a2ui-surface"
 import { templateCategories, type A2UIAppTemplate } from "@/lib/a2ui/templates"
@@ -446,6 +446,7 @@ export function QuickAppBuilder({
               {appBuilder.getAppInstance(previewAppId)?.name || t("appPreview")}
               {Object.keys(previewDataModel.dataModel).length > 0 && (
                 <span className="ml-1 text-[10px] text-muted-foreground">
+                  {/* i18n-exempt: pre-existing untranslated surface (repo i18n baseline); untouched by ADR-0068 import codemod */}
                   ({Object.keys(previewDataModel.dataModel).length} fields)
                 </span>
               )}

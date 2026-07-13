@@ -16,7 +16,7 @@
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { agentTeamManager } from "@/lib/ai/agent/agent-team"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { SubAgentPriority } from "@/types/agent/sub-agent"
 import type { TeamTaskStatus } from "@/types/agent/agent-team"
 

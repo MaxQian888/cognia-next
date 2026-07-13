@@ -25,7 +25,7 @@ import {
   getActivePluginTaskCount,
   isPluginTaskExecutionActive,
 } from "@/lib/scheduler/executors/plugin-executor"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.store
 

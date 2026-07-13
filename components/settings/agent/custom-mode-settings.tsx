@@ -7,7 +7,7 @@
 
 import { useState, useCallback, useRef } from "react"
 import { useTranslations } from "next-intl"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import {
   Plus,
   Download,

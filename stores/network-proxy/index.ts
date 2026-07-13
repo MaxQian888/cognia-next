@@ -23,7 +23,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { isTauri } from "@/lib/tauri"
 import { buildProxyUrl, isProxyActive } from "@/lib/network/proxy-config"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import {
   DEFAULT_NETWORK_PROXY_SETTINGS,
   type NetworkProxySettings,

@@ -582,5 +582,6 @@
     "toolArgs": "参数",
     "toolName": "工具",
     "totalTokens": "总计"
-  }
+  },
+  "statusSr": "状态：{status}"
 }

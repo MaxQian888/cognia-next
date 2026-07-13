@@ -29,7 +29,7 @@
 
 import { generateText, type ModelMessage } from "ai"
 import { getProviderModel } from "@cognia/provider-core/core/client"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const lmHandlerLogger = loggers.plugin.child("vscode-lm")
 

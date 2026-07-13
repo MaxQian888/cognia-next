@@ -15,7 +15,7 @@
  * after being logged and audited.
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { Logger } from "@/types/logging"
 import type { FileAccessDecision, FileAccessPolicy, FileOperation, FileStat } from "@/types/files"
 import {

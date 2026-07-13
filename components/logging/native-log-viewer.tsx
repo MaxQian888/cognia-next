@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
-import { LEVEL_THEME } from "@/lib/logging/level-theme"
+import { LEVEL_THEME } from "@cognia/logging/level-theme"
 import type { LogLevel } from "@/types/logging"
 import { useNativeLogQuery } from "@/hooks/logging/use-native-log-query"
 import type { NativeLogQueryEntry } from "@/lib/native/native-logging"

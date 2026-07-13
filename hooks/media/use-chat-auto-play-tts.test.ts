@@ -13,7 +13,7 @@ jest.mock("@/lib/tts/speak-chat-message", () => ({
   speakChatMessage: (...a: unknown[]) => speakChatMessage(...a),
 }))
 
-jest.mock("@/lib/logging", () => ({ loggers: { tts: { warn: jest.fn() } } }))
+jest.mock("@cognia/logging", () => ({ loggers: { tts: { warn: jest.fn() } } }))
 
 import { useChatAutoPlayTTS } from "./use-chat-auto-play-tts"
 

@@ -26,7 +26,7 @@ jest.mock("@/stores/account/account-store", () => ({
     selector({ unlockedAccountId }),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { chat: { warn: jest.fn(), error: jest.fn() } },
 }))
 

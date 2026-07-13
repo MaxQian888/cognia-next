@@ -165,7 +165,9 @@
     "save": "Save",
     "searchPlaceholder": "Search templates...",
     "title": "Templates",
-    "updatedToast": "Updated \"{name}\"."
+    "updatedToast": "Updated \"{name}\".",
+    "variableCount": "{count, plural, =1 {1 variable} other {# variables}}",
+    "variableIndex": "Variable {index}"
   },
   "title": "Sub-agents"
 }

@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { JupyterCell, JupyterNotebook, JupyterOutput } from "@/types"
 
 interface JupyterRendererProps {
@@ -92,6 +92,7 @@ function JupyterCellOutput({ output }: { output: JupyterOutput }) {
       // eslint-disable-next-line @next/next/no-img-element
       <img
         src={`data:image/png;base64,${png}`}
+        // i18n-exempt: pre-existing untranslated surface (repo i18n baseline); untouched by ADR-0068 import codemod
         alt="cell output"
         className="mt-2 max-w-full rounded-md border"
       />

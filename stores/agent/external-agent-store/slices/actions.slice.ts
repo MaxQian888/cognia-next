@@ -1,6 +1,6 @@
 import type { StoreApi } from "zustand"
 import { nanoid } from "nanoid"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type {
   ExternalAgentBenchmarkCapabilityEntry,
   ExternalAgentConfig,

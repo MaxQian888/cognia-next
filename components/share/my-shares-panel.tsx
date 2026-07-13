@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { listSharedLinks } from "@/lib/db/shared-links"
 import { revokeShareLink, getShareStats } from "@/lib/share/client"
 import { toast } from "sonner"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("my-shares")
 

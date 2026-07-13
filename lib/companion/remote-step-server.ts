@@ -25,7 +25,7 @@ import {
   type RemoteStepResult,
 } from "@/lib/workflow/runtime/remote-step-broker"
 import { STEP_EXECUTE_CHANNEL } from "@/lib/workflow/runtime/remote-step-broker"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.sync
 

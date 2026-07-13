@@ -14,7 +14,7 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   }),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({ warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() }),
 }))
 

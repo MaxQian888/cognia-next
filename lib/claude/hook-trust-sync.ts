@@ -9,7 +9,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
 import { listTrustedWorkspaces } from "@/lib/db/trusted-workspaces"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("claude.hook-trust-sync")
 

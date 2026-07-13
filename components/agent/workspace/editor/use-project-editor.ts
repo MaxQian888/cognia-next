@@ -23,7 +23,7 @@ import {
 import { watchWorkspace } from "@/lib/files/workspace-watch"
 import { languageFromPath, type MonacoLanguage } from "@/components/editor/editor-language"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const editorLogger = loggers.agent.child("project-editor")
 

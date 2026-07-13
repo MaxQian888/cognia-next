@@ -20,7 +20,7 @@ import { toast } from "sonner"
 
 import { isTauri } from "@/lib/tauri"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { importHandoffSession, type HandoffMessage } from "@/lib/chat/import-handoff-session"
 import { useChatStore } from "@/stores/chat/chat-store"
 

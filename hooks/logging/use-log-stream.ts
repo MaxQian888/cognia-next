@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from "react"
-import { IndexedDBTransport, getRegisteredModules } from "@/lib/logging"
+import { IndexedDBTransport, getRegisteredModules } from "@cognia/logging"
 import type {
   StructuredLogEntry,
   LogLevel,

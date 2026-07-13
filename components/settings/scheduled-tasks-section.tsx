@@ -66,7 +66,7 @@ import {
   DEFAULT_EXECUTION_CONFIG,
   DEFAULT_NOTIFICATION_CONFIG,
 } from "@/types/scheduler"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 // Aligned with the executors actually shipped in cognia-next
 // (`lib/scheduler/executors/`). `twin` (enqueues only), `workflow`, and `sync`

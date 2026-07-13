@@ -14,7 +14,7 @@ import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
   createDefaultSearchUsageStats,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 
 /** Per-provider override applied on top of `DEFAULT_SEARCH_PROVIDER_SETTINGS`. */
 export type ProviderOverride = Partial<SearchProviderSettings>

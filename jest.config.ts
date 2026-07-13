@@ -145,6 +145,7 @@ const projectCommon: Config = {
     "^@cognia/redact(.*)$": "<rootDir>/packages/redact/src$1",
     "^@cognia/web-search(.*)$": "<rootDir>/packages/web-search/src$1",
     "^@cognia/tts(.*)$": "<rootDir>/packages/tts/src$1",
+    "^@cognia/logging(.*)$": "<rootDir>/packages/logging/src$1",
 
     // cheerio's package exports prefer the ESM browser build under jsdom.
     // The HTML parser uses dynamic import("cheerio"), so map Jest to the CJS
@@ -294,6 +295,11 @@ const globalConfig: Config = {
     // types/media/tts.ts, which carried runtime tables (TTS_PROVIDERS,
     // getTTSError) and its own test, so it stays collected too.
     "packages/tts/src/**/*.{ts,tsx}",
+    // logging core was lifted out of lib/logging (coverage-collected). Its
+    // types/ subtree came from types/logging, which was never
+    // coverage-collected (provider-types precedent), so it is excluded.
+    "packages/logging/src/**/*.{ts,tsx}",
+    "!packages/logging/src/types/**",
     "!packages/plugin-sdk/src/context/**/*.ts",
     "!packages/plugin-sdk/src/hooks/index.ts",
     "!packages/plugin-sdk/src/permissions/index.ts",

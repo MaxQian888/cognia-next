@@ -5,7 +5,7 @@ import {
   DEFAULT_REDACTION_KEYS,
   DEFAULT_REDACTION_PATTERNS,
   DEFAULT_REDACTION_REPLACEMENT,
-} from "@/lib/logging/redaction-patterns"
+} from "@cognia/logging/redaction-patterns"
 
 /**
  * Frontend → Rust crash-context bridge. The renderer pushes a **redacted**

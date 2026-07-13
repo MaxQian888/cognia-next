@@ -19,7 +19,7 @@ import { SettingsToggle } from "@/components/settings/common/settings-section"
 import { useSettingsStore } from "@/stores/settings"
 import { getSearchCache } from "@cognia/web-search/search-cache"
 import { DEFAULT_SEARCH_PROVIDER_SETTINGS } from "@cognia/web-search/types"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.search.cache")
 

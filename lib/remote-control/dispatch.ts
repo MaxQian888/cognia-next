@@ -26,7 +26,7 @@ import type {
   RemoteControlRunStatusValue,
 } from "@/types/remote-control"
 import { isRemoteCommandTargetEnabled } from "@/types/remote-control"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

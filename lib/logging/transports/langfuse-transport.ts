@@ -5,7 +5,7 @@
  * Particularly useful for tracking errors and important events in AI workflows.
  */
 
-import type { Transport, StructuredLogEntry, LogLevel } from "@/types/logging"
+import type { Transport, StructuredLogEntry, LogLevel } from "@cognia/logging/types"
 
 export interface LangfuseTransportOptions {
   /** Langfuse public key */

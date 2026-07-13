@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { LogPanelStatsBar } from "./log-panel-stats-bar"
-import type { TransportHealthSnapshot } from "@/lib/logging"
+import type { TransportHealthSnapshot } from "@cognia/logging"
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
 
 const NOW = new Date().toISOString()

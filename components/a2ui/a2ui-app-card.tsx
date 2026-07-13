@@ -35,7 +35,7 @@ import {
   Share2,
   Sparkles,
 } from "lucide-react"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { generatePlaceholderThumbnail, captureSurfaceThumbnail } from "@/lib/a2ui/thumbnail"
 import { formatRelativeTime } from "@/lib/a2ui/format"
 import type { AppCardProps } from "@/types/a2ui/app"

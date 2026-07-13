@@ -191,5 +191,6 @@
   "validation": {
     "contentRequired": "System prompt cannot be empty.",
     "nameRequired": "Preset name is required."
-  }
+  },
+  "moreActions": "More actions"
 }

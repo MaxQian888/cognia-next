@@ -29,7 +29,7 @@ import { buildOcrDeps } from "@/lib/ocr/deps"
 import { getSettings } from "@/lib/db/settings"
 import { DEFAULT_OCR_SETTINGS, type OcrResult } from "@/types/ocr"
 import type { PdfRouterInput } from "@/lib/ocr/pdf-router"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /** Below this many non-whitespace chars a PDF is treated as scanned → OCR. */
 export const ATTACHMENT_OCR_MIN_TEXT_CHARS = 32

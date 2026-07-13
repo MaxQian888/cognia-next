@@ -51,7 +51,7 @@ import { startLarkLongConn } from "./transport-long-conn"
 import { startLarkWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export interface LarkAdapterOptions {
   id: string

@@ -13,7 +13,7 @@ import { toast } from "sonner"
 import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { pickPhoto } from "@/lib/capacitor/camera"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface CameraCaptureButtonProps {
   disabled?: boolean

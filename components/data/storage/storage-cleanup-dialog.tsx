@@ -35,7 +35,7 @@ import {
 import { useStorageCleanup } from "@/hooks/storage"
 import { CATEGORY_INFO, defaultDisplayName, selectableCategories } from "@/lib/storage"
 import type { CleanupResult, StorageCategory } from "@/lib/storage"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("data-cleanup")
 

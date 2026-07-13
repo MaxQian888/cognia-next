@@ -3,7 +3,7 @@ import { runWikiLint } from "@/lib/wiki/lint/lint-runner"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
 jest.mock("@/lib/wiki/lint/lint-runner", () => ({ runWikiLint: jest.fn() }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { scheduler: { info: jest.fn(), error: jest.fn() } },
 }))
 

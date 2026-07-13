@@ -48,7 +48,7 @@ import { useSkillsStore } from "@/stores/skills"
 import type { ImportStaging } from "@/stores/skills"
 import { useSkillSync, useSkillUpdate } from "@/hooks/skills"
 import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const SKILL_FILE_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown"] }]
 const BUNDLE_FILE_FILTERS = [{ name: "Skill bundle", extensions: ["zip"] }]

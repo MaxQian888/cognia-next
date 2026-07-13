@@ -20,7 +20,7 @@
  */
 
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { LSP_TAURI_CHANNEL_ID } from "@/lib/plugin/lsp/lsp-client-adapter-tauri"
 
 const log = loggers.plugin.child("editor-lsp-runtime")

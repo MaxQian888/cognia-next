@@ -19,7 +19,7 @@
  */
 
 import type { AgentTeamTaskPayload, ScheduledTask, TaskExecution } from "@/types/scheduler"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

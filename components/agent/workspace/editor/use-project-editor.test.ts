@@ -4,7 +4,7 @@
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { useProjectEditor, joinRootRel, type ProjectEditorDeps } from "./use-project-editor"
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

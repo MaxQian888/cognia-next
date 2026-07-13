@@ -12,7 +12,7 @@ import {
   createDefaultSearchUsageStats,
   type SearchProviderType,
 } from "@cognia/web-search/types"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.search.usage")
 

@@ -165,7 +165,9 @@
     "save": "保存",
     "searchPlaceholder": "搜索模板...",
     "title": "模板",
-    "updatedToast": "已更新 \"{name}\"。"
+    "updatedToast": "已更新 \"{name}\"。",
+    "variableCount": "{count} 个变量",
+    "variableIndex": "变量 {index}"
   },
   "title": "子代理"
 }

@@ -582,5 +582,6 @@
     "toolArgs": "Arguments",
     "toolName": "Tool",
     "totalTokens": "Total"
-  }
+  },
+  "statusSr": "status: {status}"
 }

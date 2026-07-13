@@ -18,7 +18,7 @@
 // internals, and forwarded events carry a REDUCED meta (id-shaped keys only —
 // `talked` events' meta.userText never crosses into plugin code).
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { PluginCapability } from "@/types/plugin/plugin"
 import type {
   PetCondition,
@@ -51,13 +51,7 @@ export interface PluginPetSummary {
 
 /** Direct nurture interactions a plugin may perform. */
 export type PluginPetInteractionKind =
-  | "fed"
-  | "played"
-  | "petted"
-  | "talked"
-  | "slept"
-  | "cleaned"
-  | "treated"
+  "fed" | "played" | "petted" | "talked" | "slept" | "cleaned" | "treated"
 
 const INTERACTION_KINDS: ReadonlySet<string> = new Set<PluginPetInteractionKind>([
   "fed",

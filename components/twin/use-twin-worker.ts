@@ -21,7 +21,7 @@
 
 import { useEffect, useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { createVectorStore, type IVectorStore, type VectorStoreConfig } from "@cognia/vector/store"
 import { embeddingProviderRequiresApiKey } from "@cognia/provider-embedding/embedding-catalog"
 import { observeTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"

@@ -10,7 +10,7 @@ import type {
   A2UIComponent,
 } from "@/types/a2ui/schema"
 import { getValueByPath, parseJsonPointer } from "@/lib/a2ui/data-model"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.ui
 

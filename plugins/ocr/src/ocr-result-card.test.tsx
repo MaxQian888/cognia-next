@@ -22,7 +22,7 @@ const copy = jest.fn()
 jest.mock("@/hooks/ui/use-copy", () => ({
   useCopy: () => ({ copied: false, copy }),
 }))
-jest.mock("@/lib/logging", () => ({ loggers: { chat: {} } }))
+jest.mock("@cognia/logging", () => ({ loggers: { chat: {} } }))
 jest.mock("@/lib/platform/detect", () => ({
   isTauri: () => false,
   isCapacitor: () => false,

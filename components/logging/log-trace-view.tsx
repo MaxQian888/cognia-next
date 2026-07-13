@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyTitle } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
-import type { StructuredLogEntry } from "@/lib/logging"
+import type { StructuredLogEntry } from "@cognia/logging"
 
 const TRACE_ID_PREFIX_LENGTH = 8
 const MINI_TIMELINE_WIDTH = 240

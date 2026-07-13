@@ -13,7 +13,7 @@ jest.mock("@/stores/a2ui", () => ({
   },
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     a2ui: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() },
   },

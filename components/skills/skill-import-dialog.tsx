@@ -25,7 +25,7 @@ import {
   type SkillDraft,
 } from "@/lib/db/skills"
 import type { ImportStaging } from "@/stores/skills"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import { useSkillSync, useSkillPanelPrefs } from "@/hooks/skills"
 import { getSkill } from "@/lib/db/skills"

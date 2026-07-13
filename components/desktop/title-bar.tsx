@@ -41,7 +41,7 @@ import {
   MenubarTrigger,
 } from "@/components/ui/menubar"
 import { listSessions } from "@/lib/db/sessions"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import { applyZoom, clampZoom, DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
 import {

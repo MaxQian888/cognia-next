@@ -18,7 +18,7 @@ jest.mock("@/lib/db/trusted-workspaces", () => ({
   revokeWorkspaceTrust: jest.fn(async () => undefined),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { shell: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
 }))
 jest.mock("@/lib/db/projects", () => ({

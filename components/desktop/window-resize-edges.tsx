@@ -1,6 +1,6 @@
 "use client"
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 import { useEffect, useState } from "react"
@@ -13,14 +13,7 @@ const log = loggers.ui
  * triggered).
  */
 type ResizeDirection =
-  | "East"
-  | "West"
-  | "North"
-  | "South"
-  | "NorthEast"
-  | "NorthWest"
-  | "SouthEast"
-  | "SouthWest"
+  "East" | "West" | "North" | "South" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest"
 
 interface EdgeSpec {
   direction: ResizeDirection

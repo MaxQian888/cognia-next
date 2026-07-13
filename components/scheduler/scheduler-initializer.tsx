@@ -5,7 +5,7 @@ import { useEffect } from "react"
 import { stopSchedulerSystem } from "@/lib/scheduler"
 import { useSchedulerStore } from "@/stores/scheduler"
 import { installExecutionEventBridge } from "@/lib/execution/event-bridge"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

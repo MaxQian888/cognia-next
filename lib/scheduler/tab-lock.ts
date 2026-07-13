@@ -5,7 +5,7 @@
  * Falls back to periodic heartbeat via localStorage for browsers without Web Locks.
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

@@ -32,7 +32,7 @@ import { notifyExportOutcome } from "@/lib/files/export-feedback"
 import type { ChatSession } from "@/lib/claude/types"
 import type { SingleExportFormat } from "@/lib/export/single"
 import { listSessions } from "@/lib/db/sessions"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("data-export")
 

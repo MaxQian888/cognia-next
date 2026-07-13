@@ -55,12 +55,12 @@ import type {
   SearchType,
   SearchUsageEntry,
   SourceVerificationSettings,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   createDefaultSearchUsageEntry,
   createDefaultSearchUsageStats,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import {
   clearProviderKey,
   loadAllProviderKeys,

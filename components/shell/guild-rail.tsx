@@ -16,7 +16,7 @@ import {
 import { cn } from "@/lib/utils"
 import { avatarColor } from "@/lib/ui/avatar"
 import { listTeams } from "@/lib/db/teams"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useUIStore } from "@/stores/ui"
 import type { Team } from "@/lib/claude/types"

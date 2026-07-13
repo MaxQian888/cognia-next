@@ -59,8 +59,8 @@ jest.mock("@/lib/native/external-agent", () => ({
 }))
 
 import { CodexAppServerAdapter, type CodexAppServerStatus } from "./codex-app-server-client"
-import { loggers } from "@/lib/logging"
-import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@/lib/logging/truncate"
+import { loggers } from "@cognia/logging"
+import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@cognia/logging/truncate"
 
 function feed(method: string, params: Record<string, unknown>): void {
   stdoutCb?.({ agentId: "proc-1", data: JSON.stringify({ method, params }) })

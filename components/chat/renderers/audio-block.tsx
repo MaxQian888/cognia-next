@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { downloadFromUrl } from "@/lib/files/download"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface AudioBlockProps {
   src: string

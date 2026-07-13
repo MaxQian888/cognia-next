@@ -55,7 +55,7 @@ jest.mock("@/lib/runtime/streaming-fetch", () => ({
   browserDirectHeaders: () => ({}),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { canvas: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 

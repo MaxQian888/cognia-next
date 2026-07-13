@@ -185,7 +185,7 @@ async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
     // turned it off; apply their TTL / size config.
     if (s?.searchCacheEnabled !== false) {
       try {
-        const { getSearchCache } = await import("@/lib/search/search-cache")
+        const { getSearchCache } = await import("@cognia/web-search/search-cache")
         const cache = getSearchCache()
         cache.setConfig({
           ...(s?.searchCacheTTL ? { defaultTTL: s.searchCacheTTL } : {}),

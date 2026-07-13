@@ -15,7 +15,7 @@ import {
 } from "@/types/agent/agent-team"
 import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "@/lib/ai/agent/agent-team-compat"
 import { canMoveTask, reorderColumn, sortColumn } from "@/lib/ai/agent/team/task-move-guard"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
 import { initialState, builtInTemplatesMap } from "../initial-state"
 import type { AgentTeamState } from "../types"

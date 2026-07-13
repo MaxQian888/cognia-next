@@ -30,8 +30,8 @@ import {
   type SourceVerificationMode,
   type SourceVerificationSettings as VerifSettings,
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
-} from "@/lib/search/types"
-import { createLogger } from "@/lib/logging"
+} from "@cognia/web-search/types"
+import { createLogger } from "@cognia/logging"
 import { DomainListInput } from "./_shared/domain-list-input"
 import { SegmentedControl, type SegmentedOption } from "./_shared/segmented-control"
 

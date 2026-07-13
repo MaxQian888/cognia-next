@@ -20,7 +20,7 @@
 import { snippetProvider } from "@/lib/canvas/snippets/snippet-registry"
 import { listSnippetsForLanguage } from "@/lib/plugin/bridge/snippets-bridge"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const snippetsLogger = loggers.canvas.child("monaco-snippets")
 

@@ -84,7 +84,7 @@ jest.mock("@/lib/db/sessions", () => ({
 const logInfo = jest.fn()
 const logWarn = jest.fn()
 const logError = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: {
       info: (...a: unknown[]) => logInfo(...a),

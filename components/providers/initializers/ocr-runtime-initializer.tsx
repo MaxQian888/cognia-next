@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react"
 
 import { installOcrRuntime } from "@/lib/ocr/runtime"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
 

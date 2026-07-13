@@ -41,7 +41,7 @@ import {
   type SubagentSourceId,
 } from "@/lib/claude/subagent-importers"
 import { applySubagentImport } from "@/lib/claude/subagent-importers/apply"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.subagents.import")
 

@@ -10,7 +10,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 
 const log = loggers.tray // shared "desktop tooling" channel — same as cli-bridge/status

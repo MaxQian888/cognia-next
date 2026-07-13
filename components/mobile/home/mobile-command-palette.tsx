@@ -36,7 +36,7 @@ import { useUIStore } from "@/stores/ui"
 import { listCharacters } from "@/lib/db/characters"
 import { listTeams } from "@/lib/db/teams"
 import { listWorkflows } from "@/lib/db/workflows"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { Character, Team } from "@/lib/claude/types"
 import type { WorkflowRow } from "@/types/workflow/visual"
 

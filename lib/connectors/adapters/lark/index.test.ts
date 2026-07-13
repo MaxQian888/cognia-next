@@ -218,7 +218,7 @@ describe("createLarkAdapter", () => {
     // configured adapter) must be handled as gracefully as empty creds:
     // health 'down', no Rust WS open, and a non-alarming warn — NOT a red
     // network ERROR that re-fires on every boot.
-    const { loggers } = await import("@/lib/logging")
+    const { loggers } = await import("@cognia/logging")
     const warnSpy = jest.spyOn(loggers.network, "warn").mockImplementation(() => {})
     const errorSpy = jest.spyOn(loggers.network, "error").mockImplementation(() => {})
     try {

@@ -4,7 +4,7 @@
 
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const childLogger = {
     warn: jest.fn(),
     error: jest.fn(),

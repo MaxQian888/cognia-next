@@ -48,15 +48,13 @@ const mockCustom: CustomModeConfig = {
   updatedAt: new Date(0),
 }
 
-const createModeMock = jest.fn(
-  (draft: Partial<CustomModeConfig>): CustomModeConfig => ({
-    ...mockCustom,
-    ...draft,
-    id: draft.id ?? "custom-new",
-    type: "custom",
-    isBuiltIn: false,
-  })
-)
+const createModeMock = jest.fn((draft: Partial<CustomModeConfig>): CustomModeConfig => ({
+  ...mockCustom,
+  ...draft,
+  id: draft.id ?? "custom-new",
+  type: "custom",
+  isBuiltIn: false,
+}))
 const deleteModeMock = jest.fn()
 const duplicateModeMock = jest.fn(() => mockCustom)
 const exportModeMock = jest.fn(() => "{}")
@@ -91,7 +89,7 @@ jest.mock("@/components/agent/mode/custom-mode-editor", () => ({
 }))
 
 // Quiet the agent logger spam during tests
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     agent: {
       child: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }),

@@ -5,7 +5,7 @@
  */
 
 import type { PluginTaskHandler } from "@/types/plugin/plugin-scheduler"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 // cognia-next's logger module exports a fixed `loggers` map keyed by namespace;
 // the upstream Cognia code used `createLogger('plugin:scheduler-executor')`,

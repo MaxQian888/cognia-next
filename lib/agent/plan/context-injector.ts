@@ -10,7 +10,7 @@
 import type { AgentPlan } from "@/types/agent/plan"
 import { renderPlanSystemSection } from "./prompts"
 import { hasNoLeakingPii } from "@cognia/redact"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /**
  * If `plan` is `executing`, returns the new value for `opts.appendSystemPrompt`

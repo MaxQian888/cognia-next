@@ -22,7 +22,7 @@ import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.
 import { transport } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import { listSessions } from "@/lib/db/sessions"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { desktop as automation } from "@/lib/automation/client"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useUIStore } from "@/stores/ui/ui-store"

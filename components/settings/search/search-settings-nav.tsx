@@ -8,7 +8,7 @@ import {
   SEARCH_PROVIDERS,
   isProviderConfigured,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import { SEARCH_SECTIONS, type SearchSectionId } from "./search-sections"
 
 interface SearchSettingsNavProps {

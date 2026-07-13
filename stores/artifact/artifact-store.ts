@@ -16,7 +16,7 @@ import { persist } from "zustand/middleware"
 import { nanoid } from "nanoid"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
 // Pure diff → hunk → apply engine (no `ai`/provider imports — safe for this
 // persisted, widely-imported store). See lib/ai/generation/canvas-review.ts.

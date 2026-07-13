@@ -6,7 +6,7 @@ import { Copy, Check, Columns, Rows, Plus, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { computeIntralineDiff, type IntralineSegment } from "@/lib/chat/intraline-diff"
 
 interface DiffLine {

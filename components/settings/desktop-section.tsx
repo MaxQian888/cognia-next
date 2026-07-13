@@ -16,7 +16,7 @@ import { openExternal, revealInExplorer } from "@/lib/tauri/opener"
 import { getOsInfo, type OsInfo } from "@/lib/tauri/os"
 import { getCloseBehavior, setCloseBehavior, type CloseBehavior } from "@/lib/tauri/close-behavior"
 import { invoke } from "@tauri-apps/api/core"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { TraySection } from "./tray-section"
 import { ShortcutsSection } from "./shortcuts-section"
 

@@ -19,7 +19,7 @@ const isTauriMock = jest.fn(() => false)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 
 const warnMock = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { ui: { warn: (...a: unknown[]) => warnMock(...a) } },
 }))
 

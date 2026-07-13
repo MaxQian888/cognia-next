@@ -19,7 +19,7 @@ import { useRecordPresetUsage, useUpdateSession } from "@/lib/data-hooks/context
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import { useTranslations } from "next-intl"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export interface ApplyPresetFn {
   (preset: SystemPromptPreset, session: ChatSession | null | undefined): Promise<boolean>

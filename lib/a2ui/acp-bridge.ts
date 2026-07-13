@@ -20,7 +20,7 @@ import {
   isSurfaceReadyMessage,
 } from "@/lib/a2ui/parser"
 import type { A2UIServerMessage } from "@/types/a2ui/schema"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /** Returns true if the line was recognised + dispatched. */
 export function detectAndDispatchA2uiLine(line: string): boolean {

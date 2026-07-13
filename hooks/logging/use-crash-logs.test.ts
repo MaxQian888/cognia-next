@@ -9,9 +9,10 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 
 const buildItemsMock = jest.fn((..._a: unknown[]) => [] as unknown[])
 const summarizeMock = jest.fn((..._a: unknown[]) => ({ total: 0 }))
-const buildBundleMock = jest.fn(
-  (..._a: unknown[]): Record<string, unknown> => ({ items: [], generatedAt: "now" })
-)
+const buildBundleMock = jest.fn((..._a: unknown[]): Record<string, unknown> => ({
+  items: [],
+  generatedAt: "now",
+}))
 const isCrashRelevantMock = jest.fn((..._a: unknown[]) => true)
 
 const serializeBundleMock = jest.fn(
@@ -42,7 +43,7 @@ jest.mock("@/lib/logging", () => ({
 const recentSubscribers: Array<() => void> = []
 const recentLogs: unknown[] = []
 const clearRecentMock = jest.fn(() => recentLogs.splice(0))
-jest.mock("@/lib/logging/recent-errors", () => ({
+jest.mock("@cognia/logging/recent-errors", () => ({
   clearRecentErrorLogs: () => clearRecentMock(),
   getRecentErrorLogs: () => recentLogs,
   subscribeRecentErrorLogs: (fn: () => void) => {

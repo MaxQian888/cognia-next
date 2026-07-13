@@ -1,7 +1,7 @@
 "use client"
 
 import type { DeeplinkRoute } from "./deeplink"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
 

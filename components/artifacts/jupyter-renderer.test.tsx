@@ -19,7 +19,7 @@ jest.mock("@/components/chat/markdown-renderer", () => ({
 }))
 
 import { JupyterRenderer } from "./jupyter-renderer"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const validNotebook = {
   cells: [

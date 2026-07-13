@@ -20,7 +20,7 @@ import { useReadAloudStatus } from "@/hooks/media/use-read-aloud-status"
 import { speakChatMessage } from "@/lib/tts/speak-chat-message"
 import { ttsOrchestrator } from "@/lib/tts/tts-orchestrator"
 import type { CharacterVoiceSource } from "@/lib/plugin/character-pack/character-voice"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { cn } from "@/lib/utils"
 
 interface ReadAloudButtonProps {

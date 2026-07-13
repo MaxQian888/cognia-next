@@ -17,7 +17,7 @@
 import { getDeviceMetadata } from "@/lib/device/device-identity"
 import { appendBackupHistory, type BackupHistoryType } from "@/lib/db/backup-history"
 import { getSettings, saveSettings } from "@/lib/db/settings"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import {
   buildSubscriptionPackage,
   decryptSubscriptionPackage,

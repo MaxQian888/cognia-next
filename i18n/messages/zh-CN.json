@@ -7067,6 +7067,7 @@
     },
     "settingsDescription": "配置日志级别、传输方式和保留策略",
     "settingsTitle": "日志配置",
+    "statusSr": "状态：{status}",
     "timeline": {
       "clear": "清除",
       "empty": "暂无数据",
@@ -12475,6 +12476,7 @@
       "hasSkills": "含技能",
       "recent": "最近使用"
     },
+    "moreActions": "更多操作",
     "pickWorkingDir": "选择工作目录",
     "readOnlyDeleteTooltip": "内置预设无法删除",
     "readOnlyTooltip": "内置预设——请先复制再编辑",
@@ -21014,7 +21016,9 @@
         "save": "保存",
         "searchPlaceholder": "搜索模板...",
         "title": "模板",
-        "updatedToast": "已更新 \"{name}\"。"
+        "updatedToast": "已更新 \"{name}\"。",
+        "variableCount": "{count} 个变量",
+        "variableIndex": "变量 {index}"
       },
       "title": "子代理"
     },

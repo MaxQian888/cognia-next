@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const childLogger = {
     warn: jest.fn(),
     error: jest.fn(),

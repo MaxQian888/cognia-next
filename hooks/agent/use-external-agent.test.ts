@@ -9,7 +9,7 @@
 import { act, renderHook } from "@testing-library/react"
 
 const logError = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     agent: {
       child: () => ({

@@ -17,7 +17,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import {
   remoteControlGetStatus,

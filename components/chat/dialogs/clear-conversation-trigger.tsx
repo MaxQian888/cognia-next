@@ -25,7 +25,7 @@ import {
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useChatStore } from "@/stores/chat"
 import { useClearMessages } from "@/lib/data-hooks/context"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export function ClearConversationTrigger() {
   const t = useTranslations("chat.list")

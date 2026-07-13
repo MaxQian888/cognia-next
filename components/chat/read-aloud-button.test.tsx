@@ -29,7 +29,7 @@ jest.mock("@/lib/tts/speak-chat-message", () => ({
 const stop = jest.fn()
 jest.mock("@/lib/tts/tts-orchestrator", () => ({ ttsOrchestrator: { stop: () => stop() } }))
 
-jest.mock("@/lib/logging", () => ({ loggers: { tts: { warn: jest.fn() } } }))
+jest.mock("@cognia/logging", () => ({ loggers: { tts: { warn: jest.fn() } } }))
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import { ReadAloudButton } from "./read-aloud-button"

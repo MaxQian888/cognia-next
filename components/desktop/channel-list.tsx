@@ -32,7 +32,7 @@ import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
 import { searchSessionsByContent } from "@/lib/db/messages"
 import { getTeam } from "@/lib/db/teams"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { avatarColor } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
 import {

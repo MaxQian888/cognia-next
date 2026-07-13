@@ -28,7 +28,7 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 const logWarn = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: { warn: (...args: unknown[]) => logWarn(...args), info: jest.fn(), error: jest.fn() },
   },

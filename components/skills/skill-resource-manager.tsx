@@ -39,7 +39,7 @@ import {
   type SkillResourceDraft,
 } from "@/lib/db/skill-resources"
 import type { SkillResource, SkillResourceKind } from "@/lib/claude/types"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface Props {
   skillId: string

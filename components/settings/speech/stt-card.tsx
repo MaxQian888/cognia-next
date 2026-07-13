@@ -20,7 +20,7 @@ import {
   SPEECH_LANGUAGES,
   type SpeechLanguageCode,
 } from "@cognia/tts/speech"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 type MicDevice = { deviceId: string; label: string }
 

@@ -39,7 +39,7 @@ import { themeHasWallpaper, resolveThemeWallpaper } from "@/lib/export/html/them
 import { useCustomThemeStore } from "@/stores/theme"
 import type { ChatSession } from "@/lib/claude/types"
 import type { SingleExportFormat } from "@/lib/export/single"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("data-export")
 

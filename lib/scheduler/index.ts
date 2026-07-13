@@ -7,7 +7,7 @@
  * present here.
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { initTaskScheduler, stopTaskScheduler } from "./task-scheduler"
 import { registerBuiltInExecutors } from "./executors"
 

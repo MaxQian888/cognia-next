@@ -28,7 +28,7 @@ import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadFromUrl } from "@/lib/files/download"
 import { openExternal } from "@/lib/tauri/opener"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface ImageBlockProps {
   src: string

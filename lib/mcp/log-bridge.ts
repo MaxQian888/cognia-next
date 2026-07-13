@@ -17,7 +17,7 @@
 
 import { onClaudeMessage } from "@/lib/claude/ipc"
 import { isMcpLogEvent, type McpLogEvent } from "@/lib/claude/types"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /** Module suffix used when a log line can't be attributed to a named server. */
 export const MCP_LOG_UNKNOWN_SERVER = "unknown"

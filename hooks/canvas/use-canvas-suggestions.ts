@@ -23,7 +23,7 @@ import { getProviderModel } from "@cognia/provider-core/core/client"
 import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-provider"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { CanvasSuggestion, ArtifactLanguage } from "@/types"
 
 export interface SuggestionContext {

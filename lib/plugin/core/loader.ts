@@ -3,7 +3,7 @@
  */
 
 import { isTauri } from "@/lib/platform/detect"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { Plugin, PluginDefinition, PluginManifest, PluginPermission } from "@/types/plugin"
 import { TimeoutError, withTimeout } from "@cognia/primitives"
 import { recordSilentFailure } from "../contracts/diagnostics-store"

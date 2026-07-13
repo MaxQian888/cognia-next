@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { downloadFromUrl } from "@/lib/files/download"
 import { openExternal } from "@/lib/tauri/opener"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface VideoBlockProps {
   src: string

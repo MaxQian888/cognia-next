@@ -18,7 +18,7 @@
  *     re-trigger itself in a tight loop.
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { PetEvent } from "@/types/pet"
 
 const log = loggers.scheduler

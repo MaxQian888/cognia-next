@@ -3,8 +3,8 @@
  */
 
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
-import type { LogLevel } from "./log-level"
-import type { StructuredLogEntry } from "./log-entry"
+import type { LogLevel } from "@cognia/logging/types/log-level"
+import type { StructuredLogEntry } from "@cognia/logging/types/log-entry"
 
 // Window-diagnostics and local-runtime snapshots come from `lib/native/*` at
 // crash-export time. They keep a small known shape so downstream summary code

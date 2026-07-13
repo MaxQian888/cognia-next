@@ -20,7 +20,7 @@ import { isTauri } from "@/lib/tauri"
 import { gitBranches, gitCheckoutBranch, gitDeleteBranch } from "@/lib/git/commands"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { GitBranch } from "@/types/git"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("agentTeams.worktrees")
 

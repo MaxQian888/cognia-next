@@ -6,7 +6,7 @@ jest.mock("@/lib/search/search-service", () => ({
 jest.mock("@cognia/document/parsers/html-parser", () => ({
   parseHTML: jest.fn(async () => ({ text: "readable text", title: "Title" })),
 }))
-jest.mock("@/lib/search/types", () => ({
+jest.mock("@cognia/web-search/types", () => ({
   DEFAULT_SEARCH_PROVIDER_SETTINGS: {},
   isProviderConfigured: jest.fn((_id: string, p: { apiKey?: string }) => Boolean(p?.apiKey)),
 }))

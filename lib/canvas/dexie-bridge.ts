@@ -29,7 +29,7 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCommentStore } from "@/stores/canvas/comment-store"
 import { getDb } from "@/lib/db/schema"
 import type { CanvasCommentRow, CanvasDocumentRow, CanvasVersionRow } from "@/lib/db/canvas-types"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 let started = false
 let mirroredDocs: Record<string, CanvasDocument> = {}

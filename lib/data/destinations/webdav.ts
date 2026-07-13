@@ -13,7 +13,7 @@
 import { getSettings } from "@/lib/db/settings"
 import { makeWebDavClient } from "@/lib/webdav/config"
 import { encryptBackupPackage } from "@/lib/data/crypto"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { BackupPackageV3 } from "@/lib/data/types"
 
 const log = loggers.export

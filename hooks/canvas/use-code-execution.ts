@@ -12,7 +12,7 @@ import {
 } from "@/lib/native/code-execution-strategy"
 import { useNativeStore } from "@/stores"
 import { useSettingsStore } from "@/stores/settings"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export interface ExecutionOptions {
   timeout?: number

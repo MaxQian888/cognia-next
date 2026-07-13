@@ -10,7 +10,7 @@
 import type { AppSettings } from "@/lib/claude/types"
 import type { GoalTaskPayload, ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

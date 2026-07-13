@@ -19,8 +19,8 @@ import {
   supportsExternalAgents,
 } from "./agent-transport"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
-import { loggers } from "@/lib/logging"
-import { truncateForLog } from "@/lib/logging/truncate"
+import { loggers } from "@cognia/logging"
+import { truncateForLog } from "@cognia/logging/truncate"
 import {
   acpTerminalCreate,
   acpTerminalKill,

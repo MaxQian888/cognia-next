@@ -32,7 +32,7 @@ import { createShareLink, revokeShareLink, ShareNotConfiguredError } from "@/lib
 import type { SharePayload } from "@/lib/share/types"
 import type { CreatedShare } from "@/lib/share/client"
 import { PayloadView } from "@/components/share/payload-view"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("share-link")
 

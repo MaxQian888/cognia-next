@@ -71,7 +71,7 @@ import {
 import { useMediaQuery, useResizableLayout, type UseResizableLayoutResult } from "@/hooks/ui"
 import { AGENT_TRACE_MODULE } from "@cognia/agent-trace/log-adapter"
 import type { LogFilterPreset } from "@/types/logging"
-import type { StructuredLogEntry } from "@/lib/logging"
+import type { StructuredLogEntry } from "@cognia/logging"
 
 // Time range options in milliseconds
 const TIME_RANGES = {

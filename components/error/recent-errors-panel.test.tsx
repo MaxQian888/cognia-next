@@ -2,7 +2,7 @@ import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { RecentErrorsPanel, isCascading, type RecentErrorsCopy } from "./recent-errors-panel"
-import { recordRecentErrorLog, resetRecentErrorLogsForTest } from "@/lib/logging/recent-errors"
+import { recordRecentErrorLog, resetRecentErrorLogsForTest } from "@cognia/logging/recent-errors"
 import type { StructuredLogEntry } from "@/types/logging"
 
 const copy: RecentErrorsCopy = {

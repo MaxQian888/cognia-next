@@ -20,7 +20,7 @@
  */
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { AgentTeamTaskPayload } from "@/types/scheduler"
 import { materializeProposal, type MaterializeOptions, type MaterializeResult } from "./materialize"
 import type { AutoOrchestrationProposal } from "./types"

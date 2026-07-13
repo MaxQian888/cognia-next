@@ -27,7 +27,7 @@
 import { liveQuery, type Subscription } from "dexie"
 
 import { getDb } from "@/lib/db/schema"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { WorkflowRow } from "@/types/workflow/visual"
 
 const log = loggers.scheduler

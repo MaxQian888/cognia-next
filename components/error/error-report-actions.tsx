@@ -20,7 +20,7 @@ import { Check, Copy, ExternalLink } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { getRecentErrorLogs } from "@/lib/logging/recent-errors"
+import { getRecentErrorLogs } from "@cognia/logging/recent-errors"
 import { getLocalRuntimeDiagnostics } from "@/lib/native/local-runtime"
 import type { LocalRuntimeDiagnostics } from "@/lib/native/local-runtime"
 import type { ErrorCategory } from "@/lib/error/classify-error"

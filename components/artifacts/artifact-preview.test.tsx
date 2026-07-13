@@ -34,12 +34,7 @@ jest.mock("./artifact-renderers", () => ({
       return {
         owner: "builtin" as const,
         rendererType: rendererTypeMap[artifact.type] as
-          | "code"
-          | "document"
-          | "mermaid"
-          | "chart"
-          | "math"
-          | undefined,
+          "code" | "document" | "mermaid" | "chart" | "math" | undefined,
       }
     }
     return { owner: "runtime" as const }
@@ -53,7 +48,7 @@ jest.mock("./jupyter-renderer", () => ({
 }))
 
 import { ArtifactPreview } from "./artifact-preview"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { Artifact } from "@/types"
 
 const dummy = (overrides: Partial<Artifact> = {}): Artifact => ({

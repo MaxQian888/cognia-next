@@ -18,7 +18,7 @@ import {
   getBindingPath,
 } from "@/lib/a2ui/data-model"
 import { getCatalog, DEFAULT_CATALOG_ID } from "@/lib/a2ui/catalog"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { A2UIActionsCtx, A2UIDataCtx } from "@/hooks/a2ui/use-a2ui-context"
 import type { A2UIActionsContextValue, A2UIDataContextValue } from "@/types/a2ui/context"
 import type { A2UIProviderProps } from "@/types/a2ui/context"

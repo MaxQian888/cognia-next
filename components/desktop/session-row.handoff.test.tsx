@@ -13,7 +13,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (k: string, params?: Record<string, unknown>) =>
     params ? `${k}:${JSON.stringify(params)}` : k,
 }))
-jest.mock("@/lib/logging", () => ({ loggers: { ui: { info: jest.fn(), warn: jest.fn() } } }))
+jest.mock("@cognia/logging", () => ({ loggers: { ui: { info: jest.fn(), warn: jest.fn() } } }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 
 const mockToastSuccess = jest.fn()

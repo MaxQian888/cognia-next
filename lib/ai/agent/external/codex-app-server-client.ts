@@ -24,8 +24,8 @@
  */
 
 import { isTauri } from "@/lib/utils"
-import { loggers } from "@/lib/logging"
-import { truncateForLog } from "@/lib/logging/truncate"
+import { loggers } from "@cognia/logging"
+import { truncateForLog } from "@cognia/logging/truncate"
 import {
   spawnExternalAgent,
   sendToExternalAgent,

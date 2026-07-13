@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 import { renderHTML, renderSVG, getReactShellHtml, escapeHtml } from "@/lib/artifacts"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { Artifact, PreviewErrorBoundaryProps, PreviewErrorBoundaryState } from "@/types"
 import {
   ArtifactRenderer,
@@ -71,6 +71,7 @@ class PreviewErrorBoundary extends Component<PreviewErrorBoundaryProps, PreviewE
                 size="sm"
                 variant="ghost"
                 onClick={this.handleRetry}
+                // i18n-exempt: class error boundary cannot use hooks; pre-existing aria label
                 aria-label="Retry preview"
               >
                 <RefreshCw className="h-4 w-4" />

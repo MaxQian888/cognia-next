@@ -5,7 +5,7 @@ import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   createDefaultSearchUsageEntry,
   createDefaultSearchUsageStats,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 
 // ---- Mocks ----
 

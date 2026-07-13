@@ -1,18 +1,11 @@
 /**
- * Logging types - log level, transports, bootstrap, filters, panel state, crash log
+ * Logging types — compat barrel (ADR-0068 E4). The pure type modules moved
+ * to `@cognia/logging/types`; the crash-log and transport-health types stay
+ * app-side because they reach into the native-logging readiness bridge.
+ * Existing `@/types/logging` importers keep working unchanged through this
+ * barrel.
  */
 
-export * from "./log-level"
-export * from "./log-entry"
-export * from "./logger"
-export * from "./transport"
-export * from "./log-filter"
-export * from "./log-stream"
-export * from "./runtime-context"
-export * from "./bootstrap"
+export * from "@cognia/logging/types"
 export * from "./crash-log"
-export * from "./level-theme"
-export * from "./filter-preset"
-export * from "./panel-state"
-export * from "./agent-trace-logs"
 export * from "./transport-health"

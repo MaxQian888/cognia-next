@@ -18,7 +18,7 @@
  */
 
 import { isTauri } from "@/lib/platform/detect"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { PluginDefinition, PluginManifest } from "@/types/plugin"
 import {
   configureRpcDispatcher,

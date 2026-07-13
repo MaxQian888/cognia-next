@@ -23,7 +23,7 @@ import {
 } from "@/lib/claude/ipc"
 import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
 import { dispatchProtocolAdapterExec } from "@/lib/claude/protocol-adapter-ipc"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export function PluginToolDispatchProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {

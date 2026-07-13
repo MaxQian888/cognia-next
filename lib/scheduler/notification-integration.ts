@@ -9,7 +9,7 @@ import type { OutboundWebhookEvent, RemoteControlOutboundHeader } from "@/types/
 import { notify } from "@/lib/tauri/notification"
 import { notify as centerNotify } from "@/lib/notifications/runtime"
 import { toast } from "sonner"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { SchedulerError } from "./errors"
 import { formatDuration } from "./format-utils"
 

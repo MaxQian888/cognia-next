@@ -10,7 +10,7 @@ import {
   createLogFilterPreset,
   loadLogFilterPresets,
   serializeLogFilterPresets,
-} from "@/lib/logging/filter-presets"
+} from "@cognia/logging/filter-presets"
 import type {
   LogFilterPreset,
   LogFilterPresetFilters,

@@ -31,7 +31,7 @@ import {
   type MonacoNamespace,
   type MonacoWorkbenchHandle,
 } from "@/lib/editor-workbench/monaco-workbench"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export interface UseCanvasMonacoSetupOptions {
   documentId?: string

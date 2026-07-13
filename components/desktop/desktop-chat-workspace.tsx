@@ -43,7 +43,7 @@ import { markSessionRead } from "@/lib/db/session-state"
 import { updateSession, setSessionOrder } from "@/lib/db/sessions"
 import { guildFromSession } from "@/lib/claude/guild"
 import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
 

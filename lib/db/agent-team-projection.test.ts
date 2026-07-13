@@ -12,7 +12,7 @@ import {
 import { boardRowFromTask, teamMetaRowId } from "./agent-team-board"
 import { getDb, __resetDbForTesting } from "./schema"
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

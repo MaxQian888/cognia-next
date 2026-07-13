@@ -2,7 +2,7 @@ jest.mock("@/lib/tauri/store", () => ({
   getPref: jest.fn(),
   setPref: jest.fn(() => Promise.resolve()),
 }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { tray: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } },
 }))
 

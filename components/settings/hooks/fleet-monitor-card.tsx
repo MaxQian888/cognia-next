@@ -61,7 +61,7 @@ import {
 } from "@/lib/tauri/fleet"
 import { subscribeClaudeSettings } from "@/lib/claude/settings"
 import { FleetHistoryPanel } from "./fleet-history-panel"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.hooks.fleet")
 

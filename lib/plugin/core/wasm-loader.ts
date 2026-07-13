@@ -10,7 +10,7 @@
  */
 
 import { isTauri } from "@/lib/platform/detect"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { PluginDefinition, PluginManifest, PluginTool } from "@/types/plugin"
 import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
 

@@ -11,7 +11,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react"
 import { pickAndReadFiles } from "@/lib/files/file-bridge"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import {
   detectSourceForFiles,
   importSessions as importSessionsDefault,

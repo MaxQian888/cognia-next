@@ -14,7 +14,7 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, DownloadIcon, FolderXIcon, Loader2Icon, ServerIcon } from "lucide-react"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 import {
   Dialog,

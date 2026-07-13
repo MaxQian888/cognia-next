@@ -10,7 +10,7 @@
 "use client"
 
 import { create } from "zustand"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { getPref, setPref } from "@/lib/tauri/store"
 
 import {

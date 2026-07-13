@@ -23,7 +23,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 
 import { isTauri } from "@/lib/tauri"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { getPluginManager } from "@/lib/plugin/core/manager"
 import {
   recordHotReloadEvent,

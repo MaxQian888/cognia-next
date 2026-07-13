@@ -18,7 +18,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import type {
   ExternalAgentEvent,
   ExternalAgentPermissionRequestEvent,

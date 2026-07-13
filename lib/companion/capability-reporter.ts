@@ -15,7 +15,7 @@
  */
 
 import { detectLocalCapabilities } from "@/lib/platform/capabilities"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { ConnectionState } from "@/lib/tauri/transport-companion"
 
 const log = loggers.sync

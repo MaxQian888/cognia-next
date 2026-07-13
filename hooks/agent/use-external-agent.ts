@@ -8,7 +8,7 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type {
   CreateExternalAgentInput,
   ExternalAgentBenchmarkCapabilityEntry,
@@ -568,12 +568,10 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (activeSession) {
         const session = manager.getSession(activeAgentId, activeSession.id)
         const sessionCommands = session?.metadata?.availableCommands as
-          | AcpAvailableCommand[]
-          | undefined
+          AcpAvailableCommand[] | undefined
         const sessionPlan = session?.metadata?.plan as AcpPlanEntry[] | undefined
         const sessionConfigOptions = session?.metadata?.configOptions as
-          | AcpConfigOption[]
-          | undefined
+          AcpConfigOption[] | undefined
         if (sessionCommands) {
           setAvailableCommands(sessionCommands)
         }

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { RecentErrorsPanel, type RecentErrorsCopy } from "./recent-errors-panel"
-import { clearRecentErrorLogs, recordRecentErrorLog } from "@/lib/logging/recent-errors"
+import { clearRecentErrorLogs, recordRecentErrorLog } from "@cognia/logging/recent-errors"
 
 const copy: RecentErrorsCopy = {
   title: "Recent errors",

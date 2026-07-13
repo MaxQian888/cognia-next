@@ -9,7 +9,7 @@ import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { renderMathSafe } from "@cognia/latex"
 import { withMathErrorBoundary } from "./math-error-boundary"
 import { useCopy } from "@/hooks/ui/use-copy"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface MathBlockProps {
   content: string

@@ -61,7 +61,7 @@ import { useNetworkStatus } from "@/hooks/use-network-status"
 import { useAutoRetryOnReconnect } from "@/hooks/use-auto-retry-on-reconnect"
 import { classifyError, type ErrorCategory, type RecoveryKind } from "@/lib/error/classify-error"
 import { exportCrashLogBundleNow } from "@/lib/logging/crash-log"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { cn } from "@/lib/utils"
 
 export type ErrorPageVariant = "error" | "not-found" | "global-error"

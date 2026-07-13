@@ -58,8 +58,8 @@ import {
   MAX_RAPID_EXITS,
 } from "./acp-client"
 import type { ExternalAgentConfig, AcpPermissionResponse } from "@/types/agent/external-agent"
-import { loggers } from "@/lib/logging"
-import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@/lib/logging/truncate"
+import { loggers } from "@cognia/logging"
+import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@cognia/logging/truncate"
 
 const mockIsTauri = isTauri as jest.Mock
 const mockTerminalWrite = acpTerminalWrite as jest.Mock

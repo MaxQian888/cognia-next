@@ -17,7 +17,7 @@
  * attached, so headless tests and the sidecar still capture the trace.
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export const PLUGIN_ERROR_EVENT = "plugin:error" as const
 

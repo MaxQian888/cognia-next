@@ -22,7 +22,7 @@
  * it converts to a JSON-RPC error.
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const dispatcherLogger = loggers.plugin.child("vscode-rpc-dispatcher")
 

@@ -21,7 +21,7 @@ import { SkillMarketplaceListItem } from "./skill-marketplace-list-item"
 import { SkillMarketplaceDetail } from "./skill-marketplace-detail"
 import { SkillMarketplaceDetailContent } from "./skill-marketplace-detail-content"
 import { SkillMarketplaceTokenTeaser } from "./skill-marketplace-token-teaser"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export function SkillMarketplace() {
   const t = useTranslations("skills.marketplace")

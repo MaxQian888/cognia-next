@@ -3,7 +3,7 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
-jest.mock("@/lib/logging/filter-presets", () => ({
+jest.mock("@cognia/logging/filter-presets", () => ({
   LOG_FILTER_PRESETS_STORAGE_KEY: "log-filter-presets",
   loadLogFilterPresets: (raw: string | null) => (raw ? JSON.parse(raw) : []),
   serializeLogFilterPresets: (next: unknown) => JSON.stringify(next),

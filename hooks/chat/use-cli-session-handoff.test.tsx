@@ -5,7 +5,7 @@ import { act, render } from "@testing-library/react"
 
 jest.mock("@tauri-apps/api/event", () => ({ listen: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { shell: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
 }))
 jest.mock("next-intl", () => ({

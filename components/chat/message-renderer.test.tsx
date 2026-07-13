@@ -141,7 +141,7 @@ jest.mock("@/lib/ui/avatar", () => ({
   avatarGlyph: () => "A",
 }))
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const childLogger = {
     trace: jest.fn(),
     debug: jest.fn(),

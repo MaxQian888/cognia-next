@@ -38,7 +38,7 @@
  * immediately and consumes no permit.
  */
 
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import type {
   ExecutionBrokerEvent,
   ExecutionLease,

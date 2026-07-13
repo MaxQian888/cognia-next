@@ -39,7 +39,7 @@ jest.mock("@/lib/web/web-tools-core", () => ({
   webSearch: jest.fn(async () => ({ ok: true })),
   buildFetchExtractor: jest.fn(() => async () => "extracted"),
 }))
-jest.mock("@/lib/search/search-cache", () => ({
+jest.mock("@cognia/web-search/search-cache", () => ({
   getSearchCache: jest.fn(() => ({
     setConfig: jest.fn(),
     get: jest.fn(() => null),
@@ -56,7 +56,7 @@ jest.mock("@/lib/skills/built-in/context", () => ({
 
 import { webSearch, webFetch, buildFetchExtractor } from "@/lib/web/web-tools-core"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
-import { getSearchCache } from "@/lib/search/search-cache"
+import { getSearchCache } from "@cognia/web-search/search-cache"
 
 const mockWebSearch = webSearch as jest.Mock
 const mockWebFetch = webFetch as jest.Mock

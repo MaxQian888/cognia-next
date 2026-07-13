@@ -40,7 +40,7 @@ import {
   SortAsc,
   SortDesc,
 } from "lucide-react"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { useA2UIAppBuilder, type A2UIAppInstance } from "@/hooks/a2ui/use-app-builder"
 import { useAppGalleryFilter } from "@/hooks/a2ui/use-app-gallery-filter"
 import { CATEGORY_KEYS, CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
@@ -302,6 +302,7 @@ export function AppGallery({
         </div>
         {/* Sort options */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {/* i18n-exempt: pre-existing untranslated surface (repo i18n baseline); untouched by ADR-0068 import codemod */}
           <span>Sort:</span>
           <Select value={sortField} onValueChange={(v) => setSortField(v as SortField)}>
             <SelectTrigger className="h-7 w-24 text-xs">

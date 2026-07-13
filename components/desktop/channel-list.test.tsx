@@ -17,7 +17,7 @@ jest.mock("next-intl", () => ({
 // plugin-sdk → lsp-registry) reads `loggers.plugin.child(...)`, so the mock
 // must answer any namespace with a logger that has a `.child` method. A Proxy
 // keeps it exhaustive without enumerating every namespace.
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const makeLogger = (): Record<string, unknown> => ({
     info: (...args: unknown[]) => logInfo(...args),
     warn: jest.fn(),

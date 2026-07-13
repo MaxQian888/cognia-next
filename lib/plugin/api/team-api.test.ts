@@ -13,7 +13,7 @@ import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
 import { PermissionError } from "@/lib/plugin/security/permission-guard"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

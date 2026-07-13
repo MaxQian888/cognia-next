@@ -27,7 +27,7 @@ jest.mock("@/lib/file/file-operations", () => ({
   exists: jest.fn(),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { files: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } },
 }))
 

@@ -11,7 +11,7 @@ import {
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
 

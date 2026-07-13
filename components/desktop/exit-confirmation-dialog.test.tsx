@@ -31,7 +31,7 @@ jest.mock("@/lib/tauri/close-behavior", () => ({
   setCloseBehavior: (...a: unknown[]) => setCloseBehaviorMock(...a),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { app: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
 }))
 

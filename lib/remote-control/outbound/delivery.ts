@@ -14,7 +14,7 @@ import {
   type WebhookDeliveryConfig,
   type WebhookEgressEndpoint,
 } from "@/types/remote-control"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

@@ -31,7 +31,7 @@ import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
 import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-provider"
 import { useAccountStore } from "@/stores/account/account-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export interface CredentialStatus {
   /** `null` until the first probe resolves; then `true` if any credential is configured. */

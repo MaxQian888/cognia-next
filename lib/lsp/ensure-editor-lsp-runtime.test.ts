@@ -1,4 +1,4 @@
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     plugin: {
       child: () => ({

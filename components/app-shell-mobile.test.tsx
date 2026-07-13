@@ -21,7 +21,7 @@ jest.mock("next/navigation", () => ({
   usePathname: () => "/",
 }))
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const makeStub = () => ({
     debug: jest.fn(),
     info: jest.fn(),

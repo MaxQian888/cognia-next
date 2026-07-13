@@ -7,7 +7,7 @@ import {
   buildIssueUrl,
   type ErrorReportContext,
 } from "./error-report-actions"
-import { resetRecentErrorLogsForTest } from "@/lib/logging/recent-errors"
+import { resetRecentErrorLogsForTest } from "@cognia/logging/recent-errors"
 import type { StructuredLogEntry } from "@/types/logging"
 
 jest.mock("sonner", () => ({
