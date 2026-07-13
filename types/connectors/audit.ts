@@ -77,6 +77,13 @@ export type AuditKind =
   // ("settings_save" | "manual_requeue") so operators can tell the two
   // apart in the Audit tab.
   | "adapter.credentials_rotated"
+  // The OS / browser resumed from sleep (or the network came back online)
+  // after a long absence, so the resume-reconnect watcher re-queued the
+  // running adapter to heal a socket that may have gone half-open while the
+  // machine slept. Carries `fields.reason` ("online" | "visible") and
+  // `fields.awayMs` so operators can see why and how long. See
+  // `lib/connectors/bootstrap/resume-reconnect.ts`.
+  | "adapter.resumed"
   // Per-conversation Computer Use opt-in toggled from Inbox header
   // (ADR-0020). Fields carry `{ allowComputerUse: boolean, bioVerified:
   // boolean, via: string }` so the audit log shows whether the flip went

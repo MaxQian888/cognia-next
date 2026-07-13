@@ -78,6 +78,10 @@ import {
   type CallbackBindingCleanupHandle,
 } from "@/lib/connectors/callback-binding-cleanup"
 import { startWorkflowProgressRunner } from "@/lib/connectors/a2ui-bridge/workflow-progress-runner"
+import {
+  startResumeReconnect,
+  type ResumeReconnectHandle,
+} from "@/lib/connectors/bootstrap/resume-reconnect"
 
 export type ConnectorRuntimeLogLevel = "info" | "warn" | "error"
 
@@ -128,6 +132,7 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
   const serverAdapterIds = new Set<string>()
   let cleanupHandle: CallbackBindingCleanupHandle | null = null
   let heartbeatSweep: HeartbeatSweepHandle | null = null
+  let resumeReconnect: ResumeReconnectHandle | null = null
   let stopWorkflowProgressRunner: (() => void) | null = null
 
   /**
@@ -403,6 +408,15 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       heartbeatSweep = startHeartbeatSweep()
     }
 
+    // Resume-reconnect (G3): the single owner of the OS/browser wake signals.
+    // After sleep or a network drop the gateway sockets go half-open and
+    // nothing else re-dials them (the gateway clients ignore heartbeat ACKs,
+    // the sweep only records health). On a wake past the away threshold this
+    // re-queues every running adapter through the same path as "Reconnect now".
+    if (!cancelled) {
+      resumeReconnect = startResumeReconnect()
+    }
+
     // Cross-adapter housekeeping: prune expired callback bindings daily so
     // the connectorCallbackBindings table stops growing without bound.
     // `recordCallbackBinding` sets a 30 d default TTL; this sweep reaps
@@ -439,6 +453,8 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     cleanupHandle = null
     heartbeatSweep?.dispose()
     heartbeatSweep = null
+    resumeReconnect?.dispose()
+    resumeReconnect = null
     stopWorkflowProgressRunner?.()
     stopWorkflowProgressRunner = null
     // Tear down every running adapter through the lifecycle registry so
