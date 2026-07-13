@@ -21,7 +21,7 @@ jest.mock("@/lib/ai/generation/utility-client", () => ({
 }))
 
 const mockPii = jest.fn((..._args: unknown[]) => true)
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: (t: string) => mockPii(t),
 }))
 

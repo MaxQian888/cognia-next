@@ -291,7 +291,7 @@ jest.mock("@/lib/db/schema", () => ({
 const hasNoLeakingPiiDeep = jest.fn(
   (value: unknown) => !JSON.stringify(value).includes("leak@pii.example")
 )
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (...a: unknown[]) => hasNoLeakingPiiDeep(...(a as [unknown])),
 }))
 

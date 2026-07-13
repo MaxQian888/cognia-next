@@ -53,7 +53,7 @@ import { maybeHandleHelpCommand, maybeSendWelcome } from "./help/help-dispatch"
 import { maybeHandleControlCommand } from "./commands/dispatch"
 import { parseConversationKey } from "@/types/connectors/event"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { segmentsToPlainText, type MessageSegment } from "@/types/connectors/segment"
 
 export interface BusInboundHandler {

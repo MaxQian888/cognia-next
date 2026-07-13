@@ -25,8 +25,8 @@ export {
   listSupportedExtensions,
   listSupportedFormats,
 } from "./dispatch"
-export { hasNoLeakingPii, redactText, unredactText } from "./redact"
-export type { RedactionRecord, RedactionResult, PiiKind } from "./redact"
+export { hasNoLeakingPii, redactText, unredactText } from "@cognia/redact"
+export type { RedactionRecord, RedactionResult, PiiKind } from "@cognia/redact"
 export { prepareChunks } from "./chunk"
 export { embedRedactedChunks } from "./embed"
 export { persistChunks, vectorCollectionName } from "./persist"

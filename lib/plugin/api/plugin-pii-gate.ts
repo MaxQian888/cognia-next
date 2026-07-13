@@ -9,7 +9,7 @@
  * model sends with no human review step, so the same gate applies here.
  */
 
-import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 
 export class PluginPiiError extends Error {
   public readonly pluginId: string

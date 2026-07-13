@@ -56,7 +56,7 @@ import { matchDispatchRule, type DispatchRuleHit } from "@/lib/connectors/dispat
 import { shouldRespondToMessage, type AtGateDecision } from "@/lib/connectors/at-gate"
 import { enqueueOutbound, waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
 import { requireMethod, withScopeCapture } from "@/lib/skills/built-in/im/_helpers"
-import { hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import {
   createA2UIBuilder,
   type PluginConnectorsA2UIBuilder,

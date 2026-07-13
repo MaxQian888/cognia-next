@@ -181,7 +181,7 @@ const skill: BuiltInSkill<typeof schema> = {
 
     // PII-gate the composed dispatch message before it leaves the device.
     const messageText = `【${args.title}】\n${args.brief}`
-    const { hasNoLeakingPiiDeep } = await import("@/lib/twin/ingest/redact")
+    const { hasNoLeakingPiiDeep } = await import("@cognia/redact")
     let brief: "sent" | "pii_blocked"
     if (!hasNoLeakingPiiDeep(messageText)) {
       // The chat WAS created/bound — report the partial outcome instead of

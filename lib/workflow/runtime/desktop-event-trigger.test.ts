@@ -17,7 +17,7 @@ jest.mock("./trigger-bridge", () => ({
 }))
 
 const hasNoLeakingPiiMock = jest.fn<boolean, [string]>(() => true)
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: (text: string) => hasNoLeakingPiiMock(text),
 }))
 

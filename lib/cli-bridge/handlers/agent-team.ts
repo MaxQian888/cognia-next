@@ -30,7 +30,7 @@ export async function agentTeamList(): Promise<AgentTeamListResult> {
   try {
     const [{ useAgentTeamStore }, { redactText }] = await Promise.all([
       import("@/stores/agent/agent-team-store"),
-      import("@/lib/twin/ingest/redact"),
+      import("@cognia/redact"),
     ])
     const teams = Object.values(useAgentTeamStore.getState().teams).map((team) => ({
       id: team.id,
@@ -105,7 +105,7 @@ export async function agentTeamRunStatus(
     const [{ getDb }, { isSynthesizedTeamRunPayload }, { hasNoLeakingPii }] = await Promise.all([
       import("@/lib/db/schema"),
       import("@/components/agent/team/runs-list"),
-      import("@/lib/twin/ingest/redact"),
+      import("@cognia/redact"),
     ])
     const db = getDb()
     const all = await db.workflowRuns

@@ -29,7 +29,7 @@ const pickPhotoMock = jest.fn()
 jest.mock("@/lib/capacitor/camera", () => ({ pickPhoto: (...a: unknown[]) => pickPhotoMock(...a) }))
 
 let mockNoLeak = true
-jest.mock("@/lib/twin/ingest/redact", () => ({ hasNoLeakingPii: () => mockNoLeak }))
+jest.mock("@cognia/redact", () => ({ hasNoLeakingPii: () => mockNoLeak }))
 
 const updateTwinSourceMock = jest.fn(async (..._a: unknown[]) => undefined)
 const deleteTwinSourceMock = jest.fn(async (..._a: unknown[]) => undefined)

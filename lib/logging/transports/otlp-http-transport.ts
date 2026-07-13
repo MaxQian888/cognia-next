@@ -19,7 +19,7 @@
 import type { StructuredLogEntry, Transport, TransportHealthSnapshot } from "@/types/logging"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import { AGENT_TRACE_SPAN_KIND } from "@/types/agent-trace/span"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { type OtlpResourceMetadata, spansToOtlp } from "@cognia/agent-trace/span-to-otlp"
 
 const consoleApi = globalThis.console

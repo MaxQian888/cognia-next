@@ -118,11 +118,7 @@ async function onUiaEvent(payload: { kind: string; name?: string; at: number }):
   if (!s || !s.active) return
   try {
     const [{ dispatchTrigger }, { findMatchingWorkflows }, { hasNoLeakingPii }] = await Promise.all(
-      [
-        import("./trigger-bridge"),
-        import("./trigger-subscriptions"),
-        import("@/lib/twin/ingest/redact"),
-      ]
+      [import("./trigger-bridge"), import("./trigger-subscriptions"), import("@cognia/redact")]
     )
     const matches = findMatchingWorkflows("trigger.desktop.event", {
       desktopEventKind: payload.kind,

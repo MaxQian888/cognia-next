@@ -80,7 +80,7 @@ export async function agentDispatchCore(input: AgentDispatchInput): Promise<Agen
   }
 
   try {
-    const { redactText } = await import("@/lib/twin/ingest/redact")
+    const { redactText } = await import("@cognia/redact")
 
     let text: string
     let channel: string | undefined
@@ -264,7 +264,7 @@ export async function teamList(input: TeamListInput = {}): Promise<TeamListOutpu
 export async function teamListCore(input: TeamListInput = {}): Promise<TeamListOutput> {
   try {
     const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
-    const { redactText } = await import("@/lib/twin/ingest/redact")
+    const { redactText } = await import("@cognia/redact")
     const teams = Object.values(useAgentTeamStore.getState().teams)
     const rows = teams
       .filter(

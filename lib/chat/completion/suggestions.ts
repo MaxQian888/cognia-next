@@ -13,7 +13,7 @@
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import type { GhostMessage } from "./ghost-prompt"
 
 /** How many suggestions to request / surface. */

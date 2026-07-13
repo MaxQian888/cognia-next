@@ -52,7 +52,7 @@ jest.mock("@/lib/claude/run-and-capture", () => ({
   runAndCaptureAssistantReply: (...a: unknown[]) => runAndCaptureAssistantReply(...a),
 }))
 const hasNoLeakingPii = jest.fn().mockReturnValue(true)
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: (...a: unknown[]) => hasNoLeakingPii(...a),
 }))
 jest.mock("@/types/connectors/event", () => ({

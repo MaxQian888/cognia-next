@@ -1117,7 +1117,7 @@ export function useClaudeChat() {
             mgr.setDelegationRules(useExternalAgentStore.getState().delegationRules)
             const [{ routeDelegation }, { redactText }] = await Promise.all([
               import("@/lib/ai/agent/external/delegation-router"),
-              import("@/lib/twin/ingest/redact"),
+              import("@cognia/redact"),
             ])
             const decision = routeDelegation(
               { prompt: effectiveText, context: { sessionId } },

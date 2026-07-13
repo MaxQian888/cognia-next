@@ -112,8 +112,7 @@ async function readMasterKeyBytes(): Promise<Uint8Array | null> {
     }
   }
   const row = (await getDb().settings.get("singleton")) as
-    | (AppSettings & { [SETTINGS_FIELD]?: string })
-    | undefined
+    (AppSettings & { [SETTINGS_FIELD]?: string }) | undefined
   const raw = row?.[SETTINGS_FIELD]
   if (typeof raw !== "string" || raw.length === 0) return null
   try {
@@ -131,8 +130,7 @@ async function fingerprintOf(bytes: Uint8Array): Promise<string> {
 
 async function readStoredFingerprint(): Promise<string | null> {
   const row = (await getDb().settings.get("singleton")) as
-    | (AppSettings & { [FINGERPRINT_FIELD]?: string })
-    | undefined
+    (AppSettings & { [FINGERPRINT_FIELD]?: string }) | undefined
   const fp = row?.[FINGERPRINT_FIELD]
   return typeof fp === "string" && fp.length > 0 ? fp : null
 }
@@ -239,7 +237,7 @@ export async function __resetRedactionKey(): Promise<void> {
 
 // ── Encryption primitives ────────────────────────────────────────────────────
 
-import type { RedactionRecord } from "./redact"
+import type { RedactionRecord } from "@cognia/redact"
 
 /** Encrypted blob shape stored as `twinSources.redactionMapEnc`. */
 export interface EncryptedRedactionMap {

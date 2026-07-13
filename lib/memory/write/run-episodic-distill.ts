@@ -12,7 +12,7 @@ import { extractJson, type LlmClient } from "@/lib/twin/distill/llm"
 import type { MemoryConfig, MemoryProvenance, MemoryScope } from "@/types/memory/memory"
 import type { ConsolidateInput, ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
 import type { MemoryCandidate } from "@/lib/memory/extract/extractor"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 const DISTILL_SYSTEM =
   "You distill a finished conversation into a few EPISODIC memories — discrete " +

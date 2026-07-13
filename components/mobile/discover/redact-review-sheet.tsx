@@ -27,7 +27,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { redactText } from "@/lib/twin/ingest/redact"
+import { redactText } from "@cognia/redact"
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 export interface RedactReviewSheetProps {

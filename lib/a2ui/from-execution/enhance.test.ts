@@ -1,10 +1,10 @@
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 
 import { enhanceExecutionPage, parseEnhancementResponse, sanitizeDigest } from "./enhance"
 
 jest.mock("@/lib/ai/generation/utility-client", () => ({ buildUtilityLlmClient: jest.fn() }))
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: jest.fn(() => true),
   redactText: jest.fn((t: string) => ({ redacted: t, map: {} })),
 }))

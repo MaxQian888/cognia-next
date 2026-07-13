@@ -50,7 +50,9 @@
       "@cognia/mermaid/*": ["./packages/mermaid/src/*"],
       "@cognia/plugin-sdk": ["./packages/plugin-sdk/src/index.ts"],
       "@cognia/plugin-sdk/define/*": ["./packages/plugin-sdk/src/define/define-*.ts"],
-      "@cognia/plugin-sdk/*": ["./packages/plugin-sdk/src/*"]
+      "@cognia/plugin-sdk/*": ["./packages/plugin-sdk/src/*"],
+      "@cognia/redact": ["./packages/redact/src/index.ts"],
+      "@cognia/redact/*": ["./packages/redact/src/*"]
     }
   },
   "include": [

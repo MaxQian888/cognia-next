@@ -88,7 +88,7 @@ export function RemoteControlReceiver({ children }: { children: React.ReactNode 
       ] = await Promise.all([
         import("@/lib/remote-control/dispatch"),
         import("@/lib/db/remote-control-audit"),
-        import("@/lib/twin/ingest/redact"),
+        import("@cognia/redact"),
         import("@/lib/remote-control/query-answerer"),
         import("@/lib/db/remote-control-run-status"),
       ])

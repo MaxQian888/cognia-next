@@ -17,7 +17,7 @@
  */
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import type { TeamExecutionPattern } from "@/types/agent/agent-team"
 import { assessRouting } from "./assess-routing"
 import { composeRoster } from "./compose-roster"

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
-import { redactText } from "@/lib/twin/ingest/redact"
+import { redactText } from "@cognia/redact"
 import {
   DEFAULT_REDACTION_KEYS,
   DEFAULT_REDACTION_PATTERNS,

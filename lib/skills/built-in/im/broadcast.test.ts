@@ -1,4 +1,4 @@
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: jest.fn(() => true),
 }))
 
@@ -16,7 +16,7 @@ jest.mock("@/lib/connectors/audit", () => ({
 
 import { getSharedBuiltInSkillRegistry } from "../registry"
 import "./broadcast"
-import { hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { findSessionByConversationKey } from "@/lib/connectors/session-bindings"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { appendAudit } from "@/lib/connectors/audit"

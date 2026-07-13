@@ -276,7 +276,7 @@ function persistCommandHistory(
     const [{ useSettingsStore }, { hasNoLeakingPii }, { recordTerminalHistory }] =
       await Promise.all([
         import("@/stores/settings/settings-store"),
-        import("@/lib/twin/ingest/redact"),
+        import("@cognia/redact"),
         import("@/lib/db/terminal-history"),
       ])
     const persist =

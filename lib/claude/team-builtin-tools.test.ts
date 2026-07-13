@@ -952,7 +952,7 @@ describe("defaultTeamToolDeps — team_post_to_chat wiring", () => {
 
   it("messagePassesPiiGate delegates to hasNoLeakingPiiDeep", async () => {
     const deps = await defaultTeamToolDeps()
-    const { hasNoLeakingPiiDeep } = await import("@/lib/twin/ingest/redact")
+    const { hasNoLeakingPiiDeep } = await import("@cognia/redact")
     expect(await deps.messagePassesPiiGate("plain safe text")).toBe(
       hasNoLeakingPiiDeep("plain safe text")
     )

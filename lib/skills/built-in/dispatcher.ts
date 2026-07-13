@@ -33,7 +33,7 @@
 
 import { z } from "zod"
 
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { append as appendAudit } from "@/lib/db/connector-audit"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { getSharedBuiltInSkillRegistry } from "./registry"

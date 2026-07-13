@@ -26,7 +26,7 @@ import { parseSource, type RawSource } from "./parse"
 import { runTwinPdfOcr } from "./ocr-fallback"
 import { persistChunks, vectorCollectionName } from "./persist"
 import { prepareChunks } from "./chunk"
-import { redactText, translateOffsetsThroughRedaction, unredactText } from "./redact"
+import { redactText, translateOffsetsThroughRedaction, unredactText } from "@cognia/redact"
 import { encryptRedactionMap } from "./redaction-key"
 
 export interface RunIngestInput {

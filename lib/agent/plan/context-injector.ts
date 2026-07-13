@@ -9,7 +9,7 @@
 
 import type { AgentPlan } from "@/types/agent/plan"
 import { renderPlanSystemSection } from "./prompts"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { loggers } from "@/lib/logging"
 
 /**

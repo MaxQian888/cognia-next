@@ -12,7 +12,7 @@
 
 import type { SkillCategory } from "@/lib/claude/types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { SKILL_CATEGORIES } from "@/lib/skills/categories"
 import { traceToPromptText } from "@/lib/skills/recording/trace-to-prompt"
 import type { RecordingTrace } from "@/lib/skills/recording/types"

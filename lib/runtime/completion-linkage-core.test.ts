@@ -1,9 +1,10 @@
 import { dispatchCompletionFanout, gateModelText } from "./completion-linkage-core"
 
 const dispatchTrigger = jest.fn(async () => {})
-const findMatchingWorkflows = jest.fn(
-  (): Array<{ workflowId: string }> => [{ workflowId: "wf-1" }, { workflowId: "wf-2" }]
-)
+const findMatchingWorkflows = jest.fn((): Array<{ workflowId: string }> => [
+  { workflowId: "wf-1" },
+  { workflowId: "wf-2" },
+])
 jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
   dispatchTrigger: (...args: unknown[]) => dispatchTrigger(...(args as [])),
 }))
@@ -12,7 +13,7 @@ jest.mock("@/lib/workflow/runtime/trigger-subscriptions", () => ({
 }))
 
 const hasNoLeakingPii = jest.fn((text: string) => !text.includes("SECRET"))
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: (text: string) => hasNoLeakingPii(text),
 }))
 

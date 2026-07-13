@@ -15,7 +15,7 @@
  */
 
 import type { TwinDraftPayload } from "@/types/twin"
-import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 
 /**
  * The user-facing prose fields a draft *typically* carries. Kept for

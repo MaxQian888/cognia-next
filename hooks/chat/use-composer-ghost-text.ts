@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { GhostController, type GhostView } from "@/lib/chat/completion/ghost-controller"
 import {

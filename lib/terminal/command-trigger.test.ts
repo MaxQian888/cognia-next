@@ -16,7 +16,7 @@ jest.mock("@/lib/workflow/runtime/trigger-subscriptions", () => ({
 }))
 
 const hasNoLeakingPiiMock = jest.fn()
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: (...args: unknown[]) => hasNoLeakingPiiMock(...args),
 }))
 

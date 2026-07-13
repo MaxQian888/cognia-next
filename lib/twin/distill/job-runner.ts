@@ -9,7 +9,7 @@
 import { listTwinChunksByTwin, updateTwinChunk } from "@/lib/db/twin-chunks"
 import { bulkCreateTwinDrafts } from "@/lib/db/twin-drafts"
 import { updateJobProgress } from "@/lib/db/twin-jobs"
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { loggers } from "@/lib/logging"
 import {
   upsertPlaybooks,
@@ -143,20 +143,18 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
   // Use the same placeholder index to look up the evaluation, then drop the
   // placeholder so Dexie mints the real id.
   const draftRows = await bulkCreateTwinDrafts(
-    sanitizedDrafts.map(
-      (draft, i): Omit<TwinDraft, "id" | "status" | "createdAt"> => ({
-        twinId: job.twinId,
-        jobId: job.id,
-        kind: draft.payload.kind,
-        payload: draft.payload,
-        provenance: {
-          chunkIds: chunks.slice(-10).map((c) => c.id),
-          playbookIds: draft.sourcePlaybookId ? [draft.sourcePlaybookId] : undefined,
-          rationale: draft.rationale,
-        },
-        evaluation: result.evaluations[`tmp_${i}`],
-      })
-    )
+    sanitizedDrafts.map((draft, i): Omit<TwinDraft, "id" | "status" | "createdAt"> => ({
+      twinId: job.twinId,
+      jobId: job.id,
+      kind: draft.payload.kind,
+      payload: draft.payload,
+      provenance: {
+        chunkIds: chunks.slice(-10).map((c) => c.id),
+        playbookIds: draft.sourcePlaybookId ? [draft.sourcePlaybookId] : undefined,
+        rationale: draft.rationale,
+      },
+      evaluation: result.evaluations[`tmp_${i}`],
+    }))
   )
 
   await updateJobProgress(job.id, { phase: "completed", progress: 99 })

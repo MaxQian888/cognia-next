@@ -16,7 +16,7 @@
  * case the "nothing to encrypt" path.
  */
 
-import { redactText, type RedactionRecord, unredactText } from "@/lib/twin/ingest/redact"
+import { redactText, type RedactionRecord, unredactText } from "@cognia/redact"
 import { decryptRedactionMap, encryptRedactionMap } from "@/lib/twin/ingest/redaction-key"
 
 export interface RedactObjectiveResult {

@@ -25,7 +25,7 @@
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 /** The rewrite intents the composer exposes. */
 export type EnhanceMode = "improve" | "concise" | "detailed" | "technical" | "simpler" | "variants"

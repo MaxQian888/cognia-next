@@ -7,7 +7,7 @@ jest.mock("@/lib/tauri/remote-control", () => ({
 }))
 
 const hasNoLeakingPii = jest.fn().mockReturnValue(true)
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: (...a: unknown[]) => hasNoLeakingPii(...a),
 }))
 

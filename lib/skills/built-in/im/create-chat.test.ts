@@ -12,7 +12,7 @@ jest.mock("@/lib/db/outbound-jobs", () => ({
   enqueueOutbound: jest.fn().mockResolvedValue({ id: "job1" }),
 }))
 
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: jest.fn(() => true),
 }))
 
@@ -25,7 +25,7 @@ import "./create-chat"
 import { resolveChatCapableAdapter } from "./_helpers"
 import { bootstrapConversation } from "@/lib/connectors/conversation-bootstrap"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
-import { hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { appendAudit } from "@/lib/connectors/audit"
 
 const mResolve = resolveChatCapableAdapter as jest.Mock

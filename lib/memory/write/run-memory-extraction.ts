@@ -27,7 +27,7 @@ import {
   type ConsolidateInput,
   type ConsolidationOp,
 } from "@/lib/memory/consolidate/consolidator"
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 
 export interface RunMemoryExtractionInput {
   rollingSummary?: string

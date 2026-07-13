@@ -27,7 +27,7 @@ jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => ({
 }))
 
 const redactTextMock = jest.fn((text: string) => ({ redacted: text, map: {} }))
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   redactText: (...a: unknown[]) => redactTextMock(...(a as [string])),
 }))
 

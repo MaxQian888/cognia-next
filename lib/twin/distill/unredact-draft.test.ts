@@ -13,7 +13,7 @@ import {
   previewUnredact,
 } from "./unredact-draft"
 import { encryptRedactionMap, __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
-import { redactText } from "@/lib/twin/ingest/redact"
+import { redactText } from "@cognia/redact"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { TwinDraft } from "@/types/twin"

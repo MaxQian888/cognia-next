@@ -104,7 +104,7 @@ export function createPiiOutputGuardrail(): PluginOutputGuardrail {
     name: "PII output guardrail",
     type: "output",
     run: async ({ output }) => {
-      const { hasNoLeakingPii } = await import("@/lib/twin/ingest/redact")
+      const { hasNoLeakingPii } = await import("@cognia/redact")
       return hasNoLeakingPii(output)
         ? { tripwireTriggered: false }
         : {

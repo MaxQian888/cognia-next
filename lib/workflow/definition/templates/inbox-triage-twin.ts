@@ -53,7 +53,7 @@ export function inboxTriageTwinTemplate(): VisualWorkflow {
             language: "javascript",
             timeoutMs: 2000,
             code:
-              "// Replace with `import { hasNoLeakingPii } from '@/lib/twin/ingest/redact'`\n" +
+              "// Replace with `import { hasNoLeakingPii } from '@cognia/redact'`\n" +
               "// in a real runtime. Inline here so the template is self-contained.\n" +
               "const body = String($input.body ?? '');\n" +
               "const redacted = body\n" +

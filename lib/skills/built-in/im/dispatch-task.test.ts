@@ -20,7 +20,7 @@ jest.mock("@/lib/db/outbound-jobs", () => ({
   enqueueOutbound: jest.fn().mockResolvedValue({ id: "job1" }),
 }))
 
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: jest.fn(() => true),
 }))
 
@@ -41,7 +41,7 @@ import { bootstrapConversation } from "@/lib/connectors/conversation-bootstrap"
 import { findSessionByConversationKey } from "@/lib/connectors/session-bindings"
 import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
-import { hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { startTeamRunFromIM } from "@/lib/connectors/team-dispatch"
 import { appendAudit } from "@/lib/connectors/audit"
 

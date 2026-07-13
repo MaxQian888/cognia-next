@@ -77,7 +77,7 @@ export async function gateModelText(
 ): Promise<string | undefined> {
   if (!text) return undefined
   try {
-    const { hasNoLeakingPii } = await import("@/lib/twin/ingest/redact")
+    const { hasNoLeakingPii } = await import("@cognia/redact")
     if (!hasNoLeakingPii(text)) return undefined
     return maxChars !== undefined ? text.slice(0, maxChars) : text
   } catch {

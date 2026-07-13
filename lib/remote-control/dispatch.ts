@@ -254,7 +254,7 @@ const HANDLERS: Record<RemoteCommandTarget, RemoteCommandHandler> = {
     if (!conversationKey) return reject(runId, "conversationKey required")
     if (!text) return reject(runId, "text required")
     // PII red-line: the message is delivered to an external IM platform.
-    const { hasNoLeakingPii } = await import("@/lib/twin/ingest/redact")
+    const { hasNoLeakingPii } = await import("@cognia/redact")
     if (!hasNoLeakingPii(text)) return reject(runId, "pii_blocked")
     const { parseConversationKey } = await import("@/types/connectors/event")
     const { enqueueOutbound } = await import("@/lib/db/outbound-jobs")

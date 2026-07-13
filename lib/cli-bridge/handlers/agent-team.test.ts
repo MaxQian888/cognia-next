@@ -12,7 +12,7 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
 
 const redactTextMock = jest.fn((text: string) => ({ redacted: text, map: {} }))
 const hasNoLeakingPiiMock = jest.fn<boolean, [string]>(() => true)
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   redactText: (text: string) => redactTextMock(text),
   hasNoLeakingPii: (text: string) => hasNoLeakingPiiMock(text),
 }))

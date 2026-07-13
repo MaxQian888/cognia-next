@@ -15,7 +15,7 @@ import type { MemoryRetrieverDeps } from "@/lib/memory/retrieve/retriever"
 import type { PetOneShot, PetProfile } from "@/types/pet"
 import type { PetView } from "@/lib/pet/runtime/pet-view"
 
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { getSpeakLimiter } from "@/lib/pet/bubbles/speak-limiter"
 import {
   buildUtilityLlmClient,
@@ -35,12 +35,7 @@ import { resolveMemoryConfig } from "@/types/memory/memory"
 
 /** Why a chat turn did not produce a real reply (surfaced in the panel). */
 export type PetChatDegradeReason =
-  | "disabled"
-  | "pii"
-  | "rateLimited"
-  | "noClient"
-  | "empty"
-  | "error"
+  "disabled" | "pii" | "rateLimited" | "noClient" | "empty" | "error"
 
 export type PetChatResult =
   | { status: "ok"; reply: string; emotion?: PetOneShot }

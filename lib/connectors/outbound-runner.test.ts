@@ -38,7 +38,7 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({ dispatchConnectorDecision: mockConnectorDecision }),
 }))
 const mockPiiDeep = jest.fn(() => true)
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (...args: unknown[]) => mockPiiDeep(...(args as [])),
   hasNoLeakingPii: () => true,
 }))

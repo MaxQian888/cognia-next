@@ -46,7 +46,7 @@ import { prompt as nativePrompt } from "@/lib/capacitor/dialog"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
 import { deleteTwinSource, updateTwinSource } from "@/lib/db/twin-sources"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import type { TwinSource } from "@/types/twin"
 import { cn } from "@/lib/utils"
 

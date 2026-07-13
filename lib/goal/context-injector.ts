@@ -13,7 +13,7 @@
 
 import type { Goal } from "@/types/goal"
 import { renderGoalSystemSection } from "./prompts"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { loggers } from "@/lib/logging"
 
 /**

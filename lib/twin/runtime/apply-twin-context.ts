@@ -35,7 +35,7 @@ import { keywordSearch } from "./bm25-index"
 import { rerank, type RerankCandidate, type RerankerOptions } from "./reranker"
 import { buildExpandedKeywordQuery } from "@/lib/ai/retrieval/query-expansion"
 import { filterByGrade } from "@/lib/ai/retrieval/corrective-filter"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import type { LanguageModel } from "ai"
 
 export interface TwinRuntimeEmbeddingConfig {

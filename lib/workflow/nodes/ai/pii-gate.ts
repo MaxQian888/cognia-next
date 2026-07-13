@@ -11,7 +11,7 @@
  * one PII policy across every LLM egress point.
  */
 
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 
 export type PiiGateMode = "off" | "block" | "redact"
 

@@ -13,7 +13,7 @@ import type {
   PluginOutputGuardrail,
 } from "@/types/plugin/plugin-agent-guardrails"
 
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: (s: string) => !s.includes("@"),
 }))
 

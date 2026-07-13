@@ -48,7 +48,7 @@ export async function dispatchTerminalCommandTriggers(
       [
         import("@/lib/workflow/runtime/trigger-bridge"),
         import("@/lib/workflow/runtime/trigger-subscriptions"),
-        import("@/lib/twin/ingest/redact"),
+        import("@cognia/redact"),
       ]
     )
 

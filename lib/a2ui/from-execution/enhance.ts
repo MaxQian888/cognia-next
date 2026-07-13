@@ -15,7 +15,7 @@
 
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import type { AppSettings, ChatSession } from "@/lib/claude/types"
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { loggers } from "@/lib/logging"
 
 const SYSTEM_PROMPT =

@@ -601,7 +601,7 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
       return listSiblingConversations(conversationKey)
     },
     messagePassesPiiGate: async (message) => {
-      const { hasNoLeakingPiiDeep } = await import("@/lib/twin/ingest/redact")
+      const { hasNoLeakingPiiDeep } = await import("@cognia/redact")
       return hasNoLeakingPiiDeep(message)
     },
     postToConversation: async (input) => {

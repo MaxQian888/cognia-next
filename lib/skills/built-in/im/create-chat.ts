@@ -74,7 +74,7 @@ const skill: BuiltInSkill<typeof schema> = {
 
     let firstMessage: "sent" | "pii_blocked" | undefined
     if (args.firstMessage?.trim()) {
-      const { hasNoLeakingPiiDeep } = await import("@/lib/twin/ingest/redact")
+      const { hasNoLeakingPiiDeep } = await import("@cognia/redact")
       if (!hasNoLeakingPiiDeep(args.firstMessage)) {
         // The chat WAS created — report the partial outcome instead of
         // failing the whole call.

@@ -142,6 +142,7 @@ const projectCommon: Config = {
     "^@cognia/mermaid(.*)$": "<rootDir>/packages/mermaid/src$1",
     "^@cognia/plugin-sdk/define/(.*)$": "<rootDir>/packages/plugin-sdk/src/define/define-$1",
     "^@cognia/plugin-sdk(.*)$": "<rootDir>/packages/plugin-sdk/src$1",
+    "^@cognia/redact(.*)$": "<rootDir>/packages/redact/src$1",
 
     // cheerio's package exports prefer the ESM browser build under jsdom.
     // The HTML parser uses dynamic import("cheerio"), so map Jest to the CJS
@@ -282,6 +283,9 @@ const globalConfig: Config = {
     "packages/latex/src/**/*.{ts,tsx}",
     "packages/mermaid/src/**/*.{ts,tsx}",
     "packages/plugin-sdk/src/**/*.{ts,tsx}",
+    // redact was lifted out of lib/twin/ingest (coverage-collected), so keep
+    // it collected.
+    "packages/redact/src/**/*.{ts,tsx}",
     "!packages/plugin-sdk/src/context/**/*.ts",
     "!packages/plugin-sdk/src/hooks/index.ts",
     "!packages/plugin-sdk/src/permissions/index.ts",

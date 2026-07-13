@@ -31,7 +31,7 @@ import {
   hasUnresolvedNonBotComments,
 } from "@/lib/github/pr-observe/predicates"
 import type { PrObservation } from "@/lib/github/pr-observe/types"
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 
 /** Max nudges for the same review key before it stops re-firing (AO reviewMaxNudge). */
 export const REVIEW_MAX_NUDGE = 3

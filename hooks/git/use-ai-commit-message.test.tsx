@@ -18,7 +18,7 @@ jest.mock("@/lib/git/commands", () => ({
 jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: (arg: unknown) => mockBuildClient(arg),
 }))
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: () => mockPii,
   redactText: (t: string) => mockRedactText(t),
 }))

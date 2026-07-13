@@ -13,7 +13,7 @@ import {
   hasNoLeakingPiiDeep,
   redactText,
   unredactText,
-} from "./redact"
+} from "./index"
 
 describe("redactText", () => {
   it("redacts emails and round-trips perfectly", () => {
@@ -340,9 +340,7 @@ describe("hasNoLeakingPiiDeep", () => {
 })
 
 describe("translateOffsetsThroughRedaction", () => {
-  const { redactText, translateOffsetsThroughRedaction } = jest.requireActual(
-    "@/lib/twin/ingest/redact"
-  )
+  const { redactText, translateOffsetsThroughRedaction } = jest.requireActual("@cognia/redact")
 
   function entry(charStart: number, charEnd: number, pageNumber = 1) {
     return { pageNumber, charStart, charEnd }

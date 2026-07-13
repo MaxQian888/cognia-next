@@ -7,7 +7,7 @@ jest.mock("sonner", () => ({
 jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: jest.fn(() => ({ complete: jest.fn() })),
 }))
-jest.mock("@/lib/twin/ingest/redact", () => ({
+jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: () => true,
   redactText: (t: string) => ({ redacted: t }),
 }))

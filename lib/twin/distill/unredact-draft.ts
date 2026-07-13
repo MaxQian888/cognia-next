@@ -20,7 +20,7 @@
  */
 
 import { decryptRedactionMap } from "@/lib/twin/ingest/redaction-key"
-import { PII_PLACEHOLDER_SOURCE, type RedactionRecord } from "@/lib/twin/ingest/redact"
+import { PII_PLACEHOLDER_SOURCE, type RedactionRecord } from "@cognia/redact"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import type { TwinDraft } from "@/types/twin"
 

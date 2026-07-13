@@ -13,7 +13,7 @@ import {
   getRedactionKey,
   RedactionKeyMismatchError,
 } from "./redaction-key"
-import { redactText } from "./redact"
+import { redactText } from "@cognia/redact"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 
 beforeEach(async () => {

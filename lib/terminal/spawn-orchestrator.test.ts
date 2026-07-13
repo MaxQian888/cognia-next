@@ -23,7 +23,7 @@ jest.mock("@/stores/settings/settings-store", () => {
     },
   }
 })
-jest.mock("@/lib/twin/ingest/redact", () => {
+jest.mock("@cognia/redact", () => {
   const state = { piiOk: true }
   return {
     __mockPiiState: state,
@@ -42,7 +42,7 @@ const { recordTerminalHistory: mockRecordHistory } = jest.requireMock(
 const { __mockSettingsState } = jest.requireMock("@/stores/settings/settings-store") as {
   __mockSettingsState: { persistHistory: boolean | undefined }
 }
-const { __mockPiiState } = jest.requireMock("@/lib/twin/ingest/redact") as {
+const { __mockPiiState } = jest.requireMock("@cognia/redact") as {
   __mockPiiState: { piiOk: boolean }
 }
 const { dispatchTerminalCommandTriggers: mockDispatchCommandTriggers } = jest.requireMock(

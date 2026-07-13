@@ -16,7 +16,7 @@
 import { gitRemotes, gitStatus } from "@/lib/git/commands"
 import { getOctokitForRepo } from "@/lib/github/octokit-factory"
 import type { OctokitLike } from "@/lib/github/pr-observe/types"
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import type { GitRemote, GitStatus } from "@/types/git"
 import { getTeamRunContext } from "@/lib/ai/agent/team/team-run-context"
 import { dispatchStructured } from "@/lib/ai/agent/team/structured-dispatch"

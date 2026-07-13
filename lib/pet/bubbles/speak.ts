@@ -6,7 +6,7 @@
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { PetBones, PetSoul } from "@/types/pet"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { buildPetSystemPrompt, type PetPromptState } from "@/lib/pet/llm/persona"
 
 const MAX_REPLY = 200

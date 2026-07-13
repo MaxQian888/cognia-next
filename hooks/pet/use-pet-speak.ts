@@ -33,7 +33,7 @@ import {
   type PetHistoryDeps,
 } from "@/lib/pet/llm/history"
 import { recallAboutUser } from "@/lib/pet/llm/recall"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { appendPetTurn, listRecentPetTurns } from "@/lib/db/pet-conversation"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"

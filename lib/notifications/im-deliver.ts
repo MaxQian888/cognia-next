@@ -24,7 +24,7 @@ import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { appendAudit } from "@/lib/connectors/audit"
 import { findSessionByConversationKey } from "@/lib/connectors/session-bindings"
 import { readForResolution } from "@/lib/db/conversation-overrides"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface ImDeliverDeps {
   findSession?: typeof findSessionByConversationKey

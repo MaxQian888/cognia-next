@@ -50,7 +50,7 @@ import {
 import { appendAudit } from "./audit"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { parseConversationKey, buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import {

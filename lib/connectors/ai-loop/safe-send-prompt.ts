@@ -20,7 +20,7 @@
  * substitute one for the other without code-path changes.
  */
 
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import {
   RunAndCaptureError,
   runAndCaptureAssistantReply,

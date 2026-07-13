@@ -63,7 +63,7 @@ export async function runMemoryStore(ctx: StepExecutionContext): Promise<StepExe
   }
 
   // PII gate — mandatory on the write path (memory text persists durably).
-  const { hasNoLeakingPii, redactText } = await import("@/lib/twin/ingest/redact")
+  const { hasNoLeakingPii, redactText } = await import("@cognia/redact")
   let text = rawText
   let piiRedacted = false
   if ((params.piiGate ?? "block") === "block") {

@@ -15,7 +15,7 @@
 
 import { listMemories } from "@/lib/db/memories"
 import { listCapturedItemsSince } from "@/lib/db/captured-items"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { smartPreFilter } from "./prefilter"
 import type { RadarDataItem } from "@/types/radar"
 

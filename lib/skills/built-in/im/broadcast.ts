@@ -55,7 +55,7 @@ const skill: BuiltInSkill<typeof schema> = {
   mcpToolName: "im_broadcast",
   inputSchema: schema,
   execute: async (args) => {
-    const { hasNoLeakingPiiDeep } = await import("@/lib/twin/ingest/redact")
+    const { hasNoLeakingPiiDeep } = await import("@cognia/redact")
     if (!hasNoLeakingPiiDeep(args.message)) {
       return {
         status: "denied",

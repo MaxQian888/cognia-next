@@ -12,7 +12,7 @@
  * source) rather than to silently rewrite mid-pipeline.
  */
 
-import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { AgentPlan, PlanStep } from "@/types/agent/plan"
 
 /** Raised when plan text carries recognised PII. */

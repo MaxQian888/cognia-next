@@ -20,7 +20,7 @@ import type {
   ExternalAgentBranchReasonCode,
   ExternalAgentDelegationResult,
 } from "@/types/agent/external-agent"
-import type { RedactionRecord } from "@/lib/twin/ingest/redact"
+import type { RedactionRecord } from "@cognia/redact"
 
 export interface RouteDelegationInput {
   /** The user prompt for this turn. */

@@ -7,7 +7,7 @@
 // (twinSource / twinDraft). The serialized JSON is the `discover-item`
 // SharePayload body; the public viewer (`payload-view.tsx`) re-parses it.
 
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import type { Character, Skill, Team } from "@/lib/claude/types"
 import type { WorkflowCopilotTemplate } from "@/lib/workflow/copilot-templates"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
@@ -61,10 +61,7 @@ export interface SharedWorkflowTemplateDef extends SharedBase {
 }
 
 export type SharedDiscoverDefinition =
-  | SharedCharacterDef
-  | SharedSkillDef
-  | SharedTeamDef
-  | SharedWorkflowTemplateDef
+  SharedCharacterDef | SharedSkillDef | SharedTeamDef | SharedWorkflowTemplateDef
 
 type Locale = "en" | "zh-CN"
 

@@ -9,7 +9,7 @@
  * and reuses the same redactor the Twin / Goal / Connector paths gate on.
  */
 
-import { redactText } from "@/lib/twin/ingest/redact"
+import { redactText } from "@cognia/redact"
 import type {
   PluginToolPermissionFn,
   PluginToolPermissionResult,

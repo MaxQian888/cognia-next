@@ -24,7 +24,7 @@ import type { StructuredLogEntry, Transport, TransportHealthSnapshot } from "@/t
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import { AGENT_TRACE_SPAN_KIND } from "@/types/agent-trace/span"
 import { bulkInsertSpans, pruneOlderThan } from "@/lib/db/agent-traces"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 const consoleApi = globalThis.console
 
