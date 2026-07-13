@@ -1184,6 +1184,179 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/memory_search:
+    post:
+      operationId: rpcMemorySearch
+      tags: [rpc-remote-control]
+      summary: Hybrid relevance search over the desktop's long-term memory (bumps access recency).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string }
+                k: { type: integer, minimum: 1, maximum: 20 }
+                types:
+                  { type: array, items: { type: string, enum: [semantic, episodic, procedural] } }
+                characterId: { type: string }
+      responses:
+        "200":
+          description: "`{ ok: true, hits }` or a structured policy block (`disabled` / `temporary` / `backend_unavailable`)."
+          content:
+            {
+              application/json:
+                { schema: { type: object, additionalProperties: true } },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/memory_list:
+    post:
+      operationId: rpcMemoryList
+      tags: [rpc-remote-control]
+      summary: Newest-first listing of active long-term memories (pure read).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type: { type: string, enum: [semantic, episodic, procedural] }
+                scope: { type: string, enum: [global, character] }
+                limit: { type: integer, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: "`{ ok: true, memories }` or a structured policy block."
+          content:
+            {
+              application/json:
+                { schema: { type: object, additionalProperties: true } },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/memory_store:
+    post:
+      operationId: rpcMemoryStore
+      tags: [rpc-remote-control]
+      summary: Store one durable fact into long-term memory (external provenance, PII-gated, never procedural).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 2000 }
+                type: { type: string, enum: [semantic, episodic] }
+                scope: { type: string, enum: [global, character] }
+                characterId: { type: string }
+                key: { type: string }
+                importance: { type: integer, minimum: 1, maximum: 10 }
+                tags: { type: array, items: { type: string } }
+      responses:
+        "200":
+          description: "`{ ok: true, stored, consolidated, memoryId?, applied }` or a structured policy block (`disabled` / `temporary` / `pii_blocked`)."
+          content:
+            {
+              application/json:
+                { schema: { type: object, additionalProperties: true } },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/memory_update:
+    post:
+      operationId: rpcMemoryUpdate
+      tags: [rpc-remote-control]
+      summary: Patch a long-term memory's text / importance / tags / key (text changes PII-gated).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+                text: { type: string, maxLength: 2000 }
+                importance: { type: integer, minimum: 1, maximum: 10 }
+                tags: { type: array, items: { type: string } }
+                key: { type: string }
+      responses:
+        "200":
+          description: "`{ ok: true }` or a structured policy block (`disabled` / `temporary` / `pii_blocked` / `not_found`)."
+          content:
+            {
+              application/json:
+                { schema: { type: object, additionalProperties: true } },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/memory_forget:
+    post:
+      operationId: rpcMemoryForget
+      tags: [rpc-remote-control]
+      summary: Soft-invalidate a long-term memory (kept in history; never a hard delete).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        "200":
+          description: "`{ ok: true }` or a structured policy block (`disabled` / `not_found`)."
+          content:
+            {
+              application/json:
+                { schema: { type: object, additionalProperties: true } },
+            }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/automation_consent_respond:
     post:
       operationId: rpcAutomationConsentRespond

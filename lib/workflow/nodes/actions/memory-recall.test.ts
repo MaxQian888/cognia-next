@@ -119,4 +119,13 @@ describe("runMemoryRecall", () => {
       expect.anything()
     )
   })
+
+  it("forwards the configured decay half-life to the retriever", async () => {
+    mockGetSettings.mockResolvedValue({ memory: { decayHalfLifeDays: 12 } })
+    await runMemoryRecall(makeCtx({ query: "q" }))
+    expect(mockRetrieveMemories).toHaveBeenCalledWith(
+      expect.objectContaining({ recencyHalfLifeDays: 12 }),
+      expect.anything()
+    )
+  })
 })

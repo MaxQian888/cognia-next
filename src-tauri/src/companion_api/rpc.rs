@@ -464,6 +464,15 @@ const KNOWN_COMMANDS: &[&str] = &[
     "goal_create",
     "goal_update",
     "goal_status",
+    // Long-term memory (ADR-0069). Reads (search / list) + writes
+    // (store / update / forget). Writes carry `external` provenance and are
+    // PII-gated on the TS side; store/update/forget are CONTROL commands.
+    // All round-trip through desktop_writes_bridge.
+    "memory_search",
+    "memory_list",
+    "memory_store",
+    "memory_update",
+    "memory_forget",
     // ── Settings / conversation overrides ───────────────────────────────────
     "conversation_overrides_update",
     // ── App-data backup ─────────────────────────────────────────────────────
@@ -577,6 +586,11 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "twin_job_status",
     // Goal status is a pure read (same goalId/sessionId returns current state).
     "goal_status",
+    // Memory listing is a pure read (same filter returns the same rows).
+    // `memory_search` is deliberately NOT here: a search bumps each hit's
+    // `lastAccessedAt`/`accessCount` (the recency signal), so it must not be
+    // served from the idempotency cache.
+    "memory_list",
     // App-data backup export is a pure read (snapshots current state).
     "backup_export",
     // Native log read-back — bounded tail reads over on-disk log files.
@@ -715,6 +729,12 @@ const CONTROL_COMMANDS: &[&str] = &[
     // elevation as goal_pause/resume/stop above.
     "goal_create",
     "goal_update",
+    // Long-term memory writes (ADR-0069) — mutating the user's durable
+    // personal-fact store from a remote device is a powerful surface
+    // (Wave 4.1 policy: every remote mutation of powerful surfaces is gated).
+    "memory_store",
+    "memory_update",
+    "memory_forget",
     // App-data restore overwrites local state.
     "backup_import",
     // Fleet control — answering a parked permission, injecting an OpenCode
@@ -1664,6 +1684,15 @@ pub(super) async fn dispatch(
         | "goal_create"
         | "goal_update"
         | "goal_status"
+        // Long-term memory (ADR-0069) — same generic bridge; TS-side dispatch
+        // arms in `lib/companion/desktop-write-source.ts` delegate to the
+        // shared `lib/memory/api/*` helpers (PII gate, `external` provenance,
+        // never procedural). Writes are gated by CONTROL_COMMANDS.
+        | "memory_search"
+        | "memory_list"
+        | "memory_store"
+        | "memory_update"
+        | "memory_forget"
         | "conversation_overrides_update"
         | "backup_export"
         | "backup_import"
@@ -4619,6 +4648,29 @@ mod tests {
             assert!(
                 !is_control_command(ungated),
                 "{ungated} should NOT be gated"
+            );
+        }
+    }
+
+    // ── Long-term memory command classification (ADR-0069) ──────────────────
+    // memory_list is a pure read; memory_search is NOT read-only (it bumps
+    // lastAccessedAt/accessCount, so idempotency-caching it would freeze the
+    // recency signal); the three writes are control-gated.
+
+    #[test]
+    fn memory_commands_are_classified_correctly() {
+        assert!(READ_ONLY_COMMANDS.contains(&"memory_list"));
+        assert!(
+            !READ_ONLY_COMMANDS.contains(&"memory_search"),
+            "memory_search mutates access recency — must not be idempotency-cached"
+        );
+        for gated in ["memory_store", "memory_update", "memory_forget"] {
+            assert!(is_control_command(gated), "{gated} should be control-gated");
+        }
+        for ungated in ["memory_search", "memory_list"] {
+            assert!(
+                !is_control_command(ungated),
+                "{ungated} should NOT be control-gated"
             );
         }
     }

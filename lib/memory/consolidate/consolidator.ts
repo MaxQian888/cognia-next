@@ -15,7 +15,12 @@
  */
 
 import { extractJson, type LlmClient } from "@/lib/twin/distill/llm"
-import type { Memory, MemoryProvenance, MemoryScope } from "@/types/memory/memory"
+import type {
+  Memory,
+  MemoryProvenance,
+  MemoryScope,
+  MemorySourceChannel,
+} from "@/types/memory/memory"
 import type { MemoryCandidate } from "@/lib/memory/extract/extractor"
 
 export interface PersistMemoryInput {
@@ -28,6 +33,8 @@ export interface PersistMemoryInput {
   provenance: MemoryProvenance
   sourceSessionId?: string
   sourceMessageId?: string
+  sourceChannel?: MemorySourceChannel
+  sourcePluginId?: string
 }
 
 export interface ConsolidateDeps {
@@ -58,6 +65,8 @@ export interface ConsolidateInput {
   characterId?: string
   provenance: MemoryProvenance
   source?: { sessionId?: string; messageId?: string }
+  /** API-surface attribution, stamped onto ADDed rows (external provenance). */
+  attribution?: { channel: MemorySourceChannel; pluginId?: string }
 }
 
 const DECIDE_SYSTEM =
@@ -104,6 +113,8 @@ async function persistCandidate(
     provenance: input.provenance,
     sourceSessionId: input.source?.sessionId,
     sourceMessageId: input.source?.messageId,
+    sourceChannel: input.attribution?.channel,
+    sourcePluginId: input.attribution?.pluginId,
   })
 }
 

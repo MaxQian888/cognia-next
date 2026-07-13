@@ -109,6 +109,7 @@
   "provenance": {
     "all": "All sources",
     "explicit": "Explicit",
+    "external": "External (API)",
     "inbound": "Inbound",
     "system": "System",
     "user": "Auto (chat)"

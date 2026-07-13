@@ -164,8 +164,11 @@ describe("recencyHalfLifeDaysForType", () => {
 })
 
 describe("veracityFor", () => {
-  it("ranks provenance user/explicit > system > inbound", () => {
+  it("ranks provenance user/explicit > external > system > inbound", () => {
     expect(veracityFor({ provenance: "user" })).toBeGreaterThan(
+      veracityFor({ provenance: "external" })
+    )
+    expect(veracityFor({ provenance: "external" })).toBeGreaterThan(
       veracityFor({ provenance: "system" })
     )
     expect(veracityFor({ provenance: "system" })).toBeGreaterThan(

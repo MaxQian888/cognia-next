@@ -30,6 +30,7 @@ import { dispatchGoalSubcommand } from "./actions/goal"
 import { dispatchPetSubcommand } from "./actions/pet"
 import { dispatchLoopSubcommand } from "./actions/loop"
 import { dispatchRememberCommand } from "./actions/remember"
+import { dispatchMemorySubcommand } from "./actions/memory"
 import { WORKFLOW_SLASH_COMMANDS } from "./actions/workflow"
 import { handleRunWorkflow } from "./actions/run-saved-workflow"
 import { handleCouncil } from "./actions/council"
@@ -471,6 +472,19 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     handler: async (ctx) => {
       const result = await dispatchRememberCommand(ctx)
       if (result?.system) ctx.pushSystemMessage(result.system)
+      if (result?.openMemory) ctx.openSettings("memory")
+    },
+  },
+  {
+    name: "memory",
+    description: "View and manage long-term memory (list, forget, status).",
+    scope: "builtin",
+    category: "chat",
+    argumentHint: "[status | list [n] | forget <id>]",
+    handler: async (ctx) => {
+      const result = await dispatchMemorySubcommand(ctx)
+      if (result?.system) ctx.pushSystemMessage(result.system)
+      if (result?.openMemory) ctx.openSettings("memory")
     },
   },
   {

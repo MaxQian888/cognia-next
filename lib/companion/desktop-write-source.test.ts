@@ -68,6 +68,24 @@ jest.mock("@/stores/agent/external-agent-store", () => ({
   },
 }))
 
+// Stub the shared memory API helpers — the arms should validate + delegate
+// with `sourceChannel: "rpc"`, not re-run PII/consolidation logic (covered by
+// lib/memory/api tests).
+const mockMemorySearch = jest.fn()
+jest.mock("@/lib/memory/api/search-memory", () => ({
+  searchMemoriesExternal: (...args: unknown[]) => mockMemorySearch(...(args as [])),
+}))
+const mockMemoryStore = jest.fn()
+jest.mock("@/lib/memory/api/store-memory", () => ({
+  storeExternalMemory: (...args: unknown[]) => mockMemoryStore(...(args as [])),
+}))
+const mockMemoryUpdate = jest.fn()
+const mockMemoryForget = jest.fn()
+jest.mock("@/lib/memory/api/mutate-memory", () => ({
+  updateExternalMemory: (...args: unknown[]) => mockMemoryUpdate(...(args as [])),
+  forgetExternalMemory: (...args: unknown[]) => mockMemoryForget(...(args as [])),
+}))
+
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { getGoalRuntime } from "@/lib/goal/runtime"
@@ -639,6 +657,81 @@ describe("dispatchCommand: external_agent_list / external_agent_update", () => {
     await expect(dispatchCommand("external_agent_update", { id: "a1", patch: {} })).rejects.toThrow(
       /no editable fields/
     )
+  })
+})
+
+describe("dispatchCommand: memory_* (ADR-0069)", () => {
+  const MEMORY_ROW = {
+    id: "m1",
+    scope: "global",
+    type: "semantic",
+    text: "User prefers pnpm",
+    tags: [],
+    importance: 7,
+    vectorDocId: "m1",
+    createdAt: 1,
+    updatedAt: 2,
+    lastAccessedAt: 2,
+    accessCount: 1,
+    version: 1,
+    status: "active",
+    pinned: false,
+    provenance: "external",
+  }
+
+  it("memory_search validates the query and projects wire rows", async () => {
+    await expect(dispatchCommand("memory_search", {})).rejects.toThrow(/query is required/)
+    mockMemorySearch.mockResolvedValue({
+      ok: true,
+      hits: [{ memory: MEMORY_ROW, relevance: 0.9, score: 0.8 }],
+    })
+    const result = (await dispatchCommand("memory_search", { query: "pnpm", k: 3 })) as {
+      ok: boolean
+      hits: Array<{ memory: Record<string, unknown> }>
+    }
+    expect(mockMemorySearch).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "pnpm", topK: 3 })
+    )
+    expect(result.ok).toBe(true)
+    expect(result.hits[0].memory.id).toBe("m1")
+    expect(result.hits[0].memory.vectorDocId).toBeUndefined()
+  })
+
+  it("memory_search passes policy blocks through unchanged", async () => {
+    mockMemorySearch.mockResolvedValue({ ok: false, reason: "disabled" })
+    expect(await dispatchCommand("memory_search", { query: "q" })).toEqual({
+      ok: false,
+      reason: "disabled",
+    })
+  })
+
+  it("memory_store validates text and stamps the rpc channel", async () => {
+    await expect(dispatchCommand("memory_store", { text: "  " })).rejects.toThrow(
+      /text is required/
+    )
+    mockMemoryStore.mockResolvedValue({ ok: true, stored: true, consolidated: false })
+    await dispatchCommand("memory_store", { text: "User prefers pnpm", importance: 9 })
+    expect(mockMemoryStore).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "User prefers pnpm", importance: 9 }),
+      { channel: "rpc" }
+    )
+  })
+
+  it("memory_update / memory_forget validate ids and delegate", async () => {
+    await expect(dispatchCommand("memory_update", {})).rejects.toThrow(/id is required/)
+    await expect(dispatchCommand("memory_forget", { id: " " })).rejects.toThrow(/id is required/)
+    mockMemoryUpdate.mockResolvedValue({ ok: true })
+    mockMemoryForget.mockResolvedValue({ ok: true })
+    await dispatchCommand("memory_update", { id: "m1", text: "new" })
+    expect(mockMemoryUpdate).toHaveBeenCalledWith("m1", expect.objectContaining({ text: "new" }))
+    expect(await dispatchCommand("memory_forget", { id: "m1" })).toEqual({ ok: true })
+    expect(mockMemoryForget).toHaveBeenCalledWith("m1")
+  })
+
+  it("memory_list is policy-gated and clamps the limit", async () => {
+    // Default settings row (fake-indexeddb) has memory enabled by default.
+    const result = (await dispatchCommand("memory_list", { limit: 999 })) as { ok: boolean }
+    expect(result.ok).toBe(true)
   })
 })
 

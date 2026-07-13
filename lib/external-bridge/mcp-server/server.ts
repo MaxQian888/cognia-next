@@ -46,6 +46,13 @@ import {
   connectorsSendMessage,
 } from "../handlers/connectors"
 import { recordLesson, saveSkillDraft, ingestNote } from "../handlers/inbound"
+import {
+  memorySearch,
+  memoryList,
+  memoryStore,
+  memoryUpdate,
+  memoryForget,
+} from "../handlers/memory"
 
 /** Function the caller injects so the server always sees fresh settings. */
 export type SettingsGetter = () => Promise<ExternalBridgeSettings | undefined>
@@ -77,6 +84,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerOrchestrationTools(server, opts.settingsGetter)
   registerConnectorTools(server, opts.settingsGetter)
   registerInboundTools(server, opts.settingsGetter)
+  registerMemoryTools(server, opts.settingsGetter)
   registerResources(server, opts.settingsGetter)
   registerPrompts(server, opts.settingsGetter)
 
@@ -736,6 +744,183 @@ function registerInboundTools(server: McpServer, settingsGetter: SettingsGetter)
             url: args.url,
             source: args.source,
           }),
+      })
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// memory_search / memory_list / memory_store / memory_update / memory_forget
+// (long-term memory, ADR-0069)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) {
+  const memoryTypeSchema = z.enum(["semantic", "episodic", "procedural"])
+  const memoryScopeSchema = z.enum(["global", "character"])
+
+  // memory_search
+  server.registerTool(
+    "memory_search",
+    {
+      title: "Search Cognia's long-term memory",
+      description:
+        "Hybrid (BM25 + vector) relevance search over what Cognia remembers about the user. Returns scored memory rows. Default OFF; gate via Settings → External Bridge → memory:read.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false, // bumps lastAccessedAt/accessCount (recency signal)
+        openWorldHint: false,
+      },
+      inputSchema: {
+        query: z.string().describe("Natural language query"),
+        k: z.number().int().min(1).max(20).optional().describe("Result count (default: configured topK)"),
+        types: z.array(memoryTypeSchema).optional().describe("Restrict to memory types"),
+        characterId: z.string().optional().describe("Include this character's override layer"),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "memory_search",
+        scope: "memory:read",
+        check: checkToolCall(await settingsGetter(), "memory_search"),
+        body: () =>
+          memorySearch({
+            query: args.query,
+            k: args.k,
+            types: args.types,
+            characterId: args.characterId,
+          }),
+      })
+  )
+
+  // memory_list
+  server.registerTool(
+    "memory_list",
+    {
+      title: "List Cognia's long-term memories",
+      description:
+        "Newest-first listing of active long-term memories (no relevance ranking). Default OFF; gate via Settings → External Bridge → memory:read.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        type: memoryTypeSchema.optional().describe("Restrict to one memory type"),
+        scope: memoryScopeSchema.optional().describe("Restrict to one scope"),
+        limit: z.number().int().min(1).max(200).optional().describe("Row cap (default 50)"),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "memory_list",
+        scope: "memory:read",
+        check: checkToolCall(await settingsGetter(), "memory_list"),
+        body: () => memoryList({ type: args.type, scope: args.scope, limit: args.limit }),
+      })
+  )
+
+  // memory_store
+  server.registerTool(
+    "memory_store",
+    {
+      title: "Store a long-term memory",
+      description:
+        "Store one durable fact about the user (semantic/episodic only — never working instructions). PII-screened; consolidated against existing memories when possible. Provenance is recorded as external/mcp. Default OFF; gate via Settings → External Bridge → memory:write.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        text: z.string().max(2000).describe("The fact to remember (one self-contained statement)"),
+        type: z.enum(["semantic", "episodic"]).optional().describe("Memory type (default semantic)"),
+        scope: memoryScopeSchema.optional().describe("Scope (default global)"),
+        characterId: z.string().optional().describe("Required when scope is character"),
+        key: z.string().optional().describe("Stable dedupe key"),
+        importance: z.number().int().min(1).max(10).optional().describe("1..10 (default 7)"),
+        tags: z.array(z.string()).optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "memory_store",
+        scope: "memory:write",
+        check: checkToolCall(await settingsGetter(), "memory_store"),
+        body: () =>
+          memoryStore({
+            text: args.text,
+            type: args.type,
+            scope: args.scope,
+            characterId: args.characterId,
+            key: args.key,
+            importance: args.importance,
+            tags: args.tags,
+          }),
+      })
+  )
+
+  // memory_update
+  server.registerTool(
+    "memory_update",
+    {
+      title: "Update a long-term memory",
+      description:
+        "Patch an existing memory's text / importance / tags / key. Text changes are PII-screened and bump the row version. Default OFF; gate via Settings → External Bridge → memory:write.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        id: z.string().describe("Memory id (from memory_search / memory_list)"),
+        text: z.string().max(2000).optional(),
+        importance: z.number().int().min(1).max(10).optional(),
+        tags: z.array(z.string()).optional(),
+        key: z.string().optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "memory_update",
+        scope: "memory:write",
+        check: checkToolCall(await settingsGetter(), "memory_update"),
+        body: () =>
+          memoryUpdate({
+            id: args.id,
+            text: args.text,
+            importance: args.importance,
+            tags: args.tags,
+            key: args.key,
+          }),
+      })
+  )
+
+  // memory_forget
+  server.registerTool(
+    "memory_forget",
+    {
+      title: "Forget a long-term memory",
+      description:
+        "Soft-invalidate a memory (kept in history, excluded from recall; never a hard delete). Default OFF; gate via Settings → External Bridge → memory:write.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        id: z.string().describe("Memory id (from memory_search / memory_list)"),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "memory_forget",
+        scope: "memory:write",
+        check: checkToolCall(await settingsGetter(), "memory_forget"),
+        body: () => memoryForget({ id: args.id }),
       })
   )
 }

@@ -58,6 +58,13 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   record_lesson: "inbound:write",
   save_skill_draft: "inbound:write",
   ingest_note: "inbound:write",
+  // Long-term memory tools (ADR-0069). Read/write split like the inbox pair;
+  // writes carry `external` provenance, are PII-block-gated, never procedural.
+  memory_search: "memory:read",
+  memory_list: "memory:read",
+  memory_store: "memory:write",
+  memory_update: "memory:write",
+  memory_forget: "memory:write",
 }
 
 /**

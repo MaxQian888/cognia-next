@@ -5,7 +5,7 @@
  * store that the Digital Twin / Agent-Team-shared-memory / RAG toolkit never
  * provided: it watches conversations, extracts durable facts about the user,
  * consolidates them (ADD/UPDATE/DELETE/NOOP), and recalls them into later
- * prompts. See `docs/superpowers/specs/2026-06-01-agent-long-term-memory-design.md`.
+ * prompts. See ADR-0069 (`docs/content/docs/en/adr/0069-long-term-memory-external-api-surfaces.md`).
  *
  * One `memories` Dexie table (schema v65) carries all three memory types. Rows
  * are never hard-deleted by the consolidation path — contradictions mark a row
@@ -45,8 +45,14 @@ export type MemoryStatus = "active" | "invalidated"
  *  - `inbound`  — derived from connector-inbound content (third-party). Never
  *    enters global scope; never procedural.
  *  - `system`   — created by the app itself (migrations, seeds).
+ *  - `external` — written through an API surface (plugin `ctx.memory`, MCP
+ *    bridge tool, companion RPC). Always PII-gated at write; never procedural.
+ *    The concrete surface lives in `Memory.sourceChannel`.
  */
-export type MemoryProvenance = "user" | "explicit" | "inbound" | "system"
+export type MemoryProvenance = "user" | "explicit" | "inbound" | "system" | "external"
+
+/** Which API surface wrote an `external`-provenance memory. */
+export type MemorySourceChannel = "plugin" | "mcp" | "rpc"
 
 export interface Memory {
   /** `mem_<ts>_<rand>`. */
@@ -84,6 +90,10 @@ export interface Memory {
   provenance: MemoryProvenance
   sourceSessionId?: string
   sourceMessageId?: string
+  /** Set on `external` provenance: which API surface wrote it (unindexed). */
+  sourceChannel?: MemorySourceChannel
+  /** Set when `sourceChannel === "plugin"`: the writing plugin's id (unindexed). */
+  sourcePluginId?: string
 }
 
 /**
@@ -116,7 +126,11 @@ export interface MemoryConfig {
    * than this many days (à la Claude's memory tool). 0 disables it (default).
    */
   maxIdleDays?: number
-  /** Informational half-life; recency uses an exponential 0.995^Δdays decay. */
+  /**
+   * Base recency half-life (days) for retrieval scoring — scaled per type by
+   * `RECENCY_HALF_LIFE_MULTIPLIER` in `lib/memory/retrieve/scoring.ts` and
+   * consumed by the retriever's `recencyHalfLifeDays` input.
+   */
   decayHalfLifeDays: number
   /** "Incognito": when true, the current context neither reads nor writes memory. */
   temporary: boolean

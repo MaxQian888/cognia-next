@@ -35,6 +35,14 @@ describe("recallAboutUser", () => {
     expect(await recallAboutUser(deps([]), { queryText: "anything at all" })).toBe("")
   })
 
+  it("accepts a recency half-life without changing single-hit recall", async () => {
+    const text = await recallAboutUser(deps([memory("m1", "Drinks matcha every morning")]), {
+      queryText: "matcha morning drink",
+      recencyHalfLifeDays: 12,
+    })
+    expect(text).toBe("- Drinks matcha every morning")
+  })
+
   it("swallows retriever failures", async () => {
     const broken: MemoryRetrieverDeps = {
       loadCandidates: async () => {

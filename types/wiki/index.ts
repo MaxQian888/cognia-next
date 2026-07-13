@@ -97,6 +97,19 @@ export type BridgeScope =
    * (ADR-0008 Phase 4).
    */
   | "inbound:write"
+  /**
+   * Read the user's long-term memory (`memory_search` / `memory_list`).
+   * Default OFF — mirrors the `rag:twin` sensitivity split: memories are
+   * distilled personal facts about the user.
+   */
+  | "memory:read"
+  /**
+   * Write the user's long-term memory (`memory_store` / `memory_update` /
+   * `memory_forget`). Default OFF. Writes carry `external` provenance, pass
+   * the PII block gate, and can never create `procedural` rules (an external
+   * agent may not rewrite the assistant's working instructions — ADR-0069).
+   */
+  | "memory:write"
 
 export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:cognia",
@@ -116,6 +129,8 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "agent:team",
   "plugin:tools",
   "inbound:write",
+  "memory:read",
+  "memory:write",
 ] as const
 
 /** Scopes enabled by default for a fresh install. Public-code wiki + RAG only. */

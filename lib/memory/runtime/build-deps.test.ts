@@ -99,6 +99,17 @@ describe("tryBuildMemoryDeps", () => {
     expect(deps!.vectorSearch).toBeUndefined()
   })
 
+  it("stays BM25-only when hybridEnabled is off, even with a usable local backend", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const deps = await tryBuildMemoryDeps(cfg({ hybridEnabled: false }))
+    expect(deps).toBeDefined()
+    expect(deps!.embed).toBeUndefined()
+    expect(deps!.vectorSearch).toBeUndefined()
+  })
+
   it("reuses prebuilt twin deps and does not call tryBuildTwinDeps again", async () => {
     const prebuilt = {
       store: { searchByEmbedding: mockSearchByEmbedding },
@@ -143,6 +154,14 @@ describe("tryBuildMemoryVectorSink", () => {
     expect(addDocuments).toHaveBeenCalledWith(MEMORY_VECTOR_COLLECTION, [
       { id: "m1", content: "The user prefers pnpm" },
     ])
+  })
+
+  it("returns undefined when hybridEnabled is off", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments: jest.fn() },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    expect(await tryBuildMemoryVectorSink(cfg({ hybridEnabled: false }))).toBeUndefined()
   })
 
   it("respects the cloud-embedding privacy gate", async () => {

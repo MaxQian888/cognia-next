@@ -59,6 +59,7 @@ export async function runMemoryRecall(ctx: StepExecutionContext): Promise<StepEx
       topK: params.topK ?? 6,
       relevanceFloor: params.relevanceFloor ?? 0.1,
       types: params.types,
+      recencyHalfLifeDays: config.decayHalfLifeDays,
     },
     deps
   )

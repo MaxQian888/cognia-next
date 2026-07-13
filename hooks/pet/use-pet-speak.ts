@@ -153,6 +153,7 @@ export function usePetSpeak({ profile, view, enabled, activeCharacterId }: UsePe
         }
         const recallText = await recallAboutUser(memoryDeps.current ?? undefined, {
           queryText: userText,
+          recencyHalfLifeDays: resolveMemoryConfig(current.appSettings?.memory).decayHalfLifeDays,
         })
 
         // Persona layer: colour the voice with the bound character (+ its twin).

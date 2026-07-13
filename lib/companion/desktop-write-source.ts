@@ -294,6 +294,20 @@ export async function dispatchCommand(
       return goalUpdate(payload)
     case "goal_status":
       return goalStatus(payload)
+    // Long-term memory (ADR-0069). All five delegate to the shared
+    // `lib/memory/api/*` helpers with `sourceChannel: "rpc"` — PII gate,
+    // `external` provenance, never procedural. Writes are CONTROL-gated on
+    // the Rust side; policy blocks come back as structured `{ ok: false }`.
+    case "memory_search":
+      return memorySearchRpc(payload)
+    case "memory_list":
+      return memoryListRpc(payload)
+    case "memory_store":
+      return memoryStoreRpc(payload)
+    case "memory_update":
+      return memoryUpdateRpc(payload)
+    case "memory_forget":
+      return memoryForgetRpc(payload)
     // External agents (ADR-0056, Wave 4). The desktop's external-agent config
     // lives in the `cognia-external-agents` Zustand/localStorage store (NOT a
     // Dexie table, so no sync mirror) — these arms project + mutate it for the
@@ -456,6 +470,97 @@ async function goalStatus(
     listGoalsBySession(sessionId),
   ])
   return { activeGoal: activeGoal ?? null, goals }
+}
+
+// ── Long-term memory (ADR-0069) ─────────────────────────────────────────────
+
+async function memorySearchRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const query = payload.query as string | undefined
+  if (typeof query !== "string" || query.trim().length === 0) {
+    throw new Error("memory_search.query is required")
+  }
+  const { searchMemoriesExternal } = await import("@/lib/memory/api/search-memory")
+  const result = await searchMemoriesExternal({
+    query,
+    topK: typeof payload.k === "number" ? payload.k : undefined,
+    types: payload.types as never,
+    characterId: payload.characterId as string | undefined,
+  })
+  if (!result.ok) return result
+  const { toMemoryWireRow } = await import("@/lib/memory/api/wire")
+  return {
+    ok: true,
+    hits: result.hits.map((h) => ({
+      memory: toMemoryWireRow(h.memory),
+      relevance: h.relevance,
+      score: h.score,
+    })),
+  }
+}
+
+async function memoryListRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const [{ getSettings: loadSettings }, { resolveMemoryConfig }] = await Promise.all([
+    import("@/lib/db/settings"),
+    import("@/types/memory/memory"),
+  ])
+  const settings = await loadSettings().catch(() => undefined)
+  const config = resolveMemoryConfig(settings?.memory)
+  if (!config.enabled) return { ok: false, reason: "disabled" }
+  if (config.temporary) return { ok: false, reason: "temporary" }
+  const [{ listMemories }, { toMemoryWireRow }] = await Promise.all([
+    import("@/lib/db/memories"),
+    import("@/lib/memory/api/wire"),
+  ])
+  const rows = await listMemories({
+    type: payload.type as never,
+    scope: payload.scope as never,
+    status: "active",
+  })
+  const limit = Math.min(200, Math.max(1, typeof payload.limit === "number" ? payload.limit : 50))
+  return { ok: true, memories: rows.slice(0, limit).map(toMemoryWireRow) }
+}
+
+async function memoryStoreRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const text = payload.text as string | undefined
+  if (typeof text !== "string" || text.trim().length === 0) {
+    throw new Error("memory_store.text is required")
+  }
+  const { storeExternalMemory } = await import("@/lib/memory/api/store-memory")
+  return storeExternalMemory(
+    {
+      text,
+      type: payload.type as never,
+      scope: payload.scope as never,
+      characterId: payload.characterId as string | undefined,
+      key: payload.key as string | undefined,
+      importance: typeof payload.importance === "number" ? payload.importance : undefined,
+      tags: payload.tags as string[] | undefined,
+    },
+    { channel: "rpc" }
+  )
+}
+
+async function memoryUpdateRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const id = payload.id as string | undefined
+  if (typeof id !== "string" || id.trim().length === 0) {
+    throw new Error("memory_update.id is required")
+  }
+  const { updateExternalMemory } = await import("@/lib/memory/api/mutate-memory")
+  return updateExternalMemory(id, {
+    text: payload.text as string | undefined,
+    importance: typeof payload.importance === "number" ? payload.importance : undefined,
+    tags: payload.tags as string[] | undefined,
+    key: payload.key as string | undefined,
+  })
+}
+
+async function memoryForgetRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const id = payload.id as string | undefined
+  if (typeof id !== "string" || id.trim().length === 0) {
+    throw new Error("memory_forget.id is required")
+  }
+  const { forgetExternalMemory } = await import("@/lib/memory/api/mutate-memory")
+  return forgetExternalMemory(id)
 }
 
 async function characterUpsert(payload: Record<string, unknown>): Promise<{ character: unknown }> {

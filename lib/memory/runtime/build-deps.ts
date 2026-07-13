@@ -11,7 +11,9 @@
  * used when the configured provider is local (`transformersjs`) OR the user has
  * explicitly opted into cloud embedding (`memory.allowCloudEmbedding`).
  * Otherwise the runtime degrades to BM25-only and personal facts never leave
- * the machine.
+ * the machine. `memory.hybridEnabled === false` is a user-facing override that
+ * forces the same BM25-only degradation even when a compliant backend exists
+ * (it also disables the write-path vector sink).
  */
 
 import type { MemoryConfig } from "@/types/memory/memory"
@@ -44,6 +46,7 @@ async function resolveMemoryBackend(
   config: MemoryConfig,
   prebuiltTwinDeps?: PrebuiltTwinDeps
 ): Promise<MemoryBackend | undefined> {
+  if (!config.hybridEnabled) return undefined
   const twinDeps = prebuiltTwinDeps ?? (await tryBuildTwinDeps())
   const store = twinDeps?.store
   const embedding = twinDeps?.embedding

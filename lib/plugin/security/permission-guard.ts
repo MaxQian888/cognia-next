@@ -103,6 +103,7 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   ],
   git: ["git:read", "git:write"],
   goal: ["goal:read", "goal:write"],
+  memory: ["memory:read", "memory:write"],
   team: ["team:read", "team:write"],
   connectors: ["connectors:read", "connectors:send", "connectors:manage"],
   share: ["share:read", "share:create"],
@@ -159,6 +160,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "git:write": "Stage, commit, branch, push, stash, or discard changes in the active repository",
   "goal:read": "Read your goals and their progress",
   "goal:write": "Create, update, complete, and decompose your goals",
+  "memory:read": "Search and list what the assistant remembers about you",
+  "memory:write":
+    "Store, update, and forget long-term memories (PII-screened; can never change working instructions)",
   "team:read": "Read your agent teams, task boards, run events, and execution reports",
   "team:write":
     "Create/edit/assign tasks, comment, move cards, and manage non-lead teammates and team config on your agent-team boards (never starts runs)",

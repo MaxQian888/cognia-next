@@ -106,6 +106,68 @@ describe("buildMcpServer — orchestration tools (Thread D)", () => {
   })
 })
 
+describe("buildMcpServer — memory tools (ADR-0069)", () => {
+  it.each([
+    ["memory_search", { query: "pnpm" }],
+    ["memory_list", {}],
+    ["memory_store", { text: "User prefers pnpm" }],
+    ["memory_update", { id: "m1", importance: 5 }],
+    ["memory_forget", { id: "m1" }],
+  ])("registers %s and denies it when the scope is OFF", async (toolName, args) => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: [] }))
+    const result = await client.callTool({ name: toolName, arguments: args })
+    expect(result.isError).toBe(true)
+    await client.close()
+  })
+
+  it("read scope does not grant writes (and vice versa)", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["memory:read"] }))
+    const denied = await client.callTool({
+      name: "memory_store",
+      arguments: { text: "User prefers pnpm" },
+    })
+    expect(denied.isError).toBe(true)
+    const allowed = await client.callTool({ name: "memory_list", arguments: {} })
+    expect(allowed.isError).not.toBe(true)
+    await client.close()
+  })
+
+  it("stores and lists a memory end-to-end when both scopes are ON", async () => {
+    const { client } = await makeWiredPair(
+      settings({ enabledScopes: ["memory:read", "memory:write"] })
+    )
+    const stored = await client.callTool({
+      name: "memory_store",
+      arguments: { text: "User ships on Fridays", tags: ["habit"] },
+    })
+    expect(stored.isError).not.toBe(true)
+    const storedPayload = stored.structuredContent as { ok: boolean; stored: boolean }
+    expect(storedPayload.ok).toBe(true)
+    expect(storedPayload.stored).toBe(true)
+
+    const listed = await client.callTool({ name: "memory_list", arguments: {} })
+    const listedPayload = listed.structuredContent as {
+      ok: boolean
+      memories: Array<{ text: string; provenance: string }>
+    }
+    expect(listedPayload.ok).toBe(true)
+    expect(listedPayload.memories.some((m) => m.text === "User ships on Fridays")).toBe(true)
+    expect(listedPayload.memories[0]?.provenance).toBe("external")
+    await client.close()
+  })
+
+  it("blocks a PII store with a structured pii_blocked result", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["memory:write"] }))
+    const result = await client.callTool({
+      name: "memory_store",
+      arguments: { text: "reach me at bob@example.com" },
+    })
+    expect(result.isError).not.toBe(true)
+    expect(result.structuredContent).toEqual({ ok: false, reason: "pii_blocked" })
+    await client.close()
+  })
+})
+
 describe("buildMcpServer — wiki_search dispatch", () => {
   it("returns a structured result when the gate allows the call", async () => {
     await createWikiArticle({

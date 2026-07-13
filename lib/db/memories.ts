@@ -1,7 +1,7 @@
 /**
  * CRUD for the `memories` table (schema v65) — the autonomous long-term memory
- * store. See `@/types/memory/memory` and
- * `docs/superpowers/specs/2026-06-01-agent-long-term-memory-design.md`.
+ * store. See `@/types/memory/memory` and ADR-0069
+ * (`docs/content/docs/en/adr/0069-long-term-memory-external-api-surfaces.md`).
  *
  * The consolidation path NEVER hard-deletes on contradiction: it calls
  * `invalidateMemory` (status → `invalidated`, history preserved). Only the

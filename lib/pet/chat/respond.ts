@@ -135,7 +135,10 @@ export async function respondAsPet(
   // Prompt layers, each degrading independently.
   const historyText = memoryOn ? formatHistoryLines(await loadHistoryForPrompt(d.history)) : ""
   const memDeps = await d.loadMemoryDeps(input.appSettings)
-  const recallText = await d.recall(memDeps ?? undefined, { queryText: userText })
+  const recallText = await d.recall(memDeps ?? undefined, {
+    queryText: userText,
+    recencyHalfLifeDays: resolveMemoryConfig(input.appSettings?.memory).decayHalfLifeDays,
+  })
 
   let persona: string | undefined
   const charId = input.activeCharacterId ?? null

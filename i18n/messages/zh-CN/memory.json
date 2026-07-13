@@ -109,6 +109,7 @@
   "provenance": {
     "all": "所有来源",
     "explicit": "显式",
+    "external": "外部（API）",
     "inbound": "入站",
     "system": "系统",
     "user": "自动（对话）"

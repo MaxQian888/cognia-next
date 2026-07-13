@@ -57,7 +57,13 @@ import { ExternalMemoryTab } from "./external/external-memory-tab"
 
 const TYPE_ORDER: MemoryType[] = ["semantic", "episodic", "procedural"]
 const SCOPE_OPTIONS: MemoryScope[] = ["global", "character"]
-const PROVENANCE_OPTIONS: MemoryProvenance[] = ["user", "explicit", "inbound", "system"]
+const PROVENANCE_OPTIONS: MemoryProvenance[] = [
+  "user",
+  "explicit",
+  "inbound",
+  "system",
+  "external",
+]
 
 /**
  * Full-page `/memory` management panel. Lists every memory with search, type /

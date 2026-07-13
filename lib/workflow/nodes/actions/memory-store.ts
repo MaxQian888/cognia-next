@@ -1,16 +1,16 @@
 /**
  * `action.memory.store` — deliberately store one durable fact into the
- * autonomous long-term memory from a workflow. Mirrors the `/remember`
- * explicit-capture path: the text IS the memory (no extraction LLM), but it
- * still flows through the SAME consolidator so it dedupes / updates /
- * supersedes instead of blindly piling up. When no utility LLM client is
- * available the node degrades to a direct Dexie insert + best-effort vector
- * upsert (`consolidated: false`) — the memory is never silently dropped.
+ * autonomous long-term memory from a workflow. Thin adapter over the shared
+ * deliberate-write core (`lib/memory/api/store-memory.ts:storeMemoryCore`),
+ * which mirrors the `/remember` explicit-capture path: the text IS the memory
+ * (no extraction LLM) but still flows through the SAME consolidator so it
+ * dedupes / updates / supersedes instead of blindly piling up.
  *
  * Trust model: workflow-stored memories default to `system` provenance;
  * `procedural` rules require `provenance: "explicit"` (per
  * types/memory/memory.ts only user/explicit may rewrite agent behavior).
- * PII gate is mandatory — "block" (default, /remember parity) or "redact".
+ * PII gate is mandatory — "block" (default, /remember parity) or "redact"
+ * (a workflow-only affordance; external API surfaces are block-only).
  */
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
@@ -46,108 +46,62 @@ export async function runMemoryStore(ctx: StepExecutionContext): Promise<StepExe
     )
   }
 
-  const [{ getSettings }, { resolveMemoryConfig }] = await Promise.all([
-    import("@/lib/db/settings"),
-    import("@/types/memory/memory"),
-  ])
-  const settings = await getSettings().catch(() => undefined)
-  const config = resolveMemoryConfig(settings?.memory)
-  if (!config.enabled) {
-    throw nonRetryable(
-      "action.memory.store: long-term memory is disabled. Enable it in Settings → Memory."
-    )
-  }
-  if (config.temporary) {
-    ctx.log("warn", "action.memory.store: temporary mode is on — nothing was saved.")
-    return { output: { stored: false, reason: "temporary_mode" } }
+  const { storeMemoryCore } = await import("@/lib/memory/api/store-memory")
+  let result
+  try {
+    result = await storeMemoryCore({
+      text: rawText,
+      scope,
+      characterId: params.characterId,
+      type,
+      key: params.key,
+      importance: params.importance,
+      provenance,
+      piiGate: params.piiGate ?? "block",
+    })
+  } catch (err) {
+    throw nonRetryable(err instanceof Error ? err.message : String(err))
   }
 
-  // PII gate — mandatory on the write path (memory text persists durably).
-  const { hasNoLeakingPii, redactText } = await import("@cognia/redact")
-  let text = rawText
-  let piiRedacted = false
-  if ((params.piiGate ?? "block") === "block") {
-    if (!hasNoLeakingPii(rawText)) {
+  if (!result.ok) {
+    if (result.reason === "disabled") {
       throw nonRetryable(
-        "action.memory.store: the text contains PII (email / phone / id / key …) " +
-          'and was not saved. Remove it or set piiGate to "redact".'
+        "action.memory.store: long-term memory is disabled. Enable it in Settings → Memory."
       )
     }
-  } else {
-    const result = redactText(rawText)
-    text = result.redacted
-    piiRedacted = Object.keys(result.map).length > 0
+    if (result.reason === "temporary") {
+      ctx.log("warn", "action.memory.store: temporary mode is on — nothing was saved.")
+      return { output: { stored: false, reason: "temporary_mode" } }
+    }
+    throw nonRetryable(
+      "action.memory.store: the text contains PII (email / phone / id / key …) " +
+        'and was not saved. Remove it or set piiGate to "redact".'
+    )
   }
 
-  const candidate = {
-    type,
-    text,
-    importance: clampImportance(params.importance ?? 7),
-    ...(params.key ? { key: params.key } : {}),
-  }
-  const consolidateInput = {
-    candidates: [candidate],
-    scope,
-    characterId: scope === "character" ? params.characterId : undefined,
-    provenance,
-  }
-
-  // Preferred path: the shared consolidator (dedupe / ADD / UPDATE / DELETE).
-  const { buildAutoExtractionDeps } = await import("@/lib/memory/write/run-memory-extraction")
-  const deps = await buildAutoExtractionDeps({ session: null, appSettings: settings }, config)
-  if (deps) {
-    const { applied } = await deps.consolidate(consolidateInput)
+  if (!result.consolidated) {
+    ctx.log(
+      "warn",
+      "action.memory.store: no utility LLM available — stored without consolidation (dedupe skipped)."
+    )
     return {
       output: {
-        stored: applied.some((op) => op.op !== "NOOP"),
-        consolidated: true,
-        applied: applied.map((op) => op.op),
-        ...(piiRedacted ? { piiRedacted: true } : {}),
+        stored: true,
+        consolidated: false,
+        memoryId: result.memoryId,
+        ...(result.piiRedacted ? { piiRedacted: true } : {}),
       },
     }
   }
 
-  // Degraded path: no utility LLM client → direct insert (BM25-findable) +
-  // best-effort vector upsert. The fact still lands; only dedupe is skipped.
-  ctx.log(
-    "warn",
-    "action.memory.store: no utility LLM available — stored without consolidation (dedupe skipped)."
-  )
-  const [memDb, { tryBuildMemoryVectorSink }] = await Promise.all([
-    import("@/lib/db/memories"),
-    import("@/lib/memory/runtime/build-deps"),
-  ])
-  const row = await memDb.createMemory({
-    scope,
-    characterId: scope === "character" ? params.characterId : undefined,
-    type,
-    text,
-    importance: candidate.importance,
-    key: params.key,
-    provenance,
-  })
-  const sink = await tryBuildMemoryVectorSink(config)
-  if (sink) {
-    try {
-      await sink.upsert(row.id, row.text)
-      await memDb.updateMemory(row.id, { vectorDocId: row.id })
-    } catch {
-      // BM25 recall still works without the vector.
-    }
-  }
   return {
     output: {
-      stored: true,
-      consolidated: false,
-      memoryId: row.id,
-      ...(piiRedacted ? { piiRedacted: true } : {}),
+      stored: result.stored,
+      consolidated: true,
+      applied: result.applied,
+      ...(result.piiRedacted ? { piiRedacted: true } : {}),
     },
   }
-}
-
-function clampImportance(value: number): number {
-  if (!Number.isFinite(value)) return 7
-  return Math.min(10, Math.max(1, Math.round(value)))
 }
 
 function nonRetryable(message: string): Error {

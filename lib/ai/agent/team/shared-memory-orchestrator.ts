@@ -5,8 +5,9 @@
  *
  * Adds:
  *   - `publishEntry`: builds a `SharedMemoryEntry` (id + version + writtenAt),
- *     **enforces the PII gate** via `lib/twin/ingest/redact.ts:hasNoLeakingPii`
- *     when the value is a string, and only then writes through to the store.
+ *     **enforces the PII gate** via `@cognia/redact` — `hasNoLeakingPii` for
+ *     string values, `hasNoLeakingPiiDeep` for object values (every string
+ *     leaf is scanned) — and only then writes through to the store.
  *     Fires `onSharedMemoryWrite`.
  *   - `deleteEntry`: store delete + fires `onSharedMemoryDelete`.
  *   - `autoPublishTaskResult`: convenience helper the dispatch executor calls
@@ -14,9 +15,9 @@
  *     `task:<taskId>` and tags it with the writer + task title for the
  *     workspace's Shared Memory UI.
  *
- * The PII gate is non-negotiable for string values (per [[feedback_reuse_existing_components]]).
- * Object values bypass the gate today — callers must explicitly serialise
- * to a vetted JSON before publishing if they want the same guarantee.
+ * The PII gate is non-negotiable for every value shape (per
+ * [[feedback_reuse_existing_components]]): strings and object leaves alike are
+ * scanned before the entry is written.
  */
 
 import type {

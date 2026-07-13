@@ -67,6 +67,8 @@ const VALID_PERMISSIONS: &[&str] = &[
     "git:write",
     "goal:read",
     "goal:write",
+    "memory:read",
+    "memory:write",
     "team:read",
     "team:write",
     "subscription:read",

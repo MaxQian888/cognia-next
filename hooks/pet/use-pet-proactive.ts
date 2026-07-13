@@ -165,6 +165,8 @@ export function usePetProactive({ profile, view, enabled }: UsePetProactiveArgs)
         recallText =
           (await recallAboutUser(memoryDeps.current ?? undefined, {
             queryText: decision.topicSeed,
+            recencyHalfLifeDays: resolveMemoryConfig(current.appSettings?.memory)
+              .decayHalfLifeDays,
           })) || undefined
       }
 

@@ -10,6 +10,8 @@ export interface RecallAboutUserInput {
   characterId?: string
   topK?: number
   relevanceFloor?: number
+  /** Base recency half-life (days) from `MemoryConfig.decayHalfLifeDays`. */
+  recencyHalfLifeDays?: number
 }
 
 /** Top-K recalled facts as "- fact" lines, or "" when nothing relevant. */
@@ -28,6 +30,7 @@ export async function recallAboutUser(
         topK: input.topK ?? 3,
         relevanceFloor: input.relevanceFloor ?? 0.2,
         types: ["semantic", "episodic"],
+        recencyHalfLifeDays: input.recencyHalfLifeDays,
       },
       deps
     )

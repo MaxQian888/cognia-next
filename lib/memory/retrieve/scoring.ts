@@ -39,7 +39,8 @@ export function recencyHalfLifeDaysForType(type: MemoryType, baseHalfLifeDays: n
 
 /**
  * Source-trust weight in [0,1] — how much we believe a fact by where it came
- * from. A user-stated / user-captured fact outranks an app-seeded one, which
+ * from. A user-stated / user-captured fact outranks an API-written one
+ * (`external`: plugin / MCP / RPC), which outranks an app-seeded one, which
  * outranks a third-party inbound one. This is a *ranking* signal only; it never
  * relaxes the provenance injection gate in `applyMemoryContext` (an inbound
  * memory still can never become procedural).
@@ -47,6 +48,7 @@ export function recencyHalfLifeDaysForType(type: MemoryType, baseHalfLifeDays: n
 export const PROVENANCE_VERACITY: Record<MemoryProvenance, number> = {
   user: 1,
   explicit: 1,
+  external: 0.85,
   system: 0.7,
   inbound: 0.5,
 }
