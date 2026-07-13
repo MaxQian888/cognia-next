@@ -3081,6 +3081,7 @@
       "dismiss": "Dismiss",
       "openSettings": "Open settings",
       "retry": "Retry",
+      "sidecarExited": "The assistant stopped unexpectedly and the turn was interrupted. Retry to continue.",
       "title": "Failed to send"
     },
     "list": {

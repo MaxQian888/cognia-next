@@ -605,6 +605,7 @@
     "dismiss": "忽略",
     "openSettings": "打开设置",
     "retry": "重试",
+    "sidecarExited": "AI 进程意外停止，本轮已中断。点击重试可继续。",
     "title": "发送失败"
   },
   "list": {

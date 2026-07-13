@@ -18,6 +18,7 @@ import { RunStatusBar } from "./run-status-bar"
 import { PlanApprovalDock } from "@/components/agent/plan/plan-approval-dock"
 import { PlanTrackerDock } from "@/components/agent/plan/plan-tracker-dock"
 import { useRunRecordPersistence } from "@/hooks/chat/use-run-record-persistence"
+import { SIDECAR_EXITED_ERROR } from "@/hooks/chat/use-claude-chat"
 import { useStableCallback } from "@/hooks/ui/use-stable-callback"
 import { FollowUpSuggestions } from "./follow-up-suggestions"
 import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
@@ -164,6 +165,7 @@ export function ChatPane({
   const tCopy = useTranslations("chat.copy")
   const tHistory = useTranslations("chat.history")
   const tConcurrent = useTranslations("chat.concurrent")
+  const tInlineErr = useTranslations("chat.inlineError")
   // The pane is bound to its own session slice (defaulting to the focused
   // session) so a background pane reads + streams its own state independently.
   const boundId = sessionId ?? activeSession?.id ?? null
@@ -321,7 +323,9 @@ export function ChatPane({
       )}
       {errorMessage && (
         <InlineError
-          message={errorMessage}
+          message={
+            errorMessage === SIDECAR_EXITED_ERROR ? tInlineErr("sidecarExited") : errorMessage
+          }
           onRetry={hasMessages ? handleRetry : undefined}
           onOpenSettings={() => onOpenSettings("api-key")}
           onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}

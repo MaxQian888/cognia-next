@@ -235,6 +235,7 @@ interface ChatStateLike {
   setSessionActiveBranch: jest.Mock
   pushApproval: jest.Mock
   clearApproval: jest.Mock
+  markApprovalInterrupted: jest.Mock
   closeSession: jest.Mock
   setPendingCommandOverrides: jest.Mock
   clearEphemeralSkillIds: jest.Mock
@@ -313,6 +314,7 @@ const chatState: ChatStateLike = {
     sliceWrite(a.sessionId, { pendingApprovals: [...cur, a], status: "awaiting_approval" })
   }),
   clearApproval: jest.fn(),
+  markApprovalInterrupted: jest.fn(),
   closeSession: jest.fn(),
   setPendingCommandOverrides: jest.fn((o: unknown) => {
     chatState.pendingCommandOverrides = o
@@ -416,7 +418,7 @@ jest.mock("@cognia/vector/store", () => ({
   createVectorStore: (...args: unknown[]) => mockCreateVectorStore(...args),
 }))
 
-import { useClaudeChat } from "./use-claude-chat"
+import { useClaudeChat, SIDECAR_EXITED_ERROR } from "./use-claude-chat"
 
 beforeEach(() => {
   isTauriMock.mockReset().mockReturnValue(true)
@@ -1005,6 +1007,45 @@ describe("useClaudeChat — actions", () => {
       _messageCallback?.({ type: "session_ended", sessionId: "sess-1" })
     })
     expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+  })
+
+  it("sidecar_exited settles a streaming session with a retryable error", async () => {
+    chatState.status = "streaming"
+    renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      _messageCallback?.({ type: "sidecar_exited" })
+    })
+    expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", SIDECAR_EXITED_ERROR)
+    chatState.status = "idle"
+  })
+
+  it("sidecar_exited interrupts a pending approval and does not touch idle sessions", async () => {
+    chatState.status = "awaiting_approval"
+    chatState.pendingApprovals = [{ requestId: "req-9", sessionId: "sess-1" }]
+    renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      _messageCallback?.({ type: "sidecar_exited" })
+    })
+    expect(chatState.markApprovalInterrupted).toHaveBeenCalledWith(
+      "req-9",
+      "sess-1",
+      expect.any(String)
+    )
+    expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", SIDECAR_EXITED_ERROR)
+    chatState.status = "idle"
+    chatState.pendingApprovals = []
+  })
+
+  it("sidecar_exited leaves an idle session untouched", async () => {
+    chatState.status = "idle"
+    renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      _messageCallback?.({ type: "sidecar_exited" })
+    })
+    expect(chatState.setSessionError).not.toHaveBeenCalled()
   })
 
   it("incoming permission_request for an already-allowed tool auto-approves", async () => {

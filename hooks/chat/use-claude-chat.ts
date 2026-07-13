@@ -107,6 +107,7 @@ import {
   setToolSpanEventPublisher,
 } from "@cognia/agent-trace/chat-tool-spans"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
@@ -233,6 +234,18 @@ function extractPlainText(message: UIMessage | undefined): string {
 // Re-exported here to preserve the historical public surface (tests import
 // `shouldGenerateTitle` from this module).
 export { shouldGenerateTitle }
+
+/**
+ * Error surfaced on every in-flight session when the sidecar process dies.
+ *
+ * The sidecar does NOT emit a per-session `session_ended` on crash (only a
+ * single global `sidecar_exited`), so without this the foreground session
+ * freezes in `streaming` forever. A readable English sentinel: background
+ * surfaces (trigger badge) render it raw like every other sidecar error, while
+ * the focused chat view maps it to a localized string (see `chat-view.tsx`).
+ */
+export const SIDECAR_EXITED_ERROR =
+  "The assistant process stopped unexpectedly. Your last turn was interrupted — retry to continue."
 
 /**
  * Write the instant first-message title preview onto a session — but only when
@@ -1091,6 +1104,16 @@ export function useClaudeChat() {
       // (external + SDK) since this is upstream of the branch below.
       emitSystemBusEvent(SystemEvents.MESSAGE_SENT, { sessionId })
       emitSystemBusEvent(SystemEvents.AGENT_STARTED, { sessionId })
+
+      // Code-adoption tracking (Phase 1): open a per-turn attribution window.
+      // Fire-and-forget — must never block or disrupt the turn. `runId` is read
+      // back from the store, whose streaming flip above bumped it for this turn.
+      void beginCodeAdoptionTurn(sendOptions.cwd, {
+        sessionId,
+        runId: store.getState().sessions[sessionId]?.runId ?? 0,
+        model: sendOptions.model ?? null,
+        agentKind: "in-app",
+      })
 
       // ── External agent branch ──────────────────────────────────────────
       // When the user selected "external" runtime in the composer toolbar,
@@ -1951,8 +1974,46 @@ async function handleEvent(
   switch (evt.type) {
     case "ready":
     case "log":
-    case "sidecar_exited":
       return
+    case "sidecar_exited": {
+      // The sidecar process died. It will NOT emit the per-session
+      // `session_ended` events for the turns it was serving, so every
+      // streaming / awaiting-approval session would otherwise freeze forever
+      // (composer disabled, chat lease + in-flight counter stuck). Settle each
+      // one exactly as a terminal errored `session_ended` would: stop the
+      // in-flight counter, drop backstops / open tool spans, interrupt any live
+      // approval, seal the slice, and surface a retryable error (which also
+      // releases the chat lease via the status→error subscription). Mirrors the
+      // mobile transport's sidecar_exited handling (use-remote-session-stream).
+      const chat = useChatStore.getState()
+      for (const [sid, slice] of Object.entries(chat.sessions)) {
+        if (slice.status !== "streaming" && slice.status !== "awaiting_approval") continue
+        useInFlightStore.getState().settle(sid)
+        clearApprovalBackstops(sid)
+        clearToolSpansForSession(sid)
+        // A dead sidecar can't emit `permission_interrupted`, so interrupt any
+        // pending approval here — the same honest "interrupted" treatment.
+        for (const approval of slice.pendingApprovals) {
+          chat.markApprovalInterrupted(approval.requestId, sid, "sidecar exited")
+        }
+        if (isSessionOpen(sid)) {
+          registry.get(sid).commit.flush()
+          registry.get(sid).persist.flush()
+          registry.release(sid)
+          messagesMirrorRef.current.delete(sid)
+        }
+        chat.setSessionError(sid, SIDECAR_EXITED_ERROR)
+        const cached = chat.lastSendBySession[sid] as { options?: { spanId?: string } } | undefined
+        if (cached?.options?.spanId) {
+          endSpan(cached.options.spanId, {
+            errorType: "turn_error",
+            errorMessage: SIDECAR_EXITED_ERROR,
+          })
+        }
+        chat.clearLastSend(sid)
+      }
+      return
+    }
     case "sdk_session_id": {
       // Persist the SDK conversation id so the next send can pass it as
       // `resumeSessionId` after a sidecar restart or app reload.
