@@ -53,6 +53,8 @@
     "0060-personal-knowledge-capture-and-insights",
     "0061-cross-device-workflow-execution",
     "0063-optical-context-compaction",
-    "0066-agent-team-task-board"
+    "0066-agent-team-task-board",
+    "0067-src-tauri-crate-decomposition-and-build-speed",
+    "0068-frontend-package-extraction-and-compile-speed"
   ]
 }
