@@ -18,7 +18,6 @@ import { AccountAutoLock } from "@/components/account/account-auto-lock"
 import { AccountGate } from "@/components/account/account-gate"
 import { AccountStoreInitializer } from "@/components/providers/initializers/account-store-initializer"
 import { ExternalAgentInitializer } from "@/components/providers/initializers/external-agent-initializer"
-import { AgentTeamRuntimeInitializer } from "@/components/providers/initializers/agent-team-runtime-initializer"
 import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
 import { PluginRuntimeInitializer } from "@/components/providers/initializers/plugin-runtime-initializer"
 import { ChatMiddlewareFlagInitializer } from "@/components/providers/initializers/chat-middleware-flag-initializer"
@@ -34,12 +33,9 @@ import { ModelsDevCatalogInitializer } from "@/components/providers/initializers
 import { OpenRouterCatalogInitializer } from "@/components/providers/initializers/openrouter-catalog-initializer"
 import { OcrRuntimeInitializer } from "@/components/providers/initializers/ocr-runtime-initializer"
 import { ProviderCostMirrorInitializer } from "@/components/providers/initializers/provider-cost-mirror-initializer"
-import { RoutingRuntimeInitializer } from "@/components/providers/initializers/routing-runtime-initializer"
 import { WindowTitleInitializer } from "@/components/providers/initializers/window-title-initializer"
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
-import { GatewayProvider } from "@/components/providers/gateway-provider"
-import { SchedulerInitializer } from "@/components/scheduler"
-import { WorkflowRuntimeProvider } from "@/components/providers/workflow-runtime-provider"
+import { DeferredBootInitializers } from "@/components/providers/initializers/deferred-boot-initializers"
 import { TwinWorkerInitializer } from "@/components/twin/twin-worker-initializer"
 import { ProjectKnowledgeWorkerInitializer } from "@/components/shell/project-kb-worker-initializer"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
@@ -59,7 +55,6 @@ import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provi
 import { HookTrustSyncProvider } from "@/components/providers/hook-trust-sync-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
 import { PluginToolDispatchProvider } from "@/components/providers/plugin-tool-dispatch-provider"
-import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
 import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-link-router"
 import { PluginModalRoot } from "@/components/plugins/dialogs/plugin-modal-root"
 import { PluginConsentOverlay } from "@/components/plugins/dialogs/plugin-consent-overlay"
@@ -198,33 +193,22 @@ export default async function RootLayout({
                         <ModelsDevCatalogInitializer />
                         <OpenRouterCatalogInitializer />
                         <OcrRuntimeInitializer />
-                        <AgentTeamRuntimeInitializer />
-                        <SchedulerInitializer />
-                        {/* Boots the workflow trigger runtime: installs the Rust
-                         * `workflow:trigger` event bridge, seeds the chat/connector
-                         * inbound trigger-match cache (`initTriggerSubscriptions`),
-                         * re-syncs every workflow's cron/webhook registration to the
-                         * Rust router on launch, and resumes in-flight runs after a
-                         * crash. Without this mount, every non-manual trigger and
-                         * crash recovery is dormant. No-op on web (Tauri calls
-                         * no-op; the inbound cache still seeds). */}
-                        <WorkflowRuntimeProvider />
+                        {/* Agent-team, scheduler, workflow-trigger, provider-
+                         * routing, gateway, and connector runtimes — bundled
+                         * behind one dynamic(ssr:false) boundary so their
+                         * subsystem graphs stay out of every route's
+                         * first-paint compile (ADR-0068 C3). Mount order
+                         * inside the bundle preserves the previous document
+                         * order here, incl. Routing-before-Gateway. */}
+                        <DeferredBootInitializers />
                         <TwinWorkerInitializer />
                         {/* Keeps each workspace's project-scoped RAG index
                          * (`projectChunks`) in sync with its `knowledgeBase`.
                          * No-op when no vector backend is configured. */}
                         <ProjectKnowledgeWorkerInitializer />
-                        {/* Reconnects the isolated provider-routing engine to the
-                         * live telemetry/settings stores (health, breaker, spend,
-                         * rate, in-flight, session affinity, difficulty + semantic
-                         * routers). Without this, all reliability/strategy routing
-                         * silently degrades to priority order. Must mount before
-                         * GatewayProvider, which builds routing engines. */}
-                        <RoutingRuntimeInitializer />
                         <ProviderCostMirrorInitializer />
                         <ContextKeysInitializer />
                         <WindowTitleInitializer />
-                        <GatewayProvider />
                         <BackupSchedulerProvider>
                           <WebDavStartupPromptProvider>
                             <WebDavMobileAutosyncProvider>
@@ -252,43 +236,41 @@ export default async function RootLayout({
                                   exclusive with CustomThemeApplier's inline
                                   vars (see plugin-theme-applier.tsx). */}
                                           <PluginThemeApplier />
-                                          <ConnectorBusProvider>
-                                            <ConnectorDeepLinkRouter>
-                                              <SubscriptionUsageProvider>
-                                                <McpLogProvider>
-                                                  <CompanionBootProvider>
-                                                    <WebCompanionBootProvider>
-                                                      <DesktopSyncSourceProvider>
-                                                        <DesktopMessageSourceProvider>
-                                                          {/* Subscribes the renderer to the remote-control axum
+                                          <ConnectorDeepLinkRouter>
+                                            <SubscriptionUsageProvider>
+                                              <McpLogProvider>
+                                                <CompanionBootProvider>
+                                                  <WebCompanionBootProvider>
+                                                    <DesktopSyncSourceProvider>
+                                                      <DesktopMessageSourceProvider>
+                                                        {/* Subscribes the renderer to the remote-control axum
                                                     server's Tauri events so inbound HTTP triggers
                                                     actually dispatch. No-op off Tauri. */}
-                                                          <RemoteControlReceiver>
-                                                            {/* id="app" is the scope root for user
+                                                        <RemoteControlReceiver>
+                                                          {/* id="app" is the scope root for user
                                                         custom CSS when `customCssScope` is
                                                         "app" (see lib/appearance/custom-css/apply).
                                                         display:contents keeps it box-less but
                                                         still a valid @scope (#app) root. */}
-                                                            <div
-                                                              id="app"
-                                                              data-bg-target="global"
-                                                              className="contents"
-                                                            >
-                                                              <MobileShellWrapper>
-                                                                <DesktopAppShell>
-                                                                  {children}
-                                                                </DesktopAppShell>
-                                                              </MobileShellWrapper>
-                                                            </div>
-                                                          </RemoteControlReceiver>
-                                                        </DesktopMessageSourceProvider>
-                                                      </DesktopSyncSourceProvider>
-                                                    </WebCompanionBootProvider>
-                                                  </CompanionBootProvider>
-                                                </McpLogProvider>
-                                              </SubscriptionUsageProvider>
-                                            </ConnectorDeepLinkRouter>
-                                          </ConnectorBusProvider>
+                                                          <div
+                                                            id="app"
+                                                            data-bg-target="global"
+                                                            className="contents"
+                                                          >
+                                                            <MobileShellWrapper>
+                                                              <DesktopAppShell>
+                                                                {children}
+                                                              </DesktopAppShell>
+                                                            </MobileShellWrapper>
+                                                          </div>
+                                                        </RemoteControlReceiver>
+                                                      </DesktopMessageSourceProvider>
+                                                    </DesktopSyncSourceProvider>
+                                                  </WebCompanionBootProvider>
+                                                </CompanionBootProvider>
+                                              </McpLogProvider>
+                                            </SubscriptionUsageProvider>
+                                          </ConnectorDeepLinkRouter>
                                         </DataAdapterProvider>
                                       </PluginToolDispatchProvider>
                                     </A2UIDispatchProvider>
