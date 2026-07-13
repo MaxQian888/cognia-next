@@ -99,9 +99,21 @@
       "verdictDeny": "Deny"
     },
     "categories": {
+      "astGrep": {
+        "desc": "Structural code search and rewrite via ast-grep patterns (ast_grep_search, ast_grep_replace). High risk — replace edits files.",
+        "name": "AST grep"
+      },
+      "codeGraph": {
+        "desc": "Structural code intelligence over a tree-sitter graph: find symbols, callers / callees, blast radius, and file / context maps.",
+        "name": "Code graph"
+      },
       "coreFiles": {
         "desc": "grep / glob / read / edit / write / bash — the full file-tool suite for non-Anthropic models. Mutating tools require approval.",
         "name": "Core file tools"
+      },
+      "dependencyResearch": {
+        "desc": "Clone a dependency's source locally so the agent can read it (clone_dep_source, list_cloned_deps).",
+        "name": "Dependency research"
       },
       "environment": {
         "desc": "Read environment variables and system information. Secrets are redacted before they reach the agent.",
@@ -130,6 +142,10 @@
       "terminalRepl": {
         "desc": "Persistent interactive PTY sessions private to the agent (python / sql / REPLs).",
         "name": "Terminal REPL"
+      },
+      "webclone": {
+        "desc": "Fetch and convert a web page's source for offline reading and reference (web_clone, web_clone_convert).",
+        "name": "Web clone"
       }
     },
     "desktopOnlyHint": "Built-in tool categories run inside the desktop sidecar — switch to the desktop app to enable them.",

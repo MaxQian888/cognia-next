@@ -44,6 +44,7 @@
   "scheduledTasks": "配置定时调度、代理创建权限与资源上限",
   "search": "联网搜索 provider（Tavily、Brave、Bing、Google、Perplexity、Exa…）、默认参数、缓存、安全与来源验证。",
   "security": "敏感操作的生物识别守卫与隐私控制",
+  "shortcuts": "在一个页面查看并重新绑定所有键盘快捷键——全局系统热键、应用内快捷键、编辑器键位——并检测冲突。",
   "sidebar": "固定、排序或隐藏左侧导航栏的项目。",
   "skills": "拼接到系统提示词的可复用指令片段。",
   "slashCommands": "内置、自定义、插件贡献的斜杠命令统一浏览,可搜索并将命令复制到聊天输入框。",

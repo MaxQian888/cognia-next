@@ -5,6 +5,8 @@
   "alwaysAllowTitle": "Always-allow tools",
   "astGrep": "Structural code search",
   "astGrepDesc": "AST-aware code search and refactoring (ast_grep_search / ast_grep_replace) across 25 languages, backed by the ast-grep CLI. Matches code structure with meta-variables ($VAR, $$$), not plain text. Desktop only; the binary is probed lazily.",
+  "codeGraph": "Code graph intelligence",
+  "codeGraphDesc": "Structural code intelligence over a tree-sitter symbol graph (codegraph_search / node / callers / callees / impact / context / explore / files). Sub-millisecond queries grep can't answer: where a symbol is defined, who calls it, and blast radius. Read-only; desktop only.",
   "coreFiles": "Core file tools",
   "coreFilesDesc": "grep / glob / read / ls / edit / multi_edit / write / bash / TodoWrite — the unified file-tool suite that gives non-Anthropic models full codebase access. Read-only tools run freely; mutating tools require per-call approval.",
   "dependencyResearch": "Dependency source",

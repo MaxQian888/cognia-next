@@ -22,14 +22,20 @@ const reload = jest.fn()
 let hookResult: { credential: Cred; loading: boolean } = { credential: null, loading: false }
 type Discovered = { accessToken: string; refreshToken: string; subscriptionType?: string } | null
 let discoveredResult: Discovered = null
+// Records the options the card passes to the discovery hook so tests can assert
+// the external-keychain probe is gated (enabled=false) when a credential exists.
+let lastDiscoveryOptions: { enabled?: boolean } | undefined
 jest.mock("@/lib/subscription/anthropic/hooks", () => ({
   useActiveAnthropicCredential: () => ({ ...hookResult, reload }),
-  useAnthropicDiscovery: () => ({
-    discovered: discoveredResult,
-    loading: false,
-    error: null,
-    reload: jest.fn(),
-  }),
+  useAnthropicDiscovery: (opts?: { enabled?: boolean }) => {
+    lastDiscoveryOptions = opts
+    return {
+      discovered: discoveredResult,
+      loading: false,
+      error: null,
+      reload: jest.fn(),
+    }
+  },
 }))
 
 jest.mock("@/lib/subscription/anthropic/discovery", () => ({
@@ -55,6 +61,7 @@ beforeEach(() => {
   tauri = true
   hookResult = { credential: null, loading: false }
   discoveredResult = null
+  lastDiscoveryOptions = undefined
 })
 
 describe("AnthropicSubscriptionReuseCard", () => {
@@ -140,6 +147,24 @@ describe("AnthropicSubscriptionReuseCard", () => {
     render(<AnthropicSubscriptionReuseCard />)
     expect(screen.getByText("signedOutTitle")).toBeInTheDocument()
     expect(screen.queryByText("localLoginTitle")).not.toBeInTheDocument()
+  })
+
+  it("gates the external-keychain probe off when a credential is already active", () => {
+    hookResult = { credential: { mode: "subscription", plan: "max" }, loading: false }
+    render(<AnthropicSubscriptionReuseCard />)
+    expect(lastDiscoveryOptions).toEqual({ enabled: false })
+  })
+
+  it("gates the probe off while the active credential is still loading", () => {
+    hookResult = { credential: null, loading: true }
+    render(<AnthropicSubscriptionReuseCard />)
+    expect(lastDiscoveryOptions).toEqual({ enabled: false })
+  })
+
+  it("enables the probe only once no credential is present", () => {
+    hookResult = { credential: null, loading: false }
+    render(<AnthropicSubscriptionReuseCard />)
+    expect(lastDiscoveryOptions).toEqual({ enabled: true })
   })
 
   it("active account wins over a detected local login", () => {

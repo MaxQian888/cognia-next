@@ -99,9 +99,21 @@
       "verdictDeny": "拒绝"
     },
     "categories": {
+      "astGrep": {
+        "desc": "通过 ast-grep 模式在代码库中进行结构化搜索与改写（ast_grep_search、ast_grep_replace）。高风险 —— replace 会改动文件。",
+        "name": "AST 结构搜索"
+      },
+      "codeGraph": {
+        "desc": "基于 tree-sitter 图谱的结构化代码智能：查找符号、调用方/被调用方、影响范围以及文件/上下文映射。",
+        "name": "代码图谱"
+      },
       "coreFiles": {
         "desc": "grep / glob / read / edit / write / bash —— 面向非 Anthropic 模型的完整文件工具套件。写入类工具需审批。",
         "name": "核心文件工具"
+      },
+      "dependencyResearch": {
+        "desc": "将依赖的源码克隆到本地，供代理阅读（clone_dep_source、list_cloned_deps）。",
+        "name": "依赖研究"
       },
       "environment": {
         "desc": "读取环境变量与系统信息，密钥在到达代理前已脱敏。",
@@ -130,6 +142,10 @@
       "terminalRepl": {
         "desc": "代理专属的持久交互式 PTY 会话（python / sql / REPL）。",
         "name": "终端 REPL"
+      },
+      "webclone": {
+        "desc": "抓取并转换网页源码，供离线阅读与参考（web_clone、web_clone_convert）。",
+        "name": "网页克隆"
       }
     },
     "desktopOnlyHint": "内置工具分类运行在桌面侧载中，请切换到桌面端启用。",

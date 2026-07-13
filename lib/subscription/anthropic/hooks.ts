@@ -168,13 +168,29 @@ export interface UseAnthropicDiscoveryResult {
   reload: () => Promise<void>
 }
 
+export interface UseAnthropicDiscoveryOptions {
+  /**
+   * Gate the automatic mount-time probe. Defaults to `true`. Pass `false` when
+   * the caller already holds an Anthropic credential — the probe reads Claude
+   * Code's OWN `"Claude Code-credentials"` keychain item, which is a separate
+   * OS-keyring entry from our vault's master key and therefore triggers its own
+   * macOS keychain prompt every time. Skipping it when the discovered result
+   * would be discarded avoids a redundant, blocking password prompt.
+   * `reload()` still probes on demand regardless of this flag.
+   */
+  enabled?: boolean
+}
+
 /**
  * Probe for an existing local Claude Code CLI subscription login. Mirrors
  * `useCodexDiscovery` — desktop-only (returns `null` on web), read-only.
  */
-export function useAnthropicDiscovery(): UseAnthropicDiscoveryResult {
+export function useAnthropicDiscovery(
+  options: UseAnthropicDiscoveryOptions = {}
+): UseAnthropicDiscoveryResult {
+  const { enabled = true } = options
   const [discovered, setDiscovered] = useState<DiscoveredAnthropicAuth | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(enabled)
   const [error, setError] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
@@ -199,13 +215,17 @@ export function useAnthropicDiscovery(): UseAnthropicDiscoveryResult {
   useEffect(() => {
     let alive = true
     void (async () => {
-      if (!isTauri()) {
+      // `enabled: false` (e.g. a credential is already active) skips the probe
+      // entirely so Claude Code's keychain item is never touched — no redundant
+      // macOS keychain prompt.
+      if (!enabled || !isTauri()) {
         if (alive) {
           setDiscovered(null)
           setLoading(false)
         }
         return
       }
+      if (alive) setLoading(true)
       try {
         const got = await discoverAnthropicAuth()
         if (alive) setDiscovered(got)
@@ -218,7 +238,7 @@ export function useAnthropicDiscovery(): UseAnthropicDiscoveryResult {
     return () => {
       alive = false
     }
-  }, [])
+  }, [enabled])
 
   return { discovered, loading, error, reload }
 }

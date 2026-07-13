@@ -38,7 +38,12 @@ export function AnthropicSubscriptionReuseCard() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { credential, loading, reload } = useActiveAnthropicCredential()
-  const { discovered } = useAnthropicDiscovery()
+  // Only probe Claude Code's own keychain item (a separate macOS keychain
+  // prompt) while we might actually offer the one-click reuse — i.e. once we
+  // know there is no active credential. Skipping it when signed in (or still
+  // resolving) avoids a redundant password prompt whose result would be
+  // discarded by the `!credential` guards below.
+  const { discovered } = useAnthropicDiscovery({ enabled: !loading && !credential })
   const [adopting, setAdopting] = useState(false)
   const [adoptError, setAdoptError] = useState<string | null>(null)
 

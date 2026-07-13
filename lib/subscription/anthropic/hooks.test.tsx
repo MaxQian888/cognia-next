@@ -107,4 +107,29 @@ describe("useAnthropicDiscovery", () => {
     expect(result.current.discovered).toBeNull()
     expect(discoverMock).toHaveBeenCalledTimes(1)
   })
+
+  // Reading the EXTERNAL Claude Code CLI keychain item pops a separate macOS
+  // keychain prompt. Callers that already hold a credential pass `enabled:
+  // false` so that redundant probe (and its prompt) never fires.
+  it("does not probe the external keychain when disabled", async () => {
+    discoverMock.mockResolvedValue(sample())
+    const { result } = renderHook(() => useAnthropicDiscovery({ enabled: false }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(discoverMock).not.toHaveBeenCalled()
+    expect(result.current.discovered).toBeNull()
+  })
+
+  it("probes once `enabled` flips from false to true", async () => {
+    discoverMock.mockResolvedValue(sample())
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useAnthropicDiscovery({ enabled }),
+      { initialProps: { enabled: false } }
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(discoverMock).not.toHaveBeenCalled()
+
+    rerender({ enabled: true })
+    await waitFor(() => expect(result.current.discovered?.source).toBe("file"))
+    expect(discoverMock).toHaveBeenCalledTimes(1)
+  })
 })

@@ -4,7 +4,35 @@
     "heading": "Auto-generate titles",
     "label": "Generate conversation titles"
   },
+  "composerBehavior": {
+    "autoScroll": {
+      "hint": "Follow the reply as it streams by scrolling to the newest content.",
+      "label": "Auto-scroll while streaming"
+    },
+    "clearAfterSend": {
+      "hint": "Empty the composer once a message is sent.",
+      "label": "Clear input after sending"
+    },
+    "description": "Control how the message composer handles typing, sending, and drafts.",
+    "inputHistory": {
+      "hint": "Press Up / Down in an empty composer to recall previous messages.",
+      "label": "Recall input history"
+    },
+    "persistDrafts": {
+      "hint": "Keep unsent text in each conversation when you switch away.",
+      "label": "Save unsent drafts"
+    },
+    "sendOnEnter": {
+      "hint": "Press Enter to send; use Shift+Enter for a new line.",
+      "label": "Send on Enter"
+    },
+    "title": "Composer behavior"
+  },
   "description": "Auto-generate titles and configure the timeline minimap.",
+  "inputSend": {
+    "description": "Keyboard, sending, and AI assistance for the message composer.",
+    "title": "Input & sending"
+  },
   "labelModel": {
     "description": "Background model used for timeline labels.",
     "heading": "Label model"
@@ -13,6 +41,10 @@
     "description": "Use a model to summarize each turn into a short label (one call per turn).",
     "heading": "Polish timeline labels",
     "label": "Generate timeline labels"
+  },
+  "messageStream": {
+    "description": "Control how assistant replies appear as they arrive.",
+    "title": "Message stream"
   },
   "model": "Model",
   "provider": "Provider",

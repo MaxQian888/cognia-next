@@ -5,6 +5,8 @@
   "alwaysAllowTitle": "始终允许的工具",
   "astGrep": "结构化代码搜索",
   "astGrepDesc": "基于 ast-grep CLI 的 AST 感知代码搜索与重构（ast_grep_search / ast_grep_replace），覆盖 25 种语言。用元变量（$VAR、$$$）匹配代码结构而非纯文本。仅桌面端；二进制按需探测。",
+  "codeGraph": "代码图谱智能",
+  "codeGraphDesc": "基于 tree-sitter 符号图谱的结构化代码智能（codegraph_search / node / callers / callees / impact / context / explore / files）。提供 grep 无法回答的亚毫秒级查询：符号定义位置、谁在调用它、影响范围。只读；仅桌面端。",
   "coreFiles": "核心文件工具",
   "coreFilesDesc": "grep / glob / read / ls / edit / multi_edit / write / bash / TodoWrite —— 让非 Anthropic 模型获得完整代码库访问能力的统一文件工具套件。只读工具自由运行；写入类工具需逐次审批。",
   "dependencyResearch": "依赖源码",

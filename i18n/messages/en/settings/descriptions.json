@@ -44,6 +44,7 @@
   "scheduledTasks": "Configure cron-style automation, agent permissions, and resource limits",
   "search": "Web search providers (Tavily, Brave, Bing, Google, Perplexity, Exa…), defaults, cache, safety and source verification.",
   "security": "Biometric guards for sensitive actions and privacy controls",
+  "shortcuts": "View and rebind every keyboard shortcut — global system hotkeys, in-app shortcuts, and editor keybindings — in one place, with conflict detection.",
   "sidebar": "Pin, reorder, or hide the left navigation rail items.",
   "skills": "Reusable instruction blobs appended to system prompts.",
   "slashCommands": "Built-in, custom, and plugin-contributed slash commands — browse, search, and copy a command into the composer.",

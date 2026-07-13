@@ -1,6 +1,7 @@
 {
   "controls": {
     "autoUpdate": "Automatic updates",
+    "backgroundTasks": "Background tasks",
     "biometricGuard": "Biometric guard",
     "builtinTools": "Built-in tools",
     "conversationTitle": "Auto conversation title",

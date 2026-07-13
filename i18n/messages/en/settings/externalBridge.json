@@ -29,6 +29,8 @@
     "inbox:connectors:read": "⚠ Read-only inbox introspection — adapters, conversations, drafts, audit. Metadata may include conversation handles and recent message snippets. Default OFF.",
     "inbox:connectors:send": "⚠ Lets external agents enqueue AI replies to your IM inbox. Goes through the same pipeline as in-app chat (PII gate, policy, outbound queue). Default OFF.",
     "mcp:computer-use": "⚠ Drives the host computer (mouse / keyboard / screenshot) from external coding agents. Honours Settings → Automation → Permissions; per-call tier surfaces the consent overlay.",
+    "memory:read": "⚠ Lets external agents search and list what the assistant remembers about you — distilled personal facts, same sensitivity tier as twin retrieval. Default OFF.",
+    "memory:write": "⚠ Lets external agents store, update, and forget long-term memories. Writes are PII-screened, tagged as external, and can never change the assistant's working instructions. Default OFF.",
     "plugin:tools": "⚠ Lets external agents invoke your plugin-registered tools. The plugin's own consent gate + ownership check still apply per call. Default OFF.",
     "rag:cognia": "Code-level retrieval over Cognia source.",
     "rag:twin": "⚠ Retrieval over your digital twin's chunks (personal documents / chat / code). Default OFF.",

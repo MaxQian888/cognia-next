@@ -1,6 +1,7 @@
 {
   "controls": {
     "autoUpdate": "自动更新",
+    "backgroundTasks": "后台任务",
     "biometricGuard": "生物识别守卫",
     "builtinTools": "内置工具",
     "conversationTitle": "自动会话标题",
