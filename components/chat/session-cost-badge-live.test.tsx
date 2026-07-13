@@ -18,9 +18,12 @@ jest.mock("next-intl", () => ({
 
 // Drive the store selector off a mutable state object. The real `useShallow`
 // runs (not mocked) so the bail-out wrapping is exercised under render.
+// `getState` backs the signature-gated aggregate read in the component.
 let storeState: { messages: UIMessage[] }
 jest.mock("@/stores/chat", () => ({
-  useChatStore: (sel: (s: { messages: UIMessage[] }) => unknown) => sel(storeState),
+  useChatStore: Object.assign((sel: (s: { messages: UIMessage[] }) => unknown) => sel(storeState), {
+    getState: () => storeState,
+  }),
 }))
 
 const tokens = (input: string, output: string) => `Tokens ${input}/${output}`

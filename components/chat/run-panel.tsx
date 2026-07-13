@@ -17,6 +17,7 @@
  * contract in `chat-view.tsx`.
  */
 import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import { usePlatform } from "@/hooks/use-platform"
 import {
@@ -51,6 +52,7 @@ import {
   selectRunningSubagentChip,
 } from "@/lib/claude/run-status"
 import { deriveRunRecord, toRunStatus } from "@/lib/claude/run-record"
+import { getLatestUsage } from "@/lib/claude/usage"
 import { useSettingsStore } from "@/stores/settings"
 import {
   aggregateRunBarUsage,
@@ -295,10 +297,21 @@ function RunPanelImpl({
   )
 
   // Live usage aggregate for the metric strip — only computed when at least one
-  // usage-derived chip (tokens / speed / cost / context%) is enabled.
+  // usage-derived chip (tokens / speed / cost / context%) is enabled. The
+  // aggregate walks the WHOLE history, so it is gated on a cheap usage
+  // signature (message count + latest usage ref, which only move a few times
+  // per turn) instead of the `messages` array ref, which swaps every streamed
+  // frame. `getLatestUsage` early-exits from the tail → O(1) per store set.
+  const [usageMsgCount, latestUsage] = useChatStore(
+    useShallow((s) => {
+      const msgs = sessionId ? (s.sessions[sessionId]?.messages ?? undefined) : undefined
+      return [msgs?.length ?? 0, msgs ? getLatestUsage(msgs) : null] as const
+    })
+  )
   const usageTotals = useMemo(
     () => (needsLiveUsage(resolvedBar) ? aggregateRunBarUsage(messages) : EMPTY_RUN_BAR_USAGE),
-    [messages, resolvedBar]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the usage signature (count + latest usage) gates the O(n) walk; `messages` itself swaps every frame
+    [usageMsgCount, latestUsage, resolvedBar]
   )
 
   const hasWork =

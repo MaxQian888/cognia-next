@@ -22,16 +22,24 @@ interface BranchNavigatorProps {
   className?: string
 }
 
+const NO_SIBLINGS: UIMessage[] = []
+
 export function BranchNavigator({ message, className }: BranchNavigatorProps) {
   const t = useTranslations("chat.branchNavigator")
   const groupId = (message.metadata as { branchGroupId?: string } | undefined)?.branchGroupId
-  const messages = useChatStore((s) => s.messages)
+  // Subscribe to the message COUNT, not the array: this navigator mounts in
+  // every assistant row, and the array ref swaps on every streamed token
+  // frame. Branch siblings only change when a message lands or is removed
+  // (regenerations stamp their branch metadata together with a fresh
+  // message), so the count is a sufficient — and O(1)-per-store-set — signal.
+  const messageCount = useChatStore((s) => (groupId ? s.messages.length : 0))
   const activeId = useChatStore((s) => (groupId ? s.activeBranchByGroup[groupId] : undefined))
   const setActiveBranch = useChatStore((s) => s.setActiveBranch)
 
   const siblings = useMemo(
-    () => (groupId ? selectBranchSiblings(messages, groupId) : []),
-    [messages, groupId]
+    () => (groupId ? selectBranchSiblings(useChatStore.getState().messages, groupId) : NO_SIBLINGS),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- messageCount keys the getState() read above
+    [messageCount, groupId]
   )
 
   if (!groupId || siblings.length <= 1) return null

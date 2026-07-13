@@ -91,6 +91,27 @@ describe("useRunRecordPersistence", () => {
     expect(rows[0]!.settledAt).toBeUndefined()
   })
 
+  it("never re-renders its host on streaming store commits (transient subscription)", async () => {
+    let renders = 0
+    renderHook(() => {
+      renders += 1
+      useRunRecordPersistence(SID)
+    })
+    const rendersAfterMount = renders
+    // Simulate rAF-coalesced streaming commits: several message-array swaps.
+    seed({ status: "streaming", runId: 1, messages: [assistantWithTool("input-available")] })
+    seed({ status: "streaming", runId: 1, messages: [assistantWithTool("input-available")] })
+    seed({ status: "streaming", runId: 1, messages: [assistantWithTool("output-available")] })
+    expect(renders).toBe(rendersAfterMount)
+    // The record still persists via the debounced write.
+    await act(async () => {
+      await wait(500)
+    })
+    const rows = await listRunRecords(SID)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.tools[0]!.status).toBe("output-available")
+  })
+
   it("flushes immediately and stamps settledAt on settle", async () => {
     const { rerender } = renderHook(({ id }) => useRunRecordPersistence(id), {
       initialProps: { id: SID },

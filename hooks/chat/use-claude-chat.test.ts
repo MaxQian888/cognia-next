@@ -1652,6 +1652,35 @@ describe("useClaudeChat — concurrent sessions", () => {
     expect(applySdkSubagentBridgeMock).toHaveBeenCalledWith(event, "sess-1")
   })
 
+  it("skips the bridge block (incl. its getSession read) for stream_event token deltas", async () => {
+    chatState.activeSessionId = "sess-1"
+    chatState.openSessionIds = ["sess-1"]
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    applySdkSubagentBridgeMock.mockClear()
+    getSessionMock.mockClear()
+    adapterMock.applySdkEvent.mockReturnValueOnce({
+      messages: [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "t" }] }],
+      turnComplete: false,
+    })
+    await act(async () => {
+      _messageCallback?.({
+        type: "event",
+        sessionId: "sess-1",
+        event: {
+          type: "stream_event",
+          event: { type: "content_block_delta", delta: { type: "text_delta", text: "t" } },
+        },
+      })
+    })
+    await flush()
+    // The per-token hot path must not pay a Dexie session read or feed the
+    // (no-op for deltas) plan / subagent bridges.
+    expect(getSessionMock).not.toHaveBeenCalled()
+    expect(applySdkSubagentBridgeMock).not.toHaveBeenCalled()
+  })
+
   it("send() is blocked (no sidecar call) when the concurrency cap is reached", async () => {
     isAtCapacityMock.mockReturnValue(true)
     const { result } = renderHook(() => useClaudeChat())

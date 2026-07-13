@@ -17,6 +17,7 @@
  */
 
 import { useMemo } from "react"
+import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import type { LanguageModelUsage, UIMessage } from "ai"
 import {
@@ -36,7 +37,6 @@ import { useSettingsStore } from "@/stores/settings"
 import { compactSession } from "@/lib/claude/ipc"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { UsageInfo } from "@/lib/claude/adapter"
 import type { SdkContextUsage } from "@cognia/agent-config-types"
 import { resolveModelContextLength } from "@/lib/ai/model-options"
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
@@ -98,12 +98,19 @@ export function ContextUsageIndicator({
 }: ContextUsageIndicatorProps) {
   const t = useTranslations("chat.composer.toolbar")
   const { mode } = useUsageDisplayMode()
-  const messages = useChatStore((s) => s.messages)
+  // Cheap-signature subscription instead of the raw `messages` array: streaming
+  // text deltas swap the array reference on every rAF frame, but token usage
+  // only moves when a message lands or its `metadata.usage` is merged
+  // (message_start / message_delta / result). Subscribing to
+  // `[length, latest usage ref]` (getLatestUsage early-exits from the tail, so
+  // the per-set selector cost is O(1)) keeps this toolbar indicator — and its
+  // two O(n) usage scans below — off the per-token render path.
+  const [messageCount, usage] = useChatStore(
+    useShallow((s) => [s.messages.length, getLatestUsage(s.messages as UIMessage[])] as const)
+  )
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const providerSettings = useSettingsStore((s) => s.settings?.providerSettings)
   const customProviders = useSettingsStore((s) => s.settings?.customProviders)
-
-  const usage = useMemo<UsageInfo | null>(() => getLatestUsage(messages as UIMessage[]), [messages])
   // Window sizing: an explicit `maxTokens` prop wins (tests / pinned
   // deployments); otherwise the model's declared context length — from the
   // custom, discovered, or built-in catalog, the same source the model picker
@@ -132,7 +139,19 @@ export function ContextUsageIndicator({
     }
     return computeContextWindowUsage(usage, modelId, effectiveMax)
   }, [sdkUsage, usage, modelId, effectiveMax])
-  const session = useMemo(() => sumSessionUsage(messages as UIMessage[]), [messages])
+  // O(n) over the whole history — recomputed only when the usage signature
+  // above moves (a few times per turn), never per streamed token. Reading the
+  // array via getState() is safe here: the signature deps pin when it re-runs.
+  // `breakdownMessages` hands the popover's source breakdown the same
+  // signature-pinned array ref so its own O(n) walk follows the same cadence.
+  const { session, breakdownMessages } = useMemo(
+    () => {
+      const msgs = useChatStore.getState().messages as UIMessage[]
+      return { session: sumSessionUsage(msgs), breakdownMessages: msgs }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- messageCount/usage ARE the recompute signal for the store read above
+    [messageCount, usage]
+  )
   // Whole-session billed tokens (every turn re-charges its full prompt), kept
   // distinct from `win.used` (current window occupancy = latest turn only).
   const sessionTokens =
@@ -208,7 +227,7 @@ export function ContextUsageIndicator({
               {sdkUsage ? (
                 <SdkBreakdown usage={sdkUsage} mode={mode} />
               ) : (
-                <ContextSourceBreakdown messages={messages as UIMessage[]} mode={mode} />
+                <ContextSourceBreakdown messages={breakdownMessages} mode={mode} />
               )}
               <CompactNowButton sessionId={activeSessionId} usedTokens={win.used} />
             </div>

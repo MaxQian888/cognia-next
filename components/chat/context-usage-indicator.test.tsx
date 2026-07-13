@@ -87,6 +87,37 @@ describe("ContextUsageIndicator", () => {
     expect(node).toHaveAttribute("data-session-tokens", "500")
   })
 
+  it("skips re-rendering on message-array swaps that leave the usage signature unchanged", () => {
+    const msgs = [assistantWithUsage("a-1", { inputTokens: 100, outputTokens: 50 })]
+    act(() => {
+      useChatStore.getState().replaceMessages(msgs)
+    })
+    const onRender = jest.fn()
+    render(
+      <React.Profiler id="ctx" onRender={onRender}>
+        <ContextUsageIndicator modelId="claude-sonnet-4-6" />
+      </React.Profiler>
+    )
+    const commitsAfterMount = onRender.mock.calls.length
+    // Simulate streaming text-delta commits: fresh array ref + fresh trailing
+    // message object, but same length and same `metadata.usage` reference —
+    // exactly what `appendDelta` produces per token frame.
+    act(() => {
+      useChatStore.getState().replaceMessages([{ ...msgs[0]! }])
+    })
+    act(() => {
+      useChatStore.getState().replaceMessages([{ ...msgs[0]! }])
+    })
+    expect(onRender.mock.calls.length).toBe(commitsAfterMount)
+    // A real usage change (turn boundary) still refreshes the read-out.
+    act(() => {
+      useChatStore
+        .getState()
+        .replaceMessages([assistantWithUsage("a-1", { inputTokens: 200, outputTokens: 80 })])
+    })
+    expect(screen.getByTestId("context-usage-indicator")).toHaveAttribute("data-used-tokens", "280")
+  })
+
   it("respects an explicit maxTokens override", () => {
     act(() => {
       useChatStore

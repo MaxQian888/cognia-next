@@ -41,6 +41,9 @@ const storeState = {
   messagesLoading: false,
   messagesLoadError: null as string | null,
   atCapacity: false,
+  // Raw-selector consumers (RunPanel's usage signature) read per-session
+  // slices directly off the state object.
+  sessions: {} as Record<string, { messages: unknown[] }>,
   setSessionError: jest.fn(),
   requestSessionMessagesReload: jest.fn(),
 }
@@ -50,7 +53,7 @@ const storeState = {
 jest.mock("@/stores/chat", () => ({
   useChatStore: Object.assign(
     jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
-    { getState: () => storeState }
+    { getState: () => storeState, subscribe: () => () => {} }
   ),
   useSessionMessages: () => storeState.messages,
   useSessionStatus: () => storeState.status,

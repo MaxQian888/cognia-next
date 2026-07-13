@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 import type { UIMessage } from "ai"
 
 import { RunPanel } from "./run-panel"
@@ -170,6 +170,32 @@ describe("RunPanel — metric strip", () => {
     expect(strip).toHaveTextContent("metricSpeed") // "{value} tok/s"
     // Cost + context are opt-in; the currency symbol / context key stay hidden.
     expect(strip).not.toHaveTextContent("metricContext")
+  })
+
+  it("refreshes the chips when a new usage-bearing turn lands (signature-gated aggregate)", () => {
+    seed({
+      status: "streaming",
+      messages: [assistantWithUsage({ inputTokens: 100, outputTokens: 500, durationMs: 10_000 })],
+    })
+    render(<RunPanel sessionId={SID} />)
+    expect(screen.getByTestId("run-bar-metrics")).toHaveTextContent('metricTokens:{"value":"500"}')
+    // A second usage-bearing assistant lands → the O(n) aggregate re-runs
+    // (message count moved) and the token chip reflects the new total.
+    act(() => {
+      seed({
+        status: "streaming",
+        messages: [
+          assistantWithUsage({ inputTokens: 100, outputTokens: 500, durationMs: 10_000 }),
+          {
+            id: "a2",
+            role: "assistant",
+            parts: [toolPart("t2", "Bash", "output-available")],
+            metadata: { usage: { inputTokens: 50, outputTokens: 300, durationMs: 5_000 } },
+          } as unknown as UIMessage,
+        ],
+      })
+    })
+    expect(screen.getByTestId("run-bar-metrics")).toHaveTextContent('metricTokens:{"value":"800"}')
   })
 
   it("hides usage-derived chips when no turn carries usage", () => {

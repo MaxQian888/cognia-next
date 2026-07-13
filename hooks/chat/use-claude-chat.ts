@@ -2309,22 +2309,29 @@ async function handleEvent(
       // / TaskList / ExitPlanMode tool_use blocks to the agent-team store so
       // the workspace tasks panel surfaces the agent's own plan. Wrapped so
       // a bridge throw never breaks the chat event loop.
-      try {
-        const session = await getSession(sessionId)
-        applyPlanModeBridge(env.event, sessionId, session?.teamId)
-        // Bridge SDK-native subagents (the `opts.agents` / Task-tool path used by
-        // workflow-editor and direct chat) into the runtime store so they render
-        // in the chat subagent tree alongside `dispatch_agent` runs.
-        const { applySdkSubagentBridge } = await import("@/lib/claude/sdk-subagent-bridge")
-        applySdkSubagentBridge(env.event, sessionId)
-        // ExitPlanMode capture (ADR-0045): project the SDK plan-mode plan into
-        // a structured draft AgentPlan so it can be approved + executed through
-        // the unified plan pipeline. Runs once per turn (turnComplete). Lazy
-        // import keeps the plan runtime out of the hot path until used.
-        const { captureExitPlanMode } = await import("@/lib/agent/plan/exit-plan-capture")
-        await captureExitPlanMode(env.event, sessionId, session?.characterId)
-      } catch (err) {
-        console.warn("planModeBridge failed", err)
+      //
+      // Skipped for `stream_event` (token-delta) envelopes: every bridge below
+      // consumes only assistant / user / system frames and would no-op — but
+      // only AFTER this block paid a Dexie `getSession` read per token batch.
+      // Gating here keeps the streaming hot path free of per-token IO.
+      if (env.event.type !== "stream_event") {
+        try {
+          const session = await getSession(sessionId)
+          applyPlanModeBridge(env.event, sessionId, session?.teamId)
+          // Bridge SDK-native subagents (the `opts.agents` / Task-tool path used by
+          // workflow-editor and direct chat) into the runtime store so they render
+          // in the chat subagent tree alongside `dispatch_agent` runs.
+          const { applySdkSubagentBridge } = await import("@/lib/claude/sdk-subagent-bridge")
+          applySdkSubagentBridge(env.event, sessionId)
+          // ExitPlanMode capture (ADR-0045): project the SDK plan-mode plan into
+          // a structured draft AgentPlan so it can be approved + executed through
+          // the unified plan pipeline. Runs once per turn (turnComplete). Lazy
+          // import keeps the plan runtime out of the hot path until used.
+          const { captureExitPlanMode } = await import("@/lib/agent/plan/exit-plan-capture")
+          await captureExitPlanMode(env.event, sessionId, session?.characterId)
+        } catch (err) {
+          console.warn("planModeBridge failed", err)
+        }
       }
 
       // Twin sources injection — runs once per turn at `turnComplete`. The

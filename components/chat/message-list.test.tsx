@@ -53,8 +53,10 @@ jest.mock("@tanstack/react-virtual", () => ({
 
 // The timeline minimap has its own test suite; stub it here so the
 // message-list logic tests stay isolated from its scroll-sync/store wiring.
+// A jest.fn stub (vs a plain () => null) lets the signature-pinning test
+// below assert on the `messages` prop identity across renders.
 jest.mock("./minimap/conversation-timeline", () => ({
-  ConversationTimeline: () => null,
+  ConversationTimeline: jest.fn(() => null),
 }))
 
 jest.mock("./message-renderer", () => {
@@ -766,5 +768,44 @@ describe("MessageList — auto-scroll gate (composerBehavior.autoScrollOnStream)
       </Wrapper>
     )
     expect(screen.getByText("hi")).toBeInTheDocument()
+  })
+})
+
+describe("MessageList — timeline signature pinning", () => {
+  it("keeps the ConversationTimeline messages prop identity across delta-frame re-renders", () => {
+    const { ConversationTimeline } = jest.requireMock("./minimap/conversation-timeline")
+    const timelineMock = ConversationTimeline as jest.Mock
+    timelineMock.mockClear()
+
+    const Wrapper = withAdapter(makeAdapter())
+    const initial = manyMsgs(25) // > TIMELINE_THRESHOLD → minimap mounts
+    const { rerender } = render(
+      <Wrapper>
+        <MessageList messages={initial} status="streaming" />
+      </Wrapper>
+    )
+    expect(timelineMock).toHaveBeenCalled()
+    const firstRef = (timelineMock.mock.calls.at(-1)![0] as { messages: unknown }).messages
+    expect(firstRef).toBe(initial)
+
+    // Simulate a streamed text-delta commit: fresh array + fresh trailing
+    // message object, same length, unchanged user metadata → the timeline's
+    // messages prop keeps its identity, so its memo skips the frame.
+    const deltaFrame = [...initial.slice(0, -1), { ...initial[initial.length - 1]! }]
+    rerender(
+      <Wrapper>
+        <MessageList messages={deltaFrame} status="streaming" />
+      </Wrapper>
+    )
+    expect((timelineMock.mock.calls.at(-1)![0] as { messages: unknown }).messages).toBe(firstRef)
+
+    // A new message landing (length change) re-pins to the fresh array.
+    const grown = [...deltaFrame, userMsg("vm-new", "next turn")]
+    rerender(
+      <Wrapper>
+        <MessageList messages={grown} status="streaming" />
+      </Wrapper>
+    )
+    expect((timelineMock.mock.calls.at(-1)![0] as { messages: unknown }).messages).toBe(grown)
   })
 })

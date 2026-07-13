@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { UIMessage } from "ai"
 import { applySdkEvent, contentPreview, makeUserMessage } from "@/lib/claude/adapter"
@@ -51,6 +51,7 @@ import { steerBlocksOf, steerTextOf } from "@/lib/claude/steer"
 import { senderIdOf, tagBranchSiblings, teamBranchGroupId } from "@/lib/chat/branch-regen"
 import { mirrorTruncateToDesktop } from "@/lib/chat/mirror-truncate"
 import { isSessionOpen, maybeDrainSteer, sessionStatusOf, steerArmed } from "./steer-runtime"
+import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { getExecutionBroker } from "@/lib/execution/broker"
 import { acquireChatLease } from "@/lib/execution/chat-lease"
 import { useChatStore } from "@/stores/chat"
@@ -138,6 +139,40 @@ export function useTeamChat() {
   // Per-session so stopping one team pane never aborts a sibling team turn.
   const interruptedRef = useRef<Set<string>>(new Set())
 
+  // Streaming coalescing — parity with direct chat's per-session registry.
+  // Mid-turn team events commit to the store at most once per animation frame
+  // and write to Dexie on a trailing debounce, instead of one full
+  // `persistMessages` transaction + React commit per token batch. The mirror
+  // holds the authoritative latest list per team session so the next event
+  // never reads a coalesced-stale base. Sealed on each member's `result`
+  // event (in `handleTeamEvent`) and in `send`'s finally (interrupt / error
+  // settles). 0ms persist in tests degrades to synchronous so existing
+  // persist-ordering assertions hold.
+  const TEAM_PERSIST_DEBOUNCE_MS = process.env.NODE_ENV === "test" ? 0 : 250
+  const streamMirrorRef = useRef<Map<string, UIMessage[]>>(new Map())
+  const [coalescing] = useState(
+    () =>
+      new SessionCoalescingRegistry({
+        onCommit: (sid, msgs) => useChatStore.getState().replaceSessionMessages(sid, msgs),
+        onPersist: (sid, msgs) =>
+          void persistMessages(sid, msgs).catch((err) =>
+            console.error("team debounced persistMessages failed", err)
+          ),
+        persistDelayMs: TEAM_PERSIST_DEBOUNCE_MS,
+      })
+  )
+
+  // Best-effort flush of every pending streaming write on unmount so the last
+  // partial isn't lost when the hook tears down mid-turn.
+  useEffect(() => {
+    const mirror = streamMirrorRef.current
+    return () => {
+      coalescing.flushAllPersist()
+      coalescing.clear()
+      mirror.clear()
+    }
+  }, [coalescing])
+
   // Cache the original SendContent per team session so regenerate can resend
   // it without losing attachments to the text-only round-trip.
   const lastUserContentRef = useRef<Map<string, SendContent>>(new Map())
@@ -151,7 +186,10 @@ export function useTeamChat() {
     let cancelled = false
 
     onClaudeMessage((evt) => {
-      void handleTeamEvent(evt, allowListRef, resolvers.current).catch((err) => {
+      void handleTeamEvent(evt, allowListRef, resolvers.current, {
+        mirror: streamMirrorRef.current,
+        registry: coalescing,
+      }).catch((err) => {
         console.error("team handleEvent failed", err)
       })
     })
@@ -167,7 +205,7 @@ export function useTeamChat() {
       cancelled = true
       unlisten?.()
     }
-  }, [])
+  }, [coalescing])
 
   // Self-reference for the steer drain in `send`'s finally (replay = fresh send).
   const sendRef = useRef<TeamSendFn | null>(null)
@@ -183,254 +221,271 @@ export function useTeamChat() {
    * `opts.skipPersistUserTurn` is set by internal re-issues (regenerate) so we
    * don't double up the user message already left on disk.
    */
-  const send = useCallback(async (content: SendContent, opts?: TeamSendOptions) => {
-    const sessionId = opts?.sessionId ?? useChatStore.getState().activeSessionId
-    if (!sessionId) {
-      useChatStore.getState().setError("No session selected")
-      return
-    }
-
-    // Concurrency cap backstop — parity with direct chat. A session that is
-    // already streaming is a continuation (its own lease exempts it).
-    if (getExecutionBroker().isAtCapacity("ai-turn", sessionId)) {
-      console.warn("team send blocked: concurrent stream cap reached", { sessionId })
-      return
-    }
-
-    // Steer instead of a concurrent orchestration loop: a fresh user turn
-    // while THIS team session is still streaming / awaiting approval would
-    // start a second orchestrator over half-written state. Queue it and
-    // replay once the turn settles. The replayed steer addresses the *team*
-    // (it re-routes through routeTurn / the supervisor); members later in the
-    // current turn's sequence do NOT see it mid-turn — same "no mid-turn
-    // injection" constraint as direct chat. Internal re-issues bypass this.
-    if (!opts?.skipPersistUserTurn) {
-      const st = sessionStatusOf(sessionId)
-      if (st === "streaming" || st === "awaiting_approval") {
-        const text = steerTextOf(content)
-        const blocks = steerBlocksOf(content)
-        if (text || blocks.length > 0) {
-          useChatStore.getState().enqueueSteer(sessionId, {
-            id: crypto.randomUUID(),
-            text,
-            blocks: blocks.length > 0 ? blocks : undefined,
-          })
-        }
+  const send = useCallback(
+    async (content: SendContent, opts?: TeamSendOptions) => {
+      const sessionId = opts?.sessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) {
+        useChatStore.getState().setError("No session selected")
         return
       }
-    }
 
-    const session = await getSession(sessionId)
-    if (!session || session.kind !== "team" || !session.teamId) {
-      useChatStore.getState().setSessionError(sessionId, "Team session not found")
-      return
-    }
-    const team = await getTeam(session.teamId)
-    if (!team) {
-      useChatStore.getState().setSessionError(sessionId, `Team ${session.teamId} no longer exists`)
-      return
-    }
-
-    interruptedRef.current.delete(sessionId)
-    useUIStore.getState().clearStopRequestsFor(sessionId)
-
-    const memberIds = team.members.map((m) => m.characterId)
-    const members = await listCharactersByIds(memberIds)
-    const memberByCharId = new Map<string, TeamMember>(team.members.map((m) => [m.characterId, m]))
-    const userText = asPlainText(content)
-    lastUserContentRef.current.set(sessionId, content)
-
-    // Embed the user message ONCE per turn so twin-bound members can share the
-    // same query vector rather than each paying an individual embed call.
-    let turnTwinDeps: TwinDepsForBuild | undefined
-    let turnEmbedding: number[] | undefined
-    let turnMemoryDeps: ApplyMemoryContextDeps | undefined
-    if (userText.trim()) {
-      turnTwinDeps = await tryBuildTwinDeps()
-      if (turnTwinDeps) {
-        try {
-          const result = await generateEmbedding(userText, turnTwinDeps.embedding)
-          turnEmbedding = result.embedding
-        } catch {
-          turnEmbedding = undefined // resolver falls back to per-member embed
-        }
+      // Concurrency cap backstop — parity with direct chat. A session that is
+      // already streaming is a continuation (its own lease exempts it).
+      if (getExecutionBroker().isAtCapacity("ai-turn", sessionId)) {
+        console.warn("team send blocked: concurrent stream cap reached", { sessionId })
+        return
       }
-      // Long-term memory recall parity with direct chat: build the read-runtime
-      // deps once per turn so every member injects the shared memory store (the
-      // team runtime previously read twin RAG but never recalled memory).
-      turnMemoryDeps = await tryBuildMemoryDeps(
-        resolveMemoryConfig(useSettingsStore.getState().settings?.memory),
-        turnTwinDeps
-      )
-    }
 
-    // 1. Persist the user turn first, tagging it as a "user" sender.
-    // Captures the instant title preview (if written) so the later LLM-title
-    // smoothing can compare against what the user actually sees.
-    // Base off this session's own slice — never the focused projection — and
-    // fall back to Dexie when no pane has materialised the slice yet.
-    let instantPreviewTitle: string | undefined
-    if (!opts?.skipPersistUserTurn) {
-      const userMsg = withMetadata(makeUserMessage(content), {
-        senderKind: "user",
-      })
-      const before =
-        useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
-      const after = [...before, userMsg]
-      useChatStore.getState().replaceSessionMessages(sessionId, after)
-      try {
-        await persistMessages(sessionId, after)
-        await touchSession(sessionId)
-        // Instant first-message preview — parity with direct chat. Only claims
-        // a still-placeholder title and marks it machine-set (`titleAuto`) so
-        // the turn-complete path may later upgrade it to an LLM title.
-        if (isPlaceholderTitle(session.title)) {
-          const title = contentPreview(content, 40)
-          if (title) {
-            instantPreviewTitle = title
-            await updateSession(sessionId, { title, titleAuto: true })
+      // Steer instead of a concurrent orchestration loop: a fresh user turn
+      // while THIS team session is still streaming / awaiting approval would
+      // start a second orchestrator over half-written state. Queue it and
+      // replay once the turn settles. The replayed steer addresses the *team*
+      // (it re-routes through routeTurn / the supervisor); members later in the
+      // current turn's sequence do NOT see it mid-turn — same "no mid-turn
+      // injection" constraint as direct chat. Internal re-issues bypass this.
+      if (!opts?.skipPersistUserTurn) {
+        const st = sessionStatusOf(sessionId)
+        if (st === "streaming" || st === "awaiting_approval") {
+          const text = steerTextOf(content)
+          const blocks = steerBlocksOf(content)
+          if (text || blocks.length > 0) {
+            useChatStore.getState().enqueueSteer(sessionId, {
+              id: crypto.randomUUID(),
+              text,
+              blocks: blocks.length > 0 ? blocks : undefined,
+            })
           }
-        }
-      } catch (err) {
-        useChatStore
-          .getState()
-          .setSessionError(sessionId, err instanceof Error ? err.message : String(err))
-        return
-      }
-    }
-
-    // Register the team turn with the global execution broker (one lease for
-    // the whole sequential fan-out). Acquired before the `streaming` flip so
-    // the status watcher releases it on settle; the broker's cancel bridge
-    // interrupts the live sub-sessions (their ids differ from `sessionId`).
-    // Best-effort: a broker hiccup never blocks the committed turn.
-    try {
-      await acquireChatLease({
-        sessionId,
-        projectId: session.projectId,
-        label: session.title || team.name || `#${sessionId.slice(0, 8)}`,
-        kind: "team",
-        onCancel: () => {
-          interruptedRef.current.add(sessionId)
-          void interruptTeamTurn(sessionId, resolvers.current)
-        },
-      })
-    } catch (leaseErr) {
-      console.warn("team chat lease acquire failed; sending without admission", leaseErr)
-    }
-    // Clear any stale error BEFORE flipping to streaming — setSessionError(null)
-    // resets status to idle, so the reverse order would strand the run status
-    // (and release the broker lease) the moment the turn started.
-    useChatStore.getState().setSessionError(sessionId, null)
-    useChatStore.getState().setSessionStatus(sessionId, "streaming")
-
-    const turnId = newTurnId()
-
-    // 2. Branch on orchestration. Supervisor has its own multi-round loop.
-    try {
-      if (team.orchestration === "supervisor") {
-        await runSupervisorTurn({
-          session,
-          sessionId,
-          team,
-          members,
-          memberByCharId,
-          turnId,
-          interruptedRef,
-          resolvers: resolvers.current,
-          turnTwinDeps,
-          turnEmbedding,
-          turnMemoryDeps,
-          turnUserMessage: userText,
-        })
-      } else {
-        const targets = routeTurn(team, members, userText)
-        if (targets.length === 0) {
-          // `manual` mode → user picks a member explicitly. Stop here.
-          useChatStore.getState().setSessionStatus(sessionId, "idle")
           return
         }
-        await runLinearTurn({
-          session,
-          sessionId,
-          team,
-          content,
-          members,
-          targets,
-          memberByCharId,
-          turnId,
-          interruptedRef,
-          resolvers: resolvers.current,
-          turnTwinDeps,
-          turnEmbedding,
-          turnMemoryDeps,
-          turnUserMessage: userText,
-        })
       }
 
-      // Long-term memory write parity with direct chat (team↔direct): the team
-      // runtime previously only *read* memory (via resolveSendOptions per member)
-      // and never wrote it back. Extract from the completed team turn — the user
-      // prompt plus the final team reply (last assistant message; for supervisor
-      // mode that is the synthesis). Only runs on clean completion: interrupt and
-      // error throw past this point, and the manual no-target case returns above.
-      const finalMessages =
-        useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
-      const lastAssistant = [...finalMessages].reverse().find((m) => m.role === "assistant")
-      void runTurnMemory(sessionId, {
-        userText,
-        assistantText: lastAssistant ? textFromParts(lastAssistant.parts) : "",
-        transcript: finalMessages.map((m) => ({ role: m.role, text: textFromParts(m.parts) })),
-      })
-
-      // Conversation-title upgrade — parity with direct chat. On the first team
-      // turn (and while still machine-set), ask the cheap model for a short
-      // title built from the first user prompt + first teammate reply. Reuse the
-      // send-start `session` snapshot for the gate (no extra DB round-trip); the
-      // freshness re-check happens inside `runTitleTask` before it persists.
-      const settings = useSettingsStore.getState().settings
-      const titleCfg = settings?.conversationTitle
-      const assistantCount = finalMessages.filter((m) => m.role === "assistant").length
-      if (
-        shouldGenerateTitle({
-          titleEnabled: titleCfg?.enabled,
-          assistantCount,
-          titleAuto: session.titleAuto,
-        })
-      ) {
-        const firstUser = finalMessages.find((m) => m.role === "user")
-        const firstAssistant = finalMessages.find((m) => m.role === "assistant")
-        void runTitleTask({
-          session,
-          appSettings: settings,
-          override: titleCfg,
-          featureId: "conversation-title",
-          sourceText: firstUser ? textFromParts(firstUser.parts) : userText,
-          resultText: firstAssistant ? textFromParts(firstAssistant.parts) : undefined,
-          locale: settings?.language,
-          currentTitle: instantPreviewTitle ?? session.title,
-          isStillAuto: async () => {
-            const fresh = await getSession(sessionId).catch(() => undefined)
-            return !fresh || fresh.titleAuto !== false
-          },
-          persist: (title) => updateSession(sessionId, { title, titleAuto: true }),
-        })
+      const session = await getSession(sessionId)
+      if (!session || session.kind !== "team" || !session.teamId) {
+        useChatStore.getState().setSessionError(sessionId, "Team session not found")
+        return
       }
-    } finally {
-      // Capture the settle shape before flipping to idle: a clean end always
-      // drains the steer queue; an interrupted / errored end only drains when
-      // `interruptAndSteer` armed it (parity with direct chat's settle).
-      const hadError = useChatStore.getState().sessions[sessionId]?.status === "error"
-      const wasInterrupted = interruptedRef.current.has(sessionId)
-      pendingTeamBranchTags.delete(sessionId)
-      useChatStore.getState().setSessionStatus(sessionId, "idle")
-      useUIStore.getState().clearMemberStatusFor(sessionId)
+      const team = await getTeam(session.teamId)
+      if (!team) {
+        useChatStore
+          .getState()
+          .setSessionError(sessionId, `Team ${session.teamId} no longer exists`)
+        return
+      }
+
+      interruptedRef.current.delete(sessionId)
       useUIStore.getState().clearStopRequestsFor(sessionId)
-      if ((!hadError && !wasInterrupted) || steerArmed.has(sessionId)) {
-        maybeDrainSteer(sessionId, (payload) => void sendRef.current?.(payload, { sessionId }))
+
+      const memberIds = team.members.map((m) => m.characterId)
+      const members = await listCharactersByIds(memberIds)
+      const memberByCharId = new Map<string, TeamMember>(
+        team.members.map((m) => [m.characterId, m])
+      )
+      const userText = asPlainText(content)
+      lastUserContentRef.current.set(sessionId, content)
+
+      // Embed the user message ONCE per turn so twin-bound members can share the
+      // same query vector rather than each paying an individual embed call.
+      let turnTwinDeps: TwinDepsForBuild | undefined
+      let turnEmbedding: number[] | undefined
+      let turnMemoryDeps: ApplyMemoryContextDeps | undefined
+      if (userText.trim()) {
+        turnTwinDeps = await tryBuildTwinDeps()
+        if (turnTwinDeps) {
+          try {
+            const result = await generateEmbedding(userText, turnTwinDeps.embedding)
+            turnEmbedding = result.embedding
+          } catch {
+            turnEmbedding = undefined // resolver falls back to per-member embed
+          }
+        }
+        // Long-term memory recall parity with direct chat: build the read-runtime
+        // deps once per turn so every member injects the shared memory store (the
+        // team runtime previously read twin RAG but never recalled memory).
+        turnMemoryDeps = await tryBuildMemoryDeps(
+          resolveMemoryConfig(useSettingsStore.getState().settings?.memory),
+          turnTwinDeps
+        )
       }
-    }
-  }, [])
+
+      // 1. Persist the user turn first, tagging it as a "user" sender.
+      // Captures the instant title preview (if written) so the later LLM-title
+      // smoothing can compare against what the user actually sees.
+      // Base off this session's own slice — never the focused projection — and
+      // fall back to Dexie when no pane has materialised the slice yet.
+      let instantPreviewTitle: string | undefined
+      if (!opts?.skipPersistUserTurn) {
+        const userMsg = withMetadata(makeUserMessage(content), {
+          senderKind: "user",
+        })
+        const before =
+          useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
+        const after = [...before, userMsg]
+        useChatStore.getState().replaceSessionMessages(sessionId, after)
+        try {
+          await persistMessages(sessionId, after)
+          await touchSession(sessionId)
+          // Instant first-message preview — parity with direct chat. Only claims
+          // a still-placeholder title and marks it machine-set (`titleAuto`) so
+          // the turn-complete path may later upgrade it to an LLM title.
+          if (isPlaceholderTitle(session.title)) {
+            const title = contentPreview(content, 40)
+            if (title) {
+              instantPreviewTitle = title
+              await updateSession(sessionId, { title, titleAuto: true })
+            }
+          }
+        } catch (err) {
+          useChatStore
+            .getState()
+            .setSessionError(sessionId, err instanceof Error ? err.message : String(err))
+          return
+        }
+      }
+
+      // Register the team turn with the global execution broker (one lease for
+      // the whole sequential fan-out). Acquired before the `streaming` flip so
+      // the status watcher releases it on settle; the broker's cancel bridge
+      // interrupts the live sub-sessions (their ids differ from `sessionId`).
+      // Best-effort: a broker hiccup never blocks the committed turn.
+      try {
+        await acquireChatLease({
+          sessionId,
+          projectId: session.projectId,
+          label: session.title || team.name || `#${sessionId.slice(0, 8)}`,
+          kind: "team",
+          onCancel: () => {
+            interruptedRef.current.add(sessionId)
+            void interruptTeamTurn(sessionId, resolvers.current)
+          },
+        })
+      } catch (leaseErr) {
+        console.warn("team chat lease acquire failed; sending without admission", leaseErr)
+      }
+      // Clear any stale error BEFORE flipping to streaming — setSessionError(null)
+      // resets status to idle, so the reverse order would strand the run status
+      // (and release the broker lease) the moment the turn started.
+      useChatStore.getState().setSessionError(sessionId, null)
+      useChatStore.getState().setSessionStatus(sessionId, "streaming")
+
+      const turnId = newTurnId()
+
+      // 2. Branch on orchestration. Supervisor has its own multi-round loop.
+      try {
+        if (team.orchestration === "supervisor") {
+          await runSupervisorTurn({
+            session,
+            sessionId,
+            team,
+            members,
+            memberByCharId,
+            turnId,
+            interruptedRef,
+            resolvers: resolvers.current,
+            turnTwinDeps,
+            turnEmbedding,
+            turnMemoryDeps,
+            turnUserMessage: userText,
+          })
+        } else {
+          const targets = routeTurn(team, members, userText)
+          if (targets.length === 0) {
+            // `manual` mode → user picks a member explicitly. Stop here.
+            useChatStore.getState().setSessionStatus(sessionId, "idle")
+            return
+          }
+          await runLinearTurn({
+            session,
+            sessionId,
+            team,
+            content,
+            members,
+            targets,
+            memberByCharId,
+            turnId,
+            interruptedRef,
+            resolvers: resolvers.current,
+            turnTwinDeps,
+            turnEmbedding,
+            turnMemoryDeps,
+            turnUserMessage: userText,
+          })
+        }
+
+        // Long-term memory write parity with direct chat (team↔direct): the team
+        // runtime previously only *read* memory (via resolveSendOptions per member)
+        // and never wrote it back. Extract from the completed team turn — the user
+        // prompt plus the final team reply (last assistant message; for supervisor
+        // mode that is the synthesis). Only runs on clean completion: interrupt and
+        // error throw past this point, and the manual no-target case returns above.
+        const finalMessages =
+          useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
+        const lastAssistant = [...finalMessages].reverse().find((m) => m.role === "assistant")
+        void runTurnMemory(sessionId, {
+          userText,
+          assistantText: lastAssistant ? textFromParts(lastAssistant.parts) : "",
+          transcript: finalMessages.map((m) => ({ role: m.role, text: textFromParts(m.parts) })),
+        })
+
+        // Conversation-title upgrade — parity with direct chat. On the first team
+        // turn (and while still machine-set), ask the cheap model for a short
+        // title built from the first user prompt + first teammate reply. Reuse the
+        // send-start `session` snapshot for the gate (no extra DB round-trip); the
+        // freshness re-check happens inside `runTitleTask` before it persists.
+        const settings = useSettingsStore.getState().settings
+        const titleCfg = settings?.conversationTitle
+        const assistantCount = finalMessages.filter((m) => m.role === "assistant").length
+        if (
+          shouldGenerateTitle({
+            titleEnabled: titleCfg?.enabled,
+            assistantCount,
+            titleAuto: session.titleAuto,
+          })
+        ) {
+          const firstUser = finalMessages.find((m) => m.role === "user")
+          const firstAssistant = finalMessages.find((m) => m.role === "assistant")
+          void runTitleTask({
+            session,
+            appSettings: settings,
+            override: titleCfg,
+            featureId: "conversation-title",
+            sourceText: firstUser ? textFromParts(firstUser.parts) : userText,
+            resultText: firstAssistant ? textFromParts(firstAssistant.parts) : undefined,
+            locale: settings?.language,
+            currentTitle: instantPreviewTitle ?? session.title,
+            isStillAuto: async () => {
+              const fresh = await getSession(sessionId).catch(() => undefined)
+              return !fresh || fresh.titleAuto !== false
+            },
+            persist: (title) => updateSession(sessionId, { title, titleAuto: true }),
+          })
+        }
+      } finally {
+        // Seal any coalesced streaming state left by this turn: a clean member
+        // settle already flushed on its `result` event, but interrupt / error
+        // paths can end mid-stream with a pending rAF commit + debounced
+        // persist. Flush them (latest snapshot wins) and drop the mirror so the
+        // next turn re-reads a fresh base.
+        const pair = coalescing.get(sessionId)
+        pair.commit.flush()
+        pair.persist.flush()
+        coalescing.release(sessionId)
+        streamMirrorRef.current.delete(sessionId)
+        // Capture the settle shape before flipping to idle: a clean end always
+        // drains the steer queue; an interrupted / errored end only drains when
+        // `interruptAndSteer` armed it (parity with direct chat's settle).
+        const hadError = useChatStore.getState().sessions[sessionId]?.status === "error"
+        const wasInterrupted = interruptedRef.current.has(sessionId)
+        pendingTeamBranchTags.delete(sessionId)
+        useChatStore.getState().setSessionStatus(sessionId, "idle")
+        useUIStore.getState().clearMemberStatusFor(sessionId)
+        useUIStore.getState().clearStopRequestsFor(sessionId)
+        if ((!hadError && !wasInterrupted) || steerArmed.has(sessionId)) {
+          maybeDrainSteer(sessionId, (payload) => void sendRef.current?.(payload, { sessionId }))
+        }
+      }
+    },
+    [coalescing]
+  )
 
   // Keep the steer drain pointed at the latest `send` without closing over it.
   useEffect(() => {
@@ -961,10 +1016,19 @@ const pendingTeamBranchTags = new Map<string, PendingTeamBranchTag>()
 
 // ---- Event handler -------------------------------------------------------
 
+/** Hook-scoped streaming coalescing state threaded into the event handler. */
+interface TeamStreamingDeps {
+  /** Latest in-flight message list per team session (see `streamMirrorRef`). */
+  mirror: Map<string, UIMessage[]>
+  /** Per-session rAF commit + debounced persist pairs. */
+  registry: SessionCoalescingRegistry
+}
+
 async function handleTeamEvent(
   evt: ClaudeEvent,
   allowListRef: React.MutableRefObject<string[]>,
-  resolvers: ResolverMap
+  resolvers: ResolverMap,
+  streaming: TeamStreamingDeps
 ): Promise<void> {
   if (evt.type !== "event" && evt.type !== "session_ended" && evt.type !== "permission_request") {
     return
@@ -1024,10 +1088,16 @@ async function handleTeamEvent(
       const ctx = subResolverCtx.get(evt.sessionId)
       const senderId = ctx?.senderId ?? characterId
 
-      const teamMsgs = isOpen
-        ? (useChatStore.getState().sessions[teamSessionId]?.messages ??
-          (await listMessages(teamSessionId)))
-        : await listMessages(teamSessionId)
+      // Mirror-first base read: the store commit may be a frame behind (rAF
+      // coalesced) and the Dexie copy a debounce behind, so the mirror holds
+      // the only authoritative mid-turn base. Falls back to the store slice /
+      // Dexie between turns (mirror entries live only while a turn streams).
+      const teamMsgs =
+        streaming.mirror.get(teamSessionId) ??
+        (isOpen
+          ? (useChatStore.getState().sessions[teamSessionId]?.messages ??
+            (await listMessages(teamSessionId)))
+          : await listMessages(teamSessionId))
 
       const existingIds = new Set(teamMsgs.map((m) => m.id))
       const { messages: nextMessages, result: sdkResult } = applySdkEvent(teamMsgs, evt.event)
@@ -1103,10 +1173,28 @@ async function handleTeamEvent(
           })
         }
 
-        await persistMessages(teamSessionId, tagged)
-        if (isOpen) {
-          useChatStore.getState().replaceSessionMessages(teamSessionId, tagged)
-        } else if (
+        streaming.mirror.set(teamSessionId, tagged)
+        const coalesce = streaming.registry.get(teamSessionId)
+        if (sdkResult) {
+          // Member turn boundary: drop pending coalesced work and write the
+          // final tagged list synchronously (parity with direct chat's
+          // turnComplete seal — flush would replay pre-tag args).
+          coalesce.commit.cancel()
+          coalesce.persist.cancel()
+          await persistMessages(teamSessionId, tagged)
+          if (isOpen) {
+            useChatStore.getState().replaceSessionMessages(teamSessionId, tagged)
+          }
+          streaming.mirror.delete(teamSessionId)
+          streaming.registry.release(teamSessionId)
+        } else {
+          // Mid-stream: coalesce the React commit to ≤1/frame and debounce the
+          // Dexie write; the mirror above keeps the next event's base correct.
+          if (isOpen) coalesce.commit.call(tagged)
+          coalesce.persist.call(tagged)
+        }
+        if (
+          !isOpen &&
           tagged.length > teamMsgs.length &&
           tagged[tagged.length - 1]?.role === "assistant"
         ) {

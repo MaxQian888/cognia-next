@@ -1239,7 +1239,9 @@ describe("useTeamChat — event handler coverage", () => {
         sessionId: "team-1::char::c1::t1",
         event: { type: "text_delta", text: "hi" },
       })
-      await new Promise<void>((r) => setTimeout(r, 10))
+      // The persist leg is synchronous in tests (0ms debounce); the store
+      // commit is rAF-coalesced, so wait out one animation frame.
+      await new Promise<void>((r) => setTimeout(r, 50))
     })
 
     expect(persistMessagesMock).toHaveBeenCalled()
@@ -1620,14 +1622,15 @@ describe("useTeamChat — error path branches", () => {
     spy.mockRestore()
   })
 
-  it("handleTeamEvent rejection is caught gracefully", async () => {
+  it("mid-stream persist rejection is caught by the debounced writer (no crash)", async () => {
     let emitTeamEvent: ((evt: unknown) => void) | null = null
     onClaudeMessageMock.mockImplementationOnce(async (cb: (evt: unknown) => void) => {
       emitTeamEvent = cb
       return onClaudeUnsub
     })
 
-    // Make persistMessages throw inside handleTeamEvent to trigger the catch.
+    // Make the (coalesced) mid-stream persistMessages throw — the debounced
+    // writer owns the failure and logs it; the event handler never rejects.
     const { applySdkEvent: applySdkEventMock } = jest.requireMock("@/lib/claude/adapter")
     const newMsg = { id: "err-msg", role: "assistant", parts: [{ type: "text", text: "x" }] }
     ;(applySdkEventMock as jest.Mock).mockReturnValueOnce({
@@ -1646,6 +1649,43 @@ describe("useTeamChat — error path branches", () => {
         type: "event",
         sessionId: "team-1::char::c1::t1",
         event: { type: "text_delta", text: "x" },
+      })
+      await new Promise<void>((r) => setTimeout(r, 10))
+    })
+
+    expect(spy).toHaveBeenCalledWith("team debounced persistMessages failed", expect.any(Error))
+    expect(spy).not.toHaveBeenCalledWith("team handleEvent failed", expect.any(Error))
+    spy.mockRestore()
+  })
+
+  it("result-event persist rejection is caught by the handleTeamEvent catch", async () => {
+    let emitTeamEvent: ((evt: unknown) => void) | null = null
+    onClaudeMessageMock.mockImplementationOnce(async (cb: (evt: unknown) => void) => {
+      emitTeamEvent = cb
+      return onClaudeUnsub
+    })
+
+    // The seal path (`result` present) awaits persistMessages directly, so a
+    // rejection there surfaces through the handler's catch.
+    const { applySdkEvent: applySdkEventMock } = jest.requireMock("@/lib/claude/adapter")
+    const newMsg = { id: "err-msg-2", role: "assistant", parts: [{ type: "text", text: "x" }] }
+    ;(applySdkEventMock as jest.Mock).mockReturnValueOnce({
+      messages: [newMsg],
+      turnComplete: true,
+      result: { type: "result", subtype: "success" },
+    })
+    persistMessagesMock.mockRejectedValueOnce(new Error("db write failed"))
+
+    const spy = jest.spyOn(console, "error").mockImplementation(() => {})
+
+    renderHook(() => useTeamChat())
+    await flush()
+
+    await act(async () => {
+      emitTeamEvent?.({
+        type: "event",
+        sessionId: "team-1::char::c1::t1",
+        event: { type: "result" },
       })
       await new Promise<void>((r) => setTimeout(r, 10))
     })

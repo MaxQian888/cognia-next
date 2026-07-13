@@ -106,6 +106,27 @@ export function MessageList({
     return null
   }, [messages])
 
+  // Signature-pinned array ref for the timeline minimap. `deriveTimelineTurns`
+  // only reads user-message text/metadata and the message COUNT (replyCount),
+  // none of which move on a streamed text delta — so pin the ref on
+  // [length, last user message's metadata] and let the memo'd
+  // `ConversationTimeline` skip every streaming frame instead of re-deriving
+  // O(n) turns per frame. The metadata term catches the async `minimapLabel`
+  // patch (which rewrites the last user message without changing the length).
+  const lastUserMetadata = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        return (messages[i] as { metadata?: Record<string, unknown> }).metadata
+      }
+    }
+    return undefined
+  }, [messages])
+  const timelineMessages = useMemo(
+    () => messages,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- length + last-user metadata are the only inputs the timeline derive reads that can change
+    [messages.length, lastUserMetadata]
+  )
+
   // Mobile per-message delete (long-press sheet). Three-way fan-out: the
   // in-memory store slice (what the list renders), the phone's Dexie mirror,
   // and the desktop's authoritative Dexie via the `message_delete` RPC. The
@@ -178,9 +199,10 @@ export function MessageList({
     measureElement: (el) => Math.round(el?.getBoundingClientRect().height ?? 0),
   })
 
-  // Re-measure every row when the streaming row finalises. Stage 4 will
-  // also wrap the streaming→idle setStatus in startTransition so this
-  // re-measure lands at transition priority.
+  // Re-measure every row when the streaming row finalises. The streaming→idle
+  // setStatus is wrapped in startTransition by the chat hook (see
+  // use-claude-chat's turn seal), so this re-measure lands at transition
+  // priority.
   useEffect(() => {
     if (status === "idle") {
       rowVirtualizer.measure()
@@ -391,7 +413,7 @@ export function MessageList({
           </div>
           {!isMobile && timelineEnabled !== false && messages.length > TIMELINE_THRESHOLD && (
             <ConversationTimeline
-              messages={messages}
+              messages={timelineMessages}
               scrollRef={scrollParentRef}
               virtualizer={rowVirtualizer}
               virtualize={virtualize}

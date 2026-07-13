@@ -18,6 +18,7 @@ import { RunStatusBar } from "./run-status-bar"
 import { PlanApprovalDock } from "@/components/agent/plan/plan-approval-dock"
 import { PlanTrackerDock } from "@/components/agent/plan/plan-tracker-dock"
 import { useRunRecordPersistence } from "@/hooks/chat/use-run-record-persistence"
+import { useStableCallback } from "@/hooks/ui/use-stable-callback"
 import { FollowUpSuggestions } from "./follow-up-suggestions"
 import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
 import { Button } from "@/components/ui/button"
@@ -208,20 +209,23 @@ export function ChatPane({
     [composerRef]
   )
 
-  const handleCopySuccess = useCallback(() => {
+  // Stable-identity wrappers (not plain useCallback): these three cross the
+  // `MessageRenderer` memo comparator for EVERY mounted row. The upstream
+  // `onRegenerate`/`onEditResend` props are rebuilt whenever the workspace
+  // re-renders (each sessions-liveQuery refresh, i.e. several times per
+  // agentic turn), and a dep-keyed useCallback would forward that identity
+  // churn and re-reconcile the whole visible list at ~11ms/row.
+  const handleCopySuccess = useStableCallback(() => {
     toast.success(tCopy("success"))
-  }, [tCopy])
+  })
 
-  const handleRegenerate = useCallback(() => {
+  const handleRegenerate = useStableCallback(() => {
     void onRegenerate()
-  }, [onRegenerate])
+  })
 
-  const handleEditResend = useCallback(
-    (id: string, newText: string) => {
-      void onEditResend(id, newText)
-    },
-    [onEditResend]
-  )
+  const handleEditResend = useStableCallback((id: string, newText: string) => {
+    void onEditResend(id, newText)
+  })
 
   const handleSend = useCallback(
     async (content: SendContent) => {
