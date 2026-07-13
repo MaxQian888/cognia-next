@@ -8,6 +8,7 @@ import { renderSingleExport } from "@/lib/export/single"
 import type { SingleExportFormat } from "@/lib/export/single"
 import type { ChatSession, StoredMessage } from "@/lib/claude/types"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
+import { resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { getDb } from "@/lib/db/schema"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { saveExport, type SaveExportOutcome } from "@/lib/files/save-export"
@@ -22,6 +23,8 @@ interface RunArgs {
   includeMetadata?: boolean
   includeTimestamps?: boolean
   includeTokens?: boolean
+  /** Lay the theme's real wallpaper behind the export (HTML/animated only). */
+  withWallpaper?: boolean
   /** JSONL formats only — include every regeneration branch (see renderSingleExport). */
   includeAllBranches?: boolean
 }
@@ -45,6 +48,8 @@ export function useSingleExport() {
         args.messages ??
         (await getDb().messages.where("sessionId").equals(args.session.id).sortBy("createdAt"))
 
+      const wallpaperDataUrl = await resolveThemeWallpaper(args.theme, args.withWallpaper ?? false)
+
       const rendered = renderSingleExport({
         format: args.format,
         session: args.session,
@@ -54,6 +59,7 @@ export function useSingleExport() {
         includeMetadata: args.includeMetadata,
         includeTimestamps: args.includeTimestamps,
         includeTokens: args.includeTokens,
+        wallpaperDataUrl,
         includeAllBranches: args.includeAllBranches,
       })
 

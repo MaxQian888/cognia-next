@@ -15,13 +15,7 @@ import { exportToJsonlPerMessage, exportToJsonlChat } from "@/lib/export/jsonl"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 
 export type SingleExportFormat =
-  | "markdown"
-  | "json"
-  | "text"
-  | "html"
-  | "animated"
-  | "jsonl"
-  | "jsonl-chat"
+  "markdown" | "json" | "text" | "html" | "animated" | "jsonl" | "jsonl-chat"
 
 export interface SingleExportOptions {
   format: SingleExportFormat
@@ -34,6 +28,8 @@ export interface SingleExportOptions {
   includeMetadata?: boolean
   includeTimestamps?: boolean
   includeTokens?: boolean
+  /** HTML / animated formats only — inlined theme wallpaper data-URL backdrop. */
+  wallpaperDataUrl?: string
   /**
    * JSONL formats only. When true, `messages` is expected to contain every
    * stored row (all regeneration siblings): the per-message format preserves
@@ -89,6 +85,7 @@ export function renderSingleExport(opts: SingleExportOptions): SingleExportResul
         customTheme: opts.customTheme,
         includeMetadata: opts.includeMetadata,
         includeTimestamps: opts.includeTimestamps,
+        wallpaperDataUrl: opts.wallpaperDataUrl,
       } satisfies BeautifulHtmlOptions)
       return { content: html, filename: `${slug}.html`, mimeType: "text/html" }
     }
@@ -101,6 +98,7 @@ export function renderSingleExport(opts: SingleExportOptions): SingleExportResul
         customTheme: opts.customTheme,
         includeMetadata: opts.includeMetadata,
         includeTimestamps: opts.includeTimestamps,
+        wallpaperDataUrl: opts.wallpaperDataUrl,
       })
       return {
         content: html,

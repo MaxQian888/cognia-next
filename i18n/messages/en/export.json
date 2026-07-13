@@ -13,6 +13,8 @@
   },
   "batchDescription": "Pick the sessions to bundle into a single ZIP archive.",
   "batchTitle": "Bulk export",
+  "downloadPng": "Download image (PNG)",
+  "downloadingPng": "Rendering…",
   "exportButton": "Export",
   "exporting": "Exporting…",
   "format": {
@@ -41,9 +43,12 @@
     "includeAllBranches": "Include all branches",
     "includeMetadata": "Include conversation info",
     "includeTimestamps": "Include timestamps",
-    "includeTokens": "Include token usage"
+    "includeTokens": "Include token usage",
+    "includeWallpaper": "Theme wallpaper"
   },
   "optionsLabel": "Options",
+  "pngError": "Failed to render the image. Try again.",
+  "pngTooLong": "This conversation is too long to render as one image — export HTML instead.",
   "singleDescription": "Export \"{title}\" to a file you can share or archive.",
   "singleTitle": "Export conversation",
   "theme": {

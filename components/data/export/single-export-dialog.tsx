@@ -17,6 +17,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { useSingleExport } from "@/hooks/data/use-single-export"
+import { notifyExportOutcome } from "@/lib/files/export-feedback"
 import {
   Select,
   SelectContent,
@@ -24,15 +26,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useSingleExport } from "@/hooks/data/use-single-export"
-import { notifyExportOutcome } from "@/lib/files/export-feedback"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
+import { ThemeGallery } from "@/components/share/theme-gallery"
 import { buildChatSharePayload } from "@/lib/share/chat-export"
 import { InteractivePageDialog } from "@/components/a2ui/from-execution/interactive-page-dialog"
+import { downloadBlob } from "@/lib/files/download"
 import { getDb } from "@/lib/db/schema"
-import { Link2Icon, LayoutDashboardIcon } from "lucide-react"
+import { Link2Icon, LayoutDashboardIcon, ImageDownIcon } from "lucide-react"
 import { CustomThemeEditor } from "./custom-theme-editor"
-import { THEME_LIST, type ThemeId } from "@/lib/export/html/syntax-themes"
+import { type ThemeId } from "@/lib/export/html/syntax-themes"
+import { themeHasWallpaper, resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { useCustomThemeStore } from "@/stores/theme"
 import type { ChatSession } from "@/lib/claude/types"
 import type { SingleExportFormat } from "@/lib/export/single"
@@ -67,6 +70,9 @@ export function SingleExportDialog({
   const [includeTimestamps, setIncludeTimestamps] = useState(true)
   const [includeTokens, setIncludeTokens] = useState(false)
   const [includeAllBranches, setIncludeAllBranches] = useState(false)
+  const [withWallpaper, setWithWallpaper] = useState(false)
+  const [downloadingPng, setDownloadingPng] = useState(false)
+  const [pngError, setPngError] = useState<string | null>(null)
   const customTheme = useCustomThemeStore((s) =>
     customThemeId
       ? (s.themes.find((th) => th.id === customThemeId)?.tokens ?? undefined)
@@ -86,6 +92,7 @@ export function SingleExportDialog({
       includeMetadata,
       includeTimestamps,
       includeTokens,
+      withWallpaper,
       includeAllBranches,
     })
     if (outcome.kind === "saved") {
@@ -98,6 +105,51 @@ export function SingleExportDialog({
       log.error("single-export-failed", { sessionId: session.id, format, error: outcome.message })
     }
     notifyExportOutcome(outcome, { t, shareTitle: session.title })
+  }
+
+  const onDownloadPng = async () => {
+    setDownloadingPng(true)
+    setPngError(null)
+    try {
+      const messages = await getDb()
+        .messages.where("sessionId")
+        .equals(session.id)
+        .sortBy("createdAt")
+      const wallpaperDataUrl = await resolveThemeWallpaper(theme, withWallpaper)
+      const { renderChatToPng, ChatPngTooLongError } = await import("@/lib/export/html/chat-png")
+      try {
+        const blob = await renderChatToPng({
+          session,
+          messages,
+          exportedAt: new Date(),
+          theme,
+          customTheme,
+          includeMetadata,
+          includeTimestamps,
+          wallpaperDataUrl,
+        })
+        const slug =
+          session.title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "") || "conversation"
+        downloadBlob(blob, `${slug}.png`)
+      } catch (e) {
+        if (e instanceof ChatPngTooLongError) {
+          setPngError(t("pngTooLong"))
+        } else {
+          throw e
+        }
+      }
+    } catch (e) {
+      log.error("single-export-png-failed", {
+        sessionId: session.id,
+        error: e instanceof Error ? e.message : String(e),
+      })
+      setPngError(t("pngError"))
+    } finally {
+      setDownloadingPng(false)
+    }
   }
 
   return (
@@ -137,19 +189,18 @@ export function SingleExportDialog({
             <>
               <div className="space-y-1">
                 <Label className="text-xs">{t("themeLabel")}</Label>
-                <Select value={theme} onValueChange={(v) => setTheme(v as ThemeId)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {THEME_LIST.map((th) => (
-                      <SelectItem key={th.id} value={th.id}>
-                        {th.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <ThemeGallery value={theme} onChange={setTheme} />
               </div>
+              {themeHasWallpaper(theme) && (
+                <label className="flex items-center justify-between text-sm">
+                  <span>{t("options.includeWallpaper")}</span>
+                  <Switch
+                    checked={withWallpaper}
+                    onCheckedChange={setWithWallpaper}
+                    data-testid="export-wallpaper"
+                  />
+                </label>
+              )}
               <CustomThemeEditor
                 selectedId={customThemeId}
                 builtInBase={theme}
@@ -179,9 +230,21 @@ export function SingleExportDialog({
               </label>
             )}
           </div>
+          {pngError && <p className="text-xs text-destructive">{pngError}</p>}
         </div>
 
         <DialogFooter>
+          {isHtml && (
+            <Button
+              variant="outline"
+              onClick={() => void onDownloadPng()}
+              disabled={downloadingPng}
+              data-testid="export-download-png"
+            >
+              <ImageDownIcon className="mr-1.5 size-4" />
+              {downloadingPng ? t("downloadingPng") : t("downloadPng")}
+            </Button>
+          )}
           <InteractivePageDialog
             source={async () => ({
               kind: "conversation",
@@ -208,6 +271,7 @@ export function SingleExportDialog({
                 includeMetadata,
                 includeTimestamps,
                 includeTokens,
+                withWallpaper,
               })
             }
             trigger={

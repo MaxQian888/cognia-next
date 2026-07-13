@@ -13,6 +13,8 @@
   },
   "batchDescription": "选择要打包到一个 ZIP 中的会话。",
   "batchTitle": "批量导出",
+  "downloadPng": "下载图片（PNG）",
+  "downloadingPng": "渲染中…",
   "exportButton": "导出",
   "exporting": "导出中…",
   "format": {
@@ -41,9 +43,12 @@
     "includeAllBranches": "包含所有分支",
     "includeMetadata": "包含会话信息",
     "includeTimestamps": "包含时间戳",
-    "includeTokens": "包含令牌用量"
+    "includeTokens": "包含令牌用量",
+    "includeWallpaper": "主题壁纸"
   },
   "optionsLabel": "选项",
+  "pngError": "图片渲染失败，请重试。",
+  "pngTooLong": "此会话过长，无法渲染为单张图片——请改用 HTML 导出。",
   "singleDescription": "将“{title}”导出为可分享或归档的文件。",
   "singleTitle": "导出会话",
   "theme": {
