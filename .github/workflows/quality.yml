@@ -58,6 +58,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # ADR-0068 C2 — restore the incremental-typecheck state so `pnpm
+      # typecheck` on a small PR re-checks only what changed. *.tsbuildinfo is
+      # gitignored, so without this cache every CI typecheck is a cold full
+      # program check. The buildinfo is advisory: stale or missing simply
+      # falls back to a full check. Same key shape as the Next.js build cache
+      # in test.yml (lockfile hash + source hash, lockfile-only restore key).
+      - name: Cache TypeScript incremental state
+        uses: actions/cache@v5
+        with:
+          path: |
+            tsconfig.tsbuildinfo
+            tsconfig.build.tsbuildinfo
+          key: ${{ runner.os }}-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.ts', '**/*.tsx') }}
+          restore-keys: |
+            ${{ runner.os }}-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml') }}-
+
       - name: Run ESLint
         run: pnpm lint
 

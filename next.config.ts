@@ -126,8 +126,17 @@ const nextConfig: NextConfig = {
   // artifacts that never enter the static export, so a broken story must not
   // fail the production build. `pnpm typecheck` still uses the root tsconfig and
   // type-checks stories. See `tsconfig.build.json`.
+  //
+  // ADR-0068 C1 — `ignoreBuildErrors` skips the in-build tsc pass entirely.
+  // `next build` used to full-check the ~9k-file program cold on every build,
+  // duplicating the `pnpm typecheck` gate that CI's quality job and the local
+  // workflow already run. SWC does the actual compilation either way, so this
+  // changes build time only, never the emitted `out/` that Tauri and
+  // Capacitor consume. The type gate stays enforced by
+  // `.github/workflows/quality.yml` → `pnpm typecheck`.
   typescript: {
     tsconfigPath: "tsconfig.build.json",
+    ignoreBuildErrors: true,
   },
   // Barrel-import optimization. These packages re-export hundreds of symbols
   // from a single entry; without this, both Turbopack (dev) and webpack

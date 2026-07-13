@@ -17,6 +17,8 @@ import { existsSync, statSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { newestMtimeMs } from "./lib/newest-mtime.mjs"
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const sidecarRoot = join(__dirname, "..", "..", "sidecar", "vscode-ext-host")
 const installOnly = process.argv.includes("--install-only")
@@ -68,6 +70,20 @@ function main() {
 
   if (installOnly) {
     process.stdout.write("[build-vscode-ext-host-sidecar] install-only mode; skipping tsc\n")
+    return
+  }
+
+  // ADR-0068 C4 — skip the (previously unconditional) tsc when dist is
+  // already newer than every source input, mirroring copy-monaco-assets.mjs's
+  // freshness skip. Sources = src/**/* plus the root-level build inputs
+  // (package.json / tsconfig.json) that change the output.
+  const distMain = join(sidecarRoot, "dist", "host.js")
+  const newestSrc = Math.max(
+    newestMtimeMs(join(sidecarRoot, "src")),
+    newestMtimeMs(sidecarRoot, { exts: [".json"] }),
+  )
+  if (existsSync(distMain) && newestSrc > 0 && statSync(distMain).mtimeMs > newestSrc) {
+    process.stdout.write("[build-vscode-ext-host-sidecar] dist up to date; skipping tsc\n")
     return
   }
 
