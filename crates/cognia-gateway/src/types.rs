@@ -118,7 +118,7 @@ impl Default for GatewayConfig {
 
 impl GatewayConfig {
     pub fn validate(&self) -> Result<(), GatewayError> {
-        crate::remote_control::allowlist::ParsedAllowlist::parse(&self.allowlist)
+        cognia_remote_control::allowlist::ParsedAllowlist::parse(&self.allowlist)
             .map_err(GatewayError::InvalidConfig)?;
         if self.rate_limit_per_min == 0 {
             return Err(GatewayError::InvalidConfig(

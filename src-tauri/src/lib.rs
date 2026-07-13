@@ -33,7 +33,9 @@ mod fonts;
 // ADR-0067 — extracted to `crates/cognia-core`; re-aliased so `crate::fs_atomic`
 // (fleet, ccswitch, automation, top-level modules) resolves unchanged.
 pub use cognia_core::fs_atomic;
-mod gateway;
+// ADR-0067 follow-up — extracted to `crates/cognia-gateway`; re-aliased so
+// `gateway::…` (generate_handler! + .manage()) resolves unchanged.
+pub use cognia_gateway as gateway;
 // ADR-0067 Phase 2 — extracted to `crates/cognia-git`; re-aliased so every
 // `crate::git::…` reference (incl. `generate_handler!` + `.manage()`) resolves.
 pub use cognia_git as git;

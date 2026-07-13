@@ -5,7 +5,7 @@
 //! models, given an expiry, its own rate limit, and an enable/disable toggle.
 //!
 //! The whole list (secrets included) is persisted as one JSON blob in the
-//! OS-keyring-backed [`crate::secret_store`] — the same place the old single
+//! OS-keyring-backed [`cognia_secrets::secret_store`] — the same place the old single
 //! token lived. Secrets never touch the plaintext config file, are never
 //! logged, and are only returned to the renderer on an explicit reveal.
 //!
@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 
-use crate::secret_store;
+use cognia_secrets::secret_store;
 
 const SERVICE: &str = "com.cognia.gateway";
 const KEYS_ACCOUNT: &str = "api-keys";

@@ -550,9 +550,10 @@ impl ExecBackend for ContainerBackend {
 // ---------------------------------------------------------------------------
 
 /// Resolve the exec backend from `COGNIA_EXEC_BACKEND`. `container` requires
-/// the `container-exec` build feature AND a reachable daemon config — a T2
-/// deployment that cannot spawn runners must fail at boot, not degrade into
-/// running dev agents inside the server container.
+/// the `container-exec` build feature AND a reachable daemon config;
+/// `kubernetes` requires `k8s-exec` + in-cluster config — a T2/T3 deployment
+/// that cannot spawn runners must fail at boot, not degrade into running dev
+/// agents inside the server container.
 pub fn exec_backend_from_env() -> Result<Arc<dyn ExecBackend>, String> {
     match std::env::var(EXEC_BACKEND_ENV).ok().as_deref() {
         Some("container") => {
@@ -566,6 +567,25 @@ pub fn exec_backend_from_env() -> Result<Arc<dyn ExecBackend>, String> {
             {
                 Err(format!(
                     "{EXEC_BACKEND_ENV}=container but this binary was built without the `container-exec` feature"
+                ))
+            }
+        }
+        Some("kubernetes") => {
+            #[cfg(feature = "k8s-exec")]
+            {
+                let config = ContainerBackendConfig::from_env()?;
+                if config.workspaces_volume.is_none() {
+                    return Err(format!(
+                        "{WORKSPACES_VOLUME_ENV} must name the workspaces PVC in kubernetes exec mode"
+                    ));
+                }
+                let api = super::kube_backend::kube_api::KubeContainerApi::connect()?;
+                Ok(ContainerBackend::new(api, config))
+            }
+            #[cfg(not(feature = "k8s-exec"))]
+            {
+                Err(format!(
+                    "{EXEC_BACKEND_ENV}=kubernetes but this binary was built without the `k8s-exec` feature"
                 ))
             }
         }
@@ -1376,6 +1396,10 @@ mod tests {
         // error (no image env set here) — either way container mode never
         // silently degrades to local processes.
         std::env::remove_var(RUNNER_IMAGE_ENV);
+        assert!(exec_backend_from_env().is_err());
+        // Same contract for the kubernetes flavor (feature `k8s-exec` /
+        // missing config): loud failure, no silent local-process fallback.
+        std::env::set_var(EXEC_BACKEND_ENV, "kubernetes");
         assert!(exec_backend_from_env().is_err());
         std::env::remove_var(EXEC_BACKEND_ENV);
     }

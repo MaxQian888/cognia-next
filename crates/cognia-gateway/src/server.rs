@@ -37,8 +37,8 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{oneshot, watch};
 use tower_http::limit::RequestBodyLimitLayer;
 
-use crate::remote_control::allowlist::ParsedAllowlist;
-use crate::remote_control::rate_limit::FixedWindowRateLimiter;
+use cognia_remote_control::allowlist::ParsedAllowlist;
+use cognia_remote_control::rate_limit::FixedWindowRateLimiter;
 
 use super::api_keys::{self, GatewayApiKey};
 use super::execute::{
@@ -472,7 +472,7 @@ async fn openai_embeddings(
     Extension(ctx): Extension<ReqCtx>,
     Json(body): Json<Value>,
 ) -> Response {
-    let _perf = crate::perf::guard("gateway.embeddings");
+    let _perf = cognia_instrument::guard("gateway.embeddings");
     let format = InboundFormat::OpenAiChat;
     let cfg = state.config.read().clone();
     let snapshot = state.snapshot.read().clone();
@@ -617,7 +617,7 @@ async fn openai_responses(
     Extension(ctx): Extension<ReqCtx>,
     Json(body): Json<Value>,
 ) -> Response {
-    let _perf = crate::perf::guard("gateway.responses");
+    let _perf = cognia_instrument::guard("gateway.responses");
     let format = InboundFormat::OpenAiChat;
     let cfg = state.config.read().clone();
 
@@ -947,7 +947,7 @@ async fn live_decision(
 }
 
 async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: Value) -> Response {
-    let _perf = crate::perf::guard("gateway.chat");
+    let _perf = cognia_instrument::guard("gateway.chat");
     let cfg = state.config.read().clone();
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {

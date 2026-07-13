@@ -1873,6 +1873,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-gateway"
+version = "0.1.0"
+dependencies = [
+ "axum 0.8.9",
+ "bytes",
+ "chrono",
+ "cognia-instrument",
+ "cognia-remote-control",
+ "cognia-secrets",
+ "futures-util",
+ "log",
+ "parking_lot",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tauri",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower 0.5.3",
+ "tower-http",
+ "uuid",
+]
+
+[[package]]
 name = "cognia-git"
 version = "0.1.0"
 dependencies = [
@@ -1940,6 +1966,7 @@ dependencies = [
  "cognia-automation",
  "cognia-connectors",
  "cognia-core",
+ "cognia-gateway",
  "cognia-git",
  "cognia-instrument",
  "cognia-net",
