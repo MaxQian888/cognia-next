@@ -71,7 +71,10 @@ mod session_import;
 mod session_import_watch;
 mod settings;
 mod shell;
-mod skills;
+// ADR-0067 follow-up — extracted to `crates/cognia-skills` (zero coupling);
+// re-aliased so `crate::skills::…` (companion_api rpc + generate_handler!)
+// resolves unchanged.
+pub use cognia_skills as skills;
 mod subscription;
 mod supervision_backoff;
 // ADR-0067 Tier B — extracted to `crates/cognia-terminal`; re-aliased so

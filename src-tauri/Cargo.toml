@@ -87,6 +87,8 @@ cognia-connectors = { path = "../crates/cognia-connectors" }
 # `crate::plugin_api`; the vscode LSP host's sidecar-dir resolver is
 # registered from run().
 cognia-plugin-runtime = { path = "../crates/cognia-plugin-runtime" }
+# ADR-0067 follow-up — skills subsystem. Re-aliased as `crate::skills`.
+cognia-skills = { path = "../crates/cognia-skills" }
 # ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
 # uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/

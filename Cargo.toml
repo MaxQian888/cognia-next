@@ -44,6 +44,8 @@ members = [
   "crates/cognia-subscription",
   "crates/cognia-connectors",
   "crates/cognia-plugin-runtime",
+  # ADR-0067 follow-up — remaining subsystem leaves.
+  "crates/cognia-skills",
 ]
 exclude = [
   "services/signaling-server",
