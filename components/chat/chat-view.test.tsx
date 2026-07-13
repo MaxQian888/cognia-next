@@ -21,7 +21,7 @@ jest.mock("./character-missing-banner", () => ({
   CharacterMissingBanner: () => null,
 }))
 jest.mock("./empty-state", () => ({ EmptyChatState: jest.fn(() => null) }))
-jest.mock("./inline-error", () => ({ InlineError: () => null }))
+jest.mock("./inline-error", () => ({ InlineError: jest.fn(() => null) }))
 jest.mock("./message-list", () => ({
   MessageList: jest.fn(() => null),
 }))
@@ -93,6 +93,8 @@ import { render } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
 import { MessageList } from "./message-list"
+import { InlineError } from "./inline-error"
+import { SIDECAR_EXITED_ERROR } from "@/hooks/chat/use-claude-chat"
 import type { ChatSession, SendContent } from "@cognia/agent-config-types"
 
 const mockSession = { id: "s1", title: "Test" } as unknown as ChatSession
@@ -142,6 +144,37 @@ describe("ChatPane", () => {
     const second = MockList.mock.calls[0]?.[0]?.onRegenerate
 
     expect(first).toBe(second)
+  })
+
+  it("maps the sidecar-exited sentinel error to a localized message", () => {
+    const MockInlineError = InlineError as jest.Mock
+    MockInlineError.mockClear()
+    storeState.errorMessage = SIDECAR_EXITED_ERROR
+    try {
+      render(<ChatPane {...makeProps()} />)
+      // next-intl mock returns the key, so the mapped message is the i18n key.
+      expect(MockInlineError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "sidecarExited" }),
+        undefined
+      )
+    } finally {
+      storeState.errorMessage = null
+    }
+  })
+
+  it("passes any other error message through unchanged", () => {
+    const MockInlineError = InlineError as jest.Mock
+    MockInlineError.mockClear()
+    storeState.errorMessage = "network down"
+    try {
+      render(<ChatPane {...makeProps()} />)
+      expect(MockInlineError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "network down" }),
+        undefined
+      )
+    } finally {
+      storeState.errorMessage = null
+    }
   })
 
   it("passes stable onEditResend reference when prop is unchanged", () => {

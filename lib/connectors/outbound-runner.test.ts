@@ -15,9 +15,16 @@
  */
 
 import "fake-indexeddb/auto"
+// Delegate to the real outbound-jobs module by default so every existing test
+// keeps its real DB behavior; a single test overrides `markSending` once to
+// simulate losing the atomic claim to another runner.
+jest.mock("@/lib/db/outbound-jobs", () => {
+  const real = jest.requireActual("@/lib/db/outbound-jobs")
+  return { ...real, markSending: jest.fn((id: string) => real.markSending(id)) }
+})
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueOutbound, markSending } from "@/lib/db/outbound-jobs"
 import { listRecent } from "@/lib/db/connector-audit"
 import {
   __resetAdapterRuntimeStateForTesting,
@@ -212,6 +219,27 @@ describe("outbound-runner — successful delivery", () => {
 
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "delivery.success")).toBe(true)
+  })
+
+  it("yields the job without sending when it loses the atomic claim to another runner", async () => {
+    const adapterId = "a_lost_claim"
+    const send = jest.fn(async () => ({ ok: true, platformMessageId: "pm_x" }))
+    const adapter = makeAdapter(adapterId, send)
+    const adapters = new Map([[adapterId, adapter]])
+    const realMarkSending = jest.requireActual("@/lib/db/outbound-jobs").markSending
+
+    await enqueue(adapterId, `telegram:${adapterId}:chat`)
+    // Another runner owns this job for the whole pass → every claim attempt loses.
+    ;(markSending as jest.Mock).mockImplementation(async () => false)
+
+    try {
+      await runOnce(adapters)
+      // The runner must NOT send a job it did not claim.
+      expect(send).not.toHaveBeenCalled()
+    } finally {
+      // Restore the delegating default so later tests keep real DB behavior.
+      ;(markSending as jest.Mock).mockImplementation((id: string) => realMarkSending(id))
+    }
   })
 
   it("clears the response-SLA deadline (markResponded) on successful delivery", async () => {

@@ -214,6 +214,49 @@ describe("agent-team account storage buckets", () => {
     expect(localStorage.getItem("cognia-agent-teams:acct_a")).toContain("team_a")
   })
 
+  it("resets a phantom running team to idle on an account switch", () => {
+    // A team persisted mid-run (no live controller survives a switch) must not
+    // rehydrate as if it were still executing.
+    localStorage.setItem(
+      "cognia-agent-teams:acct_a",
+      JSON.stringify({
+        state: {
+          teams: { team_a: { ...persistedTeam("team_a", "Alpha"), status: "executing" } },
+        },
+      })
+    )
+
+    activateAgentTeamAccountStorage("acct_a")
+    expect(useAgentTeamStore.getState().teams.team_a?.status).toBe("idle")
+  })
+})
+
+describe("agent-team onRehydrateStorage stale-status reset", () => {
+  it("resets planning/executing/paused teams to idle on rehydrate; leaves terminal ones", async () => {
+    localStorage.setItem(
+      "cognia-agent-teams",
+      JSON.stringify({
+        version: 6,
+        state: {
+          teams: {
+            t_exec: { ...persistedTeam("t_exec", "Exec"), status: "executing" },
+            t_plan: { ...persistedTeam("t_plan", "Plan"), status: "planning" },
+            t_paused: { ...persistedTeam("t_paused", "Paused"), status: "paused" },
+            t_done: { ...persistedTeam("t_done", "Done"), status: "completed" },
+          },
+        },
+      })
+    )
+
+    await useAgentTeamStore.persist.rehydrate()
+
+    const teams = useAgentTeamStore.getState().teams
+    expect(teams.t_exec?.status).toBe("idle")
+    expect(teams.t_plan?.status).toBe("idle")
+    expect(teams.t_paused?.status).toBe("idle")
+    expect(teams.t_done?.status).toBe("completed")
+  })
+
   it("purges only the requested account bucket", () => {
     localStorage.setItem("cognia-agent-teams:acct_a", "A")
     localStorage.setItem("cognia-agent-teams:acct_b", "B")
