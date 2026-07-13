@@ -46,7 +46,7 @@ describe("DesktopOnlyInitializers", () => {
     })
     // Mirrors the count of gated children in the component — a guard against
     // silently dropping one when the list changes.
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(15)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(17)
   })
 
   it.each(["overlay", "popup"] as const)(

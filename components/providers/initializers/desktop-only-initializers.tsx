@@ -116,6 +116,11 @@ const CrashReportDialog = dynamic(
   () => import("@/components/desktop/crash-report-dialog").then((m) => m.CrashReportDialog),
   { ssr: false }
 )
+const CodeAdoptionTrackerInitializer = dynamic(
+  () =>
+    import("./code-adoption-tracker-initializer").then((m) => m.CodeAdoptionTrackerInitializer),
+  { ssr: false }
+)
 
 export function DesktopOnlyInitializers() {
   const isClient = useIsClient()
@@ -150,6 +155,7 @@ export function DesktopOnlyInitializers() {
       <CliBridgeEventsBridge />
       <ExitConfirmationDialog />
       <CrashReportDialog />
+      <CodeAdoptionTrackerInitializer />
     </>
   )
 }

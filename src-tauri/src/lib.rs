@@ -17,6 +17,7 @@ mod capture;
 pub use cognia_ccswitch as ccswitch;
 mod claude;
 mod cli_bridge;
+mod code_adoption;
 // ADR-0067 Phase 6 — extracted to cognia-core; re-aliased so `crate::command_error`
 // (claude, logging, plugin_api/vscode, top-level) resolves unchanged.
 pub use cognia_core::command_error;
@@ -852,6 +853,7 @@ pub fn run() {
             connectors::commands::connectors_attachment_fetch,
             connectors::commands::connectors_attachment_read,
             connectors::commands::connectors_media_upload,
+            connectors::commands::connectors_discord_upload,
             connectors::commands::connectors_matrix_crypto_init,
             connectors::commands::connectors_matrix_crypto_outgoing_requests,
             connectors::commands::connectors_matrix_crypto_mark_request_sent,
@@ -1056,6 +1058,8 @@ pub fn run() {
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,
             twin::code_repo::twin_parse_git_repo,
+            code_adoption::commands::code_adoption_turn_begin,
+            code_adoption::commands::code_adoption_turn_end,
             github::workspace::github_workspace_clone,
             github::workspace::github_workspace_commit_and_push,
             github::workspace::github_workspace_remove,

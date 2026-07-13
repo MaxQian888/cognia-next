@@ -2340,6 +2340,14 @@ export class CogniaDB extends Dexie {
     //   The field is a filter-only JSON blob read from rows fetched by
     //   primary key, so the bump is `stores({})`.
     this.version(107).stores({})
+
+    // v108 — Local code-adoption tracking (per-turn write-attribution metrics).
+    // See `lib/code-adoption/` and the 2026-07-13 design spec. Local-only:
+    // intentionally NOT registered in `lib/sync` (SyncableTable /
+    // DEFAULT_HANDLERS), so it never leaves the device. Pure additive.
+    this.version(108).stores({
+      codeAdoptionTurns: "&id, runId, sessionId, workspaceRoot, ts, [sessionId+ts]",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -2404,6 +2412,8 @@ export class CogniaDB extends Dexie {
   gatewayRequestLog!: Table<import("@/types/gateway").GatewayRequestLogRow, string>
   // v101 — Optical-compaction archives (ADR-0063). See `lib/db/optical-archives.ts`.
   opticalArchives!: Table<import("./optical-archives").OpticalArchiveRow, string>
+  // v108 — Local code-adoption tracking (write-attribution). See `lib/code-adoption/types.ts`.
+  codeAdoptionTurns!: Table<import("@/lib/code-adoption/types").CodeAdoptionTurnRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated
@@ -2448,6 +2458,18 @@ let _yieldChannel: BroadcastChannel | null = null
 let _tauriYieldListening = false
 let _tauriYieldUnlisten: (() => void) | null = null
 let _yieldOrigin: string | null = null
+/** Stops the in-flight blocked-open re-nudge loop, if any (see getDb). */
+let _stopBlockedRetry: (() => void) | null = null
+
+/** Interval between yield re-nudges while a schema upgrade stays blocked. */
+const BLOCKED_RENUDGE_INTERVAL_MS = 750
+/**
+ * Cap on re-nudges before giving up. ~15s at the interval above — long enough
+ * for a still-booting overlay window to register its yield listener and close,
+ * short enough that a genuinely stuck open fails loudly instead of nudging
+ * forever.
+ */
+const BLOCKED_RENUDGE_MAX_ATTEMPTS = 20
 
 /**
  * Cross-context yield coordination for schema upgrades.
@@ -2568,6 +2590,40 @@ function requestOtherConnectionsToYield(dbName: string): void {
   emitTauriYield(message)
 }
 
+/**
+ * Keep asking other contexts to yield while a schema-upgrade open stays blocked.
+ *
+ * Native `blocked` fires ONCE. But a holder window that opens its base-version
+ * connection — or registers its yield listener — AFTER that single nudge (or
+ * drops the cross-window Tauri event, which is unreliable on WKWebView) keeps us
+ * blocked forever: `db.open()` never resolves and boot hangs on the loading
+ * spinner with an idle CPU. Re-emit on an interval so a late/racing holder still
+ * hears us, capped so a genuinely stuck open gives up loudly (`onGiveUp`) rather
+ * than nudging forever.
+ *
+ * Returns a stop handle to call the moment the open succeeds (`ready`) or the
+ * connection is torn down (`closeCachedDb`). Exported for unit testing the
+ * cadence in isolation from a real IndexedDB block.
+ */
+export function startBlockedYieldRetry(
+  nudge: () => void,
+  options: { intervalMs?: number; maxAttempts?: number; onGiveUp?: () => void } = {}
+): () => void {
+  const intervalMs = options.intervalMs ?? BLOCKED_RENUDGE_INTERVAL_MS
+  const maxAttempts = options.maxAttempts ?? BLOCKED_RENUDGE_MAX_ATTEMPTS
+  let attempts = 0
+  const timer = setInterval(() => {
+    attempts += 1
+    if (attempts > maxAttempts) {
+      clearInterval(timer)
+      options.onGiveUp?.()
+      return
+    }
+    nudge()
+  }, intervalMs)
+  return () => clearInterval(timer)
+}
+
 export function activateAccountDatabase(accountId: string): void {
   const nextName = accountDatabaseName(accountId)
   if (_activeDatabaseName === nextName && _db?.name === nextName) return
@@ -2613,6 +2669,29 @@ export function getDb(): CogniaDB {
         "[db] schema upgrade is waiting for another connection (tab or plugin) to close; it will proceed automatically."
       )
       requestOtherConnectionsToYield(opened.name)
+      // `blocked` fires once, but an overlay window (desktop pet / fleet island /
+      // a second tab) that opens or registers its yield listener AFTER this
+      // nudge — or drops the unreliable cross-window Tauri event — would hold the
+      // old version forever and hang boot on the loading spinner. Keep nudging
+      // until the upgrade proceeds (the `ready` handler stops us) or the cap is
+      // hit, so a stuck open surfaces loudly instead of spinning silently.
+      _stopBlockedRetry?.()
+      _stopBlockedRetry = startBlockedYieldRetry(
+        () => requestOtherConnectionsToYield(opened.name),
+        {
+          onGiveUp: () => {
+            _stopBlockedRetry = null
+            console.error(
+              "[db] schema upgrade still blocked after retries — another window (desktop pet / fleet island / a second tab) is holding an older database version open. Close the extra window or restart the app."
+            )
+          },
+        }
+      )
+    })
+    // The upgrade landed (or the db opened cleanly): stop any pending re-nudge.
+    _db.on("ready", () => {
+      _stopBlockedRetry?.()
+      _stopBlockedRetry = null
     })
     const seedTarget = _db
     // Kick off seeding once per process. We import lazily to avoid a circular
@@ -2671,6 +2750,8 @@ export function __resetDbForTesting(): void {
 }
 
 function closeCachedDb(): void {
+  _stopBlockedRetry?.()
+  _stopBlockedRetry = null
   _db?.close()
   _db = null
   _seedPromise = null

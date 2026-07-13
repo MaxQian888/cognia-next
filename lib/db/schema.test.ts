@@ -13,6 +13,7 @@ import {
   backfillRootsForRow,
   clearAccountDatabaseSelection,
   getDb,
+  startBlockedYieldRetry,
   whenSeeded,
 } from "./schema"
 import type { OutboundJobRow } from "./connector-types"
@@ -176,6 +177,53 @@ describe("getDb", () => {
     expect(db.pluginDexieMeta).toBeDefined()
     // v49 — Inbox telemetry ring buffer.
     expect(db.inboxTelemetryEvents).toBeDefined()
+    // v108 — Local code-adoption tracking.
+    expect(db.codeAdoptionTurns).toBeDefined()
+  })
+
+  it("v108 stores a code-adoption turn and resolves its indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(108)
+    await db.codeAdoptionTurns.bulkPut([
+      {
+        id: "s1:1",
+        runId: 1,
+        sessionId: "s1",
+        workspaceRoot: "/repo",
+        agentKind: "in-app",
+        model: "opus",
+        ts: 100,
+        totalFiles: 1,
+        totalAdded: 3,
+        totalRemoved: 0,
+        files: [{ path: "a.ts", added: 3, removed: 0, isNew: true, hunks: [[1, 3]] }],
+        truncated: false,
+      },
+      {
+        id: "s1:2",
+        runId: 2,
+        sessionId: "s1",
+        workspaceRoot: "/repo",
+        agentKind: "in-app",
+        model: "opus",
+        ts: 200,
+        totalFiles: 0,
+        totalAdded: 0,
+        totalRemoved: 0,
+        files: [],
+        truncated: false,
+      },
+    ])
+    expect(await db.codeAdoptionTurns.where("sessionId").equals("s1").count()).toBe(2)
+    expect(await db.codeAdoptionTurns.where("runId").equals(2).count()).toBe(1)
+    expect(await db.codeAdoptionTurns.where("workspaceRoot").equals("/repo").count()).toBe(2)
+    expect(
+      await db.codeAdoptionTurns
+        .where("[sessionId+ts]")
+        .between(["s1", 150], ["s1", 300])
+        .count()
+    ).toBe(1)
   })
 
   // v49 — Inbox optimization pass: messages.platformMessageId index + new
@@ -2837,5 +2885,67 @@ describe("schema seed error handling isolation", () => {
     })
     jest.dontMock("./seed")
     jest.resetModules()
+  })
+})
+
+// The `blocked` recovery cadence for a schema upgrade that a stale overlay
+// connection is holding open. Exercised in isolation from a real IndexedDB
+// block: fake timers drive the interval; the getDb glue that starts/stops it is
+// thin.
+describe("startBlockedYieldRetry", () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+  afterEach(() => {
+    jest.runOnlyPendingTimers()
+    jest.useRealTimers()
+  })
+
+  it("re-nudges on an interval while the open stays blocked", () => {
+    const nudge = jest.fn()
+    startBlockedYieldRetry(nudge, { intervalMs: 100, maxAttempts: 20 })
+    expect(nudge).not.toHaveBeenCalled() // no immediate nudge; the caller sent the first
+    jest.advanceTimersByTime(100)
+    expect(nudge).toHaveBeenCalledTimes(1)
+    jest.advanceTimersByTime(250)
+    expect(nudge).toHaveBeenCalledTimes(3)
+  })
+
+  it("stops nudging once the returned handle is called (open became ready)", () => {
+    const nudge = jest.fn()
+    const stop = startBlockedYieldRetry(nudge, { intervalMs: 100, maxAttempts: 20 })
+    jest.advanceTimersByTime(100)
+    expect(nudge).toHaveBeenCalledTimes(1)
+    stop()
+    jest.advanceTimersByTime(1000)
+    expect(nudge).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses the default interval and cap when no options are supplied", () => {
+    const nudge = jest.fn()
+    startBlockedYieldRetry(nudge)
+    jest.advanceTimersByTime(749)
+    expect(nudge).not.toHaveBeenCalled()
+    jest.advanceTimersByTime(1) // 750ms — the default interval
+    expect(nudge).toHaveBeenCalledTimes(1)
+    // Default cap is 20 nudges; the 21st tick gives up and stops.
+    jest.advanceTimersByTime(750 * 25)
+    expect(nudge).toHaveBeenCalledTimes(20)
+  })
+
+  it("gives up after the cap, firing onGiveUp once and nudging no further", () => {
+    const nudge = jest.fn()
+    const onGiveUp = jest.fn()
+    startBlockedYieldRetry(nudge, { intervalMs: 100, maxAttempts: 3, onGiveUp })
+    jest.advanceTimersByTime(300)
+    expect(nudge).toHaveBeenCalledTimes(3)
+    expect(onGiveUp).not.toHaveBeenCalled()
+    // The 4th tick exceeds the cap: give up, no further nudge.
+    jest.advanceTimersByTime(100)
+    expect(onGiveUp).toHaveBeenCalledTimes(1)
+    expect(nudge).toHaveBeenCalledTimes(3)
+    jest.advanceTimersByTime(500)
+    expect(nudge).toHaveBeenCalledTimes(3)
+    expect(onGiveUp).toHaveBeenCalledTimes(1)
   })
 })
