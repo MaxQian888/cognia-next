@@ -3,6 +3,7 @@ import {
   buildSubscribeFrame,
   buildPingFrame,
   buildStreamRespondFrame,
+  buildStreamWithTemplateCardFrame,
   buildMarkdownRespondFrame,
   buildTemplateCardRespondFrame,
   buildWelcomeFrame,
@@ -120,11 +121,56 @@ describe("outbound frame builders", () => {
     expect(f.body).toMatchObject({ chatid: "u_alice", chat_type: 1, msgtype: "markdown" })
   })
 
-  it("builds the 3-step media upload frames", () => {
-    expect(buildMediaInitFrame("r", "a.png", 1024, "image").cmd).toBe("aibot_upload_media_init")
-    expect(buildMediaChunkFrame("r", "up1", 0, "AAAA").body).toMatchObject({
+  it("keys proactive media bodies by msgtype (no generic `media` key)", () => {
+    const f = buildSendMsgFrame("r", {
+      chatid: "u_alice",
+      chat_type: 1,
+      msgtype: "image",
+      image: { media_id: "mid1" },
+    })
+    expect(f.body).toEqual({
+      chatid: "u_alice",
+      chat_type: 1,
+      msgtype: "image",
+      image: { media_id: "mid1" },
+    })
+    expect((f.body as Record<string, unknown>).media).toBeUndefined()
+  })
+
+  it("builds a combined stream_with_template_card frame with finish:true", () => {
+    const card: WeComTemplateCard = {
+      card_type: "button_interaction",
+      button_list: [{ key: "k", text: "Go" }],
+    }
+    const f = buildStreamWithTemplateCardFrame("r", "s1", "final text", card)
+    expect(f.cmd).toBe("aibot_respond_msg")
+    expect(f.body).toEqual({
+      msgtype: "stream_with_template_card",
+      stream: { id: "s1", content: "final text", finish: true },
+      template_card: card,
+    })
+  })
+
+  it("builds the 3-step media upload frames with the protocol field names", () => {
+    const init = buildMediaInitFrame("r", {
+      type: "image",
+      filename: "a.png",
+      totalSize: 1024,
+      totalChunks: 1,
+      md5: "d41d8cd98f00b204e9800998ecf8427e",
+    })
+    expect(init.cmd).toBe("aibot_upload_media_init")
+    expect(init.body).toEqual({
+      type: "image",
+      filename: "a.png",
+      total_size: 1024,
+      total_chunks: 1,
+      md5: "d41d8cd98f00b204e9800998ecf8427e",
+    })
+    expect(buildMediaChunkFrame("r", "up1", 0, "AAAA").body).toEqual({
       upload_id: "up1",
-      seq: 0,
+      chunk_index: 0,
+      base64_data: "AAAA",
     })
     expect(buildMediaFinishFrame("r", "up1").body).toEqual({ upload_id: "up1" })
   })

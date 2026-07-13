@@ -39,7 +39,7 @@ import { computeDueAt } from "@/lib/connectors/sla"
 import { upsertIdentity } from "@/lib/db/platform-identities"
 import { getCharacter } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
-import { recordAndCheckInbound } from "./dedup"
+import { recordAndCheckInbound, isRecordedInbound } from "./dedup"
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { appendAudit } from "./audit"
 import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
@@ -104,6 +104,22 @@ export type CallbackHandler = (
  */
 const BOT_REPLY_RETENTION_MS = 10 * 60_000
 
+/**
+ * Sliding window the `rate-limit` blocker evaluates over
+ * (`policy-eval.ts:checkBlocker`). The per-user/channel buckets are pruned to
+ * this window on every write so `policyState.recentByUserAndChannel` stays
+ * bounded across long-lived sessions.
+ */
+const RATE_BUCKET_WINDOW_MS = 60_000
+
+/**
+ * Max queued-or-running route-handler turns per conversation. A conversation
+ * whose turns cannot drain (wedged handler, message flood) drops further
+ * inbound turns with an `adapter.error` / `turn_queue_overflow` audit instead
+ * of queueing unboundedly.
+ */
+const MAX_TURN_QUEUE_DEPTH = 10
+
 export class ConnectorBus {
   private adapters = new Map<string, PlatformAdapter>()
   private inboundHandler: BusInboundHandler | null = null
@@ -144,6 +160,23 @@ export class ConnectorBus {
     recentBotReplyAtByConversation: {},
     recentByUserAndChannel: {},
   }
+
+  /**
+   * Per-conversation FIFO of route-handler turns. The route handler runs the
+   * ENTIRE model turn (minutes), so it is chained here and NOT awaited by
+   * `dispatchInboundFull` — see `enqueueRouteHandlerTurn`. Entries are removed
+   * when their tail settles, so the map stays bounded by the number of
+   * conversations with in-flight turns.
+   */
+  private turnQueues = new Map<string, { tail: Promise<void>; depth: number }>()
+
+  /**
+   * Trigger ids currently being processed by `dispatchConnectorCallback`.
+   * The persistent ledger is only written on a terminal outcome (so transient
+   * failures stay retryable); this set guards against a double-fire arriving
+   * while the first delivery is still in flight.
+   */
+  private callbackInFlight = new Set<string>()
 
   /**
    * Record that the bot delivered a reply on `conversationKey` at `at`.
@@ -255,8 +288,34 @@ export class ConnectorBus {
    * carry a fresh user message, so they bypass the full pipeline and get
    * applied to the existing StoredMessage directly. They still write an
    * audit row and (where relevant) fire workflow triggers.
+   *
+   * Error containment: adapters call this from their transport for-await
+   * loop (`ctx.emit`), so an exception escaping here would kill the
+   * transport permanently. Any pipeline failure is audited and swallowed.
+   *
+   * The final route-handler step (the model turn) is enqueued per
+   * conversation and NOT awaited — callers get control back as soon as the
+   * synchronous pipeline (dedup → policy → mode-route → control-commands →
+   * audit → workflow fan-out) settles. Tests that assert on turn
+   * side-effects must `await flushInboundTurns()` after dispatching.
    */
   async dispatchInboundFull(event: NormalizedInboundEvent): Promise<void> {
+    try {
+      await this.runInboundPipeline(event)
+    } catch (err) {
+      console.error("[connector-bus] inbound pipeline failed", err)
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: event.conversationKey,
+        reason: "inbound_pipeline_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }).catch(() => undefined)
+    }
+  }
+
+  private async runInboundPipeline(event: NormalizedInboundEvent): Promise<void> {
     const now = Date.now()
 
     // Passive plugin observers see every event up front (read-only tap).
@@ -277,7 +336,15 @@ export class ConnectorBus {
     }
 
     // ── Step 1: dedup ────────────────────────────────────────────────────────
-    const isNew = await recordAndCheckInbound(event.adapterId, event.messageId)
+    // Scoped by conversationKey: Telegram message_id (and Slack ts) are only
+    // unique per CHAT, so deduping on the bare id permanently dropped
+    // legitimate messages whose ids collided across chats.
+    const isNew = await recordAndCheckInbound(
+      event.adapterId,
+      event.messageId,
+      "inbound",
+      event.conversationKey
+    )
     if (!isNew) {
       await appendAudit({
         adapterId: event.adapterId,
@@ -440,10 +507,19 @@ export class ConnectorBus {
     if (evalResult.blocked) {
       // No-op for state — blocked events don't reset cooldowns
     } else {
-      // Update rate-limit bucket
+      // Update the rate-limit bucket, pruning on write to the 60 s window the
+      // `rate-limit` blocker evaluates (mirrors recordBotReply's prune-on-write)
+      // so the map cannot grow without bound across long-lived sessions.
+      const map = this.policyState.recentByUserAndChannel
       const bucketKey = `${event.sender.id}:${event.channel.id}`
-      const existing = this.policyState.recentByUserAndChannel[bucketKey] ?? []
-      this.policyState.recentByUserAndChannel[bucketKey] = [...existing, now]
+      const cutoff = now - RATE_BUCKET_WINDOW_MS
+      map[bucketKey] = [...(map[bucketKey] ?? []).filter((t) => t > cutoff), now]
+      for (const key in map) {
+        if (key === bucketKey) continue
+        const kept = map[key].filter((t) => t > cutoff)
+        if (kept.length === 0) delete map[key]
+        else if (kept.length !== map[key].length) map[key] = kept
+      }
     }
 
     // ── Step 9: audit ─────────────────────────────────────────────────────────
@@ -494,11 +570,22 @@ export class ConnectorBus {
       await maybeSendWelcome(event, adapterRow).catch(() => undefined)
     }
 
-    // ── Step 10: route handler ────────────────────────────────────────────────
+    // ── Step 10: route handler (enqueued per conversation, NOT awaited) ──────
     // Thread the already-fetched adapter + override rows so the runtime's
     // ai-run path reuses them instead of re-reading the same immutable rows.
+    //
+    // The route handler runs the ENTIRE model turn (up to the 15-min connector
+    // turn timeout). Awaiting it here held the adapter's transport for-await
+    // loop hostage: when an ask-tier tool suspended the turn on a HITL
+    // approval, the user's Allow click arrived as another envelope on the SAME
+    // blocked loop, so the approval could only be processed after the TTL
+    // auto-deny — and one slow turn head-of-line-blocked every other
+    // conversation on the adapter. Chaining the turn onto a per-conversation
+    // FIFO preserves same-conversation ordering, lets other conversations run
+    // in parallel, and frees the loop so `dispatchConnectorCallback` (approval
+    // clicks) executes while a turn is suspended.
     if (this.routeHandler && decision !== "drop") {
-      await this.routeHandler(event, decision, resolved, override, adapterRow)
+      this.enqueueRouteHandlerTurn(event, decision, resolved, override, adapterRow)
     }
 
     // ── Step 11: workflow fan-out ────────────────────────────────────────────
@@ -514,6 +601,125 @@ export class ConnectorBus {
     if (!evalResult.blocked && decision !== "drop") {
       await this.fanOutWorkflowTriggers(event)
     }
+  }
+
+  /**
+   * Chain a route-handler turn onto the conversation's FIFO. Depth is capped
+   * at {@link MAX_TURN_QUEUE_DEPTH}; beyond it the turn is dropped with an
+   * `adapter.error` / `turn_queue_overflow` audit. Queue entries are deleted
+   * once their tail settles so the map stays bounded.
+   */
+  private enqueueRouteHandlerTurn(
+    event: NormalizedInboundEvent,
+    decision: RouteDecision,
+    resolved: ResolvedBinding,
+    override: ConversationOverrideRow | null,
+    adapterRow: AdapterInstanceRow
+  ): void {
+    const key = event.conversationKey
+    let queue = this.turnQueues.get(key)
+    if (!queue) {
+      queue = { tail: Promise.resolve(), depth: 0 }
+      this.turnQueues.set(key, queue)
+    }
+    if (queue.depth >= MAX_TURN_QUEUE_DEPTH) {
+      void appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: key,
+        reason: "turn_queue_overflow",
+        message: `dropped inbound turn for message ${event.messageId} (${queue.depth} turns queued)`,
+      }).catch(() => undefined)
+      return
+    }
+    queue.depth += 1
+    const step: Promise<void> = queue.tail
+      .then(() => this.runRouteHandlerTurn(event, decision, resolved, override, adapterRow))
+      .then(() => {
+        // `runRouteHandlerTurn` never rejects (it audits internally), so this
+        // cleanup always runs. Delete the entry only when this step is still
+        // the mapped tail — a later enqueue must not lose its queue.
+        if (this.turnQueues.get(key) !== queue) return
+        queue.depth -= 1
+        if (queue.depth === 0 && queue.tail === step) this.turnQueues.delete(key)
+      })
+    queue.tail = step
+  }
+
+  /** Run one queued turn; a throwing route handler is audited, never rethrown. */
+  private async runRouteHandlerTurn(
+    event: NormalizedInboundEvent,
+    decision: RouteDecision,
+    resolved: ResolvedBinding,
+    override: ConversationOverrideRow | null,
+    adapterRow: AdapterInstanceRow
+  ): Promise<void> {
+    try {
+      await this.routeHandler?.(event, decision, resolved, override, adapterRow)
+    } catch (err) {
+      console.error("[connector-bus] route handler failed", err)
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: event.conversationKey,
+        reason: "route_handler_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }).catch(() => undefined)
+    }
+  }
+
+  /**
+   * Resolve once every queued route-handler turn has settled. Loops until the
+   * queue map quiesces because a running turn may enqueue another (e.g. the
+   * `help_quick_command` synthetic re-entry). Used by tests that assert on
+   * turn side-effects after `dispatchInboundFull`, and safe to call from any
+   * shutdown path that wants to drain in-flight turns.
+   */
+  async flushInboundTurns(): Promise<void> {
+    while (this.turnQueues.size > 0) {
+      await Promise.all(Array.from(this.turnQueues.values(), (q) => q.tail))
+    }
+  }
+
+  /**
+   * Locate the StoredMessage a platform edit/delete event targets, via the
+   * v49 `platformMessageId` index.
+   *
+   * Rows written after the platformMessage scoping fix carry `adapterId` +
+   * `conversationKey` inside `metadata.platformMessage`; both must match the
+   * event, because per-chat message ids (Telegram `message_id`, Slack `ts`)
+   * collide across chats and multi-bot setups collide across adapter
+   * instances — a platform-only match could rewrite the WRONG chat's message.
+   *
+   * Backward compat: legacy rows carry only {messageId, platform, sender},
+   * so requiring the event's adapterId against them is impossible (the row
+   * never stored one) — they keep the historical platform-only match, which
+   * is their strongest available scoping. When both a scoped and a legacy
+   * row match, the fully-scoped row wins.
+   */
+  private async findStoredPlatformMessage(
+    event: NormalizedInboundEvent,
+    replaces: string
+  ): Promise<StoredMessage | undefined> {
+    const candidates = await getDb()
+      .messages.where("platformMessageId")
+      .equals(replaces)
+      .filter((m) => {
+        const pm = m.metadata?.platformMessage
+        if (!pm || pm.platform !== event.platform) return false
+        if (pm.adapterId !== undefined && pm.adapterId !== event.adapterId) return false
+        if (pm.conversationKey !== undefined && pm.conversationKey !== event.conversationKey) {
+          return false
+        }
+        return true
+      })
+      .toArray()
+    return (
+      candidates.find((m) => m.metadata?.platformMessage?.adapterId === event.adapterId) ??
+      candidates[0]
+    )
   }
 
   /**
@@ -535,16 +741,10 @@ export class ConnectorBus {
       })
       return
     }
-    // Use the v49 `platformMessageId` index for O(log n) lookup. The
-    // platform safety filter scopes by adapter+platform so a Telegram
-    // `12345` edit cannot accidentally match a Discord row with the same
-    // numeric id. Legacy rows were backfilled by the v49 upgrade hook.
+    // Indexed lookup, scoped by adapterId + conversationKey (with a legacy
+    // platform-only fallback) — see `findStoredPlatformMessage`.
     const db = getDb()
-    const target = await db.messages
-      .where("platformMessageId")
-      .equals(replaces)
-      .filter((m) => m.metadata?.platformMessage?.platform === event.platform)
-      .first()
+    const target = await this.findStoredPlatformMessage(event, replaces)
     if (target) {
       // Map the new segments → parts the same way insertInboundMessage does.
       const parts: StoredMessage["parts"] = event.segments
@@ -606,14 +806,10 @@ export class ConnectorBus {
       })
       return
     }
-    // Indexed lookup via v49 `platformMessageId`. See `applyMessageEdit`
-    // for the rationale on the platform safety filter.
+    // Indexed lookup, scoped by adapterId + conversationKey (with a legacy
+    // platform-only fallback) — see `findStoredPlatformMessage`.
     const db = getDb()
-    const target = await db.messages
-      .where("platformMessageId")
-      .equals(replaces)
-      .filter((m) => m.metadata?.platformMessage?.platform === event.platform)
-      .first()
+    const target = await this.findStoredPlatformMessage(event, replaces)
     if (target) {
       const deletedMetadata: StoredMessage["metadata"] = {
         ...target.metadata,
@@ -646,7 +842,20 @@ export class ConnectorBus {
     if (sk === "read_indicator") kind = "inbound.read_indicator"
     else if (sk === "member_added") kind = "inbound.member_added"
     else if (sk === "member_removed") kind = "inbound.member_removed"
-    else {
+    else if (
+      sk === "reaction_added" ||
+      sk === "reaction_removed" ||
+      sk === "poke" ||
+      sk === "request" ||
+      sk === "lifecycle"
+    ) {
+      // Declared systemKinds that arrive on every user gesture. They carry no
+      // message body and the closed AuditKind union has no reaction/poke kind;
+      // routing them to `adapter.error` (as the pre-fix code did) flooded the
+      // audit trail with a false error per emoji reaction. Deliberate silent
+      // no-op until a dedicated audit kind ships in types/connectors/audit.ts.
+      return
+    } else {
       // Unknown system variant — surface it as adapter.error so the
       // trail catches the schema gap on next deploy.
       await appendAudit({
@@ -702,7 +911,18 @@ export class ConnectorBus {
         plainText: event.plainText,
         selfMentioned: event.mentions.selfMentioned,
       })
-    } catch {
+    } catch (err) {
+      // A broken subscription index would otherwise silently disable the
+      // entire workflow fan-out — warn + audit so the operator can see it.
+      console.warn("[connector-bus] findMatchingWorkflows failed", err)
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: event.conversationKey,
+        reason: "workflow_match_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }).catch(() => undefined)
       return
     }
     if (matches.length === 0) return
@@ -1077,25 +1297,73 @@ export class ConnectorBus {
    *
    * Errors thrown by the handler are caught and audited as
    * `callback.handler_failed` so a single bad callback doesn't kill the
-   * transport loop.
+   * transport loop; an unexpected pipeline exception is likewise contained
+   * (audited as `adapter.error`) — adapters call this from their transport
+   * for-await loop, so nothing may escape.
+   *
+   * Dedup commit protocol: the triggerId is checked up front but only
+   * COMMITTED to the persistent ledger on a terminal outcome (success or
+   * permanent failure). A transient failure — the binding lookup threw on a
+   * Dexie hiccup — leaves it unrecorded so the platform's redelivery can
+   * retry the click instead of losing it forever. Double-fire while the
+   * first delivery is still processing is guarded by the in-memory
+   * `callbackInFlight` set.
    */
   async dispatchConnectorCallback(event: ConnectorCallbackEvent): Promise<void> {
-    const now = Date.now()
-
-    // ── Step 1: Dedup ───────────────────────────────────────────────
-    const isNew = await recordAndCheckInbound(event.adapterId, event.triggerId, "callback")
-    if (!isNew) {
+    const flightKey = `${event.adapterId}:${event.triggerId}`
+    try {
+      // ── Step 1: Dedup (check now, commit on terminal outcome) ──────
+      const duplicate =
+        this.callbackInFlight.has(flightKey) ||
+        (await isRecordedInbound(event.adapterId, event.triggerId, "callback"))
+      if (duplicate) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.deduped",
+          at: Date.now(),
+          conversationKey: event.conversationKey,
+          reason: "callback:duplicate",
+          message: `triggerId=${event.triggerId}`,
+          fields: { actionType: event.actionType },
+        })
+        return
+      }
+      this.callbackInFlight.add(flightKey)
+      // Terminal by default: an unexpected throw below still commits the
+      // triggerId (re-processing an exploding callback forever helps nobody)
+      // and is audited by the outer catch.
+      let terminal = true
+      try {
+        terminal = await this.runConnectorCallback(event)
+      } finally {
+        if (terminal) {
+          await recordAndCheckInbound(event.adapterId, event.triggerId, "callback").catch(
+            () => undefined
+          )
+        }
+        this.callbackInFlight.delete(flightKey)
+      }
+    } catch (err) {
+      console.error("[connector-bus] callback pipeline failed", err)
       await appendAudit({
         adapterId: event.adapterId,
-        kind: "callback.deduped",
-        at: now,
+        kind: "adapter.error",
+        at: Date.now(),
         conversationKey: event.conversationKey,
-        reason: "callback:duplicate",
-        message: `triggerId=${event.triggerId}`,
-        fields: { actionType: event.actionType },
-      })
-      return
+        reason: "callback_pipeline_failed",
+        message: err instanceof Error ? err.message : String(err),
+        fields: { triggerId: event.triggerId },
+      }).catch(() => undefined)
     }
+  }
+
+  /**
+   * Callback pipeline body (Steps 2-4). Returns whether the outcome is
+   * TERMINAL — `true` commits the triggerId to the dedup ledger, `false`
+   * (transient failure) leaves it retryable for a platform redelivery.
+   */
+  private async runConnectorCallback(event: ConnectorCallbackEvent): Promise<boolean> {
+    const now = Date.now()
 
     // ── Step 2: Binding lookup (optional — event may already carry
     //            inline-derived surfaceId / componentId) ─────────────
@@ -1116,9 +1384,23 @@ export class ConnectorBus {
         resolvedComponentId = resolvedBinding.componentId ?? resolvedComponentId
         resolvedConversationKey = resolvedBinding.conversationKey ?? resolvedConversationKey
       }
-    } catch {
-      // Binding lookup is best-effort — Dexie hiccups should not block
-      // the callback. We fall through to whatever the event self-reported.
+    } catch (err) {
+      // TRANSIENT: a Dexie hiccup here says nothing about the click itself.
+      // Falling through on the event's self-reported fields would take a
+      // kind-specific binding (tool_approve, wf_approve, …) down the generic
+      // handler path AND permanently consume the triggerId — so instead we
+      // bail WITHOUT committing the dedup record, letting the platform's
+      // redelivery retry the click.
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: now,
+        conversationKey: resolvedConversationKey ?? undefined,
+        reason: "callback_binding_lookup_failed",
+        message: err instanceof Error ? err.message : String(err),
+        fields: { triggerId: event.triggerId },
+      }).catch(() => undefined)
+      return false
     }
 
     if (!resolvedSurfaceId) {
@@ -1136,7 +1418,7 @@ export class ConnectorBus {
           bindingFound,
         },
       })
-      return
+      return true
     }
 
     // ── Step 3: Audit reception ─────────────────────────────────────
@@ -1194,7 +1476,7 @@ export class ConnectorBus {
           fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
         })
       }
-      return
+      return true
     }
 
     // ── Step 4-pre-a: wf_approve / wf_cancel short-circuit ───────────
@@ -1233,7 +1515,7 @@ export class ConnectorBus {
           fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
         })
       }
-      return
+      return true
     }
 
     // ── Step 4-pre-c: tool_approve short-circuit (control-plane HITL) ──
@@ -1279,7 +1561,7 @@ export class ConnectorBus {
           fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
         })
       }
-      return
+      return true
     }
 
     // ── Step 4a: skill_invoke short-circuit (ADR-0026) ───────────────
@@ -1305,7 +1587,7 @@ export class ConnectorBus {
           message: `Skill HITL rejected for binding ${event.triggerId}`,
           fields: { triggerId: event.triggerId, skillId },
         })
-        return
+        return true
       }
       try {
         // Lazy import to avoid pulling the skill registry into adapter
@@ -1331,7 +1613,7 @@ export class ConnectorBus {
           fields: { triggerId: event.triggerId, skillId },
         })
       }
-      return
+      return true
     }
 
     // ── Step 4a-help: help_quick_command short-circuit (cross-provider) ──
@@ -1355,13 +1637,25 @@ export class ConnectorBus {
           reason: "help_quick_command:missing_action_or_conversation",
           message: `triggerId=${event.triggerId}`,
         })
-        return
+        return true
       }
       let parsed
       try {
         parsed = parseConversationKey(convKey)
       } catch {
-        return
+        // The bound conversationKey cannot be parsed back into (platform,
+        // adapterId, chat) — the synthetic re-entry event cannot be built.
+        // Terminal, but audited: a silently dead quick-command button was
+        // impossible to diagnose from the trail before this row.
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.unbound",
+          at: Date.now(),
+          conversationKey: convKey,
+          reason: "help_quick_command:unparsable_conversation_key",
+          message: `triggerId=${event.triggerId}`,
+        }).catch(() => undefined)
+        return true
       }
       const synthetic: NormalizedInboundEvent = {
         platform: event.platform,
@@ -1401,11 +1695,11 @@ export class ConnectorBus {
           fields: { triggerId: event.triggerId, kind: "help_quick_command" },
         })
       }
-      return
+      return true
     }
 
     // ── Step 4b: Hand off to the bridge ──────────────────────────────
-    if (!this.callbackHandler) return
+    if (!this.callbackHandler) return true
     const projected: ConnectorCallbackEvent = {
       ...event,
       surfaceId: resolvedSurfaceId,
@@ -1425,6 +1719,7 @@ export class ConnectorBus {
         fields: { triggerId: event.triggerId, surfaceId: resolvedSurfaceId },
       })
     }
+    return true
   }
 
   listAdapters(): PlatformAdapter[] {

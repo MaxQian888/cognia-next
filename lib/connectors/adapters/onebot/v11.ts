@@ -2,8 +2,9 @@
  * OneBot v11 event parser.
  *
  * Consumes raw JSON payloads from the reverse-WS connection and projects
- * `message` post_type events into NormalizedInboundEvent. Other post_types
- * (notice, request, meta_event) return null in Phase 1.
+ * `message` post_type events into NormalizedInboundEvent. `notice` recalls
+ * map to delete events; member/friend/lifecycle notices and requests map to
+ * audit-only system events; heartbeats and unknown notices return null.
  */
 
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
@@ -233,7 +234,7 @@ export function parseV11Event(
 
   // ── Request (friend / group join request) → audit-only system event ──
   if (event.post_type === "request") {
-    return v11SystemEvent(adapterId, event, "member_added")
+    return v11SystemEvent(adapterId, event, "request")
   }
 
   // ── Meta event (lifecycle / heartbeat) ──────────────────────────────
@@ -246,7 +247,7 @@ export function parseV11Event(
       event.sub_type === "disable" ||
       event.sub_type === "connect"
     ) {
-      return v11SystemEvent(adapterId, event, "member_added")
+      return v11SystemEvent(adapterId, event, "lifecycle")
     }
     // heartbeat / unknown meta_events are too noisy to log per-tick.
     return null
@@ -269,7 +270,11 @@ export function parseV11Event(
   const segments = normalizeMessageSegments(event.message)
   const plainText = segmentsToPlainText(segments)
 
-  // Mention detection: at-segments targeting selfId
+  // Mention detection: at-segments targeting selfId. A mass ping
+  // ([CQ:at,qq=all] → userId "all", see segments.ts) is recorded in `users`
+  // but never flips selfMentioned — selfId is always the numeric bot UIN, so
+  // "all" can't match, and auto-replying to every group-wide ping would be
+  // spammy.
   let selfMentioned = false
   const mentionedUsers: string[] = []
   for (const seg of segments) {

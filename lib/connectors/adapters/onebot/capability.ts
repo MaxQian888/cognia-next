@@ -5,26 +5,29 @@ import {
 } from "@/types/connectors/capability"
 
 /**
- * Phase-1 capability flags declared by the OneBot adapter.
+ * Capability flags declared by the OneBot adapter.
  *
  * OneBot v11/v12 supports: send.text, send.image, send.voice, send.video,
  * send.file, send.reply, send.mention (at), send.emoji (face), delete,
- * history.fetch (get_msg_history). No native edit or typing.
+ * history.fetch (get_msg_history), and forward (merged-forward send via the
+ * NapCat send_group/private_forward_msg extension). No native edit or typing.
  *
- * `send.reaction` is declared because NapCat ships the `set_msg_emoji_like`
- * extension; the adapter's `addReaction` is gated at runtime on the upstream
- * probe (`implMetadata.features`) so non-NapCat upstreams fail honestly.
+ * `send.reaction` is declared because NapCat/LLOneBot ship the
+ * `set_msg_emoji_like` extension; the adapter's `addReaction` /
+ * `removeReaction` pair (`set: true` / `set: false`) is gated at runtime on
+ * the upstream probe (`implMetadata.features`) so unsupported upstreams fail
+ * honestly.
  *
  * Kept in alphabetical order for stable diffs.
  *
- * NOTE: `send.markdown` and `send.edit` are intentionally absent — Group
- * 3.5 confirmed OneBot has neither native protocol support. The adapter
- * exposes `send.a2ui` because A2UI surfaces always carry a
- * `plainTextMirror`, so degradation to the most basic OneBot segments
- * (text + image + at + reply) is always available.
+ * NOTE: `send.markdown` and `send.edit` are intentionally absent — OneBot has
+ * neither native protocol support. The adapter exposes `send.a2ui` because
+ * A2UI surfaces always carry a `plainTextMirror`, so degradation to the most
+ * basic OneBot segments (text + image + at + reply) is always available.
  */
 export const ONEBOT_CAPS: readonly Capability[] = [
   "delete",
+  "forward",
   "history.fetch",
   "send.a2ui",
   "send.emoji",

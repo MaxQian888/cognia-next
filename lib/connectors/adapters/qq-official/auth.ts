@@ -56,6 +56,21 @@ export function clearQQTokenCache(appId: string, clientSecret: string): void {
   cache.delete(`${appId}:${clientSecret}`)
 }
 
+/**
+ * Invalidate whichever cache entry minted `token`.
+ *
+ * The adapter's send path only holds the resolved token (the appId/secret
+ * pair lives behind the injected `accessToken` resolver), so when the
+ * platform answers 401/403 — e.g. after a console-side secret rotation —
+ * this is the targeted way to evict the stale entry and force a re-mint on
+ * the next resolve.
+ */
+export function clearQQTokenCacheByToken(token: string): void {
+  for (const [key, entry] of cache) {
+    if (entry.token === token) cache.delete(key)
+  }
+}
+
 /** `Authorization: QQBot <token>` is the auth scheme for every QQ REST/gateway call. */
 export function qqAuthHeaders(accessToken: string): Record<string, string> {
   return { Authorization: `QQBot ${accessToken}`, "Content-Type": "application/json" }

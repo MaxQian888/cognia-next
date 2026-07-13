@@ -53,12 +53,14 @@ function makeEvent(overrides: Partial<ConnectorCallbackEvent> = {}): ConnectorCa
   }
 }
 
+// 30s hook budget: the first cold open of the full schema (100+ Dexie
+// versions) can exceed jest's default 5s under parallel suite load.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   __resetBusForTesting()
-})
+}, 30_000)
 
 describe("ConnectorBus.dispatchConnectorCallback", () => {
   it("calls the handler and writes a callback.received audit row", async () => {
@@ -157,6 +159,62 @@ describe("ConnectorBus.dispatchConnectorCallback", () => {
     await bus.dispatchConnectorCallback(makeEvent({ triggerId: "no_handler" }))
     const audit = await getDb().connectorAudit.toArray()
     expect(audit.some((r) => r.kind === "callback.received")).toBe(true)
+  })
+
+  it("a transient binding-lookup failure leaves the triggerId retryable (redelivery works)", async () => {
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+
+    // First delivery: the binding lookup blows up on a Dexie hiccup.
+    const whereSpy = jest
+      .spyOn(getDb().connectorCallbackBindings, "where")
+      .mockImplementationOnce(() => {
+        throw new Error("dexie hiccup")
+      })
+    await bus.dispatchConnectorCallback(makeEvent({ triggerId: "transient_1" }))
+    whereSpy.mockRestore()
+
+    // The click was NOT processed and NOT consumed.
+    expect(handler).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    expect(
+      audit.some(
+        (r) => r.kind === "adapter.error" && r.reason === "callback_binding_lookup_failed"
+      )
+    ).toBe(true)
+
+    // Platform redelivery of the SAME triggerId now goes through.
+    await bus.dispatchConnectorCallback(makeEvent({ triggerId: "transient_1" }))
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    // And a THIRD delivery is deduped (the success committed the ledger).
+    await bus.dispatchConnectorCallback(makeEvent({ triggerId: "transient_1" }))
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it("audits an unparsable help_quick_command conversationKey instead of silently dropping", async () => {
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "trig_bad_key",
+      kind: "help_quick_command",
+      surfaceId: "help_sfc",
+      conversationKey: "not-a-conversation-key",
+      payload: { action: { type: "prompt", value: "列出待办" } },
+    })
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(makeEvent({ triggerId: "trig_bad_key" }))
+    expect(handler).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    expect(
+      audit.some(
+        (r) =>
+          r.kind === "callback.unbound" &&
+          r.reason === "help_quick_command:unparsable_conversation_key"
+      )
+    ).toBe(true)
   })
 })
 

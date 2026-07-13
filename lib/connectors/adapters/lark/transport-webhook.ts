@@ -5,6 +5,10 @@
  * The Rust side handles AES-CBC decrypt + verification-token check (Task 87)
  * and emits the already-verified + decrypted body on this event channel.
  *
+ * GAP: the `url_verification` challenge echo (Lark's endpoint handshake)
+ * must be answered by the Rust webhook receiver before events reach this
+ * channel — it is handled on the Rust side, not here.
+ *
  * Yields each LarkEventEnvelope as it arrives; stops cleanly when signal fires.
  */
 

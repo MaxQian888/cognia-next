@@ -16,12 +16,24 @@ use super::state::ConnectorsState;
 pub struct ServerHandle {
     pub bound_addr: SocketAddr,
     shutdown_tx: watch::Sender<bool>,
+    serve_task: tokio::task::JoinHandle<()>,
 }
 
 impl ServerHandle {
-    /// Signal the server task to shut down gracefully.
+    /// Signal the server task to shut down gracefully and wait (bounded) for
+    /// it to finish, so the listener socket is actually released before this
+    /// returns — an immediate restart on the same port would otherwise race
+    /// the old task into EADDRINUSE.
     pub async fn shutdown(self) {
         let _ = self.shutdown_tx.send(true);
+        // Bounded wait: a wedged in-flight connection must not hang shutdown
+        // forever.
+        if tokio::time::timeout(std::time::Duration::from_secs(3), self.serve_task)
+            .await
+            .is_err()
+        {
+            log::warn!("connectors server task did not stop within 3s of shutdown signal");
+        }
     }
 }
 
@@ -51,7 +63,7 @@ pub async fn start_server(
         inner.bound_addr = Some(bound.to_string());
     }
 
-    tokio::spawn(async move {
+    let serve_task = tokio::spawn(async move {
         let _ = axum::serve(listener, app)
             .with_graceful_shutdown(async move {
                 loop {
@@ -69,6 +81,7 @@ pub async fn start_server(
     Ok(ServerHandle {
         bound_addr: bound,
         shutdown_tx,
+        serve_task,
     })
 }
 
@@ -96,5 +109,25 @@ mod tests {
         assert!(handle.bound_addr.port() > 0);
         assert!(state.inner.lock().server_running);
         handle.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_releases_the_port_for_immediate_rebind() {
+        let state = ConnectorsState::new();
+        let handle = start_server(
+            state.clone(),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            Arc::new(NullEmitter),
+            None,
+        )
+        .await
+        .unwrap();
+        let addr = handle.bound_addr;
+
+        // shutdown() awaits the serve task, so by the time it returns the
+        // listener socket must be closed and the exact port rebindable.
+        handle.shutdown().await;
+        let rebind = TcpListener::bind(addr).await;
+        assert!(rebind.is_ok(), "rebind after shutdown failed: {rebind:?}");
     }
 }

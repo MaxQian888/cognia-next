@@ -18,6 +18,9 @@
 
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 
+/** sessionStorage/localStorage key shared by the OAuth `state` producer (connector config forms) and the deep-link validator (ConnectorDeepLinkRouter) — the two must never drift. */
+export const CONNECTOR_OAUTH_STATE_KEY = "connector-oauth-state"
+
 export type OAuthHandler = (code: string, state: string) => Promise<void>
 
 /**

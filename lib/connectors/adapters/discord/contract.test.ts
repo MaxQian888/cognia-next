@@ -53,9 +53,22 @@ describe("Discord adapter contract suite", () => {
       if (cmd === "connectors_ws_open") return "handle-id"
       if (cmd === "connectors_ws_send") return undefined
       if (cmd === "connectors_ws_close") return undefined
+      if (cmd === "connectors_discord_upload") return "upload-msg-id"
       return makeSendOkResp()
     })
   })
+
+  /** Pull the most recent connectors_discord_upload request payload. */
+  function lastUploadReq(): {
+    channelId: string
+    files: Array<{ sourceUrl: string; filename: string }>
+  } {
+    const calls = mockInvoke.mock.calls.filter(
+      ([cmd]: [string]) => cmd === "connectors_discord_upload"
+    )
+    expect(calls.length).toBeGreaterThan(0)
+    return (calls[calls.length - 1][1] as { req: ReturnType<typeof lastUploadReq> }).req
+  }
 
   describe("send.text capability", () => {
     it("plain text segment becomes POST /channels/:id/messages with content", async () => {
@@ -99,8 +112,7 @@ describe("Discord adapter contract suite", () => {
   })
 
   describe("send.image capability", () => {
-    it("image segment sends an embed with image url", async () => {
-      mockInvoke.mockResolvedValueOnce(makeSendOkResp("t3"))
+    it("image segment is uploaded as a real attachment via connectors_discord_upload", async () => {
       const adapter = makeAdapter()
       const req: OutboundRequest = {
         conversationRef: {
@@ -111,9 +123,13 @@ describe("Discord adapter contract suite", () => {
         segments: [{ type: "image", url: "https://example.com/img.png" }],
         metadata: { idempotencyKey: "k3" },
       }
-      await adapter.send(req)
-      const call = lastHttpCall()
-      expect(call.body["embeds"]).toEqual([{ image: { url: "https://example.com/img.png" } }])
+      const result = await adapter.send(req)
+      expect(result.platformMessageId).toBe("upload-msg-id")
+      const upload = lastUploadReq()
+      expect(upload.channelId).toBe("chan-1")
+      expect(upload.files).toEqual([
+        { sourceUrl: "https://example.com/img.png", filename: "img.png" },
+      ])
     })
   })
 
@@ -180,8 +196,7 @@ describe("Discord adapter contract suite", () => {
   })
 
   describe("send.file capability", () => {
-    it("file segment passes URL as content", async () => {
-      mockInvoke.mockResolvedValueOnce(makeSendOkResp("t7"))
+    it("file segment is uploaded via connectors_discord_upload with its name + mime", async () => {
       const adapter = makeAdapter()
       const req: OutboundRequest = {
         conversationRef: {
@@ -201,8 +216,14 @@ describe("Discord adapter contract suite", () => {
         metadata: { idempotencyKey: "k7" },
       }
       await adapter.send(req)
-      const call = lastHttpCall()
-      expect(call.body["content"]).toBe("https://example.com/file.pdf")
+      const upload = lastUploadReq()
+      expect(upload.files).toEqual([
+        {
+          sourceUrl: "https://example.com/file.pdf",
+          filename: "file.pdf",
+          contentType: "application/pdf",
+        },
+      ])
     })
   })
 
@@ -260,10 +281,7 @@ describe("Discord adapter contract suite", () => {
   })
 
   describe("send.text + send.image (multi-segment)", () => {
-    it("emits two separate POST calls in order", async () => {
-      mockInvoke
-        .mockResolvedValueOnce(makeSendOkResp("multi-1"))
-        .mockResolvedValueOnce(makeSendOkResp("multi-2"))
+    it("uploads the image and posts the text in one send", async () => {
       const adapter = makeAdapter()
       const req: OutboundRequest = {
         conversationRef: {
@@ -279,10 +297,16 @@ describe("Discord adapter contract suite", () => {
       }
       const result = await adapter.send(req)
       expect(result.ok).toBe(true)
+      // Text → one JSON POST; image → one multipart upload.
       const httpCalls = mockInvoke.mock.calls.filter(
         ([cmd]: [string]) => cmd === "connectors_http_request"
       )
-      expect(httpCalls).toHaveLength(2)
+      const uploadCalls = mockInvoke.mock.calls.filter(
+        ([cmd]: [string]) => cmd === "connectors_discord_upload"
+      )
+      expect(httpCalls).toHaveLength(1)
+      expect(httpCalls[0][1]).toMatchObject({ req: { body: expect.stringContaining("look:") } })
+      expect(uploadCalls).toHaveLength(1)
     })
   })
 })

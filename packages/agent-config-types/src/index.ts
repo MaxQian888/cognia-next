@@ -1559,6 +1559,16 @@ export interface StoredMessage {
       messageId: string
       platform: import("@/types/connectors/platform-kind").PlatformKind
       sender: import("@/types/connectors/event").PlatformIdentity
+      /**
+       * Adapter-instance + conversation scoping for edit/delete lookups.
+       * Per-chat message ids (Telegram `message_id`, Slack `ts`) collide
+       * across chats, and multi-bot setups collide across adapters — the
+       * bus requires BOTH to match before rewriting a stored message.
+       * Optional: rows written before the scoping fix carry neither and
+       * fall back to the historical platform-only match.
+       */
+      adapterId?: string
+      conversationKey?: string
     }
     /**
      * Set on inbound messages whose adapter recognised platform-native

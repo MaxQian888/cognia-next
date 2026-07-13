@@ -3,26 +3,36 @@
 /**
  * Discord adapter configuration dialog.
  *
- * Migrated to the shared `AdapterFormSections` shell — Identity / Delivery /
- * Advanced collapsible sections. Discord uses gateway transport in v1. The
- * Delivery section keeps the optional Ed25519 public-key field visible as a
- * clearly inactive future webhook credential, but does not surface a callback
- * URL until the runtime adapter advertises a webhook transport.
+ * Uses the shared `AdapterFormSections` shell — Identity / Delivery / Advanced
+ * collapsible sections. The Delivery section offers a transport selector:
+ * Gateway (WebSocket, default — messages + interactions) or Interactions
+ * webhook (HTTP, interactions only). Webhook mode persists the Ed25519 public
+ * key and surfaces the Interactions Endpoint URL to paste into the Developer
+ * Portal.
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
+import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
+import { useTunnelStatus } from "@/hooks/use-tunnel-status"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { TransportMode } from "@/types/connectors/adapter"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
@@ -76,9 +86,18 @@ export function DiscordConfigDialog({
   const t = useTranslations("settings.connections.discord")
   const isNew = row === null
 
+  const initialIntents =
+    typeof (row?.settings as Record<string, unknown> | undefined)?.intents === "number"
+      ? String((row?.settings as Record<string, number>).intents)
+      : ""
+
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [botToken, setBotToken] = useState("")
   const [publicKey, setPublicKey] = useState("")
+  const [intents, setIntents] = useState<string>(initialIntents)
+  const [transport, setTransport] = useState<TransportMode>(
+    row?.transportMode === "webhook" ? "webhook" : "gateway"
+  )
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [testing, setTesting] = useState(false)
@@ -86,14 +105,32 @@ export function DiscordConfigDialog({
   const [saving, setSaving] = useState(false)
 
   const desktop = isTauri()
+  const tunnel = useTunnelStatus()
+
+  // Interactions Endpoint URL (webhook mode) — the tunnel origin + the Rust
+  // webhook route path. Only resolvable once the adapter has an id.
+  const webhookPath = isNew ? null : `/webhook/discord/${row?.id ?? ""}`
+  const webhookUrl =
+    tunnel.url && webhookPath ? `${tunnel.url.replace(/\/$/, "")}${webhookPath}` : null
 
   const dirty =
     isNew ||
     displayName.trim() !== row?.displayName ||
     botToken.length > 0 ||
     publicKey.length > 0 ||
+    intents !== initialIntents ||
+    transport !== (row?.transportMode === "webhook" ? "webhook" : "gateway") ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
+
+  const handleCopyWebhookUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success(t("interactionsUrlCopied"))
+    } catch {
+      toast.error(t("connectionFailedToast"))
+    }
+  }
 
   const handleTest = async () => {
     if (!botToken.trim()) {
@@ -121,25 +158,51 @@ export function DiscordConfigDialog({
       toast.error(t("botTokenRequired"))
       return
     }
+    const useWebhook = transport === "webhook"
+    if (useWebhook && isNew && !publicKey.trim()) {
+      toast.error(t("publicKeyRequiredForWebhook"))
+      return
+    }
     if (quietHours && (!quietHours.from || !quietHours.to || !quietHours.tz)) {
       toast.error(t("quietHoursIncomplete"))
       return
     }
 
+    const trimmedIntents = intents.trim()
+    let intentsNum: number | undefined
+    if (trimmedIntents !== "") {
+      const n = Number(trimmedIntents)
+      if (!Number.isInteger(n) || n < 0) {
+        toast.error(t("intentsInvalid"))
+        return
+      }
+      intentsNum = n
+    }
+
+    // Merge onto the existing settings so unrelated keys survive; an empty
+    // intents field clears the override (adapter falls back to the default).
+    const nextSettings: Record<string, unknown> = {
+      ...((row?.settings as Record<string, unknown> | undefined) ?? {}),
+    }
+    if (intentsNum !== undefined) nextSettings.intents = intentsNum
+    else delete nextSettings.intents
+
     setSaving(true)
     try {
       let adapterId: string
+
+      const accounts = useWebhook ? ["botToken", "publicKey"] : ["botToken"]
 
       if (isNew) {
         const newRow = await createAdapterInstance({
           type: "discord",
           displayName: displayName.trim(),
           enabled: true,
-          transportMode: "gateway",
-          settings: {},
+          transportMode: transport,
+          settings: nextSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["botToken"],
+            accounts,
           },
           trigger: defaultPrivateChatPolicy(),
           defaultMode: "auto",
@@ -151,7 +214,12 @@ export function DiscordConfigDialog({
         adapterId = row.id
         await updateAdapterInstance(adapterId, {
           displayName: displayName.trim(),
-          transportMode: "gateway",
+          transportMode: transport,
+          settings: nextSettings,
+          credentialsRef: {
+            keyringService: "com.cognia.platforms",
+            accounts,
+          },
           muted,
           quietHours: quietHours ?? undefined,
         })
@@ -160,15 +228,16 @@ export function DiscordConfigDialog({
       if (botToken.trim()) {
         await connectorsKeyringSet(adapterId, "botToken", botToken.trim())
       }
-      // Hot-reload the running adapter so the new bot token is picked up
+      // Webhook mode verifies each Interactions call with the Ed25519 public
+      // key (Rust `verify_discord` reads it from the keyring).
+      if (useWebhook && publicKey.trim()) {
+        await connectorsKeyringSet(adapterId, "publicKey", publicKey.trim())
+      }
+      // Hot-reload the running adapter so the new credentials are picked up
       // without an app restart.
       if (!isNew) {
         emitCredentialsRotated(adapterId)
       }
-      // Phase 1 ships gateway transport only — the Interactions webhook
-      // verifier exists in Rust but the Discord adapter does not subscribe to
-      // that inbound channel or answer Discord PING handshakes yet. Do not
-      // write publicKey until a real webhook transport lands.
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
       if (isNew) onCreated?.(adapterId)
@@ -268,35 +337,124 @@ export function DiscordConfigDialog({
     defaultOpen: true,
     children: (
       <div className="space-y-4">
-        <p className="text-xs text-muted-foreground">
-          {t("transportInfoPrefix")} <span className="font-medium">{t("transportInfoValue")}</span>{" "}
-          {t("transportInfoSuffix")}
-        </p>
-
         <div className="space-y-1.5">
-          <Label htmlFor="dc-public-key" className="flex items-center gap-2">
-            {t("publicKeyLabel")}
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono uppercase text-muted-foreground">
-              {t("publicKeyPhase2Badge")}
-            </span>
-          </Label>
-          <p className="text-xs text-muted-foreground">{t("publicKeyHelp")}</p>
-          <p
-            className="text-[10px] text-amber-700 dark:text-amber-400"
-            data-testid="dc-public-key-phase2-note"
-          >
-            {t("publicKeyPhase2Note")}
-          </p>
-          <Input
-            id="dc-public-key"
-            type="password"
-            autoComplete="new-password"
-            value={publicKey}
-            onChange={(e) => setPublicKey(e.target.value)}
-            placeholder={t("publicKeyPlaceholder")}
+          <Label htmlFor="dc-transport">{t("transportModeLabel")}</Label>
+          <Select
+            value={transport}
+            onValueChange={(v) => setTransport(v as TransportMode)}
             disabled={saving}
-          />
+          >
+            <SelectTrigger id="dc-transport">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="gateway">{t("transportGatewayLabel")}</SelectItem>
+              <SelectItem value="webhook">{t("transportWebhookLabel")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {transport === "gateway" ? t("transportGatewayHelp") : t("transportWebhookHelp")}
+          </p>
         </div>
+
+        {transport === "gateway" && (
+          <div className="space-y-1.5">
+            <Label htmlFor="dc-intents">{t("intentsLabel")}</Label>
+            <p className="text-xs text-muted-foreground">{t("intentsHelp")}</p>
+            <Input
+              id="dc-intents"
+              inputMode="numeric"
+              value={intents}
+              onChange={(e) => setIntents(e.target.value)}
+              placeholder={t("intentsPlaceholder")}
+              disabled={saving}
+            />
+          </div>
+        )}
+
+        {transport === "webhook" && (
+          <>
+            <p
+              className="rounded border border-amber-300/40 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:border-amber-400/30 dark:bg-amber-950/30 dark:text-amber-300"
+              data-testid="dc-webhook-interactions-only-note"
+            >
+              {t("webhookInteractionsOnlyNote")}
+            </p>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="dc-public-key">
+                {t("publicKeyLabel")}
+                <span className="ml-1 text-destructive">*</span>
+              </Label>
+              <p className="text-xs text-muted-foreground">{t("publicKeyHelp")}</p>
+              <Input
+                id="dc-public-key"
+                type="password"
+                autoComplete="new-password"
+                value={publicKey}
+                onChange={(e) => setPublicKey(e.target.value)}
+                placeholder={t("publicKeyPlaceholder")}
+                disabled={saving}
+              />
+            </div>
+
+            <div className="space-y-2 rounded border bg-card px-3 py-3">
+              <Label className="text-xs font-medium">{t("interactionsUrlLabel")}</Label>
+              {webhookPath === null ? (
+                <p className="text-xs text-muted-foreground">
+                  {t("interactionsUrlNewAdapterHint")}
+                </p>
+              ) : tunnel.loading ? (
+                <p className="text-xs text-muted-foreground">{t("interactionsUrlTunnelLoading")}</p>
+              ) : tunnel.running && webhookUrl ? (
+                <div className="space-y-2">
+                  <Input
+                    readOnly
+                    value={webhookUrl}
+                    className="font-mono text-[11px]"
+                    aria-label={t("interactionsUrlLabel")}
+                    data-testid="dc-interactions-url-input"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleCopyWebhookUrl(webhookUrl)}
+                      aria-label={t("interactionsUrlCopyAria")}
+                    >
+                      {t("interactionsUrlCopy")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        typeof window !== "undefined" &&
+                        window.open(
+                          "https://discord.com/developers/applications",
+                          "_blank",
+                          "noopener,noreferrer"
+                        )
+                      }
+                    >
+                      <ExternalLinkIcon className="mr-1 h-3.5 w-3.5" />
+                      {t("openConsole")}
+                    </Button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">{t("interactionsUrlHelp")}</p>
+                </div>
+              ) : (
+                <p
+                  className="text-xs text-amber-700 dark:text-amber-400"
+                  data-testid="dc-interactions-url-tunnel-off"
+                >
+                  {t("interactionsUrlTunnelOffHelp")}
+                </p>
+              )}
+            </div>
+          </>
+        )}
       </div>
     ),
   }

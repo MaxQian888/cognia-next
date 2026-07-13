@@ -261,6 +261,23 @@ describe("OutboundTab", () => {
     })
   })
 
+  it("manual retry of a failed job resets attempts (matches replayDeadlettered)", async () => {
+    // A job already at max attempts would instantly re-dead-letter on the
+    // runner's max-attempts gate if the retry left `attempts` untouched.
+    const maxedJob = { ...failedJob, id: "job-maxed", attempts: 5 }
+    setupQueries({ jobs: [maxedJob] })
+    mockDbGet.mockResolvedValue({ ...maxedJob })
+    mockDbUpdate.mockClear()
+    render(<OutboundTab />)
+    fireEvent.click(screen.getByRole("button", { name: /retry job-maxed/i }))
+    await waitFor(() => {
+      expect(mockDbUpdate).toHaveBeenCalledWith(
+        "job-maxed",
+        expect.objectContaining({ status: "pending", attempts: 0 })
+      )
+    })
+  })
+
   it("clicking Retry on a dead-lettered job routes through replayDeadlettered", async () => {
     setupQueries({ jobs: [deadletteredJob] })
     mockDbGet.mockResolvedValue({ ...deadletteredJob })

@@ -153,10 +153,33 @@ async function refreshCard(args: {
   const { platform } = parseConversationKey(conversationKey)
 
   // Resolve the card's platform message id from the creating job (the
-  // outbound runner records `platformMessageId` on delivery).
+  // outbound runner records `platformMessageId` on delivery). Mirrors
+  // `waitForOutboundTerminal` semantics: follow a rerouted dead-letter to
+  // the sibling that actually carries the delivery, and CLEAR `cardJobId`
+  // when the job is gone or terminally failed — a dangling pointer at a
+  // dead job would otherwise make every subsequent tick send a brand-new,
+  // never-tracked card.
   if (!state.cardMessageId && state.cardJobId) {
-    const job = await getDb().outboundQueue.get(state.cardJobId)
-    if (job?.platformMessageId) state.cardMessageId = job.platformMessageId
+    let jobId: string | undefined = state.cardJobId
+    for (let hop = 0; hop < 3 && jobId; hop++) {
+      const job = await getDb().outboundQueue.get(jobId)
+      if (!job || (job.status === "deadlettered" && !job.reroutedToJobId)) {
+        // Cancelled or terminally failed: forget it so THIS tick re-creates
+        // the card cleanly and tracks the new creating job.
+        jobId = undefined
+        break
+      }
+      if (job.platformMessageId) {
+        state.cardMessageId = job.platformMessageId
+        break
+      }
+      if (job.status === "deadlettered" && job.reroutedToJobId !== jobId) {
+        jobId = job.reroutedToJobId
+        continue
+      }
+      break // pending / failed / sending — keep waiting on this job
+    }
+    state.cardJobId = jobId
   }
 
   const segments = [{ type: "markdown" as const, md: buildUsageCardMarkdown(snapshot, { now }) }]

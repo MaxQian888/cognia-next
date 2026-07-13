@@ -33,6 +33,8 @@ export interface DingTalkBotMessage {
   text?: { content?: string }
   content?: Record<string, unknown>
   richText?: Array<Record<string, unknown>>
+  /** Users @-mentioned in the message; the bot itself appears here too. */
+  atUsers?: Array<{ dingtalkId?: string; staffId?: string }>
 }
 
 /** Flatten a `richText` array into plain text (ignoring inline pictures). */
@@ -87,19 +89,37 @@ export function parseDingTalkBotMessage(
   const text = extractText(msg)
   const segments: MessageSegment[] = [{ type: "text", text }]
 
+  const effectiveSelfId = selfId || msg.chatbotUserId || ""
+  // atUsers → mentioned user ids (staffId preferred), excluding the bot itself
+  // (its entry carries dingtalkId === chatbotUserId).
+  const mentionedUsers = Array.isArray(msg.atUsers)
+    ? msg.atUsers
+        .map((u) => (u.staffId && u.staffId.length > 0 ? u.staffId : (u.dingtalkId ?? "")))
+        .filter(
+          (id) => id.length > 0 && id !== effectiveSelfId && id !== (msg.chatbotUserId ?? "")
+        )
+    : []
+
   return {
     platform: "dingtalk",
     adapterId,
-    selfId: selfId || msg.chatbotUserId || "",
+    selfId: effectiveSelfId,
     messageId: msg.msgId,
     conversationRef: {
       platform: "dingtalk",
       adapterId,
       conversationType: msg.conversationType,
-      // 1:1 replies target the staff id; group replies target the conversation.
-      userId: remoteUserId,
+      // 1:1 replies target the staff id via /oToMessages/batchSend. External /
+      // inter-corp senders have no staffId — their Stream union id
+      // ($:LWCP_v1:$…) is NOT a valid batchSend userId, so we leave userId
+      // empty and let send() fall back to the (transient) session webhook.
+      userId: msg.senderStaffId ?? "",
       openConversationId: msg.conversationId,
       robotCode: msg.robotCode ?? "",
+      // Reply-URL fallback for senders without a staffId; expires server-side.
+      sessionWebhook: msg.sessionWebhook ?? "",
+      sessionWebhookExpiredTime:
+        typeof msg.sessionWebhookExpiredTime === "number" ? msg.sessionWebhookExpiredTime : 0,
     },
     conversationKey: buildConversationKey("dingtalk", adapterId, msg.conversationId),
     sender: {
@@ -117,8 +137,8 @@ export function parseDingTalkBotMessage(
     },
     segments,
     plainText: text,
-    // DingTalk only delivers messages addressed to the bot.
-    mentions: { selfMentioned: true, users: [] },
+    // DingTalk only delivers messages addressed to the bot (Stream mode).
+    mentions: { selfMentioned: true, users: mentionedUsers },
     timestamp: typeof msg.createAt === "number" ? msg.createAt : Date.now(),
     raw: msg,
   }

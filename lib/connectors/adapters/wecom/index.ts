@@ -42,6 +42,7 @@ import {
   buildSubscribeFrame,
   buildPingFrame,
   buildStreamRespondFrame,
+  buildStreamWithTemplateCardFrame,
   buildTemplateCardRespondFrame,
   buildWelcomeFrame,
   buildWelcomeCardFrame,
@@ -64,6 +65,17 @@ import type { IMQuickCommand } from "@/lib/connectors/quick-commands/types"
 
 type UnlistenFn = () => void
 
+/** Ack carried a non-zero errcode; `retryable` mirrors the outbound queue's semantics. */
+class WeComAckError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean
+  ) {
+    super(message)
+    this.name = "WeComAckError"
+  }
+}
+
 export interface WeComAdapterOptions {
   id: string
   displayName: string
@@ -77,6 +89,12 @@ export interface WeComAdapterOptions {
   _wsUrl?: string
   /** Test seam: reconnect backoff base ms (default 1000). */
   _backoffBaseMs?: number
+  /** Test seam: heartbeat interval ms (default {@link WECOM_PING_INTERVAL_MS}). */
+  _pingIntervalMs?: number
+  /** Test seam: per-ping ack timeout ms (default 10 000). */
+  _pingTimeoutMs?: number
+  /** Test seam: observe reconnect attempts (called with the attempt counter). */
+  _onReconnectAttempt?: (attempt: number) => void
 }
 
 const WECOM_CONFIG_SCHEMA = {
@@ -109,7 +127,15 @@ const WECOM_CONFIG_SCHEMA = {
   additionalProperties: true,
 }
 
-const REQ_TTL_MS = 10 * 60 * 1000 // reply window per the protocol
+// Reply-window bookkeeping. Per the protocol doc: a STREAMED reply must
+// complete within 10 minutes of its FIRST stream frame, while welcome
+// (enter_chat) and template-card-update replies must land within 5 seconds of
+// the callback. We keep a req_id addressable for the 10-minute stream budget;
+// the 5 s SLAs are met by replying inline in the event handler.
+const REQ_TTL_MS = 10 * 60 * 1000
+
+/** Consecutive heartbeat-ack misses before the socket is declared half-dead. */
+const PING_MISS_LIMIT = 2
 
 export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   // Normalise persisted quick-commands at factory time so the inbound
@@ -126,6 +152,7 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   let unlistenMessage: UnlistenFn | null = null
   let unlistenClose: UnlistenFn | null = null
   let pingTimer: ReturnType<typeof setInterval> | null = null
+  let pingMisses = 0
   let attempts = 0
   let selfId = ""
 
@@ -133,15 +160,56 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   const pending = new Map<string, (resp: WeComFrameEnvelope) => void>()
   /** Live reply windows: req_id → expiry epoch ms. */
   const activeReqIds = new Map<string, number>()
+  /**
+   * chatId → most recent live req_id. Fallback addressing for turns whose
+   * outbound `conversationRef` carries no (or a stale) `reqId` — e.g. A2UI
+   * card callbacks, whose `ConnectorCallbackEvent` has no conversationRef
+   * field — so their replies still ride the live reply window instead of
+   * degrading to a proactive push.
+   */
+  const liveReqByChat = new Map<string, string>()
+  /**
+   * req_id → cumulative text of an open (unfinished) stream preview. Lets
+   * `send()` close the stream (`finish:true`) even when the final message
+   * carries no text (card/media-only), so the platform preview never hangs
+   * in "generating".
+   */
+  const openStreams = new Map<string, string>()
+  /**
+   * Ack aliasing guard (fire-and-forget frames vs awaited requests).
+   *
+   * The protocol's ack frames echo ONLY `headers.req_id` — there is no
+   * per-frame nonce — and `streamReply()` / the card-update ack send frames
+   * under the SAME req_id that `send()` later awaits via `request()`. A late
+   * ack for one of those earlier frames would otherwise resolve `send()`'s
+   * pending entry with the wrong result. The WS delivers acks in frame order,
+   * so we count the acks still owed to fire-and-forget frames per req_id and
+   * swallow exactly that many before letting an ack resolve `pending`.
+   */
+  const ackDebts = new Map<string, number>()
 
   const wsUrl = opts._wsUrl ?? WECOM_WS_URL
   const backoffBaseMs = opts._backoffBaseMs ?? 1000
+  const pingIntervalMs = opts._pingIntervalMs ?? WECOM_PING_INTERVAL_MS
+  const pingTimeoutMs = opts._pingTimeoutMs ?? 10_000
 
   // ── low-level send ────────────────────────────────────────────────────
   async function rawSend(frame: WeComFrameEnvelope): Promise<void> {
     const id = handleId
     if (!id) throw new Error("wecom WS not connected")
     await connectorsWsSend(id, JSON.stringify(frame))
+  }
+
+  /**
+   * Fire-and-forget send on a req_id that may later carry an awaited
+   * `request()` — records the owed ack so it cannot alias (see `ackDebts`).
+   * The debt is recorded only after the transport accepted the frame; the
+   * server round-trip is orders of magnitude slower, so the ack cannot beat
+   * the increment.
+   */
+  async function rawSendCounted(reqId: string, frame: WeComFrameEnvelope): Promise<void> {
+    await rawSend(frame)
+    ackDebts.set(reqId, (ackDebts.get(reqId) ?? 0) + 1)
   }
 
   /** Send a frame and await the matching `req_id` ack/response. */
@@ -165,12 +233,35 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     })
   }
 
-  function recordActiveReq(reqId: string | undefined): void {
+  /**
+   * `request()` + errcode gate: a resolved ack with `errcode !== 0` is a
+   * FAILURE, not a delivery. `errcode -1` is retryable — it is both our
+   * synthetic connection-loss envelope (`rejectAllPending`) and WeCom's
+   * generic "system busy, try again" code; every other non-zero code is a
+   * definitive platform rejection surfaced with its errmsg.
+   */
+  async function requestOk(
+    frame: WeComFrameEnvelope,
+    timeoutMs?: number
+  ): Promise<WeComFrameEnvelope> {
+    const resp = await request(frame, timeoutMs)
+    if (typeof resp.errcode === "number" && resp.errcode !== 0) {
+      throw new WeComAckError(
+        `wecom ${frame.cmd ?? "frame"} rejected: ${resp.errcode} ${resp.errmsg ?? ""}`.trim(),
+        resp.errcode === -1
+      )
+    }
+    return resp
+  }
+
+  function recordActiveReq(reqId: string | undefined, chatId?: string): void {
     if (!reqId) return
     const now = Date.now()
     activeReqIds.set(reqId, now + REQ_TTL_MS)
-    // Opportunistic prune.
+    if (chatId) liveReqByChat.set(chatId, reqId)
+    // Opportunistic prune (both maps stay tiny).
     for (const [k, exp] of activeReqIds) if (exp < now) activeReqIds.delete(k)
+    for (const [chat, rid] of liveReqByChat) if (!activeReqIds.has(rid)) liveReqByChat.delete(chat)
   }
 
   function isReqLive(reqId: string | undefined): boolean {
@@ -179,10 +270,33 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     return exp !== undefined && exp > Date.now()
   }
 
+  /**
+   * Resolve the live req_id an outbound should reply on: the ref's own
+   * `reqId` when still live, else the chat's most recent live req (covers
+   * A2UI card callbacks / menu clicks whose triggering ref is stale).
+   */
+  function resolveLiveReqId(ref: WeComConversationRef): string | undefined {
+    if (isReqLive(ref.reqId)) return ref.reqId
+    const byChat = ref.chatId ? liveReqByChat.get(ref.chatId) : undefined
+    return isReqLive(byChat) ? byChat : undefined
+  }
+
   // ── inbound frame routing ───────────────────────────────────────────────
   async function routeFrame(payload: string): Promise<void> {
     const frame = classifyInboundFrame(payload)
     if (frame.kind === "ack") {
+      const debtReqId = frame.reqId
+      if (debtReqId) {
+        const debt = ackDebts.get(debtReqId) ?? 0
+        if (debt > 0) {
+          // Ack for an earlier fire-and-forget frame (stream preview /
+          // card-update) on this req_id — swallow it so it cannot resolve a
+          // later `request()`'s pending entry (acks arrive in frame order).
+          if (debt === 1) ackDebts.delete(debtReqId)
+          else ackDebts.set(debtReqId, debt - 1)
+          return
+        }
+      }
       if (frame.reqId && pending.has(frame.reqId)) {
         const resolve = pending.get(frame.reqId)!
         pending.delete(frame.reqId)
@@ -211,7 +325,7 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
 
   async function handleMessage(body: WeComInboundMsgBody, reqId?: string): Promise<void> {
     if (!selfId && body.aibotid) selfId = body.aibotid
-    recordActiveReq(reqId)
+    recordActiveReq(reqId, body.chatid)
     const event = parseWeComMessage(opts.id, selfId, body, reqId)
     if (!event) return
     // Best-effort: decrypt + inline an image so the model receives it.
@@ -244,21 +358,27 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       return
     }
     if (type === "template_card_event") {
+      // Every card click opens a fresh reply window — record it (keyed to
+      // the chat too) BEFORE dispatching, so the triggered turn replies
+      // through the live req instead of degrading to a proactive push.
+      recordActiveReq(reqId, body.chatid)
       // Ack the card within 5 s so the user sees the click registered.
+      // Counted: its ack shares the (now-active) req_id a later reply may
+      // await via `request()` — see `ackDebts`.
       if (reqId) {
-        await rawSend(buildUpdateCardFrame(reqId, buildAckUpdateCard(body, "✓"))).catch(
-          () => undefined
-        )
+        await rawSendCounted(
+          reqId,
+          buildUpdateCardFrame(reqId, buildAckUpdateCard(body, "✓"))
+        ).catch(() => undefined)
       }
       // Quick-command (menu) buttons live in the `qc:` namespace — check
       // them BEFORE falling through to the generic A2UI callback dispatch
       // so the resolver doesn't try to look up a non-existent binding.
       const menuClick = parseMenuButtonClick(body)
       if (menuClick) {
-        recordActiveReq(reqId)
         const cmd = resolveQuickCommand(quickCommands, menuClick.triggerKey)
         if (cmd) {
-          const event = buildMenuClickInboundEvent(opts.id, selfId, body, cmd)
+          const event = buildMenuClickInboundEvent(opts.id, selfId, body, cmd, reqId)
           if (event && (await gateInboundEvent(opts.id, event))) {
             lastActivityAt = Date.now()
             await ctx?.emit(event)
@@ -269,6 +389,9 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       const callback = parseTemplateCardEvent(opts.id, selfId, body)
       if (callback) {
         lastActivityAt = Date.now()
+        // `ConnectorCallbackEvent` carries no conversationRef (shared type),
+        // so the reply window recorded above is recovered at send() time via
+        // the `liveReqByChat` chat-level fallback.
         await getBus().dispatchConnectorCallback(callback)
       }
       return
@@ -327,24 +450,64 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   async function connectOnce(): Promise<void> {
     const id = await connectorsWsOpen(wsUrl)
     handleId = id
-    attempts = 0
-    unlistenMessage = await listen<string>(`connectors://ws/${id}/message`, (e) => {
-      void routeFrame(e.payload)
-    })
-    unlistenClose = await listen<void>(`connectors://ws/${id}/close`, () => {
+    try {
+      unlistenMessage = await listen<string>(`connectors://ws/${id}/message`, (e) => {
+        void routeFrame(e.payload)
+      })
+      unlistenClose = await listen<void>(`connectors://ws/${id}/close`, () => {
+        handleId = null
+        rejectAllPending("connection closed")
+        if (!stopCalled) {
+          healthState = "degraded"
+          healthReason = "connection closed"
+          void scheduleReconnect()
+        }
+      })
+      await subscribe()
+    } catch (err) {
+      // A failed handshake must NOT leak the Rust-side socket: WeCom allows
+      // exactly ONE connection per bot, so a leaked handle fights the next
+      // (re)connect attempt. Detach listeners first so our own close does
+      // not double-schedule a reconnect.
+      cleanupListeners()
       handleId = null
-      rejectAllPending("connection closed")
-      if (!stopCalled) {
-        healthState = "degraded"
-        healthReason = "connection closed"
-        void scheduleReconnect()
-      }
-    })
-    await subscribe()
-    // Heartbeat — fire-and-forget; the close event drives reconnection.
+      await connectorsWsClose(id).catch(() => undefined)
+      throw err
+    }
+    // Reset the backoff only AFTER a successful subscribe — resetting on
+    // socket-open would hammer bad credentials at base backoff forever.
+    attempts = 0
+    pingMisses = 0
     pingTimer = setInterval(() => {
-      void rawSend(buildPingFrame(newReqId(opts.id))).catch(() => undefined)
-    }, WECOM_PING_INTERVAL_MS)
+      void heartbeat()
+    }, pingIntervalMs)
+  }
+
+  /**
+   * Heartbeat with ack-miss detection: each ping is correlated through the
+   * pending-request plumbing; {@link PING_MISS_LIMIT} consecutive misses mean
+   * a half-dead socket (TCP up, peer gone) — force-close and reconnect
+   * instead of zombie-ing with health "running".
+   */
+  async function heartbeat(): Promise<void> {
+    try {
+      await requestOk(buildPingFrame(newReqId(opts.id)), pingTimeoutMs)
+      pingMisses = 0
+    } catch {
+      pingMisses += 1
+      if (pingMisses < PING_MISS_LIMIT || stopCalled) return
+      // Socket already gone (close event owns reconnection) — don't race it.
+      if (handleId === null) return
+      pingMisses = 0
+      healthState = "degraded"
+      healthReason = "heartbeat lost"
+      cleanupListeners()
+      rejectAllPending("heartbeat lost")
+      const id = handleId
+      handleId = null
+      if (id) await connectorsWsClose(id).catch(() => undefined)
+      void scheduleReconnect()
+    }
   }
 
   function rejectAllPending(reason: string): void {
@@ -353,6 +516,9 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       resolve({ errcode: -1, errmsg: reason })
     }
     pending.clear()
+    // Acks owed by the dead socket will never arrive; the next socket
+    // starts with no in-flight frames.
+    ackDebts.clear()
   }
 
   function delay(ms: number): Promise<void> {
@@ -363,6 +529,8 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     cleanupListeners()
     if (stopCalled) return
     attempts += 1
+    opts._onReconnectAttempt?.(attempts)
+    // `reconnectBackoffMs` caps at the shared jittered max (base × 32).
     await delay(reconnectBackoffMs(backoffBaseMs, attempts))
     if (stopCalled) return
     try {
@@ -379,24 +547,53 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       if (!resp.ok) return null
       const bytes = new Uint8Array(await resp.arrayBuffer())
       const name = seg.name ?? `media.${seg.type === "image" ? "png" : "bin"}`
-      return await uploadWeComMedia(request, opts.id, bytes, name, seg.type)
+      // `requestOk` so a rejected upload step (errcode != 0) throws and the
+      // media degrades instead of silently referencing a bogus media_id.
+      return await uploadWeComMedia(requestOk, opts.id, bytes, name, seg.type)
     } catch {
       return null
     }
   }
 
   // ── outbound: send ────────────────────────────────────────────────────────
-  function streamIdFor(ref: WeComConversationRef): string {
-    return `wecom-stream:${ref.reqId ?? ref.sourceMsgId ?? ref.chatId}`
+  function streamIdFor(reqId: string): string {
+    return `wecom-stream:${reqId}`
   }
 
   async function streamReply(req: StreamReplyRequest): Promise<void> {
     const ref = req.conversationRef as WeComConversationRef
-    if (!isReqLive(ref.reqId) || !ref.reqId) return
-    if (!req.text) return
-    await rawSend(buildStreamRespondFrame(ref.reqId, streamIdFor(ref), req.text, false)).catch(
-      () => undefined
-    )
+    const reqId = resolveLiveReqId(ref)
+    if (!reqId || !req.text) return
+    try {
+      // Counted: this fire-and-forget frame's ack shares the req_id that
+      // `send()` later awaits — see `ackDebts`.
+      await rawSendCounted(
+        reqId,
+        buildStreamRespondFrame(reqId, streamIdFor(reqId), req.text, false)
+      )
+      openStreams.set(reqId, req.text)
+    } catch {
+      /* preview only — the durable send() path is authoritative */
+    }
+  }
+
+  /** Proactive media body — the payload object is keyed BY msgtype. */
+  function mediaProactiveBody(
+    chatid: string,
+    chatType: 0 | 1 | 2,
+    m: { type: WeComMediaSegment["type"]; mediaId: string }
+  ): WeComProactiveBody {
+    const media = { media_id: m.mediaId }
+    switch (m.type) {
+      case "image":
+        return { chatid, chat_type: chatType, msgtype: "image", image: media }
+      case "voice":
+        return { chatid, chat_type: chatType, msgtype: "voice", voice: media }
+      case "video":
+        return { chatid, chat_type: chatType, msgtype: "video", video: media }
+      case "file":
+        return { chatid, chat_type: chatType, msgtype: "file", file: media }
+    }
   }
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
@@ -414,6 +611,11 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       templateCard = await buildWeComTemplateCard(opts.id, surface, conversationKey)
       if (templateCard) break
     }
+    // The A2UI card (if any) leads; pass-through template_card payloads from
+    // generic card segments follow as extra card frames.
+    const allCards = templateCard ? [templateCard, ...serialized.cards] : serialized.cards
+    const primaryCard = allCards[0]
+    const extraCards = allCards.slice(1)
 
     // Upload any media segments to obtain media_ids.
     const mediaIds: Array<{ type: WeComMediaSegment["type"]; mediaId: string }> = []
@@ -422,30 +624,58 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       if (id) mediaIds.push({ type: m.type, mediaId: id })
     }
 
-    const isReply = isReqLive(ref.reqId)
+    const hasContent = Boolean(serialized.markdown) || allCards.length > 0 || mediaIds.length > 0
+    const liveReqId = resolveLiveReqId(ref)
     try {
-      if (isReply && ref.reqId) {
-        const reqId = ref.reqId
-        // Finalise the (possibly already-streamed) text as a finished stream.
-        if (serialized.markdown) {
-          await request(buildStreamRespondFrame(reqId, streamIdFor(ref), serialized.markdown, true))
+      if (liveReqId) {
+        const reqId = liveReqId
+        const streamId = streamIdFor(reqId)
+        const openStreamText = openStreams.get(reqId)
+        if (primaryCard && (serialized.markdown || openStreamText !== undefined)) {
+          // Text + card must go out as ONE combined frame: the platform only
+          // accepts a card on a streamed reply via msgtype
+          // "stream_with_template_card" — a separate template_card respond
+          // after a finished stream is dropped. A card-only final after
+          // streamed frames folds in here too, closing the stream with the
+          // last previewed text so the preview never hangs in "generating".
+          await requestOk(
+            buildStreamWithTemplateCardFrame(
+              reqId,
+              streamId,
+              serialized.markdown || openStreamText || "",
+              primaryCard
+            )
+          )
+        } else if (serialized.markdown) {
+          // Finalise the (possibly already-streamed) text as a finished stream.
+          await requestOk(buildStreamRespondFrame(reqId, streamId, serialized.markdown, true))
+        } else if (openStreamText !== undefined) {
+          // Media-only (or empty) final while a stream preview is open —
+          // close it explicitly or the platform preview sticks "generating".
+          await requestOk(buildStreamRespondFrame(reqId, streamId, openStreamText, true))
+        } else if (primaryCard) {
+          await requestOk(buildTemplateCardRespondFrame(reqId, primaryCard))
         }
-        if (templateCard) {
-          await request(buildTemplateCardRespondFrame(reqId, templateCard))
+        openStreams.delete(reqId)
+        for (const card of extraCards) {
+          await requestOk(buildTemplateCardRespondFrame(reqId, card))
         }
+        // UNVERIFIED: the doc does not state whether media respond frames are
+        // accepted on a req_id after a finished stream reply; kept as-is.
         for (const m of mediaIds) {
-          await request({
+          await requestOk({
             cmd: "aibot_respond_msg",
             headers: { req_id: reqId },
             body: { msgtype: m.type, [m.type]: { media_id: m.mediaId } },
           })
         }
-        if (!serialized.markdown && !templateCard && mediaIds.length === 0) {
+        if (!hasContent) {
           return {
             ok: false,
             error: { code: "validation", message: "empty reply", retryable: false },
           }
         }
+        lastActivityAt = Date.now()
         return { ok: true, downgrades: serialized.downgrades }
       }
 
@@ -468,21 +698,16 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
           markdown: { content: serialized.markdown },
         })
       }
-      if (templateCard) {
+      for (const card of allCards) {
         frames.push({
           chatid,
           chat_type: chatType,
           msgtype: "template_card",
-          template_card: templateCard,
+          template_card: card,
         })
       }
       for (const m of mediaIds) {
-        frames.push({
-          chatid,
-          chat_type: chatType,
-          msgtype: m.type,
-          media: { media_id: m.mediaId },
-        })
+        frames.push(mediaProactiveBody(chatid, chatType, m))
       }
       if (frames.length === 0) {
         return {
@@ -491,16 +716,18 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
         }
       }
       for (const body of frames) {
-        await request(buildSendMsgFrame(newReqId(opts.id), body))
+        await requestOk(buildSendMsgFrame(newReqId(opts.id), body))
       }
+      lastActivityAt = Date.now()
       return { ok: true, downgrades: serialized.downgrades }
     } catch (err) {
+      const retryable = err instanceof WeComAckError ? err.retryable : true
       return {
         ok: false,
         error: {
-          code: "platform_5xx",
+          code: retryable ? "platform_5xx" : "platform_4xx",
           message: err instanceof Error ? err.message : String(err),
-          retryable: true,
+          retryable,
         },
       }
     }
@@ -511,6 +738,19 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     ctx = c
     stopCalled = false
     healthState = "starting"
+    // Honour the runtime's abort signal: abort tears the adapter down just
+    // like stop() — reconnect loop halted, Rust-side handle closed.
+    if (c.signal.aborted) {
+      await stop()
+      return
+    }
+    c.signal.addEventListener(
+      "abort",
+      () => {
+        void stop()
+      },
+      { once: true }
+    )
     try {
       await connectOnce()
     } catch {
@@ -524,6 +764,8 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     cleanupListeners()
     rejectAllPending("adapter stopped")
     activeReqIds.clear()
+    liveReqByChat.clear()
+    openStreams.clear()
     const id = handleId
     handleId = null
     if (id) {

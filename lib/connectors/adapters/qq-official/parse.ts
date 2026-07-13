@@ -30,6 +30,15 @@ export interface QQAuthor {
   user_openid?: string
 }
 
+export interface QQAttachmentData {
+  url?: string
+  content_type?: string
+  filename?: string
+  size?: number
+  width?: number
+  height?: number
+}
+
 export interface QQMessageData {
   id?: string
   content?: string
@@ -38,6 +47,7 @@ export interface QQMessageData {
   group_openid?: string
   channel_id?: string
   guild_id?: string
+  attachments?: QQAttachmentData[]
 }
 
 export interface QQDispatch {
@@ -119,6 +129,33 @@ export function parseQQDispatch(
   const text = scene === "channel" ? stripChannelMention(d.content ?? "") : (d.content ?? "").trim()
   const segments: MessageSegment[] = text ? [{ type: "text", text }] : []
 
+  // User-sent attachments (images / files). Without this an image-only
+  // message reaches the AI loop as empty text. Group/C2C attachment URLs
+  // arrive scheme-less (`gchat.qpic.cn/...`) — normalise to https.
+  for (const att of d.attachments ?? []) {
+    if (!att?.url) continue
+    const url = /^https?:\/\//i.test(att.url) ? att.url : `https://${att.url}`
+    const contentType = att.content_type ?? ""
+    if (contentType.startsWith("image/")) {
+      segments.push({
+        type: "image",
+        url,
+        alt: att.filename,
+        mimeType: contentType,
+        width: att.width,
+        height: att.height,
+      })
+    } else {
+      segments.push({
+        type: "file",
+        url,
+        name: att.filename ?? "attachment",
+        mimeType: contentType || "application/octet-stream",
+        sizeBytes: att.size ?? 0,
+      })
+    }
+  }
+
   return {
     platform: "qq-official",
     adapterId,
@@ -130,6 +167,10 @@ export function parseQQDispatch(
       scene,
       sceneId,
       msgId: d.id,
+      // Local receipt time — the serializer compares this against the
+      // scene's passive-reply window to decide whether msg_id is still
+      // usable (see QQ_PASSIVE_WINDOW_MS in serialize.ts).
+      receivedAt: Date.now(),
     },
     conversationKey,
     sender,

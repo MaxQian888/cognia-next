@@ -26,7 +26,15 @@ import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { createAdapterInstance, getAdapterInstance } from "@/lib/db/adapter-instances"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
 import type { AdapterInstanceRow, DispatchRule } from "@/lib/db/connector-types"
-import { installRuntime, inboundEventToSendContent, type RunAndCaptureFn } from "./runtime"
+import {
+  installRuntime,
+  inboundEventToSendContent,
+  insertInboundMessage,
+  shouldEmbedInboundText,
+  type RunAndCaptureFn,
+} from "./runtime"
+import { notifyConversationOverIM } from "@/lib/notifications/conversation-notify"
+import { registerRunningAdapter, __resetLifecycleForTesting } from "./lifecycle"
 import { getBus, __resetBusForTesting } from "./bus"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { RouteDecision } from "./mode-router"
@@ -48,6 +56,16 @@ let tryBuildMemoryDepsImpl: jest.Mock = jest.fn(async () => undefined)
 jest.mock("@/lib/memory/runtime/build-deps", () => ({
   __esModule: true,
   tryBuildMemoryDeps: (...a: unknown[]) => tryBuildMemoryDepsImpl(...a),
+}))
+
+// The embedding provider is mocked so the PII-embed-gate tests can assert
+// that NOTHING (neither the runtime's precompute nor applyTwinContext's
+// fallback) ever embeds leaky inbound text. Covers every importer of
+// `generateEmbedding` in the graph (runtime.ts AND lib/twin/runtime).
+const mockGenerateEmbedding = jest.fn(async () => ({ embedding: [0.1, 0.2] }))
+jest.mock("@cognia/provider-embedding/embedding", () => ({
+  __esModule: true,
+  generateEmbedding: (...a: unknown[]) => mockGenerateEmbedding(...(a as [])),
 }))
 
 // Team dispatch is mocked so the team-branch can be probed without importing
@@ -520,6 +538,117 @@ describe("installRuntime — ai-run (twin injection)", () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_mem" })
     await callHandler(event, "ai-run")
     expect(tryBuildMemoryDepsImpl).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("shouldEmbedInboundText — PII gate before the twin/memory embed", () => {
+  it("embeds clean, non-empty inbound text", () => {
+    expect(shouldEmbedInboundText("hello runtime")).toBe(true)
+  })
+
+  it("skips empty / whitespace-only text", () => {
+    expect(shouldEmbedInboundText("")).toBe(false)
+    expect(shouldEmbedInboundText("   ")).toBe(false)
+  })
+
+  it("skips text that would leak PII into the embedding provider", () => {
+    // Same red line safeSendPrompt enforces for the LLM leg — never embed PII.
+    expect(shouldEmbedInboundText("see alice@example.com")).toBe(false)
+  })
+})
+
+describe("installRuntime — ai-run (PII embed gate covers the fallback legs)", () => {
+  const LEAKY_TEXT = "please email alice@example.com about this"
+  const TWIN_DEPS = { embedding: { provider: "transformersjs", model: "m" }, store: {} }
+
+  /**
+   * Memory deps whose vector leg records every embed request. The candidate
+   * list must be non-empty: `retrieveMemories` returns before the vector leg
+   * (and thus before `deps.embed`) when there is nothing to rank.
+   */
+  function memoryDepsWithEmbedSpy(): { deps: Record<string, unknown>; embed: jest.Mock } {
+    const embed = jest.fn(async () => [0.5, 0.6])
+    return {
+      embed,
+      deps: {
+        loadCandidates: async () => [
+          {
+            id: "mem_1",
+            type: "semantic",
+            status: "active",
+            text: "the user prefers runtime hello messages",
+            source: "user",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+        loadProcedural: async () => [],
+        touch: async () => undefined,
+        embed,
+        vectorSearch: jest.fn(async () => []),
+      },
+    }
+  }
+
+  beforeEach(() => {
+    mockGenerateEmbedding.mockClear()
+  })
+
+  it("clean inbound still precomputes one shared query embedding (twin leg unchanged)", async () => {
+    await getDb().characters.put({ id: "char_abc", name: "Twinned", twinId: "twin_1" } as never)
+    tryBuildTwinDepsImpl = jest.fn(async () => TWIN_DEPS)
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_embed_clean" })
+    await callHandler(event, "ai-run")
+    expect(mockGenerateEmbedding).toHaveBeenCalledTimes(1)
+    expect(mockGenerateEmbedding).toHaveBeenCalledWith("hello runtime", TWIN_DEPS.embedding)
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaky inbound never reaches the embedding provider — precompute AND twin fallback", async () => {
+    // Regression: gating only the precomputed embed was not enough —
+    // resolveSendOptions used to receive `twinUserMessage: event.plainText`
+    // anyway, and applyTwinContext falls back to generateEmbedding(userMessage)
+    // when precomputedQueryEmbedding is absent, embedding the exact text the
+    // gate blocked. The runtime now withholds the twin/memory user-message
+    // levers entirely on a leak.
+    await getDb().characters.put({ id: "char_abc", name: "Twinned", twinId: "twin_1" } as never)
+    tryBuildTwinDepsImpl = jest.fn(async () => TWIN_DEPS)
+    const { deps, embed } = memoryDepsWithEmbedSpy()
+    tryBuildMemoryDepsImpl = jest.fn(async () => deps)
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_embed_leak",
+      plainText: LEAKY_TEXT,
+      segments: [{ type: "text", text: LEAKY_TEXT }],
+    })
+    await callHandler(event, "ai-run")
+    expect(mockGenerateEmbedding).not.toHaveBeenCalled()
+    expect(embed).not.toHaveBeenCalled()
+    // The turn itself still runs (degrades to no-RAG); the LLM-leg PII gate
+    // lives in the injected safeSendPrompt wrapper, one step later.
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
+  })
+
+  it("memory retriever embeds inbound text only when the PII gate passes (non-twin character)", async () => {
+    // Non-twin characters never precompute a turn embedding, so before the fix
+    // the memory retriever embedded inbound text ungated on EVERY turn.
+    await getDb().characters.put({ id: "char_abc", name: "Plain" } as never)
+    const clean = memoryDepsWithEmbedSpy()
+    tryBuildMemoryDepsImpl = jest.fn(async () => clean.deps)
+    await callHandler(makeEvent({ conversationKey: "telegram:adapter_1:chat_mem_c" }), "ai-run")
+    expect(clean.embed).toHaveBeenCalledWith("hello runtime")
+
+    const leaky = memoryDepsWithEmbedSpy()
+    tryBuildMemoryDepsImpl = jest.fn(async () => leaky.deps)
+    await callHandler(
+      makeEvent({
+        conversationKey: "telegram:adapter_1:chat_mem_l",
+        plainText: LEAKY_TEXT,
+        segments: [{ type: "text", text: LEAKY_TEXT }],
+      }),
+      "ai-run"
+    )
+    expect(leaky.embed).not.toHaveBeenCalled()
+    expect(mockGenerateEmbedding).not.toHaveBeenCalled()
   })
 })
 
@@ -1675,5 +1804,317 @@ describe("installRuntime — ai-run respond-via rule", () => {
     const audits = await getDb().connectorAudit.toArray()
     const decision = audits.find((a) => a.kind === "dispatch.respond_via")
     expect(decision!.fields).toMatchObject({ applied: false, reason: "not_found" })
+  })
+
+  it("suppresses platform streaming when respond-via rewires the reply to a sibling", async () => {
+    // The RECEIVING adapter must not stream partial frames it never finalizes
+    // (the sibling posts the final) — the user would see an orphaned preview
+    // plus a duplicate final from another bot.
+    await seedAdapter("adapter_1", {
+      dispatchRules: [{ id: "r_via", match: {}, action: { respondViaAdapterId: "adapter_2" } }],
+    })
+    await putInstance("adapter_2")
+    const streamReply = jest.fn(async () => undefined)
+    let receivedCap: { onPartial?: unknown } | undefined
+    const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
+      receivedCap = cap as typeof receivedCap
+      return { text: "final", messageId: "uuid-via-stream" }
+    })
+    __resetBusForTesting()
+    const bus = getBus()
+    installRuntime(bus, { runAndCapture: capturing })
+    bus.registerAdapter({
+      id: "adapter_1",
+      get meta() {
+        return {
+          type: "telegram" as const,
+          displayName: "stub",
+          version: "0",
+          capabilities: [],
+          transportModes: ["stub" as const],
+          configSchema: {},
+        }
+      },
+      start: async () => undefined,
+      stop: async () => undefined,
+      health: () => ({ state: "running" as const }),
+      send: async () => ({ ok: true }),
+      streamReply,
+      a2uiCapability: () => ({}) as never,
+    })
+
+    await callHandler(makeEvent({ conversationKey: "telegram:adapter_1:chat_42" }), "ai-run")
+
+    // onPartial suppressed: the reply target moved off the receiving adapter.
+    expect(receivedCap?.onPartial).toBeUndefined()
+    expect(streamReply).not.toHaveBeenCalled()
+    // The final reply is still delivered — through the sibling.
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].adapterId).toBe("adapter_2")
+  })
+
+  it("keeps streaming when respond-via falls back to the receiving bot", async () => {
+    await seedAdapter("adapter_1", {
+      dispatchRules: [{ id: "r_via", match: {}, action: { respondViaAdapterId: "ghost" } }],
+    })
+    const streamReply = jest.fn(async () => undefined)
+    const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
+      await cap?.onPartial?.("partial")
+      return { text: "final", messageId: "uuid-via-fallback" }
+    })
+    __resetBusForTesting()
+    const bus = getBus()
+    installRuntime(bus, { runAndCapture: capturing })
+    bus.registerAdapter({
+      id: "adapter_1",
+      get meta() {
+        return {
+          type: "telegram" as const,
+          displayName: "stub",
+          version: "0",
+          capabilities: [],
+          transportModes: ["stub" as const],
+          configSchema: {},
+        }
+      },
+      start: async () => undefined,
+      stop: async () => undefined,
+      health: () => ({ state: "running" as const }),
+      send: async () => ({ ok: true }),
+      streamReply,
+      a2uiCapability: () => ({}) as never,
+    })
+
+    await callHandler(makeEvent({ conversationKey: "telegram:adapter_1:chat_42" }), "ai-run")
+
+    // Invalid target → fallback to the receiving bot → streaming stays wired.
+    expect(streamReply).toHaveBeenCalledTimes(1)
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].adapterId).toBe("adapter_1")
+  })
+})
+
+describe("installRuntime — ai-run (dispatch-failure IM notification)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { upsertByConversationKey: upsertOverride } = require("@/lib/db/conversation-overrides")
+  const notifyMock = notifyConversationOverIM as jest.Mock
+  const flushNotify = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+  beforeEach(() => {
+    notifyMock.mockClear()
+    mockStartTeamRunFromIM.mockClear()
+    mockStartWorkflowFromIM.mockClear()
+  })
+
+  it("notifies the conversation when an explicitly bound team fails to dispatch", async () => {
+    const key = "telegram:adapter_1:chat_teamfail_notify"
+    await seedAdapter("adapter_1")
+    mockStartTeamRunFromIM.mockResolvedValueOnce({
+      started: false,
+      reason: "team_not_found",
+    } as never)
+    await getDb().sessions.add({
+      id: "s_tf",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertOverride({ conversationKey: key, sessionId: "s_tf", teamId: "ghost" })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await flushNotify()
+
+    expect(notifyMock).toHaveBeenCalledTimes(1)
+    expect(notifyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: key,
+        level: "error",
+        dedupeKey: `dispatch-error:${key}`,
+      })
+    )
+  })
+
+  it("notifies the conversation when workflow dispatch fails", async () => {
+    const key = "telegram:adapter_1:chat_wffail_notify"
+    await seedAdapter("adapter_1")
+    mockStartWorkflowFromIM.mockResolvedValueOnce({
+      ok: false,
+      reason: "workflow_dispatch_failed",
+    } as never)
+    await getDb().sessions.add({
+      id: "s_wff",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertOverride({ conversationKey: key, sessionId: "s_wff", workflowId: "wf_ghost" })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await flushNotify()
+
+    expect(notifyMock).toHaveBeenCalledTimes(1)
+    expect(notifyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: key,
+        level: "error",
+        dedupeKey: `dispatch-error:${key}`,
+      })
+    )
+  })
+
+  it("does NOT notify when a stale instance-default team falls through to a live reply", async () => {
+    const key = "telegram:adapter_1:chat_staleteam_notify"
+    await seedAdapter("adapter_1", { defaultTeamId: "ghost" })
+    mockStartTeamRunFromIM.mockResolvedValueOnce({
+      started: false,
+      reason: "team_not_found",
+    } as never)
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await flushNotify()
+
+    // The turn fell through to the single-character reply — no silence, so no
+    // failure notice either.
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
+    expect(notifyMock).not.toHaveBeenCalled()
+  })
+
+  it("still does not notify on successful team dispatch", async () => {
+    const key = "telegram:adapter_1:chat_teamok_notify"
+    await seedAdapter("adapter_1")
+    await getDb().sessions.add({
+      id: "s_tok",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertOverride({ conversationKey: key, sessionId: "s_tok", teamId: "team_r" })
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await flushNotify()
+
+    expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
+    expect(notifyMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("installRuntime — ai-run (adapter teardown abort propagation)", () => {
+  const stubAdapterHandle = {
+    id: "adapter_1",
+    stop: async () => undefined,
+  } as never
+
+  afterEach(() => {
+    __resetLifecycleForTesting()
+  })
+
+  it("threads the running adapter's abort signal into the capture options", async () => {
+    const adapterAc = new AbortController()
+    registerRunningAdapter("adapter_1", {
+      adapter: stubAdapterHandle,
+      abortController: adapterAc,
+      restart: async () => undefined,
+    })
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_signal" })
+    await callHandler(event, "ai-run")
+
+    const cap = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][3] as {
+      signal?: AbortSignal
+    }
+    expect(cap.signal).toBe(adapterAc.signal)
+  })
+
+  it("omits the signal when the adapter has no lifecycle entry (web/test hosts)", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_nosignal" })
+    await callHandler(event, "ai-run")
+    const cap = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][3] as {
+      signal?: AbortSignal
+    }
+    expect(cap.signal).toBeUndefined()
+  })
+
+  it("aborting the adapter signal halts an in-flight capture (audited, no enqueue)", async () => {
+    const adapterAc = new AbortController()
+    registerRunningAdapter("adapter_1", {
+      adapter: stubAdapterHandle,
+      abortController: adapterAc,
+      restart: async () => undefined,
+    })
+    const capturing: RunAndCaptureFn = jest.fn(
+      (_sid, _content, _opts, cap) =>
+        new Promise((_resolve, reject) => {
+          // Mirrors runAndCaptureAssistantReply's abort handling: reject when
+          // the threaded signal fires.
+          cap!.signal!.addEventListener(
+            "abort",
+            () => reject(new Error("aborted by signal")),
+            { once: true }
+          )
+          // Teardown fires while the turn is in flight.
+          setTimeout(() => adapterAc.abort(), 0)
+        })
+    )
+    __resetBusForTesting()
+    const bus = getBus()
+    installRuntime(bus, { runAndCapture: capturing })
+
+    await callHandler(makeEvent({ conversationKey: "telegram:adapter_1:chat_abort" }), "ai-run")
+
+    // The rejected capture takes the failure branch: audit row, and no AI
+    // reply is enqueued. (The failed-turn activity terminal line legitimately
+    // enqueues its own `activity:*` job, so filter on the reply key.)
+    const audits = await getDb().connectorAudit.toArray()
+    expect(
+      audits.some((a) => a.kind === "adapter.error" && a.reason === "ai_run_capture_failed")
+    ).toBe(true)
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(
+      jobs.filter((j) =>
+        String(j.request.metadata?.idempotencyKey ?? "").startsWith("airun:")
+      )
+    ).toHaveLength(0)
+  })
+
+  it("threads the adapter signal into draft-prepare captures too", async () => {
+    const adapterAc = new AbortController()
+    registerRunningAdapter("adapter_1", {
+      adapter: stubAdapterHandle,
+      abortController: adapterAc,
+      restart: async () => undefined,
+    })
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_draft_signal" })
+    await callHandler(event, "draft-prepare")
+    const cap = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][3] as {
+      signal?: AbortSignal
+    }
+    expect(cap.signal).toBe(adapterAc.signal)
+  })
+})
+
+describe("insertInboundMessage — session recency bump", () => {
+  it("bumps the bound session's updatedAt to the inserted message's timestamp", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_bump" })
+    await callHandler(event, "manual-store")
+    const session = (await getDb().sessions.toArray())[0]
+    expect(session).toBeDefined()
+
+    await insertInboundMessage(
+      makeEvent({ conversationKey: "telegram:adapter_1:chat_bump" }),
+      session.id,
+      9_999_999_999_999
+    )
+    const bumped = await getDb().sessions.get(session.id)
+    expect(bumped!.updatedAt).toBe(9_999_999_999_999)
   })
 })

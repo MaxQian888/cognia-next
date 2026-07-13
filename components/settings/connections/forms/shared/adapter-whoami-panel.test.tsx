@@ -24,6 +24,10 @@ jest.mock("@/lib/connectors/whoami/matrix-whoami", () => ({
   probeMatrixIdentity: jest.fn(),
   MatrixWhoamiError: class extends Error {},
 }))
+jest.mock("@/lib/connectors/whoami/qq-official-whoami", () => ({
+  probeQQOfficialIdentity: jest.fn(),
+  QQOfficialWhoamiError: class extends Error {},
+}))
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => true,
@@ -33,6 +37,7 @@ import { probeTelegramIdentity } from "@/lib/connectors/whoami/telegram-whoami"
 import { probeDiscordIdentity } from "@/lib/connectors/whoami/discord-whoami"
 import { probeSlackIdentity } from "@/lib/connectors/whoami/slack-whoami"
 import { probeMatrixIdentity } from "@/lib/connectors/whoami/matrix-whoami"
+import { probeQQOfficialIdentity } from "@/lib/connectors/whoami/qq-official-whoami"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -41,6 +46,7 @@ beforeEach(async () => {
   ;(probeDiscordIdentity as jest.Mock).mockReset()
   ;(probeSlackIdentity as jest.Mock).mockReset()
   ;(probeMatrixIdentity as jest.Mock).mockReset()
+  ;(probeQQOfficialIdentity as jest.Mock).mockReset()
 })
 
 function seed(
@@ -155,6 +161,21 @@ describe("AdapterWhoamiPanel", () => {
     })
   })
 
+  it("dispatches to probeQQOfficialIdentity for qq-official platform", async () => {
+    await seed("qq-2", "qq-official")
+    ;(probeQQOfficialIdentity as jest.Mock).mockResolvedValue({
+      botName: "CogniaQQ",
+      appId: "app-1",
+      openId: "bot-open-id",
+    })
+    render(<AdapterWhoamiPanel adapterId="qq-2" platform="qq-official" />)
+    await waitFor(() => screen.getByTestId("adapter-whoami-reprobe"))
+    fireEvent.click(screen.getByTestId("adapter-whoami-reprobe"))
+    await waitFor(() => {
+      expect(probeQQOfficialIdentity).toHaveBeenCalledWith("qq-2")
+    })
+  })
+
   it("hides the probe button for OneBot and surfaces the selfBotUin fallback", async () => {
     await seed("ob-1", "onebot", { settings: { selfBotUin: "10001234" } })
     render(<AdapterWhoamiPanel adapterId="ob-1" platform="onebot" />)
@@ -165,10 +186,34 @@ describe("AdapterWhoamiPanel", () => {
     })
   })
 
+  it("renders the connected OneBot identity snapshot without a mismatch warning when the UIN matches", async () => {
+    await seed("ob-ident", "onebot", {
+      settings: { selfBotUin: "10001234" },
+      lastWhoamiAt: 1,
+      lastWhoamiResult: { botName: "MyBot", appId: "10001234", openId: "10001234" },
+    })
+    render(<AdapterWhoamiPanel adapterId="ob-ident" platform="onebot" />)
+    await waitFor(() => {
+      expect(screen.getByText("MyBot")).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId("adapter-whoami-onebot-mismatch")).not.toBeInTheDocument()
+  })
+
+  it("warns when the connected OneBot UIN differs from the configured selfBotUin", async () => {
+    await seed("ob-mismatch", "onebot", {
+      settings: { selfBotUin: "999" },
+      lastWhoamiAt: 1,
+      lastWhoamiResult: { botName: "MyBot", appId: "10001234", openId: "10001234" },
+    })
+    render(<AdapterWhoamiPanel adapterId="ob-mismatch" platform="onebot" />)
+    await waitFor(() => {
+      expect(screen.getByTestId("adapter-whoami-onebot-mismatch")).toBeInTheDocument()
+    })
+  })
+
   it.each([
     ["onebot"],
     ["dingtalk"],
-    ["qq-official"],
     ["wechat-oa"],
     ["wecom"],
     ["wechat-personal"],

@@ -1,4 +1,4 @@
-import { parseSlackEventCallback } from "./parse"
+import { parseSlackEventCallback, parseSlackSlashCommand } from "./parse"
 import type { SlackEventEnvelope } from "./parse"
 
 import dmTextFixture from "./fixtures/dm-text.json"
@@ -234,6 +234,78 @@ describe("parseSlackEventCallback", () => {
     })
   })
 
+  describe("self-echo guard", () => {
+    function messageEnvelope(event: Partial<SlackEventEnvelope["event"]>): SlackEventEnvelope {
+      return {
+        type: "event_callback",
+        event: {
+          type: "message",
+          channel: "C123",
+          text: "hi",
+          ts: "1714900100.000001",
+          channel_type: "channel",
+          user: "U222USER",
+          ...event,
+        } as SlackEventEnvelope["event"],
+      }
+    }
+
+    it("drops messages carrying bot_id (bot-authored, any subtype)", () => {
+      const envelope = messageEnvelope({ bot_id: "B0BOT" })
+      expect(parseSlackEventCallback(ADAPTER_ID, SELF_ID, envelope)).toBeNull()
+    })
+
+    it("drops messages authored by the bot's own user id", () => {
+      const envelope = messageEnvelope({ user: SELF_ID })
+      expect(parseSlackEventCallback(ADAPTER_ID, SELF_ID, envelope)).toBeNull()
+    })
+
+    it("does NOT drop user messages when selfId is empty (failed auth.test probe)", () => {
+      const envelope = messageEnvelope({ user: "U222USER" })
+      const result = parseSlackEventCallback(ADAPTER_ID, "", envelope)
+      expect(result).not.toBeNull()
+      expect(result!.sender.remoteUserId).toBe("U222USER")
+    })
+  })
+
+  describe("subtype whitelist", () => {
+    function subtypeEnvelope(subtype?: string): SlackEventEnvelope {
+      return {
+        type: "event_callback",
+        event: {
+          type: "message",
+          channel: "C123",
+          user: "U222USER",
+          text: "content",
+          ts: "1714900200.000001",
+          channel_type: "channel",
+          ...(subtype ? { subtype } : {}),
+        },
+      }
+    }
+
+    it.each(["file_share", "thread_broadcast", "me_message"])(
+      "passes user-content subtype %s",
+      (subtype) => {
+        expect(
+          parseSlackEventCallback(ADAPTER_ID, SELF_ID, subtypeEnvelope(subtype))
+        ).not.toBeNull()
+      }
+    )
+
+    it.each([
+      "channel_join",
+      "channel_leave",
+      "channel_topic",
+      "channel_purpose",
+      "channel_name",
+      "channel_archive",
+      "group_join",
+    ])("drops system subtype %s", (subtype) => {
+      expect(parseSlackEventCallback(ADAPTER_ID, SELF_ID, subtypeEnvelope(subtype))).toBeNull()
+    })
+  })
+
   describe("unsupported subtypes", () => {
     it("returns null for bot_message subtype", () => {
       const envelope: SlackEventEnvelope = {
@@ -286,5 +358,49 @@ describe("parseSlackEventCallback", () => {
       }
       expect(parseSlackEventCallback(ADAPTER_ID, SELF_ID, envelope)).toBeNull()
     })
+  })
+})
+
+describe("parseSlackSlashCommand", () => {
+  const payload = {
+    command: "/cognia",
+    text: "summarize today",
+    channel_id: "C0CMD",
+    user_id: "U0CMD",
+    user_name: "erin",
+    trigger_id: "trig-99",
+  }
+
+  it("projects the invocation into a normalized text event", () => {
+    const event = parseSlackSlashCommand(ADAPTER_ID, SELF_ID, payload)
+    expect(event).not.toBeNull()
+    expect(event!.platform).toBe("slack")
+    expect(event!.plainText).toBe("/cognia summarize today")
+    expect(event!.segments).toEqual([{ type: "text", text: "/cognia summarize today" }])
+    expect(event!.messageId).toBe("trig-99")
+    expect(event!.conversationKey).toBe(`slack:${ADAPTER_ID}:C0CMD`)
+    expect(event!.sender.remoteUserId).toBe("U0CMD")
+    expect(event!.sender.displayName).toBe("erin")
+    // A slash command is an explicit invocation of this bot.
+    expect(event!.mentions.selfMentioned).toBe(true)
+  })
+
+  it("handles a command with no text", () => {
+    const event = parseSlackSlashCommand(ADAPTER_ID, SELF_ID, { ...payload, text: undefined })
+    expect(event!.plainText).toBe("/cognia")
+  })
+
+  it("synthesizes a messageId when trigger_id is absent", () => {
+    const event = parseSlackSlashCommand(ADAPTER_ID, SELF_ID, {
+      ...payload,
+      trigger_id: undefined,
+    })
+    expect(event!.messageId).toMatch(/^slash-\d+$/)
+  })
+
+  it("returns null when required fields are missing", () => {
+    expect(parseSlackSlashCommand(ADAPTER_ID, SELF_ID, { ...payload, command: "" })).toBeNull()
+    expect(parseSlackSlashCommand(ADAPTER_ID, SELF_ID, { ...payload, channel_id: "" })).toBeNull()
+    expect(parseSlackSlashCommand(ADAPTER_ID, SELF_ID, { ...payload, user_id: "" })).toBeNull()
   })
 })

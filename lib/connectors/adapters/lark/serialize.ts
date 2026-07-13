@@ -31,6 +31,22 @@ function threadIdFromRef(req: OutboundRequest): string | undefined {
 }
 
 /**
+ * Extract the thread's reply-anchor message id from the conversation ref.
+ *
+ * `parse.ts` stamps `threadRootMessageId` (the om_ id of the latest inbound
+ * message seen in the thread — any in-thread message is a valid reply
+ * anchor) whenever a message carries a `thread_id`. Thread sends MUST go
+ * through `POST /im/v1/messages/:id/reply` with `reply_in_thread: true`:
+ * the plain create endpoint has no thread parameter and silently ignores
+ * unknown fields, so a "thread send" there lands in the main chat.
+ */
+function threadAnchorFromRef(req: OutboundRequest): string | undefined {
+  const ref = req.conversationRef as Record<string, unknown>
+  const id = ref["threadRootMessageId"]
+  return typeof id === "string" && id.length > 0 ? id : undefined
+}
+
+/**
  * Determine the receive_id_type and receive_id for an outbound send.
  *
  * Lark messages are sent to:
@@ -132,16 +148,34 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
     }
   }
 
+  // Thread send without an explicit replyTo: route through the reply
+  // endpoint anchored at the thread's known message id. Only
+  // POST /im/v1/messages/:id/reply accepts `reply_in_thread`; the create
+  // endpoint ignores unknown fields, so the old `reply_in_thread` +
+  // `parent_id` payload silently delivered thread replies to the main chat.
+  if (threadId) {
+    const anchor = threadAnchorFromRef(req)
+    if (anchor) {
+      return {
+        method: "POST",
+        url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(anchor)}/reply`,
+        payload: {
+          msg_type: body.msg_type,
+          content: body.content,
+          reply_in_thread: true,
+        },
+      }
+    }
+    // Legacy refs persisted before threadRootMessageId existed carry only
+    // the thread_id, which no send endpoint accepts — fall through to a
+    // plain chat send (same visible behaviour as before, minus the bogus
+    // ignored fields).
+  }
+
   const payload: Record<string, unknown> = {
     receive_id: receiveId,
     msg_type: body.msg_type,
     content: body.content,
-  }
-
-  // Reply inside a thread: set reply_in_thread flag and parent_id
-  if (threadId) {
-    payload["reply_in_thread"] = true
-    payload["parent_id"] = threadId
   }
 
   return {
@@ -365,14 +399,28 @@ export async function serializeOutboundAsync(
     }
   }
 
+  // Thread send without an explicit replyTo — same anchored /reply routing
+  // as the sync path (see `serializeSend`); the create endpoint has no
+  // thread parameter.
+  if (threadId) {
+    const anchor = threadAnchorFromRef(req)
+    if (anchor) {
+      return {
+        method: "POST",
+        url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(anchor)}/reply`,
+        payload: {
+          msg_type: body.msg_type,
+          content: body.content,
+          reply_in_thread: true,
+        },
+      }
+    }
+  }
+
   const payload: Record<string, unknown> = {
     receive_id: receiveId,
     msg_type: body.msg_type,
     content: body.content,
-  }
-  if (threadId) {
-    payload["reply_in_thread"] = true
-    payload["parent_id"] = threadId
   }
 
   return {

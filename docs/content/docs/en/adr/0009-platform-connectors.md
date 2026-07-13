@@ -71,7 +71,7 @@ Each adapter follows the same decomposition:
 | Telegram      | Long-poll (`getUpdates`) or webhook | X-Telegram-Bot-Api-Secret-Token (HMAC-SHA256)                                        |
 | Discord       | Gateway WS (v10)                    | Ed25519 (X-Signature-Ed25519)                                                        |
 | Slack         | Events API webhook                  | HMAC-SHA256 (X-Slack-Signature v0)                                                   |
-| Lark / Feishu | Event callback webhook              | Verification token (`header.token`) + optional AES-256-CBC body decrypt (schema 2.0) |
+| Lark / Feishu | Long-connection WS (protobuf, **default**) or event-callback webhook | Long-conn: app_id/app_secret WS handshake. Webhook: verification token (`header.token`) + optional AES-256-CBC body decrypt (schema 2.0) |
 | OneBot v11    | Reverse-WS (device connects in)     | Bearer token (optional)                                                              |
 
 ### Outbound runner guarantees

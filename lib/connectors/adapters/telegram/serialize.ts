@@ -7,7 +7,8 @@
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
-import { escapeMdV2 } from "./markdown-v2"
+import { escapeMdV2, escapeMdV2Code, chunkTelegramText, TELEGRAM_TEXT_LIMIT } from "./markdown-v2"
+import { mdToMarkdownV2 } from "./md-to-mdv2"
 import { buildTelegramA2UICalls } from "./a2ui-mapper"
 
 export interface SerializedTelegramCall {
@@ -50,7 +51,15 @@ function chatIdFromRef(req: OutboundRequest): string | number {
 function routingFields(req: OutboundRequest): Record<string, unknown> {
   const fields: Record<string, unknown> = {}
   if (req.replyTo?.messageId) {
-    fields["reply_to_message_id"] = Number(req.replyTo.messageId)
+    // Bot API 7.0 replaced the top-level `reply_to_message_id` parameter
+    // with the `reply_parameters` object (audited fix #6). The reply target
+    // may arrive as the composite "chatId:messageId" send() returns — use
+    // the message part.
+    const raw = String(req.replyTo.messageId)
+    const idx = raw.indexOf(":")
+    fields["reply_parameters"] = {
+      message_id: Number(idx === -1 ? raw : raw.slice(idx + 1)),
+    }
   }
   if (req.threadId) {
     fields["message_thread_id"] = Number(req.threadId)
@@ -72,22 +81,25 @@ function serializeSegment(
       }
 
     case "markdown":
+      // Real CommonMark → MarkdownV2 conversion (audited fix #5) — the old
+      // path escaped the whole source, so **bold** rendered literally.
       return {
         method: "sendMessage",
         payload: {
           chat_id: chatId,
-          text: escapeMdV2(seg.md),
+          text: mdToMarkdownV2(seg.md),
           parse_mode: "MarkdownV2",
           ...routing,
         },
       }
 
     case "code": {
-      const lang = seg.language ?? ""
-      const escaped = escapeMdV2(seg.code)
-      const codeBlock = lang
-        ? `\`\`\`${escapeMdV2(lang)}\n${escaped}\n\`\`\``
-        : `\`\`\`\n${escaped}\n\`\`\``
+      // Inside a pre entity only ` and \ must be escaped (audited fix #4a);
+      // the language tag is sanitised rather than escaped because escape
+      // sequences are not valid on the fence line.
+      const lang = (seg.language ?? "").replace(/[^\w+-]/g, "")
+      const escaped = escapeMdV2Code(seg.code)
+      const codeBlock = `\`\`\`${lang}\n${escaped}\n\`\`\``
       return {
         method: "sendMessage",
         payload: {
@@ -100,6 +112,8 @@ function serializeSegment(
     }
 
     case "image":
+      // GAP: local-file (non-URL) uploads need a multipart Rust command like
+      // connectors_discord_upload — follow-up; URL-based sends work today.
       return {
         method: "sendPhoto",
         payload: { chat_id: chatId, photo: seg.url, ...routing },
@@ -124,6 +138,8 @@ function serializeSegment(
       }
 
     case "mention": {
+      // GAP: each mention segment fans out into its own sendMessage instead
+      // of being merged inline with adjacent text segments — follow-up.
       // Inline mention rendered as MarkdownV2 text_mention link
       const name = escapeMdV2(seg.displayName ?? seg.userId)
       const mentionText = `[${name}](tg://user?id=${seg.userId})`
@@ -182,7 +198,42 @@ export function serializeOutbound(req: OutboundRequest): SerializedTelegramCall[
     if (call) calls.push(call)
   }
 
-  return calls
+  return expandOversizedTextCalls(calls)
+}
+
+/**
+ * Split sendMessage calls whose text exceeds Telegram's 4096-char hard limit
+ * into multiple sequential sends (audited fix #7). Reply context stays on
+ * the first chunk; reply_markup (inline keyboard / force_reply) moves to the
+ * last chunk so it sits under the final visible part.
+ */
+function expandOversizedTextCalls(calls: SerializedTelegramCall[]): SerializedTelegramCall[] {
+  const out: SerializedTelegramCall[] = []
+  for (const call of calls) {
+    const text = call.payload["text"]
+    if (
+      call.method !== "sendMessage" ||
+      typeof text !== "string" ||
+      text.length <= TELEGRAM_TEXT_LIMIT
+    ) {
+      out.push(call)
+      continue
+    }
+    const chunks = chunkTelegramText(text)
+    chunks.forEach((chunk, idx) => {
+      const payload: Record<string, unknown> = { ...call.payload, text: chunk }
+      if (idx > 0) delete payload["reply_parameters"]
+      if (idx < chunks.length - 1) delete payload["reply_markup"]
+      out.push({
+        method: call.method,
+        payload,
+        ...(idx === chunks.length - 1 && call.forceReplyBinding
+          ? { forceReplyBinding: call.forceReplyBinding }
+          : {}),
+      })
+    })
+  }
+  return out
 }
 
 /**
@@ -227,7 +278,7 @@ export async function serializeOutboundAsync(
     if (call) calls.push(call)
   }
 
-  return calls
+  return expandOversizedTextCalls(calls)
 }
 
 /**

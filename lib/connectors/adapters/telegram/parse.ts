@@ -188,11 +188,16 @@ export interface TelegramMessageReactionUpdated {
   chat: TelegramChat
   message_id: number
   user?: TelegramUser
+  /** Set instead of `user` for anonymous group admins / channel reactions. */
+  actor_chat?: TelegramChat
   date: number
   old_reaction: TelegramReactionType[]
   new_reaction: TelegramReactionType[]
 }
 
+// GAP: media_group_id album aggregation (multi-photo posts arrive as N
+// separate updates sharing media_group_id) and my_chat_member handling
+// (bot added/removed/permission changes) are not implemented — follow-up.
 export interface TelegramUpdate {
   update_id: number
   message?: TelegramMessage
@@ -265,11 +270,15 @@ function buildSegments(msg: TelegramMessage): MessageSegment[] {
     if (msg.caption) segments.push({ type: "text", text: msg.caption })
   }
 
-  // Photo message
+  // Photo message. PhotoSize[] is ordered small→large, so when Telegram
+  // omits file_size the LAST entry is the largest — the old reduce defaulted
+  // to the first (smallest) rendition in that case (audited fix #10).
   if (msg.photo && msg.photo.length > 0) {
-    const largest = msg.photo.reduce((best, p) =>
-      p.file_size !== undefined && (best.file_size ?? 0) < p.file_size ? p : best
-    )
+    const withSize = msg.photo.filter((p) => p.file_size !== undefined)
+    const largest =
+      withSize.length > 0
+        ? withSize.reduce((best, p) => (p.file_size! > best.file_size! ? p : best))
+        : msg.photo[msg.photo.length - 1]
     segments.push({
       type: "image",
       url: `tg://file/${largest.file_id}`,
@@ -482,7 +491,11 @@ function reactionToEvent(
   reactionUpd: TelegramMessageReactionUpdated,
   rawUpdate: TelegramUpdate
 ): NormalizedInboundEvent | null {
-  if (!reactionUpd.user) return null
+  // Anonymous group admins / channel reactions arrive with `actor_chat`
+  // set instead of `user` — fall back to the chat as the actor rather
+  // than dropping the event (audited fix #11).
+  const actorChat = reactionUpd.actor_chat
+  if (!reactionUpd.user && !actorChat) return null
 
   const added = reactionUpd.new_reaction.filter(
     (r) => !reactionUpd.old_reaction.some((o) => sameReaction(o, r))
@@ -497,13 +510,21 @@ function reactionToEvent(
   const chat = reactionUpd.chat
   const chatId = chat.id
   const conversationKey = buildConversationKey("telegram", adapterId, String(chatId))
-  const sender = buildPlatformIdentity(adapterId, chatId, reactionUpd.user)
+  const actorId = reactionUpd.user?.id ?? actorChat!.id
+  const sender = reactionUpd.user
+    ? buildPlatformIdentity(adapterId, chatId, reactionUpd.user)
+    : buildPlatformIdentity(adapterId, chatId, {
+        id: actorChat!.id,
+        first_name: actorChat!.title ?? actorChat!.first_name,
+        last_name: actorChat!.last_name,
+        username: actorChat!.username,
+      })
 
   return {
     platform: "telegram",
     adapterId,
     selfId,
-    messageId: `tgreact:${reactionUpd.message_id}:${reactionUpd.user.id}:${reactionUpd.date}`,
+    messageId: `tgreact:${reactionUpd.message_id}:${actorId}:${reactionUpd.date}`,
     conversationRef: {
       platform: "telegram",
       adapterId,

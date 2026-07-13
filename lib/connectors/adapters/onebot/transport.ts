@@ -27,6 +27,12 @@ export interface OneBotTransportHandlers {
   onOpen: () => void
   /** Connection closed (peer/server dropped). */
   onClose: () => void
+  /**
+   * A dial attempt failed without ever opening (forward-ws only — reverse-ws
+   * never dials). `consecutiveFailures` counts failures since the last
+   * successful open, so the adapter can degrade health after N in a row.
+   */
+  onConnectFailed?: (consecutiveFailures: number) => void
 }
 
 export interface OneBotTransport {

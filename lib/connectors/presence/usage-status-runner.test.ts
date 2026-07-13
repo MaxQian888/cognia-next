@@ -217,6 +217,132 @@ describe("runUsagePresenceRefresh", () => {
     expect(updated!.presenceState!.cardPinned).toBe(true)
   })
 
+  it("clears a dead-lettered creating job and tracks the replacement card job", async () => {
+    const row = await seedAdapter(
+      {
+        enabled: true,
+        mode: "card",
+        intervalMinutes: 5,
+        window: "today",
+        cardConversationKey: "lark:ad-1:oc_chat",
+      },
+      { cardJobId: "job-dead" }
+    )
+    mockGetAdapter.mockReturnValue(fakeAdapter())
+    await getDb().outboundQueue.add({
+      id: "job-dead",
+      adapterId: row.id,
+      conversationKey: "lark:ad-1:oc_chat",
+      request: {
+        conversationRef: { platform: "lark", adapterId: row.id },
+        segments: [],
+        metadata: { idempotencyKey: "k-dead" },
+      },
+      status: "deadlettered",
+      attempts: 5,
+      createdAt: NOW - 60_000,
+      nextAttemptAt: NOW - 60_000,
+      idempotencyKey: "k-dead",
+      source: "manual",
+      lastErrorCode: "max_attempts",
+    } as never)
+
+    await runUsagePresenceRefresh({ adapterId: row.id, now: NOW })
+
+    const jobs = await getDb().outboundQueue.toArray()
+    const fresh = jobs.find((j) => j.id !== "job-dead")!
+    // A new card is created cleanly (no edit target pointing at nothing)…
+    expect(fresh.request.editTargetMessageId).toBeUndefined()
+    // …and the dangling pointer is REPLACED by the new creating job, so the
+    // next tick edits in place instead of minting a card per tick forever.
+    const updated = await getAdapterInstance(row.id)
+    expect(updated!.presenceState!.cardJobId).toBe(fresh.id)
+    expect(updated!.presenceState!.cardMessageId).toBeUndefined()
+  })
+
+  it("follows a rerouted dead-letter to the sibling's delivery evidence", async () => {
+    const row = await seedAdapter(
+      {
+        enabled: true,
+        mode: "card",
+        intervalMinutes: 5,
+        window: "today",
+        cardConversationKey: "lark:ad-1:oc_chat",
+      },
+      { cardJobId: "job-original" }
+    )
+    mockGetAdapter.mockReturnValue(fakeAdapter())
+    const base = {
+      adapterId: row.id,
+      conversationKey: "lark:ad-1:oc_chat",
+      request: {
+        conversationRef: { platform: "lark", adapterId: row.id },
+        segments: [],
+        metadata: { idempotencyKey: "k-reroute" },
+      },
+      attempts: 1,
+      createdAt: NOW - 60_000,
+      nextAttemptAt: NOW - 60_000,
+      idempotencyKey: "k-reroute",
+      source: "manual",
+    }
+    await getDb().outboundQueue.bulkAdd([
+      {
+        ...base,
+        id: "job-original",
+        status: "deadlettered",
+        lastErrorCode: "failover",
+        reroutedToJobId: "job-sibling",
+        reroutedMechanism: "failover",
+      },
+      { ...base, id: "job-sibling", status: "sent", platformMessageId: "om_sibling" },
+    ] as never)
+
+    await runUsagePresenceRefresh({ adapterId: row.id, now: NOW })
+
+    const updated = await getAdapterInstance(row.id)
+    expect(updated!.presenceState!.cardMessageId).toBe("om_sibling")
+    const jobs = await getDb().outboundQueue.toArray()
+    const refresh = jobs.find((j) => j.id !== "job-original" && j.id !== "job-sibling")!
+    expect(refresh.request.editTargetMessageId).toBe("om_sibling")
+  })
+
+  it("keeps waiting on a still-active creating job (no pointer churn)", async () => {
+    const row = await seedAdapter(
+      {
+        enabled: true,
+        mode: "card",
+        intervalMinutes: 5,
+        window: "today",
+        cardConversationKey: "lark:ad-1:oc_chat",
+      },
+      { cardJobId: "job-pending" }
+    )
+    mockGetAdapter.mockReturnValue(fakeAdapter())
+    await getDb().outboundQueue.add({
+      id: "job-pending",
+      adapterId: row.id,
+      conversationKey: "lark:ad-1:oc_chat",
+      request: {
+        conversationRef: { platform: "lark", adapterId: row.id },
+        segments: [],
+        metadata: { idempotencyKey: "k-pending" },
+      },
+      status: "pending",
+      attempts: 0,
+      createdAt: NOW - 1_000,
+      nextAttemptAt: NOW - 1_000,
+      idempotencyKey: "k-pending",
+      source: "manual",
+    } as never)
+
+    await runUsagePresenceRefresh({ adapterId: row.id, now: NOW })
+
+    const updated = await getAdapterInstance(row.id)
+    expect(updated!.presenceState!.cardJobId).toBe("job-pending")
+    expect(updated!.presenceState!.cardMessageId).toBeUndefined()
+  })
+
   it("resolves the card message id from a delivered creating job", async () => {
     const row = await seedAdapter(
       {

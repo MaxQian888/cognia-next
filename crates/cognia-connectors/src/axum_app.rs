@@ -21,7 +21,7 @@
 
 use axum::{
     body::Body,
-    extract::{Path, RawQuery, State},
+    extract::{DefaultBodyLimit, Path, RawQuery, State},
     http::{HeaderMap, Method, StatusCode},
     response::Response,
     routing::{any, get},
@@ -66,13 +66,19 @@ pub struct EmitterExt(pub Arc<dyn EventEmitter>);
 #[derive(Clone)]
 pub struct AppHandleExt(pub tauri::AppHandle);
 
+/// Hard cap on inbound request bodies. axum's implicit default is already
+/// 2 MiB, but we pin it explicitly so an axum upgrade cannot silently change
+/// the limit. Platform webhook payloads are far below this.
+const MAX_REQUEST_BODY_BYTES: usize = 2 * 1024 * 1024;
+
 /// Build the connectors axum `Router<ConnectorsState>` (state not yet
 /// resolved). Used by tests in `ws_server.rs` that compose extra routes.
 pub fn build_unresolved_router() -> Router<ConnectorsState> {
     let base = Router::new()
         .route("/health", get(health_handler))
+        .route("/oauth/lark/callback", get(oauth_lark_callback))
         .route("/webhook/{adapter_type}/{adapter_id}", any(webhook_handler));
-    ws_server::register_routes(base)
+    ws_server::register_routes(base).layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
 }
 
 /// Compose the resolved router with state + emitter. Used by
@@ -95,6 +101,62 @@ pub fn build_router(
 
 async fn health_handler() -> &'static str {
     r#"{"ok":true}"#
+}
+
+/// Lark send-as-user OAuth relay.
+///
+/// Feishu's console only accepts http/https redirect URLs, so the desktop OAuth
+/// flow registers `${tunnel}/oauth/lark/callback` (this route, reachable via the
+/// same Cloudflared tunnel as the webhook route). We bounce the `code` + `state`
+/// straight into the app's custom scheme `cognia://connector/oauth/lark`, where
+/// the deep-link router validates state and completes the exchange. This handler
+/// is a dumb pass-through — all validation (state, PKCE) happens in the renderer.
+///
+/// Returns a 200 HTML page that launches the scheme (meta-refresh + JS) with a
+/// manual link fallback, which is more reliable across browsers than a 302 to a
+/// non-http scheme.
+async fn oauth_lark_callback(RawQuery(raw_query): RawQuery) -> Response {
+    let params = parse_query(raw_query.as_deref().unwrap_or(""));
+    let deep_link = build_lark_oauth_deep_link(&params);
+    lark_oauth_callback_page(&deep_link)
+}
+
+/// Build the `cognia://connector/oauth/lark?…` deep link, forwarding only the
+/// OAuth fields we recognise (success `code`+`state`, or `error` details).
+fn build_lark_oauth_deep_link(params: &HashMap<String, String>) -> String {
+    let pairs: Vec<(&str, &str)> = ["code", "state", "error", "error_description"]
+        .iter()
+        .filter_map(|&k| params.get(k).map(|v| (k, v.as_str())))
+        .collect();
+    if pairs.is_empty() {
+        return "cognia://connector/oauth/lark".to_string();
+    }
+    let query = serde_urlencoded::to_string(&pairs).unwrap_or_default();
+    format!("cognia://connector/oauth/lark?{query}")
+}
+
+/// Render the bounce page. The forwarded fields are percent-encoded (no quotes
+/// or angle brackets), so the only HTML-sensitive char is `&`, escaped for the
+/// attribute contexts; the JS string embeds the raw link safely.
+fn lark_oauth_callback_page(deep_link: &str) -> Response {
+    let attr = deep_link.replace('&', "&amp;");
+    let html = format!(
+        "<!doctype html>\n<html><head><meta charset=\"utf-8\">\
+<meta http-equiv=\"refresh\" content=\"0;url={attr}\">\
+<title>Cognia</title></head>\
+<body style=\"font-family:system-ui,sans-serif;padding:2rem;text-align:center\">\
+<p>Returning to Cognia…</p>\
+<p><a href=\"{attr}\">Open Cognia</a> if you are not redirected automatically.</p>\
+<script>location.replace(\"{js}\")</script>\
+</body></html>",
+        attr = attr,
+        js = deep_link
+    );
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/html; charset=utf-8")
+        .body(Body::from(html))
+        .unwrap()
 }
 
 /// Webhook router — verifies the platform signature, then emits the parsed
@@ -135,13 +197,270 @@ async fn webhook_handler(
         .await;
     }
 
+    // Discord Interactions Endpoint — like WeChat, Discord requires the
+    // InteractionResponse (PONG / deferred ACK) IN THE HTTP BODY, which the
+    // fire-and-forget emit-and-200 flow below cannot express.
+    if adapter_type == "discord" {
+        return discord_webhook_handler(&adapter_id, &headers, &body, emitter.as_ref()).await;
+    }
+
+    // Slack — like Discord, Slack needs in-band responses the generic flow
+    // cannot express: the `url_verification` challenge must be echoed in the
+    // HTTP body, and interactivity arrives form-encoded rather than as JSON.
+    if adapter_type == "slack" {
+        return slack_webhook_handler(&adapter_id, &headers, &body, emitter.as_ref()).await;
+    }
+
+    // QQ Official Bot — in-band responses again: the op-13 URL-validation
+    // challenge must be answered with a seeded-Ed25519 signature, and ordinary
+    // pushes are ACK'd with `{"op":12}` (HTTP Callback ACK).
+    if adapter_type == "qq-official" {
+        return qq_official_webhook_handler(&adapter_id, &headers, &body, emitter.as_ref()).await;
+    }
+
     match verify_webhook(&state, &adapter_id, &headers, &body).await {
         Ok(payload) => {
+            // Lark's URL-verification handshake requires the challenge echoed
+            // in the response body — without it the console URL save fails.
+            // A handshake carries no event, so it is not emitted.
+            if let Some(resp) = url_verification_challenge_response(&payload) {
+                return resp;
+            }
             emitter.emit_webhook(&adapter_id, &payload);
             ok_response()
         }
         Err((status, msg)) => error_response(status, msg),
     }
+}
+
+/// If `payload` is a `url_verification` handshake with a `challenge` string,
+/// build the `{"challenge": ...}` echo response the platform expects (Slack
+/// and Lark share this exact shape). Returns `None` for ordinary events.
+fn url_verification_challenge_response(payload: &serde_json::Value) -> Option<Response> {
+    if payload.get("type").and_then(|v| v.as_str()) != Some("url_verification") {
+        return None;
+    }
+    let challenge = payload.get("challenge").and_then(|v| v.as_str())?;
+    Some(json_response(
+        StatusCode::OK,
+        &serde_json::json!({ "challenge": challenge }),
+    ))
+}
+
+/// Body shapes Slack delivers to a single webhook URL.
+enum SlackBody {
+    /// Events API — raw JSON body (includes the `url_verification` handshake).
+    Json(serde_json::Value),
+    /// Interactivity — `application/x-www-form-urlencoded` with a `payload`
+    /// field whose value is the URL-decoded JSON interaction.
+    Interactivity(serde_json::Value),
+    /// Slash-command form post (form-encoded, no `payload` field).
+    SlashCommand,
+    /// Neither JSON nor a recognisable form body.
+    Invalid,
+}
+
+/// Classify a Slack webhook body AFTER signature verification. Signature
+/// verification always runs over the raw body bytes; this only decides how to
+/// decode + route the verified payload.
+fn classify_slack_body(body: &[u8]) -> SlackBody {
+    if let Ok(json) = serde_json::from_slice::<serde_json::Value>(body) {
+        return SlackBody::Json(json);
+    }
+    let Ok(pairs) = serde_urlencoded::from_bytes::<Vec<(String, String)>>(body) else {
+        return SlackBody::Invalid;
+    };
+    match pairs.iter().find(|(k, _)| k == "payload") {
+        Some((_, payload)) => match serde_json::from_str::<serde_json::Value>(payload) {
+            Ok(inner) => SlackBody::Interactivity(inner),
+            Err(_) => SlackBody::Invalid,
+        },
+        None => SlackBody::SlashCommand,
+    }
+}
+
+/// Slack webhook handler — verifies the v0 signature over the RAW body bytes,
+/// then answers the `url_verification` challenge in-band, decodes form-encoded
+/// interactivity posts, and ACKs slash-command posts.
+async fn slack_webhook_handler(
+    adapter_id: &str,
+    headers: &HeaderMap,
+    body: &[u8],
+    emitter: &dyn EventEmitter,
+) -> Response {
+    if let Err((status, msg)) = verify_slack_signature(adapter_id, headers, body).await {
+        return error_response(status, msg);
+    }
+
+    match classify_slack_body(body) {
+        SlackBody::Json(payload) => {
+            // Events API URL save: echo the challenge, do not emit (handshake
+            // only — there is nothing for the renderer to run).
+            if let Some(resp) = url_verification_challenge_response(&payload) {
+                return resp;
+            }
+            emitter.emit_webhook(adapter_id, &payload);
+            ok_response()
+        }
+        SlackBody::Interactivity(inner) => {
+            // Forward the decoded inner interaction JSON on the same
+            // `connectors://webhook/<adapterId>` channel the Events API uses;
+            // the TS router detects block_actions / view_submission /
+            // shortcut / message_action shapes there. An empty 200 tells
+            // Slack "acknowledged, no message replacement".
+            emitter.emit_webhook(adapter_id, &inner);
+            empty_ok_response()
+        }
+        SlackBody::SlashCommand => {
+            // Slash-command form posts (no `payload` field) are ACK'd with an
+            // empty 200 and intentionally NOT emitted for now — cognia
+            // registers no slash commands, so forwarding would dead-letter in
+            // the renderer. Revisit when slash commands are supported.
+            empty_ok_response()
+        }
+        SlackBody::Invalid => error_response(StatusCode::BAD_REQUEST, "invalid body"),
+    }
+}
+
+/// QQ Official Bot webhook handler.
+///
+/// QQ signs every callback with an Ed25519 key derived from the bot secret
+/// (keyring `clientSecret` — the same entry the TS adapter's token minting
+/// uses): headers `X-Signature-Ed25519` (hex) + `X-Signature-Timestamp`,
+/// message = `timestamp ++ raw body`. See `sigverify::qq` for the seed
+/// derivation.
+///
+/// After verification, the envelope's `op` decides the in-band response:
+///   - op 13 (callback URL validation) → `{"plain_token", "signature"}` where
+///     signature = hex(sign(event_ts ++ plain_token)) with the same seeded
+///     key. Not emitted — the console handshake carries no event.
+///   - op 0 (DISPATCH) → emit the raw envelope on
+///     `connectors://webhook/<adapterId>` and ACK with `{"op":12}` (the
+///     documented HTTP Callback ACK opcode).
+///   - anything else → ACK `{"op":12}` without emitting (nothing else is
+///     defined for the webhook channel; forwarding would dead-letter).
+async fn qq_official_webhook_handler(
+    adapter_id: &str,
+    headers: &HeaderMap,
+    body: &[u8],
+    emitter: &dyn EventEmitter,
+) -> Response {
+    let secret = match super::keyring::get(adapter_id, "clientSecret") {
+        Ok(Some(s)) => s,
+        Ok(None) => return error_response(StatusCode::UNAUTHORIZED, "client secret not configured"),
+        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed"),
+    };
+
+    let timestamp = match headers
+        .get("X-Signature-Timestamp")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "missing timestamp header"),
+    };
+    let signature = match headers
+        .get("X-Signature-Ed25519")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(s) => s,
+        None => return error_response(StatusCode::UNAUTHORIZED, "missing signature header"),
+    };
+
+    if super::sigverify::qq::verify_ed25519(&secret, timestamp, body, signature).is_err() {
+        return error_response(StatusCode::UNAUTHORIZED, "signature verification failed");
+    }
+
+    let payload: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid JSON body"),
+    };
+
+    match payload.get("op").and_then(|v| v.as_u64()) {
+        // Callback URL validation — answer in-band, never emitted.
+        Some(13) => {
+            let d = payload.get("d");
+            let plain_token = d
+                .and_then(|d| d.get("plain_token"))
+                .and_then(|v| v.as_str());
+            let event_ts = d.and_then(|d| d.get("event_ts")).and_then(|v| v.as_str());
+            let (Some(plain_token), Some(event_ts)) = (plain_token, event_ts) else {
+                return error_response(StatusCode::BAD_REQUEST, "missing validation fields");
+            };
+            match super::sigverify::qq::sign_challenge(&secret, event_ts, plain_token) {
+                Ok(signature) => json_response(
+                    StatusCode::OK,
+                    &serde_json::json!({ "plain_token": plain_token, "signature": signature }),
+                ),
+                // Unreachable with a non-empty secret; guard anyway.
+                Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "challenge signing failed"),
+            }
+        }
+        // DISPATCH — forward the raw envelope to the renderer.
+        Some(0) => {
+            emitter.emit_webhook(adapter_id, &payload);
+            json_response(StatusCode::OK, &serde_json::json!({ "op": 12 }))
+        }
+        // Unknown / undocumented op over webhook — ACK, do not forward.
+        _ => json_response(StatusCode::OK, &serde_json::json!({ "op": 12 })),
+    }
+}
+
+/// Decide the in-band Discord InteractionResponse for a webhook delivery.
+/// Returns `(response_type, should_emit)`:
+///   - PING (1)                          → (1 = PONG, false) — handshake, nothing to run.
+///   - component (3) / modal_submit (5)  → (6 = DEFERRED_UPDATE_MESSAGE, true)
+///   - everything else                   → (6, false) — ACK-and-ignore.
+///
+/// cognia only processes component clicks and modal submits, and for those
+/// type 6 (DEFERRED_UPDATE_MESSAGE) is the right ACK: it does NOT show a
+/// "thinking" placeholder and requires NO follow-up on the interaction token,
+/// so the assistant's reply can flow out as an ordinary channel message
+/// (unified with the gateway path). We deliberately do NOT use type 5
+/// (DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE), which would leave a "thinking…"
+/// state hanging because we never edit the deferred response.
+///
+/// Slash commands (type 2) and autocomplete (type 4) are not registered by
+/// cognia and aren't handled by `parseDiscordInteraction`, so they are ACK'd
+/// (to avoid "This interaction failed") but not forwarded. Modal-open (type 9)
+/// cannot be answered here because the modal definition lives in the renderer's
+/// Dexie bindings — modal-open is gateway-only.
+fn discord_ack_for_interaction(interaction_type: u64) -> (u32, bool) {
+    match interaction_type {
+        1 => (1, false),
+        3 | 5 => (6, true),
+        _ => (6, false),
+    }
+}
+
+/// Discord Interactions Endpoint handler — verifies the Ed25519 signature, then
+/// answers PING with PONG (no emit) or interactions with a deferred ACK while
+/// emitting the interaction to the renderer for the actual reply.
+async fn discord_webhook_handler(
+    adapter_id: &str,
+    headers: &HeaderMap,
+    body: &[u8],
+    emitter: &dyn EventEmitter,
+) -> Response {
+    let payload = match verify_discord(adapter_id, headers, body).await {
+        Ok(p) => p,
+        Err((status, msg)) => return error_response(status, msg),
+    };
+
+    let interaction_type = payload.get("type").and_then(|t| t.as_u64()).unwrap_or(0);
+    let (response_type, should_emit) = discord_ack_for_interaction(interaction_type);
+    if should_emit {
+        emitter.emit_webhook(adapter_id, &payload);
+    }
+    json_response(StatusCode::OK, &serde_json::json!({ "type": response_type }))
+}
+
+/// 200 OK with a JSON body (`application/json`).
+fn json_response(status: StatusCode, value: &serde_json::Value) -> Response {
+    Response::builder()
+        .status(status)
+        .header("content-type", "application/json")
+        .body(Body::from(value.to_string()))
+        .unwrap()
 }
 
 /// Parse a `&`-separated, percent-encoded query string into a map.
@@ -234,7 +553,24 @@ async fn wechat_oa_handler(
             }
         };
         match super::sigverify::wechat::decrypt(&aes_key, &encrypt) {
-            Ok((msg_xml, _appid)) => {
+            Ok((msg_xml, appid)) => {
+                // Cross-check the decrypted appid against the adapter's stored
+                // `appId` when one is configured. This is a secondary check on
+                // top of the msg_signature + AES decrypt (both already keyed to
+                // this adapter), so a missing entry — or a transient keyring
+                // read failure — skips the check rather than dropping messages.
+                match super::keyring::get(adapter_id, "appId") {
+                    Ok(Some(expected)) if expected != appid => {
+                        return error_response(StatusCode::UNAUTHORIZED, "appid mismatch");
+                    }
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        log::debug!("wechat-oa {adapter_id}: no appId in keyring, skipping check");
+                    }
+                    Err(e) => {
+                        log::debug!("wechat-oa {adapter_id}: appId keyring read failed ({e})");
+                    }
+                }
                 emitter.emit_webhook(adapter_id, &serde_json::json!({ "xml": msg_xml }));
                 text_response("success".to_string())
             }
@@ -304,11 +640,14 @@ async fn verify_telegram(
     serde_json::from_slice(body).map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))
 }
 
-async fn verify_slack(
+/// Verify Slack's v0 HMAC signature over the RAW request body bytes. Shared
+/// by the Events API path (JSON bodies) and the interactivity path
+/// (form-encoded bodies) — Slack signs the raw bytes in both cases.
+async fn verify_slack_signature(
     adapter_id: &str,
     headers: &HeaderMap,
     body: &[u8],
-) -> Result<serde_json::Value, (StatusCode, &'static str)> {
+) -> Result<(), (StatusCode, &'static str)> {
     let expected = super::keyring::get(adapter_id, "signingSecret")
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed"))?
         .ok_or((StatusCode::UNAUTHORIZED, "signing secret not configured"))?;
@@ -325,8 +664,15 @@ async fn verify_slack(
 
     let now = chrono::Utc::now().timestamp();
     super::sigverify::slack::verify_v0(timestamp, body, signature, &expected, now)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "signature verification failed"))?;
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "signature verification failed"))
+}
 
+async fn verify_slack(
+    adapter_id: &str,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Result<serde_json::Value, (StatusCode, &'static str)> {
+    verify_slack_signature(adapter_id, headers, body).await?;
     serde_json::from_slice(body).map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))
 }
 
@@ -460,6 +806,16 @@ fn ok_response() -> Response {
         .unwrap()
 }
 
+/// 200 OK with an intentionally empty body — Slack interactivity and
+/// slash-command ACKs treat any response body as message content to render,
+/// so the ACK must stay empty.
+fn empty_ok_response() -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .unwrap()
+}
+
 fn error_response(status: StatusCode, msg: &str) -> Response {
     Response::builder()
         .status(status)
@@ -528,6 +884,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oauth_lark_callback_bounces_code_and_state_to_scheme() {
+        let state = ConnectorsState::new();
+        let (app, _) = test_router_with(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/oauth/lark/callback?code=abc123&state=lark:lk1:nonce")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 65536).await.unwrap();
+        let text = std::str::from_utf8(&body).unwrap();
+        // The bounce targets the app scheme and forwards code + state.
+        assert!(text.contains("cognia://connector/oauth/lark?"));
+        assert!(text.contains("code=abc123"));
+        assert!(text.contains("state=lark")); // `:` is percent-encoded downstream
+    }
+
+    #[tokio::test]
+    async fn oauth_lark_callback_passes_through_errors() {
+        let state = ConnectorsState::new();
+        let (app, _) = test_router_with(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/oauth/lark/callback?error=access_denied&error_description=nope")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 65536).await.unwrap();
+        let text = std::str::from_utf8(&body).unwrap();
+        assert!(text.contains("error=access_denied"));
+    }
+
+    #[tokio::test]
     async fn unregistered_webhook_returns_404() {
         let state = ConnectorsState::new();
         let (app, emitter) = test_router_with(state);
@@ -549,11 +946,8 @@ mod tests {
     // verify_webhook — pure-function tests. These do NOT exercise the HTTP
     // path; they target the verification logic directly so they don't need a
     // running server. The adapter type is read from the registered adapter.
+    // Secrets go through the hermetic in-memory store (`test-inmemory`).
     // -----------------------------------------------------------------------
-
-    fn keyring_available() -> bool {
-        crate::keyring_available()
-    }
 
     #[tokio::test]
     async fn verify_returns_404_when_adapter_unregistered() {
@@ -576,9 +970,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_telegram_happy_path() {
-        if !keyring_available() {
-            return;
-        }
         let adapter_id = "tg-happy";
         super::super::keyring::set(adapter_id, "secretToken", "shh-correct").unwrap();
 
@@ -600,9 +991,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_telegram_wrong_token_returns_401() {
-        if !keyring_available() {
-            return;
-        }
         let adapter_id = "tg-bad";
         super::super::keyring::set(adapter_id, "secretToken", "expected").unwrap();
 
@@ -621,9 +1009,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_telegram_missing_keyring_returns_401() {
-        if !keyring_available() {
-            return;
-        }
         let adapter_id = "tg-no-secret";
         super::super::keyring::delete(adapter_id, "secretToken").ok();
 
@@ -638,9 +1023,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_slack_happy_path() {
-        if !keyring_available() {
-            return;
-        }
         use hmac::{Hmac, KeyInit, Mac};
         use sha2::Sha256;
         type HmacSha256 = Hmac<Sha256>;
@@ -673,9 +1055,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_discord_happy_path() {
-        if !keyring_available() {
-            return;
-        }
         use ed25519_dalek::{Signer, SigningKey};
 
         let adapter_id = "discord-happy";
@@ -708,9 +1087,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_discord_stale_timestamp_returns_401() {
-        if !keyring_available() {
-            return;
-        }
         use ed25519_dalek::{Signer, SigningKey};
 
         let adapter_id = "discord-stale";
@@ -741,11 +1117,27 @@ mod tests {
         super::super::keyring::delete(adapter_id, "publicKey").unwrap();
     }
 
+    #[test]
+    fn discord_ack_ping_is_pong_and_not_emitted() {
+        assert_eq!(discord_ack_for_interaction(1), (1, false));
+    }
+
+    #[test]
+    fn discord_ack_component_and_modal_submit_defer_update_and_emit() {
+        assert_eq!(discord_ack_for_interaction(3), (6, true));
+        assert_eq!(discord_ack_for_interaction(5), (6, true));
+    }
+
+    #[test]
+    fn discord_ack_unsupported_types_are_ackd_without_emit() {
+        // Slash command (2) and autocomplete (4) are not registered/handled by
+        // cognia — ACK to dismiss, but do not forward (no follow-up hang).
+        assert_eq!(discord_ack_for_interaction(2), (6, false));
+        assert_eq!(discord_ack_for_interaction(4), (6, false));
+    }
+
     #[tokio::test]
     async fn verify_lark_plaintext_happy_path() {
-        if !keyring_available() {
-            return;
-        }
         let adapter_id = "lark-plain";
         super::super::keyring::set(adapter_id, "verificationToken", "vtok-1").unwrap();
 
@@ -763,9 +1155,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_lark_token_mismatch_returns_401() {
-        if !keyring_available() {
-            return;
-        }
         let adapter_id = "lark-bad";
         super::super::keyring::set(adapter_id, "verificationToken", "expected").unwrap();
 
@@ -783,9 +1172,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_lark_encrypted_round_trip() {
-        if !keyring_available() {
-            return;
-        }
         use aes::cipher::{block_padding::Pkcs7, BlockModeEncrypt, KeyIvInit};
         use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
         use rand::RngCore;
@@ -836,9 +1222,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_lark_fresh_event_passes_then_replay_is_rejected() {
-        if !keyring_available() {
-            return;
-        }
         let adapter_id = "lark-replay";
         super::super::keyring::set(adapter_id, "verificationToken", "vtok-r").unwrap();
 
@@ -864,9 +1247,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_lark_stale_event_is_rejected() {
-        if !keyring_available() {
-            return;
-        }
         let adapter_id = "lark-stale";
         super::super::keyring::set(adapter_id, "verificationToken", "vtok-s").unwrap();
 
@@ -887,9 +1267,6 @@ mod tests {
 
     #[tokio::test]
     async fn verify_lark_url_verification_challenge_skips_replay() {
-        if !keyring_available() {
-            return;
-        }
         let adapter_id = "lark-challenge";
         super::super::keyring::set(adapter_id, "verificationToken", "vtok-c").unwrap();
 
@@ -907,5 +1284,720 @@ mod tests {
             .expect("challenge should remain re-sendable");
 
         super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // HTTP-level webhook tests — drive the full router with `oneshot` so the
+    // in-band responses (challenges, ACK bodies) are asserted end to end.
+    // -----------------------------------------------------------------------
+
+    async fn post_webhook(
+        app: Router,
+        uri: &str,
+        headers: Vec<(&str, String)>,
+        body: impl Into<Body>,
+    ) -> Response {
+        let mut builder = Request::builder().uri(uri).method("POST");
+        for (k, v) in headers {
+            builder = builder.header(k, v);
+        }
+        app.oneshot(builder.body(body.into()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    async fn body_string(resp: Response) -> String {
+        let bytes = to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    /// Slack v0 signature headers for `body`, freshly timestamped.
+    fn slack_sig_headers(secret: &str, body: &[u8]) -> Vec<(&'static str, String)> {
+        use hmac::{Hmac, KeyInit, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+
+        let timestamp = chrono::Utc::now().timestamp().to_string();
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(b"v0:");
+        mac.update(timestamp.as_bytes());
+        mac.update(b":");
+        mac.update(body);
+        let sig = format!("v0={}", hex::encode(mac.finalize().into_bytes()));
+        vec![
+            ("X-Slack-Request-Timestamp", timestamp),
+            ("X-Slack-Signature", sig),
+        ]
+    }
+
+    #[tokio::test]
+    async fn slack_url_verification_challenge_is_echoed_and_not_emitted() {
+        let adapter_id = "slack-challenge-http";
+        let secret = "slack-secret-challenge";
+        super::super::keyring::set(adapter_id, "signingSecret", secret).unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "slack");
+        let (app, emitter) = test_router_with(state);
+
+        let body: &[u8] = br#"{"token":"t","challenge":"ch4ll","type":"url_verification"}"#;
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/slack/{adapter_id}"),
+            slack_sig_headers(secret, body),
+            body.to_vec(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers()["content-type"].to_str().unwrap(),
+            "application/json"
+        );
+        let text = body_string(resp).await;
+        assert_eq!(text, r#"{"challenge":"ch4ll"}"#);
+        assert!(
+            emitter.events.lock().is_empty(),
+            "handshake must not be emitted"
+        );
+
+        super::super::keyring::delete(adapter_id, "signingSecret").unwrap();
+    }
+
+    #[tokio::test]
+    async fn slack_event_callback_is_emitted_over_http() {
+        let adapter_id = "slack-event-http";
+        let secret = "slack-secret-event";
+        super::super::keyring::set(adapter_id, "signingSecret", secret).unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "slack");
+        let (app, emitter) = test_router_with(state);
+
+        let body: &[u8] = br#"{"type":"event_callback","event":{"type":"message"}}"#;
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/slack/{adapter_id}"),
+            slack_sig_headers(secret, body),
+            body.to_vec(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let events = emitter.events.lock();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, adapter_id);
+        assert_eq!(events[0].1["type"], "event_callback");
+
+        super::super::keyring::delete(adapter_id, "signingSecret").unwrap();
+    }
+
+    #[tokio::test]
+    async fn slack_form_encoded_interactivity_emits_inner_json() {
+        let adapter_id = "slack-interactivity-http";
+        let secret = "slack-secret-interactivity";
+        super::super::keyring::set(adapter_id, "signingSecret", secret).unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "slack");
+        let (app, emitter) = test_router_with(state);
+
+        let inner = serde_json::json!({
+            "type": "block_actions",
+            "actions": [{ "action_id": "approve", "value": "yes" }],
+        });
+        let form_body =
+            serde_urlencoded::to_string([("payload", inner.to_string())]).unwrap();
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/slack/{adapter_id}"),
+            slack_sig_headers(secret, form_body.as_bytes()),
+            form_body.clone(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Interactivity ACK body must be empty (any body would be rendered
+        // as a message replacement by Slack).
+        assert_eq!(body_string(resp).await, "");
+
+        let events = emitter.events.lock();
+        assert_eq!(events.len(), 1, "decoded inner payload must be emitted");
+        assert_eq!(events[0].1, inner);
+
+        super::super::keyring::delete(adapter_id, "signingSecret").unwrap();
+    }
+
+    #[tokio::test]
+    async fn slack_form_encoded_with_bad_signature_returns_401() {
+        let adapter_id = "slack-badsig-http";
+        super::super::keyring::set(adapter_id, "signingSecret", "the-real-secret").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "slack");
+        let (app, emitter) = test_router_with(state);
+
+        let form_body =
+            serde_urlencoded::to_string([("payload", r#"{"type":"block_actions"}"#)]).unwrap();
+        // Sign with the WRONG secret — must be rejected before any decode.
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/slack/{adapter_id}"),
+            slack_sig_headers("wrong-secret", form_body.as_bytes()),
+            form_body,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(emitter.events.lock().is_empty());
+
+        super::super::keyring::delete(adapter_id, "signingSecret").unwrap();
+    }
+
+    #[tokio::test]
+    async fn slack_slash_command_form_is_acked_but_not_emitted() {
+        let adapter_id = "slack-slash-http";
+        let secret = "slack-secret-slash";
+        super::super::keyring::set(adapter_id, "signingSecret", secret).unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "slack");
+        let (app, emitter) = test_router_with(state);
+
+        let form_body = serde_urlencoded::to_string([
+            ("command", "/cognia"),
+            ("text", "hello"),
+            ("user_id", "U123"),
+        ])
+        .unwrap();
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/slack/{adapter_id}"),
+            slack_sig_headers(secret, form_body.as_bytes()),
+            form_body,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, "");
+        assert!(
+            emitter.events.lock().is_empty(),
+            "slash commands are not forwarded"
+        );
+
+        super::super::keyring::delete(adapter_id, "signingSecret").unwrap();
+    }
+
+    #[test]
+    fn classify_slack_body_shapes() {
+        assert!(matches!(
+            classify_slack_body(br#"{"type":"event_callback"}"#),
+            SlackBody::Json(_)
+        ));
+        assert!(matches!(
+            classify_slack_body(b"payload=%7B%22type%22%3A%22block_actions%22%7D"),
+            SlackBody::Interactivity(_)
+        ));
+        assert!(matches!(
+            classify_slack_body(b"command=%2Fcognia&text=hi"),
+            SlackBody::SlashCommand
+        ));
+        // `payload` present but not JSON → invalid.
+        assert!(matches!(
+            classify_slack_body(b"payload=not-json"),
+            SlackBody::Invalid
+        ));
+    }
+
+    #[tokio::test]
+    async fn lark_url_verification_challenge_is_echoed_over_http() {
+        let adapter_id = "lark-challenge-http";
+        super::super::keyring::set(adapter_id, "verificationToken", "vtok-http").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "lark");
+        let (app, emitter) = test_router_with(state);
+
+        let body: &[u8] =
+            br#"{"challenge":"lk-ch4ll","token":"vtok-http","type":"url_verification"}"#;
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/lark/{adapter_id}"),
+            vec![],
+            body.to_vec(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, r#"{"challenge":"lk-ch4ll"}"#);
+        assert!(
+            emitter.events.lock().is_empty(),
+            "handshake must not be emitted"
+        );
+
+        super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
+    }
+
+    #[tokio::test]
+    async fn lark_ordinary_event_still_returns_ok_true() {
+        let adapter_id = "lark-event-http";
+        super::super::keyring::set(adapter_id, "verificationToken", "vtok-evt").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "lark");
+        let (app, emitter) = test_router_with(state);
+
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let body = lark_event_body("vtok-evt", "evt-http-1", now_ms);
+        let resp = post_webhook(app, &format!("/webhook/lark/{adapter_id}"), vec![], body).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, r#"{"ok":true}"#);
+        assert_eq!(emitter.events.lock().len(), 1);
+
+        super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
+    }
+
+    #[tokio::test]
+    async fn oversized_body_is_rejected_with_413() {
+        let state = ConnectorsState::new();
+        register(&state, "tg-big", "telegram");
+        let (app, emitter) = test_router_with(state);
+
+        // 1 byte over the 2 MiB cap → rejected during extraction, before any
+        // signature verification runs.
+        let big = vec![b'a'; MAX_REQUEST_BODY_BYTES + 1];
+        let resp = post_webhook(app, "/webhook/telegram/tg-big", vec![], big).await;
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(emitter.events.lock().is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // WeChat OA handler — GET echostr handshake, plaintext POST, safe-mode
+    // POST round-trip (incl. the appid cross-check), missing credentials.
+    // -----------------------------------------------------------------------
+
+    /// SHA-1 hex over the sorted-and-concatenated parts (WeChat's scheme).
+    fn wechat_sig(parts: &mut [&str]) -> String {
+        use sha1::{Digest, Sha1};
+        parts.sort_unstable();
+        let mut hasher = Sha1::new();
+        hasher.update(parts.concat().as_bytes());
+        hex::encode(hasher.finalize())
+    }
+
+    /// 43-char EncodingAESKey whose `+"="` decodes to 32 zero bytes.
+    fn wechat_test_aes_key() -> String {
+        "A".repeat(43)
+    }
+
+    /// Encrypt `msg` the way WeChat OA safe mode does (mirrors the helper in
+    /// `sigverify::wechat` tests): `random(16) ++ len(4) ++ msg ++ appid`,
+    /// block-32 PKCS#7, AES-256-CBC with IV = key[..16].
+    fn wechat_encrypt(encoding_aes_key: &str, msg: &str, appid: &str) -> String {
+        use aes::cipher::{block_padding::NoPadding, BlockModeEncrypt, KeyIvInit};
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+        type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
+
+        let key = BASE64.decode(format!("{encoding_aes_key}=")).unwrap();
+        let key_arr: [u8; 32] = key.as_slice().try_into().unwrap();
+        let iv_arr: [u8; 16] = key[..16].try_into().unwrap();
+
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&[0u8; 16]); // random prefix
+        buf.extend_from_slice(&(msg.len() as u32).to_be_bytes());
+        buf.extend_from_slice(msg.as_bytes());
+        buf.extend_from_slice(appid.as_bytes());
+        let block = 32usize;
+        let mut pad = block - (buf.len() % block);
+        if pad == 0 {
+            pad = block;
+        }
+        for _ in 0..pad {
+            buf.push(pad as u8);
+        }
+
+        let ct = Aes256CbcEnc::new(&key_arr.into(), &iv_arr.into())
+            .encrypt_padded_vec::<NoPadding>(&buf);
+        BASE64.encode(ct)
+    }
+
+    #[tokio::test]
+    async fn wechat_get_echostr_handshake_echoes_verbatim() {
+        let adapter_id = "wc-echostr";
+        super::super::keyring::set(adapter_id, "token", "wtok").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "wechat-oa");
+        let (app, emitter) = test_router_with(state);
+
+        let ts = "1700000000";
+        let nonce = "n0nce";
+        let sig = wechat_sig(&mut ["wtok", ts, nonce]);
+        let uri = format!(
+            "/webhook/wechat-oa/{adapter_id}?signature={sig}&timestamp={ts}&nonce={nonce}&echostr=hello-echo"
+        );
+        let resp = app
+            .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, "hello-echo");
+        assert!(emitter.events.lock().is_empty());
+
+        super::super::keyring::delete(adapter_id, "token").unwrap();
+    }
+
+    #[tokio::test]
+    async fn wechat_get_with_bad_signature_returns_401() {
+        let adapter_id = "wc-echostr-bad";
+        super::super::keyring::set(adapter_id, "token", "wtok").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "wechat-oa");
+        let (app, _) = test_router_with(state);
+
+        let uri = format!(
+            "/webhook/wechat-oa/{adapter_id}?signature=deadbeef&timestamp=1&nonce=n&echostr=x"
+        );
+        let resp = app
+            .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        super::super::keyring::delete(adapter_id, "token").unwrap();
+    }
+
+    #[tokio::test]
+    async fn wechat_post_plaintext_mode_emits_xml() {
+        let adapter_id = "wc-plain";
+        super::super::keyring::set(adapter_id, "token", "wtok-p").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "wechat-oa");
+        let (app, emitter) = test_router_with(state);
+
+        let ts = "1700000001";
+        let nonce = "pn0nce";
+        let sig = wechat_sig(&mut ["wtok-p", ts, nonce]);
+        let xml = "<xml><Content><![CDATA[hi]]></Content></xml>";
+        let uri = format!(
+            "/webhook/wechat-oa/{adapter_id}?signature={sig}&timestamp={ts}&nonce={nonce}"
+        );
+        let resp = post_webhook(app, &uri, vec![], xml.to_string()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, "success");
+
+        let events = emitter.events.lock();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1["xml"], xml);
+
+        super::super::keyring::delete(adapter_id, "token").unwrap();
+    }
+
+    #[tokio::test]
+    async fn wechat_post_safe_mode_round_trip_with_appid_check() {
+        let adapter_id = "wc-safe";
+        let aes_key = wechat_test_aes_key();
+        super::super::keyring::set(adapter_id, "token", "wtok-s").unwrap();
+        super::super::keyring::set(adapter_id, "encodingAesKey", &aes_key).unwrap();
+        super::super::keyring::set(adapter_id, "appId", "wx-good-appid").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "wechat-oa");
+        let (app, emitter) = test_router_with(state);
+
+        let inner_xml = "<xml><Content><![CDATA[safe hi]]></Content></xml>";
+        let encrypt = wechat_encrypt(&aes_key, inner_xml, "wx-good-appid");
+        let ts = "1700000002";
+        let nonce = "sn0nce";
+        let msg_sig = wechat_sig(&mut ["wtok-s", ts, nonce, encrypt.as_str()]);
+        let body = format!("<xml><Encrypt><![CDATA[{encrypt}]]></Encrypt></xml>");
+        let uri = format!(
+            "/webhook/wechat-oa/{adapter_id}?timestamp={ts}&nonce={nonce}&msg_signature={msg_sig}"
+        );
+        let resp = post_webhook(app, &uri, vec![], body).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, "success");
+
+        let events = emitter.events.lock();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1["xml"], inner_xml);
+
+        super::super::keyring::delete(adapter_id, "token").unwrap();
+        super::super::keyring::delete(adapter_id, "encodingAesKey").unwrap();
+        super::super::keyring::delete(adapter_id, "appId").unwrap();
+    }
+
+    #[tokio::test]
+    async fn wechat_post_safe_mode_rejects_appid_mismatch() {
+        let adapter_id = "wc-safe-mismatch";
+        let aes_key = wechat_test_aes_key();
+        super::super::keyring::set(adapter_id, "token", "wtok-m").unwrap();
+        super::super::keyring::set(adapter_id, "encodingAesKey", &aes_key).unwrap();
+        super::super::keyring::set(adapter_id, "appId", "wx-expected").unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "wechat-oa");
+        let (app, emitter) = test_router_with(state);
+
+        // Correctly signed + encrypted, but for a DIFFERENT appid.
+        let encrypt = wechat_encrypt(&aes_key, "<xml>x</xml>", "wx-other");
+        let ts = "1700000003";
+        let nonce = "mn0nce";
+        let msg_sig = wechat_sig(&mut ["wtok-m", ts, nonce, encrypt.as_str()]);
+        let body = format!("<xml><Encrypt><![CDATA[{encrypt}]]></Encrypt></xml>");
+        let uri = format!(
+            "/webhook/wechat-oa/{adapter_id}?timestamp={ts}&nonce={nonce}&msg_signature={msg_sig}"
+        );
+        let resp = post_webhook(app, &uri, vec![], body).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(emitter.events.lock().is_empty());
+
+        super::super::keyring::delete(adapter_id, "token").unwrap();
+        super::super::keyring::delete(adapter_id, "encodingAesKey").unwrap();
+        super::super::keyring::delete(adapter_id, "appId").unwrap();
+    }
+
+    #[tokio::test]
+    async fn wechat_post_safe_mode_skips_appid_check_when_unset() {
+        let adapter_id = "wc-safe-noappid";
+        let aes_key = wechat_test_aes_key();
+        super::super::keyring::set(adapter_id, "token", "wtok-n").unwrap();
+        super::super::keyring::set(adapter_id, "encodingAesKey", &aes_key).unwrap();
+        super::super::keyring::delete(adapter_id, "appId").ok();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "wechat-oa");
+        let (app, emitter) = test_router_with(state);
+
+        let encrypt = wechat_encrypt(&aes_key, "<xml>y</xml>", "wx-whatever");
+        let ts = "1700000004";
+        let nonce = "nn0nce";
+        let msg_sig = wechat_sig(&mut ["wtok-n", ts, nonce, encrypt.as_str()]);
+        let body = format!("<xml><Encrypt><![CDATA[{encrypt}]]></Encrypt></xml>");
+        let uri = format!(
+            "/webhook/wechat-oa/{adapter_id}?timestamp={ts}&nonce={nonce}&msg_signature={msg_sig}"
+        );
+        let resp = post_webhook(app, &uri, vec![], body).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(emitter.events.lock().len(), 1);
+
+        super::super::keyring::delete(adapter_id, "token").unwrap();
+        super::super::keyring::delete(adapter_id, "encodingAesKey").unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // QQ Official Bot — seeded-Ed25519 verification, op-13 challenge,
+    // op-0 dispatch emit + {"op":12} ACK.
+    // -----------------------------------------------------------------------
+
+    const QQ_TEST_SECRET: &str = "DG5g3B4j9X2KOErG";
+
+    /// Sign `timestamp ++ body` the way the QQ platform does (same seeded key
+    /// on both ends) and return the two signature headers.
+    fn qq_sig_headers(
+        secret: &str,
+        timestamp: &str,
+        body: &[u8],
+    ) -> Vec<(&'static str, String)> {
+        use ed25519_dalek::{Signer, SigningKey};
+        let seed = crate::sigverify::qq::seed_from_secret(secret).unwrap();
+        let key = SigningKey::from_bytes(&seed);
+        let mut msg = timestamp.as_bytes().to_vec();
+        msg.extend_from_slice(body);
+        vec![
+            ("X-Signature-Timestamp", timestamp.to_string()),
+            ("X-Signature-Ed25519", hex::encode(key.sign(&msg).to_bytes())),
+        ]
+    }
+
+    #[tokio::test]
+    async fn qq_challenge_round_trip_signs_event_ts_plus_plain_token() {
+        use ed25519_dalek::{Signature, SigningKey, Verifier};
+
+        let adapter_id = "qq-challenge";
+        super::super::keyring::set(adapter_id, "clientSecret", QQ_TEST_SECRET).unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "qq-official");
+        let (app, emitter) = test_router_with(state);
+
+        let body = serde_json::json!({
+            "op": 13,
+            "d": { "plain_token": "Arq0D5A61EgUu4OxUvOp", "event_ts": "1725442341" },
+        })
+        .to_string();
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/qq-official/{adapter_id}"),
+            qq_sig_headers(QQ_TEST_SECRET, "1725442341", body.as_bytes()),
+            body,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value =
+            serde_json::from_str(&body_string(resp).await).expect("challenge reply is JSON");
+        assert_eq!(json["plain_token"], "Arq0D5A61EgUu4OxUvOp");
+
+        // The returned signature must verify against the seed-derived public
+        // key over event_ts ++ plain_token (deterministic Ed25519).
+        let sig_hex = json["signature"].as_str().expect("signature present");
+        let sig_bytes =
+            <[u8; 64]>::try_from(hex::decode(sig_hex).unwrap().as_slice()).unwrap();
+        let seed = crate::sigverify::qq::seed_from_secret(QQ_TEST_SECRET).unwrap();
+        let vk = SigningKey::from_bytes(&seed).verifying_key();
+        assert!(vk
+            .verify(
+                b"1725442341Arq0D5A61EgUu4OxUvOp",
+                &Signature::from_bytes(&sig_bytes)
+            )
+            .is_ok());
+
+        // Handshake only — nothing reaches the renderer.
+        assert!(emitter.events.lock().is_empty());
+
+        super::super::keyring::delete(adapter_id, "clientSecret").unwrap();
+    }
+
+    #[tokio::test]
+    async fn qq_dispatch_event_is_emitted_and_acked_with_op_12() {
+        let adapter_id = "qq-dispatch";
+        super::super::keyring::set(adapter_id, "clientSecret", QQ_TEST_SECRET).unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "qq-official");
+        let (app, emitter) = test_router_with(state);
+
+        let body = serde_json::json!({
+            "op": 0,
+            "t": "C2C_MESSAGE_CREATE",
+            "id": "evt-1",
+            "d": { "id": "msg-1", "content": "hi", "author": { "user_openid": "u1" } },
+        })
+        .to_string();
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/qq-official/{adapter_id}"),
+            qq_sig_headers(QQ_TEST_SECRET, "1725442342", body.as_bytes()),
+            body.clone(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, r#"{"op":12}"#);
+
+        let events = emitter.events.lock();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, adapter_id);
+        // The RAW envelope is forwarded (TS re-parses via parseQQDispatch).
+        assert_eq!(events[0].1["t"], "C2C_MESSAGE_CREATE");
+        assert_eq!(events[0].1["d"]["id"], "msg-1");
+
+        super::super::keyring::delete(adapter_id, "clientSecret").unwrap();
+    }
+
+    #[tokio::test]
+    async fn qq_bad_signature_returns_401_and_emits_nothing() {
+        let adapter_id = "qq-badsig";
+        super::super::keyring::set(adapter_id, "clientSecret", QQ_TEST_SECRET).unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "qq-official");
+        let (app, emitter) = test_router_with(state);
+
+        let body = r#"{"op":0,"t":"C2C_MESSAGE_CREATE","d":{"id":"m"}}"#;
+        // Signed with the WRONG secret → derived public key mismatch.
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/qq-official/{adapter_id}"),
+            qq_sig_headers("wrong-secret-here", "1725442343", body.as_bytes()),
+            body.to_string(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(emitter.events.lock().is_empty());
+
+        super::super::keyring::delete(adapter_id, "clientSecret").unwrap();
+    }
+
+    #[tokio::test]
+    async fn qq_missing_signature_headers_return_401() {
+        let adapter_id = "qq-noheaders";
+        super::super::keyring::set(adapter_id, "clientSecret", QQ_TEST_SECRET).unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "qq-official");
+        let (app, emitter) = test_router_with(state);
+
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/qq-official/{adapter_id}"),
+            vec![],
+            r#"{"op":0}"#.to_string(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(emitter.events.lock().is_empty());
+
+        super::super::keyring::delete(adapter_id, "clientSecret").unwrap();
+    }
+
+    #[tokio::test]
+    async fn qq_missing_client_secret_returns_401() {
+        let adapter_id = "qq-nosecret";
+        super::super::keyring::delete(adapter_id, "clientSecret").ok();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "qq-official");
+        let (app, emitter) = test_router_with(state);
+
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/qq-official/{adapter_id}"),
+            vec![],
+            r#"{"op":0}"#.to_string(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(emitter.events.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn qq_unknown_op_is_acked_but_not_emitted() {
+        let adapter_id = "qq-unknown-op";
+        super::super::keyring::set(adapter_id, "clientSecret", QQ_TEST_SECRET).unwrap();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "qq-official");
+        let (app, emitter) = test_router_with(state);
+
+        let body = r#"{"op":11}"#;
+        let resp = post_webhook(
+            app,
+            &format!("/webhook/qq-official/{adapter_id}"),
+            qq_sig_headers(QQ_TEST_SECRET, "1725442344", body.as_bytes()),
+            body.to_string(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, r#"{"op":12}"#);
+        assert!(emitter.events.lock().is_empty());
+
+        super::super::keyring::delete(adapter_id, "clientSecret").unwrap();
+    }
+
+    #[tokio::test]
+    async fn wechat_missing_token_keyring_returns_401() {
+        let adapter_id = "wc-no-token";
+        super::super::keyring::delete(adapter_id, "token").ok();
+
+        let state = ConnectorsState::new();
+        register(&state, adapter_id, "wechat-oa");
+        let (app, emitter) = test_router_with(state);
+
+        let uri = format!(
+            "/webhook/wechat-oa/{adapter_id}?signature=x&timestamp=1&nonce=n&echostr=e"
+        );
+        let resp = app
+            .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(emitter.events.lock().is_empty());
     }
 }

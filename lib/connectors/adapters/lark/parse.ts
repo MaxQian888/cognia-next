@@ -279,7 +279,16 @@ function buildSegments(message: LarkMessage): MessageSegment[] {
 
     switch (message.message_type) {
       case "text": {
-        const text = typeof parsed["text"] === "string" ? parsed["text"] : ""
+        let text = typeof parsed["text"] === "string" ? parsed["text"] : ""
+        // Lark replaces each @-mention in the raw text with an opaque
+        // placeholder key ("@_user_1", "@_user_2", …) and ships the display
+        // names separately in `mentions[]`. Substitute them back so the
+        // model / stored message reads "@Alice" instead of "@_user_1".
+        for (const mention of message.mentions ?? []) {
+          if (mention.key && mention.name) {
+            text = text.split(mention.key).join(`@${mention.name}`)
+          }
+        }
         if (text) {
           segments.push({ type: "text", text })
         }
@@ -354,6 +363,55 @@ function buildSegments(message: LarkMessage): MessageSegment[] {
         break
       }
 
+      // ── Marker segments for share/rich types with no segment mapping ──
+      // These previously fell through to the default branch and produced an
+      // event with EMPTY segments/plainText, which in a p2p chat could
+      // trigger an AI turn on literally nothing. Each type keeps a compact
+      // text marker built from whatever the content JSON carries.
+      case "share_chat": {
+        const label = str(parsed["chat_name"]) || str(parsed["chat_id"])
+        segments.push({ type: "text", text: label ? `[shared chat: ${label}]` : "[shared chat]" })
+        break
+      }
+
+      case "share_user": {
+        const label = str(parsed["user_name"]) || str(parsed["user_id"])
+        segments.push({ type: "text", text: label ? `[shared user: ${label}]` : "[shared user]" })
+        break
+      }
+
+      case "location": {
+        // Wire shape: {"name":"...","longitude":"...","latitude":"..."}
+        // (numbers serialized as strings). Project into the typed location
+        // segment so plainText renders "[location:<name>]".
+        const lat = Number(str(parsed["latitude"]))
+        const lon = Number(str(parsed["longitude"]))
+        const name = str(parsed["name"])
+        segments.push({
+          type: "location",
+          lat: Number.isFinite(lat) ? lat : 0,
+          lon: Number.isFinite(lon) ? lon : 0,
+          ...(name ? { name } : {}),
+        })
+        break
+      }
+
+      case "todo": {
+        const label = str(parsed["summary"]) || str(parsed["task_id"])
+        segments.push({ type: "text", text: label ? `[todo: ${label}]` : "[todo]" })
+        break
+      }
+
+      case "calendar":
+      case "share_calendar_event": {
+        const label = str(parsed["summary"]) || str(parsed["title"])
+        segments.push({
+          type: "text",
+          text: label ? `[calendar event: ${label}]` : "[calendar event]",
+        })
+        break
+      }
+
       default:
         break
     }
@@ -362,6 +420,11 @@ function buildSegments(message: LarkMessage): MessageSegment[] {
   }
 
   return segments
+}
+
+/** Coerce an unknown JSON field to a trimmed string ("" when absent). */
+function str(v: unknown): string {
+  return typeof v === "string" ? v.trim() : ""
 }
 
 /**
@@ -539,6 +602,12 @@ export function parseLarkEventEnvelope(
       : undefined)
   if (!openId) return null
 
+  // System notices ("A invited B", recall banners, …) carry no recoverable
+  // content — dropping them here prevents an empty-plainText event from
+  // triggering an AI turn in p2p chats. (`fetchHistory` already skips
+  // msg_type=system before re-projection; this guards the live push path.)
+  if (message.message_type === "system") return null
+
   const chatId = message.chat_id
   const threadId = message.thread_id ?? undefined
 
@@ -563,6 +632,13 @@ export function parseLarkEventEnvelope(
       adapterId,
       channelId: chatId,
       threadTs: threadId,
+      // Reply anchor for thread sends: Lark's create-message endpoint has
+      // no thread parameter, so `serialize.ts` must route thread sends
+      // through POST /im/v1/messages/:id/reply — which needs an om_ message
+      // id, not the thread_id. Any in-thread message is a valid anchor
+      // (`reply_in_thread: true` lands the reply in that message's thread),
+      // so carry the id of the message we just parsed.
+      ...(threadId ? { threadRootMessageId: message.message_id } : {}),
     },
     conversationKey,
     sender: senderIdentity,

@@ -293,17 +293,6 @@ async fn run_bridge(app: tauri::AppHandle, adapter_id: String, socket: WebSocket
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::axum_app::build_unresolved_router;
-    use axum::body::Body;
-    use axum::http::Request;
-    use tower::ServiceExt;
-
-    fn router_with_ws() -> Router<ConnectorsState> {
-        // `build_unresolved_router` already wires in `register_routes`
-        // (see axum_app.rs); calling it a second time here would panic with
-        // "Overlapping method route". So just return the assembled router.
-        build_unresolved_router()
-    }
 
     // -----------------------------------------------------------------------
     // route_frame — pure classifier, no AppHandle / socket needed. The full
@@ -400,97 +389,108 @@ mod tests {
         assert!(bearer_matches("", ""));
     }
 
+    // -----------------------------------------------------------------------
+    // Auth over a REAL handshake. A synthetic `oneshot` request cannot reach
+    // the handler's 401 branch: axum's `WebSocketUpgrade` extractor rejects
+    // any request lacking hyper's `OnUpgrade` extension with 426 before the
+    // handler runs. So these tests start a live server on an ephemeral port
+    // and drive a genuine client handshake.
+    // -----------------------------------------------------------------------
+
+    struct NoopEmitter;
+    impl crate::axum_app::EventEmitter for NoopEmitter {
+        fn emit_webhook(&self, _adapter_id: &str, _payload: &serde_json::Value) {}
+    }
+
+    async fn start_live_server() -> (std::net::SocketAddr, crate::server_lifecycle::ServerHandle) {
+        let state = ConnectorsState::new();
+        let handle = crate::server_lifecycle::start_server(
+            state,
+            std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+            std::sync::Arc::new(NoopEmitter),
+            None,
+        )
+        .await
+        .unwrap();
+        (handle.bound_addr, handle)
+    }
+
+    /// Drive a client handshake with optional bearer; returns the result.
+    async fn ws_handshake(
+        addr: std::net::SocketAddr,
+        adapter: &str,
+        bearer: Option<&str>,
+    ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let mut req = format!("ws://{addr}/ws/onebot/{adapter}")
+            .into_client_request()
+            .unwrap();
+        if let Some(token) = bearer {
+            req.headers_mut().insert(
+                "Authorization",
+                format!("Bearer {token}").parse().unwrap(),
+            );
+        }
+        tokio_tungstenite::connect_async(req).await.map(|_| ())
+    }
+
+    fn assert_http_status(
+        result: Result<(), tokio_tungstenite::tungstenite::Error>,
+        expected: StatusCode,
+    ) {
+        match result {
+            Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => {
+                assert_eq!(resp.status(), expected)
+            }
+            other => panic!("expected HTTP {expected} rejection, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn ws_onebot_without_bearer_rejects_fail_closed() {
-        if !crate::keyring_available() {
-            return;
-        }
         // No bearer and no opt-in configured for this adapter → reject.
         let adapter = "ob-noauth-failclosed-test";
         super::super::keyring::delete(adapter, "onebotBearer").unwrap();
         super::super::keyring::delete(adapter, "onebotAllowUnauthenticated").unwrap();
 
-        let state = ConnectorsState::new();
-        let app = router_with_ws().with_state(state);
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri(format!("/ws/onebot/{adapter}"))
-                    .header("Connection", "Upgrade")
-                    .header("Upgrade", "websocket")
-                    .header("Sec-WebSocket-Version", "13")
-                    .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            resp.status(),
-            StatusCode::UNAUTHORIZED,
-            "a connection with no bearer and no opt-in must be rejected"
-        );
+        let (addr, handle) = start_live_server().await;
+        let result = ws_handshake(addr, adapter, None).await;
+        assert_http_status(result, StatusCode::UNAUTHORIZED);
+        handle.shutdown().await;
     }
 
     #[tokio::test]
     async fn ws_onebot_unauthenticated_optin_is_accepted() {
-        if !crate::keyring_available() {
-            return;
-        }
         // Explicit opt-in restores unauthenticated acceptance for trusted
         // localhost instances. No bearer set; opt-in flag truthy.
         let adapter = "ob-optin-test";
         super::super::keyring::delete(adapter, "onebotBearer").unwrap();
         super::super::keyring::set(adapter, "onebotAllowUnauthenticated", "true").unwrap();
 
-        let state = ConnectorsState::new();
-        let app = router_with_ws().with_state(state);
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri(format!("/ws/onebot/{adapter}"))
-                    .header("Connection", "Upgrade")
-                    .header("Upgrade", "websocket")
-                    .header("Sec-WebSocket-Version", "13")
-                    .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let (addr, handle) = start_live_server().await;
+        let result = ws_handshake(addr, adapter, None).await;
+        assert!(result.is_ok(), "opt-in upgrade must succeed, got {result:?}");
+        handle.shutdown().await;
 
-        // Opt-in path must not 401 (the upgrade proceeds, or 400 on a
-        // malformed tower handshake — never 401).
-        assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
         super::super::keyring::delete(adapter, "onebotAllowUnauthenticated").unwrap();
     }
 
     #[tokio::test]
     async fn ws_onebot_with_wrong_token_returns_401() {
-        if !crate::keyring_available() {
-            return;
-        }
-        // Set a bearer token in the real keyring.
-        super::super::keyring::set("guarded-ws-adapter", "onebotBearer", "correct-secret").unwrap();
+        // Set a bearer token in the (in-memory test) secret store.
+        let adapter = "guarded-ws-adapter";
+        super::super::keyring::set(adapter, "onebotBearer", "correct-secret").unwrap();
 
-        let state = ConnectorsState::new();
-        let app = router_with_ws().with_state(state);
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/ws/onebot/guarded-ws-adapter")
-                    .header("Authorization", "Bearer wrong-secret")
-                    .header("Connection", "Upgrade")
-                    .header("Upgrade", "websocket")
-                    .header("Sec-WebSocket-Version", "13")
-                    .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let (addr, handle) = start_live_server().await;
+        let result = ws_handshake(addr, adapter, Some("wrong-secret")).await;
+        assert_http_status(result, StatusCode::UNAUTHORIZED);
 
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        // The correct bearer is accepted on the same server.
+        let ok = ws_handshake(addr, adapter, Some("correct-secret")).await;
+        assert!(ok.is_ok(), "correct bearer must upgrade, got {ok:?}");
+        handle.shutdown().await;
+
+        super::super::keyring::delete(adapter, "onebotBearer").unwrap();
     }
 }

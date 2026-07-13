@@ -1,10 +1,12 @@
 //! Outbound WebSocket client for platform connectors.
 //!
 //! Wraps `tokio_tungstenite::connect_async` and emits Tauri events:
-//!   `connectors://ws/<id>/open`
-//!   `connectors://ws/<id>/message`
-//!   `connectors://ws/<id>/close`
-//!   `connectors://ws/<id>/error`
+//!   `connectors://ws/<id>/open`    — payload `()`
+//!   `connectors://ws/<id>/message` — text frame contents (string)
+//!   `connectors://ws/<id>/binary`  — binary frame as base64 (string)
+//!   `connectors://ws/<id>/close`   — `{code, reason}` (both null when the
+//!                                    stream ended without a close frame)
+//!   `connectors://ws/<id>/error`   — read-pump error message (string)
 //!
 //! A stable handle `id` (UUIDv4) is returned to the TS side so it can call
 //! `connectors_ws_send` / `connectors_ws_close` referencing that id.
@@ -139,13 +141,34 @@ pub async fn open_ws(
                     );
                 }
                 Ok(Message::Binary(bytes)) => {
+                    // Binary frames ride a dedicated `/binary` topic as base64
+                    // so `/message` listeners keep receiving text only.
+                    log::debug!(
+                        "WS {id_clone}: binary frame ({} bytes) → /binary",
+                        bytes.len()
+                    );
                     let _ = app_clone.emit(
-                        &format!("connectors://ws/{id_clone}/message"),
-                        format!("<binary:{}>", bytes.len()),
+                        &format!("connectors://ws/{id_clone}/binary"),
+                        binary_event_payload(&bytes),
                     );
                 }
-                Ok(Message::Close(_)) | Err(_) => {
-                    let _ = app_clone.emit(&format!("connectors://ws/{id_clone}/close"), ());
+                Ok(Message::Close(frame)) => {
+                    let _ = app_clone.emit(
+                        &format!("connectors://ws/{id_clone}/close"),
+                        close_event_payload(frame.as_ref()),
+                    );
+                    handles().lock().unwrap().remove(&id_clone);
+                    break;
+                }
+                Err(e) => {
+                    let _ = app_clone.emit(
+                        &format!("connectors://ws/{id_clone}/error"),
+                        e.to_string(),
+                    );
+                    let _ = app_clone.emit(
+                        &format!("connectors://ws/{id_clone}/close"),
+                        close_event_payload(None),
+                    );
                     handles().lock().unwrap().remove(&id_clone);
                     break;
                 }
@@ -155,6 +178,23 @@ pub async fn open_ws(
     });
 
     Ok(id)
+}
+
+/// Base64 payload for the `/binary` topic.
+fn binary_event_payload(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// `{code, reason}` payload for the `/close` topic. Both fields are `null`
+/// when the peer vanished without a close frame (abrupt EOF / read error).
+fn close_event_payload(
+    frame: Option<&tokio_tungstenite::tungstenite::protocol::CloseFrame>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "code": frame.map(|f| u16::from(f.code)),
+        "reason": frame.map(|f| f.reason.to_string()),
+    })
 }
 
 /// Send a text message on the given handle.
@@ -241,6 +281,34 @@ mod tests {
         ws_stream.send(Message::Text("ping".into())).await.unwrap();
         let msg = ws_stream.next().await.unwrap().unwrap();
         assert_eq!(msg.to_text().unwrap(), "ping");
+    }
+
+    #[test]
+    fn binary_event_payload_is_base64() {
+        assert_eq!(binary_event_payload(&[]), "");
+        assert_eq!(binary_event_payload(b"hi"), "aGk=");
+        assert_eq!(binary_event_payload(&[0u8, 255, 16]), "AP8Q");
+    }
+
+    #[test]
+    fn close_event_payload_carries_code_and_reason() {
+        use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+        use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+
+        let frame = CloseFrame {
+            code: CloseCode::Normal,
+            reason: "bye".into(),
+        };
+        let payload = close_event_payload(Some(&frame));
+        assert_eq!(payload["code"], 1000);
+        assert_eq!(payload["reason"], "bye");
+    }
+
+    #[test]
+    fn close_event_payload_without_frame_is_nulls() {
+        let payload = close_event_payload(None);
+        assert!(payload["code"].is_null());
+        assert!(payload["reason"].is_null());
     }
 
     #[tokio::test]

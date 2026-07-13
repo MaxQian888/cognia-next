@@ -8,16 +8,17 @@
  * tenant + activate-status. This generic panel branches by the row's
  * `type` to call the right HTTP probe:
  *
- *   - telegram → `/getMe`
- *   - discord  → `/users/@me`
- *   - slack    → `auth.test`
- *   - onebot   → no HTTP probe (bot connects TO us via reverse-WS;
+ *   - telegram    → `/getMe`
+ *   - discord     → `/users/@me`
+ *   - slack       → `auth.test`
+ *   - qq-official → `/users/@me` (QQBot app token minted from the keyring)
+ *   - onebot      → no HTTP probe (bot connects TO us via reverse-WS;
  *               identity is whatever the operator configured in
  *               `settings.selfBotUin`). The button is hidden.
- *   - dingtalk / qq-official / wechat-oa / wecom / wechat-personal → no
- *               reliable get-me style endpoint in the current adapter code;
- *               the panel shows the cached snapshot when one exists, otherwise
- *               a platform-specific no-probe reason.
+ *   - dingtalk / wechat-oa / wecom / wechat-personal → no reliable get-me
+ *               style endpoint in the current adapter code; the panel shows
+ *               the cached snapshot when one exists, otherwise a
+ *               platform-specific no-probe reason.
  *
  * Probe results all land in `adapterInstances.lastWhoamiResult` so the
  * panel can render the cached snapshot regardless of which probe wrote
@@ -40,6 +41,10 @@ import { probeTelegramIdentity, TelegramWhoamiError } from "@/lib/connectors/who
 import { probeDiscordIdentity, DiscordWhoamiError } from "@/lib/connectors/whoami/discord-whoami"
 import { probeSlackIdentity, SlackWhoamiError } from "@/lib/connectors/whoami/slack-whoami"
 import { probeMatrixIdentity, MatrixWhoamiError } from "@/lib/connectors/whoami/matrix-whoami"
+import {
+  probeQQOfficialIdentity,
+  QQOfficialWhoamiError,
+} from "@/lib/connectors/whoami/qq-official-whoami"
 
 export interface AdapterWhoamiPanelProps {
   adapterId: string
@@ -47,7 +52,13 @@ export interface AdapterWhoamiPanelProps {
   platform: PlatformKind
 }
 
-const PROBEABLE_PLATFORMS = new Set<PlatformKind>(["telegram", "discord", "slack", "matrix"])
+const PROBEABLE_PLATFORMS = new Set<PlatformKind>([
+  "telegram",
+  "discord",
+  "slack",
+  "matrix",
+  "qq-official",
+])
 
 async function dispatchProbe(adapterId: string, platform: PlatformKind): Promise<void> {
   switch (platform) {
@@ -73,8 +84,7 @@ async function dispatchProbe(adapterId: string, platform: PlatformKind): Promise
       // adapter does not expose a stable bot-identity endpoint.
       return
     case "qq-official":
-      // QQ exposes token + gateway checks, not a generic bot identity probe in
-      // the current adapter surface.
+      await probeQQOfficialIdentity(adapterId)
       return
     case "wechat-oa":
       // WeChat OA token validation is available in the config form; there is no
@@ -105,6 +115,9 @@ function probeErrorMessage(err: unknown): string {
     return `${err.httpStatus ?? "?"} — ${err.message}`
   }
   if (err instanceof MatrixWhoamiError) {
+    return `${err.httpStatus ?? "?"} — ${err.message}`
+  }
+  if (err instanceof QQOfficialWhoamiError) {
     return `${err.httpStatus ?? "?"} — ${err.message}`
   }
   return err instanceof Error ? err.message : String(err)
@@ -140,20 +153,22 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
 
   const whoami = row?.lastWhoamiResult
   const lastAt = row?.lastWhoamiAt
-  // OneBot has no probe — surface the operator-entered self UIN so the
-  // panel still has something to display.
-  const fallbackBotName =
-    !whoami && platform === "onebot"
-      ? (row?.settings as { selfBotUin?: string } | undefined)?.selfBotUin
-      : undefined
+  const configuredUin = (row?.settings as { selfBotUin?: string } | undefined)?.selfBotUin
+  // OneBot has no HTTP probe — before the client connects, surface the
+  // operator-entered self UIN so the panel still has something to display.
+  // Once connected, the adapter's `probeIdentity` writes the real identity
+  // into `lastWhoamiResult`, which renders through the shared snapshot branch.
+  const fallbackBotName = !whoami && platform === "onebot" ? configuredUin : undefined
+  // Flag when the probed bot UIN disagrees with the configured selfBotUin —
+  // usually a copy-paste slip in the config that the operator should fix.
+  const onebotUinMismatch =
+    platform === "onebot" && !!whoami && !!configuredUin && whoami.openId !== configuredUin
   const noProbeReason = (() => {
     switch (platform) {
       case "onebot":
         return t("onebotNoProbe")
       case "dingtalk":
         return t("dingtalkNoProbe")
-      case "qq-official":
-        return t("qqOfficialNoProbe")
       case "wechat-oa":
         return t("wechatOaNoProbe")
       case "wecom":
@@ -257,6 +272,17 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
           <p className="text-xs text-muted-foreground" data-testid="adapter-whoami-empty">
             {t("unknown")}
           </p>
+        )}
+        {onebotUinMismatch && (
+          <div
+            className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400"
+            data-testid="adapter-whoami-onebot-mismatch"
+          >
+            <XCircleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1 break-words">
+              {t("onebotUinMismatch", { configured: configuredUin ?? "", actual: whoami?.openId ?? "" })}
+            </span>
+          </div>
         )}
         {lastError && (
           <div

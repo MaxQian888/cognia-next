@@ -149,17 +149,34 @@ export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
     }
 
     case "mention":
+      // Documented text-message mention syntax: the ATTRIBUTE is `user_id`
+      // (its value may be an open_id / user_id, or "all"); the inner text is
+      // the fallback display name. `<at open_id="…">` is not documented and
+      // renders as literal text.
       return {
         msg_type: "text",
-        content: JSON.stringify({ text: `<at open_id="${seg.userId}"></at>` }),
+        content: JSON.stringify({
+          text: `<at user_id="${seg.userId}">${seg.displayName ?? ""}</at>`,
+        }),
       }
 
-    case "card":
-      // Phase 1: opaque card → plain text placeholder
+    case "card": {
+      // Platform-native card passthrough: when the opaque payload already
+      // looks like Lark interactive-card JSON, ship it verbatim as
+      // msg_type=interactive (this is what `send.card` + `rich-card.lark`
+      // declare). Foreign card dialects (Slack Block Kit, …) keep the
+      // plain-text placeholder.
+      if (isLarkCardPayload(seg.card?.payload)) {
+        return {
+          msg_type: "interactive",
+          content: JSON.stringify(seg.card.payload),
+        }
+      }
       return {
         msg_type: "text",
         content: JSON.stringify({ text: "[card]" }),
       }
+    }
 
     case "a2ui":
       // Sync fallback: plain text mirror. `serializeOutboundAsync`
@@ -181,8 +198,26 @@ export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
   }
 }
 
+/**
+ * Duck-type check for Lark interactive-card JSON: a card body has an
+ * `elements` array (v1), locale-keyed `i18n_elements`, a `header` object,
+ * or a Card 2.0 `schema` marker.
+ */
+function isLarkCardPayload(payload: unknown): payload is Record<string, unknown> {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false
+  const p = payload as Record<string, unknown>
+  return (
+    Array.isArray(p["elements"]) ||
+    (typeof p["i18n_elements"] === "object" && p["i18n_elements"] !== null) ||
+    (typeof p["header"] === "object" && p["header"] !== null) ||
+    typeof p["schema"] === "string"
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Lark A2UI mapper — Interactive Card projection (G3.4)
+// GAP: this mapper emits card JSON 1.0; migration to Card 2.0 (schema:"2.0",
+// body.elements, form containers, native input/checker) is out of scope here.
 // ---------------------------------------------------------------------------
 
 export interface LarkA2UIMapperInput {
@@ -474,15 +509,26 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
           componentId: node.id,
           conversationKey: input.conversationKey,
         })
-        elements.push({
+        // Lark's message-card schema only accepts `input` INSIDE an action
+        // module's `actions` array — a root-level `{tag:"input"}` element
+        // fails delivery of the whole card. There is no rows/required prop
+        // in this schema (TextArea renders as the same single-line input);
+        // `name` is kept for form-style callbacks and the baked `value`
+        // object is what `parseLarkInteractiveCallback` resolves bindings
+        // from (the submitted text arrives as `action.input_value`).
+        const defaultValue = stringValue(node.raw.value)
+        const row = ensureAction()
+        row.actions.push({
           tag: "input",
+          name: node.id,
           placeholder: {
             tag: "plain_text",
             content: stringValue(node.raw.placeholder) || stringValue(node.raw.label) || "Input",
           },
-          rows: node.component === "TextArea" ? 4 : 1,
+          ...(defaultValue ? { default_value: defaultValue } : {}),
           value: { actionId: fullId, surfaceId: input.surfaceId, componentId: node.id },
         })
+        flushAction()
         break
       }
       case "Dialog":
@@ -539,10 +585,16 @@ function stringValue(v: unknown): string {
 
 /**
  * Async serializer used by the production adapter `send()`. When a
- * segment list contains any `a2ui` segment, the whole message collapses
- * into a single Lark Interactive Card (composed from each a2ui surface
- * + the text/markdown tail). Otherwise delegates to the sync
+ * segment list contains any `a2ui` segment — or mixes a `markdown`
+ * segment with other segments — the whole message collapses into a
+ * single Lark Interactive Card (composed from each a2ui surface + the
+ * text/markdown/code tail). Otherwise delegates to the sync
  * `segmentsToLarkBody`.
+ *
+ * The markdown trigger exists because markdown only renders via a card
+ * `lark_md` element: the sync multi-segment combiner degrades it to a
+ * literal "[markdown]" placeholder inside a text body, so a
+ * text+markdown+code answer used to arrive visibly broken.
  *
  * Lark's `/im/v1/messages` accepts one body per call, so combining
  * everything into a single interactive card preserves the assistant's
@@ -557,7 +609,10 @@ export async function segmentsToLarkBodyAsync(
   }
 ): Promise<LarkMessageBody> {
   const hasA2UI = segments.some((s) => s.type === "a2ui")
-  if (!hasA2UI) return segmentsToLarkBody(segments)
+  // A single markdown segment already renders as its own interactive card
+  // via `segmentToLarkBody`; only multi-segment markdown needs the combiner.
+  const needsMarkdownCard = segments.length > 1 && segments.some((s) => s.type === "markdown")
+  if (!hasA2UI && !needsMarkdownCard) return segmentsToLarkBody(segments)
 
   // Compose a single interactive card that interleaves text/markdown
   // segments as `div` elements with each a2ui surface's projected
@@ -589,6 +644,26 @@ export async function segmentsToLarkBodyAsync(
       combinedElements.push({
         tag: "div",
         text: { tag: "lark_md", content: escapeLarkMarkdown(text) },
+      })
+      continue
+    }
+    // Code blocks render as fenced lark_md — the raw code must NOT go
+    // through escapeLarkMarkdown (a literal `@` or `\` inside code would
+    // otherwise gain escapes).
+    if (seg.type === "code") {
+      const lang = seg.language ?? ""
+      combinedElements.push({
+        tag: "div",
+        text: { tag: "lark_md", content: `\`\`\`${lang}\n${seg.code}\n\`\`\`` },
+      })
+      continue
+    }
+    // Mentions inside a card use the lark_md at-syntax (`<at id=…></at>`),
+    // which differs from the text-message `<at user_id=…>` syntax.
+    if (seg.type === "mention") {
+      combinedElements.push({
+        tag: "div",
+        text: { tag: "lark_md", content: `<at id=${seg.userId}></at>` },
       })
       continue
     }

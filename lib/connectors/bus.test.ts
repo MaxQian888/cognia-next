@@ -19,6 +19,9 @@ import type { TriggerPolicy } from "@/types/connectors/policy"
 // reach these modules, so the mocks leave them untouched.
 jest.mock("./dedup", () => ({
   recordAndCheckInbound: jest.fn().mockResolvedValue(true),
+  // Read-only probe used by dispatchConnectorCallback's check-then-commit
+  // dedup — `false` = "not seen yet" so every test callback dispatches.
+  isRecordedInbound: jest.fn().mockResolvedValue(false),
 }))
 jest.mock("./audit", () => ({
   appendAudit: jest.fn().mockResolvedValue(undefined),

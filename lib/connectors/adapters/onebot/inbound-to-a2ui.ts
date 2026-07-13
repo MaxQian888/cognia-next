@@ -33,14 +33,17 @@ function mapSegment(seg: OneBotSegment): InboundA2UINode | null {
     case "text":
       return { kind: "text", text: s(seg.data?.text) }
     case "image": {
-      const url = s(seg.data?.url) || s(seg.data?.file)
+      // v11 carries url/file; v12 carries file_id.
+      const url = s(seg.data?.url) || s(seg.data?.file) || s(seg.data?.file_id)
       if (!url) return null
       return { kind: "image", url, alt: s(seg.data?.summary) || undefined }
     }
+    // v11 "at" (qq=…) and v12 "mention" (user_id=…) are the same concept.
     case "at":
+    case "mention":
       return {
         kind: "mention",
-        handle: s(seg.data?.qq),
+        handle: s(seg.data?.qq) || s(seg.data?.user_id),
         resolved: s(seg.data?.name) || undefined,
       }
     case "reply":
@@ -62,16 +65,18 @@ function mapSegment(seg: OneBotSegment): InboundA2UINode | null {
             : []),
         ],
       }
+    // v11 "record" and v12 "voice"; v12 carries file_id instead of url/file.
     case "record":
+    case "voice":
       return {
         kind: "link",
-        href: s(seg.data?.url) || `cq-record:${s(seg.data?.file)}`,
+        href: s(seg.data?.url) || `cq-record:${s(seg.data?.file) || s(seg.data?.file_id)}`,
         label: "Voice message",
       }
     case "video":
       return {
         kind: "link",
-        href: s(seg.data?.url) || `cq-video:${s(seg.data?.file)}`,
+        href: s(seg.data?.url) || `cq-video:${s(seg.data?.file) || s(seg.data?.file_id)}`,
         label: "Video",
       }
     default:

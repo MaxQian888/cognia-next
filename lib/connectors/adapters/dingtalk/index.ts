@@ -18,9 +18,9 @@ import type { OutboundRequest, OutboundResult } from "@/types/connectors/outboun
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { DINGTALK_A2UI_CAPABILITY, DINGTALK_CAPS } from "./capability"
-import { DINGTALK_API_BASE, dingtalkAuthHeaders } from "./auth"
+import { clearDingTalkTokenCache, DINGTALK_API_BASE, dingtalkAuthHeaders } from "./auth"
 import { parseDingTalkBotMessage, type DingTalkBotMessage } from "./parse"
-import { serializeOutbound } from "./serialize"
+import { serializeOutbound, type DingTalkSerialized } from "./serialize"
 import { startDingTalkStream, TOPIC_BOT_MESSAGE } from "./stream-client"
 
 export interface DingTalkAdapterOptions {
@@ -57,6 +57,23 @@ class DingTalkApiError extends Error {
   }
 }
 
+/** Consecutive register/ws-open failures before health degrades. */
+const TRANSPORT_FAILURES_BEFORE_DEGRADED = 3
+
+/** Stream union ids ($:LWCP_v1:$…) are not valid /oToMessages/batchSend userIds. */
+const UNION_ID_PREFIX = "$:LWCP_v1:$"
+
+/** Project the serialized message onto the classic robot-webhook payload shape. */
+function toSessionWebhookPayload(serialized: DingTalkSerialized): Record<string, unknown> {
+  if (serialized.msgKey === "sampleMarkdown") {
+    return {
+      msgtype: "markdown",
+      markdown: { title: serialized.msgParam.title, text: serialized.msgParam.text },
+    }
+  }
+  return { msgtype: "text", text: { content: serialized.msgParam.content } }
+}
+
 export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAdapter {
   let abortController: AbortController | null = null
   let healthState: AdapterHealthState = "starting"
@@ -66,8 +83,12 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
   let lastActivityAt: number | undefined
   let stopCalled = false
   let selfId = opts.selfId ?? ""
+  let transportFailures = 0
 
-  async function dingtalkPost(path: string, payload: unknown): Promise<Record<string, unknown>> {
+  async function dingtalkPostOnce(
+    path: string,
+    payload: unknown
+  ): Promise<Record<string, unknown>> {
     const token = await opts.accessToken()
     const resp = await connectorsHttpRequest({
       url: `${DINGTALK_API_BASE}${path}`,
@@ -88,6 +109,49 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
     return body
   }
 
+  async function dingtalkPost(path: string, payload: unknown): Promise<Record<string, unknown>> {
+    try {
+      return await dingtalkPostOnce(path, payload)
+    } catch (err) {
+      // A 401/403 usually means the cached app access token outlived a secret
+      // rotation — drop the cache entry and retry ONCE with a fresh token.
+      // A second failure surfaces as auth_failed (non-retryable) upstream.
+      if (err instanceof DingTalkApiError && (err.status === 401 || err.status === 403)) {
+        const [appKey, appSecret] = await Promise.all([opts.appKey(), opts.appSecret()])
+        clearDingTalkTokenCache(appKey, appSecret)
+        return await dingtalkPostOnce(path, payload)
+      }
+      throw err
+    }
+  }
+
+  /** POST to a transient sessionWebhook (classic robot-webhook shape, no token). */
+  async function sessionWebhookPost(url: string, payload: Record<string, unknown>): Promise<void> {
+    const resp = await connectorsHttpRequest({
+      url,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    let body: Record<string, unknown>
+    try {
+      body = JSON.parse(resp.body) as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+    if (resp.status < 200 || resp.status >= 300) {
+      throw new DingTalkApiError(
+        `DingTalk session webhook failed: status ${resp.status}`,
+        resp.status
+      )
+    }
+    const errcode = typeof body.errcode === "number" ? body.errcode : 0
+    if (errcode !== 0) {
+      const msg = typeof body.errmsg === "string" ? body.errmsg : `errcode ${errcode}`
+      throw new DingTalkApiError(`DingTalk session webhook failed: ${msg}`, 400)
+    }
+  }
+
   async function start(ctx: AdapterContext): Promise<void> {
     if (abortController) return
     stopCalled = false
@@ -95,23 +159,44 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
     const signal = abortController.signal
     healthState = "running"
     healthReason = undefined
+    transportFailures = 0
     if (!selfId) selfId = opts.selfId ?? ""
 
     const client = startDingTalkStream({
       clientId: opts.appKey,
       clientSecret: opts.appSecret,
       signal,
+      // The stream generator retries register/ws-open failures silently
+      // forever; this callback is the only signal that the transport is stuck
+      // (e.g. wrong appKey/appSecret), so degrade health after N consecutive
+      // failures and restore "running" once a connection lands.
+      onTransportState: (state) => {
+        if (stopCalled) return
+        if (state.kind === "connected") {
+          transportFailures = 0
+          healthState = "running"
+          healthReason = undefined
+          return
+        }
+        transportFailures += 1
+        if (transportFailures >= TRANSPORT_FAILURES_BEFORE_DEGRADED) {
+          healthState = "degraded"
+          healthReason = state.reason
+        }
+      },
     })
     ;(async () => {
       try {
         for await (const frame of client.frames) {
           if (signal.aborted) break
           if (frame.topic !== TOPIC_BOT_MESSAGE) continue
-          const normalized = parseDingTalkBotMessage(
-            opts.id,
-            selfId,
-            frame.data as unknown as DingTalkBotMessage
-          )
+          const raw = frame.data as unknown as DingTalkBotMessage
+          // Learn the bot's own user id from the first frame that carries it
+          // (parse falls back per-event; this keeps adapter-level selfId set).
+          if (!selfId && typeof raw?.chatbotUserId === "string" && raw.chatbotUserId) {
+            selfId = raw.chatbotUserId
+          }
+          const normalized = parseDingTalkBotMessage(opts.id, selfId, raw)
           if (!normalized) continue
           if (!(await gateInboundEvent(opts.id, normalized))) continue
           lastActivityAt = Date.now()
@@ -177,6 +262,8 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
       userId?: string
       openConversationId?: string
       robotCode?: string
+      sessionWebhook?: string
+      sessionWebhookExpiredTime?: number
     }
     const serialized = serializeOutbound(req)
     if (!serialized) return { ok: true }
@@ -205,23 +292,38 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
           msgParam,
         })
       } else {
-        const userId = ref.userId ?? ""
-        if (!userId) {
-          return {
-            ok: false,
-            error: {
-              code: "validation",
-              message: "DingTalk 1:1 send: missing userId",
-              retryable: false,
-            },
+        const rawUserId = ref.userId ?? ""
+        // Union ids (external/inter-corp senders without a staffId) are
+        // rejected by batchSend — fall back to the frame's session webhook.
+        const staffId =
+          rawUserId && !rawUserId.startsWith(UNION_ID_PREFIX) && rawUserId !== "unknown"
+            ? rawUserId
+            : ""
+        if (staffId) {
+          await dingtalkPost("/v1.0/robot/oToMessages/batchSend", {
+            robotCode,
+            userIds: [staffId],
+            msgKey: serialized.msgKey,
+            msgParam,
+          })
+        } else {
+          const webhook = ref.sessionWebhook ?? ""
+          const webhookExpiry =
+            typeof ref.sessionWebhookExpiredTime === "number" ? ref.sessionWebhookExpiredTime : 0
+          if (webhook && webhookExpiry > Date.now()) {
+            await sessionWebhookPost(webhook, toSessionWebhookPayload(serialized))
+          } else {
+            return {
+              ok: false,
+              error: {
+                code: "validation",
+                message:
+                  "DingTalk 1:1 send: sender has no staffId (external/inter-corp user) and the session webhook is missing or expired",
+                retryable: false,
+              },
+            }
           }
         }
-        await dingtalkPost("/v1.0/robot/oToMessages/batchSend", {
-          robotCode,
-          userIds: [userId],
-          msgKey: serialized.msgKey,
-          msgParam,
-        })
       }
       lastActivityAt = Date.now()
       return { ok: true }
@@ -241,7 +343,8 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
         displayName: opts.displayName,
         version: "0.1.0",
         capabilities: DINGTALK_CAPS,
-        transportModes: ["longpoll"] as const,
+        // Stream mode is a persistent outbound WebSocket — a gateway transport.
+        transportModes: ["gateway"] as const,
         configSchema: DINGTALK_CONFIG_SCHEMA,
       }
     },

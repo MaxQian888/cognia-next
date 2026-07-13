@@ -23,6 +23,7 @@ import {
   connectorsAttachmentFetch,
   connectorsAttachmentRead,
   connectorsMediaUpload,
+  connectorsDiscordUpload,
   connectorsMatrixCryptoInit,
   connectorsMatrixCryptoOutgoingRequests,
   connectorsMatrixCryptoMarkRequestSent,
@@ -40,6 +41,7 @@ import {
   type TauriHttpResponse,
   type AttachmentRef,
   type ConnectorMediaUploadRequest,
+  type ConnectorDiscordUploadRequest,
   type MatrixCryptoInitRequest,
   type MatrixCryptoOutgoingRequest,
 } from "./commands"
@@ -303,6 +305,23 @@ describe("connectorsMediaUpload", () => {
 
     await expect(connectorsMediaUpload(req)).resolves.toBe("mxc://matrix.org/uploaded")
     expect(mockInvoke).toHaveBeenCalledWith("connectors_media_upload", { req })
+  })
+})
+
+describe("connectorsDiscordUpload", () => {
+  it("invokes connectors_discord_upload and returns the created message id", async () => {
+    mockInvoke.mockResolvedValueOnce("991122334455")
+    const req: ConnectorDiscordUploadRequest = {
+      botToken: "TOKEN",
+      channelId: "chan-1",
+      files: [
+        { sourceUrl: "https://example.com/pic.png", filename: "pic.png", contentType: "image/png" },
+      ],
+      flags: 1 << 13,
+    }
+
+    await expect(connectorsDiscordUpload(req)).resolves.toBe("991122334455")
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_discord_upload", { req })
   })
 })
 

@@ -69,8 +69,31 @@ export async function requeueAdapter(adapterId: string): Promise<boolean> {
   if (!entry) return false
   const restart = entry.restart
   unregisterRunningAdapter(adapterId)
-  await restart()
-  return true
+  try {
+    await restart()
+    return true
+  } catch (err) {
+    // A transient restart failure (network blip right after OS wake is the
+    // common case) must not permanently drop the adapter: with no registry
+    // entry, later credential rotations no-op and the resume-reconnect
+    // sweep can't see it. One bounded in-place retry, then re-register the
+    // stale entry as a placeholder — its transport is stopped and signal
+    // aborted, but its `restart` closure stays valid, so the next sweep or
+    // "Reconnect now" click can retry instead of requiring an app restart.
+    try {
+      await restart()
+      return true
+    } catch (retryErr) {
+      if (!entries.has(adapterId)) entries.set(adapterId, entry)
+      console.error(
+        `[lifecycle] adapter ${adapterId} restart failed twice (${
+          err instanceof Error ? err.message : String(err)
+        }); placeholder re-registered for a later retry:`,
+        retryErr instanceof Error ? retryErr.message : String(retryErr)
+      )
+      return false
+    }
+  }
 }
 
 /**

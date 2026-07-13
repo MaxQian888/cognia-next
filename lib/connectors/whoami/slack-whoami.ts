@@ -11,7 +11,15 @@ import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-inst
 
 export interface SlackWhoamiResult {
   botName: string
+  /**
+   * Slack app id. `auth.test` does NOT return one (`api_app_id` only rides
+   * on event envelopes), so this stays "" rather than mislabeling the
+   * bot_id as an app id. Kept because the shared `lastWhoamiResult` row
+   * shape requires the field.
+   */
   appId: string
+  /** Team-scoped bot id (`B…`) from auth.test. */
+  botId?: string
   openId: string
   tenantKey?: string
 }
@@ -95,7 +103,8 @@ export async function probeSlackIdentity(
 
   const result: SlackWhoamiResult = {
     botName: name,
-    appId: parsed.bot_id ?? parsed.user_id,
+    appId: "",
+    botId: parsed.bot_id,
     openId: parsed.user_id,
     tenantKey: parsed.team_id,
   }

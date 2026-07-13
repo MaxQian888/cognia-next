@@ -55,6 +55,27 @@ describe("parseIlinkMessage", () => {
   it("returns null when no item produces content", () => {
     expect(parseIlinkMessage(ADP, msg({ item_list: [] }))).toBeNull()
   })
+
+  it("derives a messageId that is stable across redeliveries (no wall clock)", () => {
+    const first = parseIlinkMessage(ADP, msg({}), 5000)
+    const redelivered = parseIlinkMessage(ADP, msg({}), 99_999)
+    expect(first!.messageId).toBe(redelivered!.messageId)
+    expect(first!.messageId.startsWith("ctx-1:s1:")).toBe(true)
+  })
+
+  it("derives different messageIds when the same context_token carries different content", () => {
+    const a = parseIlinkMessage(
+      ADP,
+      msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: "one" } }] }),
+      5000
+    )
+    const b = parseIlinkMessage(
+      ADP,
+      msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: "two" } }] }),
+      5000
+    )
+    expect(a!.messageId).not.toBe(b!.messageId)
+  })
 })
 
 describe("tryParseNumericCallback", () => {

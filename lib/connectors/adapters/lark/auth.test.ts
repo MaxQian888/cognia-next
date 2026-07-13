@@ -9,6 +9,7 @@ import {
   buildLarkOAuthUrl,
   exchangeCodeForUserAccessToken,
   refreshUserAccessToken,
+  fetchLarkUserInfo,
   getUserAccessToken,
   refreshUserToken,
   clearUserTokenCache,
@@ -104,66 +105,104 @@ describe("getTenantAccessToken", () => {
 })
 
 describe("buildLarkOAuthUrl", () => {
-  it("builds the correct authorize URL", () => {
+  it("builds an OAuth 2.0 authorize URL with client_id + response_type", () => {
     const url = buildLarkOAuthUrl({
       appId: "cli_my_app",
-      redirectUri: "cognia://connector/oauth/lark",
+      redirectUri: "https://relay.example/oauth/lark/callback",
       state: "random-state-123",
+      scope: "offline_access im:message",
+      codeChallenge: "challenge-abc",
     })
-    expect(url).toContain("open.feishu.cn")
+    expect(url).toContain("accounts.feishu.cn")
     expect(url).toContain("authen/v1/authorize")
-    expect(url).toContain("app_id=cli_my_app")
+    expect(url).toContain("client_id=cli_my_app")
+    expect(url).toContain("response_type=code")
     expect(url).toContain("state=random-state-123")
+    // scope is space-separated → URL-encoded to +/%20
+    expect(decodeURIComponent(new URL(url).searchParams.get("scope") ?? "")).toBe(
+      "offline_access im:message"
+    )
+    expect(url).toContain("code_challenge=challenge-abc")
+    expect(url).toContain("code_challenge_method=S256")
+  })
+
+  it("omits scope and PKCE params when not supplied", () => {
+    const url = buildLarkOAuthUrl({
+      appId: "cli_app",
+      redirectUri: "https://relay.example/cb",
+      state: "s",
+    })
+    expect(url).not.toContain("scope=")
+    expect(url).not.toContain("code_challenge")
   })
 
   it("URL-encodes the redirect_uri", () => {
     const url = buildLarkOAuthUrl({
       appId: "cli_app",
-      redirectUri: "cognia://connector/oauth/lark?foo=bar",
+      redirectUri: "https://relay.example/oauth/lark/callback?foo=bar",
       state: "s",
     })
-    expect(url).not.toContain("cognia://connector/oauth/lark?foo=bar")
+    expect(url).not.toContain("/callback?foo=bar")
     expect(url).toContain("redirect_uri=")
   })
 })
 
 // ---------------------------------------------------------------------------
-// A4 / D2 — OAuth code exchange + refresh (ADR-0009 v41)
+// OAuth 2.0 code exchange + refresh + user info (authen/v2/oauth/token)
 // ---------------------------------------------------------------------------
 
-function makeOidcResponse(opts: {
-  accessToken?: string
-  refreshToken?: string
-  openId?: string
-  name?: string
-  expiresIn?: number
-  refreshExpiresIn?: number
-  code?: number
-  msg?: string
-}) {
+function makeTokenV2Response(
+  opts: {
+    accessToken?: string
+    refreshToken?: string
+    expiresIn?: number
+    refreshExpiresIn?: number
+    scope?: string
+    code?: number
+    error?: string
+    errorDescription?: string
+  } = {}
+) {
+  const isErr = opts.code !== undefined && opts.code !== 0
+  return {
+    status: 200,
+    headers: {},
+    body: JSON.stringify(
+      isErr
+        ? { code: opts.code, error: opts.error, error_description: opts.errorDescription }
+        : {
+            code: 0,
+            access_token: opts.accessToken ?? "u-token",
+            refresh_token: opts.refreshToken ?? "u-refresh",
+            expires_in: opts.expiresIn ?? 7200,
+            refresh_token_expires_in: opts.refreshExpiresIn ?? 31_104_000,
+            token_type: "Bearer",
+            scope: opts.scope ?? "offline_access im:message",
+          }
+    ),
+  }
+}
+
+function makeUserInfoResponse(
+  opts: { openId?: string; name?: string; code?: number; msg?: string } = {}
+) {
+  const ok = (opts.code ?? 0) === 0
   return {
     status: 200,
     headers: {},
     body: JSON.stringify({
       code: opts.code ?? 0,
       msg: opts.msg,
-      data:
-        opts.code === undefined || opts.code === 0
-          ? {
-              access_token: opts.accessToken ?? "u-token",
-              refresh_token: opts.refreshToken ?? "u-refresh",
-              expires_in: opts.expiresIn ?? 7200,
-              refresh_expires_in: opts.refreshExpiresIn ?? 31_104_000,
-              open_id: opts.openId ?? "ou_default",
-              union_id: "on_default",
-              token_type: "Bearer",
-              scope: "im:message",
-              name: opts.name,
-              avatar_url: "https://avatar.example.com",
-              email: "user@example.com",
-              enterprise_email: "user@bigcorp.example.com",
-            }
-          : undefined,
+      data: ok
+        ? {
+            open_id: opts.openId ?? "ou_default",
+            union_id: "on_default",
+            name: opts.name ?? "User",
+            avatar_url: "https://avatar.example.com",
+            email: "user@example.com",
+            enterprise_email: "user@bigcorp.example.com",
+          }
+        : undefined,
     }),
   }
 }
@@ -173,23 +212,19 @@ describe("exchangeCodeForUserAccessToken", () => {
     mockHttp.mockReset()
   })
 
-  it("POSTs the OIDC endpoint with Bearer TAT and authorization_code grant body", async () => {
+  it("POSTs the v2 token endpoint with client credentials + PKCE verifier", async () => {
     mockHttp.mockResolvedValueOnce(
-      makeOidcResponse({
-        accessToken: "u-access",
-        refreshToken: "u-refresh",
-        openId: "ou_alice",
-        name: "Alice",
-      })
+      makeTokenV2Response({ accessToken: "u-access", refreshToken: "u-refresh" })
     )
     const result = await exchangeCodeForUserAccessToken({
       code: "abc123",
-      appAccessToken: "tat-xyz",
+      appId: "cli_app",
+      appSecret: "sec",
+      redirectUri: "https://relay/oauth/lark/callback",
+      codeVerifier: "verifier-1",
     })
     expect(result.accessToken).toBe("u-access")
     expect(result.refreshToken).toBe("u-refresh")
-    expect(result.openId).toBe("ou_alice")
-    expect(result.name).toBe("Alice")
     expect(result.expiresInSec).toBe(7200)
     expect(result.refreshExpiresInSec).toBe(31_104_000)
 
@@ -198,27 +233,67 @@ describe("exchangeCodeForUserAccessToken", () => {
       headers: Record<string, string>
       body: string
     }
-    expect(call.url).toContain("/authen/v1/oidc/access_token")
-    expect(call.headers.Authorization).toBe("Bearer tat-xyz")
-    expect(JSON.parse(call.body)).toEqual({ grant_type: "authorization_code", code: "abc123" })
+    expect(call.url).toBe("https://open.feishu.cn/open-apis/authen/v2/oauth/token")
+    // v2 sends client_secret in the body — no Bearer header.
+    expect(call.headers.Authorization).toBeUndefined()
+    expect(JSON.parse(call.body)).toEqual({
+      grant_type: "authorization_code",
+      client_id: "cli_app",
+      client_secret: "sec",
+      code: "abc123",
+      redirect_uri: "https://relay/oauth/lark/callback",
+      code_verifier: "verifier-1",
+    })
   })
 
-  it("throws when Lark returns a non-zero code", async () => {
-    mockHttp.mockResolvedValueOnce(makeOidcResponse({ code: 99991661, msg: "auth code expired" }))
+  it("omits code_verifier when not supplied", async () => {
+    mockHttp.mockResolvedValueOnce(makeTokenV2Response({}))
+    await exchangeCodeForUserAccessToken({
+      code: "c",
+      appId: "a",
+      appSecret: "s",
+      redirectUri: "r",
+    })
+    const body = JSON.parse((mockHttp.mock.calls[0][0] as { body: string }).body)
+    expect(body.code_verifier).toBeUndefined()
+  })
+
+  it("throws with Feishu's error_description on failure", async () => {
+    mockHttp.mockResolvedValueOnce(
+      makeTokenV2Response({ code: 20050, error: "invalid_grant", errorDescription: "code expired" })
+    )
     await expect(
-      exchangeCodeForUserAccessToken({ code: "stale", appAccessToken: "tat" })
-    ).rejects.toThrow(/auth code expired/)
+      exchangeCodeForUserAccessToken({ code: "stale", appId: "a", appSecret: "s", redirectUri: "r" })
+    ).rejects.toThrow(/code expired/)
   })
 
   it("throws when the response is missing access_token", async () => {
     mockHttp.mockResolvedValueOnce({
       status: 200,
       headers: {},
-      body: JSON.stringify({ code: 0, data: { refresh_token: "r-only" } }),
+      body: JSON.stringify({ code: 0, refresh_token: "r-only" }),
     })
     await expect(
-      exchangeCodeForUserAccessToken({ code: "x", appAccessToken: "tat" })
-    ).rejects.toThrow(/OIDC access_token failed/)
+      exchangeCodeForUserAccessToken({ code: "x", appId: "a", appSecret: "s", redirectUri: "r" })
+    ).rejects.toThrow(/oauth\/token access failed/)
+  })
+
+  it("applies default TTLs + token_type when the response omits them", async () => {
+    mockHttp.mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ access_token: "a", refresh_token: "r" }),
+    })
+    const result = await exchangeCodeForUserAccessToken({
+      code: "c",
+      appId: "a",
+      appSecret: "s",
+      redirectUri: "r",
+    })
+    expect(result.expiresInSec).toBe(7200)
+    expect(result.refreshExpiresInSec).toBe(31_104_000)
+    expect(result.tokenType).toBe("Bearer")
+    expect(result.scope).toBeUndefined()
   })
 })
 
@@ -227,33 +302,81 @@ describe("refreshUserAccessToken", () => {
     mockHttp.mockReset()
   })
 
-  it("POSTs the refresh endpoint with the refresh_token grant body", async () => {
+  it("POSTs the v2 token endpoint with the refresh_token grant body", async () => {
     mockHttp.mockResolvedValueOnce(
-      makeOidcResponse({ accessToken: "u-fresh", refreshToken: "u-rotated" })
+      makeTokenV2Response({ accessToken: "u-fresh", refreshToken: "u-rotated" })
     )
     const result = await refreshUserAccessToken({
       refreshToken: "old-refresh",
-      appAccessToken: "tat",
+      appId: "cli_app",
+      appSecret: "sec",
     })
     expect(result.accessToken).toBe("u-fresh")
     // Lark may rotate the refresh token; callers must persist whatever comes back.
     expect(result.refreshToken).toBe("u-rotated")
 
     const call = mockHttp.mock.calls[0][0] as { url: string; body: string }
-    expect(call.url).toContain("/authen/v1/oidc/refresh_access_token")
+    expect(call.url).toBe("https://open.feishu.cn/open-apis/authen/v2/oauth/token")
     expect(JSON.parse(call.body)).toEqual({
       grant_type: "refresh_token",
+      client_id: "cli_app",
+      client_secret: "sec",
       refresh_token: "old-refresh",
     })
   })
 
   it("throws on non-zero refresh code", async () => {
     mockHttp.mockResolvedValueOnce(
-      makeOidcResponse({ code: 99991671, msg: "refresh token expired" })
+      makeTokenV2Response({
+        code: 20037,
+        error: "invalid_grant",
+        errorDescription: "refresh token expired",
+      })
     )
     await expect(
-      refreshUserAccessToken({ refreshToken: "expired", appAccessToken: "tat" })
+      refreshUserAccessToken({ refreshToken: "expired", appId: "a", appSecret: "s" })
     ).rejects.toThrow(/refresh token expired/)
+  })
+})
+
+describe("fetchLarkUserInfo", () => {
+  beforeEach(() => {
+    mockHttp.mockReset()
+  })
+
+  it("GETs user_info with a Bearer user token and maps the fields", async () => {
+    mockHttp.mockResolvedValueOnce(makeUserInfoResponse({ openId: "ou_alice", name: "Alice" }))
+    const info = await fetchLarkUserInfo("u-access")
+    expect(info.openId).toBe("ou_alice")
+    expect(info.name).toBe("Alice")
+    expect(info.email).toBe("user@example.com")
+    expect(info.enterpriseEmail).toBe("user@bigcorp.example.com")
+
+    const call = mockHttp.mock.calls[0][0] as {
+      url: string
+      method: string
+      headers: Record<string, string>
+    }
+    expect(call.url).toBe("https://open.feishu.cn/open-apis/authen/v1/user_info")
+    expect(call.method).toBe("GET")
+    expect(call.headers.Authorization).toBe("Bearer u-access")
+  })
+
+  it("throws on a non-zero code", async () => {
+    mockHttp.mockResolvedValueOnce(makeUserInfoResponse({ code: 99991677, msg: "invalid token" }))
+    await expect(fetchLarkUserInfo("bad")).rejects.toThrow(/user_info failed/)
+  })
+
+  it("tolerates a user_info response missing optional fields", async () => {
+    mockHttp.mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ code: 0, data: {} }),
+    })
+    const info = await fetchLarkUserInfo("t")
+    expect(info.openId).toBe("")
+    expect(info.name).toBeUndefined()
+    expect(info.email).toBeUndefined()
   })
 })
 
@@ -279,16 +402,14 @@ describe("getUserAccessToken / refreshUserToken (send-as-user)", () => {
     expect(mockKeyringGet).toHaveBeenCalledTimes(1)
   })
 
-  it("refreshes via the refresh token + TAT and persists the rotated pair", async () => {
+  it("refreshes via the refresh token (v2) and persists the rotated pair", async () => {
     mockKeyringGet.mockImplementation(async (_id: string, cred: string) =>
       cred === "user_refresh_token" ? "old-refresh" : null
     )
-    // 1st http = tenant token, 2nd http = OIDC refresh with a rotated pair.
-    mockHttp
-      .mockResolvedValueOnce(makeTokenResponse("tat-for-refresh"))
-      .mockResolvedValueOnce(
-        makeOidcResponse({ accessToken: "u-new-access", refreshToken: "u-new-refresh" })
-      )
+    // A single v2 token-endpoint call — no tenant token needed anymore.
+    mockHttp.mockResolvedValueOnce(
+      makeTokenV2Response({ accessToken: "u-new-access", refreshToken: "u-new-refresh" })
+    )
 
     const token = await refreshUserToken({
       adapterId: "lark-u",

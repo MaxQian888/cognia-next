@@ -22,6 +22,7 @@ import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
 import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
+import { buildMatrixMessageId } from "./ids"
 
 // ---------------------------------------------------------------------------
 // Minimal Matrix client-server API types (only the fields we consume)
@@ -62,6 +63,8 @@ export interface MatrixEventContent {
   /** Replacement content for `m.replace` edits. */
   "m.new_content"?: MatrixEventContent
   "m.mentions"?: MatrixMentions
+  /** Redaction target — room v11 moved it from the top level into content. */
+  redacts?: string
 }
 
 export interface MatrixTimelineEvent {
@@ -89,6 +92,8 @@ export interface MatrixSyncResponse {
   next_batch: string
   rooms?: {
     join?: Record<string, MatrixJoinedRoom>
+    /** Pending invites; the transport auto-joins these. */
+    invite?: Record<string, unknown>
   }
 }
 
@@ -221,13 +226,32 @@ function buildSegments(
   return segments
 }
 
+/**
+ * Detect whether the bot was addressed. Sources, in order of authority:
+ * - `m.mentions.user_ids` containing the bot (the spec's intentional-mention
+ *   signal),
+ * - `m.mentions.room` — an @room ping addresses everyone, the bot included
+ *   (encoded as `selfMentioned: true`, which is what the at-gate consumes),
+ * - a reply whose target is one of the bot's own messages (`replyToSelf`),
+ * - legacy clients that omit `m.mentions` but link the user via a
+ *   `matrix.to` permalink pill in `formatted_body`.
+ */
 function detectMentions(
   selfId: string,
   content: MatrixEventContent,
   replyToSelf: boolean
 ): { selfMentioned: boolean; users: string[] } {
   const users = content["m.mentions"]?.user_ids ?? []
-  const selfMentioned = replyToSelf || (selfId !== "" && users.includes(selfId))
+  const roomPing = content["m.mentions"]?.room === true
+  let selfMentioned = replyToSelf || roomPing || (selfId !== "" && users.includes(selfId))
+  if (!selfMentioned && selfId !== "" && typeof content.formatted_body === "string") {
+    // Legacy fallback: mention pills are `matrix.to/#/@user:server` anchors,
+    // with the user id either raw or percent-encoded.
+    const html = content.formatted_body
+    selfMentioned =
+      html.includes(`matrix.to/#/${selfId}`) ||
+      html.includes(`matrix.to/#/${encodeURIComponent(selfId)}`)
+  }
   return { selfMentioned, users }
 }
 
@@ -235,8 +259,25 @@ function detectMentions(
 // Public parser
 // ---------------------------------------------------------------------------
 
+export interface ParseMatrixEventOptions {
+  homeserver?: string
+  /**
+   * Event ids the adapter itself recently sent (bare, no room prefix). Used
+   * to flag replies to the bot's own messages as `selfMentioned` — a reply
+   * to the bot addresses it just as much as an explicit mention does.
+   * Best-effort: only covers messages sent during this process lifetime.
+   */
+  ownEventIds?: ReadonlySet<string>
+}
+
 /**
  * Project a Matrix timeline event into a NormalizedInboundEvent.
+ *
+ * `messageId` / `replacesMessageId` are stamped with the adapter-public
+ * `"<roomId>|<eventId>"` composite (see ids.ts) so they match the
+ * `platformMessageId` that `send()`/`edit()` return — the bus stored-message
+ * index correlates edits/redactions across both directions. `replyTo` and
+ * `conversationRef.eventId` stay BARE (wire-level references).
  *
  * Returns `null` for:
  * - events authored by the bot itself (echoed back through `/sync`),
@@ -248,7 +289,7 @@ export function parseMatrixEvent(
   selfId: string,
   roomId: string,
   ev: MatrixTimelineEvent,
-  options: { homeserver?: string } = {}
+  options: ParseMatrixEventOptions = {}
 ): NormalizedInboundEvent | null {
   // Never echo our own sends back into the bus.
   if (selfId !== "" && ev.sender === selfId) return null
@@ -258,14 +299,17 @@ export function parseMatrixEvent(
 
   // ── Redaction → delete ────────────────────────────────────────────────
   if (ev.type === "m.room.redaction") {
-    const redacts = ev.redacts ?? ev.content?.["m.relates_to"]?.event_id
+    // Room v11 moved the target from the top-level `redacts` into
+    // `content.redacts`; check both (m.relates_to is NOT where it lives).
+    const redacts =
+      ev.redacts ?? (typeof ev.content?.redacts === "string" ? ev.content.redacts : undefined)
     if (!redacts) return null
     const conversationKey = buildConversationKey("matrix", adapterId, roomId)
     return {
       platform: "matrix",
       adapterId,
       selfId,
-      messageId: ev.event_id,
+      messageId: buildMatrixMessageId(roomId, ev.event_id),
       conversationRef: { platform: "matrix", adapterId, roomId, eventId: ev.event_id },
       conversationKey,
       sender,
@@ -276,7 +320,7 @@ export function parseMatrixEvent(
       timestamp,
       raw: ev,
       kind: "delete",
-      replacesMessageId: redacts,
+      replacesMessageId: buildMatrixMessageId(roomId, redacts),
     }
   }
 
@@ -289,7 +333,7 @@ export function parseMatrixEvent(
       platform: "matrix",
       adapterId,
       selfId,
-      messageId: ev.event_id,
+      messageId: buildMatrixMessageId(roomId, ev.event_id),
       conversationRef: { platform: "matrix", adapterId, roomId, eventId: ev.event_id },
       conversationKey,
       sender,
@@ -301,7 +345,7 @@ export function parseMatrixEvent(
       raw: ev,
       kind: "system",
       systemKind: "reaction_added",
-      replacesMessageId: rel.event_id,
+      replacesMessageId: buildMatrixMessageId(roomId, rel.event_id),
     }
   }
 
@@ -326,19 +370,27 @@ export function parseMatrixEvent(
   const conversationKey = buildConversationKey("matrix", adapterId, roomId, threadId)
 
   const inReplyTo = rel?.["m.in_reply_to"]?.event_id
+  // replyTo stays a BARE event id — it is echoed back onto the wire as an
+  // `m.in_reply_to` target by the serializer.
   const replyTo = inReplyTo
     ? { messageId: inReplyTo, snippet: (renderContent.body ?? "").slice(0, 100) }
     : undefined
 
   const segments = buildSegments(renderContent, options)
   const plainText = segmentsToPlainText(segments)
-  const { selfMentioned, users } = detectMentions(selfId, renderContent, false)
+  // A reply whose target is one of the bot's own recent messages addresses
+  // the bot (mention-gated rooms would otherwise drop it).
+  const replyToSelf = inReplyTo !== undefined && (options.ownEventIds?.has(inReplyTo) ?? false)
+  const { selfMentioned, users } = detectMentions(selfId, renderContent, replyToSelf)
 
+  // NOTE: inbound `m.notice` (bot-convention messages) parses like a normal
+  // message; `raw.content.msgtype` keeps the distinction available to any
+  // future bot-to-bot policy without a schema change.
   return {
     platform: "matrix",
     adapterId,
     selfId,
-    messageId: ev.event_id,
+    messageId: buildMatrixMessageId(roomId, ev.event_id),
     conversationRef: { platform: "matrix", adapterId, roomId, eventId: ev.event_id },
     conversationKey,
     sender,
@@ -354,7 +406,8 @@ export function parseMatrixEvent(
     timestamp,
     raw: ev,
     kind: isEdit ? "edit" : "create",
-    replacesMessageId: isEdit ? rel?.event_id : undefined,
+    replacesMessageId:
+      isEdit && rel?.event_id ? buildMatrixMessageId(roomId, rel.event_id) : undefined,
   }
 }
 

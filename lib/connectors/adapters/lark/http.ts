@@ -58,7 +58,14 @@ async function rawRequest(
   return parsed
 }
 
-function extractLarkCode(body: string | undefined | null): number | null {
+/**
+ * Best-effort extraction of the Lark business error code from an HTTP
+ * response body. Lark surfaces its error code inside the JSON body even on
+ * HTTP >= 400 responses (e.g. `{"code":99991663,...}` in a 400), so callers
+ * that classify errors (TAT refresh, retryability mapping) must read it from
+ * here rather than relying on the HTTP status alone.
+ */
+export function extractLarkCode(body: string | undefined | null): number | null {
   if (!body) return null
   try {
     const parsed = JSON.parse(body) as { code?: unknown }
@@ -108,7 +115,7 @@ export async function larkUserRequest(
  * 99991672 is the canonical "app has no permission (scope)" family; a bare
  * HTTP 403 from the gateway means the same thing with less detail.
  */
-const LARK_PERMISSION_CODES = new Set([99991672, 99991679, 1248006])
+export const LARK_PERMISSION_CODES: ReadonlySet<number> = new Set([99991672, 99991679, 1248006])
 
 export function classifyScopeError(
   err: unknown,

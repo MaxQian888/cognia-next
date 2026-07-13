@@ -41,9 +41,15 @@ function matchRule(rule: TriggerRule, event: NormalizedInboundEvent): boolean {
       return event.mentions.selfMentioned
 
     case "reply-to-bot":
-      // The adapter resolves whether `replyTo` refers to a bot message before
-      // emitting the event — if `replyTo.messageId` is present, we treat it as
-      // a reply to a bot message by convention.
+      // KNOWN LIMITATION: this fires on a reply to ANY message, not only to
+      // one of the bot's. `ReplyDescriptor` (types/connectors/event.ts) only
+      // carries { messageId, snippet } — the replied-to message's SENDER id is
+      // not on the wire shape, so there is nothing to match against
+      // `event.selfId` here. Adapters that can cheaply resolve the parent
+      // sender are expected to omit `replyTo` for replies to non-bot messages;
+      // where they can't, this rule over-matches (a reply to a human also
+      // counts as "reply-to-bot"). Tightening it requires adding the parent
+      // sender to the shared ReplyDescriptor type + every adapter parser.
       return Boolean(event.replyTo?.messageId)
 
     case "slash-command": {

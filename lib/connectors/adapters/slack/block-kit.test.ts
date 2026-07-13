@@ -1,4 +1,10 @@
-import { escapeSlackMrkdwn, segmentToBlock, segmentsToBlocks } from "./block-kit"
+import {
+  clampBlocks,
+  escapeSlackMrkdwn,
+  MAX_BLOCKS_PER_MESSAGE,
+  segmentToBlock,
+  segmentsToBlocks,
+} from "./block-kit"
 import type { MessageSegment } from "@/types/connectors/segment"
 
 describe("escapeSlackMrkdwn", () => {
@@ -124,5 +130,17 @@ describe("segmentsToBlocks", () => {
 
   it("returns empty array for empty input", () => {
     expect(segmentsToBlocks([])).toEqual([])
+  })
+})
+
+describe("clampBlocks", () => {
+  it("truncates to Slack's 50-blocks-per-message cap", () => {
+    const blocks = Array.from({ length: 60 }, (_, i) => ({ i }))
+    expect(clampBlocks(blocks)).toHaveLength(MAX_BLOCKS_PER_MESSAGE)
+  })
+
+  it("leaves lists at or under the cap untouched", () => {
+    const blocks = Array.from({ length: 50 }, (_, i) => ({ i }))
+    expect(clampBlocks(blocks)).toBe(blocks)
   })
 })

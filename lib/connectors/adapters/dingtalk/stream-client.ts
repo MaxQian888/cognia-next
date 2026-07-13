@@ -44,6 +44,16 @@ export interface DingTalkStreamFrame {
   data: Record<string, unknown>
 }
 
+/**
+ * Transport lifecycle notifications surfaced to the adapter. `connected`
+ * fires once per successful register + ws-open; `failure` fires once per
+ * failed connection attempt (register or ws-open), carrying a stable machine
+ * reason so the adapter can degrade its health after repeated failures.
+ */
+export type DingTalkTransportState =
+  | { kind: "connected" }
+  | { kind: "failure"; reason: "auth_failed" | "register_failed" | "ws_open_failed" }
+
 export interface DingTalkStreamOptions {
   /** Resolves the AppKey (Stream `clientId`). */
   clientId: () => Promise<string>
@@ -51,7 +61,11 @@ export interface DingTalkStreamOptions {
   clientSecret: () => Promise<string>
   subscriptions?: ReadonlyArray<{ topic: string; type: string }>
   signal: AbortSignal
+  /** Observes connect/failure transitions (the generator itself never throws on them). */
+  onTransportState?: (state: DingTalkTransportState) => void
   _backoffBaseMs?: number
+  /** Liveness watchdog: close + re-register when no ws traffic arrives for this long. */
+  _pingTimeoutMs?: number
 }
 
 export interface DingTalkStreamClient {
@@ -77,6 +91,17 @@ interface RegisterResult {
   ticket: string
 }
 
+/** Register failure carrying the gateway's HTTP status for auth classification. */
+export class DingTalkRegisterError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message)
+    this.name = "DingTalkRegisterError"
+  }
+}
+
 /** Register a Stream connection and return the WebSocket endpoint + ticket. */
 export async function registerDingTalkConnection(
   clientId: string,
@@ -99,24 +124,39 @@ export async function registerDingTalkConnection(
   try {
     parsed = JSON.parse(resp.body)
   } catch {
-    throw new Error(`DingTalk gateway register returned non-JSON (status ${resp.status})`)
+    throw new DingTalkRegisterError(
+      `DingTalk gateway register returned non-JSON (status ${resp.status})`,
+      resp.status
+    )
   }
   if (!parsed.endpoint || !parsed.ticket) {
-    throw new Error(
-      `DingTalk gateway register failed: ${parsed.message ?? resp.body.slice(0, 200)}`
+    throw new DingTalkRegisterError(
+      `DingTalk gateway register failed: ${parsed.message ?? resp.body.slice(0, 200)}`,
+      resp.status
     )
   }
   return { endpoint: parsed.endpoint, ticket: parsed.ticket }
 }
 
-function ackFrame(messageId: string, data: unknown): string {
+/**
+ * Build an ACK envelope. `dataJson` is the already-serialized `data` payload —
+ * pings echo their raw `data` verbatim, EVENT frames carry the
+ * `{"status":"SUCCESS","message":"success"}` envelope the protocol requires,
+ * and CALLBACK frames carry `{"response":null}`.
+ */
+function ackFrame(messageId: string, dataJson: string): string {
   return JSON.stringify({
     code: 200,
     message: "OK",
     headers: { messageId, contentType: "application/json" },
-    data: JSON.stringify(data ?? { response: null }),
+    data: dataJson,
   })
 }
+
+const EVENT_ACK_DATA = JSON.stringify({ status: "SUCCESS", message: "success" })
+const CALLBACK_ACK_DATA = JSON.stringify({ response: null })
+
+const DEFAULT_PING_TIMEOUT_MS = 90_000
 
 export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStreamClient {
   const backoffBaseMs = opts._backoffBaseMs ?? 1000
@@ -135,8 +175,14 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
           subscriptions as ReadonlyArray<{ topic: string; type: string }>
         )
         url = `${endpoint}?ticket=${encodeURIComponent(ticket)}`
-      } catch {
+      } catch (err) {
         if (opts.signal.aborted) return
+        const authFailure =
+          err instanceof DingTalkRegisterError && (err.status === 401 || err.status === 403)
+        opts.onTransportState?.({
+          kind: "failure",
+          reason: authFailure ? "auth_failed" : "register_failed",
+        })
         attempts += 1
         try {
           await delay(reconnectBackoffMs(backoffBaseMs, attempts), opts.signal)
@@ -151,6 +197,7 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
         handleId = await connectorsWsOpen(url)
       } catch {
         if (opts.signal.aborted) return
+        opts.onTransportState?.({ kind: "failure", reason: "ws_open_failed" })
         attempts += 1
         try {
           await delay(reconnectBackoffMs(backoffBaseMs, attempts), opts.signal)
@@ -162,12 +209,31 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
 
       if (opts.signal.aborted) return
       attempts = 0
+      opts.onTransportState?.({ kind: "connected" })
 
       const queue: string[] = []
       let wakeResolve: (() => void) | null = null
       let wsEnded = false
 
+      // Liveness watchdog: DingTalk pushes SYSTEM pings regularly, so a socket
+      // with zero inbound traffic for the timeout window is half-open — close
+      // it and fall through to the re-register/backoff path. Re-armed on every
+      // inbound ws payload (pings included).
+      const pingTimeoutMs = opts._pingTimeoutMs ?? DEFAULT_PING_TIMEOUT_MS
+      let watchdog: ReturnType<typeof setTimeout> | null = null
+      const armWatchdog = () => {
+        if (watchdog) clearTimeout(watchdog)
+        watchdog = setTimeout(() => {
+          wsEnded = true
+          wakeResolve?.()
+          wakeResolve = null
+          void connectorsWsClose(handleId).catch(() => {})
+        }, pingTimeoutMs)
+      }
+      armWatchdog()
+
       const unlisten = await listen<string>(`connectors://ws/${handleId}/message`, (event) => {
+        armWatchdog()
         queue.push(event.payload)
         wakeResolve?.()
         wakeResolve = null
@@ -210,14 +276,11 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
 
             if (type === "SYSTEM") {
               if (topic === "ping") {
-                // Echo the opaque value back so the server keeps the socket.
-                let opaque: unknown = {}
-                try {
-                  opaque = frame.data ? JSON.parse(frame.data) : {}
-                } catch {
-                  opaque = {}
-                }
-                void connectorsWsSend(handleId, ackFrame(messageId, opaque)).catch(() => {})
+                // Echo the raw `data` verbatim (it carries an opaque the
+                // server matches on); "{}" only when the frame has none.
+                void connectorsWsSend(handleId, ackFrame(messageId, frame.data ?? "{}")).catch(
+                  () => {}
+                )
               } else if (topic === "disconnect") {
                 wsEnded = true
               }
@@ -225,7 +288,10 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
             }
 
             // CALLBACK / EVENT — ACK first (fire-and-forget), then surface.
-            void connectorsWsSend(handleId, ackFrame(messageId, { response: null })).catch(() => {})
+            // EVENT acks require the SUCCESS envelope; CALLBACK acks carry
+            // the `{response:null}` shape.
+            const ackData = type === "EVENT" ? EVENT_ACK_DATA : CALLBACK_ACK_DATA
+            void connectorsWsSend(handleId, ackFrame(messageId, ackData)).catch(() => {})
             let data: Record<string, unknown> = {}
             try {
               data = frame.data ? (JSON.parse(frame.data) as Record<string, unknown>) : {}
@@ -236,6 +302,7 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
           }
         }
       } finally {
+        if (watchdog) clearTimeout(watchdog)
         opts.signal.removeEventListener("abort", abortHandler)
         unlisten()
         unlistenClose()

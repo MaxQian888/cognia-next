@@ -48,10 +48,11 @@ export const CONNECTOR_METADATA: readonly ConnectorMeta[] = [
   { type: "github", iconName: "Github", status: "beta", oauth: true, richMessages: false },
   { type: "email", iconName: "Mail", status: "planned", oauth: false, richMessages: false },
   {
+    // Configured with an AppKey/AppSecret pair (keyring), not an OAuth flow.
     type: "dingtalk",
     iconName: "MessageSquare",
     status: "stable",
-    oauth: true,
+    oauth: false,
     richMessages: true,
   },
   { type: "wecom", iconName: "Building2", status: "stable", oauth: true, richMessages: true },

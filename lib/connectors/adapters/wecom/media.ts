@@ -18,6 +18,7 @@ import {
   newReqId,
   type WeComFrameEnvelope,
 } from "./protocol"
+import { md5Hex } from "./md5"
 
 /** Decode a base64 string into raw bytes (browser + jsdom safe). */
 export function base64ToBytes(b64: string): Uint8Array {
@@ -104,18 +105,25 @@ export async function uploadWeComMedia(
 ): Promise<string> {
   if (bytes.length > 20 * 1024 * 1024) throw new Error("wecom media exceeds 20MB cap")
 
+  const totalChunks = Math.ceil(bytes.length / UPLOAD_CHUNK_BYTES)
+  if (totalChunks > 100) throw new Error("wecom media exceeds 100-chunk cap")
+
   const initResp = await request(
-    buildMediaInitFrame(newReqId(adapterId), filename, bytes.length, mediaType)
+    buildMediaInitFrame(newReqId(adapterId), {
+      type: mediaType,
+      filename,
+      totalSize: bytes.length,
+      totalChunks,
+      md5: md5Hex(bytes),
+    })
   )
   const uploadId = readField(initResp, "upload_id")
   if (!uploadId) throw new Error("wecom media init returned no upload_id")
 
-  let seq = 0
-  for (let off = 0; off < bytes.length; off += UPLOAD_CHUNK_BYTES) {
+  for (let index = 0; index < totalChunks; index++) {
+    const off = index * UPLOAD_CHUNK_BYTES
     const chunk = bytes.slice(off, off + UPLOAD_CHUNK_BYTES)
-    await request(buildMediaChunkFrame(newReqId(adapterId), uploadId, seq, bytesToBase64(chunk)))
-    seq += 1
-    if (seq > 100) throw new Error("wecom media exceeds 100-chunk cap")
+    await request(buildMediaChunkFrame(newReqId(adapterId), uploadId, index, bytesToBase64(chunk)))
   }
 
   const finResp = await request(buildMediaFinishFrame(newReqId(adapterId), uploadId))

@@ -23,7 +23,7 @@ describe("WeCom capability declarations", () => {
     expect(WECOM_CAPS).not.toContain("history.fetch")
   })
 
-  it("maps Button + display primitives native, interactive form controls fallback", () => {
+  it("maps Button + card-header primitives native, interactive form controls fallback", () => {
     expect(WECOM_A2UI_CAPABILITY.Button).toBe("native")
     expect(WECOM_A2UI_CAPABILITY.Text).toBe("native")
     expect(WECOM_A2UI_CAPABILITY.Card).toBe("native")
@@ -32,5 +32,12 @@ describe("WeCom capability declarations", () => {
     expect(WECOM_A2UI_CAPABILITY.Select).toBe("fallback")
     expect(WECOM_A2UI_CAPABILITY.TextField).toBe("fallback")
     expect(WECOM_A2UI_CAPABILITY.Checkbox).toBe("fallback")
+  })
+
+  it("does not over-claim: Image / Link / Divider / Badge are never projected into a template_card", () => {
+    expect(WECOM_A2UI_CAPABILITY.Image).toBe("fallback")
+    expect(WECOM_A2UI_CAPABILITY.Link).toBe("fallback")
+    expect(WECOM_A2UI_CAPABILITY.Divider).toBe("fallback")
+    expect(WECOM_A2UI_CAPABILITY.Badge).toBe("fallback")
   })
 })

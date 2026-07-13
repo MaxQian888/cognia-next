@@ -224,6 +224,34 @@ describe("WeChatPersonalConfigDialog — create", () => {
     }
   })
 
+  it("surfaces an error when the scan is confirmed but the gateway returns no bot token", async () => {
+    jest.useFakeTimers()
+    try {
+      mockRequestLoginQr.mockResolvedValue({ qrcode: "qr1", qrcode_img_content: "B64" })
+      mockPollLoginStatus.mockResolvedValue({ status: "confirmed" }) // no bot_token
+      render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /get login qr/i }))
+      })
+      await act(async () => {
+        jest.advanceTimersByTime(3000)
+      })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      // No silent "confirmed": the status flips to error and nothing persists.
+      expect(screen.getByTestId("wechat-personal-login-status")).toHaveTextContent(/failed/i)
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/no bot token/i))
+      expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+      expect(mockKeyringSet).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("blocks save before a confirmed login", async () => {
     render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
     await act(async () => {
@@ -241,7 +269,7 @@ describe("WeChatPersonalConfigDialog — edit", () => {
     displayName: "Existing WeChat",
     enabled: true,
     transportMode: "longpoll",
-    settings: { baseUrl: "https://srv" },
+    settings: { baseUrl: "https://srv", accountId: "acc-old", proxyTag: "keep-me" },
     credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["botToken"] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
     defaultMode: "auto",
@@ -293,7 +321,9 @@ describe("WeChatPersonalConfigDialog — edit", () => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
         "wx1",
         expect.objectContaining({
-          settings: { baseUrl: "https://new", accountId: "acc2" },
+          // Merged with the existing row's settings — unrelated keys survive
+          // the whole-object replace that updateAdapterInstance performs.
+          settings: { baseUrl: "https://new", accountId: "acc2", proxyTag: "keep-me" },
         })
       )
       expect(mockKeyringSet).toHaveBeenCalledWith("wx1", "botToken", "new-token")

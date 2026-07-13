@@ -68,6 +68,8 @@ function privateEvent(adapterId: string, messageId: string): NormalizedInboundEv
   }
 }
 
+// 30s hook budget: the first cold open of the full schema (100+ Dexie
+// versions) can exceed jest's default 5s under parallel suite load.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -75,7 +77,7 @@ beforeEach(async () => {
   __resetPruneCounterForTesting()
   dispatchTriggerMock.mockReset()
   findMatchingWorkflowsMock.mockReset()
-})
+}, 30_000)
 
 describe("ConnectorBus workflow trigger fan-out", () => {
   async function seedAutoAdapter(): Promise<string> {
@@ -107,6 +109,10 @@ describe("ConnectorBus workflow trigger fan-out", () => {
     expect(findMatchingWorkflowsMock).toHaveBeenCalledWith("trigger.connector.inbound", {
       adapterId,
       conversationKey: evt.conversationKey,
+      senderId: "u_alice",
+      channelKind: "private",
+      plainText: "hello",
+      selfMentioned: false,
     })
     expect(dispatchTriggerMock).toHaveBeenCalledTimes(2)
     const calls = dispatchTriggerMock.mock.calls.map(
@@ -129,6 +135,29 @@ describe("ConnectorBus workflow trigger fan-out", () => {
     await getBus().dispatchInboundFull(evt)
     expect(findMatchingWorkflowsMock).not.toHaveBeenCalled()
     expect(dispatchTriggerMock).not.toHaveBeenCalled()
+  })
+
+  it("audits + warns when findMatchingWorkflows throws (fan-out not silently disabled)", async () => {
+    const adapterId = await seedAutoAdapter()
+    findMatchingWorkflowsMock.mockImplementation(() => {
+      throw new Error("subscription index corrupted")
+    })
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await expect(
+        getBus().dispatchInboundFull(privateEvent(adapterId, "msg_wf_match_err"))
+      ).resolves.toBeUndefined()
+      expect(warnSpy).toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+    expect(dispatchTriggerMock).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    const row = audit.find(
+      (r) => r.kind === "adapter.error" && r.reason === "workflow_match_failed"
+    )
+    expect(row).toBeDefined()
+    expect(row?.message).toContain("subscription index corrupted")
   })
 
   it("survives a workflow dispatch failure without breaking the bus", async () => {

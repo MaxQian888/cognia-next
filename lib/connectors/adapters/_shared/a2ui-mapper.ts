@@ -212,15 +212,22 @@ export async function recordCallbackBinding(input: {
  * Reverse lookup: given the actionId the platform sent back, return the
  * surface/component context. Adapters call this from `parse.ts` when an
  * inbound callback arrives.
+ *
+ * A binding whose `expiresAt` has passed resolves as `undefined`: expiry is
+ * enforced at read time, not only by the daily cleanup sweep, so a click on
+ * a stale card cannot fire through a binding that is already scheduled for
+ * reaping. Rows without `expiresAt` (pre-TTL legacy) never expire here.
  */
 export async function resolveCallbackBinding(
   adapterId: string,
   actionId: string
 ): Promise<ConnectorCallbackBindingRow | undefined> {
-  return getDb()
+  const row = await getDb()
     .connectorCallbackBindings.where("[adapterId+actionId]")
     .equals([adapterId, actionId])
     .first()
+  if (row?.expiresAt !== undefined && row.expiresAt <= Date.now()) return undefined
+  return row
 }
 
 /**

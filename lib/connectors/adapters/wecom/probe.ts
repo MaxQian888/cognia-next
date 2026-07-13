@@ -8,6 +8,12 @@ import { WECOM_WS_URL, buildSubscribeFrame, newReqId, type WeComFrameEnvelope } 
 
 export type WeComCredentialProbeResult = { ok: true } | { ok: false; error: string }
 
+// GAP: this probe opens a SECOND `aibot_subscribe` connection with the same
+// bot credentials, but WeCom allows exactly ONE long connection per bot — a
+// settings-form "test connection" while the adapter is running can kick the
+// live socket (or be kicked by it) and disrupt an active conversation. Left
+// unfixed deliberately: a real fix routes the probe through the running
+// adapter instead of a throwaway socket.
 export async function probeWeComCredentials(
   botId: string,
   secret: string,

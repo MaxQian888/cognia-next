@@ -82,9 +82,13 @@ export interface DiscordMessage {
   id: string
   type?: number
   content: string
+  /**
+   * Channel the message was posted in. For thread messages this IS the
+   * thread's channel id — Discord does not ship a separate `thread_id`
+   * field on message payloads.
+   */
   channel_id: string
   guild_id?: string
-  thread_id?: string
   author: DiscordUser
   member?: DiscordMember
   timestamp: string
@@ -254,9 +258,8 @@ function messageToEvent(
   kindOverride?: "create" | "edit"
 ): NormalizedInboundEvent {
   const channelId = msg.channel_id
-  const threadId = msg.thread_id
 
-  const conversationKey = buildConversationKey("discord", adapterId, channelId, threadId)
+  const conversationKey = buildConversationKey("discord", adapterId, channelId)
 
   const sender = buildPlatformIdentity(adapterId, msg.author)
 
@@ -273,8 +276,13 @@ function messageToEvent(
         }
       : undefined
 
+  // Thread messages arrive with `channel_id` set to the thread's own id and
+  // no thread marker on the message payload (`thread_id` is not a real
+  // Discord field — the old read here was dead), so guild traffic classifies
+  // as "group" and DMs as "private". Distinguishing real threads would need
+  // channel metadata (GUILD_CREATE cache or a REST channel fetch).
   const channelKind: "private" | "group" | "channel" | "thread" =
-    threadId !== undefined ? "thread" : msg.guild_id !== undefined ? "group" : "private"
+    msg.guild_id !== undefined ? "group" : "private"
 
   return {
     platform: "discord",
@@ -310,7 +318,6 @@ interface DiscordMessageDeletePayload {
   id: string
   channel_id: string
   guild_id?: string
-  thread_id?: string
 }
 
 function deleteToEvent(
@@ -320,11 +327,12 @@ function deleteToEvent(
   dispatch: DiscordDispatch
 ): NormalizedInboundEvent {
   const channelId = payload.channel_id
-  const threadId = payload.thread_id
-  const conversationKey = buildConversationKey("discord", adapterId, channelId, threadId)
+  const conversationKey = buildConversationKey("discord", adapterId, channelId)
 
+  // Same rationale as messageToEvent: MESSAGE_DELETE carries only
+  // id / channel_id / guild_id — there is no `thread_id` field.
   const channelKind: "private" | "group" | "channel" | "thread" =
-    threadId !== undefined ? "thread" : payload.guild_id !== undefined ? "group" : "private"
+    payload.guild_id !== undefined ? "group" : "private"
 
   return {
     platform: "discord",
@@ -500,23 +508,52 @@ function collectModalValues(data: DiscordInteractionData): Record<string, unknow
 // Public parser
 // ---------------------------------------------------------------------------
 
+export interface ParseDiscordDispatchOptions {
+  /**
+   * Keep the bot's own messages instead of dropping them. Used by the
+   * `fetchHistory` projection, where the bot's past sends are legitimate
+   * history entries. Live gateway dispatches must NOT set this — the
+   * gateway echoes every bot send back as MESSAGE_CREATE, and forwarding
+   * that echo makes the AI loop reply to itself (self-echo loop under the
+   * `always` at-strategy / DM default).
+   */
+  allowSelfEcho?: boolean
+}
+
 /**
  * Parse a Discord Gateway dispatch into a NormalizedInboundEvent.
  *
  * Returns `null` for dispatches that flow through other channels:
  *   - INTERACTION_CREATE goes through `parseDiscordInteraction`.
+ *   - The bot's own MESSAGE_CREATE / MESSAGE_UPDATE echoes (self-echo
+ *     guard; disabled via `parseOpts.allowSelfEcho` for history).
  *   - Unknown / unsubscribed dispatches.
  */
 export function parseDiscordDispatch(
   adapterId: string,
   selfId: string,
-  dispatch: DiscordDispatch
+  dispatch: DiscordDispatch,
+  parseOpts?: ParseDiscordDispatchOptions
 ): NormalizedInboundEvent | null {
   switch (dispatch.t) {
     case "MESSAGE_CREATE":
-      return messageToEvent(adapterId, selfId, dispatch.d as DiscordMessage, dispatch)
-    case "MESSAGE_UPDATE":
-      return messageToEvent(adapterId, selfId, dispatch.d as DiscordMessage, dispatch, "edit")
+    case "MESSAGE_UPDATE": {
+      const msg = dispatch.d as DiscordMessage
+      // Self-echo guard: drop only the bot's OWN messages (selfId may be ""
+      // before READY — never treat that as a match). Do NOT drop all
+      // `author.bot` messages: other bots' traffic is legitimate inbound
+      // (the sibling anti-loop gate handles cross-adapter loops).
+      if (!parseOpts?.allowSelfEcho && selfId && msg.author?.id === selfId) {
+        return null
+      }
+      return messageToEvent(
+        adapterId,
+        selfId,
+        msg,
+        dispatch,
+        dispatch.t === "MESSAGE_UPDATE" ? "edit" : undefined
+      )
+    }
     case "MESSAGE_DELETE":
       return deleteToEvent(adapterId, selfId, dispatch.d as DiscordMessageDeletePayload, dispatch)
     case "MESSAGE_REACTION_ADD":

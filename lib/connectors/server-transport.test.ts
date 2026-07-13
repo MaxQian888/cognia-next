@@ -33,8 +33,10 @@ describe("adapterNeedsInboundServer", () => {
     // OneBot narrows to BOTH ws modes; the row disambiguates.
     ["onebot reverse-ws", ["reverse-ws", "forward-ws"], "reverse-ws", true],
     ["onebot forward-ws", ["reverse-ws", "forward-ws"], "forward-ws", false],
+    // Discord is dual-mode (gateway + webhook); the row disambiguates.
+    ["discord gateway", ["gateway", "webhook"], "gateway", false],
+    ["discord webhook", ["gateway", "webhook"], "webhook", true],
     // Pure outbound transports never need the server.
-    ["discord gateway", ["gateway"], "gateway", false],
     ["wecom gateway", ["gateway"], "gateway", false],
     ["qq-official gateway", ["gateway"], "gateway", false],
     ["dingtalk gateway", ["gateway"], "gateway", false],

@@ -80,6 +80,55 @@ describe("uploadWeComMedia", () => {
     ])
   })
 
+  it("sends the protocol init fields: type / filename / total_size / total_chunks / md5", async () => {
+    let initBody: Record<string, unknown> | undefined
+    const request: WeComRequestFn = jest.fn(async (frame: WeComFrameEnvelope) => {
+      if (frame.cmd === "aibot_upload_media_init") {
+        initBody = frame.body as Record<string, unknown>
+        return { body: { upload_id: "up1" } }
+      }
+      if (frame.cmd === "aibot_upload_media_finish") return { body: { media_id: "m1" } }
+      return { errcode: 0 }
+    })
+    // "abc" — known MD5, single chunk.
+    const bytes = new TextEncoder().encode("abc")
+    await uploadWeComMedia(request, "adp", bytes, "abc.txt", "file")
+    expect(initBody).toEqual({
+      type: "file",
+      filename: "abc.txt",
+      total_size: 3,
+      total_chunks: 1,
+      md5: "900150983cd24fb0d6963f7d28e17f72",
+    })
+  })
+
+  it("splits into chunks keyed upload_id / chunk_index / base64_data", async () => {
+    const chunkBodies: Array<Record<string, unknown>> = []
+    const request: WeComRequestFn = jest.fn(async (frame: WeComFrameEnvelope) => {
+      if (frame.cmd === "aibot_upload_media_init") {
+        expect((frame.body as { total_chunks?: number }).total_chunks).toBe(2)
+        return { body: { upload_id: "up1" } }
+      }
+      if (frame.cmd === "aibot_upload_media_chunk") {
+        chunkBodies.push(frame.body as Record<string, unknown>)
+        return { errcode: 0 }
+      }
+      return { body: { media_id: "m1" } }
+    })
+    // 300 KiB → 2 chunks of ≤256 KiB.
+    const bytes = new Uint8Array(300 * 1024)
+    await uploadWeComMedia(request, "adp", bytes, "big.bin", "file")
+    expect(chunkBodies).toHaveLength(2)
+    expect(chunkBodies[0]).toMatchObject({ upload_id: "up1", chunk_index: 0 })
+    expect(chunkBodies[1]).toMatchObject({ upload_id: "up1", chunk_index: 1 })
+    for (const body of chunkBodies) {
+      expect(typeof body.base64_data).toBe("string")
+      // Legacy field names must be gone.
+      expect(body.seq).toBeUndefined()
+      expect(body.data).toBeUndefined()
+    }
+  })
+
   it("rejects payloads over the 20MB cap", async () => {
     const request: WeComRequestFn = jest.fn(async () => ({ errcode: 0 }))
     await expect(

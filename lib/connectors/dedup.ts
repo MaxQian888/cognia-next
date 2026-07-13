@@ -11,12 +11,27 @@
  */
 
 import type { InboundLedgerNamespace } from "@/lib/db/connector-types"
-import { recordInbound, pruneOldest } from "@/lib/db/inbound-ledger"
+import { recordInbound, isInboundRecorded, pruneOldest } from "@/lib/db/inbound-ledger"
 
 const PRUNE_EVERY = 200
 const LEDGER_CAP = 10_000
 
 let callCount = 0
+
+/**
+ * Read-only duplicate probe — `true` when the tuple is already recorded.
+ * Delegated so the bus's callback pipeline can check without committing
+ * (the commit happens only on a terminal outcome, keeping transient
+ * failures retryable). Does not count toward the lazy-prune cadence.
+ */
+export async function isRecordedInbound(
+  adapterId: string,
+  platformMessageId: string,
+  namespace: InboundLedgerNamespace = "inbound",
+  conversationKey?: string
+): Promise<boolean> {
+  return isInboundRecorded(adapterId, platformMessageId, namespace, conversationKey)
+}
 
 /**
  * Record an inbound message (or callback) and return whether it is new.
@@ -25,18 +40,24 @@ let callCount = 0
  * @param platformMessageId the platform-native id we dedup on.
  * @param namespace         sliding-window bucket; defaults to `"inbound"`
  *                          for back-compat with every pre-v38 caller.
+ * @param conversationKey   optional per-conversation dedup scope — pass it
+ *                          for inbound messages (Telegram / Slack ids are
+ *                          only unique per chat); omit for callback trigger
+ *                          ids, which are globally unique per adapter.
  *
  * @returns `true` if this is the first time we've seen
- *          (adapterId, namespace, platformMessageId), `false` otherwise.
+ *          (adapterId, namespace, platformMessageId[, conversationKey]),
+ *          `false` otherwise.
  */
 export async function recordAndCheckInbound(
   adapterId: string,
   platformMessageId: string,
-  namespace: InboundLedgerNamespace = "inbound"
+  namespace: InboundLedgerNamespace = "inbound",
+  conversationKey?: string
 ): Promise<boolean> {
   callCount++
 
-  const isNew = await recordInbound(adapterId, platformMessageId, namespace)
+  const isNew = await recordInbound(adapterId, platformMessageId, namespace, conversationKey)
 
   // Lazy prune on every PRUNE_EVERY-th call
   if (callCount % PRUNE_EVERY === 0) {

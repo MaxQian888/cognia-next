@@ -17,11 +17,51 @@ import { connectorsHealth, type ConnectorsHealth } from "@/lib/connectors/tauri/
 import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import type { AuditEntry } from "@/types/connectors/audit"
-import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow, ConnectorHeartbeatRow } from "@/lib/db/connector-types"
+import type { HealthCellState } from "@/lib/connectors/health/derive-history"
+import { HEARTBEAT_INTERVAL_MS } from "@/lib/connectors/health/heartbeat"
 import { cn } from "@/lib/utils"
 import { auditKindLabel } from "./audit-kind-label"
 
 const POLL_INTERVAL_MS = 10_000
+
+/**
+ * A heartbeat older than 3 sweep intervals means the runtime is no longer
+ * servicing the adapter (webview reloaded without the runtime, app just
+ * booted, runtime lost the singleton lock, …) — treat the adapter as not
+ * running rather than trusting the stale snapshot.
+ */
+const HEARTBEAT_FRESH_MS = 3 * HEARTBEAT_INTERVAL_MS
+
+/**
+ * Row-level mirror of `adapterNeedsInboundServer` (server-transport.ts):
+ * only webhook and reverse-WS rows receive events through the local axum
+ * server; every other transport dials out. Used to decide whether a stopped
+ * inbound server is an error (webhook adapter starved) or simply not needed
+ * (gateway/long-poll deployment, e.g. Lark long connection).
+ */
+function rowNeedsInboundServer(row: AdapterInstanceRow): boolean {
+  return row.transportMode === "webhook" || row.transportMode === "reverse-ws"
+}
+
+/**
+ * Latest fresh heartbeat state per adapter — the SAME source of truth the
+ * Health tab uses, so the overview can never contradict it. `undefined`
+ * means no fresh heartbeat → the runtime is not servicing that adapter.
+ */
+function deriveLiveStates(heartbeats: ConnectorHeartbeatRow[]): Map<string, HealthCellState> {
+  const newest = new Map<string, ConnectorHeartbeatRow>()
+  for (const hb of heartbeats) {
+    const prev = newest.get(hb.adapterId)
+    if (!prev || hb.at > prev.at) newest.set(hb.adapterId, hb)
+  }
+  const states = new Map<string, HealthCellState>()
+  for (const [adapterId, hb] of newest) {
+    const state = (hb.fields?.state as HealthCellState | undefined) ?? "running"
+    states.set(adapterId, state)
+  }
+  return states
+}
 
 function StatusDot({ state }: { state: "ok" | "warn" | "error" | "unknown" }) {
   return (
@@ -68,6 +108,15 @@ export function OverviewTab() {
     }
   }, [desktop])
 
+  // Freshness clock for the heartbeat window: heartbeats only re-trigger the
+  // live query while the runtime keeps writing them, so a dead runtime would
+  // otherwise leave the last "running" snapshot on screen forever.
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), POLL_INTERVAL_MS)
+    return () => clearInterval(id)
+  }, [])
+
   const adapters = useLiveQuery<AdapterInstanceRow[]>(
     () =>
       typeof window === "undefined" ? Promise.resolve([]) : getDb().adapterInstances.toArray(),
@@ -82,13 +131,35 @@ export function OverviewTab() {
     []
   )
 
+  const freshHeartbeats = useLiveQuery<ConnectorHeartbeatRow[]>(
+    () =>
+      typeof window === "undefined"
+        ? Promise.resolve([])
+        : getDb()
+            .connectorHeartbeats.where("at")
+            .above(nowTick - HEARTBEAT_FRESH_MS)
+            .toArray(),
+    [nowTick]
+  )
+
+  const liveStates = deriveLiveStates(freshHeartbeats ?? [])
+  const enabledAdapters = (adapters ?? []).filter((a) => a.enabled)
+  const runningCount = enabledAdapters.filter((a) => liveStates.get(a.id) === "running").length
+
+  // The inbound axum server only matters when a webhook / reverse-WS adapter
+  // is enabled. A gateway/long-poll-only deployment (e.g. Lark long
+  // connection) legitimately never starts it — that must not read as an
+  // error, and it must not be presented as "the connector runtime".
+  const needsInboundServer = enabledAdapters.some(rowNeedsInboundServer)
   const serverStatus: "ok" | "warn" | "error" | "unknown" = !desktop
     ? "unknown"
     : health === null
       ? "unknown"
       : health.serverRunning
         ? "ok"
-        : "error"
+        : needsInboundServer
+          ? "error"
+          : "unknown"
 
   return (
     <div className="space-y-4">
@@ -109,10 +180,12 @@ export function OverviewTab() {
                 ? t("statusRunning", { addr: health?.boundAddr ?? "" })
                 : serverStatus === "error"
                   ? t("statusStopped")
-                  : t("statusUnknown")}
+                  : health && !health.serverRunning && !needsInboundServer
+                    ? t("statusNotNeeded")
+                    : t("statusUnknown")}
             </span>
           </div>
-          {health && (
+          {health && (health.serverRunning || needsInboundServer) && (
             <div className="text-xs text-muted-foreground">
               {health.registeredAdapterCount === 1
                 ? t("adapterCount", { count: health.registeredAdapterCount })
@@ -130,25 +203,55 @@ export function OverviewTab() {
             {t("adaptersHeading")}
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-2">
+          {desktop && enabledAdapters.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {t("runningSummary", { running: runningCount, total: enabledAdapters.length })}
+            </p>
+          )}
           {!adapters || adapters.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t("noAdapters")}</p>
           ) : (
             <ul className="space-y-2">
-              {adapters.map((a) => (
-                <li key={a.id} className="flex items-center gap-3 text-sm">
-                  <StatusDot state={a.enabled ? "ok" : "unknown"} />
-                  <span className="flex-1 truncate">{a.displayName}</span>
-                  <Badge variant="outline" className="shrink-0 text-xs">
-                    {a.type}
-                  </Badge>
-                  {!a.enabled && (
-                    <Badge variant="secondary" className="shrink-0 text-xs">
-                      {t("disabledBadge")}
+              {adapters.map((a) => {
+                // Live state from the freshest heartbeat — the same signal the
+                // Health tab renders, so the two surfaces cannot disagree.
+                const live = a.enabled ? liveStates.get(a.id) : undefined
+                const dotState: "ok" | "warn" | "error" | "unknown" = !a.enabled
+                  ? "unknown"
+                  : live === "running"
+                    ? "ok"
+                    : live === "starting" || live === "degraded"
+                      ? "warn"
+                      : live === "down"
+                        ? "error"
+                        : "unknown"
+                const stateKey = a.enabled ? (live ?? "notRunning") : "disabled"
+                return (
+                  <li key={a.id} className="flex items-center gap-3 text-sm">
+                    <span role="img" aria-label={t("stateAria", { state: t(`state.${stateKey}`) })}>
+                      <StatusDot state={dotState} />
+                    </span>
+                    <span className="flex-1 truncate">{a.displayName}</span>
+                    <Badge variant="outline" className="shrink-0 text-xs">
+                      {a.type}
                     </Badge>
-                  )}
-                </li>
-              ))}
+                    {a.enabled && stateKey !== "running" && (
+                      <Badge
+                        variant={live === "down" ? "destructive" : "secondary"}
+                        className="shrink-0 text-xs"
+                      >
+                        {t(`state.${stateKey}`)}
+                      </Badge>
+                    )}
+                    {!a.enabled && (
+                      <Badge variant="secondary" className="shrink-0 text-xs">
+                        {t("disabledBadge")}
+                      </Badge>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           )}
         </CardContent>

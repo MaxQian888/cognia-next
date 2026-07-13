@@ -77,6 +77,10 @@ import {
   startCallbackBindingCleanupSchedule,
   type CallbackBindingCleanupHandle,
 } from "@/lib/connectors/callback-binding-cleanup"
+import {
+  startOutboundRetentionSweep,
+  type DailyScheduleHandle,
+} from "@/lib/connectors/daily-schedule"
 import { startWorkflowProgressRunner } from "@/lib/connectors/a2ui-bridge/workflow-progress-runner"
 import {
   startResumeReconnect,
@@ -107,10 +111,15 @@ export interface InstallConnectorRuntimeOptions {
    * Acquire the cross-context "only one connector runtime" lock, returning
    * whether THIS caller owns it. The whole runtime (adapters, outbound, WS
    * reap) assumes a single `main`-role webview; a second one would double-send,
-   * double-fire, and cross-reap the first's sockets. Default: a
-   * `navigator.locks` exclusive lock (shared across a Tauri app's same-origin
-   * webviews), held until `signal` aborts. Returns `true` when Web Locks is
-   * unavailable (no guard possible → don't block boot). Test seam.
+   * double-fire, and cross-reap the first's sockets. Default: a QUEUED
+   * `navigator.locks` exclusive request (shared across a Tauri app's
+   * same-origin webviews) that waits for the current owner and is withdrawn
+   * when `signal` aborts — so a second webview boots only when the owner
+   * releases (window closed / torn down), and a StrictMode remount whose
+   * predecessor was just cancelled simply waits out the withdrawal instead of
+   * being refused. Once granted, held until `signal` aborts. Returns `true`
+   * when Web Locks is unavailable (no guard possible → don't block boot).
+   * Test seam.
    */
   acquireRuntimeLock?: (signal: AbortSignal) => Promise<boolean>
 }
@@ -119,30 +128,53 @@ export interface InstallConnectorRuntimeOptions {
 export const CONNECTOR_RUNTIME_LOCK = "cognia-connector-runtime"
 
 /**
- * Default singleton guard via the Web Locks API. Acquires an exclusive lock and
- * holds it (callback promise stays pending) until `signal` aborts, so a second
- * webview's `ifAvailable` request resolves to `null` → `false`. Degrades to
- * `true` when Web Locks is absent (SSR / older webview) — no guard, but boot
+ * Default singleton guard via the Web Locks API. Issues a QUEUED exclusive
+ * request — NOT `ifAvailable` — and, once granted, holds the lock (callback
+ * promise stays pending) until `signal` aborts.
+ *
+ * Queued-with-`signal` semantics matter for two callers:
+ *
+ * - A second main-role webview waits here until the owner releases (window
+ *   closed / runtime torn down) and then takes over — it never double-boots
+ *   while the owner lives.
+ * - A React StrictMode remount (dev): effect#1 → cleanup#1 → effect#2 run in
+ *   ONE task, so effect#1's request is still queued (the webview's lock
+ *   manager grants cross-process, never same-task) when effect#2's request is
+ *   issued. `ifAvailable` would refuse effect#2 because effect#1 is queued
+ *   ahead — leaving NO runtime at all (the dev-only "Lark connected but bot
+ *   silent" bug). With `{ signal }`, cleanup#1's abort withdraws effect#1's
+ *   queued request (AbortError → `false`) and effect#2 is granted next.
+ *
+ * Degrades to `true` when Web Locks is absent (SSR / older webview) or the
+ * request fails for any reason other than our own abort — no guard, but boot
  * must not be blocked.
  */
 function defaultAcquireRuntimeLock(signal: AbortSignal): Promise<boolean> {
   const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks
   if (!locks?.request) return Promise.resolve(true)
+  if (signal.aborted) return Promise.resolve(false)
   return new Promise<boolean>((resolveAcquired) => {
     void locks
-      .request(CONNECTOR_RUNTIME_LOCK, { ifAvailable: true }, (lock) => {
+      .request(CONNECTOR_RUNTIME_LOCK, { signal }, (lock) => {
         if (!lock) {
           resolveAcquired(false)
           return
         }
         resolveAcquired(true)
-        // Hold the lock for the runtime's lifetime.
+        // Hold the lock for the runtime's lifetime. Aborting `signal` after
+        // the grant is a no-op for the request itself (per spec), so the
+        // release rides on this held promise instead.
         return new Promise<void>((release) => {
           if (signal.aborted) return release()
           signal.addEventListener("abort", () => release(), { once: true })
         })
       })
-      .catch(() => resolveAcquired(true))
+      .catch((err: unknown) => {
+        // AbortError → our own teardown withdrew the still-queued request; we
+        // never owned the runtime. Anything else is a lock-API failure →
+        // degrade to booting, same as when Web Locks is absent.
+        resolveAcquired(!(err instanceof Error && err.name === "AbortError"))
+      })
   })
 }
 
@@ -161,17 +193,20 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
   if (!opts.skipHostGate && !isTauri()) return () => undefined
   const log = opts.log ?? consoleLog
 
-  installScheduledOutboundHandlers()
-  installUsagePresenceHandlers()
-
   const ac = new AbortController()
   let cancelled = false
+  // True only after this window wins the single-runtime lock. The teardown
+  // gates every shared-resource release on it — a non-owner window closing
+  // must never stop the owner's inbound axum server or reap its
+  // registrations.
+  let ownsRuntime = false
   const startedAdapters: PlatformAdapter[] = []
   // Ids of adapters registered with the Rust axum server (webhook /
   // reverse-WS). Single source of truth for both "does the inbound server
   // need to start" and "which registrations to reap on teardown".
   const serverAdapterIds = new Set<string>()
   let cleanupHandle: CallbackBindingCleanupHandle | null = null
+  let outboundRetentionSweep: DailyScheduleHandle | null = null
   let heartbeatSweep: HeartbeatSweepHandle | null = null
   let resumeReconnect: ResumeReconnectHandle | null = null
   let stopWorkflowProgressRunner: (() => void) | null = null
@@ -301,6 +336,14 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       )
       return
     }
+    ownsRuntime = true
+
+    // Task-scheduler executors are process-lifetime registrations; they must
+    // only exist in the lock-owning window, otherwise a second webview that
+    // never acquired the lock would still execute due connector tasks
+    // (double-send) if its scheduler fires.
+    installScheduledOutboundHandlers()
+    installUsagePresenceHandlers()
 
     // Reap any connector WS / Lark long-connection sockets leaked by a
     // PREVIOUS webview load (hard reload / Fast-Refresh full reload / crash)
@@ -444,8 +487,12 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       }
     }
 
-    // Build the adapter map for the outbound runner.
-    const adapters = new Map(bus.listAdapters().map((a) => [a.id, a]))
+    // Live adapter lookup for the outbound runner — resolved through the
+    // bus registry per delivery so a credential-rotation rebuild (which
+    // re-registers a fresh instance) or a post-boot registration is picked
+    // up immediately; a boot-time Map snapshot kept delivering through the
+    // stale instance forever.
+    const adapters = { get: (adapterId: string) => bus.getAdapter(adapterId) }
     // `onDelivered` feeds the bus's `cooldown-after-bot-reply` bookkeeping —
     // the delivery choke point is the only place every reply path (ai-run /
     // team / workflow / digest) converges, so recording here makes the
@@ -455,6 +502,13 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       signal: ac.signal,
       onDelivered: (conversationKey) => bus.recordBotReply(conversationKey),
     })
+
+    // Daily retention sweep for terminal outbound rows (sent / deadlettered
+    // older than 14 days) — the runner's queue soft cap only bounds the
+    // ACTIVE backlog; without this sweep terminal history grows forever.
+    if (!cancelled) {
+      outboundRetentionSweep = startOutboundRetentionSweep()
+    }
 
     // Single consolidated heartbeat sweep (v51) — one timer services every
     // running adapter (active heartbeat each tick + passive probe every
@@ -508,6 +562,8 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     ac.abort()
     cleanupHandle?.dispose()
     cleanupHandle = null
+    outboundRetentionSweep?.dispose()
+    outboundRetentionSweep = null
     heartbeatSweep?.dispose()
     heartbeatSweep = null
     resumeReconnect?.dispose()
@@ -543,6 +599,11 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
         )
       })
     }
+    // Shared Rust-side resources are owner-only: a non-owner window that
+    // opened and closed must not stop the owner's inbound axum server or
+    // unregister its webhook / reverse-WS routes (the owner never restarts
+    // them, so webhook adapters would silently starve).
+    if (!ownsRuntime) return
     // Reap this install's webhook / reverse-WS registrations so the Rust
     // registered-adapter map doesn't retain stale entries across a remount.
     // Mirrors the per-adapter registration in `bootAdapter`.
@@ -552,7 +613,7 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     serverAdapterIds.clear()
     // Stop the inbound axum server (install-lifetime). Safe no-op in Rust
     // when it was never started (no webhook / reverse-WS adapter), so we
-    // call it unconditionally and swallow any error.
+    // swallow any error.
     void connectorsStopServer().catch(() => undefined)
   }
 }

@@ -49,6 +49,8 @@ export interface SlackMessageEvent {
   type: string
   channel: string
   user?: string
+  /** Present on messages authored by any bot (including ourselves). */
+  bot_id?: string
   text?: string
   ts: string
   thread_ts?: string
@@ -79,6 +81,18 @@ export interface SlackEventEnvelope {
 // ---------------------------------------------------------------------------
 // Parser helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Message subtypes that carry real user content. `undefined` (plain message)
+ * is handled separately — everything else (channel_join / channel_leave /
+ * channel_topic / channel_purpose / channel_name / bot_message / …) is
+ * dropped as system noise.
+ */
+const USER_CONTENT_SUBTYPES: ReadonlySet<string> = new Set([
+  "file_share",
+  "thread_broadcast",
+  "me_message",
+])
 
 function buildPlatformIdentity(adapterId: string, userId: string): PlatformIdentity {
   return {
@@ -287,8 +301,18 @@ export function parseSlackEventCallback(
     }
   }
 
-  // Ignore bot messages
-  if (event.subtype === "bot_message") return null
+  // Subtype whitelist: only subtypes that carry real user content become
+  // inbound events. System subtypes (channel_join / channel_leave /
+  // channel_topic / channel_purpose / channel_name / bot_message / …) are
+  // noise for the AI loop and are dropped.
+  if (event.subtype !== undefined && !USER_CONTENT_SUBTYPES.has(event.subtype)) return null
+
+  // Self-echo guard: drop anything authored by a bot (`bot_id` is present on
+  // every bot-authored message regardless of subtype) and anything authored
+  // by our own bot user. `selfId` can be "" when the auth.test probe failed —
+  // guard so we don't drop user messages whose `user` is also missing/empty.
+  if (event.bot_id) return null
+  if (selfId && event.user === selfId) return null
 
   const userId = event.user
   if (!userId) return null
@@ -336,6 +360,70 @@ export function parseSlackEventCallback(
     mentions: { selfMentioned, users },
     timestamp: Math.round(parseFloat(event.ts) * 1000),
     raw: envelope,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Slash commands — Socket Mode `slash_commands` envelope payload
+// ---------------------------------------------------------------------------
+
+/** Decoded body of a Socket Mode `slash_commands` envelope. */
+export interface SlackSlashCommandPayload {
+  command: string
+  text?: string
+  channel_id: string
+  user_id: string
+  user_name?: string
+  team_id?: string
+  trigger_id?: string
+}
+
+/**
+ * Project a slash-command invocation into an ordinary
+ * NormalizedInboundEvent text message — no new event kind. `plainText` is
+ * "<command> <text>" so the AI loop sees the full invocation, and
+ * `selfMentioned` is true because a slash command is by definition an
+ * explicit invocation of this bot.
+ */
+export function parseSlackSlashCommand(
+  adapterId: string,
+  selfId: string,
+  payload: SlackSlashCommandPayload
+): NormalizedInboundEvent | null {
+  if (!payload.command || !payload.channel_id || !payload.user_id) return null
+
+  const channel = payload.channel_id
+  const conversationKey = buildConversationKey("slack", adapterId, channel)
+  const sender = buildPlatformIdentity(adapterId, payload.user_id)
+  if (payload.user_name) sender.displayName = payload.user_name
+  const text = [payload.command, payload.text ?? ""].filter(Boolean).join(" ").trim()
+  const now = Date.now()
+
+  return {
+    platform: "slack",
+    adapterId,
+    selfId,
+    // Slash commands carry no message ts — the trigger_id is the only
+    // stable platform-side id for the invocation.
+    messageId: payload.trigger_id ?? `slash-${now}`,
+    conversationRef: {
+      platform: "slack",
+      adapterId,
+      channelId: channel,
+    },
+    conversationKey,
+    sender,
+    channel: {
+      id: conversationKey,
+      kind: "channel",
+      platformChannelId: channel,
+    },
+    segments: [{ type: "text", text }],
+    plainText: text,
+    replyTo: undefined,
+    mentions: { selfMentioned: true, users: selfId ? [selfId] : [] },
+    timestamp: now,
+    raw: payload,
   }
 }
 

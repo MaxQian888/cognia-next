@@ -291,6 +291,53 @@ describe("buildDiscordAdapter", () => {
     expect(typeof callArgs.botToken).toBe("function")
   })
 
+  it("forwards a numeric settings.intents into createDiscordAdapter", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return "T"
+      if (cmd === "connectors_http_request") return makeDiscordMeResp("1")
+      return null
+    })
+
+    const row = makeRow({
+      id: "dc-intents",
+      type: "discord",
+      transportMode: "gateway",
+      settings: { intents: 4096 },
+    })
+    await buildDiscordAdapter(row)
+
+    const callArgs = mockCreateDiscordAdapter.mock.calls[0][0] as { intents?: number }
+    expect(callArgs.intents).toBe(4096)
+  })
+
+  it("omits intents when settings has none (adapter uses the default)", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return "T"
+      if (cmd === "connectors_http_request") return makeDiscordMeResp("1")
+      return null
+    })
+
+    const row = makeRow({ id: "dc-no-intents", type: "discord", transportMode: "gateway" })
+    await buildDiscordAdapter(row)
+
+    const callArgs = mockCreateDiscordAdapter.mock.calls[0][0] as { intents?: number }
+    expect(callArgs.intents).toBeUndefined()
+  })
+
+  it("forwards the row transportMode into createDiscordAdapter", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return "T"
+      if (cmd === "connectors_http_request") return makeDiscordMeResp("1")
+      return null
+    })
+
+    const row = makeRow({ id: "dc-wh", type: "discord", transportMode: "webhook" })
+    await buildDiscordAdapter(row)
+
+    const callArgs = mockCreateDiscordAdapter.mock.calls[0][0] as { transportMode?: string }
+    expect(callArgs.transportMode).toBe("webhook")
+  })
+
   it("falls back to empty selfId when /users/@me throws", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
     mockInvoke.mockImplementation(async (cmd: string) => {
@@ -392,6 +439,78 @@ describe("buildSlackAdapter", () => {
 
     const callArgs = mockCreateSlackAdapter.mock.calls[0][0] as { transport: string }
     expect(callArgs.transport).toBe("events-api-webhook")
+  })
+
+  it("passes assistantAppEnabled + validated historyMaxPages from row.settings", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return "xoxb-TOKEN"
+      if (cmd === "connectors_http_request") return makeSlackAuthTestResp("U111")
+      return null
+    })
+
+    const row = makeRow({
+      id: "sl-5",
+      type: "slack",
+      transportMode: "gateway",
+      settings: { assistantAppEnabled: true, historyMaxPages: "25" },
+    })
+    await buildSlackAdapter(row)
+
+    const callArgs = mockCreateSlackAdapter.mock.calls[0][0] as {
+      assistantAppEnabled: boolean
+      historyMaxPages?: number
+    }
+    expect(callArgs.assistantAppEnabled).toBe(true)
+    // Numeric string is validated + floored into a number.
+    expect(callArgs.historyMaxPages).toBe(25)
+  })
+
+  it("defaults assistantAppEnabled to false and drops invalid historyMaxPages", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return "xoxb-TOKEN"
+      if (cmd === "connectors_http_request") return makeSlackAuthTestResp("U111")
+      return null
+    })
+
+    const row = makeRow({
+      id: "sl-6",
+      type: "slack",
+      transportMode: "gateway",
+      settings: { assistantAppEnabled: "yes", historyMaxPages: -3 },
+    })
+    await buildSlackAdapter(row)
+
+    const callArgs = mockCreateSlackAdapter.mock.calls[0][0] as {
+      assistantAppEnabled: boolean
+      historyMaxPages?: number
+    }
+    expect(callArgs.assistantAppEnabled).toBe(false)
+    expect(callArgs.historyMaxPages).toBeUndefined()
+  })
+
+  it("userToken resolver prefers 'userToken' and falls back to legacy 'user_token'", async () => {
+    const keyring = new Map<string, string>([["user_token", "xoxp-legacy"]])
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") {
+        const credential = (args as { credential?: string })?.credential ?? ""
+        return keyring.get(credential) ?? (credential === "botToken" ? "xoxb-TOKEN" : null)
+      }
+      if (cmd === "connectors_http_request") return makeSlackAuthTestResp("U111")
+      return null
+    })
+
+    const row = makeRow({ id: "sl-7", type: "slack", transportMode: "gateway" })
+    await buildSlackAdapter(row)
+
+    const callArgs = mockCreateSlackAdapter.mock.calls[0][0] as {
+      userToken: () => Promise<string>
+    }
+    // Only the legacy key exists → fallback kicks in.
+    await expect(callArgs.userToken()).resolves.toBe("xoxp-legacy")
+
+    // Canonical key wins once present.
+    keyring.set("userToken", "xoxp-new")
+    await expect(callArgs.userToken()).resolves.toBe("xoxp-new")
   })
 })
 

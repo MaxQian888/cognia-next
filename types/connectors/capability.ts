@@ -187,10 +187,15 @@ export function componentKindsByLevel(
 }
 
 /**
- * Default per-segment-type degradation order. Each adapter MAY override via
- * its own degrade table; this is the conservative default. The bus walks
- * the chain from index 0 onward, picking the first segment type whose
- * `send.<type>` capability the adapter declares.
+ * Default per-segment-type degradation order — the conservative reference
+ * chain, read from index 0 onward: the first segment type whose
+ * `send.<type>` capability an adapter declares is the one to emit.
+ *
+ * NOTE (reality check): no central walker consumes this today. Degradation
+ * happens ad-hoc INSIDE each adapter's serializer (e.g. markdown→text
+ * flattening in the per-platform mappers); the bus does not walk this
+ * chain. The helper is kept as the documented default order and stays
+ * available for future central wiring in the bus/runner.
  */
 export function defaultDegradeChain(from: SegmentType): SegmentType[] {
   switch (from) {

@@ -153,6 +153,24 @@ access token 时，才开启 **允许未认证的连接**。
 
 ---
 
+## 机器人身份与富文本消息
+
+客户端连接后，cognia-next 会通过 OneBot `get_login_info` 动作自动探测机器人自身身份，并在适配器的
+**机器人身份** 面板显示真实昵称与 UIN —— 与 Telegram、Slack、Lark 显示机器人身份的方式一致。
+若已连接机器人的 UIN 与你填写的 **Bot UIN** 不一致，面板会给出不匹配提示，请据此修正。
+
+入站 QQ 消息会被高保真地映射：
+
+- **合并转发** 会通过 `get_forward_msg` 拉取正文，从而呈现真实的转发内容（`昵称: 文本` 逐行），
+  而不是一个通用占位符。
+- **位置** 段会转为结构化位置数据；**戳一戳**、**骰子**、**猜拳**、**推荐名片** 以及旧版
+  **XML / JSON 卡片** 会渲染为可读文本。
+
+出站方面，适配器可通过 NapCat 的 `send_group_forward_msg` / `send_private_forward_msg` 扩展把已有消息
+**合并转发** 到其他会话，并在 NapCat 上游通过 `set_msg_emoji_like` 添加 QQ 表情回应。
+
+---
+
 ## 故障排查
 
 常见问题请参阅 [QQ via OneBot FAQ](./qq-via-onebot-faq.md)。

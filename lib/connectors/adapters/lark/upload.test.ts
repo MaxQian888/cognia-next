@@ -52,6 +52,44 @@ describe("resolveLarkMediaKeys", () => {
     })
   })
 
+  it("degrades a non-opus voice source to a file attachment (unplayable as audio otherwise)", async () => {
+    // Lark's audio bubble plays only opus; uploading an mp3 with
+    // file_type=opus "succeeds" but produces a broken voice message.
+    mockInvoke.mockResolvedValueOnce("file_v3_mp3_as_file")
+    const segments: MessageSegment[] = [
+      { type: "voice", url: "https://media.example.com/memo.mp3", durationSec: 12 },
+    ]
+    const out = await resolveLarkMediaKeys(segments, {
+      getAccessToken: async () => "t-token",
+    })
+
+    expect(out).toEqual([
+      {
+        type: "file",
+        url: "file_v3_mp3_as_file",
+        name: "memo.mp3",
+        mimeType: "application/octet-stream",
+        sizeBytes: 0,
+      },
+    ])
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_lark_upload_file", {
+      accessToken: "t-token",
+      sourceUrl: "https://media.example.com/memo.mp3",
+      fileType: "stream",
+      fileName: "memo.mp3",
+      durationMs: undefined,
+    })
+  })
+
+  it("keeps an already-resolved voice key untouched even without an opus extension", async () => {
+    const segments: MessageSegment[] = [{ type: "voice", url: "file_v3_resolved_voice" }]
+    const out = await resolveLarkMediaKeys(segments, {
+      getAccessToken: async () => "t-token",
+    })
+    expect(out).toEqual(segments)
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
   it("uploads a remote video URL via connectors_lark_upload_file with mp4", async () => {
     mockInvoke.mockResolvedValueOnce("file_v3_new_video")
     const segments: MessageSegment[] = [

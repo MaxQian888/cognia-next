@@ -258,25 +258,44 @@ describe("Slack adapter contract suite", () => {
   // -------------------------------------------------------------------------
 
   describe("edit capability", () => {
-    it("edit() posts to chat.update with channel, ts, and blocks", async () => {
+    const patchFor = (channelId: string): OutboundRequest => ({
+      conversationRef: {
+        platform: "slack",
+        adapterId: "sl-contract",
+        channelId,
+      },
+      segments: [{ type: "text", text: "edited content" }],
+      metadata: { idempotencyKey: "k8" },
+    })
+
+    it("edit() with a bare ts falls back to conversationRef.channelId", async () => {
       mockInvoke.mockResolvedValueOnce(makeSendOkResp("t8"))
       const adapter = makeAdapter()
-      const patch: OutboundRequest = {
-        conversationRef: {
-          platform: "slack",
-          adapterId: "sl-contract",
-          channelId: "C01EDIT",
-        },
-        segments: [{ type: "text", text: "edited content" }],
-        metadata: { idempotencyKey: "k8" },
-      }
-      const result = await adapter.edit!("1600000001.000001", patch)
+      const result = await adapter.edit!("1600000001.000001", patchFor("C01EDIT"))
       expect(result.ok).toBe(true)
       const call = lastHttpCall()
       expect(call.url).toContain("chat.update")
       expect(call.method).toBe("POST")
       expect(call.body["channel"]).toBe("C01EDIT")
       expect(call.body["ts"]).toBe("1600000001.000001")
+    })
+
+    it("edit() parses the composite id, preferring its channel", async () => {
+      mockInvoke.mockResolvedValueOnce(makeSendOkResp("t8b"))
+      const adapter = makeAdapter()
+      const result = await adapter.edit!("C77COMP:1600000001.000002", patchFor("C01EDIT"))
+      expect(result.ok).toBe(true)
+      const call = lastHttpCall()
+      expect(call.body["channel"]).toBe("C77COMP")
+      expect(call.body["ts"]).toBe("1600000001.000002")
+    })
+
+    it("edit() returns a non-retryable validation error when no channel is derivable", async () => {
+      const adapter = makeAdapter()
+      const result = await adapter.edit!("1600000001.000003", patchFor(""))
+      expect(result.ok).toBe(false)
+      expect(result.error?.code).toBe("validation")
+      expect(result.error?.retryable).toBe(false)
     })
   })
 
@@ -296,25 +315,104 @@ describe("Slack adapter contract suite", () => {
       expect(call.body["channel"]).toBe("C01CHAN")
       expect(call.body["ts"]).toBe("1600000002.000001")
     })
+
+    it("delete() throws (never silently no-ops) on a bare-ts id", async () => {
+      const adapter = makeAdapter()
+      await expect(adapter.delete!("1600000002.000002")).rejects.toThrow(/"<channelId>:<ts>"/)
+      const httpCalls = mockInvoke.mock.calls.filter(
+        ([cmd]: [string]) => cmd === "connectors_http_request"
+      )
+      expect(httpCalls).toHaveLength(0)
+    })
   })
 
   // -------------------------------------------------------------------------
   // send.reaction
   // -------------------------------------------------------------------------
 
-  describe("send.reaction capability (addReaction)", () => {
-    it("addReaction() posts to reactions.add with channel, timestamp, name", async () => {
+  describe("send.reaction capability (addReaction / removeReaction)", () => {
+    it("addReaction() takes the 2-arg contract shape and posts reactions.add", async () => {
       mockInvoke.mockResolvedValueOnce(makeSendOkResp())
-      const adapter = makeAdapter() as ReturnType<typeof createSlackAdapter> & {
-        addReaction: (channel: string, ts: string, name: string) => Promise<void>
-      }
-      await adapter.addReaction("C01", "1600000003.000001", "thumbsup")
+      const adapter = makeAdapter()
+      const ref = await adapter.addReaction!("C01:1600000003.000001", "thumbsup")
       const call = lastHttpCall()
       expect(call.url).toContain("reactions.add")
       expect(call.method).toBe("POST")
       expect(call.body["channel"]).toBe("C01")
       expect(call.body["timestamp"]).toBe("1600000003.000001")
       expect(call.body["name"]).toBe("thumbsup")
+      // Slack reactions are keyed by emoji name — it rides back as the ref.
+      expect(ref).toEqual({ reactionId: "thumbsup" })
+    })
+
+    it("addReaction() strips surrounding colons from the emoji name", async () => {
+      mockInvoke.mockResolvedValueOnce(makeSendOkResp())
+      const adapter = makeAdapter()
+      await adapter.addReaction!("C01:1600000003.000002", ":thumbsup:")
+      const call = lastHttpCall()
+      expect(call.body["name"]).toBe("thumbsup")
+    })
+
+    it("addReaction() throws a clear error on a bare-ts message id", async () => {
+      const adapter = makeAdapter()
+      await expect(adapter.addReaction!("1600000003.000003", "thumbsup")).rejects.toThrow(
+        /"<channelId>:<ts>"/
+      )
+      const httpCalls = mockInvoke.mock.calls.filter(
+        ([cmd]: [string]) => cmd === "connectors_http_request"
+      )
+      expect(httpCalls).toHaveLength(0)
+    })
+
+    it("removeReaction() posts reactions.remove with the returned reactionId", async () => {
+      mockInvoke.mockResolvedValueOnce(makeSendOkResp())
+      const adapter = makeAdapter()
+      await adapter.removeReaction!("C01:1600000003.000001", "thumbsup")
+      const call = lastHttpCall()
+      expect(call.url).toContain("reactions.remove")
+      expect(call.body["channel"]).toBe("C01")
+      expect(call.body["timestamp"]).toBe("1600000003.000001")
+      expect(call.body["name"]).toBe("thumbsup")
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // pin capability (pinMessage / unpinMessage)
+  // -------------------------------------------------------------------------
+
+  describe("pin capability", () => {
+    it("pinMessage() parses the composite id for channel + ts", async () => {
+      mockInvoke.mockResolvedValueOnce(makeSendOkResp())
+      const adapter = makeAdapter()
+      await adapter.pinMessage!("slack:sl-contract:C99", "C01PIN:1600000004.000001")
+      const call = lastHttpCall()
+      expect(call.url).toContain("pins.add")
+      expect(call.body["channel"]).toBe("C01PIN")
+      expect(call.body["timestamp"]).toBe("1600000004.000001")
+    })
+
+    it("pinMessage() falls back to the conversationKey channel for a bare ts", async () => {
+      mockInvoke.mockResolvedValueOnce(makeSendOkResp())
+      const adapter = makeAdapter()
+      await adapter.pinMessage!("slack:sl-contract:C99", "1600000004.000002")
+      const call = lastHttpCall()
+      expect(call.body["channel"]).toBe("C99")
+      expect(call.body["timestamp"]).toBe("1600000004.000002")
+    })
+
+    it("unpinMessage() posts pins.remove from the composite id", async () => {
+      mockInvoke.mockResolvedValueOnce(makeSendOkResp())
+      const adapter = makeAdapter()
+      await adapter.unpinMessage!("C01PIN:1600000004.000001")
+      const call = lastHttpCall()
+      expect(call.url).toContain("pins.remove")
+      expect(call.body["channel"]).toBe("C01PIN")
+      expect(call.body["timestamp"]).toBe("1600000004.000001")
+    })
+
+    it("unpinMessage() throws on a bare-ts id (no channel context)", async () => {
+      const adapter = makeAdapter()
+      await expect(adapter.unpinMessage!("1600000004.000003")).rejects.toThrow(/"<channelId>:<ts>"/)
     })
   })
 

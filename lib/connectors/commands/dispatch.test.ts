@@ -8,6 +8,11 @@ import type { NormalizedInboundEvent, ChannelKind } from "@/types/connectors/eve
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type { ResolvedBinding } from "../policy-resolve"
 import type { ChatSession } from "@cognia/agent-config-types"
+import {
+  grantSessionBypass,
+  hasSessionBypass,
+  __resetApprovalRegistryForTesting,
+} from "../hitl/approval-registry"
 
 function makeEvent(over: Partial<NormalizedInboundEvent> = {}): NormalizedInboundEvent {
   return {
@@ -649,5 +654,71 @@ describe("maybeHandleControlCommand", () => {
       h.deps
     )
     expect(handled).toBe(false)
+  })
+})
+
+describe("session rotation drops HITL session bypasses", () => {
+  beforeEach(() => {
+    __resetApprovalRegistryForTesting()
+  })
+
+  it("/new clears the prior active session's bypass set", async () => {
+    grantSessionBypass("old-1", "Bash")
+    const h = harness({ active: session("old-1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/new" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(hasSessionBypass("old-1", "Bash")).toBe(false)
+  })
+
+  it("/new with no prior session clears nothing (no rotation happened)", async () => {
+    grantSessionBypass("unrelated", "Bash")
+    const h = harness()
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/new" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(hasSessionBypass("unrelated", "Bash")).toBe(true)
+  })
+
+  it("/switch clears the previously active session's bypass but keeps the target's", async () => {
+    grantSessionBypass("abc12345", "Bash")
+    grantSessionBypass("def67890", "Bash")
+    const h = harness({
+      sessions: [session("abc12345", "Old"), session("def67890", "Newer")],
+      active: session("abc12345", "Old"),
+    })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/switch def67890" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(hasSessionBypass("abc12345", "Bash")).toBe(false)
+    expect(hasSessionBypass("def67890", "Bash")).toBe(true)
+  })
+
+  it("/switch to the already-active session keeps its bypass (no rotation)", async () => {
+    grantSessionBypass("abc12345", "Bash")
+    const h = harness({
+      sessions: [session("abc12345", "Only")],
+      active: session("abc12345", "Only"),
+    })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/switch abc12345" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(hasSessionBypass("abc12345", "Bash")).toBe(true)
   })
 })

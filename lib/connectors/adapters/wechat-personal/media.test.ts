@@ -1,9 +1,15 @@
+const mockAttachmentRead = jest.fn(async (..._a: unknown[]): Promise<string | null> => null)
+jest.mock("@/lib/connectors/tauri/commands", () => ({
+  connectorsAttachmentRead: (...a: unknown[]) => mockAttachmentRead(...a),
+}))
+
 import {
   aes128DecryptBlock,
   decryptIlinkMedia,
   base64ToBytes,
   bytesToBase64,
-  fetchAndDecryptIlinkMedia,
+  fetchAndDecryptIlinkMediaViaTauri,
+  ILINK_MEDIA_MAX_BYTES,
 } from "./media"
 
 function hexToBytes(hex: string): Uint8Array {
@@ -63,22 +69,68 @@ describe("base64 helpers", () => {
   })
 })
 
-describe("fetchAndDecryptIlinkMedia", () => {
-  const realFetch = global.fetch
-  afterEach(() => {
-    global.fetch = realFetch
+describe("fetchAndDecryptIlinkMediaViaTauri", () => {
+  beforeEach(() => {
+    mockAttachmentRead.mockReset()
+    mockAttachmentRead.mockResolvedValue(null)
   })
 
-  it("returns raw bytes when no key is given", async () => {
-    global.fetch = jest.fn(async () => ({
-      ok: true,
-      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
-    })) as unknown as typeof fetch
-    expect(Array.from(await fetchAndDecryptIlinkMedia("https://cdn/x"))).toEqual([1, 2, 3])
+  it("downloads via fetchAttachment then returns the cached bytes when no key is given", async () => {
+    const fetchAttachment = jest.fn(async () => ({ localUrl: "file:///c", remoteRef: "r" }))
+    mockAttachmentRead.mockResolvedValue(bytesToBase64(new Uint8Array([1, 2, 3])))
+    const out = await fetchAndDecryptIlinkMediaViaTauri({
+      adapterId: "wx1",
+      url: "https://cdn/x",
+      fetchAttachment,
+    })
+    expect(Array.from(out)).toEqual([1, 2, 3])
+    expect(fetchAttachment).toHaveBeenCalledWith("wx1", "https://cdn/x")
+    expect(mockAttachmentRead).toHaveBeenCalledWith("wx1", "https://cdn/x", ILINK_MEDIA_MAX_BYTES)
   })
 
-  it("throws on a non-ok response", async () => {
-    global.fetch = jest.fn(async () => ({ ok: false, status: 404 })) as unknown as typeof fetch
-    await expect(fetchAndDecryptIlinkMedia("https://cdn/x")).rejects.toThrow(/404/)
+  it("decrypts the cached bytes with the AES key", async () => {
+    mockAttachmentRead.mockResolvedValue(bytesToBase64(CT))
+    const out = await fetchAndDecryptIlinkMediaViaTauri({
+      adapterId: "wx1",
+      url: "https://cdn/x",
+      aesKeyBase64: bytesToBase64(KEY),
+      fetchAttachment: jest.fn(async () => ({})),
+    })
+    expect(bytesToHex(out)).toBe(PT)
+  })
+
+  it("throws when the attachment cache read returns null", async () => {
+    await expect(
+      fetchAndDecryptIlinkMediaViaTauri({
+        adapterId: "wx1",
+        url: "https://cdn/x",
+        fetchAttachment: jest.fn(async () => ({})),
+      })
+    ).rejects.toThrow(/attachment cache/)
+  })
+
+  it("propagates fetchAttachment (download) failures", async () => {
+    await expect(
+      fetchAndDecryptIlinkMediaViaTauri({
+        adapterId: "wx1",
+        url: "https://cdn/x",
+        fetchAttachment: jest.fn(async () => {
+          throw new Error("download refused")
+        }),
+      })
+    ).rejects.toThrow(/download refused/)
+    expect(mockAttachmentRead).not.toHaveBeenCalled()
+  })
+
+  it("honours the readAttachment test seam", async () => {
+    const readAttachment = jest.fn(async () => bytesToBase64(new Uint8Array([9])))
+    const out = await fetchAndDecryptIlinkMediaViaTauri({
+      adapterId: "wx1",
+      url: "https://cdn/x",
+      fetchAttachment: jest.fn(async () => ({})),
+      readAttachment,
+    })
+    expect(Array.from(out)).toEqual([9])
+    expect(mockAttachmentRead).not.toHaveBeenCalled()
   })
 })

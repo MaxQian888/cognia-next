@@ -82,8 +82,10 @@ function StatusBadge({ status }: { status: OutboundJobStatus }) {
  * Re-arm a failed or dead-lettered job for immediate retry. Dead-lettered
  * rows go through `replayDeadlettered` (clears the error state, resets
  * attempts, and emits the enqueue wake so the runner re-checks `pickNextDue`
- * right away). Failed rows just bring `nextAttemptAt` forward to now — the
- * runner already retries them, this just skips the backoff. Either way an
+ * right away). Failed rows also reset `attempts` (matching
+ * `replayDeadlettered` semantics) — a manual retry is a fresh operator
+ * decision, and a job already at max attempts would otherwise instantly
+ * re-dead-letter without a single new send. Either way an
  * `outbound.replayed` audit row records the operator action with the
  * original error code so the replay is traceable.
  */
@@ -93,7 +95,11 @@ async function retryJob(id: string) {
   if (row.status === "deadlettered") {
     await replayDeadlettered(id)
   } else {
-    await getDb().outboundQueue.update(id, { status: "pending", nextAttemptAt: Date.now() })
+    await getDb().outboundQueue.update(id, {
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: Date.now(),
+    })
   }
   void appendAudit({
     adapterId: row.adapterId,

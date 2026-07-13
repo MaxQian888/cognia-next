@@ -67,12 +67,40 @@ const FORWARDED_DISPATCH_TYPES = new Set<string>([
  */
 export const DEFAULT_GATEWAY_INTENTS = 46593
 
+/**
+ * Gateway close codes that must NOT be retried: reconnecting with the same
+ * credentials/config would fail identically (auth) or is a config error
+ * (sharding / version / intents). See Discord Gateway close event codes.
+ */
+const FATAL_CLOSE_REASONS: Record<number, string> = {
+  4004: "authentication failed",
+  4010: "invalid shard",
+  4011: "sharding required",
+  4012: "invalid API version",
+  4013: "invalid intents",
+  4014: "disallowed intents",
+}
+
+/**
+ * Connection-lifecycle events surfaced to the adapter so `health()` can
+ * report "starting → running → degraded/down" truthfully.
+ */
+export type GatewayStatusEvent =
+  | { kind: "ready" }
+  | { kind: "resumed" }
+  /** A connect attempt failed (or a session dropped); `attempts` is the consecutive-failure count. */
+  | { kind: "connect_failed"; attempts: number }
+  /** Fatal close code received — the client stops reconnecting. */
+  | { kind: "fatal_close"; code: number; reason: string }
+
 export interface GatewayClientOptions {
   /** Bot token (without "Bot " prefix). */
   botToken: () => Promise<string>
   /** Intent bitmask. Defaults to DEFAULT_GATEWAY_INTENTS. */
   intents?: number
   signal: AbortSignal
+  /** Optional connection-lifecycle hook (READY/RESUMED/failures/fatal close). */
+  onStatus?: (status: GatewayStatusEvent) => void
   /** Override the Gateway URL (useful in tests). */
   _gatewayUrl?: string
   /** Override backoff base ms for tests. Default: 1000. */
@@ -142,6 +170,7 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
       } catch {
         if (opts.signal.aborted) return
         attempts += 1
+        opts.onStatus?.({ kind: "connect_failed", attempts })
         const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
         try {
           await delay(backoff, opts.signal)
@@ -158,6 +187,8 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
       const queue: string[] = []
       let wakeResolve: (() => void) | null = null
       let wsEnded = false
+      /** Close code from the /close payload (the Rust ws proxy emits `{code, reason}`; legacy proxies emit nothing). */
+      let closeCode: number | null = null
 
       const unlisten = await listen<string>(`connectors://ws/${handleId}/message`, (event) => {
         queue.push(event.payload)
@@ -165,7 +196,13 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
         wakeResolve = null
       })
 
-      const unlistenClose = await listen<void>(`connectors://ws/${handleId}/close`, () => {
+      // The close payload is `{code, reason}` on upgraded proxies and
+      // `undefined` on legacy ones — read it defensively.
+      const unlistenClose = await listen<unknown>(`connectors://ws/${handleId}/close`, (event) => {
+        const payload = event.payload as { code?: unknown } | undefined | null
+        if (payload && typeof payload === "object" && typeof payload.code === "number") {
+          closeCode = payload.code
+        }
         wsEnded = true
         wakeResolve?.()
         wakeResolve = null
@@ -181,6 +218,8 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
 
       let heartbeatTimer: ReturnType<typeof setTimeout> | null = null
       let shouldResume = false
+      /** True while a heartbeat is in flight without its ACK (op 11). */
+      let awaitingAck = false
 
       try {
         outer: while (!wsEnded && !opts.signal.aborted) {
@@ -207,9 +246,21 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
               case OP_HELLO: {
                 const { heartbeat_interval } = msg.d as { heartbeat_interval: number }
 
-                // Heartbeat loop
+                // Heartbeat loop with zombie detection: if the previous beat
+                // was never ACKed (op 11), the TCP link is half-dead — close
+                // the handle (non-1000) so the reconnect path resumes the
+                // session instead of idling forever while health()=running.
                 const sendHeartbeat = () => {
                   if (opts.signal.aborted || wsEnded) return
+                  if (awaitingAck) {
+                    shouldResume = true
+                    wsEnded = true
+                    wakeResolve?.()
+                    wakeResolve = null
+                    void connectorsWsClose(handleId).catch(() => {})
+                    return
+                  }
+                  awaitingAck = true
                   void connectorsWsSend(
                     handleId,
                     JSON.stringify({ op: OP_HEARTBEAT, d: session.sequence })
@@ -258,6 +309,28 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
                   session.sessionId = ready.session_id ?? null
                   session.resumeGatewayUrl = ready.resume_gateway_url ?? null
                   attempts = 0
+                  opts.onStatus?.({ kind: "ready" })
+                } else if (msg.t === "RESUMED") {
+                  // A successful RESUME is a healthy connection too — reset
+                  // the consecutive-failure counter, same as READY.
+                  attempts = 0
+                  opts.onStatus?.({ kind: "resumed" })
+                } else if (msg.t === "MESSAGE_DELETE_BULK") {
+                  // Fan out to individual MESSAGE_DELETE dispatches so the
+                  // adapter reuses the existing delete projection unchanged.
+                  const bulk = msg.d as {
+                    ids?: string[]
+                    channel_id?: string
+                    guild_id?: string
+                  }
+                  for (const id of bulk.ids ?? []) {
+                    yield {
+                      t: "MESSAGE_DELETE",
+                      s: msg.s,
+                      op: OP_DISPATCH,
+                      d: { id, channel_id: bulk.channel_id, guild_id: bulk.guild_id },
+                    }
+                  }
                 } else if (msg.t && FORWARDED_DISPATCH_TYPES.has(msg.t)) {
                   yield {
                     t: msg.t,
@@ -289,7 +362,16 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
               }
 
               case OP_HEARTBEAT_ACK:
+                awaitingAck = false
+                break
+
               case OP_HEARTBEAT:
+                // Server-requested heartbeat — the docs require an immediate
+                // beat in response (outside the regular interval cadence).
+                void connectorsWsSend(
+                  handleId,
+                  JSON.stringify({ op: OP_HEARTBEAT, d: session.sequence })
+                ).catch(() => {})
                 break
             }
           }
@@ -307,9 +389,22 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
 
       if (opts.signal.aborted) return
 
+      // Fatal close codes (auth failure / bad shard config / invalid or
+      // disallowed intents) — reconnecting can only fail the same way, so
+      // stop entirely and let the adapter surface the reason via health().
+      if (closeCode !== null && FATAL_CLOSE_REASONS[closeCode] !== undefined) {
+        opts.onStatus?.({
+          kind: "fatal_close",
+          code: closeCode,
+          reason: FATAL_CLOSE_REASONS[closeCode],
+        })
+        return
+      }
+
       // Reconnect delay
       if (!shouldResume) {
         attempts += 1
+        opts.onStatus?.({ kind: "connect_failed", attempts })
         const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
         try {
           await delay(backoff, opts.signal)

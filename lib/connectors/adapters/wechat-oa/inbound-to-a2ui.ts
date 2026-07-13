@@ -5,7 +5,9 @@
  * string (the Rust webhook handler verifies + decrypts, then emits the inner
  * XML). We reuse `extractXmlField` from parse.ts to read the CDATA fields and
  * project text / image / voice / video / shared-link / location into the
- * inbox's structured view. Returns null for event pushes and unknown types.
+ * inbox's structured view. The link / location branches are reachable now
+ * that parse.ts persists those message types (it previously dropped them).
+ * Returns null for event pushes and unknown types.
  */
 
 import type { InboundA2UIBlock, InboundA2UINode } from "../_shared/inbound-a2ui-types"

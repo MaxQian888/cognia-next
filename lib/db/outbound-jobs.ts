@@ -14,7 +14,7 @@
  * ai-run reply.
  */
 
-import { liveQuery } from "dexie"
+import { liveQuery, type Table } from "dexie"
 import type {
   OutboundJobRow,
   OutboundJobSource,
@@ -26,18 +26,54 @@ import { append as appendConnectorAudit } from "./connector-audit"
 import { resolveScopeProjectId } from "./project-scope"
 
 /**
- * Soft cap on the `outboundQueue` table. When `enqueueOutbound` brings the
- * total past this watermark we age the oldest still-pending rows to
- * `deadlettered` and emit an audit row per aged job. The cap is
- * intentionally permissive: real-world backlogs rarely exceed a few hundred
- * rows even during a sustained adapter outage, so 5000 only trips on a
- * cascading failure where every adapter is jammed at once. The dead-letter
- * transition preserves the row so the operator can still inspect it via
- * the Outbound tab; it just stops the runner from re-trying.
+ * Soft cap on the ACTIVE (`pending` / `failed` / `sending`) rows in the
+ * `outboundQueue` table. When `enqueueOutbound` brings the active count past
+ * this watermark we age the oldest still-pending rows to `deadlettered` and
+ * emit an audit row per aged job. The cap is intentionally permissive:
+ * real-world backlogs rarely exceed a few hundred rows even during a
+ * sustained adapter outage, so 5000 only trips on a cascading failure where
+ * every adapter is jammed at once. The dead-letter transition preserves the
+ * row so the operator can still inspect it via the Outbound tab; it just
+ * stops the runner from re-trying.
+ *
+ * Terminal rows (`sent` / `deadlettered`) do NOT count against the cap —
+ * they are history, not backlog. Counting them (the pre-fix behavior) meant
+ * that once accumulated terminal rows alone exceeded the cap, every fresh
+ * enqueue was immediately dead-lettered: a guaranteed total outbound outage.
+ * Terminal history is bounded separately by {@link sweepTerminalOutboundRows}
+ * (14-day retention, run from the connector runtime's daily schedule).
  *
  * Exported for the saturation banner threshold derivation + tests.
  */
 export const OUTBOUND_QUEUE_SOFT_CAP = 5000
+
+/**
+ * Retention window for terminal (`sent` / `deadlettered`) rows. Rows whose
+ * `createdAt` is older than this are deleted by the daily retention sweep —
+ * nothing else ever prunes them (a 5-minute presence card alone writes
+ * ~288 terminal rows/day). 14 days keeps plenty of Outbound-tab / DLQ
+ * inspection history while bounding the table.
+ */
+export const OUTBOUND_TERMINAL_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
+
+/** Max terminal rows deleted per sweep run — keeps one tick's IDB work bounded. */
+export const OUTBOUND_RETENTION_SWEEP_BATCH = 1000
+
+/**
+ * Grace period before a `sending` row is considered a stale claim from an
+ * interrupted runner (crash / reload between `markSending` and
+ * `markSent`/`markFailed`). Must comfortably exceed the slowest legitimate
+ * adapter send (large file uploads run tens of seconds).
+ */
+export const STALE_SENDING_GRACE_MS = 5 * 60_000
+
+/**
+ * Claim-timestamp extension written by {@link markSending}. Non-indexed
+ * column — IndexedDB stores extra keys transparently, so no schema bump is
+ * required (same pattern as `platformMessageId`). Declared locally rather
+ * than on the shared row type because only the queue layer reads it.
+ */
+type ClaimStampedOutboundJobRow = OutboundJobRow & { claimedAt?: number }
 
 function newId(): string {
   return "oqj_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -233,20 +269,28 @@ async function waitForTerminalRaw(
 }
 
 /**
- * If the outboundQueue exceeds `OUTBOUND_QUEUE_SOFT_CAP`, transition the
- * oldest still-pending rows to `deadlettered` until the table is back
- * under the cap. Each aged row emits a `outbound.queue_capped` audit row
- * carrying the job id and its age in ms, so the operator can correlate
- * the banner trip with the specific jobs that were dropped. Sending /
- * failed / already-deadlettered rows are NOT aged — they're either in
- * flight or already terminal.
+ * If the ACTIVE (`pending` / `failed` / `sending`) row count exceeds
+ * `OUTBOUND_QUEUE_SOFT_CAP`, transition the oldest still-pending rows to
+ * `deadlettered` until the backlog is back under the cap. Each aged row
+ * emits a `outbound.queue_capped` audit row carrying the job id and its age
+ * in ms, so the operator can correlate the banner trip with the specific
+ * jobs that were dropped. Sending / failed / already-deadlettered rows are
+ * NOT aged — they're either in flight or already terminal.
+ *
+ * Terminal (`sent` / `deadlettered`) rows are excluded from the count: they
+ * are bounded by the retention sweep, not the backlog cap, and counting them
+ * here would eventually dead-letter every fresh enqueue once history alone
+ * crossed the watermark.
  *
  * Best-effort: a failure to write the audit row must not block the
  * dead-letter transition.
  */
 async function enforceQueueSoftCap(now: number): Promise<void> {
   const db = getDb()
-  const total = await db.outboundQueue.count()
+  const total = await db.outboundQueue
+    .where("status")
+    .anyOf("pending", "failed", "sending")
+    .count()
   if (total <= OUTBOUND_QUEUE_SOFT_CAP) return
   const overflow = total - OUTBOUND_QUEUE_SOFT_CAP
   const oldestPending = await db.outboundQueue.where("status").equals("pending").toArray()
@@ -277,6 +321,123 @@ async function enforceQueueSoftCap(now: number): Promise<void> {
       // Best-effort — audit failure must not block the dead-letter transition.
     }
   }
+}
+
+/**
+ * Delete terminal (`sent` / `deadlettered`) rows older than the retention
+ * window, up to `batchLimit` per call. Runs from the connector runtime's
+ * daily housekeeping schedule (`lib/connectors/daily-schedule.ts`) — nothing
+ * else prunes terminal history, and without this sweep the table grows
+ * without bound. Uses the indexed `createdAt` range so the scan cost tracks
+ * the number of old rows, not the table size. Returns the deleted count.
+ */
+export async function sweepTerminalOutboundRows(opts?: {
+  now?: number
+  retentionMs?: number
+  batchLimit?: number
+}): Promise<number> {
+  const now = opts?.now ?? Date.now()
+  const retentionMs = opts?.retentionMs ?? OUTBOUND_TERMINAL_RETENTION_MS
+  const batchLimit = opts?.batchLimit ?? OUTBOUND_RETENTION_SWEEP_BATCH
+  const db = getDb()
+  const victims = await db.outboundQueue
+    .where("createdAt")
+    .below(now - retentionMs)
+    .filter((r) => isOutboundTerminal(r.status))
+    .limit(batchLimit)
+    .toArray()
+  if (victims.length === 0) return 0
+  await db.outboundQueue.bulkDelete(victims.map((r) => r.id))
+  return victims.length
+}
+
+/**
+ * Flip `sending` rows whose claim is older than `graceMs` back to `failed`
+ * (retryable now). A row can only be stuck in `sending` when a runner died
+ * between `markSending` and `markSent`/`markFailed` — `listDueNow` scans
+ * only `pending`/`failed`, so without this recovery such rows are lost
+ * forever. Called by the outbound runner on every drain pass (cheap indexed
+ * `status` query; usually empty).
+ *
+ * The age signal is the `claimedAt` stamp written by {@link markSending};
+ * legacy rows claimed before the stamp existed fall back to `createdAt`.
+ * Rows inside the grace window (a legitimately in-flight send) are left
+ * untouched. Returns the recovered rows so the caller can audit each one.
+ */
+export async function recoverStaleSendingJobs(
+  now: number,
+  graceMs: number = STALE_SENDING_GRACE_MS
+): Promise<OutboundJobRow[]> {
+  const db = getDb()
+  const sending = (await db.outboundQueue
+    .where("status")
+    .equals("sending")
+    .toArray()) as ClaimStampedOutboundJobRow[]
+  const cutoff = now - graceMs
+  const recovered: OutboundJobRow[] = []
+  for (const row of sending) {
+    if ((row.claimedAt ?? row.createdAt) > cutoff) continue
+    // Transactional re-check: the in-flight send may have settled between
+    // the scan and this write; only flip rows that are STILL `sending`.
+    const flipped = await db.transaction("rw", db.outboundQueue, async () => {
+      const fresh = await db.outboundQueue.get(row.id)
+      if (!fresh || fresh.status !== "sending") return false
+      await db.outboundQueue.update(row.id, {
+        status: "failed",
+        lastErrorCode: "stale_sending_recovered",
+        lastError: "Recovered from a stale sending claim (runner interrupted mid-send)",
+        nextAttemptAt: now,
+      })
+      return true
+    })
+    if (flipped) {
+      recovered.push({
+        ...row,
+        status: "failed",
+        lastErrorCode: "stale_sending_recovered",
+        nextAttemptAt: now,
+      })
+    }
+  }
+  return recovered
+}
+
+/**
+ * Persistent analog of the runner's in-memory idempotency LRU: find a row
+ * that already DELIVERED this idempotency key (status `sent` with a
+ * platform message id). A rebooted runner's empty LRU consults this before
+ * re-sending a retry row so a delivered-but-differently-tracked payload is
+ * not duplicated. Uses the indexed `idempotencyKey` column.
+ */
+export async function findDeliveredByIdempotencyKey(
+  idempotencyKey: string,
+  excludeJobId?: string
+): Promise<OutboundJobRow | undefined> {
+  const rows = await getDb().outboundQueue.where("idempotencyKey").equals(idempotencyKey).toArray()
+  return rows.find((r) => r.id !== excludeJobId && r.status === "sent" && !!r.platformMessageId)
+}
+
+/**
+ * Return the oldest OLDER non-terminal sibling in the same conversation
+ * lane — `pending`, `failed`, or `sending` with a strictly smaller
+ * `createdAt` — or undefined when none exists. The runner consults this
+ * before delivering a due job so per-conversation FIFO holds ACROSS drain
+ * passes, not just within one: a deferred older retry must resolve
+ * (deliver or dead-letter) before a newer sibling may go out. Bounded
+ * index range on `[conversationKey+createdAt]`.
+ */
+export async function findOlderActiveOutboundSibling(
+  job: Pick<OutboundJobRow, "id" | "conversationKey" | "createdAt">
+): Promise<OutboundJobRow | undefined> {
+  const older = await getDb()
+    .outboundQueue.where("[conversationKey+createdAt]")
+    .between([job.conversationKey, -Infinity], [job.conversationKey, job.createdAt], true, false)
+    .toArray()
+  return older.find(
+    (r) =>
+      r.id !== job.id &&
+      (r.status === "pending" || r.status === "failed" || r.status === "sending")
+  )
 }
 
 /**
@@ -368,16 +529,48 @@ export async function listPendingForConversation(
  */
 export async function markSending(jobId: string): Promise<boolean> {
   const db = getDb()
+  const queue = db.outboundQueue as Table<ClaimStampedOutboundJobRow, string>
   return db.transaction("rw", db.outboundQueue, async () => {
-    const row = await db.outboundQueue.get(jobId)
+    const row = await queue.get(jobId)
     if (!row || (row.status !== "pending" && row.status !== "failed")) {
       return false
     }
-    await db.outboundQueue.update(jobId, {
+    await queue.update(jobId, {
       status: "sending",
       attempts: (row.attempts ?? 0) + 1,
+      // Claim stamp — lets `recoverStaleSendingJobs` distinguish a
+      // legitimately in-flight send from a claim orphaned by a crash.
+      claimedAt: Date.now(),
     })
     return true
+  })
+}
+
+/**
+ * Undo a `markSending` claim WITHOUT consuming an attempt: transition the
+ * row back to `failed` (retryable at `nextAttemptAt`) and decrement the
+ * attempt counter that `markSending` incremented. Used by the runner when a
+ * post-claim gate (the token bucket) defers the job — a rate-limit deferral
+ * is not a delivery attempt and must not eat into the max-attempts budget.
+ * Only acts on rows still in `sending`.
+ */
+export async function unclaimSending(
+  jobId: string,
+  errorCode: string,
+  message: string,
+  nextAttemptAt: number
+): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.outboundQueue, async () => {
+    const row = await db.outboundQueue.get(jobId)
+    if (!row || row.status !== "sending") return
+    await db.outboundQueue.update(jobId, {
+      status: "failed",
+      attempts: Math.max(0, (row.attempts ?? 1) - 1),
+      lastErrorCode: errorCode,
+      lastError: message,
+      nextAttemptAt,
+    })
   })
 }
 

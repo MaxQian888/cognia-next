@@ -15,7 +15,14 @@
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { bareMatrixEventId } from "./ids"
 import type { MatrixMentions, MatrixRelatesTo } from "./parse"
+
+// All outbound assistant messages use `msgtype: "m.notice"` — the spec's
+// convention for automated senders. Well-behaved bots do not respond to
+// m.notice, which is the protocol-level guard against bot-to-bot reply
+// loops; `m.text` is reserved for humans and is never emitted here.
+const OUTBOUND_MSGTYPE = "m.notice" as const
 
 export interface MatrixSendContent {
   kind?: "message"
@@ -300,7 +307,7 @@ export function serializeOutbound(req: OutboundRequest): MatrixSerializedSend {
     const rendered = renderSegments(buffer)
     buffer = []
     if (!rendered.body && !rendered.formattedBody) return
-    const content: MatrixSendContent = { msgtype: "m.text", body: rendered.body }
+    const content: MatrixSendContent = { msgtype: OUTBOUND_MSGTYPE, body: rendered.body }
     if (rendered.usedHtml) {
       content.format = "org.matrix.custom.html"
       content.formatted_body = rendered.formattedBody
@@ -316,7 +323,7 @@ export function serializeOutbound(req: OutboundRequest): MatrixSerializedSend {
       flush()
       const { html, hasInteractive } = a2uiToMatrixHtml(seg.content)
       const content: MatrixSendContent = {
-        msgtype: "m.text",
+        msgtype: OUTBOUND_MSGTYPE,
         body: seg.plainTextMirror || "[interactive message]",
         format: "org.matrix.custom.html",
         formatted_body: html || escapeHtml(seg.plainTextMirror || "[interactive message]"),
@@ -341,14 +348,19 @@ export function serializeOutbound(req: OutboundRequest): MatrixSerializedSend {
   // by EVERY event in the thread (message and media alike), or later chunks
   // render outside the thread. A plain reply annotates only the first chunk.
   if (contents.length > 0 && (req.replyTo || req.threadId)) {
+    // Callers (workflow nodes, stored platformMessageIds) may hold the
+    // adapter-public "<roomId>|<eventId>" composite — the wire relation
+    // needs the bare event id.
+    const replyTarget = req.replyTo ? bareMatrixEventId(req.replyTo.messageId) : undefined
+    const threadRoot = req.threadId ? bareMatrixEventId(req.threadId) : undefined
     const rel: MatrixRelatesTo = {}
-    if (req.threadId) {
+    if (threadRoot) {
       rel.rel_type = "m.thread"
-      rel.event_id = req.threadId
+      rel.event_id = threadRoot
       rel.is_falling_back = true
-      rel["m.in_reply_to"] = { event_id: req.replyTo?.messageId ?? req.threadId }
-    } else if (req.replyTo) {
-      rel["m.in_reply_to"] = { event_id: req.replyTo.messageId }
+      rel["m.in_reply_to"] = { event_id: replyTarget ?? threadRoot }
+    } else if (replyTarget) {
+      rel["m.in_reply_to"] = { event_id: replyTarget }
     }
     const targets = req.threadId ? contents : [contents[0]]
     for (const chunk of targets) {
@@ -369,10 +381,23 @@ export function serializeOutbound(req: OutboundRequest): MatrixSerializedSend {
  */
 export function serializeMediaLinkFallback(seg: MatrixMediaChunk["segment"]): MatrixSendContent {
   return {
-    msgtype: "m.text",
+    msgtype: OUTBOUND_MSGTYPE,
     body: `[${seg.type}] ${seg.url}`,
     format: "org.matrix.custom.html",
     formatted_body: `<a href="${escapeAttr(seg.url)}">[${seg.type}]</a>`,
+  }
+}
+
+/**
+ * Plain-text fallback for a failed media upload whose source URL is NOT
+ * shareable (local file paths, `asset://` URIs) — embedding it verbatim
+ * would leak local paths into the room. Names the attachment so the
+ * recipient at least knows something was meant to arrive.
+ */
+export function serializeMediaFailureNotice(name: string): MatrixSendContent {
+  return {
+    msgtype: OUTBOUND_MSGTYPE,
+    body: `[attachment upload failed: ${name}]`,
   }
 }
 
@@ -381,18 +406,26 @@ export function serializeMediaLinkFallback(seg: MatrixMediaChunk["segment"]): Ma
  */
 export function serializeEdit(targetEventId: string, req: OutboundRequest): MatrixSendContent {
   const rendered = renderSegments(req.segments)
-  const newContent: MatrixSendContent["m.new_content"] = { msgtype: "m.text", body: rendered.body }
+  const newContent: MatrixSendContent["m.new_content"] = {
+    msgtype: OUTBOUND_MSGTYPE,
+    body: rendered.body,
+  }
   if (rendered.usedHtml) {
     newContent.format = "org.matrix.custom.html"
     newContent.formatted_body = rendered.formattedBody
   }
+  if (rendered.mentionUsers.length > 0) {
+    // Per the edit spec, `m.new_content` carries the replacement's mentions;
+    // without them, clients drop mention pills/notifications on the edit.
+    newContent["m.mentions"] = { user_ids: [...new Set(rendered.mentionUsers)] }
+  }
   const content: MatrixSendContent = {
     // Fallback body for clients that don't render edits — Matrix convention
     // prefixes the replacement with "* ".
-    msgtype: "m.text",
+    msgtype: OUTBOUND_MSGTYPE,
     body: `* ${rendered.body}`,
     "m.new_content": newContent,
-    "m.relates_to": { rel_type: "m.replace", event_id: targetEventId },
+    "m.relates_to": { rel_type: "m.replace", event_id: bareMatrixEventId(targetEventId) },
   }
   if (rendered.usedHtml) {
     content.format = "org.matrix.custom.html"

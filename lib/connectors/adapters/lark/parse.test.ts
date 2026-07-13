@@ -99,6 +99,25 @@ describe("parseLarkEventEnvelope", () => {
       const ref = result!.conversationRef as { threadTs?: string }
       expect(ref.threadTs).toBe("thr_root_001")
     })
+
+    it("carries the in-thread message id as the reply anchor (threadRootMessageId)", () => {
+      // serialize.ts routes thread sends through /im/v1/messages/:id/reply —
+      // that endpoint needs an om_ message id, not the thread_id.
+      const ref = result!.conversationRef as { threadRootMessageId?: string }
+      expect(ref.threadRootMessageId).toBe("om_thr_001")
+    })
+  })
+
+  describe("non-thread messages carry no thread anchor", () => {
+    it("dm-text.json has no threadRootMessageId on the ref", () => {
+      const r = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        dmTextFixture as LarkEventEnvelope
+      )
+      const ref = r!.conversationRef as { threadRootMessageId?: string }
+      expect(ref.threadRootMessageId).toBeUndefined()
+    })
   })
 
   describe("image-message.json — image message type", () => {
@@ -207,6 +226,118 @@ describe("parseLarkEventEnvelope", () => {
       const content = { title: "T", content: [[{ tag: "text", text: "body" }]] }
       const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, receive("post", content))
       expect(r!.segments[0]).toEqual({ type: "markdown", md: "T\nbody" })
+    })
+
+    // Previously these types fell through to empty segments/plainText and
+    // could trigger an AI turn on nothing in p2p — each now keeps a marker.
+    it("share_chat → '[shared chat: …]' marker", () => {
+      const r = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        receive("share_chat", { chat_id: "oc_shared_123" })
+      )
+      expect(r!.segments).toEqual([{ type: "text", text: "[shared chat: oc_shared_123]" }])
+      expect(r!.plainText).toBe("[shared chat: oc_shared_123]")
+    })
+
+    it("share_user → '[shared user: …]' marker", () => {
+      const r = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        receive("share_user", { user_id: "ou_shared_9" })
+      )
+      expect(r!.segments).toEqual([{ type: "text", text: "[shared user: ou_shared_9]" }])
+    })
+
+    it("location → typed location segment with non-empty plainText", () => {
+      const r = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        receive("location", { name: "Company HQ", latitude: "39.90", longitude: "116.40" })
+      )
+      expect(r!.segments[0]).toEqual({
+        type: "location",
+        lat: 39.9,
+        lon: 116.4,
+        name: "Company HQ",
+      })
+      expect(r!.plainText).toContain("Company HQ")
+    })
+
+    it("todo → '[todo: …]' marker", () => {
+      const r = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        receive("todo", { task_id: "task_abc" })
+      )
+      expect(r!.segments).toEqual([{ type: "text", text: "[todo: task_abc]" }])
+    })
+
+    it("calendar / share_calendar_event → '[calendar event: …]' marker", () => {
+      for (const type of ["calendar", "share_calendar_event"]) {
+        const r = parseLarkEventEnvelope(
+          ADAPTER_ID,
+          SELF_BOT_OPEN_ID,
+          receive(type, { summary: "Weekly sync" })
+        )
+        expect(r!.segments).toEqual([{ type: "text", text: "[calendar event: Weekly sync]" }])
+      }
+    })
+
+    it("system message type → null (content-less; must not trigger an AI turn)", () => {
+      const r = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        receive("system", { template: "{from_user} invited {to_chatters}." })
+      )
+      expect(r).toBeNull()
+    })
+  })
+
+  describe("inbound mention placeholder substitution", () => {
+    it("replaces @_user_N keys with @<display name> in the text segment", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: { event_id: "evt_m", event_type: "im.message.receive_v1" },
+        event: {
+          sender: { sender_id: { open_id: "ou_user_m" } },
+          message: {
+            message_id: "om_m",
+            chat_id: "oc_m",
+            chat_type: "group",
+            message_type: "text",
+            content: JSON.stringify({ text: "@_user_1 please review, cc @_user_2" }),
+            mentions: [
+              { key: "@_user_1", id: { open_id: SELF_BOT_OPEN_ID }, name: "Cognia Bot" },
+              { key: "@_user_2", id: { open_id: "ou_alice" }, name: "Alice" },
+            ],
+          },
+        },
+      }
+      const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+      expect(r!.plainText).toBe("@Cognia Bot please review, cc @Alice")
+      // Mention detection is unaffected by the substitution.
+      expect(r!.mentions.selfMentioned).toBe(true)
+    })
+
+    it("leaves the raw key when the mention carries no name", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: { event_id: "evt_m2", event_type: "im.message.receive_v1" },
+        event: {
+          sender: { sender_id: { open_id: "ou_user_m" } },
+          message: {
+            message_id: "om_m2",
+            chat_id: "oc_m",
+            chat_type: "group",
+            message_type: "text",
+            content: JSON.stringify({ text: "@_user_1 hi" }),
+            mentions: [{ key: "@_user_1", id: { open_id: "ou_x" } }],
+          },
+        },
+      }
+      const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+      expect(r!.plainText).toBe("@_user_1 hi")
     })
   })
 

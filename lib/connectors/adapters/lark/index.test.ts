@@ -171,15 +171,95 @@ describe("createLarkAdapter", () => {
     expect(adapter.health().state).toBe("starting")
   })
 
-  it("health() is 'running' after start()", async () => {
+  // start() only proves credentials resolved — "running" needs evidence the
+  // transport actually delivers (first envelope) or the API works (first
+  // successful send). Previously health flipped to running immediately and
+  // a bot whose long-conn never connected still reported healthy.
+  it("health() stays 'starting' right after start() (no traffic yet)", async () => {
     const adapter = makeAdapter()
     const { ctx } = makeCtx()
     await adapter.start(ctx)
-    expect(adapter.health().state).toBe("running")
-    // A healthy adapter carries no reason code.
+    expect(adapter.health().state).toBe("starting")
     expect(adapter.health().reason).toBeUndefined()
     await adapter.stop()
   })
+
+  it("health() flips to 'running' on the first inbound envelope", async () => {
+    const session = createFakeLongConnSession()
+    mockListen.mockImplementation(session.listenImpl)
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_lark_ws_open") return "lark-ws-h"
+      return undefined
+    })
+
+    const adapter = createLarkAdapter({
+      id: "lark-health-evt",
+      displayName: "Health Bot",
+      appId: async () => "cli_health",
+      appSecret: async () => "secret-health",
+      verificationToken: async () => "token",
+      selfBotOpenId: "ou_bot",
+      transport: "long-connection",
+    })
+    const { ctx } = makeCtx()
+    await adapter.start(ctx)
+    await session.waitForListeners()
+    expect(adapter.health().state).toBe("starting")
+
+    session.push({
+      schema: "2.0",
+      header: { event_id: "evt_h1", event_type: "im.message.receive_v1" },
+      event: {
+        sender: { sender_id: { open_id: "ou_user_h" } },
+        message: {
+          message_id: "om_h1",
+          chat_id: "oc_chat_h",
+          chat_type: "p2p",
+          message_type: "text",
+          content: '{"text":"ping"}',
+        },
+      },
+    })
+    await new Promise((r) => setTimeout(r, 30))
+
+    expect(adapter.health().state).toBe("running")
+    expect(adapter.health().reason).toBeUndefined()
+    expect(adapter.health().lastActivityAt).toBeDefined()
+    await adapter.stop()
+  }, 15000)
+
+  it("health() goes 'degraded' with transport_error when the transport throws", async () => {
+    // listen() rejecting makes the long-conn generator throw — the only
+    // transport failure signal observable on the TS side (Rust owns the
+    // per-cycle reconnect loop).
+    mockListen.mockRejectedValue(new Error("tauri event bridge gone"))
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_lark_ws_open") return "lark-ws-broken"
+      return undefined
+    })
+    const errorSpy = jest
+      .spyOn((await import("@cognia/logging")).loggers.network, "error")
+      .mockImplementation(() => {})
+    try {
+      const adapter = createLarkAdapter({
+        id: "lark-health-deg",
+        displayName: "Degraded Bot",
+        appId: async () => "cli_deg",
+        appSecret: async () => "secret-deg",
+        verificationToken: async () => "token",
+        selfBotOpenId: "ou_bot",
+        transport: "long-connection",
+      })
+      const { ctx } = makeCtx()
+      await adapter.start(ctx)
+      await new Promise((r) => setTimeout(r, 30))
+      expect(adapter.health().state).toBe("degraded")
+      expect(adapter.health().reason).toBe("transport_error")
+      await adapter.stop()
+    } finally {
+      errorSpy.mockRestore()
+    }
+  }, 15000)
 
   it("health() is 'down' after stop()", async () => {
     const adapter = makeAdapter()
@@ -261,7 +341,12 @@ describe("createLarkAdapter", () => {
     const { ctx } = makeCtx()
     await adapter.start(ctx)
     await adapter.start(ctx)
-    expect(adapter.health().state).toBe("running")
+    expect(adapter.health().state).toBe("starting")
+    // Exactly one transport open despite two start() calls.
+    const openCalls = mockInvoke.mock.calls.filter(
+      ([cmd]: [string]) => cmd === "connectors_lark_ws_open"
+    )
+    expect(openCalls.length).toBeLessThanOrEqual(1)
     await adapter.stop()
   })
 
@@ -423,11 +508,16 @@ describe("createLarkAdapter", () => {
       metadata: { idempotencyKey: "k1" },
     }
 
+    expect(adapter.health().lastActivityAt).toBeUndefined()
     const result = await adapter.send(req)
     expect(result.ok).toBe(true)
     // Delivery feedback: the REAL Lark message id must surface so the
     // outbound runner persists it (workflow send output, edit chains).
     expect(result.platformMessageId).toBe("om_resp_001")
+    // A successful send stamps lastActivityAt and, while still "starting",
+    // is evidence enough to report running.
+    expect(adapter.health().lastActivityAt).toBeDefined()
+    expect(adapter.health().state).toBe("running")
 
     const httpCalls = mockInvoke.mock.calls.filter(
       ([cmd]: [string]) => cmd === "connectors_http_request"
@@ -540,20 +630,18 @@ describe("createLarkAdapter", () => {
       if (cmd === "connectors_http_request") {
         const req = (args as { req: { url: string; headers: Record<string, string> } }).req
         if (req.url.includes("tenant_access_token")) return makeTatOkResp("tat-r")
-        if (req.url.includes("/oidc/refresh_access_token")) {
+        if (req.url.includes("/oauth/token")) {
+          // v2 token endpoint — flat OAuth 2.0 refresh response.
           return {
             status: 200,
             headers: {},
             body: JSON.stringify({
               code: 0,
-              data: {
-                access_token: "u-new",
-                refresh_token: "u-refresh-new",
-                expires_in: 7200,
-                refresh_expires_in: 31_104_000,
-                open_id: "ou_u",
-                token_type: "Bearer",
-              },
+              access_token: "u-new",
+              refresh_token: "u-refresh-new",
+              expires_in: 7200,
+              refresh_token_expires_in: 31_104_000,
+              token_type: "Bearer",
             }),
           }
         }
@@ -583,13 +671,9 @@ describe("createLarkAdapter", () => {
     expect(sendHeaders(findSend())["Authorization"]).toBe("Bearer u-new")
   })
 
-  it("setTyping() is a no-op (returns without calling API)", async () => {
+  it("setTyping is absent (typing is undeclared — absence means unsupported)", () => {
     const adapter = makeAdapter()
-    await adapter.setTyping!("lark:lark-1:oc_chat_001", true)
-    const httpCalls = mockInvoke.mock.calls.filter(
-      ([cmd]: [string]) => cmd === "connectors_http_request"
-    )
-    expect(httpCalls).toHaveLength(0)
+    expect(adapter.setTyping).toBeUndefined()
   })
 
   it("fetchHistory() calls /im/v1/messages and yields parsed messages", async () => {
@@ -757,5 +841,214 @@ describe("createLarkAdapter", () => {
     const call = httpCallTo("urgent_app")
     expect(call?.req.method).toBe("PATCH")
     expect(JSON.parse(call!.req.body!).user_id_list).toEqual(["ou_a"])
+  })
+
+  it("forwardMessage() with neither messageId nor messageIds returns a validation error (no HTTP)", async () => {
+    mockHttp(() => ({ code: 0 }))
+    const res = await makeAdapter().forwardMessage!({ target: "oc_dest" })
+    expect(res.ok).toBe(false)
+    expect(res.error?.code).toBe("validation")
+    expect(res.error?.retryable).toBe(false)
+    // The degenerate POST /im/v1/messages//forward must never be issued.
+    expect(httpCallTo("/forward")).toBeUndefined()
+  })
+
+  it("getReadReceipt() walks page_token until exhausted and merges readers", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-rr")
+      const page2 = url.includes("page_token=tok2")
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          code: 0,
+          data: page2
+            ? { items: [{ user_id: "ou_b", timestamp: "1700000002" }], has_more: false }
+            : {
+                items: [{ user_id: "ou_a", timestamp: "1700000001" }],
+                has_more: true,
+                page_token: "tok2",
+              },
+        }),
+      }
+    })
+    const rr = await makeAdapter().getReadReceipt!("om_1")
+    expect(rr.readers).toEqual([
+      { userId: "ou_a", readAt: 1700000001 },
+      { userId: "ou_b", readAt: 1700000002 },
+    ])
+    expect(rr.hasMore).toBe(false)
+    const pages = mockInvoke.mock.calls.filter(
+      ([cmd, args]: [string, unknown]) =>
+        cmd === "connectors_http_request" &&
+        (args as { req: { url: string } }).req.url.includes("read_users")
+    )
+    expect(pages).toHaveLength(2)
+  })
+
+  it("getReadReceipt() reports hasMore=true when the 10-page cap cuts the walk short", async () => {
+    let readPages = 0
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-rr2")
+      readPages++
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          code: 0,
+          data: {
+            items: [{ user_id: `ou_${readPages}` }],
+            has_more: true,
+            page_token: `tok${readPages}`,
+          },
+        }),
+      }
+    })
+    const rr = await makeAdapter().getReadReceipt!("om_1")
+    expect(readPages).toBe(10)
+    expect(rr.readers).toHaveLength(10)
+    expect(rr.hasMore).toBe(true)
+  })
+
+  it("fetchHistory() normalises millisecond before/after values to epoch seconds", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-hist-ms")
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({ code: 0, data: { items: [], has_more: false } }),
+      }
+    })
+    const events = []
+    for await (const evt of makeAdapter().fetchHistory!("lark:lark-1:oc_chat_001", {
+      after: "1714899900000",
+      before: "1714900100123",
+    })) {
+      events.push(evt)
+    }
+    const historyCall = mockInvoke.mock.calls.find(
+      ([cmd, args]: [string, { req?: { url?: string } }]) =>
+        cmd === "connectors_http_request" && args.req?.url?.includes("/im/v1/messages")
+    )
+    const url = new URL((historyCall![1] as { req: { url: string } }).req.url)
+    // ms-epoch inputs (> 10^12) are divided down; seconds pass verbatim.
+    expect(url.searchParams.get("start_time")).toBe("1714899900")
+    expect(url.searchParams.get("end_time")).toBe("1714900100")
+  })
+
+  // ── outbound error classification (retryability contract) ──
+  const send400 = (body: Record<string, unknown>, status = 400) => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-err")
+      return { status, headers: {}, body: JSON.stringify(body) }
+    })
+  }
+  const sendReq = {
+    conversationRef: { platform: "lark" as const, adapterId: "lark-1", channelId: "oc_chat_e" },
+    segments: [{ type: "text" as const, text: "x" }],
+    metadata: { idempotencyKey: "ke" },
+  }
+
+  it("send() maps a 4xx business error (invalid receive_id) to non-retryable platform_4xx", async () => {
+    send400({ code: 230002, msg: "invalid receive_id" })
+    const res = await makeAdapter().send(sendReq)
+    expect(res.ok).toBe(false)
+    expect(res.error?.code).toBe("platform_4xx")
+    expect(res.error?.retryable).toBe(false)
+    // The Lark code must be diagnosable from the message.
+    expect(res.error?.message).toContain("230002")
+  })
+
+  it("send() maps permission code 99991672 to non-retryable auth_failed", async () => {
+    send400({ code: 99991672, msg: "permission denied" }, 403)
+    const res = await makeAdapter().send(sendReq)
+    expect(res.ok).toBe(false)
+    expect(res.error?.code).toBe("auth_failed")
+    expect(res.error?.retryable).toBe(false)
+  })
+
+  it("send() maps HTTP 429 to retryable rate_limited", async () => {
+    send400({ code: 99991400, msg: "frequency limit" }, 429)
+    const res = await makeAdapter().send(sendReq)
+    expect(res.error?.code).toBe("rate_limited")
+    expect(res.error?.retryable).toBe(true)
+  })
+
+  it("send() keeps 5xx retryable as platform_5xx", async () => {
+    send400({ msg: "internal error" }, 502)
+    const res = await makeAdapter().send(sendReq)
+    expect(res.error?.code).toBe("platform_5xx")
+    expect(res.error?.retryable).toBe(true)
+  })
+
+  it("send() maps transport-level failures (Rust bridge throw) to retryable network", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd === "connectors_http_request") throw new Error("connection reset")
+      return undefined
+    })
+    const res = await makeAdapter().send(sendReq)
+    expect(res.error?.code).toBe("network")
+    expect(res.error?.retryable).toBe(true)
+  })
+
+  it("edit() classifies 4xx as non-retryable too", async () => {
+    send400({ code: 230099, msg: "card schema reject" })
+    const res = await makeAdapter().edit!("om_e1", sendReq)
+    expect(res.ok).toBe(false)
+    expect(res.error?.code).toBe("platform_4xx")
+    expect(res.error?.retryable).toBe(false)
+  })
+
+  it("send() refreshes the TAT once when a 400 body carries code 99991663", async () => {
+    // The Lark code rides inside the 400 body — before the fix sendHttp threw
+    // LarkApiError{code:null}, isLarkTatInvalidation missed it, and the main
+    // send path never refreshed the token.
+    let tatFetches = 0
+    let sendAttempts = 0
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) {
+        tatFetches++
+        return makeTatOkResp(`t-refresh-${tatFetches}`)
+      }
+      sendAttempts++
+      if (sendAttempts === 1) {
+        return {
+          status: 400,
+          headers: {},
+          body: JSON.stringify({ code: 99991663, msg: "invalid access_token" }),
+        }
+      }
+      return makeSendOkResp()
+    })
+    // Unique creds so the module-level TAT cache is cold for this test.
+    const adapter = createLarkAdapter({
+      id: "lark-tat-400",
+      displayName: "TAT 400 Bot",
+      appId: async () => "cli_tat_400",
+      appSecret: async () => "secret_tat_400",
+      verificationToken: async () => "token",
+      selfBotOpenId: "ou_bot",
+      transport: "long-connection",
+    })
+    const res = await adapter.send(sendReq)
+    expect(res.ok).toBe(true)
+    expect(sendAttempts).toBe(2) // failed once, retried once after refresh
+    expect(tatFetches).toBe(2) // initial token + refreshed token
   })
 })

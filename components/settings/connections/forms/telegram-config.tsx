@@ -75,7 +75,10 @@ interface TelegramConfigDialogProps {
 }
 
 function telegramCredentialAccounts(transport: TransportMode): string[] {
-  return transport === "webhook" ? ["botToken", "webhookSecret"] : ["botToken"]
+  // "secretToken" is the keyring key the Rust webhook verifier reads
+  // (crates/cognia-connectors/src/axum_app.rs — X-Telegram-Bot-Api-Secret-Token
+  // check); "webhookSecret" is the legacy key kept for backward compat.
+  return transport === "webhook" ? ["botToken", "secretToken", "webhookSecret"] : ["botToken"]
 }
 
 function sameCredentialAccounts(actual: readonly string[], expected: readonly string[]): boolean {
@@ -199,6 +202,11 @@ export function TelegramConfigDialog({
         await connectorsKeyringSet(adapterId, "botToken", botToken.trim())
       }
       if (webhookSecret.trim()) {
+        // The Rust webhook 401-gate reads "secretToken" — saving only the old
+        // "webhookSecret" key meant every webhook delivery failed verification.
+        // Keep writing "webhookSecret" too for backward compatibility with
+        // anything still reading the legacy key.
+        await connectorsKeyringSet(adapterId, "secretToken", webhookSecret.trim())
         await connectorsKeyringSet(adapterId, "webhookSecret", webhookSecret.trim())
       }
 

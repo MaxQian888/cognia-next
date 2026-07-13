@@ -165,7 +165,10 @@ describe("buildLarkA2UICard", () => {
     expect(sel?.initial_option).toBe("true")
   })
 
-  it("renders TextField / TextArea as input elements with appropriate rows", async () => {
+  // Lark's message-card schema only accepts `input` inside an action
+  // module's actions array — a root-level {tag:"input"} element makes the
+  // whole card undeliverable.
+  it("renders TextField / TextArea as inputs INSIDE action modules (never root-level)", async () => {
     const surface: A2UISegmentContent = {
       components: {
         root: { id: "root", component: "Column", children: ["t", "a"] },
@@ -177,12 +180,33 @@ describe("buildLarkA2UICard", () => {
     }
     const body = await buildLarkA2UICard(baseInput(surface))
     const parsed = JSON.parse(body.content) as {
-      elements: Array<{ tag: string; rows?: number }>
+      elements: Array<{
+        tag: string
+        actions?: Array<{
+          tag: string
+          name?: string
+          rows?: number
+          required?: boolean
+          value?: { actionId?: string; componentId?: string }
+        }>
+      }>
     }
-    const inputs = parsed.elements.filter((e) => e.tag === "input")
+    // No root-level input elements — Lark rejects the card otherwise.
+    expect(parsed.elements.some((e) => e.tag === "input")).toBe(false)
+    const inputs = parsed.elements
+      .filter((e) => e.tag === "action")
+      .flatMap((e) => e.actions ?? [])
+      .filter((a) => a.tag === "input")
     expect(inputs).toHaveLength(2)
-    expect(inputs[0].rows).toBe(1)
-    expect(inputs[1].rows).toBe(4)
+    // Unsupported props are dropped; name + baked value binding round-trip.
+    expect(inputs[0].rows).toBeUndefined()
+    expect(inputs[0].required).toBeUndefined()
+    expect(inputs[0].name).toBe("t")
+    expect(inputs[1].name).toBe("a")
+    expect(inputs[0].value?.componentId).toBe("t")
+    // Bindings persisted so the inbound input_value callback resolves.
+    const binding = await resolveCallbackBinding("adp_lk", "a2ui:sfc_1:t:t")
+    expect(binding?.componentId).toBe("t")
   })
 })
 
@@ -223,6 +247,54 @@ describe("segmentsToLarkBodyAsync — composition with text segments", () => {
     })
     expect(body.msg_type).toBe("text")
     expect(JSON.parse(body.content)).toEqual({ text: "just text" })
+  })
+
+  // Multi-segment messages containing markdown used to degrade every
+  // non-text segment to "[type]" placeholders (literally sending the string
+  // "[markdown]"). Markdown renders via a card md element, so the combiner
+  // now composes text+markdown+code into one interactive card.
+  it("composes text + markdown + code into a single interactive card", async () => {
+    const body = await segmentsToLarkBodyAsync(
+      [
+        { type: "text", text: "Summary below" },
+        { type: "markdown", md: "**bold** point" },
+        { type: "code", language: "ts", code: "const x = 1" },
+      ],
+      { adapterId: "adp_lk" }
+    )
+    expect(body.msg_type).toBe("interactive")
+    const parsed = JSON.parse(body.content) as {
+      elements: Array<{ tag: string; text?: { tag: string; content: string } }>
+    }
+    const contents = parsed.elements.map((e) => e.text?.content ?? "")
+    expect(contents.some((c) => c.includes("Summary below"))).toBe(true)
+    expect(contents.some((c) => c.includes("**bold** point"))).toBe(true)
+    expect(contents.some((c) => c.includes("```ts\nconst x = 1\n```"))).toBe(true)
+    // No placeholder degradation anywhere.
+    expect(contents.some((c) => c.includes("[markdown]") || c.includes("[code]"))).toBe(false)
+  })
+
+  it("renders mention segments with the lark_md at-syntax inside combined cards", async () => {
+    const body = await segmentsToLarkBodyAsync(
+      [
+        { type: "markdown", md: "please review" },
+        { type: "mention", userId: "ou_rev_1" },
+      ],
+      { adapterId: "adp_lk" }
+    )
+    expect(body.msg_type).toBe("interactive")
+    const parsed = JSON.parse(body.content) as {
+      elements: Array<{ text?: { content: string } }>
+    }
+    expect(parsed.elements.some((e) => e.text?.content === "<at id=ou_rev_1></at>")).toBe(true)
+  })
+
+  it("keeps single markdown segments on the plain segmentToLarkBody path", async () => {
+    const body = await segmentsToLarkBodyAsync([{ type: "markdown", md: "**alone**" }], {
+      adapterId: "adp_lk",
+    })
+    // Same interactive rendering, produced by the sync path (no combiner).
+    expect(body.msg_type).toBe("interactive")
   })
 })
 
@@ -434,9 +506,14 @@ describe("buildLarkA2UICard — overlay surfaces (Dialog / Drawer / Sheet)", () 
         ((e.text as { content?: string })?.content ?? "").includes("Fill the form")
     )
     expect(titleEl).toBeDefined()
-    // Children still render (input + submit button) with live bindings.
-    expect(tags).toContain("input")
+    // Children still render (input inside an action module + submit button)
+    // with live bindings.
     expect(tags).toContain("action")
+    const nestedTags = parsed.elements
+      .filter((e) => e.tag === "action")
+      .flatMap((e) => (e.actions as Array<{ tag: string }> | undefined) ?? [])
+      .map((a) => a.tag)
+    expect(nestedTags).toContain("input")
     const binding = await resolveCallbackBinding("adp_lk", "a2ui:sfc_1:b1:submit")
     expect(binding?.componentId).toBe("b1")
   })

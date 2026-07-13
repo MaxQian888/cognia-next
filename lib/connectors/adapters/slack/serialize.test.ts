@@ -5,9 +5,11 @@ import {
   serializeUpdate,
   serializeDeleteMessage,
   serializeReaction,
+  serializeReactionRemoval,
   serializeTyping,
   serializeAssistantStatus,
   serializeAssistantSuggestedPrompts,
+  SlackEmptyMessageError,
 } from "./serialize"
 
 function makeRef(channelId: string, threadTs?: string): Record<string, unknown> {
@@ -61,6 +63,51 @@ describe("serializePostMessage / serializeOutbound", () => {
     const blocks = call.payload["blocks"] as Array<Record<string, unknown>>
     expect(blocks[0]["type"]).toBe("section")
   })
+
+  it("always includes a top-level text notification fallback beside blocks", () => {
+    const req: OutboundRequest = {
+      conversationRef: makeRef("C123") as never,
+      segments: [{ type: "text", text: "hello world" }],
+      metadata: { idempotencyKey: "k-fb" },
+    }
+    const call = serializePostMessage(req)
+    expect(call.payload["text"]).toBe("hello world")
+    expect(Array.isArray(call.payload["blocks"])).toBe(true)
+  })
+
+  it("sends text-only when every segment was dropped by the block serializer", () => {
+    const req: OutboundRequest = {
+      conversationRef: makeRef("C123") as never,
+      // voice segments produce no block, but do produce plain text.
+      segments: [{ type: "voice", url: "https://example.com/v.ogg" }],
+      metadata: { idempotencyKey: "k-voice" },
+    }
+    const call = serializePostMessage(req)
+    expect(call.payload["blocks"]).toBeUndefined()
+    expect(call.payload["text"]).toBe("[voice]")
+  })
+
+  it("throws SlackEmptyMessageError when both blocks and text are empty", () => {
+    const req: OutboundRequest = {
+      conversationRef: makeRef("C123") as never,
+      segments: [],
+      metadata: { idempotencyKey: "k-empty" },
+    }
+    expect(() => serializePostMessage(req)).toThrow(SlackEmptyMessageError)
+  })
+
+  it("clamps blocks to Slack's 50-block cap", () => {
+    const req: OutboundRequest = {
+      conversationRef: makeRef("C123") as never,
+      segments: Array.from({ length: 60 }, (_, i) => ({
+        type: "text" as const,
+        text: `line ${i}`,
+      })),
+      metadata: { idempotencyKey: "k-cap" },
+    }
+    const call = serializePostMessage(req)
+    expect((call.payload["blocks"] as unknown[]).length).toBe(50)
+  })
 })
 
 describe("serializeUpdate", () => {
@@ -76,6 +123,17 @@ describe("serializeUpdate", () => {
     expect(call.payload["channel"]).toBe("C123")
     expect(call.payload["ts"]).toBe("1714900000.000100")
     expect(Array.isArray(call.payload["blocks"])).toBe(true)
+    // Same notification fallback as chat.postMessage.
+    expect(call.payload["text"]).toBe("edited")
+  })
+
+  it("throws SlackEmptyMessageError for an all-empty update", () => {
+    const req: OutboundRequest = {
+      conversationRef: makeRef("C123") as never,
+      segments: [],
+      metadata: { idempotencyKey: "k5e" },
+    }
+    expect(() => serializeUpdate("C123", "1714900000.000100", req)).toThrow(SlackEmptyMessageError)
   })
 })
 
@@ -97,6 +155,19 @@ describe("serializeReaction", () => {
     expect(call.payload["channel"]).toBe("C123")
     expect(call.payload["timestamp"]).toBe("1714900000.000100")
     expect(call.payload["name"]).toBe("thumbsup")
+  })
+})
+
+describe("serializeReactionRemoval", () => {
+  it("builds POST reactions.remove with channel, timestamp, name", () => {
+    const call = serializeReactionRemoval("C123", "1714900000.000100", "thumbsup")
+    expect(call.method).toBe("POST")
+    expect(call.url).toBe("https://slack.com/api/reactions.remove")
+    expect(call.payload).toEqual({
+      channel: "C123",
+      timestamp: "1714900000.000100",
+      name: "thumbsup",
+    })
   })
 })
 

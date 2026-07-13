@@ -75,6 +75,8 @@ function makeTatFailResponse(msg = "invalid_app") {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  sessionStorage.clear()
+  localStorage.clear()
 })
 
 // ---------------------------------------------------------------------------
@@ -319,16 +321,39 @@ describe("LarkConfigDialog — send as user", () => {
     expect(screen.queryByText("Send as me")).not.toBeInTheDocument()
   })
 
-  it("opens the OAuth authorize URL and stores the CSRF state on Connect", async () => {
+  it("opens the OAuth 2.0 authorize URL (client_id + scope + PKCE) and stores CSRF state on Connect", async () => {
     render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={baseRow} />)
     fireEvent.click(screen.getByText("Send as me")) // expand the collapsed section
     fireEvent.click(screen.getByRole("button", { name: /connect account/i }))
 
     await waitFor(() => expect(mockOpenUrl).toHaveBeenCalledTimes(1))
-    const url = mockOpenUrl.mock.calls[0][0] as string
-    expect(url).toContain("open.feishu.cn")
-    expect(url).toContain("authen/v1/authorize")
+    const url = new URL(mockOpenUrl.mock.calls[0][0] as string)
+    expect(url.host).toBe("accounts.feishu.cn")
+    expect(url.pathname).toContain("authen/v1/authorize")
+    expect(url.searchParams.get("client_id")).toBe("cli_app_x")
+    expect(url.searchParams.get("response_type")).toBe("code")
+    expect(url.searchParams.get("scope")).toBe("offline_access im:message")
+    expect(url.searchParams.get("code_challenge")).toBeTruthy()
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256")
+    // Redirect defaults to the tunnel-derived relay URL.
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      "https://demo.trycloudflare.com/oauth/lark/callback"
+    )
+    // State persisted for the deep-link router — sessionStorage (live) +
+    // localStorage (durable cold-start).
     expect(sessionStorage.getItem("connector-oauth-state")).toMatch(/^lark:lark-existing:/)
+    expect(localStorage.getItem("connector-oauth-state")).toMatch(/^lark:lark-existing:/)
+  })
+
+  it("renders the redirect URL field defaulting to the tunnel-derived relay URL", () => {
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={baseRow} />)
+    fireEvent.click(screen.getByText("Send as me"))
+    const input = screen.getByTestId("lark-redirect-uri-input") as HTMLInputElement
+    // Empty value → the derived relay URL shows as the placeholder.
+    expect(input.value).toBe("")
+    expect(input.placeholder).toBe("https://demo.trycloudflare.com/oauth/lark/callback")
+    // The Copy button is present and enabled (effective redirect is derived).
+    expect(screen.getByTestId("lark-redirect-uri-copy")).not.toBeDisabled()
   })
 
   it("shows 'Connected as' and enables the toggle when a user is connected", () => {

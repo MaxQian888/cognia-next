@@ -70,7 +70,10 @@ describe("probeSlackIdentity", () => {
     const result = await probeSlackIdentity(ADAPTER_ID, { now: () => 1 })
     expect(result.botName).toBe("cognia @ Workspace")
     expect(result.openId).toBe("U0XYZ")
-    expect(result.appId).toBe("B0BOT")
+    // auth.test has no api_app_id — the bot id lives under botId and appId
+    // stays empty instead of mislabeling.
+    expect(result.appId).toBe("")
+    expect(result.botId).toBe("B0BOT")
     expect(result.tenantKey).toBe("T0ABC")
     const row = await getDb().adapterInstances.get(ADAPTER_ID)
     expect(row?.lastWhoamiAt).toBe(1)

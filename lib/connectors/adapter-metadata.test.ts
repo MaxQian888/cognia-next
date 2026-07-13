@@ -78,6 +78,14 @@ describe("lib/connectors/adapter-metadata", () => {
     })
   })
 
+  it("dingtalk does not claim OAuth (appKey/appSecret keyring config only)", () => {
+    expect(getConnectorMeta("dingtalk")).toMatchObject({
+      status: "stable",
+      oauth: false,
+      richMessages: true,
+    })
+  })
+
   it("never produces a duplicate type entry", () => {
     const types = CONNECTOR_METADATA.map((m) => m.type)
     expect(new Set(types).size).toBe(types.length)

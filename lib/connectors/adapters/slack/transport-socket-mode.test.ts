@@ -15,7 +15,7 @@ import {
   connectorsWsClose,
   connectorsHttpRequest,
 } from "@/lib/connectors/tauri/commands"
-import { startSocketMode } from "./transport-socket-mode"
+import { startSocketMode, type SocketModeDelivery } from "./transport-socket-mode"
 
 const mockListen = listen as jest.Mock
 const mockWsOpen = connectorsWsOpen as jest.Mock
@@ -92,16 +92,16 @@ describe("startSocketMode", () => {
     mockListen.mockImplementation(session.listenImpl)
 
     const ctrl = new AbortController()
-    const yielded: Array<{ type: string }> = []
+    const yielded: SocketModeDelivery[] = []
 
     const collectorDone = (async () => {
-      for await (const envelope of startSocketMode({
+      for await (const delivery of startSocketMode({
         appToken: async () => "xapp-token",
         signal: ctrl.signal,
         _connectionsOpenUrl: "https://fake-connections-open",
         _backoffBaseMs: 1,
       })) {
-        yielded.push(envelope as { type: string })
+        yielded.push(delivery)
         if (yielded.length >= 2) break
       }
     })()
@@ -156,8 +156,10 @@ describe("startSocketMode", () => {
     await collectorDone
 
     expect(yielded).toHaveLength(2)
-    expect(yielded[0].type).toBe("event_callback")
-    expect(yielded[1].type).toBe("event_callback")
+    expect(yielded[0].kind).toBe("event")
+    expect(yielded[1].kind).toBe("event")
+    expect((yielded[0] as { envelope: { type: string } }).envelope.type).toBe("event_callback")
+    expect((yielded[1] as { envelope: { type: string } }).envelope.type).toBe("event_callback")
 
     // Assert ACKs were sent for both envelope_ids
     const ackCalls = mockWsSend.mock.calls.filter((args: unknown[]) => {
@@ -229,6 +231,80 @@ describe("startSocketMode", () => {
     expect(httpCalls.length).toBeGreaterThanOrEqual(1)
     expect(yielded.length).toBeGreaterThanOrEqual(1)
   }, 10000)
+
+  it("ACKs and yields interactive + slash_commands envelopes, and fires onHello", async () => {
+    const session = createFakeWsSession()
+    mockListen.mockImplementation(session.listenImpl)
+
+    const ctrl = new AbortController()
+    const yielded: SocketModeDelivery[] = []
+    const onHello = jest.fn()
+
+    const collectorDone = (async () => {
+      for await (const delivery of startSocketMode({
+        appToken: async () => "xapp-token",
+        signal: ctrl.signal,
+        onHello,
+        _connectionsOpenUrl: "https://fake-connections-open",
+        _backoffBaseMs: 1,
+      })) {
+        yielded.push(delivery)
+        if (yielded.length >= 2) break
+      }
+    })()
+
+    await session.waitForListeners()
+
+    session.push({ type: "hello", num_connections: 1 })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(onHello).toHaveBeenCalledTimes(1)
+
+    // interactive envelope (A2UI button click)
+    session.push({
+      type: "interactive",
+      envelope_id: "env-int",
+      payload: {
+        type: "block_actions",
+        user: { id: "U1" },
+        actions: [{ action_id: "a1", type: "button", value: "v" }],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+
+    // slash_commands envelope
+    session.push({
+      type: "slash_commands",
+      envelope_id: "env-slash",
+      payload: { command: "/x", text: "y", channel_id: "C1", user_id: "U1" },
+    })
+    await new Promise((r) => setTimeout(r, 20))
+
+    ctrl.abort()
+    await collectorDone
+
+    expect(yielded).toHaveLength(2)
+    expect(yielded[0]).toMatchObject({
+      kind: "interactive",
+      payload: { type: "block_actions" },
+    })
+    expect(yielded[1]).toMatchObject({
+      kind: "slash_command",
+      payload: { command: "/x" },
+    })
+
+    // BOTH envelope kinds must have been acked with their envelope_id.
+    const ackIds = mockWsSend.mock.calls
+      .map((args: unknown[]) => {
+        try {
+          return (JSON.parse(args[1] as string) as { envelope_id?: string }).envelope_id
+        } catch {
+          return undefined
+        }
+      })
+      .filter(Boolean)
+    expect(ackIds).toContain("env-int")
+    expect(ackIds).toContain("env-slash")
+  }, 15000)
 
   it("stops immediately when signal is pre-aborted", async () => {
     mockListen.mockResolvedValue(jest.fn())

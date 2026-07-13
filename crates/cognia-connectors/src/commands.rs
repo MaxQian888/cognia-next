@@ -115,6 +115,21 @@ pub async fn connectors_stop_server(
 /// previous load's leaked sockets are reaped first.
 #[tauri::command]
 pub async fn connectors_reset_all_ws() -> Result<u32, String> {
+    // Piggyback the attachment raw-cache cleanup on this once-per-boot reset:
+    // the plaintext copies decrypted for the previous session's webview are
+    // reaped before any adapter re-fetches (see the attachments.rs module
+    // header for the remaining exposure window). Best-effort — a cleanup
+    // failure must not block the WS reset.
+    match tokio::task::spawn_blocking(super::attachments::cleanup_raw_attachment_cache).await {
+        Ok(Ok(removed)) => {
+            if removed > 0 {
+                log::debug!("connectors bootstrap: removed {removed} raw attachment cache files");
+            }
+        }
+        Ok(Err(e)) => log::warn!("connectors bootstrap: raw attachment cache cleanup failed: {e}"),
+        Err(e) => log::warn!("connectors bootstrap: raw attachment cleanup task failed: {e}"),
+    }
+
     let generic = super::ws_client::close_all().await;
     let lark = super::lark_ws::close_all();
     Ok((generic + lark) as u32)
@@ -256,6 +271,16 @@ pub async fn connectors_media_upload(
     req: super::types::ConnectorMediaUploadRequest,
 ) -> Result<String, String> {
     super::media_upload::upload_media(req).await
+}
+
+/// Discord multipart media upload — fetch each source URL and POST the bytes as
+/// `multipart/form-data` to `/channels/{id}/messages`, returning the created
+/// message id. Handles voice messages via the IS_VOICE_MESSAGE flag.
+#[tauri::command]
+pub async fn connectors_discord_upload(
+    req: super::discord_upload::ConnectorDiscordUploadRequest,
+) -> Result<String, String> {
+    super::discord_upload::upload(req).await
 }
 
 #[tauri::command]

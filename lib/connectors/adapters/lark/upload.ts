@@ -29,16 +29,22 @@ function needsUpload(url: string): boolean {
   return url.includes("://")
 }
 
+/** Lowercased extension of a URL's path (query/hash stripped), or "". */
+function urlExtension(url: string): string {
+  return url.split(/[?#]/)[0].split(".").pop()?.toLowerCase() ?? ""
+}
+
 /**
  * Map a voice / video / file segment to a Lark `file_type` discriminator.
- * Lark accepts: opus, mp4, pdf, doc, xls, ppt, stream. Voice MUST be opus;
- * video defaults to mp4; file uses an extension-derived guess with `stream`
- * (binary catch-all) as the safe fallback.
+ * Lark accepts: opus, mp4, pdf, doc, xls, ppt, stream. Voice MUST be opus
+ * (non-opus sources are degraded to plain files by the caller before this
+ * runs); video defaults to mp4; file uses an extension-derived guess with
+ * `stream` (binary catch-all) as the safe fallback.
  */
 function guessFileType(segmentType: "voice" | "video" | "file", url: string): string {
   if (segmentType === "voice") return "opus"
   if (segmentType === "video") return "mp4"
-  const ext = url.split(/[?#]/)[0].split(".").pop()?.toLowerCase()
+  const ext = urlExtension(url)
   switch (ext) {
     case "pdf":
       return "pdf"
@@ -92,9 +98,9 @@ export interface ResolveMediaKeysOptions {
  * that already carry a key (no `://`), and non-media segments, pass through
  * unchanged.
  *
- * Failures bubble up — the adapter's `send` translates them into a
- * `platform_5xx` `OutboundError` so the outbound runner can deadletter
- * cleanly. We never silently drop a segment.
+ * Failures bubble up — the adapter's `send` classifies them into an
+ * `OutboundError` (network / platform_*) so the outbound runner can retry
+ * or deadletter cleanly. We never silently drop a segment.
  */
 export async function resolveLarkMediaKeys(
   segments: MessageSegment[],
@@ -112,6 +118,34 @@ export async function resolveLarkMediaKeys(
 
   const out: MessageSegment[] = []
   for (const seg of segments) {
+    // Voice degrade pre-pass: Lark's audio message (msg_type=audio) plays
+    // ONLY opus. Uploading an mp3/m4a/wav with file_type=opus succeeds but
+    // produces an unplayable voice bubble, so non-opus sources are degraded
+    // to a regular file attachment instead (audible after download, never
+    // broken). Remote URLs without an extension are assumed non-opus.
+    if (seg.type === "voice" && needsUpload(seg.url) && urlExtension(seg.url) !== "opus") {
+      const fileName = fileNameFromUrl(seg.url, "voice")
+      const cachedKey = cache?.get(seg.url)
+      const key =
+        cachedKey ??
+        (await uploadFile({
+          accessToken: await token(),
+          sourceUrl: seg.url,
+          fileType: guessFileType("file", seg.url),
+          fileName,
+          durationMs: undefined,
+        }))
+      cache?.set(seg.url, key)
+      out.push({
+        type: "file",
+        url: key,
+        name: fileName,
+        mimeType: seg.mimeType ?? "application/octet-stream",
+        sizeBytes: 0,
+      })
+      continue
+    }
+
     if (seg.type === "voice" || seg.type === "video" || seg.type === "file") {
       if (!needsUpload(seg.url)) {
         out.push(seg)

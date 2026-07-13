@@ -166,7 +166,9 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     bus.registerAdapter(makeAdapter(autoAdapterId))
     bus.registerAdapter(makeAdapter(manualAdapterId))
     bus.routeHandler = routeHandler
-  })
+    // 30s hook budget: the first cold open of the full schema (100+ Dexie
+    // versions) can exceed jest's default 5s under parallel suite load.
+  }, 30_000)
 
   it("runs inbound OCR only when an inbound image carries inline bytes (gate)", async () => {
     const bus = getBus()
@@ -186,6 +188,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     mockConnectorDecision.mockResolvedValue({ action: "block", reason: "spam" })
     const bus = getBus()
     await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_blocked"))
+    await bus.flushInboundTurns()
     expect(routeHandler).not.toHaveBeenCalled()
     const auditRows = await listRecent(autoAdapterId)
     expect(auditRows.some((r) => r.kind === "plugin.inbound_blocked")).toBe(true)
@@ -198,6 +201,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     })
     const bus = getBus()
     await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_xform"))
+    await bus.flushInboundTurns()
     expect(routeHandler).toHaveBeenCalledTimes(1)
     const [evt] = routeHandler.mock.calls[0] as [NormalizedInboundEvent]
     expect(evt.plainText).toBe("rewritten by plugin")
@@ -213,6 +217,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     mockPiiDeep.mockReturnValue(false)
     const bus = getBus()
     await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_pii"))
+    await bus.flushInboundTurns()
     expect(routeHandler).toHaveBeenCalledTimes(1)
     const [evt] = routeHandler.mock.calls[0] as [NormalizedInboundEvent]
     expect(evt.plainText).not.toBe("leaks pii")
@@ -224,6 +229,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     const bus = getBus()
     const event = privateEvent(autoAdapterId, "msg_priv_1")
     await bus.dispatchInboundFull(event)
+    await bus.flushInboundTurns()
 
     expect(routeHandler).toHaveBeenCalledTimes(1)
     const [, decision] = routeHandler.mock.calls[0] as [
@@ -299,20 +305,64 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
 
     // First dispatch
     await bus.dispatchInboundFull(event)
+    await bus.flushInboundTurns()
     expect(routeHandler).toHaveBeenCalledTimes(1)
     routeHandler.mockReset()
 
     // Duplicate dispatch
     await bus.dispatchInboundFull(event)
+    await bus.flushInboundTurns()
     expect(routeHandler).not.toHaveBeenCalled()
 
     const auditRows = await listRecent(autoAdapterId)
     expect(auditRows.some((r) => r.kind === "inbound.deduped")).toBe(true)
   })
 
+  it("dedup is scoped per conversation: same messageId in two chats both deliver", async () => {
+    // Telegram message_id (and Slack ts) are only unique per CHAT — the
+    // pre-fix (adapterId, messageId) dedup key permanently dropped the
+    // second chat's message.
+    const bus = getBus()
+    const inChat = (chat: string): NormalizedInboundEvent => ({
+      ...privateEvent(autoAdapterId, "42"),
+      conversationKey: `telegram:${autoAdapterId}:${chat}`,
+      channel: { id: `ch_${chat}`, kind: "private" },
+    })
+    await bus.dispatchInboundFull(inChat("chatA"))
+    await bus.dispatchInboundFull(inChat("chatB"))
+    await bus.flushInboundTurns()
+    expect(routeHandler).toHaveBeenCalledTimes(2)
+
+    // A true redelivery (same chat, same id) still dedups.
+    routeHandler.mockReset()
+    await bus.dispatchInboundFull(inChat("chatA"))
+    await bus.flushInboundTurns()
+    expect(routeHandler).not.toHaveBeenCalled()
+    const auditRows = await listRecent(autoAdapterId)
+    expect(auditRows.some((r) => r.kind === "inbound.deduped")).toBe(true)
+  })
+
+  it("prunes the rate-limit buckets to the 60s window on write (bounded map)", async () => {
+    const bus = getBus()
+    const state = bus.__getPolicyStateForTesting()
+    // Seed a stale foreign bucket and stale entries in the event's own bucket.
+    state.recentByUserAndChannel["ghost:ch_gone"] = [Date.now() - 120_000]
+    state.recentByUserAndChannel["u_alice:ch_private"] = [Date.now() - 120_000]
+
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_prune_1"))
+    await bus.flushInboundTurns()
+
+    const map = bus.__getPolicyStateForTesting().recentByUserAndChannel
+    // Stale foreign bucket deleted entirely; own bucket keeps only the fresh stamp.
+    expect(map["ghost:ch_gone"]).toBeUndefined()
+    expect(map["u_alice:ch_private"]).toHaveLength(1)
+    expect(map["u_alice:ch_private"][0]).toBeGreaterThan(Date.now() - 5_000)
+  })
+
   it("scenario 3: group message no @-mention in auto mode → drop, no inbound.received audit", async () => {
     const bus = getBus()
     await bus.dispatchInboundFull(groupEvent(autoAdapterId, "msg_group_no_mention", false))
+    await bus.flushInboundTurns()
 
     expect(routeHandler).not.toHaveBeenCalled()
 
@@ -324,6 +374,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
   it("scenario 4: group message with @-mention → ai-run", async () => {
     const bus = getBus()
     await bus.dispatchInboundFull(groupEvent(autoAdapterId, "msg_group_mention", true))
+    await bus.flushInboundTurns()
 
     expect(routeHandler).toHaveBeenCalledTimes(1)
     const [, decision] = routeHandler.mock.calls[0] as [
@@ -340,6 +391,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
   it("scenario 5: private message in manual mode → manual-store, regardless of match", async () => {
     const bus = getBus()
     await bus.dispatchInboundFull(privateEvent(manualAdapterId, "msg_manual_1"))
+    await bus.flushInboundTurns()
 
     expect(routeHandler).toHaveBeenCalledTimes(1)
     const [, decision] = routeHandler.mock.calls[0] as [
@@ -357,6 +409,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     const bus = getBus()
     const event = privateEvent("nonexistent_adapter", "msg_x")
     await bus.dispatchInboundFull(event)
+    await bus.flushInboundTurns()
 
     expect(routeHandler).not.toHaveBeenCalled()
 
@@ -371,6 +424,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     await upsertByConversationKey({ conversationKey: ck, sessionId: "sess_x", status: "resolved" })
 
     await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_reopen"))
+    await bus.flushInboundTurns()
 
     // Routing is unchanged by the seam.
     expect(routeHandler).toHaveBeenCalledTimes(1)
@@ -404,6 +458,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     const ck = `telegram:${autoAdapterId}:private`
     // No override row at all → seam is a strict no-op; routing proceeds normally.
     await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_open"))
+    await bus.flushInboundTurns()
     expect(routeHandler).toHaveBeenCalledTimes(1)
     // The seam must not create an override row or a status for an absent one.
     expect(await readForResolution(ck)).toBeUndefined()

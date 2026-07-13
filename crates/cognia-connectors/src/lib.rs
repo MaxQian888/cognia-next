@@ -9,6 +9,7 @@
 pub mod attachments;
 pub mod axum_app;
 pub mod commands;
+pub mod discord_upload;
 pub mod http_client;
 pub mod keyring;
 pub mod lark_upload;
@@ -25,12 +26,8 @@ pub mod ws_server;
 
 pub use state::ConnectorsState;
 
-/// Whether the OS keyring is available for integration tests.
-///
-/// Set `COGNIA_TEST_KEYRING=1` to run tests that require a real OS keyring
-/// (or a keyring-accessible environment). Mirrors the pattern in
-/// `tts::keyring`.
-#[cfg(test)]
-pub(crate) fn keyring_available() -> bool {
-    std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
-}
+// NOTE on secret-dependent tests: this crate's [dev-dependencies] enable
+// cognia-secrets' `test-inmemory` feature, so `cargo test -p cognia-connectors`
+// runs against a hermetic in-memory secret store — no OS keyring is touched.
+// The former `COGNIA_TEST_KEYRING=1` opt-in gate is therefore gone; keyring-
+// dependent tests run unconditionally.

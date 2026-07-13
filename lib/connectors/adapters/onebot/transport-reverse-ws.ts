@@ -12,9 +12,8 @@
  *  2. Provides `sendToOneBot(adapterId, call)` to push an outbound RPC call
  *     to the connected client and await the echo-matched response.
  *
- * The Rust side must relay outbound calls received on the
+ * The Rust side relays outbound calls received on the
  * `connectors://onebot/<adapterId>/send` event channel back over the WS.
- * Phase 1 ships the TS subscription and the send helper.
  */
 
 import { listen, emit } from "@tauri-apps/api/event"
@@ -166,15 +165,41 @@ export async function sendToOneBot(
  */
 export function createReverseWsTransport(adapterId: string): OneBotTransport {
   const unlisteners: UnlistenFn[] = []
+  // Liveness: with no OneBot client connected to the axum route, every RPC
+  // would otherwise sit out the full 10s response timeout (fetchHistory worst
+  // case 50 pages × 10s). Track connection state from the open/close events
+  // and fail fast instead. An inbound event frame also proves a live client —
+  // covers an adapter (re)start that missed the original open event.
+  let clientConnected = false
 
   return {
     async start(handlers: OneBotTransportHandlers): Promise<void> {
       unlisteners.push(await subscribeOneBotResponses(adapterId))
-      unlisteners.push(await subscribeOneBotOpen(adapterId, handlers.onOpen))
-      unlisteners.push(await subscribeOneBotClose(adapterId, handlers.onClose))
-      unlisteners.push(await subscribeOneBotEvents(adapterId, handlers.onEvent))
+      unlisteners.push(
+        await subscribeOneBotOpen(adapterId, () => {
+          clientConnected = true
+          handlers.onOpen()
+        })
+      )
+      unlisteners.push(
+        await subscribeOneBotClose(adapterId, () => {
+          clientConnected = false
+          handlers.onClose()
+        })
+      )
+      unlisteners.push(
+        await subscribeOneBotEvents(adapterId, (raw) => {
+          clientConnected = true
+          void handlers.onEvent(raw)
+        })
+      )
     },
     send(call: SerializedOneBotCall, timeoutMs?: number): Promise<OneBotRpcResponse> {
+      if (!clientConnected) {
+        return Promise.reject(
+          new Error(`OneBot reverse-WS has no connected client: action=${call.action}`)
+        )
+      }
       return sendToOneBot(adapterId, call, timeoutMs)
     },
     async stop(): Promise<void> {

@@ -9,6 +9,7 @@ import type {
   AdapterContext,
   AdapterHealth,
   AdapterHealthState,
+  ReactionRef,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
@@ -25,6 +26,8 @@ import { startLongPoll } from "./transport-longpoll"
 import { startWebhookTransport } from "./transport-webhook"
 import { getBus } from "@/lib/connectors/bus"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
+import { getAdapterInstance } from "@/lib/db/adapter-instances"
+import { appendAudit } from "@/lib/connectors/audit"
 
 export interface TelegramAdapterOptions {
   id: string
@@ -42,16 +45,81 @@ const TELEGRAM_CONFIG_SCHEMA = {
   required: ["botToken"],
   properties: {
     botToken: { type: "string", title: "Bot Token" },
-    webhookSecret: { type: "string", title: "Webhook Secret Token" },
+    // The adapter builder reads `row.transportMode` — declare the selector
+    // in the schema so generic config UIs surface it (audited fix #14).
+    transportMode: {
+      type: "string",
+      title: "Transport",
+      enum: ["longpoll", "webhook"],
+      default: "longpoll",
+    },
+    // Keyring key the Rust webhook verifier reads (axum_app.rs).
+    secretToken: { type: "string", title: "Webhook Secret Token" },
+    // Legacy alias for secretToken — kept for rows created before the
+    // keyring key was aligned with the Rust side.
+    webhookSecret: { type: "string", title: "Webhook Secret Token (legacy)" },
   },
   additionalProperties: false,
 }
 
 const TELEGRAM_API_BASE = "https://api.telegram.org"
 
+/**
+ * Split the `"chatId:messageId"` composite this adapter's `send()` returns as
+ * `platformMessageId`. Message-scoped ops (delete / edit / reactions) need
+ * both ids, but the {@link PlatformAdapter} contract threads only a single
+ * string — the chat rides in the composite, mirroring the Discord adapter's
+ * `"channelId:messageId"` convention. Telegram chat ids never contain a
+ * colon (they are signed integers), so the first colon is the separator.
+ *
+ * Throws on malformed input — a silent best-effort call would 400 on the
+ * platform anyway (deleteMessage & co. require chat_id).
+ */
+function splitChatMessage(composite: string): [chatId: string, messageId: string] {
+  const idx = composite.indexOf(":")
+  if (idx <= 0 || idx === composite.length - 1) {
+    throw new Error(`Telegram message ops require a "chatId:messageId" id, got "${composite}"`)
+  }
+  return [composite.slice(0, idx), composite.slice(idx + 1)]
+}
+
+/**
+ * Chat allow/blocklist gate for the callback channel (audited fix #12).
+ * Regular messages flow through `gateInboundEvent`, but callback_query and
+ * ForceReply-correlation events are `ConnectorCallbackEvent`s and used to
+ * bypass it entirely. Mirror the allow/blocklist half of the at-gate here —
+ * the at-mention strategy deliberately does NOT apply, because a press on
+ * the bot's own inline keyboard is always directed at the bot.
+ *
+ * Fails open on a missing row / Dexie error, same as `gateInboundEvent`.
+ */
+async function callbackChatAllowed(
+  adapterId: string,
+  chatId: string,
+  conversationKey: string
+): Promise<boolean> {
+  const row = await getAdapterInstance(adapterId).catch(() => undefined)
+  if (!row) return true
+  const reason = row.chatBlocklist?.includes(chatId)
+    ? "chat_blocklist"
+    : row.chatAllowlist && row.chatAllowlist.length > 0 && !row.chatAllowlist.includes(chatId)
+      ? "chat_allowlist"
+      : null
+  if (!reason) return true
+  await appendAudit({
+    adapterId,
+    kind: "inbound.policy_blocked",
+    at: Date.now(),
+    conversationKey,
+    reason,
+  }).catch(() => undefined)
+  return false
+}
+
 export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAdapter {
   let abortController: AbortController | null = null
   let healthState: AdapterHealthState = "starting"
+  let healthReason: string | undefined = undefined
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
 
@@ -136,10 +204,46 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     const signal = abortController.signal
 
     healthState = "running"
+    healthReason = undefined
 
+    // Persistent-failure classification for the long-poll transport
+    // (audited fix #9): 401 (invalid token) and 409 (another getUpdates /
+    // webhook consumer) degrade immediately; anything else degrades after
+    // three consecutive failures. A successful poll recovers to running.
+    let consecutivePollErrors = 0
     const feed: AsyncGenerator<TelegramUpdate> =
       opts.transport === "longpoll"
-        ? startLongPoll({ botToken: opts.botToken, signal })
+        ? startLongPoll({
+            botToken: opts.botToken,
+            signal,
+            onPollError: (info) => {
+              consecutivePollErrors += 1
+              const reason =
+                info.status === 401
+                  ? `getUpdates 401: bot token rejected — ${info.message}`
+                  : info.status === 409
+                    ? `getUpdates 409: another getUpdates client or webhook is active — ${info.message}`
+                    : consecutivePollErrors >= 3
+                      ? `getUpdates failing (${consecutivePollErrors} consecutive): ${info.message}`
+                      : undefined
+              if (reason && !stopCalled) {
+                healthState = "degraded"
+                healthReason = reason
+                ctx.logger.warn("telegram:longpoll degraded", {
+                  status: info.status,
+                  consecutiveErrors: consecutivePollErrors,
+                  reason,
+                })
+              }
+            },
+            onPollSuccess: () => {
+              consecutivePollErrors = 0
+              if (!stopCalled && healthState === "degraded") {
+                healthState = "running"
+                healthReason = undefined
+              }
+            },
+          })
         : startWebhookTransport({ adapterId: opts.id, signal })
 
     // Drive the transport in the background
@@ -156,6 +260,12 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
           if (update.callback_query !== undefined) {
             const callback = parseTelegramCallbackQuery(opts.id, opts.selfId, update)
             if (callback) {
+              // Chat allow/blocklist gate (audited fix #12) — callback
+              // events used to bypass gateInboundEvent entirely.
+              const cbChatId = String(update.callback_query.message?.chat.id ?? "")
+              if (!(await callbackChatAllowed(opts.id, cbChatId, callback.conversationKey))) {
+                continue
+              }
               lastActivityAt = Date.now()
               await getBus().dispatchConnectorCallback(callback)
               // Best-effort ack so the Telegram client stops the
@@ -187,6 +297,19 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
               update
             )
             if (forceReplyCallback) {
+              // Same allow/blocklist gate as the callback_query path
+              // (audited fix #12).
+              const frMsg = update.message ?? update.channel_post
+              const frChatId = String(frMsg?.chat.id ?? "")
+              if (
+                !(await callbackChatAllowed(
+                  opts.id,
+                  frChatId,
+                  forceReplyCallback.conversationKey
+                ))
+              ) {
+                continue
+              }
               lastActivityAt = Date.now()
               await getBus().dispatchConnectorCallback(forceReplyCallback)
               continue
@@ -208,10 +331,15 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
         }
         if (!stopCalled) {
           healthState = "down"
+          healthReason = "transport feed ended unexpectedly"
         }
-      } catch {
+      } catch (err) {
+        // Transport crash — record WHY the adapter degraded instead of
+        // silently flipping the flag (audited fix #9).
         if (!stopCalled) {
           healthState = "degraded"
+          healthReason = err instanceof Error ? err.message : String(err)
+          ctx.logger.warn("telegram:transport crashed", { reason: healthReason })
         }
       }
     })()
@@ -222,10 +350,11 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     abortController?.abort()
     abortController = null
     healthState = "down"
+    healthReason = undefined
   }
 
   function health(): AdapterHealth {
-    return { state: healthState, lastActivityAt }
+    return { state: healthState, reason: healthReason, lastActivityAt }
   }
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
@@ -236,16 +365,24 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
       for (const call of calls) {
         const result = await doSend(call.method, call.payload as Record<string, unknown>)
         if (result.message_id !== undefined) {
-          platformMessageId = String(result.message_id)
+          // Composite "chatId:messageId" (audited fix #1) — message-scoped
+          // ops (delete / edit / reactions) receive only this one string
+          // back from callers, and Telegram requires chat_id + message_id.
+          // Same convention as the Discord adapter's "channelId:messageId".
+          const sentChatId = String(call.payload["chat_id"] ?? "")
+          platformMessageId = `${sentChatId}:${result.message_id}`
           // B2 — post-send ForceReply binding. The mapper signals which
           // A2UI surface + component asked for input; we couldn't know
           // the platform message_id until Telegram echoed it back. The
           // parser will use this row when the user replies to the prompt.
+          // NOTE: the binding key stays the BARE message id — the parser
+          // correlates against inbound reply_to_message.message_id, which
+          // Telegram delivers without a chat prefix.
           if (call.forceReplyBinding) {
             try {
               await recordCallbackBinding({
                 adapterId: opts.id,
-                actionId: platformMessageId,
+                actionId: String(result.message_id),
                 kind: "force_reply",
                 surfaceId: call.forceReplyBinding.surfaceId,
                 componentId: call.forceReplyBinding.componentId,
@@ -288,20 +425,63 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
 
   async function edit(messageId: string, patch: OutboundRequest): Promise<OutboundResult> {
     const ref = patch.conversationRef as Record<string, unknown>
-    const chatId = ref["chatId"]
 
-    // Build text from first text/markdown segment
-    const seg = patch.segments.find((s) => s.type === "text" || s.type === "markdown")
-    const text = seg?.type === "text" ? seg.text : seg?.type === "markdown" ? seg.md : ""
+    // Accept the composite "chatId:messageId" this adapter's send() returns;
+    // fall back to the conversationRef chatId for legacy bare message ids.
+    let chatId: unknown
+    let msgId = messageId
+    if (messageId.includes(":")) {
+      const [c, m] = splitChatMessage(messageId)
+      chatId = c
+      msgId = m
+    } else {
+      chatId = ref["chatId"]
+    }
+
+    // Reuse send()'s serializer so markdown keeps its parse_mode and inline
+    // keyboards keep their reply_markup (audited fix #8) — the old path sent
+    // the raw markdown source as plain text and dropped any markup.
+    const calls = await serializeOutboundAsync(patch, opts.id)
+    const textCall = calls.find(
+      (c) => c.method === "sendMessage" && typeof c.payload["text"] === "string"
+    )
+    const text = textCall ? (textCall.payload["text"] as string) : ""
 
     try {
       await doSend("editMessageText", {
         chat_id: chatId,
-        message_id: Number(messageId),
+        message_id: Number(msgId),
         text,
+        ...(textCall?.payload["parse_mode"]
+          ? { parse_mode: textCall.payload["parse_mode"] }
+          : {}),
+        ...(textCall?.payload["reply_markup"]
+          ? { reply_markup: textCall.payload["reply_markup"] }
+          : {}),
       })
       return { ok: true }
     } catch (err) {
+      if (err instanceof TelegramApiError) {
+        // "message is not modified" is Telegram's way of saying the target
+        // already shows this content — a success no-op, not a retryable
+        // failure (retrying would 400 forever).
+        if (err.status === 400 && /message is not modified/i.test(err.message)) {
+          return { ok: true }
+        }
+        // Same classification as send(): 429 → rate_limited (+retryAfter),
+        // 5xx retryable, other 4xx permanent (audited fix #8).
+        const code =
+          err.status === 429 ? "rate_limited" : err.status >= 500 ? "platform_5xx" : "platform_4xx"
+        return {
+          ok: false,
+          error: {
+            code,
+            message: err.message,
+            retryable: code !== "platform_4xx",
+            retryAfterMs: err.retryAfterMs,
+          },
+        }
+      }
       return {
         ok: false,
         error: {
@@ -314,10 +494,11 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
   }
 
   async function deleteMessage(messageId: string): Promise<void> {
-    // We need chat_id — callers must embed it in the messageId as "chatId:msgId" for Telegram
-    // For simplicity in Phase 1, messageId is expected as plain message_id and chatId comes from context.
-    // This method signature only gets messageId, so we can only do best-effort.
-    await doSend("deleteMessage", { message_id: Number(messageId) })
+    // deleteMessage requires chat_id + message_id (audited fix #1) — the
+    // chat rides in the "chatId:messageId" composite send() returned.
+    // splitChatMessage throws on malformed input; never a silent 400.
+    const [chatId, msgId] = splitChatMessage(messageId)
+    await doSend("deleteMessage", { chat_id: chatId, message_id: Number(msgId) })
   }
 
   async function setTyping(conversationKey: string, on: boolean): Promise<void> {
@@ -329,24 +510,40 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
   }
 
   /**
-   * Push a bot reaction onto a message via `setMessageReaction` (Bot API 7.0+,
-   * shipped at ADR-0009 v41 / A1 of the IM connector gap-closure plan).
+   * Push a bot reaction onto a message via `setMessageReaction` (Bot API
+   * 7.0+, ADR-0009 v41 / A1), conforming to the {@link PlatformAdapter}
+   * 2-arg contract `addReaction(messageId, emojiType)` the connector bus
+   * calls (audited fix #1 — the old 4-arg shape received the message id as
+   * chat_id and the emoji as message_id). `messageId` is the
+   * `"chatId:messageId"` composite from send(); `emojiType` is a unicode
+   * emoji (the only ReactionType bots may push without admin-granted
+   * custom-emoji rights).
    *
-   * Bots may only push the `emoji` ReactionType — passing the unicode
-   * character directly is the simplest stable contract. Passing an empty
-   * `emoji` clears the bot's reactions on the message.
-   *
-   * Mirrors the `addReaction` surface area exposed by the Slack adapter so
-   * the connector bus can route capability-aware reaction sends without
-   * adapter-specific call sites.
+   * Telegram reactions have no addressable id (setMessageReaction replaces
+   * the bot's reaction list), so the emoji itself rides back as
+   * `reactionId` for a later {@link removeReaction} — same convention as
+   * the Discord adapter.
    */
-  async function addReaction(
-    chatId: string | number,
-    messageId: string | number,
-    emoji: string | string[],
-    opts?: { isBig?: boolean }
-  ): Promise<void> {
-    const call = serializeReaction(chatId, messageId, emoji, opts)
+  async function addReaction(messageId: string, emojiType: string): Promise<ReactionRef> {
+    const [chatId, msgId] = splitChatMessage(messageId)
+    const call = serializeReaction(chatId, msgId, emojiType)
+    await doSend(call.method, call.payload)
+    return { reactionId: emojiType }
+  }
+
+  /**
+   * Retract the bot's reaction previously added with {@link addReaction}.
+   * `setMessageReaction` REPLACES the bot's reaction list on the message,
+   * and this adapter only ever sets a single emoji per add — so removing
+   * "our" reaction means setting the empty list (which clears all of the
+   * bot's reactions; correct for the single-emoji case we add). The
+   * `reactionId` (the emoji) is accepted per contract but not needed on
+   * the wire.
+   */
+  async function removeReaction(messageId: string, reactionId: string): Promise<void> {
+    void reactionId
+    const [chatId, msgId] = splitChatMessage(messageId)
+    const call = serializeReaction(chatId, msgId, [])
     await doSend(call.method, call.payload)
   }
 
@@ -374,9 +571,11 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     delete: deleteMessage,
     setTyping,
     addReaction,
+    removeReaction,
     refreshCredentials,
     a2uiCapability: () => TELEGRAM_A2UI_CAPABILITY,
   } as PlatformAdapter & {
     addReaction: typeof addReaction
+    removeReaction: typeof removeReaction
   }
 }

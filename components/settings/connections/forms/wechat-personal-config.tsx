@@ -74,7 +74,14 @@ export function WeChatPersonalConfigDialog({
     if (persistingRef.current) return
     persistingRef.current = true
     try {
-      const settings = { baseUrl: baseUrl ?? undefined, accountId: accountId ?? undefined }
+      // On re-login, merge into the existing row's settings —
+      // `updateAdapterInstance` replaces the whole `settings` object, so a
+      // bare `{ baseUrl, accountId }` would wipe any other persisted keys.
+      const settings = {
+        ...(isNew ? {} : row.settings),
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(accountId ? { accountId } : {}),
+      }
       let adapterId: string
       if (isNew) {
         const newRow = await createAdapterInstance({
@@ -153,8 +160,16 @@ export function WeChatPersonalConfigDialog({
         if (cancelled) return
         if (res.status === "scaned") setLoginStatus("scaned")
         else if (res.status === "confirmed") {
-          setLoginStatus("confirmed")
-          if (res.bot_token) void persistRef.current(res.bot_token, res.baseurl, res.account_id)
+          if (res.bot_token) {
+            setLoginStatus("confirmed")
+            void persistRef.current(res.bot_token, res.baseurl, res.account_id)
+          } else {
+            // The gateway confirmed the scan but returned no bot_token —
+            // nothing can be persisted, and a silent "confirmed" would let
+            // handleSave close the dialog without creating anything.
+            setLoginStatus("error")
+            toast.error(t("confirmedNoToken"))
+          }
         } else if (res.status === "expired") setLoginStatus("expired")
       })
     }, POLL_INTERVAL_MS)
@@ -162,7 +177,7 @@ export function WeChatPersonalConfigDialog({
       cancelled = true
       clearInterval(timer)
     }
-  }, [qrcode, loginStatus])
+  }, [qrcode, loginStatus, t])
 
   const handleSave = async () => {
     if (!displayName.trim()) {

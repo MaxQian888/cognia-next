@@ -32,10 +32,24 @@ describe("fromOneBotSegments v11", () => {
     expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "mention", userId: "123456" }])
   })
 
+  it("at qq=all (mass ping) → mention with userId 'all' and an @all marker", () => {
+    const segs: OneBotSegment[] = [{ type: "at", data: { qq: "all" } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([
+      { type: "mention", userId: "all", displayName: "@all" },
+    ])
+  })
+
   it("reply segment", () => {
     const segs: OneBotSegment[] = [{ type: "reply", data: { id: "9999" } }]
     expect(fromOneBotSegments(segs, "v11")).toEqual([
       { type: "reply", messageId: "9999", snippet: "" },
+    ])
+  })
+
+  it("reply segment carries an enrichment-injected snippet", () => {
+    const segs: OneBotSegment[] = [{ type: "reply", data: { id: "9999", snippet: "quoted text" } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([
+      { type: "reply", messageId: "9999", snippet: "quoted text" },
     ])
   })
 
@@ -70,10 +84,76 @@ describe("fromOneBotSegments v11", () => {
   })
 
   it("unknown segment → text placeholder", () => {
-    const segs: OneBotSegment[] = [{ type: "xml", data: { data: "<card/>" } }]
+    const segs: OneBotSegment[] = [{ type: "shake", data: {} }]
     const result = fromOneBotSegments(segs, "v11")
     expect(result[0].type).toBe("text")
-    expect((result[0] as { type: "text"; text: string }).text).toContain("unsupported:xml")
+    expect((result[0] as { type: "text"; text: string }).text).toContain("unsupported:shake")
+  })
+
+  it("xml card → brief summary text", () => {
+    const segs: OneBotSegment[] = [
+      { type: "xml", data: { data: '<msg brief="[分享]网页标题"><item/></msg>' } },
+    ]
+    const result = fromOneBotSegments(segs, "v11")
+    expect(result[0]).toEqual({ type: "text", text: "[分享]网页标题" })
+  })
+
+  it("xml card without brief → title element", () => {
+    const segs: OneBotSegment[] = [
+      { type: "xml", data: { data: "<msg><title>标题内容</title></msg>" } },
+    ]
+    const result = fromOneBotSegments(segs, "v11")
+    expect(result[0]).toEqual({ type: "text", text: "标题内容" })
+  })
+
+  it("xml card with no recognisable summary → generic marker", () => {
+    const segs: OneBotSegment[] = [{ type: "xml", data: { data: "<card/>" } }]
+    const result = fromOneBotSegments(segs, "v11")
+    expect(result[0]).toEqual({ type: "text", text: "[卡片消息]" })
+  })
+
+  it("location → structured location segment", () => {
+    const segs: OneBotSegment[] = [
+      { type: "location", data: { lat: "31.23", lon: "121.47", title: "上海" } },
+    ]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([
+      { type: "location", lat: 31.23, lon: 121.47, name: "上海" },
+    ])
+  })
+
+  it("poke → readable marker", () => {
+    const segs: OneBotSegment[] = [{ type: "poke", data: { id: "1" } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[戳一戳]" }])
+  })
+
+  it("dice → readable marker with rolled value", () => {
+    const segs: OneBotSegment[] = [{ type: "dice", data: { result: "5" } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[骰子:5]" }])
+  })
+
+  it("rps → readable marker with rolled value", () => {
+    const segs: OneBotSegment[] = [{ type: "rps", data: { result: "2" } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[猜拳:2]" }])
+  })
+
+  it("dice without a value → bare marker", () => {
+    const segs: OneBotSegment[] = [{ type: "dice", data: {} }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[骰子]" }])
+  })
+
+  it("dice with an empty-string value → bare marker", () => {
+    const segs: OneBotSegment[] = [{ type: "dice", data: { result: "" } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[骰子]" }])
+  })
+
+  it("location falls back to lng field and empty name", () => {
+    const segs: OneBotSegment[] = [{ type: "location", data: { lat: 1, lng: 2 } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "location", lat: 1, lon: 2 }])
+  })
+
+  it("contact → readable marker", () => {
+    const segs: OneBotSegment[] = [{ type: "contact", data: { type: "qq", id: "10001" } }]
+    expect(fromOneBotSegments(segs, "v11")).toEqual([{ type: "text", text: "[推荐名片]" }])
   })
 
   it("handles mixed segment array", () => {
@@ -145,6 +225,24 @@ describe("fromOneBotSegments v12", () => {
     const result = fromOneBotSegments(segs, "v12")
     expect(result[0].type).toBe("text")
     expect((result[0] as { type: "text"; text: string }).text).toContain("unsupported:custom")
+  })
+
+  it("xml / location / magic-face / contact map the same as v11", () => {
+    expect(fromOneBotSegments([{ type: "xml", data: { data: "<card/>" } }], "v12")).toEqual([
+      { type: "text", text: "[卡片消息]" },
+    ])
+    expect(
+      fromOneBotSegments([{ type: "location", data: { lat: 1, lon: 2, content: "here" } }], "v12")
+    ).toEqual([{ type: "location", lat: 1, lon: 2, name: "here" }])
+    expect(fromOneBotSegments([{ type: "poke", data: {} }], "v12")).toEqual([
+      { type: "text", text: "[戳一戳]" },
+    ])
+    expect(fromOneBotSegments([{ type: "rps", data: { result: "1" } }], "v12")).toEqual([
+      { type: "text", text: "[猜拳:1]" },
+    ])
+    expect(fromOneBotSegments([{ type: "contact", data: {} }], "v12")).toEqual([
+      { type: "text", text: "[推荐名片]" },
+    ])
   })
 })
 
@@ -314,6 +412,26 @@ describe("parseCqCodeString", () => {
   it("unescapes CQ special chars in text", () => {
     const result = parseCqCodeString("a&amp;b&#91;c&#93;", "v11")
     expect(result).toEqual([{ type: "text", text: "a&b[c]" }])
+  })
+
+  it("unescapes &amp; LAST so a literal '&amp;#91;' round-trips to '&#91;' (no double-unescape)", () => {
+    // On the wire, a user who typed the literal text "&#91;" arrives as
+    // "&amp;#91;" — the old &amp;-first order collapsed it into "[".
+    const result = parseCqCodeString("x&amp;#91;y", "v11")
+    expect(result).toEqual([{ type: "text", text: "x&#91;y" }])
+  })
+
+  it("CQ-unescapes param values (image URL with &amp;-joined query params)", () => {
+    const result = parseCqCodeString(
+      "[CQ:image,url=https://img.example/a.png?rkey=1&amp;size=big]",
+      "v11"
+    )
+    expect(result).toEqual([{ type: "image", url: "https://img.example/a.png?rkey=1&size=big" }])
+  })
+
+  it("CQ-unescapes bracket and comma entities inside param values", () => {
+    const result = parseCqCodeString("[CQ:image,file=a&#44;b&#91;1&#93;.png]", "v11")
+    expect(result).toEqual([{ type: "image", url: "a,b[1].png" }])
   })
 
   it("record CQ code → voice", () => {

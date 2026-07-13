@@ -98,26 +98,27 @@ describe("DingTalkConfigDialog", () => {
     expect(mockCreate).not.toHaveBeenCalled()
   })
 
-  it("creates a longpoll adapter and stores both credentials", async () => {
+  it("creates a gateway (Stream mode) adapter and stores both credentials", async () => {
     render(<DingTalkConfigDialog open onOpenChange={jest.fn()} row={null} />)
     fireEvent.change(screen.getByLabelText(/app key/i), { target: { value: "dingabc" } })
     fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret" } })
     fireEvent.click(screen.getByRole("button", { name: /add connector/i }))
     await waitFor(() => {
       expect(mockCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "dingtalk", transportMode: "longpoll" })
+        expect.objectContaining({ type: "dingtalk", transportMode: "gateway" })
       )
     })
     expect(mockKeyringSet).toHaveBeenCalledWith("dt-new", "appKey", "dingabc")
     expect(mockKeyringSet).toHaveBeenCalledWith("dt-new", "appSecret", "secret")
   })
 
-  it("on edit, updates the row and emits a credential rotation", async () => {
+  it("on edit, tolerates a legacy longpoll row (updates without touching transportMode)", async () => {
     const row = {
       id: "dt-1",
       type: "dingtalk",
       displayName: "Existing",
       enabled: true,
+      // legacy rows created before the gateway rename still carry "longpoll"
       transportMode: "longpoll",
       settings: {},
       credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["appKey", "appSecret"] },
@@ -130,6 +131,8 @@ describe("DingTalkConfigDialog", () => {
     fireEvent.change(screen.getByLabelText(/app key/i), { target: { value: "rotated" } })
     fireEvent.click(screen.getByRole("button", { name: /save/i }))
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledWith("dt-1", expect.any(Object)))
+    // the edit path never rewrites transportMode — legacy value stays put
+    expect(mockUpdate.mock.calls[0][1]).not.toHaveProperty("transportMode")
     expect(mockKeyringSet).toHaveBeenCalledWith("dt-1", "appKey", "rotated")
     expect(mockRotated).toHaveBeenCalledWith("dt-1")
   })

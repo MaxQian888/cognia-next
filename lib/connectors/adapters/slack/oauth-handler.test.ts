@@ -66,7 +66,17 @@ describe("handleSlackOAuth", () => {
     expect(team.teamId).toBe("T1")
     expect(team.teamName).toBe("Acme")
     expect(mockKeyringSet).toHaveBeenCalledWith("slack-1", "botToken", "xoxb-123")
-    expect(mockKeyringSet).toHaveBeenCalledWith("slack-1", "user_token", "xoxp-456")
+    // Canonical key is "userToken" — the same one buildSlackAdapter reads.
+    expect(mockKeyringSet).toHaveBeenCalledWith("slack-1", "userToken", "xoxp-456")
+    expect(mockKeyringSet).not.toHaveBeenCalledWith("slack-1", "user_token", expect.anything())
+    expect(mockUpdateAdapter).toHaveBeenCalledWith(
+      "slack-1",
+      expect.objectContaining({
+        credentialsRef: expect.objectContaining({
+          accounts: expect.arrayContaining(["botToken", "userToken"]),
+        }),
+      })
+    )
     // Connected-team metadata stamped on the row.
     expect(mockUpdateAdapter).toHaveBeenCalledWith(
       "slack-1",

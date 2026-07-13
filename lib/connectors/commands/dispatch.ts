@@ -33,6 +33,7 @@ import { getCharacter, listCharacters } from "@/lib/db/characters"
 import { resolveTeamByNameOrId } from "@/lib/connectors/team-dispatch"
 import { resolveWorkflowByNameOrId } from "@/lib/workflow/library/lookup"
 import { isBuiltInProviderId } from "@cognia/provider-types/built-in-provider-catalog"
+import { clearSessionBypass } from "@/lib/connectors/hitl/approval-registry"
 import { parseControlCommand, isReadonlyCommand } from "./parse"
 import * as R from "./render"
 
@@ -242,9 +243,14 @@ export async function maybeHandleControlCommand(
     }
 
     case "new": {
+      const prior = active
       const created = await createSession(event, resolved.characterId)
       active = created
       await patchOverride(event.conversationKey, { activeSessionId: created.id }, created.id)
+      // The conversation's session rotated — drop any "allow for session" tool
+      // bypasses granted on the session we rotated away from, per the
+      // approval-registry contract (a grant must not outlive its rotation).
+      if (prior && prior.id !== created.id) clearSessionBypass(prior.id)
       await reply(R.confirmNewSession(created.title, idPrefix(created.id)), "applied")
       return true
     }
@@ -264,6 +270,8 @@ export async function maybeHandleControlCommand(
         return true
       }
       await patchOverride(event.conversationKey, { activeSessionId: target.id }, target.id)
+      // Session rotation — same bypass-drop contract as `/new` above.
+      if (active && active.id !== target.id) clearSessionBypass(active.id)
       active = target
       await reply(R.confirmSwitched(target.title, idPrefix(target.id)), "applied")
       return true

@@ -27,21 +27,23 @@ export const CONNECTORS_SERVER_PORT = 7842
 
 /**
  * True when an enabled adapter needs the inbound axum server running:
- *   - it exposes a `webhook` transport (Rust verifies the signature and emits
- *     `connectors://webhook/<id>`), OR
+ *   - it exposes a `webhook` transport AND the row is configured for `webhook`
+ *     (Rust verifies the signature and emits `connectors://webhook/<id>`), OR
  *   - it exposes a `reverse-ws` transport AND is not configured as
  *     `forward-ws` (OneBot narrows to both modes at build time, so the row's
  *     active `transportMode` disambiguates: reverse-ws dials in → needs the
  *     `/ws/onebot/<id>` server; forward-ws dials out → does not).
  *
- * long-poll / gateway / forward-ws adapters all dial outbound and return false.
+ * Both branches key off the row's active `transportMode` so a dual-mode adapter
+ * (Discord: gateway + webhook) only starts the server when actually in webhook
+ * mode; gateway/long-poll/forward-ws rows all dial outbound and return false.
  */
 export function adapterNeedsInboundServer(
   adapter: Pick<PlatformAdapter, "meta">,
   row: Pick<AdapterInstanceRow, "transportMode">
 ): boolean {
   const modes = adapter.meta.transportModes
-  if (modes.includes("webhook")) return true
+  if (modes.includes("webhook") && row.transportMode === "webhook") return true
   if (modes.includes("reverse-ws") && row.transportMode !== "forward-ws") return true
   return false
 }

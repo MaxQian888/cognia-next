@@ -184,7 +184,8 @@ describe("OneBot adapter contract suite", () => {
 
       expect(topic).toBe("connectors://onebot/ob-text/send")
       expect(payload.action).toBe("send_private_msg")
-      expect((payload.params as Record<string, unknown>).user_id).toBe("200001")
+      // v11 types user_id as number — numeric chatKey ids are converted.
+      expect((payload.params as Record<string, unknown>).user_id).toBe(200001)
 
       await adapter.stop()
     })
@@ -311,7 +312,7 @@ describe("OneBot adapter contract suite", () => {
   // ---------------------------------------------------------------------------
 
   describe("send.reaction capability", () => {
-    it("addReaction emits set_msg_emoji_like when the upstream advertises it", async () => {
+    it("addReaction emits set_msg_emoji_like (set:true) and returns a ReactionRef", async () => {
       const bus = createEventBus()
       mockListen.mockImplementation(bus.listenImpl)
       mockGetAdapterInstance.mockResolvedValue({
@@ -319,11 +320,12 @@ describe("OneBot adapter contract suite", () => {
       })
 
       const { adapter } = await setupAdapter(bus, "ob-react")
-      const withReact = adapter as typeof adapter & {
-        addReaction: (messageId: string, emojiId: string) => Promise<void>
-      }
 
-      await withReact.addReaction("12345", "128077")
+      const ref = await adapter.addReaction!("12345", "128077")
+
+      // ReactionRef contract (types/connectors/adapter.ts): the returned
+      // reactionId feeds removeReaction.
+      expect(ref).toEqual({ reactionId: "128077" })
 
       const sendCall = mockEmit.mock.calls.find((c) => (c[0] as string).endsWith("/send"))
       expect(sendCall).toBeDefined()
@@ -332,11 +334,35 @@ describe("OneBot adapter contract suite", () => {
       const params = payload.params as Record<string, unknown>
       expect(params.message_id).toBe(12345)
       expect(params.emoji_id).toBe("128077")
+      expect(params.set).toBe(true)
 
       await adapter.stop()
     })
 
-    it("addReaction throws (no emit) when the upstream lacks set_msg_emoji_like", async () => {
+    it("removeReaction emits set_msg_emoji_like with set:false", async () => {
+      const bus = createEventBus()
+      mockListen.mockImplementation(bus.listenImpl)
+      mockGetAdapterInstance.mockResolvedValue({
+        implMetadata: { impl: "llonebot", version: "3.x", features: ["set_msg_emoji_like"] },
+      })
+
+      const { adapter } = await setupAdapter(bus, "ob-react-rm")
+
+      await adapter.removeReaction!("12345", "128077")
+
+      const sendCall = mockEmit.mock.calls.find((c) => (c[0] as string).endsWith("/send"))
+      expect(sendCall).toBeDefined()
+      const payload = JSON.parse(sendCall![1] as string) as Record<string, unknown>
+      expect(payload.action).toBe("set_msg_emoji_like")
+      const params = payload.params as Record<string, unknown>
+      expect(params.message_id).toBe(12345)
+      expect(params.emoji_id).toBe("128077")
+      expect(params.set).toBe(false)
+
+      await adapter.stop()
+    })
+
+    it("addReaction and removeReaction throw (no emit) when the upstream lacks set_msg_emoji_like", async () => {
       const bus = createEventBus()
       mockListen.mockImplementation(bus.listenImpl)
       mockGetAdapterInstance.mockResolvedValue({
@@ -344,11 +370,9 @@ describe("OneBot adapter contract suite", () => {
       })
 
       const { adapter } = await setupAdapter(bus, "ob-react-no")
-      const withReact = adapter as typeof adapter & {
-        addReaction: (messageId: string, emojiId: string) => Promise<void>
-      }
 
-      await expect(withReact.addReaction("1", "76")).rejects.toThrow(/set_msg_emoji_like/)
+      await expect(adapter.addReaction!("1", "76")).rejects.toThrow(/set_msg_emoji_like/)
+      await expect(adapter.removeReaction!("1", "76")).rejects.toThrow(/set_msg_emoji_like/)
 
       const sendCalls = mockEmit.mock.calls.filter((c) => (c[0] as string).endsWith("/send"))
       expect(sendCalls).toHaveLength(0)

@@ -1,23 +1,26 @@
 /**
- * Lark OAuth handler — completes Phase 2 of ADR-0009 v41 / A4 (D2).
+ * Lark OAuth handler — completes the send-as-user OAuth 2.0 flow.
  *
  * The deep-link router (cognia://connector/oauth/lark?code=...&state=...)
- * invokes `handleLarkOAuth(code)` after validating the state. This module
- * is the platform-specific completion side:
+ * invokes `handleLarkOAuth(code, {state})` after a first state check. This
+ * module is the platform-specific completion side:
  *
- *   1. Parse the adapterId out of the state nonce (state encodes both
- *      adapter scope + entropy via `buildLarkOAuthState`).
- *   2. Look up the AdapterInstanceRow + decrypt the app secret from the
- *      OS keyring via the existing connectors-keyring Tauri commands.
- *   3. Acquire the tenant access token (`getTenantAccessToken`).
- *   4. Swap the OAuth code for a user access token + refresh token via
- *      `exchangeCodeForUserAccessToken`.
- *   5. Persist tokens in the keyring under
- *      `<adapterId>:user_token` + `<adapterId>:user_refresh_token` so
- *      the adapter's send loop can opt-into the user-scope path for
- *      future API calls.
- *   6. Stamp the connected-user metadata onto AdapterInstanceRow.settings
- *      so the Adapters tab can render "Connected as <Name>".
+ *   1. Parse the adapterId out of the state (state encodes both adapter scope
+ *      + entropy via `buildLarkOAuthState`).
+ *   2. Load the durable pending authorization (PKCE `code_verifier` + the exact
+ *      `redirect_uri` used at authorize) and re-validate `state` against it —
+ *      the CSRF check that survives an app restart.
+ *   3. Look up the AdapterInstanceRow + decrypt the app secret from the OS
+ *      keyring.
+ *   4. Swap the OAuth code for a user access token + refresh token via the v2
+ *      token endpoint (`exchangeCodeForUserAccessToken`; client_secret in body,
+ *      no tenant token needed).
+ *   5. Resolve the connected user's identity (`fetchLarkUserInfo`).
+ *   6. Persist tokens in the keyring under `<adapterId>:user_token` +
+ *      `<adapterId>:user_refresh_token` so the adapter's send loop can opt-into
+ *      the user-scope path for future API calls.
+ *   7. Stamp the connected-user metadata onto AdapterInstanceRow.settings so
+ *      the Adapters tab can render "Connected as <Name>", and clear the pending.
  *
  * Designed to be re-entrant: a second invocation with the same code is a
  * no-op (Lark rejects re-use) — the keyring write is idempotent because
@@ -26,11 +29,8 @@
 
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsKeyringGet, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
-import {
-  exchangeCodeForUserAccessToken,
-  getTenantAccessToken,
-  type LarkUserAccessTokenResult,
-} from "./auth"
+import { exchangeCodeForUserAccessToken, fetchLarkUserInfo } from "./auth"
+import { clearLarkOAuthPending, getLarkOAuthPending } from "./oauth-pending"
 
 // ---------------------------------------------------------------------------
 // State encoding: `lark:<adapterId>:<nonce>`
@@ -117,12 +117,15 @@ export async function handleLarkOAuth(
     throw new Error(`Lark OAuth: adapter ${adapterId} is not a Lark adapter (type=${adapter.type})`)
   }
 
-  const appId = String(adapter.settings.appId ?? "").trim()
+  // ── Step 2: pull credentials from keyring (appId + appSecret both live in
+  // the OS keyring — settings never carries them; the adapter runtime resolves
+  // them the same way) ───────────────────────────────────────────────────
+  const appId = ((await connectorsKeyringGet(adapterId, "appId")) ?? "").trim()
   if (!appId) {
-    throw new Error(`Lark OAuth: adapter ${adapterId} has no appId configured`)
+    throw new Error(
+      `Lark OAuth: appId not found in keyring (adapterId=${adapterId} credential=appId)`
+    )
   }
-
-  // ── Step 2: pull app secret from keyring ───────────────────────────────
   const appSecret = await connectorsKeyringGet(adapterId, "appSecret")
   if (!appSecret) {
     throw new Error(
@@ -130,26 +133,37 @@ export async function handleLarkOAuth(
     )
   }
 
-  // ── Step 3: TAT, then exchange ─────────────────────────────────────────
-  const tat = await getTenantAccessToken({ appId, appSecret })
-  const tokens: LarkUserAccessTokenResult = await exchangeCodeForUserAccessToken({
-    code,
-    appAccessToken: tat,
-  })
+  // ── Step 3: durable pending — CSRF re-check + PKCE verifier + redirect_uri
+  const pending = getLarkOAuthPending(adapterId)
+  if (!pending || pending.state !== deps.state) {
+    throw new Error(
+      "Lark OAuth: no matching pending authorization (session expired or state tampered) — retry Connect"
+    )
+  }
 
-  // ── Step 4: persist tokens in keyring ──────────────────────────────────
+  // ── Step 4: exchange the code for a user token (v2), then resolve identity
+  const tokens = await exchangeCodeForUserAccessToken({
+    code,
+    appId,
+    appSecret,
+    redirectUri: pending.redirectUri,
+    codeVerifier: pending.codeVerifier,
+  })
+  const userInfo = await fetchLarkUserInfo(tokens.accessToken)
+
+  // ── Step 5: persist tokens in keyring ──────────────────────────────────
   await connectorsKeyringSet(adapterId, "user_token", tokens.accessToken)
   await connectorsKeyringSet(adapterId, "user_refresh_token", tokens.refreshToken)
 
-  // ── Step 5: stamp connected-user metadata ─────────────────────────────
+  // ── Step 6: stamp connected-user metadata ─────────────────────────────
   const now = Date.now()
   const connectedUser: LarkConnectedUser = {
-    openId: tokens.openId,
-    unionId: tokens.unionId,
-    name: tokens.name,
-    avatarUrl: tokens.avatarUrl,
-    email: tokens.email,
-    enterpriseEmail: tokens.enterpriseEmail,
+    openId: userInfo.openId,
+    unionId: userInfo.unionId,
+    name: userInfo.name,
+    avatarUrl: userInfo.avatarUrl,
+    email: userInfo.email,
+    enterpriseEmail: userInfo.enterpriseEmail,
     expiresAtMs: now + tokens.expiresInSec * 1000,
     refreshExpiresAtMs: now + tokens.refreshExpiresInSec * 1000,
   }
@@ -169,6 +183,9 @@ export async function handleLarkOAuth(
       ),
     },
   })
+
+  // Clear-on-use: the pending authorization (PKCE verifier + redirect) is spent.
+  clearLarkOAuthPending(adapterId)
 
   return connectedUser
 }

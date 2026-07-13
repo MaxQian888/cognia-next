@@ -58,6 +58,7 @@ import { createPlatformSession, findActiveSessionForConversation } from "./sessi
 import { startTeamRunFromIM } from "./team-dispatch"
 import { startWorkflowFromIM } from "@/lib/workflow/runtime/start-from-im"
 import { evaluateImRate } from "@/lib/connectors/im-rate/registry"
+import { getRunningAdapter } from "./lifecycle"
 import { makeImPermissionResponder } from "./hitl/tool-approval"
 import { TurnActivityDispatcher } from "./activity/turn-activity-dispatcher"
 import { resolveActivityI18n } from "./activity/i18n"
@@ -68,6 +69,59 @@ import { resolveActivityI18n } from "./activity/i18n"
  * resolves before the turn times out, while still bounding a stuck sidecar.
  */
 const CONNECTOR_TURN_TIMEOUT_MS = 15 * 60 * 1000
+
+/**
+ * Canned user-facing texts for proactive IM failure notifications
+ * (`notifyConversationOverIM`).
+ *
+ * PATTERN NOTE — IM-outbound strings cannot use next-intl (`useTranslations`
+ * is React-only; this runtime is not a component tree), and the repo has no
+ * locale-keyed catalog for notification texts today. The existing precedent
+ * for `notifyConversationOverIM` call sites is inline bilingual "zh / en"
+ * strings (see the terminal notify in
+ * `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`); the live-activity
+ * card's locale-resolved bag (`lib/connectors/activity/i18n.ts`) instead needs
+ * `AppSettings` at the call site, which the dispatch-failure paths below do
+ * not have. Follow the bilingual precedent, but keep every canned notice in
+ * this one named table so a future locale-bag refactor has a single seam.
+ */
+const IM_FAILURE_NOTICE = {
+  /** Single-character ai-run capture failed (sidecar error). */
+  replyFailed: {
+    title: "回复失败 / Reply failed",
+    body: "助手处理这条消息时出错。/ The assistant hit an error processing this message.",
+  },
+  /** Bound team / workflow could not be dispatched for this turn. */
+  dispatchFailed: {
+    title: "任务分发失败 / Dispatch failed",
+    body: "绑定的团队或工作流无法启动，本条消息未被处理。/ The bound team or workflow could not start; this message was not processed.",
+  },
+} as const
+
+/**
+ * Fire-and-forget an IM failure notice (control-plane notifications): lands in
+ * the Notification Center always, and pushes to IM when the conversation opted
+ * in. Coalesced via `notifyConversationOverIM`'s `dedupeKey`. The dynamic
+ * import keeps the notifications runtime out of the connector bundle;
+ * best-effort so it can never mask the original failure.
+ */
+function notifyImFailure(
+  conversationKey: string,
+  notice: { title: string; body: string },
+  dedupeKey: string
+): void {
+  void import("@/lib/notifications/conversation-notify")
+    .then(({ notifyConversationOverIM }) =>
+      notifyConversationOverIM({
+        conversationKey,
+        level: "error",
+        title: notice.title,
+        body: notice.body,
+        dedupeKey,
+      })
+    )
+    .catch(() => undefined)
+}
 
 /** Resolved outbound target for one ai-run reply — see `resolveRespondViaTarget`. */
 export interface RespondViaTarget {
@@ -390,12 +444,24 @@ export async function insertInboundMessage(
         messageId: event.messageId,
         platform: event.platform,
         sender: event.sender,
+        // Scope edit/delete lookups: per-chat message ids (Telegram, Slack)
+        // collide across chats/adapters, so the bus matches on these too.
+        adapterId: event.adapterId,
+        conversationKey: event.conversationKey,
       },
       ...(inboundA2UI ? { inboundA2UI } : {}),
     },
     createdAt: now,
   }
   await getDb().messages.add(row)
+  // Bump the bound session's recency so "most-recently-updated" ordering in
+  // `findActiveSessionForConversation` / `listSessionsByConversationKey`
+  // reflects inbound traffic — without this, a conversation whose session
+  // never changes otherwise goes stale and `/sessions` ordering (plus the
+  // active-session fallback) drifts. Best-effort: a missing row is a no-op.
+  await getDb()
+    .sessions.update(sessionId, { updatedAt: now })
+    .catch(() => undefined)
   return row
 }
 
@@ -415,6 +481,20 @@ function suppressedReasonToAuditKind(
     case "manual_mode_override":
       return "inbound.deferred_manual_mode"
   }
+}
+
+/**
+ * Gate for embedding inbound text into the twin/memory RAG query vector.
+ *
+ * Returns true only when the text is non-empty AND carries no leaking PII —
+ * the same red line `safeSendPrompt` enforces for the LLM leg. The embedding
+ * provider is a cloud-capable sink (`@cognia/provider-embedding`), so an
+ * inbound message that would be blocked before the model reply must not be
+ * embedded first. On a leak we skip the embed and degrade to no-RAG (the
+ * reply is blocked one step later anyway).
+ */
+export function shouldEmbedInboundText(plainText: string): boolean {
+  return plainText.trim().length > 0 && hasNoLeakingPii(plainText)
 }
 
 /**
@@ -479,11 +559,24 @@ async function resolveInboundSendOptions(params: {
     ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory), twinHandshake)
     : undefined
 
+  // PII red line for the RAG legs: when the inbound text would leak PII to the
+  // (cloud-capable) embedding provider, withhold BOTH the precomputed embedding
+  // AND the twin/memory user-message levers below. Gating only the precompute
+  // is not enough — `applyTwinContext` falls back to
+  // `generateEmbedding(userMessage)` when `precomputedQueryEmbedding` is absent,
+  // and the memory retriever calls `deps.embed(query)` the same way — so
+  // passing the raw text would re-embed exactly what this gate blocked.
+  // `resolveSendOptions` only invokes either context builder when its
+  // userMessage is set, so withholding them disables every fallback embed in
+  // one move. Degrades to no-RAG; the LLM leg is blocked by `safeSendPrompt`
+  // one step later anyway.
+  const embedSafe = shouldEmbedInboundText(event.plainText)
+
   // Embed the inbound message ONCE (when twin deps exist) so the twin RAG and
   // memory recall legs share one query vector instead of embedding twice. Memory
   // reuses the twin embedding model, so the vector is valid for both. Best-effort.
   let turnEmbedding: number[] | undefined
-  if (twinHandshake && event.plainText.trim()) {
+  if (twinHandshake && embedSafe) {
     try {
       turnEmbedding = (await generateEmbedding(event.plainText, twinHandshake.embedding)).embedding
     } catch {
@@ -503,9 +596,9 @@ async function resolveInboundSendOptions(params: {
     imOverrideRow: override,
     imAdapterRow: adapterRow,
     twinDeps: twinHandshake,
-    twinUserMessage: twinHandshake ? event.plainText : undefined,
+    twinUserMessage: twinHandshake && embedSafe ? event.plainText : undefined,
     memoryDeps: memoryHandshake,
-    memoryUserMessage: memoryHandshake ? event.plainText : undefined,
+    memoryUserMessage: memoryHandshake && embedSafe ? event.plainText : undefined,
     precomputedQueryEmbedding: turnEmbedding,
     // Open the connector turn's agent-trace ROOT span (ai-run) so the whole
     // turn appears in the waterfall under surface "connector". Draft prepares
@@ -682,6 +775,17 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               sourceMessageId: storedMsg.id,
             },
           })
+          // Surface the failure to the conversation (parity with the
+          // capture-failure branch below) — an audit row alone leaves the IM
+          // user with silence. Skipped for the stale-instance-default case,
+          // which falls through to a live single-character reply instead.
+          if (!res.started && !staleInstanceDefault) {
+            notifyImFailure(
+              event.conversationKey,
+              IM_FAILURE_NOTICE.dispatchFailed,
+              `dispatch-error:${event.conversationKey}`
+            )
+          }
           // A deleted team behind the BOT default must not brick every
           // message on the instance — fall through to the single-character
           // ai-run below. An explicitly `/team`-bound (or rule-bound)
@@ -720,6 +824,16 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             ...(res.ok ? {} : { reason: res.reason ?? "workflow_dispatch_failed" }),
             fields: { workflowId: effectiveWorkflowId, sourceMessageId: storedMsg.id },
           })
+          // Surface the failure to the conversation (parity with the
+          // capture-failure branch below) — the audit row alone leaves the IM
+          // user with silence.
+          if (!res.ok) {
+            notifyImFailure(
+              event.conversationKey,
+              IM_FAILURE_NOTICE.dispatchFailed,
+              `dispatch-error:${event.conversationKey}`
+            )
+          }
           break
         }
 
@@ -833,6 +947,30 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               },
             })
           : null
+        // ── Respond-via bot (multi-bot cross-account send) ──
+        // A matched dispatch rule may ask for the reply to be delivered
+        // through ANOTHER of our own bot instances. Validate the target at
+        // dispatch time (exists, enabled, not muted, same platform) and fall
+        // back to the receiving bot — with an audit trail either way — so a
+        // stale rule can never silently drop the reply. Resolved BEFORE the
+        // capture so platform streaming can be gated on it: when the reply is
+        // rewired away from the receiving adapter+conversation, the RECEIVING
+        // bot must not stream partial frames it will never finalize (the
+        // sibling posts the final — the user would otherwise see an orphaned
+        // duplicate preview).
+        const outboundTarget = await resolveRespondViaTarget(
+          routing.respondViaAdapterId,
+          event,
+          adapterRow
+        )
+        const streamsThroughReceiver =
+          outboundTarget.adapterId === event.adapterId &&
+          outboundTarget.conversationKey === event.conversationKey
+        // Abort propagation: thread the per-adapter teardown signal (aborted
+        // by the install teardown and by a lifecycle requeue/stop) into the
+        // capture, so tearing the runtime down halts an in-flight turn instead
+        // of letting it run to the 15-min timeout and write Dexie post-unmount.
+        const adapterSignal = getRunningAdapter(event.adapterId)?.abortController.signal
         const cap: import("@/lib/claude/run-and-capture").RunAndCaptureOptions & {
           adapterId?: string
           conversationKey?: string
@@ -842,6 +980,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           adapterId: event.adapterId,
           conversationKey: event.conversationKey,
           timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
+          ...(adapterSignal ? { signal: adapterSignal } : {}),
           onPermissionRequest: makeImPermissionResponder({
             sessionId: session.id,
             adapterId: event.adapterId,
@@ -856,7 +995,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
                 },
               }
             : {}),
-          ...(typeof targetAdapter?.streamReply === "function"
+          ...(streamsThroughReceiver && typeof targetAdapter?.streamReply === "function"
             ? {
                 onPartial: (text: string) => {
                   void targetAdapter.streamReply!({
@@ -900,22 +1039,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           } catch {
             /* best-effort — the original error is what matters */
           }
-          // Proactively surface the failure (control-plane notifications): the
-          // user otherwise gets silence on a sidecar error. Lands in the
-          // Notification Center always, and pushes to IM when the conversation
-          // opted in. Dynamic import keeps the notifications runtime out of the
-          // connector bundle; best-effort so it never masks the original error.
-          void import("@/lib/notifications/conversation-notify")
-            .then(({ notifyConversationOverIM }) =>
-              notifyConversationOverIM({
-                conversationKey: event.conversationKey,
-                level: "error",
-                title: "回复失败 / Reply failed",
-                body: "助手处理这条消息时出错。/ The assistant hit an error processing this message.",
-                dedupeKey: `airun-error:${event.conversationKey}`,
-              })
-            )
-            .catch(() => undefined)
+          // Proactively surface the failure: the user otherwise gets silence
+          // on a sidecar error.
+          notifyImFailure(
+            event.conversationKey,
+            IM_FAILURE_NOTICE.replyFailed,
+            `airun-error:${event.conversationKey}`
+          )
           // Close the agent-trace root span on a failed capture so it doesn't
           // dangle. Idempotent + no-op when minting was skipped (suppressed).
           if (sendOptions.spanId) {
@@ -953,17 +1083,8 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           a2uiSurfaceOrder: captured.a2uiSurfaceOrder,
         })
         const idempotencyKey = `airun:${captured.messageId}`
-        // ── Respond-via bot (multi-bot cross-account send) ──
-        // A matched dispatch rule may ask for the reply to be delivered
-        // through ANOTHER of our own bot instances. Validate the target at
-        // dispatch time (exists, enabled, not muted, same platform) and fall
-        // back to the receiving bot — with an audit trail either way — so a
-        // stale rule can never silently drop the reply.
-        const outboundTarget = await resolveRespondViaTarget(
-          routing.respondViaAdapterId,
-          event,
-          adapterRow
-        )
+        // Deliver through the respond-via target resolved above (falls back to
+        // the receiving bot on any invalid target).
         await enqueueOutbound({
           adapterId: outboundTarget.adapterId,
           conversationKey: outboundTarget.conversationKey,
@@ -1047,10 +1168,14 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const draftPrompt = inboundEventToSendContent(event)
         let draftCapture: Awaited<ReturnType<RunAndCaptureFn>>
         try {
+          // Same abort propagation as the ai-run branch: the adapter's
+          // teardown signal halts an in-flight draft generation too.
+          const draftSignal = getRunningAdapter(event.adapterId)?.abortController.signal
           draftCapture = await opts.runAndCapture(session.id, draftPrompt, sendOptions, {
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
             timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
+            ...(draftSignal ? { signal: draftSignal } : {}),
             onPermissionRequest: () => ({ decision: "deny" as const }),
           })
         } catch (err) {

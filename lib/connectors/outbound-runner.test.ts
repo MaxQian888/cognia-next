@@ -16,15 +16,28 @@
 
 import "fake-indexeddb/auto"
 // Delegate to the real outbound-jobs module by default so every existing test
-// keeps its real DB behavior; a single test overrides `markSending` once to
-// simulate losing the atomic claim to another runner.
+// keeps its real DB behavior; individual tests override `markSending` (to
+// simulate losing the atomic claim) or `listDueNow` (to simulate a persistent
+// Dexie drain failure) and restore the delegating default afterwards.
 jest.mock("@/lib/db/outbound-jobs", () => {
   const real = jest.requireActual("@/lib/db/outbound-jobs")
-  return { ...real, markSending: jest.fn((id: string) => real.markSending(id)) }
+  return {
+    ...real,
+    markSending: jest.fn((id: string) => real.markSending(id)),
+    listDueNow: jest.fn(() => real.listDueNow()),
+  }
 })
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
-import { enqueueOutbound, markSending } from "@/lib/db/outbound-jobs"
+import {
+  enqueueOutbound,
+  markSending,
+  markFailed,
+  markDeadlettered,
+  markSent,
+  listDueNow,
+  STALE_SENDING_GRACE_MS,
+} from "@/lib/db/outbound-jobs"
 import { listRecent } from "@/lib/db/connector-audit"
 import {
   __resetAdapterRuntimeStateForTesting,
@@ -51,6 +64,9 @@ jest.mock("@cognia/redact", () => ({
 }))
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+/** Pseudo adapter id the runner uses for runner-level audit rows. */
+const RUNNER_AUDIT_ID = "__outbound_runner__"
 
 function makeAdapter(id: string, send: () => Promise<OutboundResult>): PlatformAdapter {
   return {
@@ -985,6 +1001,9 @@ describe("outbound-runner — per-bot outbound tuning", () => {
     const limited = jobs.filter((j) => j.lastErrorCode === "rate_limited")
     expect(sent).toHaveLength(1)
     expect(limited).toHaveLength(1)
+    // A rate-limit deferral is not a delivery attempt: the post-claim
+    // `unclaimSending` refunds the attempt `markSending` charged.
+    expect(limited[0].attempts).toBe(0)
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "rate_limit.tripped")).toBe(true)
   })
@@ -1002,15 +1021,26 @@ describe("outbound-runner — per-bot outbound tuning", () => {
 
     const { promise, stop } = createRunner(adapters)
     const jobs = await waitForJobs(
-      (rows) => rows.length === 2 && rows.every((j) => j.status === "deadlettered")
+      (rows) =>
+        rows.length === 2 &&
+        rows.some((j) => j.status === "deadlettered") &&
+        rows.some((j) => j.lastErrorCode === "circuit_open")
     )
     stop()
     await promise
 
     // First failure trips the tuned breaker (default minEvents=5 would not),
-    // so the second job dead-letters on the circuit gate without a send.
-    expect(jobs.every((j) => j.status === "deadlettered")).toBe(true)
-    expect(jobs.some((j) => j.lastErrorCode === "circuit_open")).toBe(true)
+    // so the second job hits the circuit gate without a send — and is
+    // DEFERRED until the breaker cooldown ends, not dead-lettered (an open
+    // breaker is a transient adapter condition, not a per-job failure).
+    const dead = jobs.find((j) => j.lastErrorCode === "validation")
+    expect(dead?.status).toBe("deadlettered")
+    const deferred = jobs.find((j) => j.lastErrorCode === "circuit_open")
+    expect(deferred).toBeDefined()
+    expect(deferred!.status).toBe("failed")
+    expect(deferred!.nextAttemptAt).toBeGreaterThan(Date.now())
+    // A breaker deferral must not consume the max-attempts budget.
+    expect(deferred!.attempts).toBe(0)
     expect(adapter.send).toHaveBeenCalledTimes(1)
   })
 })
@@ -1057,7 +1087,7 @@ describe("outbound-runner — circuit-open failover", () => {
     expect(audits.some((a) => a.kind === "delivery.failover")).toBe(true)
   })
 
-  it("never fails over twice: a job that already hopped dead-letters as circuit_open", async () => {
+  it("never fails over twice: a job that already hopped defers as circuit_open", async () => {
     const primary = "a_fo_guard"
     const sibling = "b_fo_guard"
     await seedInstance(primary, {
@@ -1089,13 +1119,20 @@ describe("outbound-runner — circuit-open failover", () => {
 
     const { promise, stop } = createRunner(adapters)
     const jobs = await waitForJobs(
-      (rows) => rows.length === 2 && rows.every((j) => j.status === "deadlettered")
+      (rows) =>
+        rows.length === 2 &&
+        rows.some((j) => j.status === "deadlettered") &&
+        rows.some((j) => j.lastErrorCode === "circuit_open")
     )
     stop()
     await promise
 
     expect(jobs).toHaveLength(2)
-    expect(jobs.some((j) => j.lastErrorCode === "circuit_open")).toBe(true)
+    // The already-hopped job is DEFERRED behind the open breaker (never a
+    // second hop, never a dead-letter for the breaker alone).
+    const hopped = jobs.find((j) => j.idempotencyKey === "k_guard_2")
+    expect(hopped?.status).toBe("failed")
+    expect(hopped?.lastErrorCode).toBe("circuit_open")
     // No third job was minted on the sibling.
     expect(jobs.every((j) => j.adapterId === primary)).toBe(true)
   })
@@ -1292,5 +1329,393 @@ describe("outbound-runner — per-conversation mute", () => {
     expect(adapter.send).toHaveBeenCalledTimes(1)
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.reason === "muted" && a.conversationKey === mutedKey)).toBe(true)
+  })
+})
+
+// ── Muted defer window + once-per-job audit ───────────────────────────────────
+
+describe("outbound-runner — muted defer audit hygiene", () => {
+  it("defers a muted job by 5 minutes and audits the deferral once per job", async () => {
+    const adapterId = "a_mute_once"
+    await seedInstance(adapterId, { muted: true })
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true }))
+    const start = Date.now()
+    const job = await enqueue(adapterId, `telegram:${adapterId}:chat`, "k_mute_once")
+
+    const { promise, stop } = createRunner(new Map([[adapterId, adapter]]))
+    try {
+      // First cycle: deferred ~5 min out, audited once.
+      let row = (await waitForJobs((rows) => rows[0]?.lastErrorCode === "muted"))[0]
+      expect(row.status).toBe("failed")
+      expect(row.nextAttemptAt).toBeGreaterThanOrEqual(start + 4 * 60_000)
+
+      // Simulate the defer window elapsing: make the job due again while
+      // still muted. The SAME runner re-defers it but must NOT re-audit.
+      await getDb().outboundQueue.update(job.id, { nextAttemptAt: Date.now() - 1 })
+      row = (
+        await waitForJobs((rows) => rows[0]?.nextAttemptAt > Date.now() + 60_000)
+      )[0]
+      expect(row.lastErrorCode).toBe("muted")
+
+      const audits = await listRecent(adapterId)
+      const muteAudits = audits.filter(
+        (a) => a.kind === "delivery.error" && a.reason === "muted"
+      )
+      expect(muteAudits).toHaveLength(1)
+      expect(adapter.send).not.toHaveBeenCalled()
+    } finally {
+      stop()
+      await promise
+    }
+  })
+})
+
+// ── Stale `sending` claim recovery (runner integration) ───────────────────────
+
+describe("outbound-runner — stale sending recovery", () => {
+  function sendingRow(
+    id: string,
+    adapterId: string,
+    claimedAt: number,
+    idempotencyKey: string
+  ): Record<string, unknown> {
+    const at = claimedAt - 1_000
+    return {
+      id,
+      adapterId,
+      conversationKey: `telegram:${adapterId}:chat_${id}`,
+      request: {
+        conversationRef: { platform: "telegram", adapterId },
+        segments: [{ type: "text", text: "hello" }],
+        metadata: { idempotencyKey },
+      },
+      status: "sending",
+      attempts: 1,
+      createdAt: at,
+      nextAttemptAt: at,
+      idempotencyKey,
+      source: "ai-run",
+      claimedAt,
+    }
+  }
+
+  it("recovers a stale sending row on startup and retries it to delivery", async () => {
+    const adapterId = "a_stale"
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_r" }))
+    await getDb().outboundQueue.add(
+      sendingRow(
+        "stale_job",
+        adapterId,
+        Date.now() - STALE_SENDING_GRACE_MS - 60_000,
+        "k_stale_r"
+      ) as never
+    )
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    const row = await getDb().outboundQueue.get("stale_job")
+    expect(row?.status).toBe("sent")
+    expect(adapter.send).toHaveBeenCalledTimes(1)
+    const audits = await listRecent(adapterId)
+    expect(
+      audits.some((a) => a.kind === "delivery.error" && a.reason === "stale_sending_recovered")
+    ).toBe(true)
+  })
+
+  it("leaves a fresh sending row (inside the grace window) untouched", async () => {
+    const adapterId = "a_fresh"
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true }))
+    await getDb().outboundQueue.add(
+      sendingRow("fresh_job", adapterId, Date.now(), "k_fresh_r") as never
+    )
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    const row = await getDb().outboundQueue.get("fresh_job")
+    expect(row?.status).toBe("sending")
+    expect(adapter.send).not.toHaveBeenCalled()
+  })
+})
+
+// ── Row-evidence idempotency (persistent dedupe) ──────────────────────────────
+
+describe("outbound-runner — row-evidence dedupe", () => {
+  it("treats a retry row that already carries platformMessageId as delivered (no re-send)", async () => {
+    const adapterId = "a_evidence"
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_x" }))
+    const job = await enqueue(adapterId, `telegram:${adapterId}:chat`, "k_ev_row")
+    // Simulate a rewound row that already has delivery evidence.
+    await getDb().outboundQueue.update(job.id, {
+      status: "failed",
+      nextAttemptAt: Date.now() - 1,
+      platformMessageId: "pm_prior",
+    })
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    const row = await getDb().outboundQueue.get(job.id)
+    expect(row?.status).toBe("sent")
+    expect(row?.platformMessageId).toBe("pm_prior")
+    expect(adapter.send).not.toHaveBeenCalled()
+    const audits = await listRecent(adapterId)
+    expect(
+      audits.some((a) => a.kind === "delivery.success" && a.message === "row_evidence_hit")
+    ).toBe(true)
+  })
+
+  it("serves a rebooted runner (empty LRU) from a delivered sibling row with the same key", async () => {
+    const adapterId = "a_evidence_db"
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_y" }))
+    const key = "k_ev_shared"
+    // A prior session delivered this key and recorded the evidence on its row.
+    const delivered = await enqueue(adapterId, `telegram:${adapterId}:chat`, key)
+    await markSent(delivered.id, "pm_prev_session")
+    // The retry job (same key) faces a fresh runner whose LRU is empty.
+    await enqueue(adapterId, `telegram:${adapterId}:chat`, key)
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    const rows = await getDb().outboundQueue.toArray()
+    expect(rows.every((r) => r.status === "sent")).toBe(true)
+    expect(rows.every((r) => r.platformMessageId === "pm_prev_session")).toBe(true)
+    expect(adapter.send).not.toHaveBeenCalled()
+  })
+})
+
+// ── Breaker interplay: defer / recover / 429 exclusion / max-attempts ─────────
+
+describe("outbound-runner — breaker defer + recovery", () => {
+  it("delivers a breaker-deferred job once the cooldown elapses (recovery)", async () => {
+    let t = 1_000_000
+    const now = () => t
+    const adapterId = "a_brk_recover"
+    await seedInstance(adapterId, { outboundTuning: { breakerMinEvents: 1 } })
+    let calls = 0
+    const adapter = makeAdapter(adapterId, async () => {
+      calls++
+      if (calls === 1) {
+        return { ok: false, error: { code: "validation", message: "bad", retryable: false } }
+      }
+      return { ok: true, platformMessageId: "pm_recovered" }
+    })
+    const adapters = new Map([[adapterId, adapter]])
+    // Same conversation: the lane serializes them, so the first job trips
+    // the breaker BEFORE the second hits the open-circuit gate and defers
+    // (parallel lanes would race the send past the not-yet-open breaker).
+    await enqueue(adapterId, `telegram:${adapterId}:chat`, "k_rec_1")
+    await new Promise<void>((r) => setTimeout(r, 2))
+    await enqueue(adapterId, `telegram:${adapterId}:chat`, "k_rec_2")
+
+    const { promise, stop } = createRunner(adapters, { now })
+    try {
+      await waitForJobs(
+        (rows) =>
+          rows.some((j) => j.status === "deadlettered") &&
+          rows.some((j) => j.lastErrorCode === "circuit_open" && j.status === "failed")
+      )
+      expect(calls).toBe(1)
+
+      // Cooldown (default 30 s) elapses → breaker half-opens → the deferred
+      // job's next pick sends for real and succeeds.
+      t += 31_000
+      const jobs = await waitForJobs((rows) => rows.some((j) => j.status === "sent"))
+      const recovered = jobs.find((j) => j.status === "sent")
+      expect(recovered?.idempotencyKey).toBe("k_rec_2")
+      expect(calls).toBe(2)
+    } finally {
+      stop()
+      await promise
+    }
+  })
+
+  it("retryable rate_limited failures (429 storm) never open the breaker", async () => {
+    const adapterId = "a_429"
+    // minEvents 1: ONE counted failure would open the breaker — so if the
+    // second job still reaches the adapter, 429s were excluded.
+    await seedInstance(adapterId, { outboundTuning: { breakerMinEvents: 1 } })
+    const adapter = makeAdapter(adapterId, async () => ({
+      ok: false,
+      error: { code: "rate_limited", message: "429", retryable: true },
+    }))
+    const adapters = new Map([[adapterId, adapter]])
+    await enqueue(adapterId, `telegram:${adapterId}:chat_1`, "k_429_1")
+    await enqueue(adapterId, `telegram:${adapterId}:chat_2`, "k_429_2")
+
+    const { promise, stop } = createRunner(adapters)
+    const jobs = await waitForJobs(
+      (rows) => rows.filter((j) => j.lastErrorCode === "rate_limited").length === 2
+    )
+    // Read the live breaker state BEFORE stopping (the registry clears on
+    // stop): two counted failures with minEvents=1 would have opened it.
+    const snap = getAdapterRuntimeStateSnapshot(adapterId)
+    stop()
+    await promise
+
+    // Both jobs reached the platform (no circuit gate short-circuit), both
+    // deferred as plain retryable failures, and nothing dead-lettered.
+    expect(adapter.send).toHaveBeenCalledTimes(2)
+    expect(jobs.every((j) => j.status === "failed")).toBe(true)
+    expect(snap?.breaker.state).toBe("closed")
+    const audits = await listRecent(adapterId)
+    expect(audits.some((a) => a.kind === "circuit.opened")).toBe(false)
+    expect(audits.some((a) => a.reason === "circuit_open")).toBe(false)
+  })
+
+  it("a max-attempts bookkeeping dead-letter does not feed the breaker", async () => {
+    const adapterId = "a_max_nobrk"
+    // minEvents 1: if the max-attempts dead-letter recorded a breaker
+    // failure, the next job would hit an open circuit instead of sending.
+    await seedInstance(adapterId, { outboundTuning: { breakerMinEvents: 1 } })
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_ok" }))
+    const at = Date.now() - 1_000
+    await getDb().outboundQueue.add({
+      id: "maxed_job",
+      adapterId,
+      conversationKey: `telegram:${adapterId}:chat_maxed`,
+      request: {
+        conversationRef: { platform: "telegram", adapterId },
+        segments: [{ type: "text", text: "hello" }],
+        metadata: { idempotencyKey: "k_maxed" },
+      },
+      status: "failed",
+      attempts: 5,
+      createdAt: at,
+      nextAttemptAt: at,
+      idempotencyKey: "k_maxed",
+      source: "ai-run",
+    } as never)
+    // Same conversation: the lane dead-letters the maxed job FIRST, so the
+    // live job's outcome deterministically reflects the breaker state that
+    // the dead-letter left behind.
+    await enqueue(adapterId, `telegram:${adapterId}:chat_maxed`, "k_live_after_max")
+
+    const { promise, stop } = createRunner(new Map([[adapterId, adapter]]))
+    const jobs = await waitForJobs(
+      (rows) =>
+        rows.some((j) => j.status === "deadlettered") && rows.some((j) => j.status === "sent")
+    )
+    stop()
+    await promise
+
+    expect(jobs.find((j) => j.id === "maxed_job")?.lastErrorCode).toBe("max_attempts")
+    expect(jobs.find((j) => j.idempotencyKey === "k_live_after_max")?.status).toBe("sent")
+    expect(adapter.send).toHaveBeenCalledTimes(1)
+    const audits = await listRecent(adapterId)
+    expect(audits.some((a) => a.kind === "circuit.opened")).toBe(false)
+  })
+})
+
+// ── Cross-pass per-conversation FIFO ──────────────────────────────────────────
+
+describe("outbound-runner — cross-pass FIFO ordering", () => {
+  it("a deferred older job blocks a newer same-conversation sibling until it resolves", async () => {
+    const adapterId = "a_xpass"
+    const conversationKey = `telegram:${adapterId}:chat`
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_f" }))
+    const older = await enqueue(adapterId, conversationKey, "k_xp_older")
+    await new Promise<void>((r) => setTimeout(r, 2))
+    const newer = await enqueue(adapterId, conversationKey, "k_xp_newer")
+    // The older job was deferred to a future pass (e.g. retry backoff).
+    const olderRetryAt = Date.now() + 60_000
+    await markFailed(older.id, "network", "boom", olderRetryAt)
+
+    const { promise, stop } = createRunner(new Map([[adapterId, adapter]]))
+    try {
+      // The newer job must NOT deliver while the older one is unresolved —
+      // it is pushed out to the blocker's retry time instead.
+      const blocked = (
+        await waitForJobs((rows) => {
+          const b = rows.find((j) => j.id === newer.id)
+          return !!b && b.nextAttemptAt >= olderRetryAt
+        })
+      ).find((j) => j.id === newer.id)
+      expect(blocked?.status).toBe("pending")
+      expect(adapter.send).not.toHaveBeenCalled()
+
+      // The older sibling dead-letters → the lane unblocks; make the newer
+      // job due again and it delivers.
+      await markDeadlettered(older.id, "max_attempts", "gave up")
+      await getDb().outboundQueue.update(newer.id, { nextAttemptAt: Date.now() - 1 })
+      const jobs = await waitForJobs((rows) =>
+        rows.some((j) => j.id === newer.id && j.status === "sent")
+      )
+      expect(jobs.find((j) => j.id === newer.id)?.status).toBe("sent")
+      expect(adapter.send).toHaveBeenCalledTimes(1)
+    } finally {
+      stop()
+      await promise
+    }
+  })
+})
+
+// ── Rate token is not consumed by a lost claim ────────────────────────────────
+
+describe("outbound-runner — claim-then-token ordering", () => {
+  it("does not consume a rate token when the atomic claim is lost", async () => {
+    const adapterId = "a_lost_token"
+    // Capacity 1 with negligible refill: a single wasted token would drain
+    // the bucket to 0 for the whole test window.
+    await seedInstance(adapterId, {
+      outboundTuning: { rateCapacity: 1, rateRefillPerSec: 0.001 },
+    })
+    const send = jest.fn(async () => ({ ok: true }) as OutboundResult)
+    const adapter = makeAdapter(adapterId, send)
+    const realMarkSending = jest.requireActual("@/lib/db/outbound-jobs").markSending
+    await enqueue(adapterId, `telegram:${adapterId}:chat`, "k_lost_token")
+    // Another runner owns every claim for the whole pass.
+    ;(markSending as jest.Mock).mockImplementation(async () => false)
+
+    const { promise, stop } = createRunner(new Map([[adapterId, adapter]]))
+    try {
+      // Wait until the runner has processed the job at least once (state
+      // registry becomes non-null once the breaker/bucket pair is built).
+      let available: number | null = null
+      for (let i = 0; i < 50; i++) {
+        await new Promise<void>((r) => setTimeout(r, 20))
+        const snap = getAdapterRuntimeStateSnapshot(adapterId)
+        if (snap) {
+          available = snap.bucket.available
+          break
+        }
+      }
+      // The claim was lost BEFORE the token acquisition, so the single
+      // token is still there (pre-fix ordering would have consumed it).
+      expect(available).not.toBeNull()
+      expect(available!).toBeGreaterThanOrEqual(1)
+      expect(send).not.toHaveBeenCalled()
+    } finally {
+      ;(markSending as jest.Mock).mockImplementation((id: string) => realMarkSending(id))
+      stop()
+      await promise
+    }
+  })
+})
+
+// ── Drain-pass DB errors are visible + throttled ──────────────────────────────
+
+describe("outbound-runner — drain error visibility", () => {
+  it("logs and audits a persistent drain failure, throttled to one audit row", async () => {
+    const realListDueNow = jest.requireActual("@/lib/db/outbound-jobs").listDueNow
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    ;(listDueNow as jest.Mock).mockImplementation(async () => {
+      throw new Error("dexie exploded")
+    })
+    try {
+      // pollIntervalMs 1 → dozens of failing drain passes in 120 ms.
+      await runOnce(new Map())
+      expect(
+        errorSpy.mock.calls.some((c) => String(c[0]).includes("drain pass failed"))
+      ).toBe(true)
+      const audits = await listRecent(RUNNER_AUDIT_ID)
+      const drainAudits = audits.filter(
+        (a) => a.kind === "adapter.error" && a.reason === "drain_failed"
+      )
+      // Many passes failed, but the audit is throttled to once per minute.
+      expect(drainAudits).toHaveLength(1)
+      expect(drainAudits[0].message).toContain("dexie exploded")
+    } finally {
+      ;(listDueNow as jest.Mock).mockImplementation(() => realListDueNow())
+      errorSpy.mockRestore()
+    }
   })
 })

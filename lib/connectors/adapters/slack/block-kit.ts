@@ -60,6 +60,33 @@ export function escapeSlackMrkdwn(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Block Kit hard limits (https://api.slack.com/reference/block-kit)
+// Enforced by truncation, matching the defensive-trim precedent of
+// `serializeAssistantSuggestedPrompts` (which slices to Slack's cap instead
+// of letting the API 4xx).
+// ---------------------------------------------------------------------------
+
+/** Slack rejects messages with more than 50 blocks. */
+export const MAX_BLOCKS_PER_MESSAGE = 50
+/** `header` block plain_text is capped at 150 characters. */
+export const HEADER_TEXT_MAX = 150
+/** Button plain_text label is capped at 75 characters. */
+export const BUTTON_TEXT_MAX = 75
+/** static_select / radio_buttons accept at most 100 options. */
+export const SELECT_OPTIONS_MAX = 100
+
+/** Truncate to `max` characters, marking the cut with an ellipsis. */
+function truncateWithEllipsis(text: string, max: number): string {
+  if (text.length <= max) return text
+  return `${text.slice(0, Math.max(0, max - 1))}…`
+}
+
+/** Clamp a blocks list to Slack's 50-blocks-per-message hard cap. */
+export function clampBlocks<T>(blocks: T[]): T[] {
+  return blocks.length > MAX_BLOCKS_PER_MESSAGE ? blocks.slice(0, MAX_BLOCKS_PER_MESSAGE) : blocks
+}
+
+// ---------------------------------------------------------------------------
 // Segment → blocks
 // ---------------------------------------------------------------------------
 
@@ -168,12 +195,7 @@ interface ContextBlock {
 }
 
 export type SlackAnyBlock =
-  | SlackBlock
-  | ActionsBlock
-  | InputBlock
-  | HeaderBlock
-  | DividerBlock
-  | ContextBlock
+  SlackBlock | ActionsBlock | InputBlock | HeaderBlock | DividerBlock | ContextBlock
 
 /**
  * Project an A2UI surface into Slack Block Kit blocks. Async because
@@ -213,7 +235,10 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
         flushActions()
         const title = stringValue(node.raw.title)
         if (title) {
-          out.push({ type: "header", text: { type: "plain_text", text: title } })
+          out.push({
+            type: "header",
+            text: { type: "plain_text", text: truncateWithEllipsis(title, HEADER_TEXT_MAX) },
+          })
         }
         break
       }
@@ -231,7 +256,10 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
         if (!text) break
         const variant = stringValue(node.raw.variant)
         if (variant === "heading1" || variant === "heading2") {
-          out.push({ type: "header", text: { type: "plain_text", text } })
+          out.push({
+            type: "header",
+            text: { type: "plain_text", text: truncateWithEllipsis(text, HEADER_TEXT_MAX) },
+          })
         } else if (variant === "heading3") {
           out.push(sectionBlock(`*${escapeSlackMrkdwn(text)}*`))
         } else {
@@ -283,7 +311,7 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
         }
         const element: Record<string, unknown> = {
           type: "button",
-          text: { type: "plain_text", text: label },
+          text: { type: "plain_text", text: truncateWithEllipsis(label, BUTTON_TEXT_MAX) },
           action_id: fullId,
           ...(style ? { style } : {}),
         }
@@ -307,6 +335,7 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
         const options = Array.isArray(node.raw.options)
           ? (node.raw.options as Array<Record<string, unknown>>)
               .filter((o) => o && (typeof o.value === "string" || typeof o.value === "number"))
+              .slice(0, SELECT_OPTIONS_MAX)
               .map((o) => ({
                 text: {
                   type: "plain_text" as const,

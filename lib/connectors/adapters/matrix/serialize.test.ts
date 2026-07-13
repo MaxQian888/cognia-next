@@ -5,6 +5,7 @@ import {
   escapeHtml,
   mdToMatrixHtml,
   serializeEdit,
+  serializeMediaFailureNotice,
   serializeMediaLinkFallback,
   serializeOutbound,
   serializeReaction,
@@ -40,10 +41,12 @@ describe("escapeHtml / mdToMatrixHtml", () => {
 })
 
 describe("serializeOutbound", () => {
-  it("renders plain text without a formatted_body", () => {
+  it("renders plain text as m.notice without a formatted_body", () => {
     const { contents } = serializeOutbound(req([{ type: "text", text: "hi" }]))
     expect(contents).toHaveLength(1)
-    expect(contents[0]).toEqual({ msgtype: "m.text", body: "hi" })
+    // m.notice is the bot convention — well-behaved bots ignore m.notice,
+    // which prevents bot-to-bot reply loops.
+    expect(contents[0]).toEqual({ msgtype: "m.notice", body: "hi" })
   })
 
   it("renders markdown with an org.matrix.custom.html formatted_body", () => {
@@ -132,10 +135,31 @@ describe("serializeOutbound", () => {
 
   it("serializeMediaLinkFallback renders the pre-upload link line", () => {
     expect(serializeMediaLinkFallback({ type: "image", url: "https://e.com/p.png" })).toEqual({
-      msgtype: "m.text",
+      msgtype: "m.notice",
       body: "[image] https://e.com/p.png",
       format: "org.matrix.custom.html",
       formatted_body: '<a href="https://e.com/p.png">[image]</a>',
+    })
+  })
+
+  it("serializeMediaFailureNotice names the attachment without leaking a url", () => {
+    expect(serializeMediaFailureNotice("secret.pdf")).toEqual({
+      msgtype: "m.notice",
+      body: "[attachment upload failed: secret.pdf]",
+    })
+  })
+
+  it("strips the roomId| composite prefix from reply/thread targets", () => {
+    const { contents } = serializeOutbound(
+      req([{ type: "text", text: "re" }], {
+        replyTo: { messageId: "!r:s|$orig" },
+        threadId: "!r:s|$root",
+      })
+    )
+    expect(asSend(contents[0])["m.relates_to"]).toMatchObject({
+      rel_type: "m.thread",
+      event_id: "$root",
+      "m.in_reply_to": { event_id: "$orig" },
     })
   })
 
@@ -215,12 +239,28 @@ describe("serializeEdit", () => {
     const content = serializeEdit("$target", req([{ type: "markdown", md: "**v2**" }]))
     expect(content["m.relates_to"]).toEqual({ rel_type: "m.replace", event_id: "$target" })
     expect(content["m.new_content"]).toMatchObject({
-      msgtype: "m.text",
+      msgtype: "m.notice",
       body: "**v2**",
       format: "org.matrix.custom.html",
       formatted_body: "<strong>v2</strong>",
     })
     expect(content.body).toBe("* **v2**")
+  })
+
+  it("accepts the roomId|eventId composite as the edit target", () => {
+    const content = serializeEdit("!r:s|$target", req([{ type: "text", text: "v2" }]))
+    expect(content["m.relates_to"]).toEqual({ rel_type: "m.replace", event_id: "$target" })
+  })
+
+  it("carries m.mentions inside m.new_content", () => {
+    const content = serializeEdit(
+      "$target",
+      req([
+        { type: "text", text: "ping " },
+        { type: "mention", userId: "@u:s", displayName: "U" },
+      ])
+    )
+    expect(content["m.new_content"]?.["m.mentions"]).toEqual({ user_ids: ["@u:s"] })
   })
 
   it("renders media segments as a link line instead of an empty body", () => {

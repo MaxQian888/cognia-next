@@ -12,7 +12,7 @@
  *      from the keyring.
  *   3. POST oauth.v2.access (form-encoded) for the bot token (+ optional user
  *      token).
- *   4. Store `botToken` (and `user_token` when present) in the keyring.
+ *   4. Store `botToken` (and `userToken` when present) in the keyring.
  *   5. Stamp connected-team metadata onto AdapterInstanceRow.settings.
  */
 
@@ -114,7 +114,10 @@ export async function handleSlackOAuth(
   // The bot token is what `buildSlackAdapter` reads as `botToken`.
   await connectorsKeyringSet(adapterId, "botToken", body.access_token)
   if (body.authed_user?.access_token) {
-    await connectorsKeyringSet(adapterId, "user_token", body.authed_user.access_token)
+    // "userToken" is the key `buildSlackAdapter` resolves for
+    // setPresenceStatus (with a legacy fallback to the old "user_token"
+    // key this handler wrote before the unification).
+    await connectorsKeyringSet(adapterId, "userToken", body.authed_user.access_token)
   }
 
   const connectedTeam: SlackConnectedTeam = {
@@ -132,7 +135,7 @@ export async function handleSlackOAuth(
         new Set([
           ...adapter.credentialsRef.accounts,
           "botToken",
-          ...(body.authed_user?.access_token ? ["user_token"] : []),
+          ...(body.authed_user?.access_token ? ["userToken"] : []),
         ])
       ),
     },

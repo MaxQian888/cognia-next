@@ -1,16 +1,19 @@
 /**
  * Generic daily-housekeeping scheduler for connector background sweeps.
  *
- * Extracted so cross-adapter cleanup tasks (attachment cache eviction, and
- * any future periodic prune) share one timer mechanism instead of each
- * re-implementing the setTimeout → setInterval handoff. The first run fires
- * after `initialDelayMs` (so it doesn't compete with app boot); subsequent
- * runs fire every `intervalMs`. Errors thrown by the task are caught and
- * logged so a single failure never kills the schedule.
+ * Extracted so cross-adapter cleanup tasks (the outbound terminal-row
+ * retention sweep below, and any future periodic prune) share one timer
+ * mechanism instead of each re-implementing the setTimeout → setInterval
+ * handoff. The first run fires after `initialDelayMs` (so it doesn't
+ * compete with app boot); subsequent runs fire every `intervalMs`. Errors
+ * thrown by the task are caught and logged so a single failure never kills
+ * the schedule.
  *
  * `startCallbackBindingCleanupSchedule` predates this and keeps its own
  * equivalent loop; it is intentionally left untouched.
  */
+
+import { sweepTerminalOutboundRows } from "@/lib/db/outbound-jobs"
 
 /** Interval between sweeps. 24 h matches the OS-scheduler conventions used elsewhere. */
 export const DAILY_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -93,4 +96,25 @@ export function startDailySchedule(options: DailyScheduleOptions): DailySchedule
       await run()
     },
   }
+}
+
+/**
+ * Daily retention sweep for terminal (`sent` / `deadlettered`) outbound
+ * rows. Deletes terminal rows older than 14 days
+ * (`OUTBOUND_TERMINAL_RETENTION_MS`) in capped batches — nothing else
+ * prunes them, and unbounded terminal history is what used to trip the
+ * queue soft cap and dead-letter every fresh enqueue. Registered by
+ * `installConnectorRuntime` next to the other daily housekeeping handles;
+ * the caller MUST dispose the returned handle on teardown.
+ */
+export function startOutboundRetentionSweep(
+  options?: Pick<DailyScheduleOptions, "intervalMs" | "initialDelayMs" | "scheduler">
+): DailyScheduleHandle {
+  return startDailySchedule({
+    ...options,
+    label: "outbound-retention",
+    task: async () => {
+      await sweepTerminalOutboundRows()
+    },
+  })
 }

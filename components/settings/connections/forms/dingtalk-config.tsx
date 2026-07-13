@@ -113,7 +113,10 @@ export function DingTalkConfigDialog({
           type: "dingtalk",
           displayName: displayName.trim(),
           enabled: true,
-          transportMode: "longpoll",
+          // Stream mode = persistent outbound WebSocket ("gateway"). Older
+          // rows may still carry "longpoll"; the registry ignores the value
+          // when building the DingTalk adapter, so both are tolerated.
+          transportMode: "gateway",
           settings: {},
           credentialsRef: {
             keyringService: "com.cognia.platforms",

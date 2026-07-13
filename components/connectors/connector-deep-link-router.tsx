@@ -20,19 +20,49 @@ import { useEffect } from "react"
 import { toast } from "sonner"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
-import { onDeepLink } from "@/lib/tauri/deep-link"
+import { getLaunchDeepLink, onDeepLink } from "@/lib/tauri/deep-link"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import {
   getLaunchRoute as getCapacitorLaunchRoute,
   subscribe as subscribeCapacitorDeeplink,
 } from "@/lib/capacitor/deeplink"
 import { close as closeCapacitorBrowser } from "@/lib/capacitor/browser"
-import { oauthRegistry } from "@/lib/connectors/oauth-registry"
+import { CONNECTOR_OAUTH_STATE_KEY, oauthRegistry } from "@/lib/connectors/oauth-registry"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { isPlatformKind } from "@/types/connectors/platform-kind"
 
 /** Matches: cognia://connector/oauth/<adapterType>?code=…&state=… */
 const OAUTH_PATH_RE = /^cognia:\/\/connector\/oauth\/([^?#/]+)/
+
+/** Read the pending OAuth state — session first, durable localStorage fallback. */
+function readStoredOAuthState(): string {
+  let stored = ""
+  if (typeof sessionStorage !== "undefined") {
+    stored = sessionStorage.getItem(CONNECTOR_OAUTH_STATE_KEY) ?? ""
+  }
+  if (!stored && typeof localStorage !== "undefined") {
+    stored = localStorage.getItem(CONNECTOR_OAUTH_STATE_KEY) ?? ""
+  }
+  return stored
+}
+
+/** Clear both copies of the pending OAuth state (clear-on-use). */
+function clearStoredOAuthState(): void {
+  if (typeof sessionStorage !== "undefined") {
+    try {
+      sessionStorage.removeItem(CONNECTOR_OAUTH_STATE_KEY)
+    } catch {
+      // ignore
+    }
+  }
+  if (typeof localStorage !== "undefined") {
+    try {
+      localStorage.removeItem(CONNECTOR_OAUTH_STATE_KEY)
+    } catch {
+      // ignore
+    }
+  }
+}
 
 function parseOAuthUrl(raw: string): {
   adapterType: string
@@ -60,11 +90,8 @@ async function handleOAuthUrl(raw: string): Promise<void> {
 
   const { adapterType, code, state } = parsed
 
-  // ── Step 1: validate state ─────────────────────────────────────────────────
-  const storedState =
-    typeof sessionStorage !== "undefined"
-      ? (sessionStorage.getItem("connector-oauth-state") ?? "")
-      : ""
+  // ── Step 1: validate state (session live-path, durable cold-start fallback)
+  const storedState = readStoredOAuthState()
 
   if (!state || state !== storedState) {
     toast.error("OAuth state mismatch")
@@ -83,6 +110,9 @@ async function handleOAuthUrl(raw: string): Promise<void> {
     return
   }
 
+  // The state is spent — clear both copies before running the exchange.
+  clearStoredOAuthState()
+
   // ── Step 3: invoke handler ─────────────────────────────────────────────────
   // State is forwarded so platform-specific handlers can decode an
   // adapterId out of it (Lark uses `lark:<adapterId>:<nonce>` to scope
@@ -100,12 +130,24 @@ export function ConnectorDeepLinkRouter({ children }: { children: React.ReactNod
     if (isTauri()) {
       let unlisten: (() => void) | null = null
       let cancelled = false
+      // Dedup: a cold-start launch URL can also be re-delivered via onOpenUrl.
+      const seen = new Set<string>()
+      const dispatch = (raw: string) => {
+        if (!OAUTH_PATH_RE.test(raw) || seen.has(raw)) return
+        seen.add(raw)
+        void handleOAuthUrl(raw)
+      }
 
       void (async () => {
+        // Cold-start: the relay may have 302'd into `cognia://` while the app
+        // was closed. The pending state survives in the durable localStorage
+        // mirror, so the exchange can still validate.
+        const launch = await getLaunchDeepLink()
+        if (!cancelled && launch) {
+          for (const url of launch) dispatch(url)
+        }
         unlisten = await onDeepLink((urls: string[]) => {
-          for (const url of urls) {
-            void handleOAuthUrl(url)
-          }
+          for (const url of urls) dispatch(url)
         })
         if (cancelled && unlisten) {
           safeUnlisten(unlisten)

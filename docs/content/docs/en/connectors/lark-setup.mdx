@@ -175,6 +175,42 @@ adapter's detail panel). The welcome card is on by default.
 
 ---
 
+## 10. Send as Me (User OAuth)
+
+By default the bot replies under its own identity. **Send as me** lets replies go out under
+_your_ Lark identity instead, via an OAuth 2.0 authorization-code flow. This is optional — the
+bot works fully without it, and falls back to the bot identity if the authorization ever expires.
+
+Because Feishu only accepts **http/https** redirect URLs (custom app schemes like `cognia://`
+cannot be registered in the console), cognia-next relays the callback through the same Cloudflared
+tunnel used for webhooks: `https://<your-tunnel-host>/oauth/lark/callback` bounces the result back
+into the desktop app.
+
+### Setup
+
+1. **Start a stable tunnel.** Open **Settings → Mobile Companion → Tunnel** and start the
+   Cloudflared tunnel. Use a **named tunnel** so the host stays stable across restarts — Feishu
+   matches the exact registered URL on every authorization.
+2. **Grant user scopes.** In the Lark console → **Permission management**, enable and get approval
+   for:
+   - `offline_access` — **required**; Feishu only issues a refresh token when this is granted.
+   - `im:message` — send messages as the user.
+
+   Re-release the app version after changing scopes.
+3. **Register the redirect URL.** In the Lark console → **Security Settings → Redirect URL**, add
+   the exact URL shown in cognia-next under **Settings → Connections → Lark → Send as me** (the
+   "OAuth redirect URL" field, e.g. `https://<tunnel>/oauth/lark/callback`). Leave the field blank
+   in cognia-next to use the tunnel-derived URL, or paste a custom one if you front the relay with
+   your own domain.
+4. **Connect.** Click **Connect account**. Your browser opens the Feishu consent page; approve it,
+   and the relay returns you to cognia-next, which shows **Connected as \<name\>**.
+5. **Enable.** Toggle **Send replies as me** on.
+
+The flow uses PKCE (`S256`) — the verifier never leaves your device — and refreshes the user token
+automatically, falling back to the bot identity if a refresh fails.
+
+---
+
 ## Troubleshooting
 
 | Symptom                               | Likely cause                                                                 |
@@ -187,3 +223,5 @@ adapter's detail panel). The welcome card is on by default.
 | Bot menu click does nothing           | Subscribe `application.bot.menu_v6` and map the `event_key` under Quick commands |
 | No welcome card on join               | Subscribe `im.chat.member.bot.added_v1`; ensure Welcome card is enabled under Help & Welcome |
 | Interactive cards render as plain text | Grant the `cardkit:card:write` scope and re-release the app version            |
+| "Connect account" fails / `redirect_uri unmatch` | The redirect URL isn't registered in Security Settings, or the tunnel host changed — use a named tunnel and register the exact URL |
+| "Send as me" still sends as the bot   | `offline_access` + `im:message` not granted/approved, or the authorization expired — reconnect the account |

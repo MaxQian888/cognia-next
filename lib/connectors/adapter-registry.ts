@@ -17,6 +17,7 @@ import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
+import { fetchDiscordBotUser } from "./whoami/discord-whoami"
 import { createSlackAdapter } from "./adapters/slack"
 import { createLarkAdapter } from "./adapters/lark"
 import { createOneBotAdapter } from "./adapters/onebot"
@@ -113,8 +114,9 @@ export async function buildTelegramAdapter(row: AdapterInstanceRow): Promise<Pla
 /**
  * Instantiate a Discord PlatformAdapter from a persisted AdapterInstanceRow.
  *
- * Reads the bot token from the keyring and calls /users/@me to fetch the
- * bot's own user id (selfId), then delegates to createDiscordAdapter.
+ * Resolves the bot's own user id (selfId) via the shared whoami probe
+ * helper (`fetchDiscordBotUser` — GET /users/@me), then delegates to
+ * createDiscordAdapter.
  */
 export async function buildDiscordAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
   const tokenRaw = await connectorsKeyringGet(row.id, "botToken")
@@ -122,25 +124,22 @@ export async function buildDiscordAdapter(row: AdapterInstanceRow): Promise<Plat
 
   let selfId = ""
   try {
-    const resp = await connectorsHttpRequest({
-      url: "https://discord.com/api/v10/users/@me",
-      method: "GET",
-      headers: { Authorization: `Bot ${token}` },
-    })
-    const parsed = JSON.parse(resp.body) as { id?: string }
-    if (parsed.id) {
-      selfId = parsed.id
-    }
+    selfId = (await fetchDiscordBotUser(token)).id
   } catch {
     // Non-fatal: selfId will be empty string; adapter refreshes from READY event.
     console.warn(`[adapter-registry] /users/@me failed for Discord adapter ${row.id}`)
   }
+
+  const intentsRaw = (row.settings as Record<string, unknown> | undefined)?.intents
+  const intents = typeof intentsRaw === "number" ? intentsRaw : undefined
 
   return createDiscordAdapter({
     id: row.id,
     displayName: row.displayName,
     botToken: () => connectorsKeyringGet(row.id, "botToken").then((t) => t ?? ""),
     selfId,
+    intents,
+    transportMode: row.transportMode,
   })
 }
 
@@ -154,9 +153,21 @@ export async function buildSlackAdapter(row: AdapterInstanceRow): Promise<Platfo
   const tokenRaw = await connectorsKeyringGet(row.id, "botToken")
   const token = tokenRaw ?? ""
 
-  const settings = (row.settings ?? {}) as { transport?: "socket-mode" | "events-api-webhook" }
+  const settings = (row.settings ?? {}) as {
+    transport?: "socket-mode" | "events-api-webhook"
+    assistantAppEnabled?: unknown
+    historyMaxPages?: unknown
+  }
   const transport: "socket-mode" | "events-api-webhook" =
     settings.transport === "events-api-webhook" ? "events-api-webhook" : "socket-mode"
+
+  // Validate historyMaxPages: a positive number (form inputs may persist it
+  // as a string) — anything else falls back to the adapter default (10).
+  const historyMaxPagesRaw = Number(settings.historyMaxPages)
+  const historyMaxPages =
+    Number.isFinite(historyMaxPagesRaw) && historyMaxPagesRaw >= 1
+      ? Math.floor(historyMaxPagesRaw)
+      : undefined
 
   let selfId = ""
   try {
@@ -185,9 +196,18 @@ export async function buildSlackAdapter(row: AdapterInstanceRow): Promise<Platfo
     botToken: () => connectorsKeyringGet(row.id, "botToken").then((t) => t ?? ""),
     appToken: () => connectorsKeyringGet(row.id, "appToken").then((t) => t ?? ""),
     signingSecret: () => connectorsKeyringGet(row.id, "signingSecret").then((t) => t ?? ""),
-    userToken: () => connectorsKeyringGet(row.id, "userToken").then((t) => t ?? ""),
+    // Canonical key is "userToken"; fall back to the legacy "user_token"
+    // key the Slack OAuth handler wrote before the key unification, so
+    // installs completed via OAuth keep their presence-status support.
+    userToken: async () => {
+      const token = await connectorsKeyringGet(row.id, "userToken")
+      if (token) return token
+      return (await connectorsKeyringGet(row.id, "user_token")) ?? ""
+    },
     selfId,
     transport,
+    assistantAppEnabled: settings.assistantAppEnabled === true,
+    ...(historyMaxPages !== undefined ? { historyMaxPages } : {}),
   })
 }
 
@@ -196,8 +216,9 @@ export async function buildSlackAdapter(row: AdapterInstanceRow): Promise<Platfo
  *
  * Reads App ID + App Secret from the keyring, obtains a tenant_access_token to
  * call /open-apis/bot/v3/info, and resolves the bot's own open_id (selfBotOpenId).
- * If the API call fails the adapter still starts — mention detection falls back to
- * checking the app_id in event headers.
+ * If the API call fails the adapter still starts, but with an EMPTY
+ * selfBotOpenId — self-mention detection is disabled (there is no header
+ * fallback; the factory warns loudly) until the whoami probe succeeds.
  *
  * Caches a successful probe back to `row.settings.selfBotOpenId` so the
  * next cold start can skip the API call. The cache is invalidated by the
@@ -354,8 +375,10 @@ export async function buildWechatPersonalAdapter(
  *
  * Reads the access token from the keyring and the non-secret homeserver URL
  * from `settings.homeserver`, then calls `whoami` to resolve the bot's own
- * user id (selfId). If the probe fails the adapter still starts — self-mention
- * detection then relies on explicit `m.mentions` only.
+ * user id (selfId). If the probe fails the adapter still starts with an
+ * empty selfId and lazily re-probes whoami itself once the homeserver is
+ * reachable (an empty selfId would otherwise disable own-echo suppression
+ * and self-mention detection until restart).
  */
 export async function buildMatrixAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
   const settings = (row.settings ?? {}) as { homeserver?: string }
@@ -386,12 +409,23 @@ export async function buildMatrixAdapter(row: AdapterInstanceRow): Promise<Platf
  *
  * Reads `appId` + `clientSecret` from the keyring; the access token is
  * resolved (and cached) on demand by `getQQAccessToken`. No identity probe is
- * needed — the bot's id arrives on the gateway READY event.
+ * needed — the bot's id arrives on the gateway READY event (webhook mode has
+ * no READY; selfId stays empty there).
+ *
+ * Webhook can be selected either by the row's first-class `transportMode` or
+ * by `settings.transport` (the schema-driven form field — same convention as
+ * the Lark builder); gateway stays the default so existing installs are
+ * unaffected. Note the inbound axum server auto-start/registration keys off
+ * `row.transportMode` only (`adapterNeedsInboundServer`).
  */
 export async function buildQQOfficialAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
+  const settingsTransport = (row.settings as Record<string, unknown> | undefined)?.transport
+  const transportMode =
+    row.transportMode === "webhook" || settingsTransport === "webhook" ? "webhook" : "gateway"
   return createQQOfficialAdapter({
     id: row.id,
     displayName: row.displayName,
+    transportMode,
     accessToken: async () => {
       const appId = (await connectorsKeyringGet(row.id, "appId")) ?? ""
       const secret = (await connectorsKeyringGet(row.id, "clientSecret")) ?? ""

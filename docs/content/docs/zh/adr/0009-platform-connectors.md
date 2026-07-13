@@ -71,7 +71,7 @@ TypeScript layer (renderer)
 | Telegram      | 长轮询（`getUpdates`）或 webhook | X-Telegram-Bot-Api-Secret-Token (HMAC-SHA256) |
 | Discord       | Gateway WS (v10)                    | Ed25519 (X-Signature-Ed25519)                 |
 | Slack         | Events API webhook                  | HMAC-SHA256 (X-Slack-Signature v0)            |
-| 飞书 / Lark | 事件回调 webhook              | HMAC-SHA256 (X-Lark-Signature)                |
+| 飞书 / Lark | 长连接 WS（protobuf，**默认**）或事件回调 webhook | 长连接：app_id/app_secret WS 握手。Webhook：verification token（`header.token`）+ 可选 AES-256-CBC 解密（schema 2.0） |
 | OneBot v11    | 反向 WS（设备主动连入）             | Bearer token（可选）                       |
 
 ### 出站执行器的保证

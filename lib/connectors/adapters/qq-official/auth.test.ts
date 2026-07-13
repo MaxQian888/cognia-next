@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core"
-import { clearQQTokenCache, getQQAccessToken, getQQGatewayUrl, qqAuthHeaders } from "./auth"
+import {
+  clearQQTokenCache,
+  clearQQTokenCacheByToken,
+  getQQAccessToken,
+  getQQGatewayUrl,
+  qqAuthHeaders,
+} from "./auth"
 
 const mockInvoke = invoke as jest.Mock
 
@@ -28,6 +34,25 @@ describe("getQQAccessToken", () => {
   it("throws when the platform returns no token", async () => {
     mockInvoke.mockResolvedValue(httpResp(200, { message: "bad secret" }))
     await expect(getQQAccessToken("app1", "sec1")).rejects.toThrow("bad secret")
+  })
+})
+
+describe("clearQQTokenCacheByToken", () => {
+  it("evicts the entry that minted the token so the next resolve re-mints", async () => {
+    mockInvoke.mockResolvedValue(httpResp(200, { access_token: "tok-1", expires_in: 7200 }))
+    await getQQAccessToken("app1", "sec1")
+    clearQQTokenCacheByToken("tok-1")
+    mockInvoke.mockResolvedValue(httpResp(200, { access_token: "tok-2", expires_in: 7200 }))
+    await expect(getQQAccessToken("app1", "sec1")).resolves.toBe("tok-2")
+    expect(mockInvoke).toHaveBeenCalledTimes(2)
+  })
+
+  it("leaves unrelated cache entries alone", async () => {
+    mockInvoke.mockResolvedValue(httpResp(200, { access_token: "tok-1", expires_in: 7200 }))
+    await getQQAccessToken("app1", "sec1")
+    clearQQTokenCacheByToken("some-other-token")
+    await getQQAccessToken("app1", "sec1")
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
   })
 })
 

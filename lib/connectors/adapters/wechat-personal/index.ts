@@ -36,9 +36,10 @@ import {
   type WechatPersonalConversationRef,
 } from "./parse"
 import { getBus } from "@/lib/connectors/bus"
+import { reconnectBackoffMs } from "@/lib/connectors/adapters/_shared/reconnect-backoff"
 import { serializeIlinkSegments } from "./serialize"
 import { WECHAT_PERSONAL_CAPS, WECHAT_PERSONAL_A2UI_CAPABILITY } from "./capability"
-import { fetchAndDecryptIlinkMedia, bytesToBase64 } from "./media"
+import { fetchAndDecryptIlinkMediaViaTauri, bytesToBase64 } from "./media"
 
 export interface WechatPersonalAdapterOptions {
   id: string
@@ -75,27 +76,75 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
 
   const backoffBaseMs = opts._backoffBaseMs ?? 2000
 
+  /** Wakes the pending backoff sleep early — set while a delay() is in flight. */
+  let wakeDelay: (() => void) | null = null
+
+  /** True once stop() ran or the runtime aborted this adapter's signal. */
+  function shouldStop(): boolean {
+    return stopCalled || ctx?.signal.aborted === true
+  }
+
+  /**
+   * Abortable sleep: resolves early when stop() is called or `ctx.signal`
+   * aborts, so a 30s+ backoff never outlives the adapter lifecycle.
+   */
   function delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms))
+    return new Promise((resolve) => {
+      const signal = ctx?.signal
+      if (shouldStop()) {
+        resolve()
+        return
+      }
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        signal?.removeEventListener("abort", finish)
+        if (wakeDelay === finish) wakeDelay = null
+        resolve()
+      }
+      const timer = setTimeout(finish, ms)
+      wakeDelay = finish
+      signal?.addEventListener("abort", finish)
+    })
   }
 
   async function resolveBaseUrl(): Promise<string> {
-    return opts.baseUrl ? (await opts.baseUrl()) || ILINK_DEFAULT_BASE_URL : ILINK_DEFAULT_BASE_URL
+    const raw = opts.baseUrl
+      ? (await opts.baseUrl()) || ILINK_DEFAULT_BASE_URL
+      : ILINK_DEFAULT_BASE_URL
+    // Persisted base URLs sometimes carry a trailing slash; the plain
+    // `${baseUrl}${path}` join would then hit `https://host//ilink/...`.
+    return raw.replace(/\/+$/, "")
   }
 
   /** Best-effort: decrypt the first inbound image and inline it as base64. */
   async function resolveInboundImage(segments: MessageSegment[], msg: IlinkMessage): Promise<void> {
     const img = msg.item_list?.find((i) => i.image_item?.url)?.image_item
     if (!img?.url) return
+    const seg = segments.find((s) => s.type === "image")
+    if (!seg || seg.type !== "image") return
     try {
-      const bytes = await fetchAndDecryptIlinkMedia(img.url, img.aes_key)
-      const seg = segments.find((s) => s.type === "image")
-      if (seg && seg.type === "image") {
-        ;(seg as { dataBase64?: string; mimeType?: string }).dataBase64 = bytesToBase64(bytes)
-        ;(seg as { mimeType?: string }).mimeType = "image/jpeg"
-      }
-    } catch {
-      /* keep the URL marker */
+      // The CDN payload is AES-encrypted and the renderer fetch() is
+      // CORS-blocked in the Tauri webview — download through the Rust
+      // attachment cache, then decrypt from the cached bytes.
+      const bytes = await fetchAndDecryptIlinkMediaViaTauri({
+        adapterId: opts.id,
+        url: img.url,
+        aesKeyBase64: img.aes_key,
+        fetchAttachment: (adapterId, remoteRef) => ctx!.tauri.fetchAttachment(adapterId, remoteRef),
+      })
+      seg.dataBase64 = bytesToBase64(bytes)
+      seg.mimeType = "image/jpeg"
+    } catch (err) {
+      // The raw CDN url points at AES-encrypted bytes — blank it so no
+      // downstream fetcher downloads garbage; keep a placeholder marker.
+      ctx?.logger.warn(
+        `ilink image resolve failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+      seg.url = ""
+      seg.alt = "[unavailable image]"
     }
   }
 
@@ -133,6 +182,11 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
 
   async function pollOnce(): Promise<"ok" | "expired" | "error"> {
     const [token, baseUrl] = await Promise.all([opts.token(), resolveBaseUrl()])
+    if (!token) {
+      healthReason = "token_missing"
+      ctx?.logger.warn("ilink poll skipped: bot token missing from keyring")
+      return "error"
+    }
     const resp = await ctx!.tauri.httpRequest({
       url: `${baseUrl}${ILINK_PATHS.getUpdates}`,
       method: "POST",
@@ -144,28 +198,44 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
     try {
       parsed = JSON.parse(resp.body) as IlinkGetUpdatesResponse
     } catch {
+      healthReason = "bad_response"
+      ctx?.logger.warn(`ilink getupdates returned a non-JSON body (status ${resp.status})`)
       return "error"
     }
     if (parsed.ret === ILINK_RET_SESSION_EXPIRED || parsed.errcode === ILINK_RET_SESSION_EXPIRED) {
       return "expired"
     }
-    if (parsed.ret !== 0) return "error"
+    if (parsed.ret !== 0) {
+      healthReason = "bad_response"
+      ctx?.logger.warn(`ilink getupdates failed: ret ${parsed.ret} ${parsed.errmsg ?? ""}`.trim())
+      return "error"
+    }
 
     healthState = "running"
     healthReason = undefined
     lastActivityAt = Date.now()
-    if (typeof parsed.get_updates_buf === "string") cursor = parsed.get_updates_buf
+    // Process the batch BEFORE advancing the cursor — advancing first would
+    // silently drop the unprocessed tail if a handler threw mid-batch. Each
+    // message gets its own guard so one poison message can't take the rest
+    // of the batch (or the cursor advance) down with it.
     for (const msg of parsed.msgs ?? []) {
-      await handleMessage(msg)
+      try {
+        await handleMessage(msg)
+      } catch (err) {
+        ctx?.logger.warn(
+          `ilink message handling failed: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
     }
+    if (typeof parsed.get_updates_buf === "string") cursor = parsed.get_updates_buf
     return "ok"
   }
 
   async function pollLoop(): Promise<void> {
-    while (!stopCalled) {
+    while (!shouldStop()) {
       try {
         const result = await pollOnce()
-        if (stopCalled) return
+        if (shouldStop()) return
         if (result === "expired") {
           healthState = "degraded"
           healthReason = "session_expired_rescan"
@@ -174,15 +244,19 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
         if (result === "error") {
           attempts += 1
           healthState = "degraded"
-          await delay(backoffBaseMs * Math.min(2 ** attempts, 16))
+          await delay(reconnectBackoffMs(backoffBaseMs, attempts))
           continue
         }
         attempts = 0
-      } catch {
-        if (stopCalled) return
+      } catch (err) {
+        if (shouldStop()) return
         attempts += 1
         healthState = "degraded"
-        await delay(backoffBaseMs * Math.min(2 ** attempts, 16))
+        healthReason = "network_error"
+        ctx?.logger.warn(
+          `ilink poll failed: ${err instanceof Error ? err.message : String(err)}`
+        )
+        await delay(reconnectBackoffMs(backoffBaseMs, attempts))
       }
     }
   }
@@ -241,12 +315,28 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
           timeoutMs: 15_000,
         })
         const parsed = JSON.parse(resp.body) as { ret?: number; errcode?: number; errmsg?: string }
-        if ((parsed.ret ?? parsed.errcode ?? 0) !== 0) {
+        const ret = parsed.ret ?? parsed.errcode ?? 0
+        if (ret === ILINK_RET_SESSION_EXPIRED) {
+          // Dead session — retrying is useless until the operator re-scans
+          // the QR code. Degrade health so the settings UI surfaces it and
+          // return non-retryable so the outbound queue doesn't spin forever.
+          healthState = "degraded"
+          healthReason = "session_expired_rescan"
+          return {
+            ok: false,
+            error: {
+              code: "auth_failed",
+              message: parsed.errmsg ?? `ret ${ret} (session expired — re-scan the QR code)`,
+              retryable: false,
+            },
+          }
+        }
+        if (ret !== 0) {
           return {
             ok: false,
             error: {
               code: "platform_4xx",
-              message: parsed.errmsg ?? `ret ${parsed.ret ?? parsed.errcode}`,
+              message: parsed.errmsg ?? `ret ${ret}`,
               retryable: true,
             },
           }
@@ -282,10 +372,14 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
       stopCalled = false
       healthState = "starting"
       cursor = ""
+      attempts = 0
       void pollLoop()
     },
     async stop(): Promise<void> {
       stopCalled = true
+      // Wake a pending backoff sleep so the loop exits promptly instead of
+      // outliving stop() by up to a full backoff window.
+      wakeDelay?.()
       contextTokens.clear()
       healthState = "down"
     },

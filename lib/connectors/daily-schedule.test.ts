@@ -5,7 +5,21 @@
  * can drive them deterministically without real timers.
  */
 
-import { startDailySchedule, DAILY_INTERVAL_MS, DAILY_INITIAL_DELAY_MS } from "./daily-schedule"
+// Mock the Dexie-backed sweep so this suite stays in the fast node env
+// (no fake-indexeddb needed) — the retention behavior itself is covered in
+// lib/db/outbound-jobs.test.ts.
+jest.mock("@/lib/db/outbound-jobs", () => ({
+  sweepTerminalOutboundRows: jest.fn().mockResolvedValue(0),
+}))
+import { sweepTerminalOutboundRows } from "@/lib/db/outbound-jobs"
+import {
+  startDailySchedule,
+  startOutboundRetentionSweep,
+  DAILY_INTERVAL_MS,
+  DAILY_INITIAL_DELAY_MS,
+} from "./daily-schedule"
+
+const mockSweep = sweepTerminalOutboundRows as jest.Mock
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -117,5 +131,49 @@ describe("startDailySchedule", () => {
 
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("[test-label]"))
     errorSpy.mockRestore()
+  })
+})
+
+describe("startOutboundRetentionSweep", () => {
+  beforeEach(() => {
+    mockSweep.mockClear()
+  })
+
+  it("runs the terminal-row sweep on the daily cadence", async () => {
+    const s = makeScheduler()
+    const handle = startOutboundRetentionSweep({ scheduler: s.scheduler })
+
+    // Daily cadence with the standard boot delay.
+    expect(s.timeouts[0].ms).toBe(DAILY_INITIAL_DELAY_MS)
+    expect(mockSweep).not.toHaveBeenCalled()
+
+    s.timeouts[0].cb()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mockSweep).toHaveBeenCalledTimes(1)
+    expect(s.intervals[0].ms).toBe(DAILY_INTERVAL_MS)
+
+    s.intervals[0].cb()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mockSweep).toHaveBeenCalledTimes(2)
+
+    handle.dispose()
+    expect(s.clearedTimeouts).toHaveLength(1)
+    expect(s.clearedIntervals).toHaveLength(1)
+  })
+
+  it("survives a sweep failure (logged, schedule keeps running)", async () => {
+    const s = makeScheduler()
+    mockSweep.mockRejectedValueOnce(new Error("idb down"))
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    const handle = startOutboundRetentionSweep({ scheduler: s.scheduler })
+
+    await handle.runNow()
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("[outbound-retention]"))
+
+    // Next run works again.
+    await handle.runNow()
+    expect(mockSweep).toHaveBeenCalledTimes(2)
+    errorSpy.mockRestore()
+    handle.dispose()
   })
 })

@@ -11,7 +11,12 @@ import {
   connectorsWsSend,
   connectorsWsClose,
 } from "@/lib/connectors/tauri/commands"
-import { startDingTalkStream, registerDingTalkConnection, TOPIC_BOT_MESSAGE } from "./stream-client"
+import {
+  startDingTalkStream,
+  registerDingTalkConnection,
+  TOPIC_BOT_MESSAGE,
+  type DingTalkTransportState,
+} from "./stream-client"
 
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsHttpRequest: jest.fn(),
@@ -120,6 +125,8 @@ describe("startDingTalkStream", () => {
     await Promise.resolve()
     const pingAck = mockWsSend.mock.calls.find((c) => String(c[1]).includes("abc"))
     expect(pingAck).toBeTruthy()
+    // the ping data is echoed verbatim, not re-serialized
+    expect(JSON.parse(String(pingAck![1])).data).toBe('{"opaque":"abc"}')
 
     // bot message CALLBACK frame
     const payload = {
@@ -145,6 +152,40 @@ describe("startDingTalkStream", () => {
     const cbAck = mockWsSend.mock.calls.find((c) => String(c[1]).includes("cb1"))
     expect(cbAck).toBeTruthy()
     expect(JSON.parse(String(cbAck![1])).code).toBe(200)
+    // CALLBACK acks carry the {response:null} data shape
+    expect(JSON.parse(String(cbAck![1])).data).toBe('{"response":null}')
+  })
+
+  it("ACKs EVENT frames with the SUCCESS status envelope", async () => {
+    mockHttp.mockResolvedValue(registerOk())
+    const session = createFakeWsSession()
+    mockListen.mockImplementation(session.listenImpl)
+    const ctrl = new AbortController()
+    const client = startDingTalkStream({
+      clientId: async () => "ak",
+      clientSecret: async () => "as",
+      signal: ctrl.signal,
+      _backoffBaseMs: 50000,
+    })
+    const out: Array<{ topic: string; data: Record<string, unknown> }> = []
+    const collector = (async () => {
+      for await (const f of client.frames) {
+        out.push(f)
+        if (out.length >= 1) break
+      }
+    })()
+    await session.waitForListeners()
+    session.push({
+      type: "EVENT",
+      headers: { topic: "/v1.0/event/some_event", messageId: "ev1" },
+      data: JSON.stringify({ eventId: "e1" }),
+    })
+    await collector
+    ctrl.abort()
+    const evAck = mockWsSend.mock.calls.find((c) => String(c[1]).includes("ev1"))
+    expect(evAck).toBeTruthy()
+    expect(JSON.parse(String(evAck![1])).data).toBe('{"status":"SUCCESS","message":"success"}')
+    expect(out[0]).toMatchObject({ topic: "/v1.0/event/some_event", data: { eventId: "e1" } })
   })
 
   it("retries on registration failure and stops cleanly on abort", async () => {
@@ -224,7 +265,7 @@ describe("startDingTalkStream", () => {
     expect(out[0].data).toEqual({}) // non-JSON data degrades to {}
   })
 
-  it("echoes an empty opaque when the ping data is not JSON", async () => {
+  it("echoes non-JSON ping data verbatim and falls back to {} only when absent", async () => {
     mockHttp.mockResolvedValue(registerOk())
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)
@@ -241,12 +282,132 @@ describe("startDingTalkStream", () => {
       }
     })()
     await session.waitForListeners()
+    // non-JSON opaque is echoed verbatim (not degraded to "{}")
     session.push({ type: "SYSTEM", headers: { topic: "ping", messageId: "p2" }, data: "not-json" })
     await Promise.resolve()
     const ack = mockWsSend.mock.calls.find((c) => String(c[1]).includes("p2"))
     expect(ack).toBeTruthy()
+    expect(JSON.parse(String(ack![1])).data).toBe("not-json")
+    // absent data → "{}" fallback
+    session.push({ type: "SYSTEM", headers: { topic: "ping", messageId: "p3" } })
+    await Promise.resolve()
+    const ack3 = mockWsSend.mock.calls.find((c) => String(c[1]).includes("p3"))
+    expect(ack3).toBeTruthy()
+    expect(JSON.parse(String(ack3![1])).data).toBe("{}")
     ctrl.abort()
     await collector
+  })
+
+  it("closes and re-registers when no ws traffic arrives within the ping timeout", async () => {
+    mockHttp.mockResolvedValue(registerOk())
+    const session = createFakeWsSession()
+    mockListen.mockImplementation(session.listenImpl)
+    const ctrl = new AbortController()
+    const client = startDingTalkStream({
+      clientId: async () => "ak",
+      clientSecret: async () => "as",
+      signal: ctrl.signal,
+      _backoffBaseMs: 1,
+      _pingTimeoutMs: 20,
+    })
+    const collector = (async () => {
+      for await (const _f of client.frames) {
+        /* none */
+      }
+    })()
+    await session.waitForListeners()
+    const firstRegisterCount = mockHttp.mock.calls.length
+    // no pings pushed — the watchdog must fire, close the socket, re-register
+    await new Promise((r) => setTimeout(r, 60))
+    expect(mockWsClose).toHaveBeenCalled()
+    expect(mockHttp.mock.calls.length).toBeGreaterThan(firstRegisterCount)
+    ctrl.abort()
+    await collector
+  })
+
+  it("does not trip the watchdog while ws traffic keeps arriving", async () => {
+    mockHttp.mockResolvedValue(registerOk())
+    const session = createFakeWsSession()
+    mockListen.mockImplementation(session.listenImpl)
+    const ctrl = new AbortController()
+    const client = startDingTalkStream({
+      clientId: async () => "ak",
+      clientSecret: async () => "as",
+      signal: ctrl.signal,
+      _backoffBaseMs: 1,
+      _pingTimeoutMs: 100,
+    })
+    const collector = (async () => {
+      for await (const _f of client.frames) {
+        /* none */
+      }
+    })()
+    await session.waitForListeners()
+    // keep pinging faster than the timeout — the watchdog keeps re-arming
+    for (let i = 0; i < 5; i++) {
+      session.push({ type: "SYSTEM", headers: { topic: "ping", messageId: `w${i}` }, data: "{}" })
+      await new Promise((r) => setTimeout(r, 25))
+    }
+    expect(mockHttp).toHaveBeenCalledTimes(1) // never re-registered
+    ctrl.abort()
+    await collector
+  })
+
+  it("reports register failures (auth vs generic) and connect via onTransportState", async () => {
+    // 401 register → auth_failed; then a network reject → register_failed;
+    // then a successful register+open → connected.
+    mockHttp
+      .mockResolvedValueOnce({ status: 401, headers: {}, body: JSON.stringify({ message: "bad" }) })
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue(registerOk())
+    const session = createFakeWsSession()
+    mockListen.mockImplementation(session.listenImpl)
+    const ctrl = new AbortController()
+    const states: DingTalkTransportState[] = []
+    const client = startDingTalkStream({
+      clientId: async () => "ak",
+      clientSecret: async () => "as",
+      signal: ctrl.signal,
+      onTransportState: (s) => states.push(s),
+      _backoffBaseMs: 1,
+    })
+    const collector = (async () => {
+      for await (const _f of client.frames) {
+        /* none */
+      }
+    })()
+    await session.waitForListeners()
+    expect(states).toEqual([
+      { kind: "failure", reason: "auth_failed" },
+      { kind: "failure", reason: "register_failed" },
+      { kind: "connected" },
+    ])
+    ctrl.abort()
+    await collector
+  })
+
+  it("reports ws-open failures via onTransportState", async () => {
+    mockHttp.mockResolvedValue(registerOk())
+    mockWsOpen.mockRejectedValue(new Error("ws fail"))
+    const ctrl = new AbortController()
+    const states: DingTalkTransportState[] = []
+    const client = startDingTalkStream({
+      clientId: async () => "ak",
+      clientSecret: async () => "as",
+      signal: ctrl.signal,
+      onTransportState: (s) => states.push(s),
+      _backoffBaseMs: 1,
+    })
+    const done = (async () => {
+      for await (const _f of client.frames) {
+        /* none */
+      }
+    })()
+    await new Promise((r) => setTimeout(r, 15))
+    ctrl.abort()
+    await done
+    expect(states.length).toBeGreaterThan(0)
+    expect(states.every((s) => s.kind === "failure" && s.reason === "ws_open_failed")).toBe(true)
   })
 
   it("reconnects (re-registers) when the ws closes, then stops on abort", async () => {

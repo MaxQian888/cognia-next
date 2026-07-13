@@ -5,6 +5,10 @@
  * Supports two transports:
  *   - long-connection (default): uses /im/v1/wsServer + WSS
  *   - webhook: subscribes to Tauri event channel from Rust HTTP proxy
+ *
+ * GAP: webhook `url_verification` challenge echo is answered by the Rust
+ * webhook receiver (not TS-side). Card 2.0 migration and E2EE-style
+ * advanced messaging features are out of scope for this adapter revision.
  */
 
 import type {
@@ -17,8 +21,9 @@ import type {
   ForwardMessageInput,
   UrgentChannel,
 } from "@/types/connectors/adapter"
-import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { extractLarkCode, LARK_PERMISSION_CODES } from "./http"
 import { LARK_A2UI_CAPABILITY, LARK_CAPS } from "./capability"
 import {
   parseLarkEventEnvelope,
@@ -94,6 +99,46 @@ export interface LarkAdapterOptions {
 
 const LARK_API_BASE = "https://open.feishu.cn/open-apis"
 
+/**
+ * Map a send/edit/forward failure onto the OutboundError contract
+ * (`types/connectors/outbound.ts`). Previously every failure became
+ * `platform_5xx / retryable:true`, so 4xx business errors (invalid
+ * receive_id, permission code 99991672, card schema rejects) were retried
+ * until deadletter even though the same payload can never succeed.
+ *
+ *   - 429                    → rate_limited, retryable (server asks to slow down)
+ *   - 401 / 403 / permission → auth_failed, NOT retryable (the one automatic
+ *     token refresh already ran inside withTatRefresh before we got here)
+ *   - other 4xx + Lark business codes in a 2xx envelope → platform_4xx,
+ *     NOT retryable (request itself is invalid; message carries the code)
+ *   - 5xx                    → platform_5xx, retryable
+ *   - non-LarkApiError (Rust bridge / fetch failures) → network, retryable
+ */
+function larkOutboundError(err: unknown): OutboundError {
+  if (err instanceof LarkApiError) {
+    const message = err.message
+    // 99991400 is Lark's app frequency-limit business code (shipped inside
+    // an HTTP 400) — same meaning as a bare 429 from the gateway.
+    if (err.status === 429 || err.code === 99991400) {
+      return { code: "rate_limited", message, retryable: true }
+    }
+    if (
+      err.status === 401 ||
+      err.status === 403 ||
+      (err.code !== null && LARK_PERMISSION_CODES.has(err.code))
+    ) {
+      return { code: "auth_failed", message, retryable: false }
+    }
+    if (err.status >= 500) return { code: "platform_5xx", message, retryable: true }
+    return { code: "platform_4xx", message, retryable: false }
+  }
+  return {
+    code: "network",
+    message: err instanceof Error ? err.message : String(err),
+    retryable: true,
+  }
+}
+
 const LARK_CONFIG_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
   type: "object",
@@ -121,6 +166,17 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
   opts = { ...opts, quickCommands: normalizedQuickCommands }
 
   let abortController: AbortController | null = null
+  // Health state machine:
+  //   starting → running   on the first inbound envelope OR first successful
+  //                        send (evidence the transport / API actually works —
+  //                        `start()` returning only proves credentials resolved)
+  //   running  → down      generator ended without abort ("no_data")
+  //   running  → degraded  generator threw ("transport_error")
+  //   degraded → running   next inbound envelope (transport recovered)
+  // Limitation: the Rust lark_ws bridge owns per-cycle reconnection and the
+  // TS generator only surfaces terminal close/throw — individual failed
+  // reconnect cycles are not observable here, so "running" means "was
+  // delivering recently", refined by `lastActivityAt` staleness.
   let healthState: AdapterHealthState = "starting"
   // Stable machine code (not a sentence) explaining a non-running health
   // state, surfaced to the UI via `health().reason` → heartbeat →
@@ -128,6 +184,15 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
   let healthReason: string | undefined = undefined
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
+
+  /** Inbound traffic proves the transport is delivering — mark running. */
+  function markInboundActivity(): void {
+    lastActivityAt = Date.now()
+    if (healthState !== "running") {
+      healthState = "running"
+      healthReason = undefined
+    }
+  }
 
   // Per-adapter-session URL → file_key / image_key cache so repeated sends
   // of the same media don't re-upload. Cleared on `stop()`.
@@ -160,9 +225,13 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
     if (resp.status >= 400) {
+      // Lark embeds its business error code in the body even on HTTP >= 400
+      // (e.g. 99991663 "invalid access_token" inside a 400). Extract it so
+      // `isLarkTatInvalidation` / retryability mapping see the real code —
+      // with `code: null` the main send path never triggered a TAT refresh.
       throw new LarkApiError({
         status: resp.status,
-        code: null,
+        code: extractLarkCode(resp.body),
         message: `Lark API ${method} ${urlPath} → ${resp.status}: ${resp.body}`,
       })
     }
@@ -255,7 +324,11 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     abortController = new AbortController()
     const signal = abortController.signal
 
-    healthState = "running"
+    // Deliberately stay in "starting": credentials resolving only proves the
+    // keyring works. `markInboundActivity` (first envelope) or the first
+    // successful send flips to "running"; the transport loops below flip to
+    // down/degraded on terminal end/throw.
+    healthState = "starting"
     healthReason = undefined
 
     // An empty selfBotOpenId silently disables self-mention detection —
@@ -285,6 +358,9 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
      * `ctx.emit` as a normalised message event.
      */
     const dispatchEnvelope = async (envelope: LarkEventEnvelope): Promise<void> => {
+      // Any envelope — even one that gets gated or fails to parse — proves
+      // the transport is connected and delivering.
+      markInboundActivity()
       loggers.network.info("[lark] inbound envelope", {
         id: opts.id,
         eventType: envelope.header?.event_type,
@@ -439,16 +515,18 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       // edit/reaction chains, delivery audit) need the `om_…` id, not the
       // idempotency-key placeholder the runner falls back to.
       const messageId = resp?.data?.message_id
+      // A successful send is activity too (not just inbound traffic), and —
+      // while still "starting" — it is evidence the credentials + API work.
+      // It must NOT clear a down/degraded transport state: outbound HTTP
+      // succeeding says nothing about the inbound long-conn being alive.
+      lastActivityAt = Date.now()
+      if (healthState === "starting") {
+        healthState = "running"
+        healthReason = undefined
+      }
       return { ok: true, ...(messageId ? { platformMessageId: messageId } : {}) }
     } catch (err) {
-      return {
-        ok: false,
-        error: {
-          code: "platform_5xx",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
-        },
-      }
+      return { ok: false, error: larkOutboundError(err) }
     }
   }
 
@@ -473,14 +551,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       // same feedback shape as a fresh send.
       return { ok: true, platformMessageId: messageId }
     } catch (err) {
-      return {
-        ok: false,
-        error: {
-          code: "platform_5xx",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
-        },
-      }
+      return { ok: false, error: larkOutboundError(err) }
     }
   }
 
@@ -500,10 +571,18 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
    *   - per-page size = 50 (Lark default; max 50)
    *   - max pages    = `opts.historyMaxPages` ?? 20
    *   - `historyOpts.before` / `historyOpts.after` are forwarded as
-   *     `end_time` / `start_time` (Lark expects ISO seconds-since-epoch
-   *     strings; the caller must already provide that format).
+   *     `end_time` / `start_time`. Lark expects epoch SECONDS; callers that
+   *     pass epoch-milliseconds (any value > 10^12) are normalised down,
+   *     since a ms value would otherwise select an empty window in the
+   *     year ~56000.
    *   - `historyOpts.max` further caps the total messages yielded.
    */
+  function toEpochSeconds(value: string): string {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return value
+    return n > 1e12 ? String(Math.floor(n / 1000)) : value
+  }
+
   async function* fetchHistory(
     conversationKey: string,
     historyOpts: { before?: string; after?: string; max?: number }
@@ -523,8 +602,8 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         page_size: "50",
       }
       if (pageToken) params["page_token"] = pageToken
-      if (historyOpts.after) params["start_time"] = historyOpts.after
-      if (historyOpts.before) params["end_time"] = historyOpts.before
+      if (historyOpts.after) params["start_time"] = toEpochSeconds(historyOpts.after)
+      if (historyOpts.before) params["end_time"] = toEpochSeconds(historyOpts.before)
 
       const search = new URLSearchParams(params).toString()
       const response = (await doRequest("GET", `/im/v1/messages?${search}`)) as {
@@ -593,9 +672,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     }
   }
 
-  async function setTyping(_conversationKey: string, _on: boolean): Promise<void> {
-    // Lark has no native typing indicator for bots; no-op.
-  }
+  // No setTyping: Lark has no typing indicator for bots. The adapter
+  // contract treats an ABSENT method as "unsupported" (matching `typing`
+  // not being declared in LARK_CAPS) — a silent no-op would instead tell
+  // callers the indicator was set.
 
   async function refreshCredentials(): Promise<void> {
     // All token resolvers call fresh on each request; cache handles the rest.
@@ -651,10 +731,24 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         : input.target
       const { receiveIdType, receiveId } = sniffReceiveId(channelId)
       const ids = (input.messageIds ?? []).filter(Boolean)
+      const singleId = input.messageId ?? ids[0]
+      // Guard the degenerate call: with neither messageId nor messageIds the
+      // old code built POST /im/v1/messages//forward (guaranteed 4xx after a
+      // pointless network round-trip).
+      if (!singleId && ids.length === 0) {
+        return {
+          ok: false,
+          error: {
+            code: "validation",
+            message: "forwardMessage requires messageId or a non-empty messageIds",
+            retryable: false,
+          },
+        }
+      }
       const call =
         ids.length > 1
           ? serializeMergeForward(ids, receiveIdType, receiveId)
-          : serializeForward(input.messageId ?? ids[0] ?? "", receiveIdType, receiveId)
+          : serializeForward(singleId ?? "", receiveIdType, receiveId)
       const urlPath = call.url.replace(LARK_API_BASE, "")
       const resp = (await doRequest(call.method, urlPath, call.payload)) as {
         data?: { message_id?: string }
@@ -662,14 +756,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       const messageId = resp?.data?.message_id
       return { ok: true, ...(messageId ? { platformMessageId: messageId } : {}) }
     } catch (err) {
-      return {
-        ok: false,
-        error: {
-          code: "platform_5xx",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
-        },
-      }
+      return { ok: false, error: larkOutboundError(err) }
     }
   }
 
@@ -688,24 +775,40 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     await doRequest(call.method, urlPath, call.payload)
   }
 
-  /** Query who has read a message (feedback). Bot needs `im:message` readonly. */
+  /**
+   * Query who has read a message (feedback). Bot needs `im:message` readonly.
+   * Walks the `page_token` cursor until exhausted (capped at
+   * READ_RECEIPT_MAX_PAGES pages of 50); `hasMore` is true only when the cap
+   * cut the walk short.
+   */
+  const READ_RECEIPT_MAX_PAGES = 10
   async function getReadReceipt(messageId: string): Promise<ReadReceipt> {
-    const resp = (await doRequest(
-      "GET",
-      `/im/v1/messages/${encodeURIComponent(messageId)}/read_users?user_id_type=open_id&page_size=50`
-    )) as {
-      data?: { items?: Array<{ user_id?: string; timestamp?: string }>; has_more?: boolean }
-    } | null
-    const items = resp?.data?.items ?? []
-    return {
-      readers: items
-        .map((it) => ({
-          userId: String(it.user_id ?? ""),
-          ...(it.timestamp ? { readAt: Number(it.timestamp) } : {}),
-        }))
-        .filter((r) => r.userId.length > 0),
-      hasMore: resp?.data?.has_more === true,
+    const readers: ReadReceipt["readers"] = []
+    let pageToken: string | undefined
+    let hasMore = false
+    for (let page = 0; page < READ_RECEIPT_MAX_PAGES; page++) {
+      const cursor = pageToken ? `&page_token=${encodeURIComponent(pageToken)}` : ""
+      const resp = (await doRequest(
+        "GET",
+        `/im/v1/messages/${encodeURIComponent(messageId)}/read_users?user_id_type=open_id&page_size=50${cursor}`
+      )) as {
+        data?: {
+          items?: Array<{ user_id?: string; timestamp?: string }>
+          has_more?: boolean
+          page_token?: string
+        }
+      } | null
+      const items = resp?.data?.items ?? []
+      for (const it of items) {
+        const userId = String(it.user_id ?? "")
+        if (userId.length === 0) continue
+        readers.push({ userId, ...(it.timestamp ? { readAt: Number(it.timestamp) } : {}) })
+      }
+      hasMore = resp?.data?.has_more === true
+      pageToken = resp?.data?.page_token
+      if (!hasMore || !pageToken) break
     }
+    return { readers, hasMore: hasMore && !!pageToken }
   }
 
   // Chat management (W2 multi-bot): five optional PlatformAdapter methods,
@@ -732,7 +835,6 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     edit,
     delete: deleteMessage,
     fetchHistory,
-    setTyping,
     refreshCredentials,
     setPresenceStatus: presence.setPresenceStatus,
     pinMessage: presence.pinMessage,

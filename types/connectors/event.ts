@@ -100,6 +100,13 @@ export interface NormalizedInboundEvent {
     | "reaction_added"
     | "reaction_removed"
     | "poke"
+    // Friend/group join REQUEST (OneBot `post_type:"request"`). Bookkeeping
+    // only — must NOT be conflated with `member_added`, which drives the
+    // welcome-card flow.
+    | "request"
+    // Transport lifecycle marker (OneBot meta_event enable/disable/connect).
+    // Bookkeeping only, same caveat as `request`.
+    | "lifecycle"
 }
 
 const KEY_SEP = ":"
@@ -123,13 +130,35 @@ export interface ParsedConversationKey {
 
 export function parseConversationKey(key: string): ParsedConversationKey {
   const parts = key.split(KEY_SEP)
-  if (parts.length !== 3 && parts.length !== 4) {
+  if (parts.length < 3 || !parts[0] || !parts[1]) {
     throw new Error(`invalid conversationKey: ${key}`)
   }
-  return {
-    platform: parts[0] as PlatformKind,
-    adapterId: parts[1],
-    remoteChatId: parts[2],
-    threadId: parts[3],
+  const platform = parts[0] as PlatformKind
+  const adapterId = parts[1]
+  const rest = parts.slice(2)
+  if (rest.length === 1) {
+    return { platform, adapterId, remoteChatId: rest[0], threadId: undefined }
   }
+  // Chat ids may themselves contain the separator — Matrix room ids are
+  // `!local:server[:port]` — so a trailing segment is only split off as a
+  // thread id when it is unambiguous. Matrix thread roots are `$`-prefixed
+  // event ids; on Matrix everything else belongs to the room id. Other
+  // platforms keep the historical shapes: 4 segments = chat id + thread id,
+  // and anything longer folds the extra separators back into the chat id.
+  const last = rest[rest.length - 1]
+  if (platform === "matrix") {
+    if (rest.length > 1 && last.startsWith("$")) {
+      return {
+        platform,
+        adapterId,
+        remoteChatId: rest.slice(0, -1).join(KEY_SEP),
+        threadId: last,
+      }
+    }
+    return { platform, adapterId, remoteChatId: rest.join(KEY_SEP), threadId: undefined }
+  }
+  if (rest.length === 2) {
+    return { platform, adapterId, remoteChatId: rest[0], threadId: rest[1] }
+  }
+  return { platform, adapterId, remoteChatId: rest.join(KEY_SEP), threadId: undefined }
 }

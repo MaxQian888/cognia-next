@@ -86,6 +86,27 @@ export interface ConnectorMediaUploadRequest {
   contentType?: string
 }
 
+export interface DiscordUploadFile {
+  sourceUrl: string
+  filename: string
+  contentType?: string
+  description?: string
+  /** Voice-message duration in seconds (audio attachments only). */
+  durationSecs?: number
+  /** Base64 waveform for voice messages. */
+  waveform?: string
+}
+
+export interface ConnectorDiscordUploadRequest {
+  botToken: string
+  channelId: string
+  content?: string
+  files: DiscordUploadFile[]
+  replyToMessageId?: string
+  /** Message flags bitfield (e.g. IS_VOICE_MESSAGE = 1 << 13). */
+  flags?: number
+}
+
 export interface MatrixCryptoInitRequest {
   adapterId: string
   userId: string
@@ -374,6 +395,17 @@ export async function connectorsAttachmentRead(
 
 export async function connectorsMediaUpload(req: ConnectorMediaUploadRequest): Promise<string> {
   return invoker<string>("connectors_media_upload", { req })
+}
+
+/**
+ * Discord multipart media upload — fetches each source URL in Rust and posts the
+ * bytes as `multipart/form-data` to `/channels/{id}/messages`, returning the new
+ * message id. Handles voice messages via the IS_VOICE_MESSAGE flag.
+ */
+export async function connectorsDiscordUpload(
+  req: ConnectorDiscordUploadRequest
+): Promise<string> {
+  return invoker<string>("connectors_discord_upload", { req })
 }
 
 export async function connectorsMatrixCryptoInit(req: MatrixCryptoInitRequest): Promise<void> {

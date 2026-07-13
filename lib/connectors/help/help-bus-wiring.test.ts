@@ -106,12 +106,14 @@ async function outboundCount(): Promise<number> {
   return getDb().outboundQueue.count()
 }
 
+// 30s hook budget: the first cold open of the full schema (100+ Dexie
+// versions) can exceed jest's default 5s under parallel suite load.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   __resetBusForTesting()
   __resetPruneCounterForTesting()
-})
+}, 30_000)
 
 describe("bus help/welcome wiring", () => {
   it("serves a help card and skips the route handler on a help trigger", async () => {
@@ -122,6 +124,7 @@ describe("bus help/welcome wiring", () => {
     bus.routeHandler = routeHandler
 
     await bus.dispatchInboundFull(privateEvent(adapterId, "m_help", "/help"))
+    await bus.flushInboundTurns()
 
     expect(routeHandler).not.toHaveBeenCalled()
     const jobs = await getDb().outboundQueue.toArray()
@@ -162,6 +165,7 @@ describe("bus help/welcome wiring", () => {
     bus.routeHandler = routeHandler
 
     await bus.dispatchInboundFull(privateEvent(adapterId, "m_status", "/status"))
+    await bus.flushInboundTurns()
 
     expect(routeHandler).not.toHaveBeenCalled()
     const jobs = await getDb().outboundQueue.toArray()
@@ -179,6 +183,7 @@ describe("bus help/welcome wiring", () => {
     bus.routeHandler = routeHandler
 
     await bus.dispatchInboundFull(privateEvent(adapterId, "m_model", "/model gpt-5"))
+    await bus.flushInboundTurns()
 
     expect(routeHandler).not.toHaveBeenCalled()
     const override = await getDb()
@@ -277,6 +282,8 @@ describe("bus help/welcome wiring", () => {
       raw: {},
     }
     await bus.dispatchConnectorCallback(callback)
+    // The synthetic re-entry enqueues the turn on the conversation queue.
+    await bus.flushInboundTurns()
 
     expect(routeHandler).toHaveBeenCalledTimes(1)
     const [event, decision] = routeHandler.mock.calls[0] as [NormalizedInboundEvent, string]

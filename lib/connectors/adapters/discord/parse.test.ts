@@ -105,13 +105,12 @@ describe("parseDiscordDispatch", () => {
       expect(result).not.toBeNull()
     })
 
-    it("conversationKey includes thread_id as the channel segment", () => {
-      // channel_id == thread_id in Discord thread messages
+    it("conversationKey uses channel_id (which IS the thread id for thread messages)", () => {
       expect(result!.conversationKey).toContain("5556543210987654321")
     })
 
-    it("channel kind is thread", () => {
-      expect(result!.channel.kind).toBe("thread")
+    it("channel kind is group — messages carry no thread marker (thread_id is not a real field)", () => {
+      expect(result!.channel.kind).toBe("group")
     })
 
     it("sets replyTo.messageId from message_reference.message_id", () => {
@@ -219,18 +218,71 @@ describe("parseDiscordDispatch", () => {
       expect(r!.sender.remoteUserId).toBe("unknown")
     })
 
-    it("uses thread channel kind when thread_id is present", () => {
+    it("classifies a delete without guild_id as private (no thread_id field exists)", () => {
       const dispatch: DiscordDispatch = {
         t: "MESSAGE_DELETE",
         op: 0,
         d: {
           id: "msg-del-2",
           channel_id: "ch-1",
-          thread_id: "th-1",
         },
       }
       const r = parseDiscordDispatch(ADAPTER_ID, SELF_ID, dispatch)
-      expect(r!.channel.kind).toBe("thread")
+      expect(r!.channel.kind).toBe("private")
+    })
+  })
+
+  // Self-echo guard — the gateway echoes the bot's own sends back as
+  // MESSAGE_CREATE / MESSAGE_UPDATE; forwarding them loops the AI reply.
+  describe("self-echo guard", () => {
+    function makeSelfDispatch(t: "MESSAGE_CREATE" | "MESSAGE_UPDATE", authorId: string) {
+      return {
+        t,
+        op: 0,
+        d: {
+          id: "msg-self-1",
+          content: "echoed bot reply",
+          channel_id: "ch-1",
+          author: { id: authorId, username: "cogniabot", bot: true },
+          timestamp: "2026-07-14T00:00:00.000Z",
+          attachments: [],
+          mentions: [],
+        },
+      } as DiscordDispatch
+    }
+
+    it("drops MESSAGE_CREATE authored by the bot itself", () => {
+      expect(parseDiscordDispatch(ADAPTER_ID, SELF_ID, makeSelfDispatch("MESSAGE_CREATE", SELF_ID))).toBeNull()
+    })
+
+    it("drops MESSAGE_UPDATE authored by the bot itself", () => {
+      expect(parseDiscordDispatch(ADAPTER_ID, SELF_ID, makeSelfDispatch("MESSAGE_UPDATE", SELF_ID))).toBeNull()
+    })
+
+    it('does NOT drop when selfId is "" (pre-READY) even if author ids collide vacuously', () => {
+      const event = parseDiscordDispatch(ADAPTER_ID, "", makeSelfDispatch("MESSAGE_CREATE", SELF_ID))
+      expect(event).not.toBeNull()
+      expect(event!.messageId).toBe("msg-self-1")
+    })
+
+    it("does NOT drop other bots' messages (sibling gating needs them)", () => {
+      const event = parseDiscordDispatch(
+        ADAPTER_ID,
+        SELF_ID,
+        makeSelfDispatch("MESSAGE_CREATE", "other-bot-id")
+      )
+      expect(event).not.toBeNull()
+    })
+
+    it("keeps the bot's own messages when allowSelfEcho is set (history projection)", () => {
+      const event = parseDiscordDispatch(
+        ADAPTER_ID,
+        SELF_ID,
+        makeSelfDispatch("MESSAGE_CREATE", SELF_ID),
+        { allowSelfEcho: true }
+      )
+      expect(event).not.toBeNull()
+      expect(event!.sender.remoteUserId).toBe(SELF_ID)
     })
   })
 

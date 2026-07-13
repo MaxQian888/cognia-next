@@ -91,6 +91,15 @@ jest.mock("@/lib/connectors/health/heartbeat-sweep", () => ({
   startHeartbeatSweep: (...args: unknown[]) => mockStartHeartbeatSweep(...args),
 }))
 
+// ── Mock the outbound terminal-row retention sweep (Dexie + real timers) ─────
+const mockRetentionDispose = jest.fn()
+const mockStartOutboundRetentionSweep = jest
+  .fn()
+  .mockImplementation(() => ({ dispose: mockRetentionDispose, runNow: jest.fn() }))
+jest.mock("@/lib/connectors/daily-schedule", () => ({
+  startOutboundRetentionSweep: (...args: unknown[]) => mockStartOutboundRetentionSweep(...args),
+}))
+
 // ── Mock the immediate per-boot heartbeat (writes to Dexie; jsdom has no IDB) ─
 const mockRecordHeartbeatNow = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/connectors/health/heartbeat", () => ({
@@ -200,6 +209,10 @@ beforeEach(() => {
   mockListAdapters.mockReturnValue([])
   lifecycleRegistry.clear()
   mockStartHeartbeatSweep.mockImplementation(() => ({ dispose: mockSweepDispose }))
+  mockStartOutboundRetentionSweep.mockImplementation(() => ({
+    dispose: mockRetentionDispose,
+    runNow: jest.fn(),
+  }))
 })
 
 afterEach(() => {
@@ -279,6 +292,140 @@ describe("installConnectorRuntime", () => {
     expect(mockListEnabled).not.toHaveBeenCalled()
     expect(mockRegisterAdapter).not.toHaveBeenCalled()
     expect(mockStartOutboundRunner).not.toHaveBeenCalled()
+  })
+
+  // ── Default Web Locks singleton guard ──────────────────────────────────────
+  // A spec-faithful `navigator.locks` fake: requests queue; grants are
+  // processed asynchronously (a macrotask, mirroring WKWebView's
+  // cross-process lock manager — never within the requesting task);
+  // `ifAvailable` resolves the callback with null unless the lock is
+  // IMMEDIATELY grantable (not held AND nothing queued ahead); an aborted
+  // `signal` withdraws a still-queued request with an AbortError but is a
+  // no-op once the lock has been granted (per spec).
+  describe("default Web Locks runtime lock", () => {
+    interface FakeLockRequest {
+      cb: (lock: { name: string; mode: string } | null) => unknown
+      resolve: (v: unknown) => void
+      reject: (e: unknown) => void
+      granted: boolean
+      withdrawn: boolean
+    }
+
+    class FakeLockManager {
+      held: FakeLockRequest | null = null
+      queue: FakeLockRequest[] = []
+
+      request(
+        name: string,
+        opts: { ifAvailable?: boolean; signal?: AbortSignal },
+        cb: FakeLockRequest["cb"]
+      ): Promise<unknown> {
+        return new Promise((resolve, reject) => {
+          if (opts.signal?.aborted) {
+            reject(new DOMException("aborted", "AbortError"))
+            return
+          }
+          if (opts.ifAvailable && (this.held !== null || this.queue.length > 0)) {
+            Promise.resolve(cb(null)).then(resolve, reject)
+            return
+          }
+          const req: FakeLockRequest = { cb, resolve, reject, granted: false, withdrawn: false }
+          opts.signal?.addEventListener(
+            "abort",
+            () => {
+              if (req.granted) return
+              req.withdrawn = true
+              this.queue = this.queue.filter((q) => q !== req)
+              reject(new DOMException("aborted", "AbortError"))
+            },
+            { once: true }
+          )
+          this.queue.push(req)
+          setTimeout(() => this.pump(), 0)
+        })
+      }
+
+      private pump(): void {
+        if (this.held !== null) return
+        const req = this.queue.shift()
+        if (!req) return
+        req.granted = true
+        this.held = req
+        Promise.resolve(req.cb({ name: "cognia-connector-runtime", mode: "exclusive" })).then(
+          (v) => {
+            this.held = null
+            req.resolve(v)
+            setTimeout(() => this.pump(), 0)
+          },
+          (e) => {
+            this.held = null
+            req.reject(e)
+            setTimeout(() => this.pump(), 0)
+          }
+        )
+      }
+    }
+
+    beforeEach(() => {
+      mockedIsTauri.mockReturnValue(true)
+      const row = makeTelegramRow()
+      mockListEnabled.mockResolvedValue([row])
+      mockBuildAdapterFromRow.mockImplementation(async () => makeFakeAdapter(row.id))
+      Object.defineProperty(globalThis.navigator, "locks", {
+        value: new FakeLockManager(),
+        configurable: true,
+      })
+    })
+
+    afterEach(() => {
+      delete (globalThis.navigator as { locks?: unknown }).locks
+    })
+
+    it("boots after a StrictMode-style remount (teardown while the first request is still queued)", async () => {
+      // effect#1 → cleanup#1 → effect#2, all in the same task — exactly what
+      // React StrictMode does to ConnectorBusProvider in dev. The first
+      // install's lock request is still queued (grants are async) when it is
+      // torn down; the remounted install must still end up booting.
+      const teardown1 = install()
+      teardown1()
+      install()
+
+      await waitFor(() => {
+        expect(mockRegisterAdapter).toHaveBeenCalledTimes(1)
+        expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
+      })
+    })
+
+    it("does not boot a second runtime while the first still holds the lock", async () => {
+      install()
+      await waitFor(() => {
+        expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
+      })
+
+      install()
+      await new Promise((r) => setTimeout(r, 100))
+
+      // Still exactly one runtime: no double adapter boot, no double runner.
+      expect(mockRegisterAdapter).toHaveBeenCalledTimes(1)
+      expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
+    })
+
+    it("lets a waiting install take over when the owner tears down", async () => {
+      const teardown1 = install()
+      await waitFor(() => {
+        expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
+      })
+
+      install() // queues behind the owner
+      await new Promise((r) => setTimeout(r, 50))
+      expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
+
+      teardown1() // owner releases → the waiter must boot
+
+      await waitFor(() => {
+        expect(mockStartOutboundRunner).toHaveBeenCalledTimes(2)
+      })
+    })
   })
 
   it("registers multiple adapters when multiple rows are enabled", async () => {
@@ -501,6 +648,24 @@ describe("installConnectorRuntime", () => {
     dispose()
     await waitFor(() => {
       expect(mockSweepDispose).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("starts the outbound terminal-row retention sweep and disposes it on teardown", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow("cai_retention")
+    const adapter = makeFakeAdapter(row.id)
+    adapter.start.mockResolvedValue(undefined)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    const dispose = install()
+    await waitFor(() => {
+      expect(mockStartOutboundRetentionSweep).toHaveBeenCalledTimes(1)
+    })
+    dispose()
+    await waitFor(() => {
+      expect(mockRetentionDispose).toHaveBeenCalledTimes(1)
     })
   })
 

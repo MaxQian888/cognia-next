@@ -82,14 +82,24 @@ describe("segmentToLarkBody", () => {
     expect(content.text).toContain("```\nselect 1")
   })
 
-  it("mention segment → text with open_id tag", () => {
-    const body = segmentToLarkBody({ type: "mention", userId: "ou_user_abc" })
+  it("mention segment → documented <at user_id=…> syntax with display-name fallback text", () => {
+    const body = segmentToLarkBody({
+      type: "mention",
+      userId: "ou_user_abc",
+      displayName: "Alice",
+    })
     expect(body!.msg_type).toBe("text")
     const content = JSON.parse(body!.content) as { text: string }
-    expect(content.text).toContain("ou_user_abc")
+    expect(content.text).toBe('<at user_id="ou_user_abc">Alice</at>')
   })
 
-  it("card segment → text [card] placeholder", () => {
+  it("mention segment without displayName keeps an empty fallback text", () => {
+    const body = segmentToLarkBody({ type: "mention", userId: "ou_user_abc" })
+    const content = JSON.parse(body!.content) as { text: string }
+    expect(content.text).toBe('<at user_id="ou_user_abc"></at>')
+  })
+
+  it("card segment with foreign dialect → text [card] placeholder", () => {
     const body = segmentToLarkBody({
       type: "card",
       card: { kind: "block_kit", payload: { type: "section" } },
@@ -97,6 +107,20 @@ describe("segmentToLarkBody", () => {
     expect(body!.msg_type).toBe("text")
     const content = JSON.parse(body!.content) as { text: string }
     expect(content.text).toBe("[card]")
+  })
+
+  it("card segment with Lark card JSON (elements) → passthrough interactive body", () => {
+    const payload = { elements: [{ tag: "div", text: { tag: "lark_md", content: "hi" } }] }
+    const body = segmentToLarkBody({ type: "card", card: { kind: "lark", payload } })
+    expect(body!.msg_type).toBe("interactive")
+    expect(JSON.parse(body!.content)).toEqual(payload)
+  })
+
+  it("card segment with Card 2.0 schema marker → passthrough interactive body", () => {
+    const payload = { schema: "2.0", body: { elements: [] } }
+    const body = segmentToLarkBody({ type: "card", card: { kind: "lark", payload } })
+    expect(body!.msg_type).toBe("interactive")
+    expect(JSON.parse(body!.content)).toEqual(payload)
   })
 
   it("file segment with remote URL → text with link (degraded)", () => {

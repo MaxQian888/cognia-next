@@ -27,8 +27,10 @@ const mockOnDeepLink = jest.fn().mockImplementation(async (handler: (urls: strin
   capturedDeepLinkHandler = handler
   return jest.fn() // unsubscribe fn
 })
+const mockLaunchDeepLink = jest.fn(async (): Promise<string[] | null> => null)
 jest.mock("@/lib/tauri/deep-link", () => ({
   onDeepLink: (...args: unknown[]) => mockOnDeepLink(...args),
+  getLaunchDeepLink: () => mockLaunchDeepLink(),
 }))
 
 // ── Mock Capacitor deeplink + browser (mobile branch) ────────────────────────
@@ -70,6 +72,7 @@ function setOAuthState(state: string) {
 
 function clearOAuthState() {
   sessionStorage.removeItem("connector-oauth-state")
+  localStorage.removeItem("connector-oauth-state")
 }
 
 beforeEach(() => {
@@ -77,6 +80,7 @@ beforeEach(() => {
   capturedDeepLinkHandler = null
   capturedCapHandler = null
   mockCapLaunchRoute.mockResolvedValue(null)
+  mockLaunchDeepLink.mockResolvedValue(null)
   setCapacitor(false)
   oauthRegistry.clear()
   clearOAuthState()
@@ -232,6 +236,32 @@ describe("ConnectorDeepLinkRouter", () => {
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("token exchange failed"))
     })
+  })
+
+  it("replays a cold-start desktop launch URL, validating state from durable localStorage", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    // Cold-start: sessionStorage is empty; only the durable localStorage
+    // mirror carries the state (as the relay bounce would leave it).
+    localStorage.setItem("connector-oauth-state", "valid-state")
+    const fakeHandler = jest.fn().mockResolvedValue(undefined)
+    oauthRegistry.set("lark", fakeHandler)
+    mockLaunchDeepLink.mockResolvedValue([
+      "cognia://connector/oauth/lark?code=cold-code&state=valid-state",
+    ])
+
+    render(
+      <ConnectorDeepLinkRouter>
+        <div />
+      </ConnectorDeepLinkRouter>
+    )
+
+    await waitFor(() => {
+      expect(fakeHandler).toHaveBeenCalledWith("cold-code", "valid-state")
+      expect(mockToastSuccess).toHaveBeenCalledWith("lark connected successfully")
+    })
+    // State is cleared on use (both copies).
+    expect(sessionStorage.getItem("connector-oauth-state")).toBeNull()
+    expect(localStorage.getItem("connector-oauth-state")).toBeNull()
   })
 
   it("handles connector OAuth callbacks on the Capacitor shell (appUrlOpen)", async () => {

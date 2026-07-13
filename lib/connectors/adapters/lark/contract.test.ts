@@ -326,7 +326,10 @@ describe("Lark adapter contract suite", () => {
   // -------------------------------------------------------------------------
 
   describe("send.reply + send.thread capability", () => {
-    it("threadTs becomes reply_in_thread=true + parent_id in payload", async () => {
+    // Only POST /im/v1/messages/:id/reply accepts reply_in_thread — the
+    // create endpoint ignores unknown fields, so the old
+    // reply_in_thread+parent_id payload silently landed in the main chat.
+    it("thread send routes through /reply with reply_in_thread=true", async () => {
       mockInvoke.mockResolvedValueOnce(makeTatOkResp()).mockResolvedValueOnce(makeSendOkResp())
 
       const adapter = makeAdapter()
@@ -335,7 +338,8 @@ describe("Lark adapter contract suite", () => {
           platform: "lark",
           adapterId: "lark-contract",
           channelId: "oc_chat_001",
-          threadTs: "thr_root_001",
+          threadTs: "omt_thread_001",
+          threadRootMessageId: "om_thread_anchor",
         },
         segments: [{ type: "text", text: "reply in thread" }],
         metadata: { idempotencyKey: "k5" },
@@ -343,8 +347,32 @@ describe("Lark adapter contract suite", () => {
 
       await adapter.send(req)
       const call = lastSendCall()
+      expect(call.url).toContain("/im/v1/messages/om_thread_anchor/reply")
       expect(call.body["reply_in_thread"]).toBe(true)
-      expect(call.body["parent_id"]).toBe("thr_root_001")
+      expect(call.body["receive_id"]).toBeUndefined()
+      expect(call.body["parent_id"]).toBeUndefined()
+    })
+
+    it("non-thread send stays on the plain create endpoint", async () => {
+      mockInvoke.mockResolvedValueOnce(makeTatOkResp()).mockResolvedValueOnce(makeSendOkResp())
+
+      const adapter = makeAdapter()
+      const req: OutboundRequest = {
+        conversationRef: {
+          platform: "lark",
+          adapterId: "lark-contract",
+          channelId: "oc_chat_001",
+        },
+        segments: [{ type: "text", text: "plain send" }],
+        metadata: { idempotencyKey: "k5b" },
+      }
+
+      await adapter.send(req)
+      const call = lastSendCall()
+      expect(call.url).toContain("/im/v1/messages?receive_id_type=chat_id")
+      expect(call.body["receive_id"]).toBe("oc_chat_001")
+      expect(call.body["reply_in_thread"]).toBeUndefined()
+      expect(call.body["parent_id"]).toBeUndefined()
     })
   })
 
@@ -353,7 +381,7 @@ describe("Lark adapter contract suite", () => {
   // -------------------------------------------------------------------------
 
   describe("send.mention capability", () => {
-    it("mention segment includes open_id in text", async () => {
+    it("mention segment uses the documented <at user_id=…> syntax", async () => {
       mockInvoke.mockResolvedValueOnce(makeTatOkResp()).mockResolvedValueOnce(makeSendOkResp())
 
       const adapter = makeAdapter()
@@ -363,14 +391,16 @@ describe("Lark adapter contract suite", () => {
           adapterId: "lark-contract",
           channelId: "oc_chat_001",
         },
-        segments: [{ type: "mention", userId: "ou_user_abc" }],
+        segments: [{ type: "mention", userId: "ou_user_abc", displayName: "Alice" }],
         metadata: { idempotencyKey: "k7" },
       }
 
       await adapter.send(req)
       const call = lastSendCall()
       const content = JSON.parse(call.body["content"] as string) as { text: string }
-      expect(content.text).toContain("ou_user_abc")
+      // Documented mention syntax: the ATTRIBUTE is user_id (value may be an
+      // open_id); <at open_id=…> is undocumented and renders literally.
+      expect(content.text).toBe('<at user_id="ou_user_abc">Alice</at>')
     })
   })
 
@@ -450,7 +480,31 @@ describe("Lark adapter contract suite", () => {
   // -------------------------------------------------------------------------
 
   describe("send.card / rich-card.lark capability", () => {
-    it("card segment produces [card] placeholder text", async () => {
+    it("Lark-shaped card payload passes through as msg_type=interactive", async () => {
+      mockInvoke.mockResolvedValueOnce(makeTatOkResp()).mockResolvedValueOnce(makeSendOkResp())
+
+      const larkCard = {
+        header: { title: { tag: "plain_text", content: "Report" } },
+        elements: [{ tag: "div", text: { tag: "lark_md", content: "**done**" } }],
+      }
+      const adapter = makeAdapter()
+      const req: OutboundRequest = {
+        conversationRef: {
+          platform: "lark",
+          adapterId: "lark-contract",
+          channelId: "oc_chat_001",
+        },
+        segments: [{ type: "card", card: { kind: "lark", payload: larkCard } }],
+        metadata: { idempotencyKey: "k11" },
+      }
+
+      await adapter.send(req)
+      const call = lastSendCall()
+      expect(call.body["msg_type"]).toBe("interactive")
+      expect(JSON.parse(call.body["content"] as string)).toEqual(larkCard)
+    })
+
+    it("foreign card dialects still degrade to the [card] placeholder", async () => {
       mockInvoke.mockResolvedValueOnce(makeTatOkResp()).mockResolvedValueOnce(makeSendOkResp())
 
       const adapter = makeAdapter()
@@ -460,31 +514,29 @@ describe("Lark adapter contract suite", () => {
           adapterId: "lark-contract",
           channelId: "oc_chat_001",
         },
-        segments: [{ type: "card", card: { kind: "block_kit", payload: {} } }],
-        metadata: { idempotencyKey: "k11" },
+        segments: [{ type: "card", card: { kind: "block_kit", payload: { blocks: [] } } }],
+        metadata: { idempotencyKey: "k11b" },
       }
 
       await adapter.send(req)
       const call = lastSendCall()
+      expect(call.body["msg_type"]).toBe("text")
       const content = JSON.parse(call.body["content"] as string) as { text: string }
       expect(content.text).toBe("[card]")
     })
   })
 
   // -------------------------------------------------------------------------
-  // setTyping (no-op)
+  // typing (unsupported)
   // -------------------------------------------------------------------------
 
-  describe("setTyping no-op", () => {
-    it("setTyping() never calls the Lark API", async () => {
+  describe("typing is unsupported", () => {
+    it("setTyping is absent — the contract treats a missing method as unsupported", () => {
       const adapter = makeAdapter()
-      await adapter.setTyping!("lark:lark-contract:oc_chat_001", true)
-      await adapter.setTyping!("lark:lark-contract:oc_chat_001", false)
-
-      const httpCalls = mockInvoke.mock.calls.filter(
-        ([cmd]: [string]) => cmd === "connectors_http_request"
-      )
-      expect(httpCalls).toHaveLength(0)
+      // `typing` is (correctly) not declared in capabilities, so a silent
+      // no-op implementation would lie to callers that probe the method.
+      expect(adapter.setTyping).toBeUndefined()
+      expect(adapter.meta.capabilities).not.toContain("typing")
     })
   })
 

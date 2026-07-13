@@ -6,6 +6,8 @@ import {
   serializeReactionRemoval,
   serializeFetchHistory,
   escapeDiscordMd,
+  chunkDiscordContent,
+  DISCORD_MAX_CONTENT_LENGTH,
 } from "./serialize"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -137,6 +139,56 @@ describe("serializeOutbound", () => {
     const req = makeReq([{ type: "text", text: "thread msg" }])
     const calls = serializeOutbound(req)
     expect(calls[0].url).toContain("/channels/9876543210987654321/messages")
+  })
+
+  // ── 2000-char content chunking ─────────────────────────────────────────────
+
+  it("splits an over-limit text segment into multiple ≤2000-char POSTs", () => {
+    const text = "a".repeat(4500)
+    const calls = serializeOutbound(makeReq([{ type: "text", text }]))
+    expect(calls).toHaveLength(3)
+    const contents = calls.map((c) => c.payload["content"] as string)
+    for (const c of contents) {
+      expect(c.length).toBeLessThanOrEqual(DISCORD_MAX_CONTENT_LENGTH)
+    }
+    expect(contents.join("")).toBe(text)
+  })
+
+  it("chunks markdown segments too, attaching message_reference only to the first chunk", () => {
+    const md = "x".repeat(2500)
+    const calls = serializeOutbound(
+      makeReq([{ type: "markdown", md }], { replyTo: { messageId: "999" } })
+    )
+    expect(calls).toHaveLength(2)
+    expect(calls[0].payload["message_reference"]).toBeDefined()
+    expect(calls[1].payload["message_reference"]).toBeUndefined()
+  })
+})
+
+describe("chunkDiscordContent", () => {
+  it("returns the text unchanged when within the limit", () => {
+    expect(chunkDiscordContent("short")).toEqual(["short"])
+    expect(chunkDiscordContent("b".repeat(2000))).toEqual(["b".repeat(2000)])
+  })
+
+  it("prefers a newline boundary inside the window", () => {
+    const first = "p".repeat(1500)
+    const second = "q".repeat(1000)
+    const chunks = chunkDiscordContent(`${first}\n${second}`)
+    expect(chunks).toEqual([first, second])
+  })
+
+  it("hard-cuts at the limit when no newline exists in the window", () => {
+    const chunks = chunkDiscordContent("z".repeat(2001))
+    expect(chunks).toEqual(["z".repeat(2000), "z"])
+  })
+
+  it("never treats a leading newline as a boundary (no empty chunks)", () => {
+    const text = "\n" + "y".repeat(2500)
+    const chunks = chunkDiscordContent(text)
+    expect(chunks.every((c) => c.length > 0)).toBe(true)
+    expect(chunks.every((c) => c.length <= 2000)).toBe(true)
+    expect(chunks.join("")).toBe(text)
   })
 })
 

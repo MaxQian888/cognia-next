@@ -1,9 +1,9 @@
 /**
- * Lark OAuth handler tests — ADR-0009 v41 / A4 (D2).
+ * Lark OAuth handler tests — OAuth 2.0 send-as-user flow.
  *
- * Mocks Dexie row reads, keyring get/set, and the two HTTP calls (TAT +
- * OIDC exchange) so the test can drive the full happy-path and the
- * common failure paths without touching real networks.
+ * Mocks Dexie row reads, keyring get/set, the durable pending store, and the
+ * two HTTP calls (v2 token exchange + user_info) so the test can drive the
+ * full happy-path and the common failure paths without touching real networks.
  */
 
 jest.mock("@/lib/db/adapter-instances", () => ({
@@ -22,12 +22,20 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
     mockKeyringSet(adapterId, credential, value),
 }))
 
+const mockGetPending = jest.fn()
+const mockClearPending = jest.fn()
+jest.mock("./oauth-pending", () => ({
+  getLarkOAuthPending: (adapterId: string) => mockGetPending(adapterId),
+  clearLarkOAuthPending: (adapterId: string) => mockClearPending(adapterId),
+}))
+
 import { buildLarkOAuthState, parseLarkOAuthState, handleLarkOAuth } from "./oauth-handler"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { clearTokenCache } from "./auth"
 
 const mockGetAdapter = getAdapterInstance as jest.Mock
 const mockUpdateAdapter = updateAdapterInstance as jest.Mock
+
+const REDIRECT = "https://relay.example/oauth/lark/callback"
 
 const makeAdapterRow = () => ({
   id: "lk-1",
@@ -43,14 +51,65 @@ const makeAdapterRow = () => ({
   updatedAt: 1,
 })
 
+/** Make `getLarkOAuthPending` return a pending record matching `state`. */
+function primePending(state: string) {
+  mockGetPending.mockReturnValue({
+    state,
+    codeVerifier: "verifier-1",
+    redirectUri: REDIRECT,
+    ts: Date.now(),
+  })
+}
+
+/** v2 token-exchange HTTP response (flat OAuth 2.0 shape). */
+function tokenV2Response() {
+  return {
+    status: 200,
+    headers: {},
+    body: JSON.stringify({
+      code: 0,
+      access_token: "u-access-789",
+      refresh_token: "u-refresh-abc",
+      expires_in: 7200,
+      refresh_token_expires_in: 31_104_000,
+      token_type: "Bearer",
+      scope: "offline_access im:message",
+    }),
+  }
+}
+
+/** user_info HTTP response. */
+function userInfoResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    status: 200,
+    headers: {},
+    body: JSON.stringify({
+      code: 0,
+      data: {
+        open_id: "ou_alice",
+        union_id: "on_alice",
+        name: "Alice",
+        avatar_url: "https://lark.example.com/alice.png",
+        email: "alice@example.com",
+        enterprise_email: "alice@bigcorp.example.com",
+        ...overrides,
+      },
+    }),
+  }
+}
+
 beforeEach(() => {
   mockHttp.mockReset()
   mockKeyringGet.mockReset()
+  // appId + appSecret both resolve from the keyring by default.
+  mockKeyringGet.mockImplementation(async (_id: string, cred: string) =>
+    cred === "appId" ? "cli_test123" : cred === "appSecret" ? "secret_456" : null
+  )
   mockKeyringSet.mockReset().mockResolvedValue(undefined)
   mockGetAdapter.mockReset()
   mockUpdateAdapter.mockReset().mockResolvedValue(undefined)
-  // Auth's TAT cache is module-scoped; clear so the test's HTTP mock fires.
-  clearTokenCache("cli_test123", "secret_456")
+  mockGetPending.mockReset()
+  mockClearPending.mockReset()
 })
 
 describe("buildLarkOAuthState / parseLarkOAuthState", () => {
@@ -76,42 +135,16 @@ describe("buildLarkOAuthState / parseLarkOAuthState", () => {
 })
 
 describe("handleLarkOAuth — happy path", () => {
-  it("exchanges code, persists tokens, stamps connectedUser", async () => {
+  it("exchanges code, resolves identity, persists tokens, stamps connectedUser", async () => {
+    const state = buildLarkOAuthState("lk-1", "nonce-1")
+    primePending(state)
     mockGetAdapter.mockResolvedValueOnce(makeAdapterRow())
     mockKeyringGet.mockResolvedValueOnce("secret_456")
-    // 1st HTTP call: TAT
-    mockHttp.mockResolvedValueOnce({
-      status: 200,
-      headers: {},
-      body: JSON.stringify({ code: 0, tenant_access_token: "t-tat-xyz", expire: 7200 }),
-    })
-    // 2nd HTTP call: OIDC access token
-    mockHttp.mockResolvedValueOnce({
-      status: 200,
-      headers: {},
-      body: JSON.stringify({
-        code: 0,
-        data: {
-          access_token: "u-access-789",
-          refresh_token: "u-refresh-abc",
-          expires_in: 7200,
-          refresh_expires_in: 31_104_000,
-          token_type: "Bearer",
-          scope: "im:message",
-          open_id: "ou_alice",
-          union_id: "on_alice",
-          name: "Alice",
-          avatar_url: "https://lark.example.com/alice.png",
-          email: "alice@example.com",
-          enterprise_email: "alice@bigcorp.example.com",
-        },
-      }),
-    })
+    // 1st HTTP: v2 token exchange. 2nd HTTP: user_info.
+    mockHttp.mockResolvedValueOnce(tokenV2Response()).mockResolvedValueOnce(userInfoResponse())
 
     const before = Date.now()
-    const result = await handleLarkOAuth("oauth-code-1", {
-      state: buildLarkOAuthState("lk-1", "nonce-1"),
-    })
+    const result = await handleLarkOAuth("oauth-code-1", { state })
     const after = Date.now()
 
     expect(result.openId).toBe("ou_alice")
@@ -132,38 +165,35 @@ describe("handleLarkOAuth — happy path", () => {
     expect(patch.credentialsRef.accounts).toEqual(
       expect.arrayContaining(["appSecret", "user_token", "user_refresh_token"])
     )
+
+    // Pending authorization is cleared on success.
+    expect(mockClearPending).toHaveBeenCalledWith("lk-1")
   })
 
-  it("OIDC endpoint receives Bearer TAT and the authorization_code grant body", async () => {
+  it("v2 token endpoint gets client creds + PKCE verifier + the pending redirect_uri", async () => {
+    const state = buildLarkOAuthState("lk-1", "nonce")
+    primePending(state)
     mockGetAdapter.mockResolvedValueOnce(makeAdapterRow())
-    mockKeyringGet.mockResolvedValueOnce("secret_456")
-    mockHttp
-      .mockResolvedValueOnce({
-        status: 200,
-        headers: {},
-        body: JSON.stringify({ code: 0, tenant_access_token: "tat", expire: 7200 }),
-      })
-      .mockResolvedValueOnce({
-        status: 200,
-        headers: {},
-        body: JSON.stringify({
-          code: 0,
-          data: {
-            access_token: "a",
-            refresh_token: "r",
-            open_id: "o",
-          },
-        }),
-      })
-    await handleLarkOAuth("the-code", {
-      state: buildLarkOAuthState("lk-1", "nonce"),
+    mockHttp.mockResolvedValueOnce(tokenV2Response()).mockResolvedValueOnce(userInfoResponse())
+
+    await handleLarkOAuth("the-code", { state })
+
+    const tokenCall = mockHttp.mock.calls[0][0]
+    expect(tokenCall.url).toBe("https://open.feishu.cn/open-apis/authen/v2/oauth/token")
+    expect(tokenCall.headers.Authorization).toBeUndefined()
+    expect(JSON.parse(tokenCall.body)).toEqual({
+      grant_type: "authorization_code",
+      client_id: "cli_test123",
+      client_secret: "secret_456",
+      code: "the-code",
+      redirect_uri: REDIRECT,
+      code_verifier: "verifier-1",
     })
 
-    const oidcCall = mockHttp.mock.calls[1][0]
-    expect(oidcCall.url).toBe("https://open.feishu.cn/open-apis/authen/v1/oidc/access_token")
-    expect(oidcCall.headers.Authorization).toBe("Bearer tat")
-    const body = JSON.parse(oidcCall.body)
-    expect(body).toEqual({ grant_type: "authorization_code", code: "the-code" })
+    // user_info is called with the freshly-minted user token.
+    const infoCall = mockHttp.mock.calls[1][0]
+    expect(infoCall.url).toBe("https://open.feishu.cn/open-apis/authen/v1/user_info")
+    expect(infoCall.headers.Authorization).toBe("Bearer u-access-789")
   })
 })
 
@@ -186,40 +216,55 @@ describe("handleLarkOAuth — error paths", () => {
     ).rejects.toThrow(/not a Lark adapter/)
   })
 
-  it("throws when appId is missing on the row", async () => {
-    mockGetAdapter.mockResolvedValueOnce({
-      ...makeAdapterRow(),
-      settings: {},
-    })
+  it("throws when appId is missing from the keyring", async () => {
+    mockGetAdapter.mockResolvedValueOnce(makeAdapterRow())
+    mockKeyringGet.mockImplementation(async (_id: string, cred: string) =>
+      cred === "appSecret" ? "secret_456" : null
+    )
     await expect(
       handleLarkOAuth("code", { state: buildLarkOAuthState("lk-1", "x") })
-    ).rejects.toThrow(/no appId configured/)
+    ).rejects.toThrow(/appId not found in keyring/i)
   })
 
   it("throws when app secret is not in keyring", async () => {
     mockGetAdapter.mockResolvedValueOnce(makeAdapterRow())
-    mockKeyringGet.mockResolvedValueOnce(null)
+    mockKeyringGet.mockImplementation(async (_id: string, cred: string) =>
+      cred === "appId" ? "cli_test123" : null
+    )
     await expect(
       handleLarkOAuth("code", { state: buildLarkOAuthState("lk-1", "x") })
     ).rejects.toThrow(/app secret not found in keyring/i)
   })
 
-  it("propagates Lark's non-zero error code from the OIDC endpoint", async () => {
+  it("throws when there is no matching pending authorization", async () => {
+    // getLarkOAuthPending returns undefined (default) — session expired.
     mockGetAdapter.mockResolvedValueOnce(makeAdapterRow())
-    mockKeyringGet.mockResolvedValueOnce("secret")
-    mockHttp
-      .mockResolvedValueOnce({
-        status: 200,
-        headers: {},
-        body: JSON.stringify({ code: 0, tenant_access_token: "tat", expire: 7200 }),
-      })
-      .mockResolvedValueOnce({
-        status: 200,
-        headers: {},
-        body: JSON.stringify({ code: 99991661, msg: "auth code expired" }),
-      })
     await expect(
       handleLarkOAuth("code", { state: buildLarkOAuthState("lk-1", "x") })
-    ).rejects.toThrow(/auth code expired/)
+    ).rejects.toThrow(/no matching pending authorization/i)
+  })
+
+  it("throws when the pending state does not match the redirect state", async () => {
+    primePending(buildLarkOAuthState("lk-1", "authorized-nonce"))
+    mockGetAdapter.mockResolvedValueOnce(makeAdapterRow())
+    await expect(
+      handleLarkOAuth("code", { state: buildLarkOAuthState("lk-1", "tampered-nonce") })
+    ).rejects.toThrow(/no matching pending authorization/i)
+  })
+
+  it("propagates Lark's error from the v2 token endpoint", async () => {
+    const state = buildLarkOAuthState("lk-1", "x")
+    primePending(state)
+    mockGetAdapter.mockResolvedValueOnce(makeAdapterRow())
+    mockHttp.mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        code: 20050,
+        error: "invalid_grant",
+        error_description: "auth code expired",
+      }),
+    })
+    await expect(handleLarkOAuth("code", { state })).rejects.toThrow(/auth code expired/)
   })
 })

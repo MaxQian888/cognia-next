@@ -1,5 +1,6 @@
 pub mod discord;
 pub mod lark;
+pub mod qq;
 pub mod slack;
 pub mod telegram;
 pub mod wechat;

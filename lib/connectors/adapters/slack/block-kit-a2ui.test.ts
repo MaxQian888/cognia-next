@@ -144,4 +144,58 @@ describe("buildSlackA2UIBlocks", () => {
     const blocks = await buildSlackA2UIBlocks(baseInput(surface))
     expect(blocks[0]).toEqual({ type: "divider" })
   })
+
+  describe("Block Kit hard limits", () => {
+    it("truncates header text to 150 chars with an ellipsis", async () => {
+      const surface: A2UISegmentContent = {
+        components: {
+          root: { id: "root", component: "Card", title: "T".repeat(200) },
+        },
+        dataModel: {},
+        rootId: "root",
+      }
+      const blocks = await buildSlackA2UIBlocks(baseInput(surface))
+      const header = blocks[0] as { text: { text: string } }
+      expect(header.text.text).toHaveLength(150)
+      expect(header.text.text.endsWith("…")).toBe(true)
+    })
+
+    it("truncates button labels to 75 chars with an ellipsis", async () => {
+      const surface: A2UISegmentContent = {
+        components: {
+          root: { id: "root", component: "Column", children: ["b1"] },
+          b1: { id: "b1", component: "Button", text: "B".repeat(100), action: "go" },
+        },
+        dataModel: {},
+        rootId: "root",
+      }
+      const blocks = await buildSlackA2UIBlocks(baseInput(surface))
+      const actions = blocks[0] as unknown as { elements: Array<{ text: { text: string } }> }
+      expect(actions.elements[0].text.text).toHaveLength(75)
+      expect(actions.elements[0].text.text.endsWith("…")).toBe(true)
+    })
+
+    it("caps select options at 100", async () => {
+      const surface: A2UISegmentContent = {
+        components: {
+          root: { id: "root", component: "Column", children: ["sel"] },
+          sel: {
+            id: "sel",
+            component: "Select",
+            value: "",
+            label: "Pick",
+            options: Array.from({ length: 150 }, (_, i) => ({
+              value: `v${i}`,
+              label: `Option ${i}`,
+            })),
+          },
+        },
+        dataModel: {},
+        rootId: "root",
+      }
+      const blocks = await buildSlackA2UIBlocks(baseInput(surface))
+      const input = blocks[0] as unknown as { element: { options: unknown[] } }
+      expect(input.element.options).toHaveLength(100)
+    })
+  })
 })

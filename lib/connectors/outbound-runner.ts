@@ -3,17 +3,29 @@
  *
  * Task 38 primitives:
  *   - Per-adapter circuit breaker: trips when failure rate in a sliding window
- *     exceeds the threshold; re-opens after cooldown.
- *   - Per-adapter token bucket: rate limits outbound send attempts.
+ *     exceeds the threshold; re-opens after cooldown. While open, due jobs are
+ *     DEFERRED (retry after the cooldown ends) — never dead-lettered for the
+ *     breaker alone — and breaker deferrals don't consume attempts.
+ *   - Per-adapter token bucket: rate limits outbound send attempts (checked
+ *     after the atomic claim so a lost claim never wastes a token; a
+ *     rate-limit deferral un-claims and refunds the attempt).
  *   - Exponential back-off with jitter: `min(60 000, 1000 * 2^attempts) + jitter`,
  *     backed by the shared `computeBackoffDelay` from `@cognia/primitives`.
- *   - Idempotency LRU: short-circuits retries when the platform already acked.
+ *   - Idempotency dedupe: an in-memory LRU short-circuits retries when the
+ *     platform already acked, backed by row-level delivery evidence
+ *     (`platformMessageId` + the indexed `idempotencyKey` column) so a
+ *     rebooted runner doesn't re-send what a prior session delivered.
  *   - Dead-letter after 5 attempts.
+ *   - Stale-claim recovery: `sending` rows orphaned by a crash (claimed but
+ *     never settled) are flipped back to `failed` after a 5-minute grace,
+ *     on startup and lazily on every drain pass.
  *
  * Task 39 addition:
- *   - Per-conversation FIFO lane: a `Map<conversationKey, Promise<void>>` chain
- *     ensures messages within a conversation are sent in createdAt order while
- *     cross-conversation sends run in parallel.
+ *   - Per-conversation FIFO: lanes serialize jobs claimed in one drain pass,
+ *     and a cross-pass guard (`hasOlderActiveOutboundSibling`) skips a due
+ *     job while an OLDER non-terminal sibling exists in the same
+ *     conversation — so createdAt order holds even when an older job was
+ *     deferred to a later pass. Cross-conversation sends run in parallel.
  *
  * Usage:
  *   const controller = new AbortController()
@@ -33,6 +45,10 @@ import {
   markFailed,
   markDeadlettered,
   enqueueOutbound,
+  unclaimSending,
+  recoverStaleSendingJobs,
+  findDeliveredByIdempotencyKey,
+  findOlderActiveOutboundSibling,
 } from "@/lib/db/outbound-jobs"
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
@@ -156,6 +172,16 @@ const BASE_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 60_000
 const IDEMPOTENCY_LRU_CAP = 1_000
 /**
+ * Defer window for muted adapters / conversations. Long mutes are the norm
+ * (hours), so re-checking every 5 min is plenty responsive while keeping the
+ * defer loop from re-visiting each muted job every minute.
+ */
+const MUTED_DEFER_MS = 5 * 60_000
+/** Throttle for drain-pass error audits — one audit row per minute at most. */
+const DRAIN_ERROR_AUDIT_THROTTLE_MS = 60_000
+/** Pseudo adapter id for runner-level (not adapter-attributable) audit rows. */
+const RUNNER_AUDIT_ADAPTER_ID = "__outbound_runner__"
+/**
  * Safety-net ceiling on how long the wake-driven loop sleeps when nothing is
  * scheduled. The loop is normally woken precisely (enqueue event or the next
  * retry deadline), so this only bounds the worst case if a wake is ever
@@ -268,8 +294,13 @@ export class ConversationLane {
 // ── Runner options ────────────────────────────────────────────────────────────
 
 export interface OutboundRunnerOptions {
-  /** All registered platform adapters keyed by adapterId. */
-  adapters: Map<string, PlatformAdapter>
+  /**
+   * Live adapter lookup. Structurally satisfied by a `Map`, but production
+   * callers should pass a getter backed by the bus registry so adapters
+   * rebuilt after boot (credential rotation, hot enable) are picked up — a
+   * Map snapshotted at boot time delivers through stale instances forever.
+   */
+  adapters: { get(adapterId: string): PlatformAdapter | undefined }
   /**
    * Idle-sleep ceiling in ms (default 60 000). The loop is event-driven —
    * it wakes on enqueue and at each retry deadline — so this only caps the
@@ -377,11 +408,20 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
   // Task 39: per-conversation FIFO lanes
   const lanes = new Map<string, ConversationLane>()
   // Jobs currently enqueued into a lane but not yet terminal. `markSending`
-  // happens late (after the muted/quiet/idempotency/breaker/rate gates), so
+  // happens late (after the muted/quiet/idempotency/breaker gates), so
   // without this guard a tight drain would re-pick a job that is still
   // `pending` in the DB and double-enqueue it. The lane closure clears the
   // id in a `finally`.
   const inFlight = new Set<string>()
+  // Job ids whose mute-deferral has already been audited this run. A long
+  // mute defers the same job over and over; auditing each cycle floods the
+  // capped audit table, so the audit fires once per job (per runner
+  // lifetime). Entries are dropped when the job leaves the muted path.
+  const mutedAuditedJobs = new Set<string>()
+  // Last time a drain-pass DB error was audited (throttled to once/min so a
+  // persistent Dexie failure is visible without flooding the audit table).
+  // -Infinity ⇒ the first error always audits, whatever the injected clock.
+  let lastDrainErrorAuditAt = -Infinity
 
   function getAdapterState(adapterId: string, row?: AdapterInstanceRow): AdapterState {
     const tuning = sanitizeOutboundTuning(row?.outboundTuning)
@@ -587,6 +627,20 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     const { conversationKey, request } = job
     const { idempotencyKey } = request.metadata
 
+    // ── Cross-pass FIFO guard ─────────────────────────────────────────────
+    // Lanes only serialize jobs claimed in ONE drain pass. When an older
+    // sibling in this conversation was deferred to a later pass (retry
+    // backoff, quiet hours, breaker cooldown), a newer sibling must not
+    // overtake it. Push this job's `nextAttemptAt` out to the blocker's
+    // retry time (status untouched) so it re-evaluates right when the older
+    // sibling resolves — leaving it "due now" would busy-spin the wake loop.
+    const olderSibling = await findOlderActiveOutboundSibling(job).catch(() => undefined)
+    if (olderSibling) {
+      const blockedUntil = Math.max(now + 1_000, olderSibling.nextAttemptAt)
+      await getDb().outboundQueue.update(job.id, { nextAttemptAt: blockedUntil })
+      return
+    }
+
     // ── Muted / quiet-hours check ─────────────────────────────────────────
     let adapterRow: AdapterInstanceRow | undefined
     if (adapterCache?.has(adapterId)) {
@@ -597,17 +651,22 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     }
     if (adapterRow) {
       if (adapterRow.muted === true) {
-        // Muted: defer by 60 s, do NOT count as failure
-        await markFailed(job.id, "muted", "Adapter is globally muted", now + 60_000)
-        await appendAudit({
-          adapterId,
-          kind: "delivery.error",
-          at: now,
-          conversationKey,
-          idempotencyKey,
-          reason: "muted",
-          message: "Adapter is globally muted — delivery deferred",
-        })
+        // Muted: defer (do NOT count as failure). Audit only the FIRST
+        // deferral per job — a long mute re-defers the same job every
+        // cycle and would otherwise flood the capped audit table.
+        await markFailed(job.id, "muted", "Adapter is globally muted", now + MUTED_DEFER_MS)
+        if (!mutedAuditedJobs.has(job.id)) {
+          mutedAuditedJobs.add(job.id)
+          await appendAudit({
+            adapterId,
+            kind: "delivery.error",
+            at: now,
+            conversationKey,
+            idempotencyKey,
+            reason: "muted",
+            message: "Adapter is globally muted — delivery deferred",
+          })
+        }
         return
       }
 
@@ -624,20 +683,27 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       }
       // Per-conversation mute: same defer-not-fail semantics as the adapter
       // level mute above, scoped to one conversation — the bot keeps
-      // delivering everywhere else.
+      // delivering everywhere else. Audited once per job, like above.
       if (convOverride?.muted === true) {
-        await markFailed(job.id, "muted", "Conversation is muted", now + 60_000)
-        await appendAudit({
-          adapterId,
-          kind: "delivery.error",
-          at: now,
-          conversationKey,
-          idempotencyKey,
-          reason: "muted",
-          message: "Conversation is muted — delivery deferred",
-        })
+        await markFailed(job.id, "muted", "Conversation is muted", now + MUTED_DEFER_MS)
+        if (!mutedAuditedJobs.has(job.id)) {
+          mutedAuditedJobs.add(job.id)
+          await appendAudit({
+            adapterId,
+            kind: "delivery.error",
+            at: now,
+            conversationKey,
+            idempotencyKey,
+            reason: "muted",
+            message: "Conversation is muted — delivery deferred",
+          })
+        }
         return
       }
+
+      // Past both mute gates — forget any mute-audit marker so a future
+      // re-mute of this (still-undelivered) job audits again.
+      mutedAuditedJobs.delete(job.id)
 
       const effectiveQuietHours = convOverride?.quietHours ?? adapterRow.quietHours
       if (effectiveQuietHours) {
@@ -686,6 +752,44 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         conversationKey,
         idempotencyKey,
         message: "idempotency_cache_hit",
+      })
+      return
+    }
+
+    // ── Row-evidence dedupe (persistent idempotency) ──────────────────────
+    // The LRU above is in-memory only — a rebooted runner starts empty. Two
+    // durable evidence sources close (most of) the duplicate window:
+    //   1. This row already carries a `platformMessageId` (a prior attempt's
+    //      `markSent` landed but the status was later rewound, e.g. an
+    //      operator replay): the platform HAS the message — finish the
+    //      bookkeeping, never re-send.
+    //   2. A sibling row with the same idempotencyKey already delivered
+    //      (indexed lookup): serve this row from that evidence, exactly
+    //      like an LRU hit.
+    // GAP: neither closes the crash window between a successful
+    // `adapter.send()` and `markSent` — the ack died with the runner, so no
+    // local evidence exists and a retry duplicates. Fully closing it needs
+    // platform-side idempotency keys (e.g. Lark message create `uuid`)
+    // passed through the adapters; adapters are intentionally untouched here.
+    const rowEvidence =
+      job.platformMessageId ??
+      (await findDeliveredByIdempotencyKey(idempotencyKey, job.id).catch(() => undefined))
+        ?.platformMessageId
+    if (rowEvidence) {
+      await markSent(job.id, rowEvidence)
+      idempotencyCache.set(idempotencyKey, rowEvidence)
+      try {
+        opts.onDelivered?.(conversationKey)
+      } catch {
+        /* best-effort — cooldown bookkeeping must never break delivery */
+      }
+      await appendAudit({
+        adapterId,
+        kind: "delivery.success",
+        at: now,
+        conversationKey,
+        idempotencyKey,
+        message: "row_evidence_hit",
       })
       return
     }
@@ -757,11 +861,11 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
 
     // ── Circuit breaker ───────────────────────────────────────────────────
     if (!breaker.canPass()) {
-      // Multi-bot failover: before dead-lettering, try to re-enqueue the
-      // payload through an enabled same-platform sibling from this bot's
+      // Multi-bot failover: before deferring, try to re-enqueue the payload
+      // through an enabled same-platform sibling from this bot's
       // `failoverAdapterIds`. Single hop only — a job that already failed
-      // over once (metadata guard) is dead-lettered like before so two
-      // open-circuit bots can't ping-pong it forever.
+      // over once (metadata guard) stays put so two open-circuit bots can't
+      // ping-pong it forever.
       if (
         adapterRow &&
         request.metadata.failoverFromAdapterId === undefined &&
@@ -770,50 +874,34 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         const newJobId = await rerouteJob(job, adapterRow, "failover", adapterCache)
         if (newJobId !== null) return
       }
-      await markDeadlettered(job.id, "circuit_open", "Circuit breaker is open")
+      // An open breaker is a TRANSIENT adapter condition, not a property of
+      // this job: DEFER until the cooldown ends (plus jitter so the whole
+      // backlog doesn't stampede the half-open probe), never dead-letter.
+      // `markFailed` leaves `attempts` untouched, so breaker deferrals
+      // don't consume the max-attempts budget; jobs that genuinely exceed
+      // it still dead-letter via the max-attempts gate below.
+      const cooldownMs = sanitizeOutboundTuning(adapterRow?.outboundTuning).breakerCooldownMs
+      const openedAt = breaker.snapshot().openedAt
+      const nextAt = Math.max(now + 1_000, (openedAt ?? now) + cooldownMs) + jitter()
+      await markFailed(job.id, "circuit_open", "Circuit breaker is open — deferred", nextAt)
       await appendAudit({
         adapterId,
-        kind: "delivery.deadlettered",
+        kind: "delivery.error",
         at: now,
         conversationKey,
         idempotencyKey,
         reason: "circuit_open",
-      })
-      return
-    }
-
-    // ── Rate limit ────────────────────────────────────────────────────────
-    if (!bucket.tryAcquire()) {
-      // Multi-bot load balancing: before deferring behind the exhausted
-      // bucket, try to spill the job onto a same-platform sibling from this
-      // bot's `balanceAdapterIds` that still has send capacity. Single hop
-      // only (shared guard with failover) so saturated bots can't ping-pong.
-      if (
-        adapterRow &&
-        request.metadata.failoverFromAdapterId === undefined &&
-        request.metadata.balancedFromAdapterId === undefined
-      ) {
-        const newJobId = await rerouteJob(job, adapterRow, "balanced", adapterCache)
-        if (newJobId !== null) return
-      }
-      // Defer retry by 1 second (the lane-completion wake re-tightens the
-      // loop's sleep so the runner re-picks once the deferral elapses).
-      const nextAt = now + 1_000
-      await markFailed(job.id, "rate_limited", "Token bucket exhausted", nextAt)
-      await appendAudit({
-        adapterId,
-        kind: "rate_limit.tripped",
-        at: now,
-        conversationKey,
-        idempotencyKey,
+        message: `Circuit breaker is open — deferred ${Math.max(0, Math.round((nextAt - now) / 1000))}s`,
       })
       return
     }
 
     // ── Dead-letter gate: max attempts ────────────────────────────────────
+    // Bookkeeping only — no wire event happened here, so the breaker's
+    // failure window is NOT fed (a burst of maxed-out retry jobs must not
+    // open the circuit by itself).
     if (job.attempts >= MAX_ATTEMPTS) {
       await markDeadlettered(job.id, "max_attempts", `Exceeded ${MAX_ATTEMPTS} attempts`)
-      breaker.recordFailure()
       await appendAudit({
         adapterId,
         kind: "delivery.deadlettered",
@@ -828,8 +916,42 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     // ── Send ──────────────────────────────────────────────────────────────
     // Atomic claim: if another runner already moved this job out of
     // pending/failed, yield rather than double-send the same message.
+    // Claimed BEFORE the token bucket so a lost claim never consumes a
+    // rate-limit token.
     const claimed = await markSending(job.id)
     if (!claimed) {
+      return
+    }
+
+    // ── Rate limit (post-claim) ───────────────────────────────────────────
+    if (!bucket.tryAcquire()) {
+      // Multi-bot load balancing: before deferring behind the exhausted
+      // bucket, try to spill the job onto a same-platform sibling from this
+      // bot's `balanceAdapterIds` that still has send capacity. Single hop
+      // only (shared guard with failover) so saturated bots can't ping-pong.
+      // (`rerouteJob` dead-letters the original with a reroute pointer, so
+      // the `sending` claim needs no separate rollback on this path.)
+      if (
+        adapterRow &&
+        request.metadata.failoverFromAdapterId === undefined &&
+        request.metadata.balancedFromAdapterId === undefined
+      ) {
+        const newJobId = await rerouteJob(job, adapterRow, "balanced", adapterCache)
+        if (newJobId !== null) return
+      }
+      // Defer retry by 1 second (the lane-completion wake re-tightens the
+      // loop's sleep so the runner re-picks once the deferral elapses).
+      // `unclaimSending` refunds the attempt `markSending` charged — a
+      // rate-limit deferral is not a delivery attempt.
+      const nextAt = now + 1_000
+      await unclaimSending(job.id, "rate_limited", "Token bucket exhausted", nextAt)
+      await appendAudit({
+        adapterId,
+        kind: "rate_limit.tripped",
+        at: now,
+        conversationKey,
+        idempotencyKey,
+      })
       return
     }
 
@@ -931,7 +1053,12 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
             jitter: { kind: "absolute", amountMs: jitter },
           }) + retryAfter
         await markFailed(job.id, err.code, err.message, now + backoff)
-        breaker.recordFailure()
+        // Platform rate limiting (429) is back-pressure, not adapter
+        // failure: feeding it to the breaker would let a transient 429
+        // storm open the circuit and stall the whole backlog.
+        if (err.code !== "rate_limited") {
+          breaker.recordFailure()
+        }
         await appendAudit({
           adapterId,
           kind: "delivery.error",
@@ -950,7 +1077,9 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       } else {
         // Non-retryable — dead-letter immediately
         await markDeadlettered(job.id, err.code, err.message)
-        breaker.recordFailure()
+        if (err.code !== "rate_limited") {
+          breaker.recordFailure()
+        }
         await appendAudit({
           adapterId,
           kind: "delivery.deadlettered",
@@ -1021,6 +1150,28 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       // never stall outbound delivery.
       await wakeSnoozedConversations(clock()).catch(() => undefined)
 
+      // Stale-claim recovery (startup + every pass): flip `sending` rows
+      // orphaned by a crashed/reloaded runner (claimed > 5 min ago, never
+      // settled) back to `failed` so this drain can retry them. Best-effort;
+      // audited per recovered row. `inFlight` jobs are claimed seconds ago
+      // and sit safely inside the grace window.
+      try {
+        const recoveredRows = await recoverStaleSendingJobs(clock())
+        for (const row of recoveredRows) {
+          await appendAudit({
+            adapterId: row.adapterId,
+            kind: "delivery.error",
+            at: clock(),
+            conversationKey: row.conversationKey,
+            idempotencyKey: row.idempotencyKey,
+            reason: "stale_sending_recovered",
+            message: "Recovered a stale sending claim — retrying now",
+          }).catch(() => undefined)
+        }
+      } catch (err) {
+        console.error("[outbound-runner] stale-sending recovery failed:", err)
+      }
+
       // Drain everything currently due into per-conversation lanes in one
       // pass. Lanes run concurrently across conversations and FIFO within
       // one; the `inFlight` guard prevents re-enqueuing a job that is still
@@ -1047,8 +1198,23 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
             }
           })
         }
-      } catch {
-        // Transient DB errors: ignore and re-evaluate after the idle cap.
+      } catch (err) {
+        // Transient DB errors self-heal on the next pass, but a PERSISTENT
+        // Dexie failure must be visible: log every occurrence and audit at
+        // most once per minute (`adapter.error` under the runner pseudo-id).
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error("[outbound-runner] drain pass failed:", msg)
+        const nowMs = clock()
+        if (nowMs - lastDrainErrorAuditAt >= DRAIN_ERROR_AUDIT_THROTTLE_MS) {
+          lastDrainErrorAuditAt = nowMs
+          await appendAudit({
+            adapterId: RUNNER_AUDIT_ADAPTER_ID,
+            kind: "adapter.error",
+            at: nowMs,
+            reason: "drain_failed",
+            message: msg,
+          }).catch(() => undefined)
+        }
       }
 
       if (opts.signal.aborted) break

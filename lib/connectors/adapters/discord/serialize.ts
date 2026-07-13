@@ -27,6 +27,45 @@ export interface SerializedDiscordCall {
   payload: Record<string, unknown>
 }
 
+/** Discord rejects message `content` longer than 2000 characters with a 400. */
+export const DISCORD_MAX_CONTENT_LENGTH = 2000
+
+/**
+ * Split `text` into ≤`max`-char chunks, preferring to cut at the last
+ * newline inside the window so markdown blocks/paragraphs stay intact.
+ * The boundary newline itself is consumed (not re-emitted).
+ */
+export function chunkDiscordContent(text: string, max = DISCORD_MAX_CONTENT_LENGTH): string[] {
+  if (text.length <= max) return [text]
+  const chunks: string[] = []
+  let rest = text
+  while (rest.length > max) {
+    const nl = rest.lastIndexOf("\n", max)
+    // No usable newline in the window (or only a leading one) → hard cut.
+    const cut = nl > 0 ? nl : max
+    chunks.push(rest.slice(0, cut))
+    rest = rest.slice(cut === nl ? cut + 1 : cut)
+  }
+  if (rest.length > 0) chunks.push(rest)
+  return chunks
+}
+
+/**
+ * Build one POST /messages call per ≤2000-char chunk of `content`. Only the
+ * first chunk carries the `message_reference` (one reply ping, not N).
+ */
+function contentCalls(
+  content: string,
+  url: string,
+  messageReference: Record<string, unknown> | undefined
+): SerializedDiscordCall[] {
+  return chunkDiscordContent(content).map((chunk, i) => {
+    const payload: Record<string, unknown> = { content: chunk }
+    if (messageReference && i === 0) payload["message_reference"] = messageReference
+    return { method: "POST" as const, url, payload }
+  })
+}
+
 /** Extract channel_id from the conversation reference. */
 function channelIdFromRef(req: OutboundRequest): string {
   const ref = req.conversationRef as Record<string, unknown>
@@ -47,32 +86,31 @@ function buildMessageReference(
   }
 }
 
+// GAP: per-segment fragmentation — every text/markdown/code/mention segment
+// still becomes its own Discord message (and edits consolidate lossily to the
+// first text segment); merging consecutive segments into one message is a
+// separate follow-up.
 function serializeSegment(
   seg: MessageSegment,
   channelId: string,
   messageReference: Record<string, unknown> | undefined
-): SerializedDiscordCall | null {
+): SerializedDiscordCall[] {
   const url = `${DISCORD_API_BASE}/channels/${channelId}/messages`
 
   switch (seg.type) {
-    case "text": {
-      const payload: Record<string, unknown> = { content: seg.text }
-      if (messageReference) payload["message_reference"] = messageReference
-      return { method: "POST", url, payload }
-    }
+    case "text":
+      // Chunked at Discord's 2000-char content cap (400 otherwise).
+      return contentCalls(seg.text, url, messageReference)
 
-    case "markdown": {
-      const payload: Record<string, unknown> = { content: seg.md }
-      if (messageReference) payload["message_reference"] = messageReference
-      return { method: "POST", url, payload }
-    }
+    case "markdown":
+      return contentCalls(seg.md, url, messageReference)
 
     case "code": {
       const lang = seg.language ?? ""
       const block = lang ? `\`\`\`${lang}\n${seg.code}\n\`\`\`` : `\`\`\`\n${seg.code}\n\`\`\``
       const payload: Record<string, unknown> = { content: block }
       if (messageReference) payload["message_reference"] = messageReference
-      return { method: "POST", url, payload }
+      return [{ method: "POST", url, payload }]
     }
 
     case "image": {
@@ -81,32 +119,32 @@ function serializeSegment(
         embeds: [{ image: { url: seg.url } }],
       }
       if (messageReference) payload["message_reference"] = messageReference
-      return { method: "POST", url, payload }
+      return [{ method: "POST", url, payload }]
     }
 
     case "file": {
       // Phase 1: URL-only link in content
       const payload: Record<string, unknown> = { content: seg.url }
       if (messageReference) payload["message_reference"] = messageReference
-      return { method: "POST", url, payload }
+      return [{ method: "POST", url, payload }]
     }
 
     case "mention": {
       const content = `<@${seg.userId}>`
       const payload: Record<string, unknown> = { content }
       if (messageReference) payload["message_reference"] = messageReference
-      return { method: "POST", url, payload }
+      return [{ method: "POST", url, payload }]
     }
 
     case "emoji": {
       const payload: Record<string, unknown> = { content: seg.code }
       if (messageReference) payload["message_reference"] = messageReference
-      return { method: "POST", url, payload }
+      return [{ method: "POST", url, payload }]
     }
 
     case "reply":
       // reply segments are handled via replyTo on the OutboundRequest
-      return null
+      return []
 
     case "a2ui": {
       // Sync path: emit the `plainTextMirror` as fallback. The async
@@ -114,12 +152,12 @@ function serializeSegment(
       // components) and overrides this.
       const payload: Record<string, unknown> = { content: seg.plainTextMirror }
       if (messageReference) payload["message_reference"] = messageReference
-      return { method: "POST", url, payload }
+      return [{ method: "POST", url, payload }]
     }
 
     default:
       // Unsupported segment types dropped in Phase 1
-      return null
+      return []
   }
 }
 
@@ -134,8 +172,7 @@ export function serializeOutbound(req: OutboundRequest): SerializedDiscordCall[]
   const calls: SerializedDiscordCall[] = []
 
   for (const seg of req.segments) {
-    const call = serializeSegment(seg, channelId, messageReference)
-    if (call) calls.push(call)
+    calls.push(...serializeSegment(seg, channelId, messageReference))
   }
 
   return calls
@@ -180,8 +217,7 @@ export async function serializeOutboundAsync(
       calls.push({ method: "POST", url, payload: body })
       continue
     }
-    const call = serializeSegment(seg, channelId, messageReference)
-    if (call) calls.push(call)
+    calls.push(...serializeSegment(seg, channelId, messageReference))
   }
 
   return calls

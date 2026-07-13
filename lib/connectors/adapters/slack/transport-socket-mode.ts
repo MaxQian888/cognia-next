@@ -4,11 +4,13 @@
  * Drives the Slack Socket Mode protocol:
  *   1. Call apps.connections.open (POST with Authorization: Bearer <appToken>) to get a WSS URL.
  *   2. Connect via connectorsWsOpen.
- *   3. Receive hello, events_api, disconnect messages.
- *   4. For each events_api envelope, ack via { envelope_id }, then yield payload.event.
+ *   3. Receive hello, events_api, interactive, slash_commands, disconnect messages.
+ *   4. EVERY envelope type carrying an envelope_id (events_api, interactive,
+ *      slash_commands) is acked via { envelope_id }, then yielded as a
+ *      discriminated SocketModeDelivery so the adapter can route each kind.
  *   5. On disconnect → reconnect via fresh apps.connections.open.
  *
- * Returns AsyncGenerator<SlackEventEnvelope>.
+ * Returns AsyncGenerator<SocketModeDelivery>.
  */
 
 import { listen } from "@tauri-apps/api/event"
@@ -19,7 +21,7 @@ import {
   connectorsWsClose,
   connectorsHttpRequest,
 } from "@/lib/connectors/tauri/commands"
-import type { SlackEventEnvelope } from "./parse"
+import type { SlackEventEnvelope, SlackInteractivePayload, SlackSlashCommandPayload } from "./parse"
 
 const SLACK_CONNECTIONS_OPEN_URL = "https://slack.com/api/apps.connections.open"
 
@@ -27,11 +29,25 @@ export interface SocketModeOptions {
   /** Resolves the xapp-... app-level token used for apps.connections.open. */
   appToken: () => Promise<string>
   signal: AbortSignal
+  /**
+   * Invoked on each `hello` frame (connection established). The adapter
+   * uses this to flip health from "starting" to "running".
+   */
+  onHello?: () => void
   /** Override for testing. */
   _connectionsOpenUrl?: string
   /** Backoff base ms; default 1000. */
   _backoffBaseMs?: number
 }
+
+/**
+ * Discriminated delivery yielded by {@link startSocketMode} — one variant
+ * per Socket Mode envelope family the adapter must route differently.
+ */
+export type SocketModeDelivery =
+  | { kind: "event"; envelope: SlackEventEnvelope }
+  | { kind: "interactive"; payload: SlackInteractivePayload }
+  | { kind: "slash_command"; payload: SlackSlashCommandPayload }
 
 interface ConnectionsOpenResponse {
   ok: boolean
@@ -56,12 +72,29 @@ interface SocketModeEventsApiFrame {
   accepts_response_payload?: boolean
 }
 
+interface SocketModeInteractiveFrame {
+  type: "interactive"
+  envelope_id: string
+  payload: SlackInteractivePayload
+}
+
+interface SocketModeSlashCommandsFrame {
+  type: "slash_commands"
+  envelope_id: string
+  payload: SlackSlashCommandPayload
+}
+
 interface SocketModeDisconnectFrame {
   type: "disconnect"
   reason?: string
 }
 
-type SocketModeFrame = SocketModeHelloFrame | SocketModeEventsApiFrame | SocketModeDisconnectFrame
+type SocketModeFrame =
+  | SocketModeHelloFrame
+  | SocketModeEventsApiFrame
+  | SocketModeInteractiveFrame
+  | SocketModeSlashCommandsFrame
+  | SocketModeDisconnectFrame
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -97,14 +130,15 @@ async function openConnection(connectionsOpenUrl: string, appToken: string): Pro
 }
 
 /**
- * Start a Slack Socket Mode generator that yields SlackEventEnvelopes.
+ * Start a Slack Socket Mode generator that yields SocketModeDeliveries.
  *
- * Handles hello/events_api/disconnect frames, ACKs each events_api frame,
- * and reconnects on disconnect or WS close.
+ * Handles hello/events_api/interactive/slash_commands/disconnect frames,
+ * ACKs every frame that carries an envelope_id, and reconnects on
+ * disconnect or WS close.
  */
 export async function* startSocketMode(
   opts: SocketModeOptions
-): AsyncGenerator<SlackEventEnvelope> {
+): AsyncGenerator<SocketModeDelivery> {
   const connectionsOpenUrl = opts._connectionsOpenUrl ?? SLACK_CONNECTIONS_OPEN_URL
   const backoffBaseMs = opts._backoffBaseMs ?? 1000
   let attempts = 0
@@ -189,20 +223,26 @@ export async function* startSocketMode(
             continue
           }
 
+          // ACK anything that carries an envelope_id FIRST — Slack retries
+          // (and eventually disables the app's event delivery) when
+          // envelopes go un-acked, and that must not depend on whether we
+          // can route the payload.
+          const envelopeId = (frame as { envelope_id?: string }).envelope_id
+          if (typeof envelopeId === "string" && envelopeId.length > 0) {
+            await connectorsWsSend(handleId, JSON.stringify({ envelope_id: envelopeId })).catch(
+              () => {}
+            )
+          }
+
           switch (frame.type) {
             case "hello":
               // Connection established; reset backoff
               attempts = 0
+              opts.onHello?.()
               break
 
             case "events_api": {
               const eventsFrame = frame as SocketModeEventsApiFrame
-
-              // ACK the envelope immediately
-              await connectorsWsSend(
-                handleId,
-                JSON.stringify({ envelope_id: eventsFrame.envelope_id })
-              ).catch(() => {})
 
               // Yield the inner event as a SlackEventEnvelope
               if (eventsFrame.payload?.type === "event_callback") {
@@ -213,7 +253,23 @@ export async function* startSocketMode(
                   api_app_id: eventsFrame.payload.api_app_id,
                   event_id: eventsFrame.envelope_id,
                 }
-                yield envelope
+                yield { kind: "event", envelope }
+              }
+              break
+            }
+
+            case "interactive": {
+              const interactiveFrame = frame as SocketModeInteractiveFrame
+              if (interactiveFrame.payload) {
+                yield { kind: "interactive", payload: interactiveFrame.payload }
+              }
+              break
+            }
+
+            case "slash_commands": {
+              const slashFrame = frame as SocketModeSlashCommandsFrame
+              if (slashFrame.payload) {
+                yield { kind: "slash_command", payload: slashFrame.payload }
               }
               break
             }

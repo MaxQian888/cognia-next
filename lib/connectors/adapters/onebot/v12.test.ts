@@ -17,15 +17,37 @@ function makeBase(): OneBotV12Event {
 }
 
 describe("parseV12Event", () => {
-  it("notice with no detail_type → system event (G3.5 widened notice handling)", () => {
-    // G3.5 widened notice handling — a notice with no detail_type is
-    // surfaced as a system event tagged member_added by default. The
-    // pre-G3.5 behaviour returned null; that contract changed with the
-    // member-change projection.
+  it("notice with no detail_type → null (no fabricated join event)", () => {
+    // Unrecognised notices used to default to systemKind "member_added",
+    // fabricating join events for every unknown v12 notice type. They now
+    // return null, mirroring the v11 parser.
     const event: OneBotV12Event = { ...makeBase(), type: "notice" }
+    expect(parseV12Event(ADAPTER_ID, event)).toBeNull()
+  })
+
+  it("notice with an unrecognised detail_type → null", () => {
+    const event: OneBotV12Event = {
+      ...makeBase(),
+      type: "notice",
+      detail_type: "group_admin_set",
+      group_id: "300001",
+    }
+    expect(parseV12Event(ADAPTER_ID, event)).toBeNull()
+  })
+
+  it("friend_increase → system event member_added", () => {
+    const event: OneBotV12Event = {
+      id: "evt-fr",
+      time: 1700000650,
+      type: "notice",
+      detail_type: "friend_increase",
+      user_id: "200004",
+      self: { platform: "qq", user_id: "100000" },
+    }
     const r = parseV12Event(ADAPTER_ID, event)
     expect(r!.kind).toBe("system")
     expect(r!.systemKind).toBe("member_added")
+    expect(r!.channel.kind).toBe("private")
   })
 
   it("parses private text message", () => {

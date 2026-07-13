@@ -7,7 +7,13 @@
  * standard test vector in the co-located test. Inbound only — outbound media
  * (which would need ECB *encryption* + the CDN upload handshake) is not
  * supported in v1.
+ *
+ * Download goes through the Rust attachment cache (`fetch_attachment` →
+ * `connectors_attachment_read`), NOT a renderer `fetch()` — the CDN host
+ * sends no CORS headers, so a webview fetch is blocked before it starts.
  */
+
+import { connectorsAttachmentRead } from "@/lib/connectors/tauri/commands"
 
 // ── base64 helpers (browser + jsdom safe) ─────────────────────────────────
 export function base64ToBytes(b64: string): Uint8Array {
@@ -170,14 +176,39 @@ export function decryptIlinkMedia(
   return pkcs7Unpad(out)
 }
 
-/** Fetch an encrypted CDN URL and decrypt it. Throws on network/decrypt error. */
-export async function fetchAndDecryptIlinkMedia(
-  url: string,
+/** Cap on cached-attachment reads for inline images. */
+export const ILINK_MEDIA_MAX_BYTES = 20 * 1024 * 1024
+
+export interface FetchIlinkMediaViaTauriInput {
+  adapterId: string
+  /** Encrypted CDN download URL — doubles as the attachment-cache remoteRef. */
+  url: string
+  /** Base64 AES-128 key; omitted ⇒ the payload is plaintext. */
   aesKeyBase64?: string
+  /**
+   * `ctx.tauri.fetchAttachment` — downloads the CDN bytes in Rust and caches
+   * them locally (the renderer cannot fetch the CDN URL: CORS-blocked).
+   */
+  fetchAttachment: (adapterId: string, remoteRef: string) => Promise<unknown>
+  /** Test seam — defaults to the `connectors_attachment_read` wrapper. */
+  readAttachment?: typeof connectorsAttachmentRead
+}
+
+/**
+ * Download an encrypted CDN payload through the Rust attachment cache and
+ * decrypt it locally. Bytes flow Rust `fetch_attachment` → encrypted cache →
+ * `connectors_attachment_read` (base64) → AES-128-ECB decrypt. Throws on
+ * download, cache-read, or decrypt failure.
+ */
+export async function fetchAndDecryptIlinkMediaViaTauri(
+  input: FetchIlinkMediaViaTauriInput
 ): Promise<Uint8Array> {
-  const resp = await fetch(url)
-  if (!resp.ok) throw new Error(`ilink media fetch failed: ${resp.status}`)
-  const buf = await resp.arrayBuffer()
-  if (!aesKeyBase64) return new Uint8Array(buf)
-  return decryptIlinkMedia(buf, aesKeyBase64)
+  const { adapterId, url, aesKeyBase64, fetchAttachment } = input
+  const readAttachment = input.readAttachment ?? connectorsAttachmentRead
+  await fetchAttachment(adapterId, url)
+  const b64 = await readAttachment(adapterId, url, ILINK_MEDIA_MAX_BYTES)
+  if (b64 === null) throw new Error("ilink media not readable from the attachment cache")
+  const bytes = base64ToBytes(b64)
+  if (!aesKeyBase64) return bytes
+  return decryptIlinkMedia(bytes, aesKeyBase64)
 }

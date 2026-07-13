@@ -10,9 +10,22 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
 }))
 
 let framesImpl: () => AsyncGenerator<{ topic: string; data: Record<string, unknown> }>
+interface CapturedStreamOpts {
+  onTransportState?: (state: { kind: "connected" } | { kind: "failure"; reason: string }) => void
+}
+let capturedStreamOpts: CapturedStreamOpts | null = null
 jest.mock("./stream-client", () => ({
   TOPIC_BOT_MESSAGE: "/v1.0/im/bot/messages/get",
-  startDingTalkStream: () => ({ frames: framesImpl() }),
+  startDingTalkStream: (opts: CapturedStreamOpts) => {
+    capturedStreamOpts = opts
+    return { frames: framesImpl() }
+  },
+}))
+
+const mockClearTokenCache = jest.fn()
+jest.mock("./auth", () => ({
+  ...jest.requireActual("./auth"),
+  clearDingTalkTokenCache: (...a: unknown[]) => mockClearTokenCache(...a),
 }))
 
 const gateInboundEvent = jest.fn(async (..._a: unknown[]) => true)
@@ -51,8 +64,20 @@ function req(conversationRef: Record<string, unknown>, text = "hello"): Outbound
   }
 }
 
+function makeCtx(adapterId = "ad_1", onEmit?: (ev: unknown) => void): AdapterContext {
+  return {
+    emit: async (ev: unknown) => {
+      onEmit?.(ev)
+    },
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    signal: new AbortController().signal,
+    adapterId,
+  } as unknown as AdapterContext
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
+  capturedStreamOpts = null
   framesImpl = async function* () {
     /* no frames by default */
   }
@@ -63,7 +88,8 @@ describe("createDingTalkAdapter — meta + capability", () => {
     const a = makeAdapter()
     expect(a.meta.type).toBe("dingtalk")
     expect(a.meta.capabilities).toContain("send.markdown")
-    expect(a.meta.transportModes).toEqual(["longpoll"])
+    // Stream mode is a persistent outbound WebSocket — declared as "gateway".
+    expect(a.meta.transportModes).toEqual(["gateway"])
     expect(a.a2uiCapability().Text).toBe("native")
     expect(a.platformSkillCapabilities?.()).toEqual([])
   })
@@ -143,7 +169,23 @@ describe("send routing", () => {
     expect(mockHttp).not.toHaveBeenCalled()
   })
 
-  it("maps a 401 to auth_failed (non-retryable)", async () => {
+  it("clears the token cache and retries once on a 401, then succeeds", async () => {
+    mockHttp
+      .mockResolvedValueOnce({
+        status: 401,
+        headers: {},
+        body: JSON.stringify({ message: "token expired" }),
+      })
+      .mockResolvedValueOnce(okResp())
+    const a = makeAdapter()
+    const res = await a.send(req(ref({ conversationType: "1", userId: "staff_1" })))
+    expect(res.ok).toBe(true)
+    expect(mockClearTokenCache).toHaveBeenCalledTimes(1)
+    expect(mockClearTokenCache).toHaveBeenCalledWith("ak", "as")
+    expect(mockHttp).toHaveBeenCalledTimes(2)
+  })
+
+  it("maps a persistent 401 to auth_failed (non-retryable) after one retry", async () => {
     mockHttp.mockResolvedValue({
       status: 401,
       headers: {},
@@ -154,6 +196,17 @@ describe("send routing", () => {
     expect(res.ok).toBe(false)
     expect(res.error?.code).toBe("auth_failed")
     expect(res.error?.retryable).toBe(false)
+    // exactly one cache-clearing retry — no infinite loop
+    expect(mockClearTokenCache).toHaveBeenCalledTimes(1)
+    expect(mockHttp).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not clear the token cache for non-auth failures", async () => {
+    mockHttp.mockResolvedValueOnce({ status: 500, headers: {}, body: "boom" })
+    const a = makeAdapter()
+    await a.send(req(ref({ conversationType: "1", userId: "s" })))
+    expect(mockClearTokenCache).not.toHaveBeenCalled()
+    expect(mockHttp).toHaveBeenCalledTimes(1)
   })
 
   it("maps a 500 to platform_5xx (retryable) and 429 to rate_limited", async () => {
@@ -177,6 +230,96 @@ describe("send routing", () => {
     const res = await a.send(req(ref({ conversationType: "1", userId: "s" })))
     expect(res.error?.code).toBe("platform_5xx")
     expect(res.error?.message).toContain("network down")
+  })
+})
+
+describe("send — sessionWebhook fallback (no staffId)", () => {
+  const WEBHOOK = "https://oapi.dingtalk.com/robot/sendBySession?session=s1"
+
+  function unionRef(over: Record<string, unknown> = {}) {
+    return ref({
+      conversationType: "1",
+      userId: "$:LWCP_v1:$abc==",
+      sessionWebhook: WEBHOOK,
+      sessionWebhookExpiredTime: Date.now() + 60_000,
+      ...over,
+    })
+  }
+
+  it("posts text to the unexpired session webhook instead of batchSend", async () => {
+    mockHttp.mockResolvedValue({ status: 200, headers: {}, body: JSON.stringify({ errcode: 0 }) })
+    const a = makeAdapter()
+    const res = await a.send(req(unionRef()))
+    expect(res.ok).toBe(true)
+    expect(mockHttp).toHaveBeenCalledTimes(1)
+    const call = mockHttp.mock.calls[0][0]
+    expect(call.url).toBe(WEBHOOK)
+    // classic robot-webhook shape, no access-token header
+    expect(call.headers["x-acs-dingtalk-access-token"]).toBeUndefined()
+    expect(JSON.parse(call.body)).toEqual({ msgtype: "text", text: { content: "hello" } })
+  })
+
+  it("projects markdown onto the webhook markdown shape", async () => {
+    mockHttp.mockResolvedValue({ status: 200, headers: {}, body: JSON.stringify({ errcode: 0 }) })
+    const a = makeAdapter()
+    const res = await a.send({
+      conversationRef: unionRef() as OutboundRequest["conversationRef"],
+      segments: [{ type: "markdown", md: "# Title\nbody" }],
+      metadata: { idempotencyKey: "k2" },
+    })
+    expect(res.ok).toBe(true)
+    const body = JSON.parse(mockHttp.mock.calls[0][0].body)
+    expect(body.msgtype).toBe("markdown")
+    expect(body.markdown.text).toContain("# Title")
+    expect(body.markdown.title).toBeTruthy()
+  })
+
+  it("returns a non-retryable validation error when the webhook is expired", async () => {
+    const a = makeAdapter()
+    const res = await a.send(
+      req(unionRef({ sessionWebhookExpiredTime: Date.now() - 1000 }))
+    )
+    expect(res.ok).toBe(false)
+    expect(res.error?.code).toBe("validation")
+    expect(res.error?.retryable).toBe(false)
+    expect(res.error?.message).toContain("staffId")
+    expect(mockHttp).not.toHaveBeenCalled()
+  })
+
+  it("returns a validation error when there is no webhook at all", async () => {
+    const a = makeAdapter()
+    const res = await a.send(
+      req(unionRef({ sessionWebhook: undefined, sessionWebhookExpiredTime: undefined }))
+    )
+    expect(res.ok).toBe(false)
+    expect(res.error?.code).toBe("validation")
+    expect(res.error?.message).toContain("staffId")
+    expect(mockHttp).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a webhook body errcode as a non-retryable platform_4xx", async () => {
+    mockHttp.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ errcode: 300001, errmsg: "session expired" }),
+    })
+    const a = makeAdapter()
+    const res = await a.send(req(unionRef()))
+    expect(res.ok).toBe(false)
+    expect(res.error?.code).toBe("platform_4xx")
+    expect(res.error?.retryable).toBe(false)
+    expect(res.error?.message).toContain("session expired")
+  })
+
+  it("keeps the staffId path on batchSend (behavior unchanged)", async () => {
+    mockHttp.mockResolvedValue(okResp())
+    const a = makeAdapter()
+    // a staff id present alongside a webhook still routes through batchSend
+    const res = await a.send(req(unionRef({ userId: "staff_1" })))
+    expect(res.ok).toBe(true)
+    const call = mockHttp.mock.calls[0][0]
+    expect(call.url).toContain("/v1.0/robot/oToMessages/batchSend")
+    expect(JSON.parse(call.body).userIds).toEqual(["staff_1"])
   })
 })
 
@@ -299,6 +442,49 @@ describe("start — inbound", () => {
     await a.stop()
   })
 
+  it("learns selfId from the first frame's chatbotUserId and keeps it for later frames", async () => {
+    // an earlier test flips the gate to false; clearAllMocks does not restore it
+    gateInboundEvent.mockResolvedValue(true)
+    framesImpl = async function* () {
+      yield {
+        topic: "/v1.0/im/bot/messages/get",
+        data: {
+          msgId: "m1",
+          conversationId: "c1",
+          conversationType: "1",
+          chatbotUserId: "learned_bot",
+          msgtype: "text",
+          text: { content: "first" },
+        },
+      }
+      // second frame omits chatbotUserId — the learned selfId must persist
+      yield {
+        topic: "/v1.0/im/bot/messages/get",
+        data: {
+          msgId: "m2",
+          conversationId: "c1",
+          conversationType: "1",
+          msgtype: "text",
+          text: { content: "second" },
+        },
+      }
+    }
+    const emitted: Array<{ selfId: string }> = []
+    const a = createDingTalkAdapter({
+      id: "ad_no_self",
+      displayName: "No Self",
+      appKey: async () => "ak",
+      appSecret: async () => "as",
+      accessToken: async () => "tok",
+    })
+    await a.start(makeCtx("ad_no_self", (ev) => emitted.push(ev as { selfId: string })))
+    await new Promise((r) => setTimeout(r, 10))
+    await a.stop()
+    expect(emitted).toHaveLength(2)
+    expect(emitted[0].selfId).toBe("learned_bot")
+    expect(emitted[1].selfId).toBe("learned_bot")
+  })
+
   it("health reflects starting → running → down across the lifecycle", async () => {
     // A live stream never completes (it reconnects forever), so block here to
     // hold the adapter in "running" until stop() aborts it.
@@ -316,6 +502,62 @@ describe("start — inbound", () => {
     await a.start(ctx)
     expect(a.health().state).toBe("running")
     await a.stop()
+    expect(a.health().state).toBe("down")
+  })
+})
+
+describe("transport health (register/ws-open failures)", () => {
+  async function startedAdapter() {
+    framesImpl = async function* () {
+      await new Promise<void>(() => {})
+    }
+    const a = makeAdapter()
+    await a.start(makeCtx())
+    const onTransportState = capturedStreamOpts?.onTransportState
+    expect(onTransportState).toBeDefined()
+    return { a, onTransportState: onTransportState! }
+  }
+
+  it("degrades to the failure reason after 3 consecutive failures", async () => {
+    const { a, onTransportState } = await startedAdapter()
+    onTransportState({ kind: "failure", reason: "auth_failed" })
+    onTransportState({ kind: "failure", reason: "auth_failed" })
+    // below the threshold — still running
+    expect(a.health().state).toBe("running")
+    onTransportState({ kind: "failure", reason: "auth_failed" })
+    expect(a.health().state).toBe("degraded")
+    expect(a.health().reason).toBe("auth_failed")
+    await a.stop()
+  })
+
+  it("carries register_failed for non-auth register failures", async () => {
+    const { a, onTransportState } = await startedAdapter()
+    for (let i = 0; i < 3; i++) onTransportState({ kind: "failure", reason: "register_failed" })
+    expect(a.health().state).toBe("degraded")
+    expect(a.health().reason).toBe("register_failed")
+    await a.stop()
+  })
+
+  it("recovers to running (and clears the reason) once a connection lands", async () => {
+    const { a, onTransportState } = await startedAdapter()
+    for (let i = 0; i < 3; i++) onTransportState({ kind: "failure", reason: "register_failed" })
+    expect(a.health().state).toBe("degraded")
+    onTransportState({ kind: "connected" })
+    expect(a.health().state).toBe("running")
+    expect(a.health().reason).toBeUndefined()
+    // the failure streak was reset — two more failures do not degrade
+    onTransportState({ kind: "failure", reason: "register_failed" })
+    onTransportState({ kind: "failure", reason: "register_failed" })
+    expect(a.health().state).toBe("running")
+    await a.stop()
+  })
+
+  it("ignores transport callbacks after stop()", async () => {
+    const { a, onTransportState } = await startedAdapter()
+    await a.stop()
+    for (let i = 0; i < 3; i++) onTransportState({ kind: "failure", reason: "auth_failed" })
+    expect(a.health().state).toBe("down")
+    onTransportState({ kind: "connected" })
     expect(a.health().state).toBe("down")
   })
 })
