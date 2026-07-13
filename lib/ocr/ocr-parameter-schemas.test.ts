@@ -65,10 +65,35 @@ describe("OCR_PARAMETER_SCHEMAS", () => {
     expect(keys).toEqual(["format", "languages", "maxImageDimension", "pageRange"])
   })
 
-  it("paddle-ocr exposes a model variant selector", () => {
+  it("paddle-ocr ships only the common parameter block (no dead model knob)", () => {
     const schema = OCR_PARAMETER_SCHEMAS["paddle-ocr"]!
-    const keys = schema.parameters.map((p) => p.key)
-    expect(keys).toContain("model")
+    const keys = schema.parameters.map((p) => p.key).sort()
+    expect(keys).toEqual(["format", "languages", "maxImageDimension", "pageRange"])
+  })
+
+  it("ocr-space exposes the engine selector the provider reads", () => {
+    const schema = OCR_PARAMETER_SCHEMAS["ocr-space"]!
+    const params = Object.fromEntries(schema.parameters.map((p) => [p.key, p]))
+    expect(params["model"]).toBeUndefined()
+    const engine = params["engine"]!
+    expect(engine.type).toBe("select")
+    expect(engine.defaultValue).toBe("3")
+    expect(engine.validation?.options?.map((o) => o.value)).toEqual(["1", "2", "3"])
+  })
+
+  it("abbyy-cloud exposes the exportFormat selector the provider reads", () => {
+    const schema = OCR_PARAMETER_SCHEMAS["abbyy-cloud"]!
+    const params = Object.fromEntries(schema.parameters.map((p) => [p.key, p]))
+    expect(params["model"]).toBeUndefined()
+    const exportFormat = params["exportFormat"]!
+    expect(exportFormat.type).toBe("select")
+    expect(exportFormat.defaultValue).toBe("txt")
+  })
+
+  it("mathpix ships only the common parameter block (v3/text has no model)", () => {
+    const schema = OCR_PARAMETER_SCHEMAS["mathpix"]!
+    const keys = schema.parameters.map((p) => p.key).sort()
+    expect(keys).toEqual(["format", "languages", "maxImageDimension", "pageRange"])
   })
 
   it("local-http requires endpoint + dialect and offers an optional apiKey + timeout", () => {
@@ -101,7 +126,7 @@ describe("applyOcrParameterDefaults", () => {
     expect(out.format).toBe("markdown")
     expect(out.languages).toBe("en")
     expect(out.maxImageDimension).toBe(2000)
-    expect(out.model).toBe("mistral-ocr-2509")
+    expect(out.model).toBe("mistral-ocr-latest")
   })
 
   it("preserves caller-supplied overrides", () => {

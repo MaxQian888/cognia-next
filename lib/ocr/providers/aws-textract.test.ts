@@ -150,50 +150,88 @@ describe("awsTextractExtract — error paths", () => {
     ).rejects.toMatchObject({ code: "invalid_input" })
   })
 
-  it("maps a ThrottlingException body to rate_limited", async () => {
+  it("throws invalid_input before uploading when the document exceeds 10 MB", async () => {
+    const fetchImpl = jest.fn() as unknown as typeof fetch
+    const bigInput = {
+      source: {
+        kind: "blob" as const,
+        blob: new Blob([new Uint8Array(10 * 1024 * 1024 + 1)]),
+        mimeType: "image/png",
+      },
+    }
+    await expect(awsTextractExtract(bigInput, makeCtx(), fetchImpl)).rejects.toMatchObject({
+      code: "invalid_input",
+      message: expect.stringContaining("10 MB"),
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("accepts a document of exactly 10 MB", async () => {
     const fetchImpl = makeFetch({
       status: 200,
-      body: { __type: "ThrottlingException", Message: "slow down" },
+      body: { DocumentMetadata: { Pages: 1 }, Blocks: [] },
+    })
+    const maxInput = {
+      source: {
+        kind: "blob" as const,
+        blob: new Blob([new Uint8Array(10 * 1024 * 1024)]),
+        mimeType: "image/png",
+      },
+    }
+    const result = await awsTextractExtract(maxInput, makeCtx(), fetchImpl)
+    expect(result.pages).toHaveLength(1)
+  })
+
+  // AWS always signals exceptions via non-2xx statuses with the real kind in
+  // the body's `__type` — the HTTP status alone is often misleading.
+  it.each([
+    ["ThrottlingException", 500, "rate_limited"],
+    ["ProvisionedThroughputExceededException", 400, "rate_limited"],
+    ["LimitExceededException", 400, "rate_limited"],
+    ["AccessDeniedException", 400, "missing_credentials"],
+    ["UnrecognizedClientException", 403, "missing_credentials"],
+    ["InvalidSignatureException", 403, "missing_credentials"],
+    ["ExpiredTokenException", 400, "missing_credentials"],
+    ["UnsupportedDocumentException", 400, "invalid_input"],
+    ["DocumentTooLargeException", 400, "invalid_input"],
+    ["BadDocumentException", 400, "invalid_input"],
+    ["InvalidParameterException", 400, "invalid_input"],
+  ] as const)("maps %s (HTTP %i) to %s", async (type, status, code) => {
+    const fetchImpl = makeFetch({ status, body: { __type: type, Message: "err" } })
+    await expect(awsTextractExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({ code })
+  })
+
+  it("strips the com.amazonaws.textract# namespace prefix from __type", async () => {
+    const fetchImpl = makeFetch({
+      status: 500,
+      body: { __type: "com.amazonaws.textract#ThrottlingException", Message: "slow down" },
     })
     await expect(awsTextractExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
       code: "rate_limited",
     })
   })
 
-  it("maps an UnsupportedDocumentException to invalid_input", async () => {
+  it("falls back to status mapping for an unknown __type", async () => {
     const fetchImpl = makeFetch({
-      status: 200,
-      body: { __type: "UnsupportedDocumentException", Message: "weird format" },
+      status: 400,
+      body: { __type: "SomeNewException", Message: "?" },
     })
     await expect(awsTextractExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
       code: "invalid_input",
     })
   })
 
-  it("maps an AccessDeniedException to missing_credentials", async () => {
-    const fetchImpl = makeFetch({
-      status: 200,
-      body: { __type: "AccessDeniedException", message: "denied" },
-    })
-    await expect(awsTextractExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
-      code: "missing_credentials",
-    })
-  })
-
-  it("maps a generic exception to provider_failed", async () => {
-    const fetchImpl = makeFetch({
-      status: 200,
-      body: { __type: "InternalServerError", Message: "boom" },
-    })
-    await expect(awsTextractExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
-      code: "provider_failed",
-    })
-  })
-
-  it("maps HTTP 500 to provider_failed", async () => {
+  it("falls back to status mapping when the error body is not JSON", async () => {
     const fetchImpl = makeFetch({ status: 500, body: "boom" })
     await expect(awsTextractExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
       code: "provider_failed",
+    })
+  })
+
+  it("maps HTTP 403 without a body to missing_credentials", async () => {
+    const fetchImpl = makeFetch({ status: 403, body: "" })
+    await expect(awsTextractExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
+      code: "missing_credentials",
     })
   })
 })

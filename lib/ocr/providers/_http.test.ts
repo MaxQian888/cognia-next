@@ -93,6 +93,24 @@ describe("cloudFetch", () => {
     ).rejects.toMatchObject({ code, providerId: "demo" })
   })
 
+  it("passes the error body text to errorCodeFor for body-based classification", async () => {
+    const fetchImpl = mockFetch(
+      () => new Response(JSON.stringify({ __type: "ThrottlingException" }), { status: 500 })
+    )
+    const errorCodeFor = jest.fn((_status: number, bodyText?: string) =>
+      bodyText?.includes("ThrottlingException")
+        ? ("rate_limited" as const)
+        : ("provider_failed" as const)
+    )
+    await expect(
+      cloudFetch({ providerId: "demo", url: "https://api.example.com", fetchImpl, errorCodeFor })
+    ).rejects.toMatchObject({ code: "rate_limited" })
+    expect(errorCodeFor).toHaveBeenCalledWith(
+      500,
+      JSON.stringify({ __type: "ThrottlingException" })
+    )
+  })
+
   it("honours a caller-supplied errorCodeFor override", async () => {
     const fetchImpl = mockFetch(() => new Response("x", { status: 500 }))
     await expect(

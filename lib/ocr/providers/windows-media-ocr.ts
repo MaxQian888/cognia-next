@@ -3,7 +3,7 @@
  * `winocr` Rust crate. Only available when the Tauri app runs inside an MSIX
  * package (winocr requires package identity).
  *
- * Availability detection lives in `src-tauri/src/ocr/msix.rs`; the frontend
+ * Availability detection lives in `crates/cognia-ocr/src/msix.rs`; the frontend
  * caches the readiness flag at app boot and re-uses it here.
  */
 
@@ -18,6 +18,7 @@ import {
 } from "@/types/ocr"
 import {
   __setNativeOcrInvoker as setShared,
+  mapNativeInvokeError,
   type NativeOcrInvoker,
   type NativeOcrResult,
 } from "./tesseract-native"
@@ -94,12 +95,7 @@ export async function windowsMediaOcrExtract(
       languages: (input.languages ?? ["en"]).map((l) => l.toLowerCase()),
     })
   } catch (err) {
-    throw new OcrError(
-      "provider_failed",
-      "windows-media-ocr",
-      err instanceof Error ? err.message : String(err),
-      err
-    )
+    throw mapNativeInvokeError("windows-media-ocr", "windows-media-ocr", err)
   }
   const blocks: OcrBlock[] = (payload.blocks ?? []).map((b) => ({
     text: b.text,

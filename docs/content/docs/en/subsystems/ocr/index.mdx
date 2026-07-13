@@ -136,9 +136,9 @@ match reality:
   - **Composer menu** — `ocr-menu.tsx` / `ocr-result-bubble.tsx` / `useOcr` are built and tested, but
     `components/chat/composer.tsx` renders `<AttachmentPreview />` without the `onOcrSelect` prop, so the menu
     is dormant.
-  - **Native bindings** — only the `ocr-ocrs` and `ocr-paddle` Cargo features link real crates; `ocr-tesseract`
-    / `ocr-windows` / `ocr-apple` are empty feature flags resolving to a `PlaceholderBackend`. See
-    [Native backends](./native-backends).
+  - **Native bindings** — the `ocr-ocrs` and `ocr-paddle` Cargo features link real crates, and `apple-vision`
+    is compiled in-process on macOS targets; `ocr-tesseract` / `ocr-windows` are empty feature flags resolving
+    to a `PlaceholderBackend`. See [Native backends](./native-backends).
 </Callout>
 
 ## Module map

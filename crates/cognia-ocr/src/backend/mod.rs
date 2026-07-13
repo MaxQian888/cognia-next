@@ -6,21 +6,23 @@
 //! when invoked — that fans out to the TS layer's `unsupported_shell`
 //! error code.
 //!
-//! The default Cargo build ships placeholders for every backend so the
-//! command surface compiles on all targets. Real wiring happens behind
-//! feature flags:
+//! The default Cargo build ships placeholders so the command surface
+//! compiles on all targets. `apple-vision` is the exception: it is wired to
+//! Vision.framework whenever the target is macOS (see [`apple`]) — no
+//! feature flag, since it needs no models or extra toolchain. Everything
+//! else gets real wiring behind feature flags:
 //!
 //! - `ocr-tesseract` — invoke the local Tesseract CLI through the native
 //!   backend.
 //! - `ocr-windows`   — reserved for Windows.Media.Ocr; currently registers
 //!   the placeholder explicitly.
-//! - `ocr-apple`     — reserved for Apple Vision; currently registers the
-//!   placeholder explicitly.
 //! - `ocr-ocrs`      — pure-Rust ONNX-style pipeline via `ocrs` + RTen.
 //! - `ocr-paddle`    — PaddleOCR PP-OCRv5 via `oar-ocr` + `ort`.
 
 use crate::{NativeBackend, NativeOcrRegistry};
 
+#[cfg(target_os = "macos")]
+pub mod apple;
 pub mod ocrs;
 pub mod paddle;
 pub mod placeholder;
@@ -56,12 +58,15 @@ pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
             .await;
     }
 
-    #[cfg(feature = "ocr-apple")]
+    // apple-vision — in-process Vision.framework binding; macOS-only by
+    // target, no feature flag (nothing to download, no extra toolchain).
+    #[cfg(target_os = "macos")]
     {
-        log::warn!(
-            "ocr-apple feature is enabled, but the Apple Vision backend is not implemented; registering placeholder"
-        );
+        registry
+            .register(Box::new(apple::AppleVisionBackend))
+            .await;
     }
+    #[cfg(not(target_os = "macos"))]
     {
         registry
             .register(Box::new(placeholder::PlaceholderBackend::new(

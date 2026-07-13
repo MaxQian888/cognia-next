@@ -58,7 +58,18 @@ describe("mistralExtract — success", () => {
     expect(result.pages[0]!.text).toContain("Hello")
     expect(result.pages[0]!.text).not.toContain("#")
     expect(result.costEstimate?.unit).toBe("page")
-    expect(result.costEstimate?.amount).toBeCloseTo(0.004)
+    // 2 pages × $0.004/page ($4 per 1000 pages).
+    expect(result.costEstimate?.amount).toBeCloseTo(0.008)
+  })
+
+  it("sends the official default model alias when none is configured", async () => {
+    const seen: { body?: string } = {}
+    const fetchImpl = jest.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      seen.body = init?.body as string
+      return new Response(JSON.stringify({ pages: [] }), { status: 200 })
+    }) as unknown as typeof fetch
+    await mistralExtract(dataUrlInput, makeCtx(), fetchImpl)
+    expect(JSON.parse(seen.body!).model).toBe("mistral-ocr-latest")
   })
 
   it("falls back to positional page numbers when index is missing", async () => {

@@ -1,7 +1,8 @@
 # ADR-0067 Phase 3 — native OCR subsystem (ADR-0024), extracted from `app_lib`'s
 # `ocr/` module. Isolates the optional ONNX/Paddle/ocrs stack (and its heavy
-# toolchain floor — `oar-ocr` needs Rust 1.84.1). The 5 `ocr-*` features move
-# here; `src-tauri` forwards them. `ort`'s `copy-dylibs` and model DLL staging
+# toolchain floor — `oar-ocr` needs Rust 1.84.1). The `ocr-*` features move
+# here; `src-tauri` forwards them. Apple Vision is not feature-gated — it is
+# compiled whenever the target is macOS. `ort`'s `copy-dylibs` and model DLL staging
 # follow the dependency, so bundling is unaffected.
 [package]
 name = "cognia-ocr"
@@ -27,6 +28,7 @@ serde_json = "1.0"
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 once_cell = "1"
+log = "0.4"
 sha2 = "0.11"
 hex = "0.4"
 dirs = "6"
@@ -41,6 +43,25 @@ oar-ocr        = { version = "0.6",  optional = true }
 ort            = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["download-binaries", "copy-dylibs"] }
 image          = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff"] }
 
+# Apple Vision text recognition (macOS) — in-process via the objc2 framework
+# bindings (VNRecognizeTextRequest). Compiled unconditionally on macOS: the
+# backend has no model downloads and no system deps beyond Vision.framework.
+# `image` is pulled in non-optionally here for header-only dimension probing
+# (Vision reports bounding boxes normalized; we need pixel dimensions).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSData", "NSArray", "NSString", "NSDictionary", "NSError", "NSValue"] }
+objc2-core-foundation = "0.3"
+objc2-vision = { version = "0.3", features = [
+    "VNRecognizeTextRequest",
+    "VNRequest",
+    "VNRequestHandler",
+    "VNObservation",
+    "VNTypes",
+    "objc2-core-foundation",
+] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff"] }
+
 [dev-dependencies]
 tempfile = "3"
 
@@ -50,8 +71,6 @@ default = []
 ocr-tesseract = []
 # Windows.Media.Ocr — requires MSIX package identity at runtime.
 ocr-windows = []
-# Apple Vision via the bundled Swift sidecar (externalBin).
-ocr-apple = []
 # Pure-Rust OCR via `ocrs` + RTen. Models downloaded on first use.
 ocr-ocrs = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
 # PaddleOCR PP-OCRv5 via `oar-ocr` + ONNX Runtime (ships an onnxruntime DLL).

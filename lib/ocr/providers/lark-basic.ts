@@ -157,8 +157,8 @@ function cacheKey(appId: string, base: string): string {
 
 function mapLarkCode(code: number): OcrError["code"] {
   if (code === 99991663 || code === 99991664) return "missing_credentials"
-  if (code === 99991400) return "invalid_input"
-  if (code === 99991663 || code === 11202) return "rate_limited"
+  // 99991400 = request trigger frequency limit (official Feishu error code).
+  if (code === 99991400) return "rate_limited"
   return "provider_failed"
 }
 

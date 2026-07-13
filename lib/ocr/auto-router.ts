@@ -27,9 +27,8 @@ import { shellAllows } from "./registry"
 
 /**
  * Optional readiness check for local engines. Some engines (windows-media-ocr
- * with MSIX, apple-vision sidecar, ml-kit android plugin) require shell-side
- * detection beyond "are we on the right OS". Auto-router calls this to gate
- * the local-engine pick.
+ * with MSIX, ml-kit android plugin) require shell-side detection beyond "are
+ * we on the right OS". Auto-router calls this to gate the local-engine pick.
  */
 export type LocalReadinessFn = (providerId: string) => boolean | Promise<boolean>
 

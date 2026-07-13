@@ -1,8 +1,10 @@
 import {
   __setNativeOcrInvoker,
   buildTesseractNativeProvider,
+  mapNativeInvokeError,
   tesseractNativeExtract,
 } from "./tesseract-native"
+import { OcrError } from "@/lib/ocr/errors"
 import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 const input: OcrInput = {
@@ -72,6 +74,23 @@ describe("tesseractNativeExtract", () => {
     expect(invoker).toHaveBeenCalledTimes(1)
   })
 
+  it("maps the Rust MissingBinding rejection to unsupported_shell", async () => {
+    const invoker = jest.fn(async () => {
+      // Exact string shape serialized by crates/cognia-ocr NativeOcrError.
+      throw new Error("OCR backend `tesseract` is not bound on this platform")
+    })
+    const ctx: OcrProviderContext = {
+      credentials: { secrets: {} },
+      config: { invoker },
+      platform: "tauri",
+    }
+    await expect(tesseractNativeExtract(input, ctx)).rejects.toMatchObject({
+      code: "unsupported_shell",
+      providerId: "tesseract-native",
+      message: "This build does not include the tesseract native binding.",
+    })
+  })
+
   it("wraps invoker exceptions into provider_failed", async () => {
     const invoker = jest.fn(async () => {
       throw new Error("native binding panicked")
@@ -84,5 +103,28 @@ describe("tesseractNativeExtract", () => {
     await expect(tesseractNativeExtract(input, ctx)).rejects.toMatchObject({
       code: "provider_failed",
     })
+  })
+})
+
+describe("mapNativeInvokeError", () => {
+  it("passes an existing OcrError through untouched", () => {
+    const original = new OcrError("unsupported_shell", "tesseract-native", "nope")
+    expect(mapNativeInvokeError("tesseract-native", "tesseract", original)).toBe(original)
+  })
+
+  it("stringifies non-Error rejections into provider_failed", () => {
+    const mapped = mapNativeInvokeError("tesseract-native", "tesseract", "raw string failure")
+    expect(mapped.code).toBe("provider_failed")
+    expect(mapped.message).toBe("raw string failure")
+  })
+
+  it("detects MissingBinding in a plain-string rejection (Tauri serializes errors as strings)", () => {
+    const mapped = mapNativeInvokeError(
+      "windows-media-ocr",
+      "windows-media-ocr",
+      "OCR backend `windows-media-ocr` is not bound on this platform"
+    )
+    expect(mapped.code).toBe("unsupported_shell")
+    expect(mapped.message).toBe("This build does not include the windows-media-ocr native binding.")
   })
 })

@@ -23,6 +23,7 @@ import {
 } from "@/types/ocr"
 import {
   __setNativeOcrInvoker as setShared,
+  mapNativeInvokeError,
   type NativeOcrInvoker,
   type NativeOcrResult,
 } from "./tesseract-native"
@@ -100,12 +101,7 @@ export async function ocrsExtract(input: OcrInput, ctx: OcrProviderContext): Pro
       languages,
     })
   } catch (err) {
-    throw new OcrError(
-      "provider_failed",
-      "ocrs",
-      err instanceof Error ? err.message : String(err),
-      err
-    )
+    throw mapNativeInvokeError("ocrs", "ocrs", err)
   }
   const blocks: OcrBlock[] = (payload.blocks ?? []).map((b) => ({
     text: b.text,

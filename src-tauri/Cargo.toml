@@ -500,8 +500,8 @@ default = []
 ocr-tesseract = ["cognia-ocr/ocr-tesseract"]
 # Windows.Media.Ocr — requires MSIX package identity; see `tauri.conf.json`.
 ocr-windows = ["cognia-ocr/ocr-windows"]
-# Apple Vision via the Swift sidecar (bundled through `bundle.externalBin`).
-ocr-apple = ["cognia-ocr/ocr-apple"]
+# Apple Vision needs no feature — `cognia-ocr` wires Vision.framework
+# in-process whenever the target is macOS.
 # Pure-Rust OCR via `ocrs` + RTen. Models downloaded on first use.
 ocr-ocrs = ["cognia-ocr/ocr-ocrs"]
 # PaddleOCR PP-OCRv5 via `oar-ocr` + ONNX Runtime (ships an onnxruntime DLL).

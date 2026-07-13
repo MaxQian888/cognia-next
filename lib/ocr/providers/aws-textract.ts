@@ -47,10 +47,13 @@ interface TextractBlock {
 interface TextractResponse {
   Blocks?: TextractBlock[]
   DocumentMetadata?: { Pages?: number }
-  __type?: string
-  Message?: string
-  message?: string
 }
+
+/**
+ * Sync-API document size limit (10 MB) for DetectDocumentText / AnalyzeDocument.
+ * https://docs.aws.amazon.com/textract/latest/dg/limits-document.html
+ */
+const TEXTRACT_SYNC_MAX_BYTES = 10 * 1024 * 1024
 
 export function buildAwsTextractProvider(inject: { fetchImpl?: typeof fetch } = {}): OcrProvider {
   return {
@@ -89,6 +92,13 @@ export async function awsTextractExtract(
       "AWS Textract sync API requires images. Convert PDFs to PNG pages first."
     )
   }
+  if (normalized.bytes.length > TEXTRACT_SYNC_MAX_BYTES) {
+    throw new OcrError(
+      "invalid_input",
+      "aws-textract",
+      `Document is ${normalized.bytes.length} bytes; the AWS Textract sync API accepts at most 10 MB. Downscale or compress the image first.`
+    )
+  }
   const base64 = bytesToBase64(normalized.bytes)
   const body: Record<string, unknown> = { Document: { Bytes: base64 } }
   if (useAnalyze) {
@@ -123,18 +133,13 @@ export async function awsTextractExtract(
     body: bodyStr,
     signal: ctx.signal,
     fetchImpl: fetchImpl ?? config.fetchImpl,
-    errorCodeFor: (status) => {
-      // Textract uses 400 with __type=ThrottlingException for rate-limit.
-      if (status === 400) return "invalid_input"
-      return defaultErrorCodeFor(status)
-    },
+    // AWS errors always come with a non-2xx status; the error body carries the
+    // real kind in `__type` (e.g. ProvisionedThroughputExceededException on
+    // HTTP 400, ThrottlingException on HTTP 500), so classify by body first
+    // and only fall back to the HTTP status.
+    errorCodeFor: textractErrorCodeFor,
   })
   const data = parseJson<TextractResponse>("aws-textract", res.body)
-
-  if (data.__type) {
-    const code = mapTextractException(data.__type)
-    throw new OcrError(code, "aws-textract", data.Message || data.message || data.__type)
-  }
 
   const totalPages = data.DocumentMetadata?.Pages ?? 1
   const blocksByPage: Record<number, OcrBlock[]> = {}
@@ -183,22 +188,62 @@ function geometryToBox(geom: TextractGeometry | undefined): OcrBlock["bbox"] | u
   return { x: Left, y: Top, width: Width, height: Height }
 }
 
-function mapTextractException(typeStr: string): OcrError["code"] {
+/**
+ * Classify a Textract error response. AWS json-1.1 error bodies look like
+ * `{"__type":"com.amazonaws.textract#ThrottlingException","Message":"..."}`
+ * (the namespace prefix is optional), and the HTTP status alone is misleading:
+ * ThrottlingException arrives as HTTP 500 and ProvisionedThroughputExceeded /
+ * AccessDenied as HTTP 400. Parse `__type` first; fall back to the status.
+ */
+export function textractErrorCodeFor(status: number, bodyText?: string): OcrError["code"] {
+  const exceptionType = extractExceptionType(bodyText)
+  if (exceptionType) {
+    const mapped = mapTextractException(exceptionType)
+    if (mapped) return mapped
+  }
+  return defaultErrorCodeFor(status)
+}
+
+function extractExceptionType(bodyText: string | undefined): string | undefined {
+  if (!bodyText) return undefined
+  try {
+    const parsed = JSON.parse(bodyText) as { __type?: unknown }
+    if (typeof parsed.__type !== "string" || parsed.__type.length === 0) return undefined
+    // Strip the "com.amazonaws.textract#" namespace prefix when present.
+    const hashIndex = parsed.__type.lastIndexOf("#")
+    return hashIndex >= 0 ? parsed.__type.slice(hashIndex + 1) : parsed.__type
+  } catch {
+    return undefined
+  }
+}
+
+function mapTextractException(typeStr: string): OcrError["code"] | undefined {
   const lower = typeStr.toLowerCase()
-  if (lower.includes("throttling") || lower.includes("provisionedthroughput")) {
+  if (
+    lower.includes("throttling") ||
+    lower.includes("provisionedthroughput") ||
+    lower.includes("limitexceeded")
+  ) {
     return "rate_limited"
   }
   if (
-    lower.includes("invalidsignature") ||
     lower.includes("accessdenied") ||
+    lower.includes("unrecognizedclient") ||
+    lower.includes("invalidsignature") ||
+    lower.includes("expiredtoken") ||
     lower.includes("auth")
   ) {
     return "missing_credentials"
   }
-  if (lower.includes("unsupporteddocument") || lower.includes("invalidparameter")) {
+  if (
+    lower.includes("unsupporteddocument") ||
+    lower.includes("documenttoolarge") ||
+    lower.includes("baddocument") ||
+    lower.includes("invalidparameter")
+  ) {
     return "invalid_input"
   }
-  return "provider_failed"
+  return undefined
 }
 
 export const awsTextractProvider = buildAwsTextractProvider()

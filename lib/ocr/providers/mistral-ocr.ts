@@ -1,5 +1,5 @@
 /**
- * Mistral OCR provider (mistral-ocr-2509).
+ * Mistral OCR provider (mistral-ocr-latest).
  *
  * Endpoint: POST https://api.mistral.ai/v1/ocr
  *   body: { model, document: { type, image_url|document_url } }
@@ -29,7 +29,7 @@ interface MistralOcrResponse {
   usage_info?: { pages_processed?: number; doc_size_bytes?: number }
 }
 
-const MISTRAL_DEFAULT_MODEL = "mistral-ocr-2509"
+const MISTRAL_DEFAULT_MODEL = "mistral-ocr-latest"
 const MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/ocr"
 
 export interface MistralOcrConfig {
@@ -102,7 +102,8 @@ export async function mistralExtract(
       data.usage_info?.pages_processed !== undefined
         ? {
             unit: "page",
-            amount: data.usage_info.pages_processed * 0.002,
+            // OCR API pricing: $4 per 1000 pages ($0.004/page).
+            amount: data.usage_info.pages_processed * 0.004,
             currency: "USD",
           }
         : undefined,

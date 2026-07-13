@@ -25,7 +25,7 @@ import {
 } from "./_llm-vision"
 
 const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
-const DEFAULT_MODEL = "claude-opus-4-7"
+const DEFAULT_MODEL = "claude-opus-4-8"
 const DEFAULT_API_VERSION = "2023-06-01"
 
 export interface AnthropicVisionConfig extends VisionConfig {
@@ -127,7 +127,7 @@ export async function anthropicVisionExtract(
     const output_tokens = data.usage.output_tokens ?? 0
     result.costEstimate = {
       unit: "token",
-      // Opus 4.7 list pricing: $5/M in + $25/M out (2026-Q1).
+      // Opus 4.8 list pricing: $5/M in + $25/M out (unchanged from 4.7).
       amount: (input_tokens * 5) / 1_000_000 + (output_tokens * 25) / 1_000_000,
       currency: "USD",
     }

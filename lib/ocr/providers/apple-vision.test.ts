@@ -52,6 +52,22 @@ describe("appleVisionExtract — tauri path", () => {
     })
   })
 
+  it("maps the Rust MissingBinding rejection to unsupported_shell", async () => {
+    const invoker = jest.fn(async () => {
+      throw new Error("OCR backend `apple-vision` is not bound on this platform")
+    })
+    const ctx: OcrProviderContext = {
+      credentials: { secrets: {} },
+      config: { invoker },
+      platform: "tauri",
+    }
+    await expect(appleVisionExtract(input, ctx)).rejects.toMatchObject({
+      code: "unsupported_shell",
+      providerId: "apple-vision",
+      message: "This build does not include the apple-vision native binding.",
+    })
+  })
+
   it("wraps Tauri invoker errors into provider_failed", async () => {
     const invoker = jest.fn(async () => {
       throw new Error("Swift sidecar exited")
@@ -70,14 +86,14 @@ describe("appleVisionExtract — tauri path", () => {
 describe("appleVisionExtract — mobile path", () => {
   function buildPlugin(): AppleVisionPluginShape {
     return {
-      recognizeText: jest.fn(async () => ({
+      detectText: jest.fn(async () => ({
         text: "iOS",
-        blocks: [{ text: "iOS", confidence: 0.99 }],
+        blocks: [{ text: "iOS", boundingBox: { left: 2, top: 4, right: 12, bottom: 9 } }],
       })),
     }
   }
 
-  it("calls the Capacitor plugin on the mobile shell", async () => {
+  it("calls detectText with the base64Image payload on the mobile shell", async () => {
     const plugin = buildPlugin()
     const ctx: OcrProviderContext = {
       credentials: { secrets: {} },
@@ -85,12 +101,12 @@ describe("appleVisionExtract — mobile path", () => {
       platform: "mobile",
     }
     const result = await appleVisionExtract(input, ctx)
-    expect(plugin.recognizeText).toHaveBeenCalled()
+    expect(plugin.detectText).toHaveBeenCalledWith({ base64Image: expect.any(String) })
     expect(result.pages[0]!.text).toBe("iOS")
-    expect(result.pages[0]!.blocks?.[0]?.confidence).toBe(0.99)
+    expect(result.pages[0]!.blocks?.[0]?.bbox).toEqual({ x: 2, y: 4, width: 10, height: 5 })
   })
 
-  it("maps a missing plugin to unsupported_shell", async () => {
+  it("maps a missing plugin to unsupported_shell naming the missing package", async () => {
     const ctx: OcrProviderContext = {
       credentials: { secrets: {} },
       config: {
@@ -102,12 +118,13 @@ describe("appleVisionExtract — mobile path", () => {
     }
     await expect(appleVisionExtract(input, ctx)).rejects.toMatchObject({
       code: "unsupported_shell",
+      message: expect.stringContaining("@pantrist/capacitor-plugin-ml-kit-text-recognition"),
     })
   })
 
   it("maps plugin throw to provider_failed", async () => {
     const plugin: AppleVisionPluginShape = {
-      recognizeText: jest.fn(async () => {
+      detectText: jest.fn(async () => {
         throw new Error("plugin boom")
       }),
     }

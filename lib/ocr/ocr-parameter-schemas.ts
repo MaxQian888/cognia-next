@@ -98,6 +98,41 @@ const ENDPOINT_PARAM = (defaultValue: string): ParameterDefinition => ({
   defaultValue,
 })
 
+/** OCR.space engine selector — the provider reads `config.engine`. */
+const ENGINE_PARAM: ParameterDefinition = {
+  key: "engine",
+  type: "select",
+  label: `${PROVIDER_PARAM_PREFIX}.engine.label`,
+  description: `${PROVIDER_PARAM_PREFIX}.engine.description`,
+  category: "provider-specific",
+  defaultValue: "3",
+  validation: {
+    options: [
+      { value: "1", label: `${PROVIDER_PARAM_PREFIX}.engine.engine1` },
+      { value: "2", label: `${PROVIDER_PARAM_PREFIX}.engine.engine2` },
+      { value: "3", label: `${PROVIDER_PARAM_PREFIX}.engine.engine3` },
+    ],
+  },
+}
+
+/** ABBYY export format — the provider reads `config.exportFormat`. */
+const EXPORT_FORMAT_PARAM: ParameterDefinition = {
+  key: "exportFormat",
+  type: "select",
+  label: `${PROVIDER_PARAM_PREFIX}.exportFormat.label`,
+  description: `${PROVIDER_PARAM_PREFIX}.exportFormat.description`,
+  category: "provider-specific",
+  defaultValue: "txt",
+  validation: {
+    options: [
+      { value: "txt", label: `${PROVIDER_PARAM_PREFIX}.exportFormat.txt` },
+      { value: "txtUnstructured", label: `${PROVIDER_PARAM_PREFIX}.exportFormat.txtUnstructured` },
+      { value: "xml", label: `${PROVIDER_PARAM_PREFIX}.exportFormat.xml` },
+      { value: "alto", label: `${PROVIDER_PARAM_PREFIX}.exportFormat.alto` },
+    ],
+  },
+}
+
 const ENABLE_TABLES_PARAM: ParameterDefinition = {
   key: "enableTables",
   type: "toggle",
@@ -173,7 +208,7 @@ function compose(
  * shared dynamic-form helpers in `components/settings/provider/`.
  */
 export const OCR_PARAMETER_SCHEMAS: Record<string, ProviderParameterSchema> = {
-  "mistral-ocr": compose("mistral-ocr", "Mistral OCR", [MODEL_PARAM("mistral-ocr-2509")]),
+  "mistral-ocr": compose("mistral-ocr", "Mistral OCR", [MODEL_PARAM("mistral-ocr-latest")]),
   "google-vision": compose("google-vision", "Google Cloud Vision", [
     MODEL_PARAM("DOCUMENT_TEXT_DETECTION"),
     ENABLE_TABLES_PARAM,
@@ -189,22 +224,21 @@ export const OCR_PARAMETER_SCHEMAS: Record<string, ProviderParameterSchema> = {
     [ENDPOINT_PARAM("https://<resource>.cognitiveservices.azure.com"), MODEL_PARAM("prebuilt-read")]
   ),
   "anthropic-vision": compose("anthropic-vision", "Claude (vision)", [
-    MODEL_PARAM("claude-opus-4-7"),
+    MODEL_PARAM("claude-opus-4-8"),
     PROMPT_TEMPLATE_PARAM,
   ]),
   "openai-vision": compose("openai-vision", "OpenAI (vision)", [
-    MODEL_PARAM("gpt-5"),
+    MODEL_PARAM("gpt-5.6"),
     PROMPT_TEMPLATE_PARAM,
   ]),
   "gemini-vision": compose("gemini-vision", "Gemini (vision)", [
-    MODEL_PARAM("gemini-2.5-pro"),
+    MODEL_PARAM("gemini-3.5-flash"),
     PROMPT_TEMPLATE_PARAM,
   ]),
-  mathpix: compose("mathpix", "Mathpix", [MODEL_PARAM("math+text")]),
-  "ocr-space": compose("ocr-space", "OCR.space", [MODEL_PARAM("3")]),
-  "abbyy-cloud": compose("abbyy-cloud", "ABBYY Cloud OCR", [
-    MODEL_PARAM("TextExtraction_Accuracy"),
-  ]),
+  // Mathpix v3/text has no model parameter — only the common params apply.
+  mathpix: compose("mathpix", "Mathpix", []),
+  "ocr-space": compose("ocr-space", "OCR.space", [ENGINE_PARAM]),
+  "abbyy-cloud": compose("abbyy-cloud", "ABBYY Cloud OCR", [EXPORT_FORMAT_PARAM]),
   nanonets: compose("nanonets", "Nanonets", [MODEL_PARAM("")]),
   "lark-basic": compose("lark-basic", "Feishu / Lark", []),
   "tesseract-wasm": compose("tesseract-wasm", "Tesseract (WASM)", []),
@@ -213,7 +247,9 @@ export const OCR_PARAMETER_SCHEMAS: Record<string, ProviderParameterSchema> = {
   "apple-vision": compose("apple-vision", "Apple Vision", []),
   "mlkit-android": compose("mlkit-android", "ML Kit Text Recognition", []),
   ocrs: compose("ocrs", "ocrs (local)", []),
-  "paddle-ocr": compose("paddle-ocr", "PaddleOCR (local)", [MODEL_PARAM("PP-OCRv5_mobile")]),
+  // The native backend loads its bundled PP-OCRv5 models; no model knob is
+  // wired through the invoke payload, so none is exposed here.
+  "paddle-ocr": compose("paddle-ocr", "PaddleOCR (local)", []),
   "local-http": compose("local-http", "Local HTTP (self-hosted)", [
     ENDPOINT_PARAM("http://localhost:1224/api/ocr"),
     DIALECT_PARAM,

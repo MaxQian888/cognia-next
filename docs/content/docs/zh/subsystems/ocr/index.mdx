@@ -130,9 +130,9 @@ flowchart LR
     `async () => ({ secrets: {} })`；keyring 支撑的解析器在 `ExtractDeps` 上声明了但未组装。
   - **Composer 菜单** —— `ocr-menu.tsx` / `ocr-result-bubble.tsx` / `useOcr` 已构建并测试，但
     `components/chat/composer.tsx` 渲染 `<AttachmentPreview />` 时未带 `onOcrSelect` prop，因此该菜单处于休眠状态。
-  - **原生绑定** —— 只有 `ocr-ocrs` 和 `ocr-paddle` 这两个 Cargo feature 链接了真实 crate；`ocr-tesseract`
-    / `ocr-windows` / `ocr-apple` 是解析为 `PlaceholderBackend` 的空 feature flag。见
-    [原生后端](./native-backends)。
+  - **原生绑定** —— `ocr-ocrs` 和 `ocr-paddle` 这两个 Cargo feature 链接了真实 crate，且 `apple-vision`
+    在 macOS 目标上进程内编译启用；`ocr-tesseract` / `ocr-windows` 是解析为 `PlaceholderBackend` 的
+    空 feature flag。见[原生后端](./native-backends)。
 </Callout>
 
 ## 模块导航

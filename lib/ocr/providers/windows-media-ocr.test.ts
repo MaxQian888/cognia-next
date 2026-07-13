@@ -63,6 +63,22 @@ describe("windowsMediaOcrExtract", () => {
     })
   })
 
+  it("maps the Rust MissingBinding rejection to unsupported_shell", async () => {
+    const invoker = jest.fn(async () => {
+      throw new Error("OCR backend `windows-media-ocr` is not bound on this platform")
+    })
+    const ctx: OcrProviderContext = {
+      credentials: { secrets: {} },
+      config: { invoker, isReady: () => true },
+      platform: "tauri",
+    }
+    await expect(windowsMediaOcrExtract(input, ctx)).rejects.toMatchObject({
+      code: "unsupported_shell",
+      providerId: "windows-media-ocr",
+      message: "This build does not include the windows-media-ocr native binding.",
+    })
+  })
+
   it("wraps invoker failures into provider_failed", async () => {
     const invoker = jest.fn(async () => {
       throw new Error("winocr panic")

@@ -1,5 +1,5 @@
 /**
- * OpenAI (GPT-4o / GPT-5) OCR (vision) provider.
+ * OpenAI (GPT-5.6 family) OCR (vision) provider.
  *
  * Reuses the user's main OpenAI API key (provider settings). POSTs to
  * https://api.openai.com/v1/chat/completions with a multimodal user message
@@ -24,7 +24,7 @@ import {
 } from "./_llm-vision"
 
 const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
-const DEFAULT_MODEL = "gpt-5"
+const DEFAULT_MODEL = "gpt-5.6"
 
 export interface OpenAiVisionConfig extends VisionConfig {
   maxTokens?: number
@@ -88,7 +88,9 @@ export async function openAiVisionExtract(
     headers,
     body: {
       model,
-      max_tokens: maxTokens,
+      // GPT-5-family / o-series models reject the legacy `max_tokens` param
+      // with a 400; `max_completion_tokens` is the accepted replacement.
+      max_completion_tokens: maxTokens,
       messages: [
         {
           role: "user",
@@ -119,10 +121,10 @@ export async function openAiVisionExtract(
   if (data.usage) {
     const promptTokens = data.usage.prompt_tokens ?? 0
     const completionTokens = data.usage.completion_tokens ?? 0
-    // GPT-5 list pricing: $1.25/M in + $10/M out (2026-Q1).
+    // GPT-5.6 (gpt-5.6-sol) list pricing: $5/M in + $30/M out (2026-Q2).
     result.costEstimate = {
       unit: "token",
-      amount: (promptTokens * 1.25) / 1_000_000 + (completionTokens * 10) / 1_000_000,
+      amount: (promptTokens * 5) / 1_000_000 + (completionTokens * 30) / 1_000_000,
       currency: "USD",
     }
   }

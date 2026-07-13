@@ -24,7 +24,7 @@ read a screenshot mid-conversation"). It also has to cover the platform
 matrix without forcing users to pick a single provider — local engines
 for offline scenarios, cloud providers when accuracy matters, and a
 fallback chain when local engines aren't ready (Windows without MSIX,
-macOS without the Apple Vision sidecar binary, Linux without Tesseract).
+Linux without Tesseract).
 
 ## Decision
 
@@ -129,14 +129,16 @@ clear manually.
   completion. Idempotent — re-running a successful download is a no-op
   for files whose digest already matches.
 
-Real bindings ride five Cargo features (all default-off so the standard
-build stays fast; release pipeline turns on `ocr-ocrs` and `ocr-paddle`):
+Real bindings ride four Cargo features (all default-off so the standard
+build stays fast; release pipeline turns on `ocr-ocrs` and `ocr-paddle`),
+plus one target-gated backend that is always on for its platform:
 
 - `ocr-tesseract` → `tesseract-rs` (cross-platform, statically linked
   libtesseract + leptonica).
 - `ocr-windows` → `winocr` crate (Windows + MSIX).
-- `ocr-apple` → Swift sidecar at `src-tauri/sidecars/apple-vision-ocr/`
-  bundled via `tauri.conf.json` `bundle.externalBin`.
+- `apple-vision` (no feature; compiled whenever the target is macOS) →
+  Vision.framework's `VNRecognizeTextRequest` in-process via the
+  `objc2-vision` bindings — no sidecar, no model downloads.
 - `ocr-ocrs` → `ocrs` + `rten` (pure-Rust, no system deps).
 - `ocr-paddle` → `oar-ocr` + `ort` (PP-OCRv5 via ONNX Runtime; pinned to
   `ort = "=2.0.0-rc.12"` to avoid ABI churn between RCs).

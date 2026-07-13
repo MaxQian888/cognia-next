@@ -183,6 +183,71 @@ describe("localHttpExtract", () => {
     })
   })
 
+  it("parses official hubserving dict-shaped PaddleOCR-Server results", async () => {
+    const fetchImpl = jest.fn(async () =>
+      jsonResponse({
+        status: "000",
+        results: [
+          [
+            {
+              text: "hello",
+              confidence: 0.95,
+              text_region: [
+                [10, 5],
+                [50, 5],
+                [50, 15],
+                [10, 15],
+              ],
+            },
+            { text: "world", confidence: 0.8 },
+          ],
+        ],
+      })
+    ) as unknown as typeof fetch
+    const ctx: OcrProviderContext = {
+      credentials: { secrets: {} },
+      config: {
+        endpoint: "http://localhost:8868/predict/ocr_system",
+        dialect: "paddleocr-server",
+        fetchImpl,
+      },
+      platform: "tauri",
+    }
+    const result = await localHttpExtract(baseInput, ctx)
+    expect(result.pages[0]!.text).toBe("hello\nworld")
+    expect(result.pages[0]!.blocks).toHaveLength(2)
+    expect(result.pages[0]!.blocks?.[0]?.confidence).toBeCloseTo(0.95)
+    expect(result.pages[0]!.blocks?.[0]?.bbox).toEqual({
+      x: 10,
+      y: 5,
+      width: 40,
+      height: 10,
+    })
+    expect(result.pages[0]!.blocks?.[1]?.bbox).toBeUndefined()
+  })
+
+  it("raises provider_failed when all PaddleOCR-Server entries are unparseable", async () => {
+    const fetchImpl = jest.fn(async () =>
+      jsonResponse({
+        status: "000",
+        results: [[{ unexpected: true }, 42, null]],
+      })
+    ) as unknown as typeof fetch
+    const ctx: OcrProviderContext = {
+      credentials: { secrets: {} },
+      config: {
+        endpoint: "http://localhost:8868/predict/ocr_system",
+        dialect: "paddleocr-server",
+        fetchImpl,
+      },
+      platform: "tauri",
+    }
+    await expect(localHttpExtract(baseInput, ctx)).rejects.toMatchObject({
+      code: "provider_failed",
+      providerId: "local-http",
+    })
+  })
+
   it("maps 401 to missing_credentials", async () => {
     const fetchImpl = jest.fn(
       async () => new Response("unauthorized", { status: 401 })
@@ -247,14 +312,21 @@ describe("localHttpExtract", () => {
 })
 
 describe("serializeRequest", () => {
-  it("encodes base64 + lang into Umi-OCR JSON body", () => {
+  it("encodes base64 + lang under Umi-OCR's documented 'ocr.language' option key", () => {
     const bundle = serializeRequest("umi-ocr", new Uint8Array([1, 2, 3]), "image/png", ["zh-cn"])
     expect(bundle.headers["Content-Type"]).toBe("application/json")
     const parsed = JSON.parse(String(bundle.body))
     expect(parsed).toMatchObject({
       base64: expect.any(String),
-      options: { language: "zh-cn" },
+      options: { "ocr.language": "zh-cn" },
     })
+    expect(parsed.options.language).toBeUndefined()
+  })
+
+  it("omits Umi-OCR options entirely when no languages are provided", () => {
+    const bundle = serializeRequest("umi-ocr", new Uint8Array([1, 2, 3]), "image/png", [])
+    const parsed = JSON.parse(String(bundle.body))
+    expect(parsed.options).toBeUndefined()
   })
 
   it("encodes PaddleOCR-Server payload with images array", () => {

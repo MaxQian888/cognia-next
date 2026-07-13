@@ -60,17 +60,30 @@ describe("paddleOcrExtract", () => {
     expect(result.pages[0]!.blocks?.[0]?.confidence).toBeCloseTo(0.93)
   })
 
-  it("forwards the model variant via options when configured", async () => {
+  it("sends no options field — the invoke payload has no model knob", async () => {
     const invoker = jest.fn(async () => ({ text: "ok", blocks: [] }))
     const ctx: OcrProviderContext = {
       credentials: { secrets: {} },
-      config: { invoker, model: "PP-OCRv5_server" },
+      config: { invoker },
       platform: "tauri",
     }
     await paddleOcrExtract(input, ctx)
-    expect(invoker).toHaveBeenCalledWith(
-      expect.objectContaining({ options: { model: "PP-OCRv5_server" } })
-    )
+    expect(invoker.mock.calls[0]![0]).not.toHaveProperty("options")
+  })
+
+  it("maps a MissingBinding rejection to unsupported_shell", async () => {
+    const invoker = jest.fn(async () => {
+      throw new Error("OCR backend `paddle-ocr` is not bound on this platform")
+    })
+    const ctx: OcrProviderContext = {
+      credentials: { secrets: {} },
+      config: { invoker },
+      platform: "tauri",
+    }
+    await expect(paddleOcrExtract(input, ctx)).rejects.toMatchObject({
+      code: "unsupported_shell",
+      providerId: "paddle-ocr",
+    })
   })
 
   it("defaults languages to zh-cn + en when caller omits them", async () => {

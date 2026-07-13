@@ -102,23 +102,13 @@ describe("larkBasicExtract — error paths", () => {
     })
   })
 
-  it("maps OCR endpoint code=11202 to rate_limited and clears the cache", async () => {
+  it("maps OCR code=99991400 (request trigger frequency limit) to rate_limited", async () => {
     const fetchImpl = makeFetchSequence([
       { status: 200, body: { code: 0, tenant_access_token: "tat-1", expire: 7200 } },
-      { status: 200, body: { code: 11202, msg: "rate limit" } },
+      { status: 200, body: { code: 99991400, msg: "request trigger frequency limit" } },
     ])
     await expect(larkBasicExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
       code: "rate_limited",
-    })
-  })
-
-  it("maps OCR code=99991400 to invalid_input", async () => {
-    const fetchImpl = makeFetchSequence([
-      { status: 200, body: { code: 0, tenant_access_token: "tat-1", expire: 7200 } },
-      { status: 200, body: { code: 99991400, msg: "bad image" } },
-    ])
-    await expect(larkBasicExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
-      code: "invalid_input",
     })
   })
 

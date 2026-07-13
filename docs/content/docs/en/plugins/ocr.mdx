@@ -100,7 +100,10 @@ Tauri builds can opt into native OCR engines through Cargo features:
 | --------------- | ----------------------------------------------------------------------------- |
 | `ocr-tesseract` | Cross-platform Tesseract via the `tesseract-rs` crate.                        |
 | `ocr-windows`   | `Windows.Media.Ocr` via the `winocr` crate. Requires an MSIX build.           |
-| `ocr-apple`     | Apple Vision via the Swift sidecar at `src-tauri/sidecars/apple-vision-ocr/`. |
+
+Apple Vision needs no feature flag: the `apple-vision` backend runs
+Vision.framework in-process (via the `objc2-vision` bindings) whenever the
+target is macOS.
 
 Without these features the registry advertises placeholder backends that report
 `MissingBinding`. The TS layer surfaces that as `unsupported_shell` and the

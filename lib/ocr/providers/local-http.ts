@@ -10,8 +10,10 @@
  *   - "umi-ocr": Umi-OCR HTTP server. JSON body with base64 image,
  *     `{ "code": 100, "data": "..." }` or `{ "code": 100, "data": [{ text, score, box }] }`
  *     depending on Umi-OCR config. See https://github.com/hiroi-sora/Umi-OCR
- *   - "paddleocr-server": PaddleOCR's serving API. Multipart body with
- *     the image, `{ "status": "...", "results": [[bbox, [text, conf]]] }`.
+ *   - "paddleocr-server": PaddleOCR's serving API. JSON body with base64
+ *     images; responses carry either official hubserving dict entries
+ *     `{ text, confidence, text_region }` or legacy tuple entries
+ *     `[bbox, [text, conf]]` under `{ "status": "...", "results": [...] }`.
  *
  * Adding a new dialect is a matter of teaching `serializeRequest` /
  * `parseResponse` how to talk to it — provider id stays stable.
@@ -55,13 +57,18 @@ interface UmiOcrResponse {
   message?: string
 }
 
-interface PaddleServerEntry {
-  // PaddleOCR-Server returns nested tuples that don't map cleanly to
-  // TS. The runtime shape is `[bbox[4][2], [text, confidence]]` — we
-  // parse it defensively in `parsePaddleServerResponse`.
-  0: number[][]
-  1: [string, number]
+// PaddleOCR-Server entries come in two documented shapes:
+//   - Official PaddleHub Serving (deploy/hubserving/readme_en.md §4):
+//     dict entries `{ text, confidence, text_region: [[x,y] x4] }`.
+//   - Legacy/fork tuple entries: `[bbox[4][2], [text, confidence]]`.
+// Both are parsed defensively in `parsePaddleServerResponse`.
+interface PaddleServerDictEntry {
+  text: string
+  confidence?: number
+  text_region?: number[][]
 }
+
+type PaddleServerEntry = PaddleServerDictEntry | [number[][], [string, number]]
 
 interface PaddleServerResponse {
   status?: string
@@ -206,12 +213,15 @@ export function serializeRequest(
   switch (dialect) {
     case "umi-ocr": {
       headers["Content-Type"] = "application/json"
+      // Umi-OCR's documented option key is "ocr.language" (docs/http/api_ocr.md),
+      // and its values are Umi-OCR model-config identifiers, not BCP-47 codes.
+      // We pass the user-configured string through as-is — no BCP-47 mapping
+      // table exists in the upstream docs, so users must supply Umi-OCR's own
+      // model-config names when they want a non-default language.
+      const language = languages[0]
       const body = JSON.stringify({
         base64: bytesToBase64(bytes),
-        options: {
-          // Umi-OCR honours these options when configured for multi-language.
-          language: languages[0] ?? "en",
-        },
+        ...(language ? { options: { "ocr.language": language } } : {}),
       })
       return { body, headers }
     }
@@ -313,23 +323,70 @@ function parsePaddleServerResponse(body: string): ParseResult {
   const blocks: OcrBlock[] = []
   const lines: string[] = []
   const firstImage = (payload.results ?? [])[0] ?? []
+  let unparseable = 0
   for (const entry of firstImage) {
-    if (!entry || !Array.isArray(entry)) continue
-    const bboxRaw = entry[0]
-    const textPair = entry[1]
-    if (!Array.isArray(textPair) || textPair.length < 2) continue
-    const text = String(textPair[0] ?? "")
-    if (!text) continue
-    const confidence = typeof textPair[1] === "number" ? textPair[1] : undefined
-    lines.push(text)
+    const parsed = parsePaddleServerEntry(entry)
+    if (!parsed) {
+      unparseable++
+      continue
+    }
+    if (!parsed.text) continue
+    lines.push(parsed.text)
     blocks.push({
-      text,
-      bbox: boxToBbox(bboxRaw as number[][] | undefined),
-      confidence,
+      text: parsed.text,
+      bbox: boxToBbox(parsed.box),
+      confidence: parsed.confidence,
       kind: "line",
     })
   }
+  // No silent skips: if a non-empty result set matched neither documented
+  // shape, surface it instead of returning an empty success.
+  if (unparseable > 0 && unparseable === firstImage.length) {
+    throw new OcrError(
+      "provider_failed",
+      "local-http",
+      `PaddleOCR-Server response contained ${unparseable} entr${
+        unparseable === 1 ? "y" : "ies"
+      }, none matching the official dict shape ({text, confidence, text_region}) or the legacy tuple shape ([bbox, [text, conf]]).`
+    )
+  }
   return { combinedText: lines.join("\n"), blocks }
+}
+
+interface ParsedPaddleEntry {
+  text: string
+  confidence?: number
+  box?: number[][]
+}
+
+/**
+ * Accepts both documented PaddleOCR-Server entry shapes:
+ *   - official hubserving dict: `{ text, confidence, text_region }`
+ *   - legacy tuple: `[bbox[4][2], [text, confidence]]`
+ * Returns undefined when the entry matches neither.
+ */
+function parsePaddleServerEntry(entry: unknown): ParsedPaddleEntry | undefined {
+  if (!entry) return undefined
+  if (Array.isArray(entry)) {
+    const bboxRaw = entry[0]
+    const textPair = entry[1]
+    if (!Array.isArray(textPair) || textPair.length < 2) return undefined
+    return {
+      text: String(textPair[0] ?? ""),
+      confidence: typeof textPair[1] === "number" ? textPair[1] : undefined,
+      box: Array.isArray(bboxRaw) ? (bboxRaw as number[][]) : undefined,
+    }
+  }
+  if (typeof entry === "object") {
+    const dict = entry as Partial<PaddleServerDictEntry>
+    if (typeof dict.text !== "string") return undefined
+    return {
+      text: dict.text,
+      confidence: typeof dict.confidence === "number" ? dict.confidence : undefined,
+      box: Array.isArray(dict.text_region) ? dict.text_region : undefined,
+    }
+  }
+  return undefined
 }
 
 function boxToBbox(box: number[][] | undefined): OcrBlock["bbox"] | undefined {

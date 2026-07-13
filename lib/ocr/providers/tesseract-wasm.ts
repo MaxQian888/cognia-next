@@ -5,6 +5,15 @@
  * the wasm fetch + worker boot cost. Subsequent calls reuse the shared
  * worker registered in module scope.
  *
+ * Offline assets: `scripts/build/copy-ocr-assets.mjs` (wired into
+ * `predev`/`prebuild`) copies `worker.min.js` and the tesseract.js-core
+ * `-lstm` wasm bundles into `public/ocr/`, and the provider defaults
+ * `workerPath`/`corePath` to those local files so no CDN access is needed in
+ * any shell. `langPath` intentionally keeps tesseract.js's CDN default:
+ * traineddata files are large and per-language, so bundling them all offline
+ * is a user settings choice — a local mirror can be configured via
+ * `config.langPath`.
+ *
  * The provider intentionally exposes a `recognizer` factory so tests can
  * inject a mock without touching the real WASM binary, which jsdom can't
  * execute.
@@ -20,37 +29,51 @@ import {
   type OcrResult,
 } from "@/types/ocr"
 
+/** Local assets copied by scripts/build/copy-ocr-assets.mjs. */
+const DEFAULT_WORKER_PATH = "/ocr/worker.min.js"
+const DEFAULT_CORE_PATH = "/ocr/core"
+
+export interface TesseractBbox {
+  x0?: number
+  y0?: number
+  x1?: number
+  y1?: number
+}
+
 /**
- * Slim slice of tesseract.js's recognize() return shape. Only the bits we
- * actually consume are listed — full type lives in tesseract.js's d.ts.
+ * Slim slice of tesseract.js v7's recognize() return shape (`data` is the
+ * `Page` type in tesseract.js's d.ts). Since v6, block/paragraph structures
+ * are only populated when requested via the `output` argument of
+ * recognize() — `data.blocks` is `null` otherwise.
  */
 export interface TesseractRecognizeResult {
   data: {
     text: string
     confidence?: number
-    paragraphs?: Array<{
+    blocks?: Array<{
       text: string
       confidence?: number
-      bbox?: { x0?: number; y0?: number; x1?: number; y1?: number }
-    }>
-    lines?: Array<{
-      text: string
-      confidence?: number
-      bbox?: { x0?: number; y0?: number; x1?: number; y1?: number }
-    }>
-    words?: Array<{
-      text: string
-      confidence?: number
-      bbox?: { x0?: number; y0?: number; x1?: number; y1?: number }
-    }>
+      bbox?: TesseractBbox
+      paragraphs?: Array<{
+        text: string
+        confidence?: number
+        bbox?: TesseractBbox
+      }>
+    }> | null
   }
+}
+
+/** Requested output formats — second/third args of worker.recognize(). */
+export interface TesseractOutputFormats {
+  text?: boolean
+  blocks?: boolean
 }
 
 export interface TesseractRecognizer {
   recognize(
     image: Blob | Uint8Array | string,
-    language: string,
-    options?: Record<string, unknown>
+    options?: Record<string, unknown>,
+    output?: TesseractOutputFormats
   ): Promise<TesseractRecognizeResult>
   terminate?(): Promise<void>
 }
@@ -58,9 +81,10 @@ export interface TesseractRecognizer {
 export interface TesseractWasmConfig {
   /** Tesseract language list — defaults to ["eng"]. */
   languages?: string[]
-  /** Path prefix served from `public/ocr/` (filled in by scripts/copy-ocr-assets.mjs). */
+  /** Path overrides; default to the local copies under `public/ocr/`. */
   workerPath?: string
   corePath?: string
+  /** Traineddata directory — defaults to tesseract.js's CDN (see header). */
   langPath?: string
   /** Optional override used by tests; in production, the real loader resolves it. */
   recognizer?: TesseractRecognizer
@@ -76,23 +100,21 @@ let cachedLangKey: string | null = null
 
 /** Default factory dynamically imports tesseract.js. Skipped under jsdom in tests. */
 export const defaultRecognizerFactory: TesseractRecognizerFactory = async (langs, opts) => {
-  // The dynamic import is webpackIgnore'd so the package isn't bundled into
-  // the static export — the WASM core is copied to `public/ocr/` by
-  // scripts/copy-ocr-assets.mjs at build time.
-  const moduleId = "tesseract.js"
-  const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-    createWorker: (
-      lang: string,
-      oem?: number,
-      options?: Record<string, unknown>
-    ) => Promise<TesseractRecognizer>
-  }
-  const langKey = langs.join("+") || "eng"
-  return mod.createWorker(langKey, undefined, {
-    workerPath: opts.workerPath,
-    corePath: opts.corePath,
-    langPath: opts.langPath,
+  // Lazy dynamic import — the tesseract.js JS glue only enters the chunk that
+  // actually runs OCR, and the multi-MB wasm cores are never bundled: the
+  // worker fetches them at runtime from `corePath` (local `public/ocr/`).
+  const mod = await import("tesseract.js")
+  // createWorker(langs, oem, options): language is fixed at worker creation,
+  // NOT passed to recognize(). Default oem (LSTM_ONLY) matches the `-lstm`
+  // cores copied by scripts/build/copy-ocr-assets.mjs.
+  const worker = await mod.createWorker(langs.length > 0 ? langs : ["eng"], undefined, {
+    workerPath: opts.workerPath ?? DEFAULT_WORKER_PATH,
+    corePath: opts.corePath ?? DEFAULT_CORE_PATH,
+    // Keep tesseract.js's CDN default for traineddata unless configured —
+    // full offline language packs are a settings choice (see file header).
+    ...(opts.langPath ? { langPath: opts.langPath } : {}),
   })
+  return worker as unknown as TesseractRecognizer
 }
 
 let factory: TesseractRecognizerFactory = defaultRecognizerFactory
@@ -154,10 +176,20 @@ export async function tesseractWasmExtract(
     }
   }
 
+  // tesseract.js's browser worker takes Blob/File/canvas/URL inputs — raw
+  // Uint8Array is only supported on the node path, so wrap in a Blob.
+  const image: Blob | Uint8Array =
+    typeof Blob !== "undefined"
+      ? new Blob([normalized.bytes as BlobPart], { type: normalized.mimeType })
+      : normalized.bytes
+
   const start = Date.now()
   let payload: TesseractRecognizeResult
   try {
-    payload = await recognizer.recognize(normalized.bytes, langKey)
+    // recognize(image, options, output): since v6 the block/paragraph tree is
+    // opt-in via the `output` argument — without `blocks: true`, data.blocks
+    // is null and we'd always return zero blocks.
+    payload = await recognizer.recognize(image, {}, { text: true, blocks: true })
   } catch (err) {
     throw new OcrError(
       "provider_failed",
@@ -167,12 +199,28 @@ export async function tesseractWasmExtract(
     )
   }
 
-  const blocks: OcrBlock[] = (payload.data.paragraphs ?? []).map((p) => ({
-    text: p.text,
-    bbox: bboxFrom(p.bbox),
-    confidence: typeof p.confidence === "number" ? p.confidence / 100 : undefined,
-    kind: "paragraph",
-  }))
+  const blocks: OcrBlock[] = []
+  for (const block of payload.data.blocks ?? []) {
+    const paragraphs = block.paragraphs ?? []
+    if (paragraphs.length === 0) {
+      // Degenerate block without a paragraph tree — surface it as one block.
+      blocks.push({
+        text: block.text,
+        bbox: bboxFrom(block.bbox),
+        confidence: normalizeConfidence(block.confidence),
+        kind: "paragraph",
+      })
+      continue
+    }
+    for (const p of paragraphs) {
+      blocks.push({
+        text: p.text,
+        bbox: bboxFrom(p.bbox),
+        confidence: normalizeConfidence(p.confidence),
+        kind: "paragraph",
+      })
+    }
+  }
 
   return {
     providerId: "tesseract-wasm",
@@ -192,9 +240,12 @@ export async function tesseractWasmExtract(
   }
 }
 
-function bboxFrom(
-  bbox: { x0?: number; y0?: number; x1?: number; y1?: number } | undefined
-): OcrBlock["bbox"] | undefined {
+/** tesseract.js reports confidence 0-100; OcrBlock wants 0-1. */
+function normalizeConfidence(confidence: number | undefined): number | undefined {
+  return typeof confidence === "number" ? confidence / 100 : undefined
+}
+
+function bboxFrom(bbox: TesseractBbox | undefined): OcrBlock["bbox"] | undefined {
   if (!bbox) return undefined
   const x0 = bbox.x0 ?? 0
   const y0 = bbox.y0 ?? 0

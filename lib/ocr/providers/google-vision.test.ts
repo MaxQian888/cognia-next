@@ -1,5 +1,18 @@
 import { buildGoogleVisionProvider, googleVisionExtract } from "./google-vision"
+import { downscaleImage } from "../image-prep"
 import type { OcrProviderContext } from "@/types/ocr"
+
+// Partial mock: keep real behavior (jsdom passthrough) but observable, so we
+// can assert the maxImageDimension wiring without a canvas polyfill.
+jest.mock("../image-prep", () => {
+  const actual = jest.requireActual("../image-prep")
+  return { ...actual, downscaleImage: jest.fn(actual.downscaleImage) }
+})
+const downscaleImageMock = downscaleImage as jest.Mock
+
+beforeEach(() => {
+  downscaleImageMock.mockClear()
+})
 
 function makeFetch(resp: { status: number; body: unknown }) {
   return jest.fn(async () => {
@@ -127,6 +140,50 @@ describe("googleVisionExtract — success", () => {
     )
     expect(seenBody).toContain("TEXT_DETECTION")
   })
+
+  it("reads the feature type from the settings-UI `model` key, beating featureType", async () => {
+    let seenBody = ""
+    const fetchImpl = jest.fn(async (_url, init: RequestInit | undefined) => {
+      seenBody = init?.body as string
+      return new Response(JSON.stringify({ responses: [{ fullTextAnnotation: { text: "" } }] }), {
+        status: 200,
+      })
+    }) as unknown as typeof fetch
+    await googleVisionExtract(
+      input,
+      makeCtx({ config: { model: "TEXT_DETECTION", featureType: "DOCUMENT_TEXT_DETECTION" } }),
+      fetchImpl
+    )
+    expect(seenBody).toContain('"type":"TEXT_DETECTION"')
+  })
+
+  it("ignores a non-feature `model` value and falls back to featureType", async () => {
+    let seenBody = ""
+    const fetchImpl = jest.fn(async (_url, init: RequestInit | undefined) => {
+      seenBody = init?.body as string
+      return new Response(JSON.stringify({ responses: [{ fullTextAnnotation: { text: "" } }] }), {
+        status: 200,
+      })
+    }) as unknown as typeof fetch
+    await googleVisionExtract(
+      input,
+      makeCtx({ config: { model: "gemini-3.5-flash", featureType: "TEXT_DETECTION" } }),
+      fetchImpl
+    )
+    expect(seenBody).toContain('"type":"TEXT_DETECTION"')
+  })
+
+  it("downscales the image honoring the shared maxImageDimension config", async () => {
+    const fetchImpl = makeFetch({ status: 200, body: { responses: [] } })
+    await googleVisionExtract(input, makeCtx({ config: { maxImageDimension: 1234 } }), fetchImpl)
+    expect(downscaleImageMock).toHaveBeenCalledWith(expect.any(Uint8Array), "image/png", 1234)
+  })
+
+  it("downscales with the default long-edge cap when unconfigured", async () => {
+    const fetchImpl = makeFetch({ status: 200, body: { responses: [] } })
+    await googleVisionExtract(input, makeCtx(), fetchImpl)
+    expect(downscaleImageMock).toHaveBeenCalledWith(expect.any(Uint8Array), "image/png", 2000)
+  })
 })
 
 describe("googleVisionExtract — error paths", () => {
@@ -137,10 +194,44 @@ describe("googleVisionExtract — error paths", () => {
     ).rejects.toMatchObject({ code: "missing_credentials" })
   })
 
-  it("maps the per-response error.code=429 to rate_limited", async () => {
+  it("maps gRPC code 8 (RESOURCE_EXHAUSTED) to rate_limited", async () => {
     const fetchImpl = makeFetch({
       status: 200,
-      body: { responses: [{ error: { code: 429, message: "Too many" } }] },
+      body: {
+        responses: [{ error: { code: 8, status: "RESOURCE_EXHAUSTED", message: "Too many" } }],
+      },
+    })
+    await expect(googleVisionExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
+      code: "rate_limited",
+    })
+  })
+
+  it("maps gRPC code 3 (INVALID_ARGUMENT) to invalid_input", async () => {
+    const fetchImpl = makeFetch({
+      status: 200,
+      body: { responses: [{ error: { code: 3, message: "bad image" } }] },
+    })
+    await expect(googleVisionExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
+      code: "invalid_input",
+    })
+  })
+
+  it("maps gRPC codes 7/16 (PERMISSION_DENIED / UNAUTHENTICATED) to missing_credentials", async () => {
+    for (const code of [7, 16]) {
+      const fetchImpl = makeFetch({
+        status: 200,
+        body: { responses: [{ error: { code, message: "denied" } }] },
+      })
+      await expect(googleVisionExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
+        code: "missing_credentials",
+      })
+    }
+  })
+
+  it("falls back to the status string when the numeric code is absent", async () => {
+    const fetchImpl = makeFetch({
+      status: 200,
+      body: { responses: [{ error: { status: "RESOURCE_EXHAUSTED", message: "quota" } }] },
     })
     await expect(googleVisionExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
       code: "rate_limited",
@@ -150,7 +241,7 @@ describe("googleVisionExtract — error paths", () => {
   it("maps other per-response errors to provider_failed", async () => {
     const fetchImpl = makeFetch({
       status: 200,
-      body: { responses: [{ error: { code: 3, message: "bad request" } }] },
+      body: { responses: [{ error: { code: 13, status: "INTERNAL", message: "boom" } }] },
     })
     await expect(googleVisionExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
       code: "provider_failed",

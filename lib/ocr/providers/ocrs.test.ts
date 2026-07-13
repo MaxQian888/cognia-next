@@ -118,6 +118,21 @@ describe("ocrsExtract", () => {
     })
   })
 
+  it("maps a MissingBinding rejection to unsupported_shell", async () => {
+    const invoker = jest.fn(async () => {
+      throw new Error("OCR backend `ocrs` is not bound on this platform")
+    })
+    const ctx: OcrProviderContext = {
+      credentials: { secrets: {} },
+      config: { invoker },
+      platform: "tauri",
+    }
+    await expect(ocrsExtract(input, ctx)).rejects.toMatchObject({
+      code: "unsupported_shell",
+      providerId: "ocrs",
+    })
+  })
+
   it("passes ocrs invoker through to the shared native invoker slot", async () => {
     // The shared invoker is mutated as a side-effect of __setOcrsInvoker so
     // every other Rust-backed provider can dispatch through the same Tauri

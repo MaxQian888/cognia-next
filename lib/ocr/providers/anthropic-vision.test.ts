@@ -53,6 +53,16 @@ describe("anthropicVisionExtract — success", () => {
     expect(result.costEstimate?.amount).toBeGreaterThan(0)
   })
 
+  it("defaults to the claude-opus-4-8 model", async () => {
+    let seenBody: Record<string, unknown> = {}
+    const fetchImpl = jest.fn(async (_url, init: RequestInit | undefined) => {
+      seenBody = JSON.parse(init?.body as string)
+      return new Response(JSON.stringify({ content: [] }), { status: 200 })
+    }) as unknown as typeof fetch
+    await anthropicVisionExtract(input, makeCtx(), fetchImpl)
+    expect(seenBody.model).toBe("claude-opus-4-8")
+  })
+
   it("sends x-api-key header and the anthropic-version header", async () => {
     let seen: Headers | undefined
     const fetchImpl = jest.fn(async (_url, init: RequestInit | undefined) => {

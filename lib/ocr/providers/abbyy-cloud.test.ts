@@ -37,18 +37,32 @@ describe("buildAbbyyCloudProvider", () => {
 })
 
 describe("abbyyCloudExtract — success", () => {
-  it("submits, polls, and downloads the result text", async () => {
-    const fetchImpl = makeFetchSequence([
-      { status: 200, body: { id: "t1", status: "InProgress" } },
-      { status: 200, body: { id: "t1", status: "Completed", resultUrl: "https://cdn/abc.txt" } },
-      { status: 200, body: "Hello world" },
-    ])
+  it("submits to /v2/processImage, polls /v2/getTaskStatus, and downloads the first resultUrls entry", async () => {
+    const urls: string[] = []
+    let call = 0
+    const responses = [
+      JSON.stringify({ taskId: "t1", status: "InProgress", resultUrls: [] }),
+      JSON.stringify({
+        taskId: "t1",
+        status: "Completed",
+        resultUrls: ["https://cdn/abc.txt", "https://cdn/abc.xml"],
+      }),
+      "Hello world",
+    ]
+    const fetchImpl = jest.fn(async (url: RequestInfo | URL) => {
+      urls.push(String(url))
+      return new Response(responses[call++]!, { status: 200 })
+    }) as unknown as typeof fetch
     const result = await abbyyCloudExtract(input, makeCtx(), fetchImpl)
     expect(result.pages[0]!.text).toBe("Hello world")
     expect(fetchImpl).toHaveBeenCalledTimes(3)
+    expect(urls[0]).toContain("/v2/processImage?")
+    expect(urls[1]).toContain("/v2/getTaskStatus?taskId=t1")
+    // First entry of resultUrls is the configured single exportFormat.
+    expect(urls[2]).toBe("https://cdn/abc.txt")
   })
 
-  it("parses an XML task response", async () => {
+  it("falls back to the v1 XML task envelope (custom endpoint pointing at a v1 server)", async () => {
     const fetchImpl = makeFetchSequence([
       {
         status: 200,
@@ -56,7 +70,13 @@ describe("abbyyCloudExtract — success", () => {
       },
       { status: 200, body: "ok" },
     ])
-    const result = await abbyyCloudExtract(input, makeCtx(), fetchImpl)
+    const result = await abbyyCloudExtract(
+      input,
+      makeCtx({
+        config: { pollIntervalMs: 0, maxPolls: 5, endpoint: "https://legacy.example.com" },
+      }),
+      fetchImpl
+    )
     expect(result.pages[0]!.text).toBe("ok")
   })
 
@@ -66,7 +86,7 @@ describe("abbyyCloudExtract — success", () => {
       seen = seen ?? new Headers(init?.headers)
       const body =
         seen.get("authorization")?.startsWith("Basic ") && !seen.has("done")
-          ? JSON.stringify({ id: "t1", status: "Completed", resultUrl: "https://cdn/x" })
+          ? JSON.stringify({ taskId: "t1", status: "Completed", resultUrls: ["https://cdn/x"] })
           : "ok"
       seen.set("done", "true")
       return new Response(body, { status: 200 })
@@ -90,7 +110,7 @@ describe("abbyyCloudExtract — error paths", () => {
 
   it("throws provider_failed on ProcessingFailed status", async () => {
     const fetchImpl = makeFetchSequence([
-      { status: 200, body: { id: "t1", status: "ProcessingFailed", error: "bad" } },
+      { status: 200, body: { taskId: "t1", status: "ProcessingFailed", error: "bad" } },
     ])
     await expect(abbyyCloudExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
       code: "provider_failed",
@@ -99,15 +119,29 @@ describe("abbyyCloudExtract — error paths", () => {
 
   it("throws provider_failed on NotEnoughCredits", async () => {
     const fetchImpl = makeFetchSequence([
-      { status: 200, body: { id: "t1", status: "NotEnoughCredits" } },
+      { status: 200, body: { taskId: "t1", status: "NotEnoughCredits" } },
     ])
     await expect(abbyyCloudExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
       code: "provider_failed",
     })
   })
 
+  it("fails fast on Deleted status instead of exhausting the poll budget", async () => {
+    const fetchImpl = makeFetchSequence([
+      { status: 200, body: { taskId: "t1", status: "Deleted" } },
+    ])
+    await expect(abbyyCloudExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
+      code: "provider_failed",
+      message: expect.stringContaining("Deleted"),
+    })
+    // One submit call only — the terminal status must not trigger any polls.
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
   it("throws provider_failed when polling never converges", async () => {
-    const fetchImpl = makeFetchSequence([{ status: 200, body: { id: "t1", status: "InProgress" } }])
+    const fetchImpl = makeFetchSequence([
+      { status: 200, body: { taskId: "t1", status: "InProgress" } },
+    ])
     await expect(
       abbyyCloudExtract(input, makeCtx({ config: { pollIntervalMs: 0, maxPolls: 2 } }), fetchImpl)
     ).rejects.toMatchObject({ code: "provider_failed" })

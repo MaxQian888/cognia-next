@@ -58,6 +58,50 @@ describe("geminiVisionExtract — success", () => {
     expect(seenUrl).toContain("?key=gem-test")
   })
 
+  it("defaults to the GA gemini-3.5-flash model in the endpoint path", async () => {
+    let seenUrl = ""
+    const fetchImpl = jest.fn(async (url: RequestInfo | URL) => {
+      seenUrl = typeof url === "string" ? url : url.toString()
+      return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
+    }) as unknown as typeof fetch
+    await geminiVisionExtract(input, makeCtx(), fetchImpl)
+    expect(seenUrl).toContain("/models/gemini-3.5-flash:generateContent")
+  })
+
+  it("warns but still returns partial text when finishReason is MAX_TOKENS", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const fetchImpl = makeFetch({
+        status: 200,
+        body: {
+          candidates: [
+            { content: { parts: [{ text: "partial transcript" }] }, finishReason: "MAX_TOKENS" },
+          ],
+        },
+      })
+      const result = await geminiVisionExtract(input, makeCtx(), fetchImpl)
+      expect(result.pages[0]!.markdown).toBe("partial transcript")
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("truncated"))
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it("does not warn when finishReason is STOP", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const fetchImpl = makeFetch({
+        status: 200,
+        body: { candidates: [{ content: { parts: [{ text: "full" }] }, finishReason: "STOP" }] },
+      })
+      const result = await geminiVisionExtract(input, makeCtx(), fetchImpl)
+      expect(result.pages[0]!.markdown).toBe("full")
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
   it("falls back to getMainProviderKey('gemini')", async () => {
     const getMainProviderKey = jest.fn(async (id: string) => (id === "gemini" ? "from-main" : null))
     const ctx: OcrProviderContext = {

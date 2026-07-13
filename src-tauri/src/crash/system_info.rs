@@ -35,8 +35,10 @@ fn enabled_features() -> Vec<String> {
     if cfg!(feature = "ocr-windows") {
         features.push("ocr-windows".to_string());
     }
-    if cfg!(feature = "ocr-apple") {
-        features.push("ocr-apple".to_string());
+    // apple-vision is not a Cargo feature: cognia-ocr links Vision.framework
+    // whenever the target is macOS. Report it the same way.
+    if cfg!(target_os = "macos") {
+        features.push("apple-vision".to_string());
     }
     if cfg!(feature = "ocr-ocrs") {
         features.push("ocr-ocrs".to_string());
@@ -116,7 +118,7 @@ mod tests {
         let known = [
             "ocr-tesseract",
             "ocr-windows",
-            "ocr-apple",
+            "apple-vision",
             "ocr-ocrs",
             "ocr-paddle",
         ];

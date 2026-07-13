@@ -91,7 +91,9 @@ Tauri 构建可通过 Cargo feature 选择原生 OCR 引擎：
 | --------------- | ----------------------------------------------------------------------------- |
 | `ocr-tesseract` | 通过 `tesseract-rs` crate 的跨平台 Tesseract。                               |
 | `ocr-windows`   | 通过 `winocr` crate 的 `Windows.Media.Ocr`。需要 MSIX 构建。                  |
-| `ocr-apple`     | 通过 `src-tauri/sidecars/apple-vision-ocr/` 的 Swift sidecar 调 Apple Vision。 |
+
+Apple Vision 无需 feature 标志：目标平台为 macOS 时，`apple-vision` 后端通过
+`objc2-vision` 绑定在进程内直接调用 Vision.framework。
 
 未启用这些 feature 时，注册表广告占位后端，上报 `MissingBinding`。TS 层把它显示为 `unsupported_shell`，auto-router 跌穿到下一个候选。
 

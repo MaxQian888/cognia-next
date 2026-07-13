@@ -277,6 +277,21 @@
       "description": "自定义 API 端点 URL。",
       "label": "端点"
     },
+    "engine": {
+      "description": "OCR.space 引擎。引擎 3 精度最高但免费额度较小；引擎 1/2 更快。",
+      "engine1": "引擎 1（快速）",
+      "engine2": "引擎 2（均衡）",
+      "engine3": "引擎 3（高精度）",
+      "label": "OCR 引擎"
+    },
+    "exportFormat": {
+      "alto": "ALTO XML",
+      "description": "ABBYY 结果导出格式。XML 和 ALTO 含文字坐标；txt 变体返回纯文本。",
+      "label": "导出格式",
+      "txt": "纯文本",
+      "txtUnstructured": "纯文本（无结构）",
+      "xml": "ABBYY XML"
+    },
     "format": {
       "blocks": "结构化块",
       "description": "Markdown 是 2026 的跨 provider 通用标准。纯文本会丢失表格结构。",

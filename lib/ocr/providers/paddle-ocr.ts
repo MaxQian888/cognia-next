@@ -20,6 +20,7 @@ import {
 } from "@/types/ocr"
 import {
   __setNativeOcrInvoker as setShared,
+  mapNativeInvokeError,
   type NativeOcrInvoker,
   type NativeOcrResult,
 } from "./tesseract-native"
@@ -29,8 +30,6 @@ export interface PaddleOcrConfig {
   invoker?: NativeOcrInvoker
   /** Optional readiness override; default reads the module-level probe. */
   isReady?: () => boolean | Promise<boolean>
-  /** Model variant hint — passed through to the backend via `options`. */
-  model?: string
 }
 
 let invoker: NativeOcrInvoker | null = null
@@ -92,15 +91,9 @@ export async function paddleOcrExtract(
       bytes: normalized.bytes,
       mimeType: normalized.mimeType,
       languages,
-      options: config.model ? { model: config.model } : undefined,
     })
   } catch (err) {
-    throw new OcrError(
-      "provider_failed",
-      "paddle-ocr",
-      err instanceof Error ? err.message : String(err),
-      err
-    )
+    throw mapNativeInvokeError("paddle-ocr", "paddle-ocr", err)
   }
   const blocks: OcrBlock[] = (payload.blocks ?? []).map((b) => ({
     text: b.text,

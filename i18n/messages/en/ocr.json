@@ -277,6 +277,21 @@
       "description": "Custom API endpoint URL.",
       "label": "Endpoint"
     },
+    "engine": {
+      "description": "OCR.space engine. Engine 3 is the most accurate but has a smaller free quota; engines 1/2 are faster.",
+      "engine1": "Engine 1 (fast)",
+      "engine2": "Engine 2 (balanced)",
+      "engine3": "Engine 3 (accurate)",
+      "label": "OCR engine"
+    },
+    "exportFormat": {
+      "alto": "ALTO XML",
+      "description": "ABBYY result export format. XML and ALTO include word coordinates; txt variants return plain text.",
+      "label": "Export format",
+      "txt": "Plain text",
+      "txtUnstructured": "Plain text (unstructured)",
+      "xml": "ABBYY XML"
+    },
     "format": {
       "blocks": "Structured blocks",
       "description": "Markdown is the 2026 cross-provider standard. Plain text drops table structure.",

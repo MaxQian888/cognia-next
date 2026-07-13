@@ -12,7 +12,7 @@ function makeFetch(resp: { status: number; body: unknown }) {
 function makeCtx(overrides: Partial<OcrProviderContext> = {}): OcrProviderContext {
   return {
     credentials: overrides.credentials ?? { secrets: { apiKey: "key" } },
-    config: overrides.config ?? {},
+    config: overrides.config ?? { model: "test-model" },
     platform: "web",
     signal: overrides.signal,
   }
@@ -61,25 +61,63 @@ describe("nanonetsExtract", () => {
     expect(result.pages[0]!.blocks?.[0]?.confidence).toBe(0.95)
   })
 
-  it("sends multipart/form-data with Basic auth header", async () => {
+  it("sends multipart/form-data with Basic auth header and a `file` field", async () => {
     let seen: Headers | undefined
+    let seenBody = ""
     const fetchImpl = jest.fn(async (_url, init: RequestInit | undefined) => {
       seen = new Headers(init?.headers)
+      seenBody = new TextDecoder().decode(init?.body as Uint8Array)
       return new Response(JSON.stringify({ result: [] }), { status: 200 })
     }) as unknown as typeof fetch
     await nanonetsExtract(input, makeCtx(), fetchImpl)
     expect(seen?.get("content-type")).toMatch(/^multipart\/form-data; boundary=/)
     expect(seen?.get("authorization")?.startsWith("Basic ")).toBe(true)
+    // Nanonets v2 LabelFile requires the multipart field name `file`.
+    expect(seenBody).toContain('Content-Disposition: form-data; name="file";')
+    expect(seenBody).not.toContain('name="image"')
   })
 
-  it("uses a custom modelId in the URL when provided", async () => {
+  it("uses config.model in the URL when provided", async () => {
     let seenUrl = ""
     const fetchImpl = jest.fn(async (url: RequestInfo | URL) => {
       seenUrl = typeof url === "string" ? url : url.toString()
       return new Response(JSON.stringify({ result: [] }), { status: 200 })
     }) as unknown as typeof fetch
-    await nanonetsExtract(input, makeCtx({ config: { modelId: "abc-123" } }), fetchImpl)
+    await nanonetsExtract(input, makeCtx({ config: { model: "abc-123" } }), fetchImpl)
     expect(seenUrl).toContain("/Model/abc-123/")
+  })
+
+  it("falls back to the legacy modelId config key", async () => {
+    let seenUrl = ""
+    const fetchImpl = jest.fn(async (url: RequestInfo | URL) => {
+      seenUrl = typeof url === "string" ? url : url.toString()
+      return new Response(JSON.stringify({ result: [] }), { status: 200 })
+    }) as unknown as typeof fetch
+    await nanonetsExtract(input, makeCtx({ config: { modelId: "legacy-9" } }), fetchImpl)
+    expect(seenUrl).toContain("/Model/legacy-9/")
+  })
+
+  it("prefers config.model over the legacy modelId", async () => {
+    let seenUrl = ""
+    const fetchImpl = jest.fn(async (url: RequestInfo | URL) => {
+      seenUrl = typeof url === "string" ? url : url.toString()
+      return new Response(JSON.stringify({ result: [] }), { status: 200 })
+    }) as unknown as typeof fetch
+    await nanonetsExtract(
+      input,
+      makeCtx({ config: { model: "new-1", modelId: "legacy-9" } }),
+      fetchImpl
+    )
+    expect(seenUrl).toContain("/Model/new-1/")
+  })
+
+  it("throws missing_credentials when no model id is configured", async () => {
+    const fetchImpl = makeFetch({ status: 200, body: { result: [] } })
+    await expect(nanonetsExtract(input, makeCtx({ config: {} }), fetchImpl)).rejects.toMatchObject({
+      code: "missing_credentials",
+      message: expect.stringContaining("model id"),
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it("throws missing_credentials when apiKey is absent", async () => {
@@ -108,5 +146,21 @@ describe("nanonetsExtract", () => {
     await expect(nanonetsExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
       code: "provider_failed",
     })
+  })
+
+  it("maps a non-success message without result to provider_failed", async () => {
+    const fetchImpl = makeFetch({ status: 200, body: { message: "Model not found" } })
+    await expect(nanonetsExtract(input, makeCtx(), fetchImpl)).rejects.toMatchObject({
+      code: "provider_failed",
+    })
+  })
+
+  it('accepts message === "Success" (case-insensitive) as success', async () => {
+    const fetchImpl = makeFetch({
+      status: 200,
+      body: { message: "success", result: [{ page: 1, prediction: [{ ocr_text: "ok" }] }] },
+    })
+    const result = await nanonetsExtract(input, makeCtx(), fetchImpl)
+    expect(result.pages[0]!.text).toBe("ok")
   })
 })

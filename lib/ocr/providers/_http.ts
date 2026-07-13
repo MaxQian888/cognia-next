@@ -21,9 +21,11 @@ export interface CloudFetchOptions {
   /**
    * Maps an HTTP status to an explicit OcrErrorCode. The default mapping
    * handles 401/403 -> missing_credentials, 429 -> rate_limited, 4xx -> invalid_input,
-   * 5xx -> provider_failed.
+   * 5xx -> provider_failed. The raw error-response body text is passed as the
+   * second argument so providers that encode the real error kind in the body
+   * (e.g. AWS `__type`) can classify beyond the status code.
    */
-  errorCodeFor?: (status: number) => OcrErrorCode
+  errorCodeFor?: (status: number, bodyText?: string) => OcrErrorCode
   /** Override fetch — primarily used in tests. */
   fetchImpl?: typeof fetch
 }
@@ -87,7 +89,7 @@ export async function cloudFetch(opts: CloudFetchOptions): Promise<CloudFetchRes
   }
   const text = await response.text()
   if (!response.ok) {
-    const code = (opts.errorCodeFor ?? defaultErrorCodeFor)(response.status)
+    const code = (opts.errorCodeFor ?? defaultErrorCodeFor)(response.status, text)
     throw new OcrError(
       code,
       opts.providerId,

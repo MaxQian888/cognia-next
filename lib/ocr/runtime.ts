@@ -3,8 +3,8 @@
  *
  * Wires every provider in `lib/ocr/providers/*` into the shared registry and
  * connects the platform-native providers to their respective Tauri / Capacitor
- * invokers. Called once from the app's client-side entry point — see
- * `app/(setup)/ocr-bootstrap.tsx`.
+ * invokers. Called once at app boot — see
+ * `components/providers/initializers/ocr-runtime-initializer.tsx`.
  *
  * Provider files self-register through their factory exports rather than via
  * `import './providers/foo'` side effects so the static export's tree-shaker

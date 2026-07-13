@@ -24,7 +24,9 @@ import {
 } from "./_llm-vision"
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-const DEFAULT_MODEL = "gemini-2.5-pro"
+// gemini-2.5-pro is deprecated (shutdown 2026-10-16); gemini-3.5-flash is the
+// current GA multimodal model suited to OCR transcription.
+const DEFAULT_MODEL = "gemini-3.5-flash"
 
 export interface GeminiVisionConfig extends VisionConfig {
   maxTokens?: number
@@ -101,7 +103,15 @@ export async function geminiVisionExtract(
     const code = mapGeminiErrorCode(data.error.code, data.error.status)
     throw new OcrError(code, "gemini-vision", data.error.message ?? data.error.status ?? "error")
   }
-  const markdown = (data.candidates?.[0]?.content?.parts ?? [])
+  const candidate = data.candidates?.[0]
+  if (candidate?.finishReason === "MAX_TOKENS") {
+    // No degraded-output channel exists on OcrResult, so surface the
+    // truncation and return the partial transcription instead of throwing.
+    console.warn(
+      "[ocr:gemini-vision] response truncated at maxOutputTokens; returning partial text"
+    )
+  }
+  const markdown = (candidate?.content?.parts ?? [])
     .map((part) => part.text ?? "")
     .join("")
     .trim()
@@ -109,10 +119,10 @@ export async function geminiVisionExtract(
   if (data.usageMetadata) {
     const promptTokens = data.usageMetadata.promptTokenCount ?? 0
     const completionTokens = data.usageMetadata.candidatesTokenCount ?? 0
-    // Gemini 2.5 Pro list pricing: $1.25/M in + $10/M out (2026-Q1, ≤200k context).
+    // Gemini 3.5 Flash list pricing: $1.50/M in + $9/M out (2026-Q2).
     result.costEstimate = {
       unit: "token",
-      amount: (promptTokens * 1.25) / 1_000_000 + (completionTokens * 10) / 1_000_000,
+      amount: (promptTokens * 1.5) / 1_000_000 + (completionTokens * 9) / 1_000_000,
       currency: "USD",
     }
   }

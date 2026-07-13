@@ -5,7 +5,8 @@
  *   Basic auth (apiKey:""), multipart form with `file` field.
  *   Response: { result: [{ prediction: [{ ocr_text, score, bbox: [x,y,w,h] }] }], ... }
  *
- * When no `modelId` is provided we use the generic Nanonets OCR model.
+ * Nanonets has no generic OCR model — the model id must be a user-created
+ * model, so a missing model id is a configuration error.
  */
 
 import { normalizeImage } from "../image-prep"
@@ -20,10 +21,11 @@ import {
 import { cloudFetch, parseJson, requireSecret } from "./_http"
 
 const NANONETS_BASE = "https://app.nanonets.com/api/v2/OCR/Model"
-/** Generic free-form OCR model id used when no `modelId` is configured. */
-const NANONETS_GENERIC_MODEL = "ocr"
 
 export interface NanonetsConfig {
+  /** Nanonets model id (the key the settings UI writes). */
+  model?: string
+  /** Legacy config key, kept as a fallback for existing configs. */
   modelId?: string
   endpoint?: string
   fetchImpl?: typeof fetch
@@ -69,12 +71,20 @@ export async function nanonetsExtract(
 ): Promise<OcrResult> {
   const apiKey = requireSecret("nanonets", ctx.credentials.secrets, "apiKey")
   const config = (ctx.config ?? {}) as NanonetsConfig
-  const modelId = config.modelId || NANONETS_GENERIC_MODEL
+  const modelId = config.model || config.modelId
+  if (!modelId) {
+    throw new OcrError(
+      "missing_credentials",
+      "nanonets",
+      "No Nanonets model id configured. Create a model in your Nanonets dashboard and set its model id in the provider settings."
+    )
+  }
   const endpoint = config.endpoint || `${NANONETS_BASE}/${encodeURIComponent(modelId)}/LabelFile/`
 
   const normalized = await normalizeImage(input.source)
   const boundary = `------OcrBoundary${Date.now().toString(36)}`
-  const body = buildMultipart(boundary, normalized.bytes, normalized.mimeType, "image")
+  // Nanonets v2 LabelFile expects the multipart field to be named `file`.
+  const body = buildMultipart(boundary, normalized.bytes, normalized.mimeType, "file")
   const auth = "Basic " + base64(`${apiKey}:`)
 
   const start = Date.now()
@@ -90,7 +100,11 @@ export async function nanonetsExtract(
     fetchImpl: fetchImpl ?? config.fetchImpl,
   })
   const data = parseJson<NanonetsResponse>("nanonets", res.body)
-  if (data.error || data.message?.toLowerCase().includes("error")) {
+  // Per docs a successful response carries message === "Success". Treat any
+  // explicit error, or a non-success message with no result payload, as a
+  // provider failure.
+  const messageOk = typeof data.message !== "string" || data.message.toLowerCase() === "success"
+  if (data.error || (!messageOk && !Array.isArray(data.result))) {
     throw new OcrError(
       "provider_failed",
       "nanonets",

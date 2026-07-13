@@ -11,8 +11,8 @@
 //!   wasm provider.
 //! - `windows-media-ocr` — Windows + MSIX only. Currently a placeholder; a
 //!   future PR will wire the `winocr` crate behind the `ocr-windows` feature.
-//! - `apple-vision` — macOS only. Calls the Swift sidecar at
-//!   `src-tauri/sidecars/apple-vision-ocr/` via `tauri-plugin-shell`.
+//! - `apple-vision` — macOS only. Runs Vision.framework's
+//!   `VNRecognizeTextRequest` in-process via the `objc2-vision` bindings.
 //! - `ocrs` — cross-platform pure-Rust pipeline (`ocrs` + RTen) behind the
 //!   `ocr-ocrs` Cargo feature. Models live in `<app_data>/cognia/ocr/ocrs/`
 //!   and are downloaded on first use via `ocr_download_model`.
@@ -190,38 +190,45 @@ pub struct ModelFileSpec {
 }
 
 /// Static registry of model URLs per backend tag. Updated alongside the
-/// upstream model releases. URLs verified 2026-05-18. Mirroring the file
-/// names used by `crate::backend::ocrs::*_MODEL_FILE` / `crate::backend::paddle::*` so
-/// downloader and loader agree.
+/// upstream model releases. URLs verified 2026-07-13 (all return HTTP 200).
+/// Sources:
+/// - `ocrs`: the ocrs-models S3 bucket — the same location the upstream
+///   `ocrs` CLI downloads from (github.com/robertknight/ocrs).
+/// - `paddle-ocr`: PP-OCRv5 ONNX conversions + dictionary published on the
+///   `oar-ocr` GitHub Releases page, as documented in that repo's
+///   docs/models.md (the HF PaddlePaddle repos ship Paddle-format files
+///   only, no ONNX).
+/// Mirroring the file names used by `crate::backend::ocrs::*_MODEL_FILE` /
+/// `crate::backend::paddle::*` so downloader and loader agree.
 pub fn model_spec(backend: &str) -> Option<Vec<ModelFileSpec>> {
     match backend {
         "ocrs" => Some(vec![
             ModelFileSpec {
                 file_name: crate::backend::ocrs::DETECTION_MODEL_FILE,
-                url: "https://huggingface.co/robertknight/ocrs/resolve/main/text-detection.rten",
+                url: "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten",
                 expected_bytes: 2_640_000,
             },
             ModelFileSpec {
                 file_name: crate::backend::ocrs::RECOGNITION_MODEL_FILE,
-                url: "https://huggingface.co/robertknight/ocrs/resolve/main/text-recognition.rten",
+                url: "https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.rten",
                 expected_bytes: 10_190_000,
             },
         ]),
         "paddle-ocr" => Some(vec![
             ModelFileSpec {
                 file_name: crate::backend::paddle::DETECTION_MODEL_FILE,
-                url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det/resolve/main/inference.onnx",
-                expected_bytes: 4_700_000,
+                url: "https://github.com/GreatV/oar-ocr/releases/download/v0.3.0/pp-ocrv5_mobile_det.onnx",
+                expected_bytes: 4_826_518,
             },
             ModelFileSpec {
                 file_name: crate::backend::paddle::RECOGNITION_MODEL_FILE,
-                url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec/resolve/main/inference.onnx",
-                expected_bytes: 11_300_000,
+                url: "https://github.com/GreatV/oar-ocr/releases/download/v0.3.0/pp-ocrv5_mobile_rec.onnx",
+                expected_bytes: 16_562_373,
             },
             ModelFileSpec {
                 file_name: crate::backend::paddle::DICTIONARY_FILE,
-                url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec/resolve/main/ppocrv5_dict.txt",
-                expected_bytes: 220_000,
+                url: "https://github.com/GreatV/oar-ocr/releases/download/v0.3.0/ppocrv5_dict.txt",
+                expected_bytes: 74_012,
             },
         ]),
         _ => None,
@@ -580,11 +587,15 @@ mod tests {
         let names: Vec<&str> = spec.iter().map(|s| s.file_name).collect();
         assert!(names.contains(&crate::backend::ocrs::DETECTION_MODEL_FILE));
         assert!(names.contains(&crate::backend::ocrs::RECOGNITION_MODEL_FILE));
-        // Every URL must be HTTPS so the renderer-side allowlist accepts it.
+        // Every URL must be HTTPS so the renderer-side allowlist accepts it,
+        // and must point at the ocrs-models S3 bucket (the upstream ocrs
+        // CLI's own download location — the old HF mirror 404s).
         for entry in &spec {
             assert!(
-                entry.url.starts_with("https://"),
-                "URL not https: {}",
+                entry
+                    .url
+                    .starts_with("https://ocrs-models.s3-accelerate.amazonaws.com/"),
+                "unexpected ocrs model host: {}",
                 entry.url
             );
         }
@@ -598,10 +609,15 @@ mod tests {
         assert!(names.contains(&crate::backend::paddle::DETECTION_MODEL_FILE));
         assert!(names.contains(&crate::backend::paddle::RECOGNITION_MODEL_FILE));
         assert!(names.contains(&crate::backend::paddle::DICTIONARY_FILE));
+        // PP-OCRv5 ONNX conversions + dict live on the oar-ocr GitHub
+        // Releases page (docs/models.md); the HF PaddlePaddle repos only
+        // ship Paddle-format files and 404 for ONNX/dict.
         for entry in &spec {
             assert!(
-                entry.url.starts_with("https://"),
-                "URL not https: {}",
+                entry
+                    .url
+                    .starts_with("https://github.com/GreatV/oar-ocr/releases/download/"),
+                "unexpected paddle model host: {}",
                 entry.url
             );
         }

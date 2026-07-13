@@ -47,6 +47,20 @@ describe("openAiVisionExtract — success", () => {
     expect(result.costEstimate?.unit).toBe("token")
   })
 
+  it("sends max_completion_tokens (never the legacy max_tokens) and the default model", async () => {
+    let seenBody: Record<string, unknown> = {}
+    const fetchImpl = jest.fn(async (_url, init: RequestInit | undefined) => {
+      seenBody = JSON.parse(init?.body as string)
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+      })
+    }) as unknown as typeof fetch
+    await openAiVisionExtract(input, makeCtx(), fetchImpl)
+    expect(seenBody.max_completion_tokens).toBe(4096)
+    expect(seenBody).not.toHaveProperty("max_tokens")
+    expect(seenBody.model).toBe("gpt-5.6")
+  })
+
   it("attaches the bearer Authorization header", async () => {
     let seen: Headers | undefined
     const fetchImpl = jest.fn(async (_url, init: RequestInit | undefined) => {

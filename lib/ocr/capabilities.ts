@@ -85,9 +85,11 @@ export const OCR_PROVIDER_CAPABILITIES: Record<string, OcrCapabilityFields> = {
     offline: "no",
     multilang: 60,
     costTier: "$$",
-    maxPagesPerCall: 2000,
+    // images:annotate takes one image per call; PDFs are rasterized upstream
+    // by pdf-router (files:annotate is not implemented).
+    maxPagesPerCall: 1,
     structuredOutput: "yes",
-    pdfNative: "partial",
+    pdfNative: "no",
     category: "document-cloud",
   },
   "aws-textract": {
@@ -99,9 +101,11 @@ export const OCR_PROVIDER_CAPABILITIES: Record<string, OcrCapabilityFields> = {
     offline: "no",
     multilang: 10,
     costTier: "$$$",
-    maxPagesPerCall: 3000,
+    // Sync DetectDocumentText/AnalyzeDocument: one image per call; the
+    // provider rejects PDFs (pdf-router rasterizes pages upstream).
+    maxPagesPerCall: 1,
     structuredOutput: "yes",
-    pdfNative: "yes",
+    pdfNative: "no",
     category: "document-cloud",
   },
   "azure-document-intelligence": {
@@ -211,7 +215,8 @@ export const OCR_PROVIDER_CAPABILITIES: Record<string, OcrCapabilityFields> = {
     offline: "no",
     multilang: 30,
     costTier: "$$",
-    maxPagesPerCall: 500,
+    // Sync LabelFile endpoint is documented for up to 3 pages per call.
+    maxPagesPerCall: 3,
     structuredOutput: "yes",
     pdfNative: "yes",
     category: "specialist",
