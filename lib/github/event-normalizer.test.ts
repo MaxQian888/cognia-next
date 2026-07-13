@@ -156,6 +156,16 @@ describe("computePollingDeliveryId", () => {
     expect(a).not.toBe(computePollingDeliveryId("issues.opened", "o/q", 5))
     expect(a).not.toBe(computePollingDeliveryId("issues.opened", "o/r", 6))
   })
+
+  // The id must be a plain hex string produced by a pure-JS hash, not
+  // node:crypto — the polling path runs in the WebView where node:crypto
+  // resolves to an empty stub. A hex-only, non-empty result proves the hash
+  // ran (an undefined `createHash` would have thrown).
+  it("is a stable lowercase hex string with no node:crypto dependency", () => {
+    const id = computePollingDeliveryId("pull_request.opened", "octocat/hello-world", 42)
+    expect(id).toMatch(/^[0-9a-f]+$/)
+    expect(id.length).toBeGreaterThanOrEqual(14)
+  })
 })
 
 describe("normalizePollingDiff", () => {

@@ -55,8 +55,23 @@ fn next_rpc_id() -> i64 {
     RPC_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Tauri event names accept only `[a-zA-Z0-9-/:_]` — `emit`/`listen` both
+/// reject anything else. Extension ids are `publisher.name`, so the dot (and
+/// any other stray char) maps to `_`. MUST stay in sync with
+/// `vscodeRpcEventName` in lib/plugin/vscode-shim/rpc-dispatcher.ts, which
+/// listens on the same channel.
 fn inbound_event_name(extension_id: &str) -> String {
-    format!("vscode://rpc/{}", extension_id)
+    let sanitized: String = extension_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '/' | ':' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("vscode://rpc/{sanitized}")
 }
 
 #[derive(Debug, Serialize)]
@@ -493,9 +508,21 @@ mod tests {
 
     #[test]
     fn inbound_event_name_is_namespaced_per_extension() {
+        // Tauri event names accept only [a-zA-Z0-9-/:_]; extension ids are
+        // `publisher.name`, so the dot must be sanitized or emit() errors.
         assert_eq!(
             inbound_event_name("publisher.ext"),
-            "vscode://rpc/publisher.ext".to_string()
+            "vscode://rpc/publisher_ext".to_string()
+        );
+    }
+
+    #[test]
+    fn inbound_event_name_is_always_tauri_valid() {
+        let name = inbound_event_name("weird id!@#.ext");
+        assert!(
+            name.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '/' | ':' | '_')),
+            "{name:?}"
         );
     }
 
@@ -515,9 +542,11 @@ mod tests {
 
     #[test]
     fn lsp_host_inbound_event_name_is_the_system_channel() {
+        // Pins the Rust↔TS contract with `vscodeRpcEventName` in
+        // lib/plugin/vscode-shim/rpc-dispatcher.ts.
         assert_eq!(
             inbound_event_name(LSP_HOST_KEY),
-            "vscode://rpc/cognia.lsp-service".to_string()
+            "vscode://rpc/cognia_lsp-service".to_string()
         );
     }
 

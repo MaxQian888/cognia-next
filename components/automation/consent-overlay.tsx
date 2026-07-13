@@ -42,6 +42,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import {
   desktop,
   type ConsentPromptPayload,
@@ -85,14 +86,16 @@ export function ConsentOverlay() {
       })
     }).then((u) => {
       if (cancelled) {
-        u()
+        // StrictMode mount→unmount→mount can resolve this after cleanup ran;
+        // the raw unlisten may throw on the already-gone registration.
+        safeUnlisten(u)
       } else {
         unlisten = u
       }
     })
     return () => {
       cancelled = true
-      if (unlisten) unlisten()
+      safeUnlisten(unlisten)
     }
   }, [])
 

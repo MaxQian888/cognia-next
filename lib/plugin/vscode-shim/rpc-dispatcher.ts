@@ -111,9 +111,20 @@ export function listRegisteredMethods(): string[] {
 }
 
 /**
- * Start listening for `vscode://rpc/<pluginId>` events on behalf of a
- * loaded extension. The returned disposer unlistens and is safe to call
- * multiple times.
+ * Tauri event names accept only `[a-zA-Z0-9-/:_]` — its listen/emit both
+ * reject anything else. Extension ids are `publisher.name`, so the dot (and
+ * any other stray char) maps to `_`. MUST stay in sync with
+ * `inbound_event_name` in crates/cognia-plugin-runtime/src/vscode/commands.rs,
+ * which emits on the same channel.
+ */
+export function vscodeRpcEventName(pluginId: string): string {
+  return `vscode://rpc/${pluginId.replace(/[^a-zA-Z0-9\-/:_]/g, "_")}`
+}
+
+/**
+ * Start listening for `vscode://rpc/<pluginId>` events (id sanitized via
+ * `vscodeRpcEventName`) on behalf of a loaded extension. The returned
+ * disposer unlistens and is safe to call multiple times.
  */
 export async function subscribeToVscodeEvents(pluginId: string): Promise<() => void> {
   if (!listenImpl) {
@@ -125,7 +136,7 @@ export async function subscribeToVscodeEvents(pluginId: string): Promise<() => v
   const existing = subscriptions.get(pluginId)
   if (existing) return existing
 
-  const eventName = `vscode://rpc/${pluginId}`
+  const eventName = vscodeRpcEventName(pluginId)
   const unlisten = await listenImpl(eventName, (event) => {
     void handleInboundFrame(pluginId, event.payload)
   })

@@ -55,6 +55,44 @@ function setupListener() {
 }
 
 describe("ConsentOverlay", () => {
+  it("survives an unlisten that throws during unmount cleanup (Tauri unlisten race)", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    // Mirrors tauri 2.x `unregisterListener` throwing
+    // `listeners[eventId].handlerId` when the registration eval lost the race.
+    const throwingUnlisten = jest.fn(() => {
+      throw new TypeError("undefined is not an object (evaluating 'listeners[eventId].handlerId')")
+    })
+    mockListen.mockResolvedValue(throwingUnlisten)
+    const { unmount } = render(<ConsentOverlay />)
+    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    await act(async () => {})
+    expect(() => unmount()).not.toThrow()
+    expect(throwingUnlisten).toHaveBeenCalledTimes(1)
+  })
+
+  it("disposes a listener that resolves only after unmount", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const throwingUnlisten = jest.fn(() => {
+      throw new TypeError("undefined is not an object (evaluating 'listeners[eventId].handlerId')")
+    })
+    let resolveListen: ((u: () => void) => void) | null = null
+    mockListen.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveListen = resolve
+        })
+    )
+    const { unmount } = render(<ConsentOverlay />)
+    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    unmount()
+    await act(async () => {
+      resolveListen!(throwingUnlisten)
+    })
+    // The cancelled path must still dispose the late listener — and swallow
+    // its throw instead of surfacing an unhandled rejection.
+    expect(throwingUnlisten).toHaveBeenCalledTimes(1)
+  })
+
   it("renders nothing on web mode", () => {
     mockedIsTauri.mockReturnValue(false)
     const { container } = render(<ConsentOverlay />)

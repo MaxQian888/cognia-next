@@ -19,6 +19,7 @@ import {
   registerMethod,
   resetRegistry,
   subscribeToVscodeEvents,
+  vscodeRpcEventName,
 } from "./rpc-dispatcher"
 
 describe("rpc-dispatcher", () => {
@@ -207,15 +208,15 @@ describe("rpc-dispatcher", () => {
       const a1 = await subscribeToVscodeEvents("pub.a")
       const a2 = await subscribeToVscodeEvents("pub.a")
       expect(a1).toBe(a2)
-      expect(listenCalls).toEqual([{ event: "vscode://rpc/pub.a" }])
+      expect(listenCalls).toEqual([{ event: "vscode://rpc/pub_a" }])
     })
 
     it("listens separately per pluginId", async () => {
       await subscribeToVscodeEvents("pub.a")
       await subscribeToVscodeEvents("pub.b")
       expect(listenCalls).toEqual([
-        { event: "vscode://rpc/pub.a" },
-        { event: "vscode://rpc/pub.b" },
+        { event: "vscode://rpc/pub_a" },
+        { event: "vscode://rpc/pub_b" },
       ])
     })
 
@@ -234,6 +235,26 @@ describe("rpc-dispatcher", () => {
     it("throws if not configured", async () => {
       configureRpcDispatcher(null)
       await expect(subscribeToVscodeEvents("pub.y")).rejects.toThrow(/configureRpcDispatcher/)
+    })
+  })
+
+  describe("vscodeRpcEventName", () => {
+    // Tauri rejects listen/emit for names outside [a-zA-Z0-9-/:_] ("Event name
+    // must include only alphanumeric characters, `-`, `/`, `:` and `_`.").
+    // Extension ids are `publisher.name`, so the dot must be mapped away.
+    it("produces a Tauri-valid event name for dotted extension ids", () => {
+      expect(vscodeRpcEventName("publisher.ext")).toBe("vscode://rpc/publisher_ext")
+      expect(vscodeRpcEventName("publisher.ext")).toMatch(/^[a-zA-Z0-9\-/:_]+$/)
+    })
+
+    it("maps the system LSP channel id to the name the Rust host emits", () => {
+      // Pins the TS↔Rust contract with `inbound_event_name` in
+      // crates/cognia-plugin-runtime/src/vscode/commands.rs.
+      expect(vscodeRpcEventName("cognia.lsp-service")).toBe("vscode://rpc/cognia_lsp-service")
+    })
+
+    it("keeps already-valid characters untouched", () => {
+      expect(vscodeRpcEventName("plain_id-1:x/y")).toBe("vscode://rpc/plain_id-1:x/y")
     })
   })
 

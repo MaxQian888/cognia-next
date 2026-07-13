@@ -9,7 +9,6 @@
  * of (kind, repoFullName, primary id).
  */
 
-import { createHash } from "node:crypto"
 import type { NormalizedGhEvent, NormalizedGhEventKind } from "./types"
 
 interface MinimalUser {
@@ -153,6 +152,32 @@ export interface PollingDiffEntry {
 }
 
 /**
+ * Deterministic 53-bit string hash (cyrb53). Pure JS — deliberately NOT
+ * `node:crypto` — because the polling path runs in the WebView: the
+ * github-delivery plugin drives `runGithubPoll` from the renderer through its
+ * Dexie tables (`browser-builtin-registry` → `github-poll` → here). A static
+ * `import { createHash } from "node:crypto"` pulled the module into the
+ * static-export client bundle, where webpack resolves it to an empty stub and
+ * `createHash` is `undefined` at runtime. 53 bits keeps dedup-key collisions
+ * negligible for the per-repo /events volume (GitHub drops items > 90 days).
+ */
+function cyrb53(input: string, seed = 0): string {
+  let h1 = 0xdeadbeef ^ seed
+  let h2 = 0x41c6ce57 ^ seed
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507)
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507)
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  const hash = 4294967296 * (2097151 & h2) + (h1 >>> 0)
+  return hash.toString(16).padStart(14, "0")
+}
+
+/**
  * Polling sources don't have an x-github-delivery header. We synthesize a
  * deterministic id from (kind, repoFullName, primaryId) so re-polling the
  * same item is deduped against the events table.
@@ -162,7 +187,7 @@ export function computePollingDeliveryId(
   repoFullName: string,
   primaryId: number | string
 ): string {
-  return createHash("sha1").update(`${kind}|${repoFullName}|${primaryId}`).digest("hex")
+  return cyrb53(`${kind}|${repoFullName}|${primaryId}`)
 }
 
 export function normalizePollingDiff(entry: PollingDiffEntry): NormalizedGhEvent {

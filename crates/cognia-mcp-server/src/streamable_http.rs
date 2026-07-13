@@ -205,7 +205,7 @@ fn spawn_reader(mut lines: SidecarLines, tx: broadcast::Sender<String>) {
 // ---------------------------------------------------------------------------
 
 /// `POST /mcp/stream` (and the `/mcp/sse` back-compat alias).
-pub async fn post_handler(
+pub(crate) async fn post_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
@@ -297,7 +297,7 @@ pub async fn post_handler(
 }
 
 /// `GET /mcp/stream` — long-lived SSE channel for server-initiated messages.
-pub async fn get_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub(crate) async fn get_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let Some(sid) = headers
         .get(SESSION_HEADER)
         .and_then(|v| v.to_str().ok())
@@ -317,7 +317,7 @@ pub async fn get_handler(State(state): State<AppState>, headers: HeaderMap) -> R
 }
 
 /// `DELETE /mcp/stream` — end the session (kills the sidecar child on drop).
-pub async fn delete_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub(crate) async fn delete_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let Some(sid) = headers
         .get(SESSION_HEADER)
         .and_then(|v| v.to_str().ok())
