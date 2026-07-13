@@ -16,7 +16,7 @@
 // so a single rotation doesn't fire the writeback twice.
 
 #[allow(unused_imports)]
-pub use crate::subscription::vault::AnthropicCredentialData;
+pub use crate::vault::AnthropicCredentialData;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,8 +28,8 @@ use serde::Deserialize;
 
 use std::collections::HashMap;
 
-use crate::subscription::provider::ProviderId;
-use crate::subscription::vault::{self, ProviderCredential};
+use crate::provider::ProviderId;
+use crate::vault::{self, ProviderCredential};
 
 /// Default debounce window — collapses burst writes so a single
 /// rotation maps to one writeback.

@@ -77,6 +77,9 @@ cognia-net = { path = "../crates/cognia-net" }
 # ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased
 # as `crate::terminal`; commands referenced from generate_handler!.
 cognia-terminal = { path = "../crates/cognia-terminal" }
+# ADR-0067 Tier B — subscription vault/providers (ADR-0025); `subscription/`
+# stays as an app-side facade holding the top-level command surface.
+cognia-subscription = { path = "../crates/cognia-subscription" }
 # ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
 # uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/

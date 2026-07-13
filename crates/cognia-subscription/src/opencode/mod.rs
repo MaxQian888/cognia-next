@@ -25,9 +25,9 @@ pub mod commands;
 pub mod credential;
 pub mod discovery;
 
-use crate::subscription::preset::ProviderPreset;
-use crate::subscription::provider::{ProviderId, SubscriptionProvider};
-use crate::subscription::vault::{Account, ProviderCredential};
+use crate::preset::ProviderPreset;
+use crate::provider::{ProviderId, SubscriptionProvider};
+use crate::vault::{Account, ProviderCredential};
 
 pub struct OpencodeProvider;
 
@@ -174,7 +174,7 @@ pub fn is_whitelisted_sub_provider(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subscription::vault::{OpencodeDiscoveredData, OpencodeZenData};
+    use crate::vault::{OpencodeDiscoveredData, OpencodeZenData};
 
     fn discovered() -> OpencodeDiscoveredData {
         OpencodeDiscoveredData {
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_wrong_variant() {
-        use crate::subscription::vault::AnthropicCredentialData;
+        use crate::vault::AnthropicCredentialData;
         let a = ProviderCredential::Anthropic(AnthropicCredentialData::default());
         assert!(OpencodeProvider.validate(&a).is_err());
     }

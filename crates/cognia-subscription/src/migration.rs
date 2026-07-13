@@ -18,8 +18,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::subscription::provider::ProviderId;
-use crate::subscription::vault::{
+use crate::provider::ProviderId;
+use crate::vault::{
     self, Account, AnthropicCredentialData, CodexCredentialData, ProviderCredential, ProviderVault,
 };
 
@@ -316,7 +316,7 @@ fn migrate_codex_for_account(local_account_id: &str) -> Result<MigrationOutcome,
 }
 
 fn read_v1_blob(service: &str, account: &str) -> Result<Option<String>, String> {
-    crate::secret_store::get(service, account)
+    cognia_secrets::secret_store::get(service, account)
 }
 
 /// Keyring `account` field for the legacy-migration marker. Scoping it to
@@ -333,7 +333,7 @@ fn read_account_migration_marker(
     local_account_id: &str,
     provider: ProviderId,
 ) -> Result<Option<String>, String> {
-    crate::secret_store::get(
+    cognia_secrets::secret_store::get(
         V2_ACCOUNT_MIGRATION_SERVICE,
         &account_migration_marker_key(local_account_id, provider),
     )
@@ -343,7 +343,7 @@ fn write_account_migration_marker(
     local_account_id: &str,
     provider: ProviderId,
 ) -> Result<(), String> {
-    crate::secret_store::set(
+    cognia_secrets::secret_store::set(
         V2_ACCOUNT_MIGRATION_SERVICE,
         &account_migration_marker_key(local_account_id, provider),
         local_account_id,
@@ -373,7 +373,7 @@ mod tests {
     }
 
     fn clear_v1(service: &str) {
-        let _ = crate::secret_store::delete(service, V1_ACCOUNT);
+        let _ = cognia_secrets::secret_store::delete(service, V1_ACCOUNT);
     }
 
     fn write_v1_anthropic() -> String {
@@ -388,7 +388,7 @@ mod tests {
             stored_at_ms: 1_700_000_000_000,
         };
         let blob = serde_json::to_string(&cred).unwrap();
-        crate::secret_store::set(V1_ANTHROPIC_SERVICE, V1_ACCOUNT, &blob).unwrap();
+        cognia_secrets::secret_store::set(V1_ANTHROPIC_SERVICE, V1_ACCOUNT, &blob).unwrap();
         blob
     }
 
@@ -407,7 +407,7 @@ mod tests {
             stored_at_ms: 1_700_000_000_000,
         };
         let blob = serde_json::to_string(&cred).unwrap();
-        crate::secret_store::set(V1_CODEX_SERVICE, V1_ACCOUNT, &blob).unwrap();
+        cognia_secrets::secret_store::set(V1_CODEX_SERVICE, V1_ACCOUNT, &blob).unwrap();
         blob
     }
 
@@ -481,7 +481,7 @@ mod tests {
         }
 
         // V1 entry untouched (90-day rollback).
-        assert!(crate::secret_store::get(V1_ANTHROPIC_SERVICE, V1_ACCOUNT)
+        assert!(cognia_secrets::secret_store::get(V1_ANTHROPIC_SERVICE, V1_ACCOUNT)
             .unwrap()
             .is_some());
 
@@ -568,11 +568,11 @@ mod tests {
         clear_v1(V1_ANTHROPIC_SERVICE);
         let _ = vault::clear_for_account("local_a", ProviderId::Anthropic);
         let _ = vault::clear_for_account("local_b", ProviderId::Anthropic);
-        let _ = crate::secret_store::delete(
+        let _ = cognia_secrets::secret_store::delete(
             V2_ACCOUNT_MIGRATION_SERVICE,
             &account_migration_marker_key("local_a", ProviderId::Anthropic),
         );
-        let _ = crate::secret_store::delete(
+        let _ = cognia_secrets::secret_store::delete(
             V2_ACCOUNT_MIGRATION_SERVICE,
             &account_migration_marker_key("local_b", ProviderId::Anthropic),
         );
@@ -611,11 +611,11 @@ mod tests {
         clear_v1(V1_ANTHROPIC_SERVICE);
         let _ = vault::clear_for_account("local_a", ProviderId::Anthropic);
         let _ = vault::clear_for_account("local_b", ProviderId::Anthropic);
-        let _ = crate::secret_store::delete(
+        let _ = cognia_secrets::secret_store::delete(
             V2_ACCOUNT_MIGRATION_SERVICE,
             &account_migration_marker_key("local_a", ProviderId::Anthropic),
         );
-        let _ = crate::secret_store::delete(
+        let _ = cognia_secrets::secret_store::delete(
             V2_ACCOUNT_MIGRATION_SERVICE,
             &account_migration_marker_key("local_b", ProviderId::Anthropic),
         );

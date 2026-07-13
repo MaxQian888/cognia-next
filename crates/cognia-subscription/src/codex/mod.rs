@@ -12,9 +12,9 @@ pub mod credential;
 pub mod discovery;
 pub mod oauth;
 
-use crate::subscription::preset::ProviderPreset;
-use crate::subscription::provider::{ProviderId, SubscriptionProvider};
-use crate::subscription::vault::{Account, ProviderCredential};
+use crate::preset::ProviderPreset;
+use crate::provider::{ProviderId, SubscriptionProvider};
+use crate::vault::{Account, ProviderCredential};
 
 pub struct CodexProvider;
 
@@ -104,7 +104,7 @@ impl SubscriptionProvider for CodexProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subscription::vault::CodexCredentialData;
+    use crate::vault::CodexCredentialData;
     use std::collections::BTreeMap;
 
     fn chatgpt_cred() -> CodexCredentialData {
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_wrong_variant() {
-        use crate::subscription::vault::AnthropicCredentialData;
+        use crate::vault::AnthropicCredentialData;
         let a = ProviderCredential::Anthropic(AnthropicCredentialData::default());
         assert!(CodexProvider.validate(&a).is_err());
     }

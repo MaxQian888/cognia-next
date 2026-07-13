@@ -3,4 +3,4 @@
 // variants) because it's referenced from the `ProviderCredential` enum.
 
 #[allow(unused_imports)]
-pub use crate::subscription::vault::CodexCredentialData;
+pub use crate::vault::CodexCredentialData;

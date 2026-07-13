@@ -8,8 +8,8 @@
 
 use super::discovery::{self, DiscoveredAnthropicAuth};
 use super::AnthropicProvider;
-use crate::subscription::provider::{ProviderId, SubscriptionProvider};
-use crate::subscription::vault::{
+use crate::provider::{ProviderId, SubscriptionProvider};
+use crate::vault::{
     self, Account, AnthropicCredentialData, ProviderCredential, ProviderVault,
 };
 

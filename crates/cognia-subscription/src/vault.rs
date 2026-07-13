@@ -12,8 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::subscription::preset::ProviderPreset;
-use crate::subscription::provider::ProviderId;
+use crate::preset::ProviderPreset;
+use crate::provider::ProviderId;
 
 pub const SERVICE: &str = "com.cognia.subscription/v2";
 pub const SCHEMA_VERSION: u32 = 3;
@@ -482,7 +482,7 @@ fn parse_vault_blob(blob: &str) -> Result<ProviderVault, String> {
 pub fn save(provider: ProviderId, vault: &ProviderVault) -> Result<(), String> {
     validate_vault(vault)?;
     let blob = serde_json::to_string(vault).map_err(|e| format!("vault serialize failed: {e}"))?;
-    crate::secret_store::set(SERVICE, provider.as_str(), &blob)
+    cognia_secrets::secret_store::set(SERVICE, provider.as_str(), &blob)
 }
 
 #[allow(dead_code)]
@@ -494,14 +494,14 @@ pub fn save_for_account(
     validate_vault(vault)?;
     let blob = serde_json::to_string(vault).map_err(|e| format!("vault serialize failed: {e}"))?;
     let service = service_name_for_account(local_account_id)?;
-    crate::secret_store::set(&service, provider.as_str(), &blob)
+    cognia_secrets::secret_store::set(&service, provider.as_str(), &blob)
 }
 
 /// Read the vault. Returns `Ok(None)` when no entry exists, surfaces parse
 /// errors as `Err` so the UI can show "credential corrupted" rather than
 /// silently dropping the user back to "logged out".
 pub fn load(provider: ProviderId) -> Result<Option<ProviderVault>, String> {
-    match crate::secret_store::get(SERVICE, provider.as_str())? {
+    match cognia_secrets::secret_store::get(SERVICE, provider.as_str())? {
         Some(blob) => Ok(Some(parse_vault_blob(&blob)?)),
         None => Ok(None),
     }
@@ -513,7 +513,7 @@ pub fn load_for_account(
     provider: ProviderId,
 ) -> Result<Option<ProviderVault>, String> {
     let service = service_name_for_account(local_account_id)?;
-    match crate::secret_store::get(&service, provider.as_str())? {
+    match cognia_secrets::secret_store::get(&service, provider.as_str())? {
         Some(blob) => Ok(Some(parse_vault_blob(&blob)?)),
         None => adopt_legacy_vault_for_account(local_account_id, provider),
     }
@@ -537,13 +537,13 @@ fn adopt_legacy_vault_for_account(
 /// that needs to reset between runs.
 #[allow(dead_code)]
 pub fn clear(provider: ProviderId) -> Result<(), String> {
-    crate::secret_store::delete(SERVICE, provider.as_str())
+    cognia_secrets::secret_store::delete(SERVICE, provider.as_str())
 }
 
 #[allow(dead_code)]
 pub fn clear_for_account(local_account_id: &str, provider: ProviderId) -> Result<(), String> {
     let service = service_name_for_account(local_account_id)?;
-    crate::secret_store::delete(&service, provider.as_str())
+    cognia_secrets::secret_store::delete(&service, provider.as_str())
 }
 
 // ---------------------------------------------------------------------------

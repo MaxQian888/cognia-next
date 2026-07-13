@@ -41,6 +41,7 @@ members = [
   "crates/cognia-net",
   # ADR-0067 Tier-B subsystem crates.
   "crates/cognia-terminal",
+  "crates/cognia-subscription",
 ]
 exclude = [
   "services/signaling-server",

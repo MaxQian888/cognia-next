@@ -21,12 +21,12 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::subscription::anthropic::AnthropicProvider;
-use crate::subscription::codex::CodexProvider;
-use crate::subscription::opencode::OpencodeProvider;
-use crate::subscription::preset::ProviderPreset;
-use crate::subscription::provider::{ProviderId, SubscriptionProvider};
-use crate::subscription::vault::{self, Account, ProviderVault};
+use crate::anthropic::AnthropicProvider;
+use crate::codex::CodexProvider;
+use crate::opencode::OpencodeProvider;
+use crate::preset::ProviderPreset;
+use crate::provider::{ProviderId, SubscriptionProvider};
+use crate::vault::{self, Account, ProviderVault};
 
 /// Snapshot of the in-process active state for one provider.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -314,7 +314,7 @@ mod tests {
     // ADR-0028 — per-account env builder tests.
     // -----------------------------------------------------------------------
 
-    use crate::subscription::vault::{AnthropicCredentialData, ProviderCredential};
+    use crate::vault::{AnthropicCredentialData, ProviderCredential};
 
     fn sample_anthropic_account(id: &str) -> Account {
         Account {
@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn env_for_account_with_vault_applies_preset_base_url() {
-        use crate::subscription::preset::ProviderPreset;
+        use crate::preset::ProviderPreset;
         use std::collections::BTreeMap;
 
         let tmp = tempfile::tempdir().unwrap();

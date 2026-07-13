@@ -5,8 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::subscription::preset::ProviderPreset;
-use crate::subscription::vault::{Account, ProviderCredential};
+use crate::preset::ProviderPreset;
+use crate::vault::{Account, ProviderCredential};
 
 const ALLOWED_PROVIDER_IDS: &str = "anthropic, codex, opencode";
 const MAX_PROVIDER_ID_ERROR_CHARS: usize = 64;

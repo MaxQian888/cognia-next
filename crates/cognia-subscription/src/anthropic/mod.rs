@@ -11,9 +11,9 @@ pub mod commands;
 pub mod credential;
 pub mod discovery;
 
-use crate::subscription::preset::ProviderPreset;
-use crate::subscription::provider::{ProviderId, SubscriptionProvider};
-use crate::subscription::vault::{Account, ProviderCredential};
+use crate::preset::ProviderPreset;
+use crate::provider::{ProviderId, SubscriptionProvider};
+use crate::vault::{Account, ProviderCredential};
 
 pub struct AnthropicProvider;
 
@@ -107,7 +107,7 @@ impl SubscriptionProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subscription::vault::AnthropicCredentialData;
+    use crate::vault::AnthropicCredentialData;
     use std::collections::BTreeMap;
 
     fn cred() -> AnthropicCredentialData {
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_non_anthropic_variant() {
-        use crate::subscription::vault::CodexCredentialData;
+        use crate::vault::CodexCredentialData;
         let codex = ProviderCredential::Codex(CodexCredentialData::default());
         assert!(AnthropicProvider.validate(&codex).is_err());
     }
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn env_for_sidecar_rejects_wrong_variant() {
-        use crate::subscription::vault::CodexCredentialData;
+        use crate::vault::CodexCredentialData;
         let wrong = Account {
             id: "x".into(),
             label: None,

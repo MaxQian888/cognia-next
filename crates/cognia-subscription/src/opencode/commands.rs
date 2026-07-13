@@ -19,8 +19,8 @@
 
 use super::discovery::{self, DiscoveredOpencodeAuth};
 use super::OpencodeProvider;
-use crate::subscription::provider::{ProviderId, SubscriptionProvider};
-use crate::subscription::vault::{
+use crate::provider::{ProviderId, SubscriptionProvider};
+use crate::vault::{
     self, Account, OpencodeDiscoveredData, OpencodeZenData, ProviderCredential, ProviderVault,
 };
 
@@ -167,7 +167,7 @@ pub async fn opencode_adopt_discovered(
 #[cfg(test)]
 mod adoption_tests {
     use super::*;
-    use crate::subscription::opencode::discovery::DiscoveredOpencodeEntry;
+    use crate::opencode::discovery::DiscoveredOpencodeEntry;
 
     fn discovered(entries: Vec<(&str, &str, &str)>) -> DiscoveredOpencodeAuth {
         DiscoveredOpencodeAuth {
