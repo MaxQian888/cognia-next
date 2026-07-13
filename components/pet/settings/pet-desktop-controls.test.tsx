@@ -31,7 +31,7 @@ describe("PetDesktopControls", () => {
   it("links to the shortcuts settings section to configure the toggle hotkey", () => {
     render(<PetDesktopControls pet={DEFAULT_PET_SETTINGS} patch={jest.fn()} />)
     const link = screen.getByRole("link", { name: /configure a global hotkey/i })
-    expect(link).toHaveAttribute("href", "/settings?section=desktop")
+    expect(link).toHaveAttribute("href", "/settings?section=shortcuts")
   })
 
   it("enabling opens the overlay window and persists the flag", () => {

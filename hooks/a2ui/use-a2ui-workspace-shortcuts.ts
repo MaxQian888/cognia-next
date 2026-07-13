@@ -1,10 +1,22 @@
 /**
- * A2UI Workspace Keyboard Shortcuts
- * Standard keyboard bindings for the workspace editor
+ * A2UI Workspace Keyboard Shortcuts — rebindable bindings for the workspace
+ * editor, registered while mounted (and only while `enabled`):
+ *
+ *   a2ui.undo            Ctrl+Z
+ *   a2ui.redo            Ctrl+Y / Ctrl+Shift+Z
+ *   a2ui.save            Ctrl+S
+ *   a2ui.deleteComponent Delete / Backspace
+ *   a2ui.duplicate       Ctrl+D
+ *   a2ui.deselect        Escape
+ *   a2ui.toggleMode      Ctrl+E
+ *
+ * The single dispatcher owns the listener + editable guard, so these never fire
+ * while the user is typing in a field. Each handler `preventDefault`s exactly as
+ * the pre-migration code did.
  */
 
-import { useEffect, useCallback } from "react"
 import { useA2UIStore } from "@/stores/a2ui"
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 
 interface WorkspaceShortcutActions {
   surfaceId: string
@@ -28,92 +40,13 @@ export function useA2UIWorkspaceShortcuts({
   const undo = useA2UIStore((state) => state.undo)
   const redo = useA2UIStore((state) => state.redo)
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (!enabled) return
+  const opts = { enabled, preventDefault: true }
 
-      // Guard: don't steal from input fields
-      const activeEl = document.activeElement
-      const tag = activeEl?.tagName
-      if (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        (activeEl as HTMLElement)?.isContentEditable
-      ) {
-        return
-      }
-
-      const isCtrl = e.ctrlKey || e.metaKey
-
-      // Ctrl+Z — Undo
-      if (isCtrl && e.key === "z" && !e.shiftKey) {
-        e.preventDefault()
-        undo(surfaceId)
-        return
-      }
-
-      // Ctrl+Y or Ctrl+Shift+Z — Redo
-      if (
-        isCtrl &&
-        (e.key === "y" || (e.key === "z" && e.shiftKey) || (e.key === "Z" && e.shiftKey))
-      ) {
-        e.preventDefault()
-        redo(surfaceId)
-        return
-      }
-
-      // Ctrl+S — Save
-      if (isCtrl && e.key === "s") {
-        e.preventDefault()
-        onSave?.()
-        return
-      }
-
-      // Delete / Backspace — Delete selected component
-      if (e.key === "Delete" || e.key === "Backspace") {
-        e.preventDefault()
-        onDeleteComponent?.()
-        return
-      }
-
-      // Ctrl+D — Duplicate selected component
-      if (isCtrl && e.key === "d") {
-        e.preventDefault()
-        onDuplicateComponent?.()
-        return
-      }
-
-      // Escape — Deselect / exit mode
-      if (e.key === "Escape") {
-        e.preventDefault()
-        onDeselect?.()
-        return
-      }
-
-      // Ctrl+E — Toggle Edit/Preview
-      if (isCtrl && e.key === "e") {
-        e.preventDefault()
-        onToggleMode?.()
-        return
-      }
-    },
-    [
-      enabled,
-      surfaceId,
-      undo,
-      redo,
-      onSave,
-      onDeleteComponent,
-      onDuplicateComponent,
-      onDeselect,
-      onToggleMode,
-    ]
-  )
-
-  useEffect(() => {
-    if (!enabled) return
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [enabled, handleKeyDown])
+  useAppShortcut("a2ui.undo", () => undo(surfaceId), opts)
+  useAppShortcut("a2ui.redo", () => redo(surfaceId), opts)
+  useAppShortcut("a2ui.save", () => onSave?.(), opts)
+  useAppShortcut("a2ui.deleteComponent", () => onDeleteComponent?.(), opts)
+  useAppShortcut("a2ui.duplicate", () => onDuplicateComponent?.(), opts)
+  useAppShortcut("a2ui.deselect", () => onDeselect?.(), opts)
+  useAppShortcut("a2ui.toggleMode", () => onToggleMode?.(), opts)
 }

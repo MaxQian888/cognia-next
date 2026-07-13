@@ -2,7 +2,27 @@
  * @jest-environment jsdom
  */
 import { renderHook } from "@testing-library/react"
-import { isEditableTarget, useObservabilityHotkeys } from "./use-observability-hotkeys"
+import { useObservabilityHotkeys, type HotkeyHandlers } from "./use-observability-hotkeys"
+import { useAppShortcutDispatcher } from "@/hooks/shortcuts/use-app-shortcut-dispatcher"
+import { __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
+import { __resetAppKeybindingStoreForTesting } from "@/stores/shortcuts/app-keybinding-store"
+import { __resetContextKeysForTesting } from "@/lib/plugin/context-keys/context-key-store"
+
+// The editable-target guard now lives in `lib/shortcuts/dom.ts` (tested there);
+// this suite covers the observability hook's dispatch contract end-to-end.
+jest.mock("@/lib/plugin", () => ({
+  getPluginEventHooks: () => ({ dispatchShortcut: jest.fn() }),
+}))
+
+function mount(handlers: HotkeyHandlers) {
+  return renderHook(
+    (props: { h: HotkeyHandlers }) => {
+      useAppShortcutDispatcher()
+      useObservabilityHotkeys(props.h)
+    },
+    { initialProps: { h: handlers } }
+  )
+}
 
 function press(key: string, opts: KeyboardEventInit = {}, target: EventTarget = window) {
   const evt = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...opts })
@@ -10,19 +30,11 @@ function press(key: string, opts: KeyboardEventInit = {}, target: EventTarget = 
   return evt
 }
 
-describe("isEditableTarget", () => {
-  it("is true for inputs, textareas, selects and contenteditable", () => {
-    expect(isEditableTarget(document.createElement("input"))).toBe(true)
-    expect(isEditableTarget(document.createElement("textarea"))).toBe(true)
-    expect(isEditableTarget(document.createElement("select"))).toBe(true)
-    const div = document.createElement("div")
-    Object.defineProperty(div, "isContentEditable", { value: true })
-    expect(isEditableTarget(div)).toBe(true)
-  })
-  it("is false for non-elements and plain elements", () => {
-    expect(isEditableTarget(null)).toBe(false)
-    expect(isEditableTarget(document.createElement("div"))).toBe(false)
-  })
+beforeEach(() => {
+  __resetAppRuntimeForTesting()
+  __resetAppKeybindingStoreForTesting()
+  __resetContextKeysForTesting()
+  localStorage.clear()
 })
 
 describe("useObservabilityHotkeys", () => {
@@ -33,7 +45,7 @@ describe("useObservabilityHotkeys", () => {
       onFocusFilter: jest.fn(),
       onOpenSettings: jest.fn(),
     }
-    renderHook(() => useObservabilityHotkeys(h))
+    mount(h)
     press("e")
     press("r")
     press("f")
@@ -46,7 +58,7 @@ describe("useObservabilityHotkeys", () => {
 
   it("is case-insensitive and calls preventDefault", () => {
     const onToggleEdit = jest.fn()
-    renderHook(() => useObservabilityHotkeys({ onToggleEdit }))
+    mount({ onToggleEdit })
     const evt = press("E")
     expect(onToggleEdit).toHaveBeenCalled()
     expect(evt.defaultPrevented).toBe(true)
@@ -54,7 +66,7 @@ describe("useObservabilityHotkeys", () => {
 
   it("ignores presses with modifiers", () => {
     const onRefresh = jest.fn()
-    renderHook(() => useObservabilityHotkeys({ onRefresh }))
+    mount({ onRefresh })
     press("r", { ctrlKey: true })
     press("r", { metaKey: true })
     press("r", { altKey: true })
@@ -63,7 +75,7 @@ describe("useObservabilityHotkeys", () => {
 
   it("ignores presses that originate from an editable field", () => {
     const onToggleEdit = jest.fn()
-    renderHook(() => useObservabilityHotkeys({ onToggleEdit }))
+    mount({ onToggleEdit })
     const input = document.createElement("input")
     document.body.appendChild(input)
     press("e", {}, input)
@@ -73,8 +85,8 @@ describe("useObservabilityHotkeys", () => {
 
   it("no-ops for keys without a handler and unmounts cleanly", () => {
     const onRefresh = jest.fn()
-    const { unmount } = renderHook(() => useObservabilityHotkeys({ onRefresh }))
-    // 'e' has no handler → does nothing, no throw.
+    const { unmount } = mount({ onRefresh })
+    // 'e' has no handler → does nothing, no preventDefault.
     expect(press("e").defaultPrevented).toBe(false)
     unmount()
     press("r")
@@ -84,10 +96,8 @@ describe("useObservabilityHotkeys", () => {
   it("always reads the latest handlers", () => {
     const first = jest.fn()
     const second = jest.fn()
-    const { rerender } = renderHook(({ fn }) => useObservabilityHotkeys({ onRefresh: fn }), {
-      initialProps: { fn: first },
-    })
-    rerender({ fn: second })
+    const { rerender } = mount({ onRefresh: first })
+    rerender({ h: { onRefresh: second } })
     press("r")
     expect(first).not.toHaveBeenCalled()
     expect(second).toHaveBeenCalledTimes(1)

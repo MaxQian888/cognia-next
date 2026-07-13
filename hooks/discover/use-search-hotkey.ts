@@ -1,33 +1,23 @@
 "use client"
 
 /**
- * Global `/` shortcut that focuses a search input — the same convention used by
- * GitHub, Slack, and Linear. Registers a window `keydown` listener while
- * mounted and focuses `ref` when the user presses `/` outside any text field.
- *
- * Guards:
- *  - Ignored when a modifier (⌘ / Ctrl / Alt) is held so it never shadows
- *    browser shortcuts.
- *  - Ignored when the event originates from an `<input>` / `<textarea>` /
- *    contenteditable, so typing a literal "/" into a field still works.
- *  - `preventDefault()` on match so the "/" isn't also inserted once focus lands.
+ * Global `/` shortcut that focuses a search input — the GitHub/Slack/Linear
+ * convention. Registers the rebindable `app.search.focus` action; the single
+ * `use-app-shortcut-dispatcher` owns the window listener plus the modifier and
+ * editable-target guards (so typing a literal "/" into a field still works and
+ * `Ctrl+/` never triggers it). We only `preventDefault` once there is an input
+ * to focus, so a stray press without a mounted search box types through.
  */
 
-import { useEffect, type RefObject } from "react"
+import { type RefObject } from "react"
+
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 
 export function useSearchHotkey(ref: RefObject<HTMLInputElement | null>): void {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return
-      const target = event.target as HTMLElement | null
-      const tag = target?.tagName
-      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return
-      const input = ref.current
-      if (!input) return
-      event.preventDefault()
-      input.focus()
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [ref])
+  useAppShortcut("app.search.focus", (event) => {
+    const input = ref.current
+    if (!input) return
+    event.preventDefault()
+    input.focus()
+  })
 }

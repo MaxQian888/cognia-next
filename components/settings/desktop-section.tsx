@@ -18,7 +18,6 @@ import { getCloseBehavior, setCloseBehavior, type CloseBehavior } from "@/lib/ta
 import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "@cognia/logging"
 import { TraySection } from "./tray-section"
-import { ShortcutsSection } from "./shortcuts-section"
 
 /**
  * Desktop-only preferences. Combined surface for autostart, system info, and
@@ -290,10 +289,6 @@ export function DesktopSection() {
 
       <section className="space-y-3 rounded-md border p-4">
         <TraySection />
-      </section>
-
-      <section className="space-y-3 rounded-md border p-4">
-        <ShortcutsSection />
       </section>
     </div>
   )

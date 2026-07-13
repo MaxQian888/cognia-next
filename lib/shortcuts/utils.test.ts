@@ -49,6 +49,22 @@ describe("parseKeyEvent", () => {
     const event = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true })
     expect(parseKeyEvent(event)).toBe("Ctrl+Enter")
   })
+
+  it("folds the Shift '+' key back to '=' so it never collides with the separator", () => {
+    const event = new KeyboardEvent("keydown", { key: "+", ctrlKey: true, shiftKey: true })
+    expect(parseKeyEvent(event)).toBe("Ctrl+Shift+=")
+  })
+
+  it("folds the Shift '_' key back to '-'", () => {
+    const event = new KeyboardEvent("keydown", { key: "_", ctrlKey: true, shiftKey: true })
+    expect(parseKeyEvent(event)).toBe("Ctrl+Shift+-")
+  })
+
+  it("names the Space key so it survives normalization", () => {
+    const event = new KeyboardEvent("keydown", { key: " ", ctrlKey: true, shiftKey: true })
+    expect(parseKeyEvent(event)).toBe("Ctrl+Shift+Space")
+    expect(normalizeKeyCombo(parseKeyEvent(event))).toBe("ctrl+shift+space")
+  })
 })
 
 describe("formatKeybinding", () => {

@@ -159,6 +159,10 @@ const CanvasSection = dynamic(() => import("./canvas-section").then((m) => m.Can
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const UnifiedShortcutsSection = dynamic(
+  () => import("./shortcuts/unified-shortcuts-section").then((m) => m.UnifiedShortcutsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const ToolSettingsSection = dynamic(
   () => import("./tools/tool-settings-section").then((m) => m.ToolSettingsSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -483,6 +487,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ArtifactsSection />
     case "canvas":
       return <CanvasSection />
+    case "shortcuts":
+      return <UnifiedShortcutsSection />
     case "conversation":
       return <ConversationSection />
     case "notifications":

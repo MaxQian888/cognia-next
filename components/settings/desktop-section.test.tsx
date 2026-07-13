@@ -48,7 +48,6 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), message: jest.fn(), warning: jest.fn() },
 }))
 jest.mock("./tray-section", () => ({ TraySection: () => null }))
-jest.mock("./shortcuts-section", () => ({ ShortcutsSection: () => null }))
 
 import { DesktopSection } from "./desktop-section"
 

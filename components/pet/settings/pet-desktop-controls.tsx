@@ -85,7 +85,7 @@ export function PetDesktopControls({ pet, patch }: PetControlsProps) {
       </div>
 
       <Button asChild size="sm" variant="link" className="h-auto p-0">
-        <Link href="/settings?section=desktop">
+        <Link href="/settings?section=shortcuts">
           {t("desktopPet.hotkeyLink")}
           <ArrowRightIcon className="ml-1.5 size-3.5" />
         </Link>

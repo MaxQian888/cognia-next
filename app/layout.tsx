@@ -35,6 +35,7 @@ import { OcrRuntimeInitializer } from "@/components/providers/initializers/ocr-r
 import { ProviderCostMirrorInitializer } from "@/components/providers/initializers/provider-cost-mirror-initializer"
 import { WindowTitleInitializer } from "@/components/providers/initializers/window-title-initializer"
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
+import { AppShortcutDispatcher } from "@/components/providers/app-shortcut-dispatcher"
 import { DeferredBootInitializers } from "@/components/providers/initializers/deferred-boot-initializers"
 import { TwinWorkerInitializer } from "@/components/twin/twin-worker-initializer"
 import { ProjectKnowledgeWorkerInitializer } from "@/components/shell/project-kb-worker-initializer"
@@ -208,6 +209,10 @@ export default async function RootLayout({
                         <ProjectKnowledgeWorkerInitializer />
                         <ProviderCostMirrorInitializer />
                         <ContextKeysInitializer />
+                        {/* Single keydown listener for all rebindable in-app
+                         * (renderer-scope) shortcuts. Reads the context-key
+                         * store, so it mounts after ContextKeysInitializer. */}
+                        <AppShortcutDispatcher />
                         <WindowTitleInitializer />
                         <BackupSchedulerProvider>
                           <WebDavStartupPromptProvider>

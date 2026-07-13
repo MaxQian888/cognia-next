@@ -50,6 +50,7 @@ import {
   GitPullRequestArrowIcon,
   CircleUserIcon,
   ClipboardCheckIcon,
+  KeyboardIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -86,6 +87,7 @@ export type SettingsSectionId =
   | "presets"
   | "artifacts"
   | "canvas"
+  | "shortcuts"
   | "conversation"
   | "notifications"
   | "memory"
@@ -386,6 +388,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "canvas",
     group: "interface",
     icon: PencilRulerIcon,
+  },
+  {
+    id: "shortcuts",
+    labelKey: "shortcuts",
+    descriptionKey: "shortcuts",
+    group: "interface",
+    icon: KeyboardIcon,
   },
   {
     id: "source-control",
@@ -873,6 +882,25 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "静音",
     "角标",
     "保留",
+  ],
+  shortcuts: [
+    "shortcut",
+    "shortcuts",
+    "hotkey",
+    "hotkeys",
+    "keybinding",
+    "keybindings",
+    "keyboard",
+    "accelerator",
+    "global shortcut",
+    "rebind",
+    "conflict",
+    "快捷键",
+    "热键",
+    "键位",
+    "键盘",
+    "组合键",
+    "冲突",
   ],
   canvas: [
     "canvas",

@@ -1,19 +1,21 @@
 "use client"
 
 /**
- * Global keyboard shortcuts for the observability dashboard. Attaches a single
- * window `keydown` listener and dispatches unmodified single-key presses:
+ * Rebindable keyboard shortcuts for the observability dashboard, registered
+ * while it is mounted:
  *
- *   e → toggle edit/lock layout    r → refresh now
- *   f → focus the filter bar       s → open settings
+ *   observability.toggleEdit   e → toggle edit/lock layout
+ *   observability.refresh      r → refresh now
+ *   observability.focusFilter  f → focus the filter bar
+ *   observability.openSettings s → open settings
  *
- * Presses are ignored while the user is typing (input / textarea / select /
- * contenteditable) or holding a modifier, so they never fight normal editing.
- * Handlers are read through a ref so the listener is subscribed once and never
- * churns on re-render.
+ * The single dispatcher owns the listener, the editable guard (so the keys type
+ * normally in a field), and the modifier guard (a held modifier makes a
+ * different chord that won't match). `preventDefault` fires only when a handler
+ * is present, matching the pre-migration behavior.
  */
 
-import { useEffect, useRef } from "react"
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 
 export interface HotkeyHandlers {
   onToggleEdit?: () => void
@@ -22,45 +24,15 @@ export interface HotkeyHandlers {
   onOpenSettings?: () => void
 }
 
-/** True when the event originated from an editable control we must not hijack. */
-export function isEditableTarget(el: EventTarget | null): boolean {
-  if (!(el instanceof HTMLElement)) return false
-  const tag = el.tagName
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable === true
+function run(event: KeyboardEvent, fn: (() => void) | undefined): void {
+  if (!fn) return
+  event.preventDefault()
+  fn()
 }
 
 export function useObservabilityHotkeys(handlers: HotkeyHandlers): void {
-  const ref = useRef(handlers)
-  useEffect(() => {
-    ref.current = handlers
-  })
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (isEditableTarget(e.target)) return
-      const h = ref.current
-      const run = (fn: (() => void) | undefined) => {
-        if (!fn) return
-        e.preventDefault()
-        fn()
-      }
-      switch (e.key.toLowerCase()) {
-        case "e":
-          run(h.onToggleEdit)
-          break
-        case "r":
-          run(h.onRefresh)
-          break
-        case "f":
-          run(h.onFocusFilter)
-          break
-        case "s":
-          run(h.onOpenSettings)
-          break
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
+  useAppShortcut("observability.toggleEdit", (e) => run(e, handlers.onToggleEdit))
+  useAppShortcut("observability.refresh", (e) => run(e, handlers.onRefresh))
+  useAppShortcut("observability.focusFilter", (e) => run(e, handlers.onFocusFilter))
+  useAppShortcut("observability.openSettings", (e) => run(e, handlers.onOpenSettings))
 }

@@ -1,20 +1,39 @@
 /**
- * Tests for useCanvasLayoutShortcuts.
+ * Tests for useCanvasLayoutShortcuts — end-to-end through the shared dispatcher.
  */
 
 import { renderHook, act } from "@testing-library/react"
 import { useCanvasLayoutShortcuts } from "./use-canvas-layout-shortcuts"
+import { useAppShortcutDispatcher } from "@/hooks/shortcuts/use-app-shortcut-dispatcher"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { getAppRegistration, __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
+import { __resetAppKeybindingStoreForTesting } from "@/stores/shortcuts/app-keybinding-store"
+import {
+  setContextKeys,
+  __resetContextKeysForTesting,
+} from "@/lib/plugin/context-keys/context-key-store"
 
 jest.mock("@/hooks/ui", () => ({
   useIsMobile: jest.fn(() => false),
+}))
+jest.mock("@/lib/plugin", () => ({
+  getPluginEventHooks: () => ({ dispatchShortcut: jest.fn() }),
 }))
 
 import { useIsMobile } from "@/hooks/ui"
 
 const useIsMobileMock = useIsMobile as jest.MockedFunction<typeof useIsMobile>
 
-function pressMod(key: string, options: Partial<KeyboardEventInit> = {}) {
+// The rail toggles carry `when: "view.canvas"`, so the Canvas guild must be active.
+// Mount the dispatcher + the feature hook together (no JSX ⇒ .test.ts stays valid).
+function mount() {
+  return renderHook(() => {
+    useAppShortcutDispatcher()
+    useCanvasLayoutShortcuts()
+  })
+}
+
+function pressMod(target: EventTarget, key: string, options: Partial<KeyboardEventInit> = {}) {
   const event = new KeyboardEvent("keydown", {
     key,
     metaKey: true,
@@ -22,7 +41,7 @@ function pressMod(key: string, options: Partial<KeyboardEventInit> = {}) {
     cancelable: true,
     ...options,
   })
-  window.dispatchEvent(event)
+  target.dispatchEvent(event)
   return event
 }
 
@@ -30,89 +49,71 @@ describe("useCanvasLayoutShortcuts", () => {
   beforeEach(() => {
     window.localStorage.clear()
     useIsMobileMock.mockReturnValue(false)
+    __resetAppRuntimeForTesting()
+    __resetAppKeybindingStoreForTesting()
+    __resetContextKeysForTesting()
+    setContextKeys({ "view.canvas": true })
     act(() => {
       useCanvasLayoutStore.getState().resetLayout()
     })
   })
 
   it("Cmd+B toggles the left rail on desktop", () => {
-    renderHook(() => useCanvasLayoutShortcuts())
+    mount()
     expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(false)
-    act(() => {
-      pressMod("b")
-    })
+    act(() => pressMod(document.body, "b"))
     expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(true)
-    act(() => {
-      pressMod("b")
-    })
+    act(() => pressMod(document.body, "b"))
     expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(false)
   })
 
   it("Cmd+J toggles the right rail on desktop", () => {
-    renderHook(() => useCanvasLayoutShortcuts())
-    act(() => {
-      pressMod("j")
-    })
+    mount()
+    act(() => pressMod(document.body, "j"))
     expect(useCanvasLayoutStore.getState().rightCollapsed).toBe(true)
   })
 
   it("Ctrl+B works on non-Mac (no metaKey)", () => {
-    renderHook(() => useCanvasLayoutShortcuts())
-    act(() => {
-      const event = new KeyboardEvent("keydown", {
-        key: "b",
-        ctrlKey: true,
-        bubbles: true,
-        cancelable: true,
-      })
-      window.dispatchEvent(event)
-    })
+    mount()
+    act(() => pressMod(document.body, "b", { metaKey: false, ctrlKey: true }))
     expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(true)
   })
 
   it("ignores Cmd+Shift+B and Cmd+Alt+B (modifier-noise)", () => {
-    renderHook(() => useCanvasLayoutShortcuts())
+    mount()
     act(() => {
-      pressMod("b", { shiftKey: true })
-      pressMod("b", { altKey: true })
+      pressMod(document.body, "b", { shiftKey: true })
+      pressMod(document.body, "b", { altKey: true })
     })
     expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(false)
   })
 
-  it("ignores plain B (no modifier)", () => {
-    renderHook(() => useCanvasLayoutShortcuts())
+  it("ignores plain B (no modifier) and keys outside b/j", () => {
+    mount()
     act(() => {
-      const event = new KeyboardEvent("keydown", {
-        key: "b",
-        bubbles: true,
-        cancelable: true,
-      })
-      window.dispatchEvent(event)
-    })
-    expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(false)
-  })
-
-  it("ignores keys outside b/j", () => {
-    renderHook(() => useCanvasLayoutShortcuts())
-    act(() => {
-      pressMod("k")
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "b", bubbles: true }))
+      pressMod(document.body, "k")
     })
     expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(false)
     expect(useCanvasLayoutStore.getState().rightCollapsed).toBe(false)
   })
 
-  it("bails when focus is inside .monaco-editor", () => {
+  it("does not fire when the Canvas guild is not active (when: view.canvas)", () => {
+    __resetContextKeysForTesting() // view.canvas unset
+    mount()
+    act(() => pressMod(document.body, "b"))
+    expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(false)
+  })
+
+  it("bails when the event originates inside .monaco-editor", () => {
     const monaco = document.createElement("div")
     monaco.className = "monaco-editor"
-    const child = document.createElement("input")
+    const child = document.createElement("span")
     monaco.appendChild(child)
     document.body.appendChild(monaco)
-    child.focus()
     try {
-      renderHook(() => useCanvasLayoutShortcuts())
-      act(() => {
-        pressMod("b")
-      })
+      mount()
+      act(() => pressMod(child, "b"))
       expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(false)
     } finally {
       document.body.removeChild(monaco)
@@ -121,46 +122,40 @@ describe("useCanvasLayoutShortcuts", () => {
 
   it("on mobile: Cmd+B toggles the left Sheet instead of the collapsed flag", () => {
     useIsMobileMock.mockReturnValue(true)
-    renderHook(() => useCanvasLayoutShortcuts())
-    act(() => {
-      pressMod("b")
-    })
+    mount()
+    act(() => pressMod(document.body, "b"))
     expect(useCanvasLayoutStore.getState().mobileLeftOpen).toBe(true)
     expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(false)
-    act(() => {
-      pressMod("b")
-    })
+    act(() => pressMod(document.body, "b"))
     expect(useCanvasLayoutStore.getState().mobileLeftOpen).toBe(false)
   })
 
   it("on mobile: Cmd+J toggles the right Sheet", () => {
     useIsMobileMock.mockReturnValue(true)
-    renderHook(() => useCanvasLayoutShortcuts())
-    act(() => {
-      pressMod("j")
-    })
+    mount()
+    act(() => pressMod(document.body, "j"))
     expect(useCanvasLayoutStore.getState().mobileRightOpen).toBe(true)
     expect(useCanvasLayoutStore.getState().rightCollapsed).toBe(false)
   })
 
   it("preventDefault is called only when matched", () => {
-    renderHook(() => useCanvasLayoutShortcuts())
-    let matched: Event | null = null
-    let unmatched: Event | null = null
+    mount()
+    let matched: KeyboardEvent | null = null
+    let unmatched: KeyboardEvent | null = null
     act(() => {
-      matched = pressMod("b")
-      unmatched = pressMod("k")
+      matched = pressMod(document.body, "b")
+      unmatched = pressMod(document.body, "k")
     })
     expect(matched!.defaultPrevented).toBe(true)
     expect(unmatched!.defaultPrevented).toBe(false)
   })
 
-  it("removes the listener on unmount", () => {
+  it("removes its registrations on unmount", () => {
     const { unmount } = renderHook(() => useCanvasLayoutShortcuts())
+    expect(getAppRegistration("canvasLayout.toggleLeft")).toBeDefined()
+    expect(getAppRegistration("canvasLayout.toggleRight")).toBeDefined()
     unmount()
-    act(() => {
-      pressMod("b")
-    })
-    expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(false)
+    expect(getAppRegistration("canvasLayout.toggleLeft")).toBeUndefined()
+    expect(getAppRegistration("canvasLayout.toggleRight")).toBeUndefined()
   })
 })
