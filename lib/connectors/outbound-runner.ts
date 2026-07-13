@@ -826,7 +826,12 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     }
 
     // ── Send ──────────────────────────────────────────────────────────────
-    await markSending(job.id)
+    // Atomic claim: if another runner already moved this job out of
+    // pending/failed, yield rather than double-send the same message.
+    const claimed = await markSending(job.id)
+    if (!claimed) {
+      return
+    }
 
     const adapter = opts.adapters.get(adapterId)
     if (!adapter) {

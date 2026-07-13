@@ -80,18 +80,18 @@ export function awaitApproval(
     pending.delete(k)
   }
 
-  const ttlMs = opts.ttlMs ?? DEFAULT_APPROVAL_TTL_MS
+  // Clamp to a positive floor: a caller passing `0` (or a negative) used to
+  // disable the watchdog entirely, leaving the tool waiting for a button press
+  // forever. There must always be a TTL backstop, so fall back to the default.
+  const ttlMs = opts.ttlMs !== undefined && opts.ttlMs > 0 ? opts.ttlMs : DEFAULT_APPROVAL_TTL_MS
   return new Promise<CapturePermissionDecision>((resolve) => {
-    const timer =
-      ttlMs > 0
-        ? setTimeout(() => {
-            const entry = pending.get(k)
-            if (!entry) return
-            pending.delete(k)
-            entry.onExpire?.()
-            resolve({ decision: "deny", message: "approval timed out" })
-          }, ttlMs)
-        : null
+    const timer = setTimeout(() => {
+      const entry = pending.get(k)
+      if (!entry) return
+      pending.delete(k)
+      entry.onExpire?.()
+      resolve({ decision: "deny", message: "approval timed out" })
+    }, ttlMs)
     pending.set(k, { resolve, timer, onExpire: opts.onExpire })
   })
 }

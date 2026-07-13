@@ -45,6 +45,21 @@ describe("approval-registry", () => {
     }
   })
 
+  it("clamps a non-positive ttl to the default so a card can never hang forever", async () => {
+    jest.useFakeTimers()
+    try {
+      // ttlMs:0 previously disabled the watchdog entirely (timer === null) —
+      // the tool would wait for a button press forever. It must fall back to
+      // the default TTL and still auto-deny.
+      const p = awaitApproval("s1", "r1", { ttlMs: 0 })
+      jest.advanceTimersByTime(DEFAULT_APPROVAL_TTL_MS)
+      await expect(p).resolves.toEqual({ decision: "deny", message: "approval timed out" })
+      expect(pendingApprovalCount()).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("a superseding request denies the prior pending entry", async () => {
     const first = awaitApproval("s1", "r1", { ttlMs: 0 })
     const second = awaitApproval("s1", "r1", { ttlMs: 0 })

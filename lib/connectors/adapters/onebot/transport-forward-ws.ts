@@ -16,6 +16,7 @@
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsWsOpen,
   connectorsWsSend,
@@ -125,7 +126,7 @@ export function createForwardWsTransport(opts: ForwardWsOptions): OneBotTranspor
     cleanupListeners()
     if (abort.signal.aborted) return
     attempts += 1
-    const backoff = backoffBaseMs * Math.min(2 ** attempts, 32)
+    const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
     try {
       await delay(backoff, abort.signal)
     } catch {

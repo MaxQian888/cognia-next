@@ -12,6 +12,7 @@
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsWsOpen,
   connectorsWsSend,
@@ -117,7 +118,7 @@ export async function* startSocketMode(
     } catch {
       if (opts.signal.aborted) return
       attempts += 1
-      const backoff = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+      const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
       try {
         await delay(backoff, opts.signal)
       } catch {
@@ -133,7 +134,7 @@ export async function* startSocketMode(
     } catch {
       if (opts.signal.aborted) return
       attempts += 1
-      const backoff = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+      const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
       try {
         await delay(backoff, opts.signal)
       } catch {
@@ -241,7 +242,7 @@ export async function* startSocketMode(
     if (!shouldReconnect) {
       attempts += 1
     }
-    const backoff = shouldReconnect ? 500 : backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+    const backoff = shouldReconnect ? 500 : reconnectBackoffMs(backoffBaseMs, attempts)
     try {
       await delay(backoff, opts.signal)
     } catch {

@@ -6,13 +6,15 @@
  *   2. Receive HELLO (op 10) → start heartbeat loop
  *   3. Send IDENTIFY (op 2)
  *   4. Receive READY → cache selfId
- *   5. Yield MESSAGE_CREATE / MESSAGE_UPDATE dispatches
+ *   5. Yield message / reaction / interaction dispatches (see
+ *      FORWARDED_DISPATCH_TYPES) — everything parse.ts consumes
  *   6. Resume on disconnect where possible
  *
  * Inbound messages arrive via Tauri events at connectors://ws/<id>/message.
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsWsOpen,
   connectorsWsSend,
@@ -37,10 +39,33 @@ const OP_HEARTBEAT_ACK = 11
 const GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
 
 /**
- * Default intents: GUILDS(1) | GUILD_MESSAGES(512) |
- * MESSAGE_CONTENT(32768) | DIRECT_MESSAGES(4096) = 33281
+ * Dispatch types forwarded from the gateway to the adapter — every event
+ * `parse.ts` / `parseDiscordInteraction` project. Anything else (READY,
+ * TYPING_START, GUILD_CREATE, …) is consumed internally and dropped so the
+ * adapter only sees actionable inbound events.
  */
-export const DEFAULT_GATEWAY_INTENTS = 33281
+const FORWARDED_DISPATCH_TYPES = new Set<string>([
+  "MESSAGE_CREATE",
+  "MESSAGE_UPDATE",
+  "MESSAGE_DELETE",
+  "MESSAGE_REACTION_ADD",
+  "MESSAGE_REACTION_REMOVE",
+  "INTERACTION_CREATE",
+])
+
+/**
+ * Default intents — every non-privileged event `parse.ts` projects plus the
+ * privileged MESSAGE_CONTENT:
+ *   GUILDS(1) | GUILD_MESSAGES(512) | GUILD_MESSAGE_REACTIONS(1024) |
+ *   DIRECT_MESSAGES(4096) | DIRECT_MESSAGE_REACTIONS(8192) |
+ *   MESSAGE_CONTENT(32768) = 46593
+ *
+ * MESSAGE_CONTENT is privileged and must ALSO be enabled in the Developer
+ * Portal (Bot → Privileged Gateway Intents); otherwise Discord closes the
+ * socket with code 4014. (The previous default 33281 silently omitted
+ * DIRECT_MESSAGES, so DMs never arrived.)
+ */
+export const DEFAULT_GATEWAY_INTENTS = 46593
 
 export interface GatewayClientOptions {
   /** Bot token (without "Bot " prefix). */
@@ -117,7 +142,7 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
       } catch {
         if (opts.signal.aborted) return
         attempts += 1
-        const backoff = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+        const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
         try {
           await delay(backoff, opts.signal)
         } catch {
@@ -233,7 +258,7 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
                   session.sessionId = ready.session_id ?? null
                   session.resumeGatewayUrl = ready.resume_gateway_url ?? null
                   attempts = 0
-                } else if (msg.t === "MESSAGE_CREATE" || msg.t === "MESSAGE_UPDATE") {
+                } else if (msg.t && FORWARDED_DISPATCH_TYPES.has(msg.t)) {
                   yield {
                     t: msg.t,
                     s: msg.s,
@@ -285,7 +310,7 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
       // Reconnect delay
       if (!shouldResume) {
         attempts += 1
-        const backoff = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+        const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
         try {
           await delay(backoff, opts.signal)
         } catch {

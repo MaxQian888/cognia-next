@@ -218,6 +218,26 @@ describe("outbound-jobs", () => {
     expect(updated?.attempts).toBe(1)
   })
 
+  it("markSending is an atomic claim: only the first caller wins", async () => {
+    const row = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_1",
+      request: makeRequest(),
+    })
+    const first = await markSending(row.id)
+    const second = await markSending(row.id)
+    expect(first).toBe(true)
+    // Second claim loses — the row is already 'sending', not pending/failed.
+    expect(second).toBe(false)
+    const updated = await getDb().outboundQueue.get(row.id)
+    // Attempts incremented exactly once (no double-send).
+    expect(updated?.attempts).toBe(1)
+  })
+
+  it("markSending returns false for an unknown job id", async () => {
+    expect(await markSending("nope")).toBe(false)
+  })
+
   it("markSent transitions to sent with platformMessageId", async () => {
     const row = await enqueue({
       adapterId: "adp_1",

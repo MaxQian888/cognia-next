@@ -13,6 +13,7 @@
  */
 
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import { normalizeHomeserver } from "./auth"
 import type { MatrixSyncResponse, MatrixTimelineEvent } from "./parse"
 
@@ -101,7 +102,7 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
       if (opts.signal.aborted) return
       if (err instanceof DOMException && err.name === "AbortError") return
       attempts += 1
-      const backoffMs = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+      const backoffMs = reconnectBackoffMs(backoffBaseMs, attempts)
       try {
         await delay(backoffMs, opts.signal)
       } catch {

@@ -358,12 +358,26 @@ export async function listPendingForConversation(
     .toArray()
 }
 
-/** Transition a job to "sending" and increment attempts. */
-export async function markSending(jobId: string): Promise<void> {
-  const row = await getDb().outboundQueue.get(jobId)
-  await getDb().outboundQueue.update(jobId, {
-    status: "sending",
-    attempts: (row?.attempts ?? 0) + 1,
+/**
+ * Atomically claim a job for sending: transition `pending`/`failed` → `sending`
+ * and increment attempts, inside a single Dexie transaction. Returns `true` if
+ * THIS caller won the claim, `false` if the row was already claimed by another
+ * runner (or moved to a terminal status) — the Dexie analog of a `SELECT … FOR
+ * UPDATE` claim. Without the transaction two runners (e.g. a second `main`
+ * webview) could both read `pending` and both send the same message.
+ */
+export async function markSending(jobId: string): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.outboundQueue, async () => {
+    const row = await db.outboundQueue.get(jobId)
+    if (!row || (row.status !== "pending" && row.status !== "failed")) {
+      return false
+    }
+    await db.outboundQueue.update(jobId, {
+      status: "sending",
+      attempts: (row.attempts ?? 0) + 1,
+    })
+    return true
   })
 }
 

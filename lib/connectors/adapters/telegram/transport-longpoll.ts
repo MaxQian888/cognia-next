@@ -6,6 +6,7 @@
  */
 
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import type { TelegramUpdate } from "./parse"
 
 export interface LongPollOptions {
@@ -85,7 +86,7 @@ export async function* startLongPoll(opts: LongPollOptions): AsyncGenerator<Tele
       if (err instanceof DOMException && err.name === "AbortError") return
 
       attempts += 1
-      const backoffMs = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+      const backoffMs = reconnectBackoffMs(backoffBaseMs, attempts)
       try {
         await delay(backoffMs, opts.signal)
       } catch {

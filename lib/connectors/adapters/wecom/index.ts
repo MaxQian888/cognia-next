@@ -16,6 +16,7 @@
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import type {
   PlatformAdapter,
   AdapterContext,
@@ -362,7 +363,7 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     cleanupListeners()
     if (stopCalled) return
     attempts += 1
-    await delay(backoffBaseMs * Math.min(2 ** attempts, 32))
+    await delay(reconnectBackoffMs(backoffBaseMs, attempts))
     if (stopCalled) return
     try {
       await connectOnce()

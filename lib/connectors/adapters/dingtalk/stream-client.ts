@@ -20,6 +20,7 @@
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsHttpRequest,
   connectorsWsOpen,
@@ -138,7 +139,7 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
         if (opts.signal.aborted) return
         attempts += 1
         try {
-          await delay(backoffBaseMs * Math.min(2 ** attempts, 32), opts.signal)
+          await delay(reconnectBackoffMs(backoffBaseMs, attempts), opts.signal)
         } catch {
           return
         }
@@ -152,7 +153,7 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
         if (opts.signal.aborted) return
         attempts += 1
         try {
-          await delay(backoffBaseMs * Math.min(2 ** attempts, 32), opts.signal)
+          await delay(reconnectBackoffMs(backoffBaseMs, attempts), opts.signal)
         } catch {
           return
         }
@@ -244,7 +245,7 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
       if (opts.signal.aborted) return
       attempts += 1
       try {
-        await delay(backoffBaseMs * Math.min(2 ** attempts, 32), opts.signal)
+        await delay(reconnectBackoffMs(backoffBaseMs, attempts), opts.signal)
       } catch {
         return
       }
