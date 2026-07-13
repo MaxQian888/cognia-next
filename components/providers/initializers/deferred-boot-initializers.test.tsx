@@ -2,13 +2,13 @@ import { render, act } from "@testing-library/react"
 
 import { DeferredBootInitializers } from "./deferred-boot-initializers"
 
-// Replace every `next/dynamic(...)` call with the same lightweight stub so we
-// can assert how many deferred children get rendered without pulling the real
-// workflow/gateway/connector/scheduler/agent-team subsystem graphs into the
-// test.
+// Replace the `next/dynamic(...)` boundary with a lightweight stub so we can
+// assert the gating without pulling the impl chunk's subsystem graphs into
+// the test. The impl's own composition is covered by
+// deferred-boot-initializers-impl.test.tsx.
 jest.mock("next/dynamic", () => () => {
-  const Stub = () => <span data-testid="deferred-child" />
-  Stub.displayName = "MockDeferredChild"
+  const Stub = () => <span data-testid="deferred-bundle" />
+  Stub.displayName = "MockDeferredBundle"
   return Stub
 })
 
@@ -24,14 +24,12 @@ describe("DeferredBootInitializers", () => {
     mockPetRole = "main"
   })
 
-  it("renders every deferred child once mounted (all shells, no platform gate)", async () => {
+  it("mounts the single deferred bundle once hydrated (all shells, no platform gate)", async () => {
     let container!: HTMLElement
     await act(async () => {
       container = render(<DeferredBootInitializers />).container
     })
-    // Mirrors the count of bundled children in the component — a guard
-    // against silently dropping one when the list changes.
-    expect(container.querySelectorAll('[data-testid="deferred-child"]')).toHaveLength(6)
+    expect(container.querySelectorAll('[data-testid="deferred-bundle"]')).toHaveLength(1)
   })
 
   it.each(["overlay", "popup"] as const)("renders nothing in the %s pet window", async (role) => {
@@ -42,6 +40,6 @@ describe("DeferredBootInitializers", () => {
     })
     // The bundled initializers are all main-window concerns; the pet
     // windows must not boot the workflow/gateway/connector runtimes.
-    expect(container.querySelectorAll('[data-testid="deferred-child"]')).toHaveLength(0)
+    expect(container.querySelectorAll('[data-testid="deferred-bundle"]')).toHaveLength(0)
   })
 })

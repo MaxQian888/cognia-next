@@ -294,8 +294,11 @@ const globalConfig: Config = {
     "packages/web-search/src/**/*.{ts,tsx}",
     // tts was lifted out of lib/tts (coverage-collected). types.ts came from
     // types/media/tts.ts, which carried runtime tables (TTS_PROVIDERS,
-    // getTTSError) and its own test, so it stays collected too.
+    // getTTSError) and its own test, so it stays collected too. The index
+    // barrel has no importers (consumers deep-import submodules), so its
+    // re-export statements never execute under Jest — exclude it.
     "packages/tts/src/**/*.{ts,tsx}",
+    "!packages/tts/src/index.ts",
     // logging core was lifted out of lib/logging (coverage-collected). Its
     // types/ subtree came from types/logging, which was never
     // coverage-collected (provider-types precedent), so it is excluded.

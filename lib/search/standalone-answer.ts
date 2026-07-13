@@ -11,6 +11,12 @@
 //    buffering) and `browserDirectHeaders()` (the Anthropic browser-direct
 //    CORS opt-in).
 
+// Side-effect: registers the settings-store usage reporter with the package
+// core. The core's search() (which this pipeline calls internally) records
+// per-provider usage through that seam, so a session whose only search
+// surface is /search must still load the registration.
+import "./search-service"
+
 import {
   runStandaloneSearchAnswer as runStandaloneSearchAnswerCore,
   type RunStandaloneSearchParams,
