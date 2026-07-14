@@ -559,7 +559,7 @@ describe("load-complete signal", () => {
       Object.defineProperty(document, "readyState", { value: "loading", configurable: true })
       install()
       install() // second init-script run against the same window
-      const loadListeners = addSpy.mock.calls.filter(([type]) => type === "load")
+      const loadListeners = addSpy.mock.calls.filter(([type]) => (type as string) === "load")
       expect(loadListeners).toHaveLength(1)
     } finally {
       addSpy.mockRestore()

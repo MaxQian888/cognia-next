@@ -382,7 +382,12 @@ export default function Live2dCanvas({
 
   // Ambient head/eye envelopes for the idle-collapsed AI states
   // (thinking/waiting/review) — skipped while paused (no frames fire).
-  useLive2dParamEmotion(model, state, oneShot, reducedMotion || Boolean(paused))
+  useLive2dParamEmotion(
+    model as unknown as Live2dLipSyncModel | null,
+    state,
+    oneShot,
+    reducedMotion || Boolean(paused)
+  )
 
   // Mouth flap while a bubble is up. Skip when paused (ticker stopped → no frames)
   // so we don't register a handler that can never fire.

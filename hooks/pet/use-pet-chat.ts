@@ -10,7 +10,7 @@
 
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { useLocale } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -58,7 +58,9 @@ export function usePetChat(
   const inFlightRef = useRef(false)
 
   const respond = deps.respond ?? respondAsPet
-  const now = deps.now ?? (() => Date.now())
+  // Stable clock: the `?? (() => Date.now())` fallback would otherwise be a
+  // fresh function every render, invalidating `send`'s memoization each time.
+  const now = useMemo(() => deps.now ?? (() => Date.now()), [deps.now])
 
   const send = useCallback(
     async (raw: string) => {

@@ -8,7 +8,6 @@
  * @see https://github.com/zed-industries/claude-code-acp
  */
 
-import { isTauri } from "@/lib/utils"
 import {
   agentInvoke,
   agentListen,

@@ -3,6 +3,10 @@
  */
 import "fake-indexeddb/auto"
 
+// Dexie clear/reseed in beforeEach can exceed the default 5s hook timeout
+// under parallel-worker CPU contention (repo idiom for Dexie suites).
+jest.setTimeout(30_000)
+
 import { getDb } from "@/lib/db/schema"
 import { createAdapterInstance, getAdapterInstance } from "@/lib/db/adapter-instances"
 import { upsertSessionUsage } from "@/lib/db/session-usage"
@@ -369,7 +373,7 @@ describe("runUsagePresenceRefresh", () => {
       attempts: 1,
       createdAt: NOW,
       updatedAt: NOW,
-    } as unknown as Parameters<typeof getDb.prototype>[0])
+    } as never)
 
     await runUsagePresenceRefresh({ adapterId: row.id, now: NOW })
     const updated = await getAdapterInstance(row.id)

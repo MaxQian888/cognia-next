@@ -7,6 +7,10 @@ import "fake-indexeddb/auto"
 import { createCanvasAPI } from "./canvas-api"
 import { initializePluginPermissions } from "./permission-api"
 
+// Cold Dexie delete + reseed in beforeEach can exceed the default 5s hook
+// timeout under parallel-worker CPU contention (repo idiom for Dexie suites).
+jest.setTimeout(30_000)
+
 type MockCanvasEditorSelection = {
   startLineNumber: number
   startColumn: number
@@ -1039,6 +1043,8 @@ describe("permission gate", () => {
   it("throws PermissionError when canvas permissions are not granted", () => {
     const api = createCanvasAPI("no-perms-plugin")
     expect(() => api.getContent()).toThrow(/canvas:read/)
-    expect(() => api.executeAction("improve", "x", {})).toThrow(/canvas:run/)
+    expect(() =>
+      api.executeAction("improve", "x", { provider: "openai", model: "gpt-4", apiKey: "k" })
+    ).toThrow(/canvas:run/)
   })
 })

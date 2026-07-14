@@ -617,10 +617,20 @@ pub fn terminal_headless_kill(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     fn script_dir() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
+        // Mirror `commands::resolve_script_dir`'s dev fallback: the shell
+        // integration scripts live under src-tauri/resources/terminal/;
+        // CARGO_MANIFEST_DIR is crates/cognia-terminal, two hops below the
+        // workspace root (ADR-0067 extraction). Pointing at the crate-local
+        // `resources/terminal` (which doesn't exist) silently disables OSC 633
+        // integration, so `run` never sees a CommandEnd marker and times out.
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest
+            .ancestors()
+            .nth(2)
+            .map(|root| root.join("src-tauri"))
+            .unwrap_or(manifest)
             .join("resources")
             .join("terminal")
     }

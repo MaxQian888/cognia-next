@@ -63,7 +63,7 @@ export async function ghCliToken(): Promise<string | null> {
     const { runHeadlessExec } = await import("@/lib/terminal/headless-exec")
     const out = await runHeadlessExec({
       command: "gh auth token",
-      onAskVerdict: "allow",
+      onAskVerdict: "run",
       source: "agent",
       timeoutMs: 15_000,
     })
@@ -94,7 +94,10 @@ export interface ResolveOctokitDeps {
 export function createResolveOctokit(
   deps: ResolveOctokitDeps = {
     getToken: ghCliToken,
-    build: (opts) => getOctokitForRepo(opts),
+    // The real octokit satisfies OctokitLike at runtime; its typed response
+    // headers are `string | number | undefined` (vs. OctokitLike's narrower
+    // `string | undefined`), so bridge across the minimal interface here.
+    build: (opts) => getOctokitForRepo(opts) as unknown as Promise<OctokitLike>,
   }
 ): (repoFullName: string) => Promise<OctokitLike | null> {
   return async (repoFullName) => {

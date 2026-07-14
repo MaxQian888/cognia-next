@@ -212,6 +212,7 @@ const a2uiSegment = {
   type: "a2ui" as const,
   surfaceId: "s1",
   content: { components: {}, dataModel: {}, rootId: "root" },
+  plainTextMirror: "",
 }
 
 describe("createWeComAdapter — lifecycle", () => {
@@ -490,7 +491,7 @@ describe("createWeComAdapter — outbound reply (streaming)", () => {
     expect((finish!.body as { stream: { content: string } }).stream.content).toBe("thinking...")
     // Still reported as an empty outbound to the queue.
     expect(res.ok).toBe(false)
-    if (!res.ok) expect(res.error.code).toBe("validation")
+    if (!res.ok) expect(res.error!.code).toBe("validation")
     await adapter.stop()
   })
 })
@@ -513,10 +514,10 @@ describe("createWeComAdapter — errcode handling", () => {
     )
     expect(res.ok).toBe(false)
     if (!res.ok) {
-      expect(res.error.retryable).toBe(false)
-      expect(res.error.code).toBe("platform_4xx")
-      expect(res.error.message).toContain("95001")
-      expect(res.error.message).toContain("content blocked")
+      expect(res.error!.retryable).toBe(false)
+      expect(res.error!.code).toBe("platform_4xx")
+      expect(res.error!.message).toContain("95001")
+      expect(res.error!.message).toContain("content blocked")
     }
     await adapter.stop()
   })
@@ -543,9 +544,9 @@ describe("createWeComAdapter — errcode handling", () => {
     const res = await sendP
     expect(res.ok).toBe(false)
     if (!res.ok) {
-      expect(res.error.retryable).toBe(true)
-      expect(res.error.code).toBe("platform_5xx")
-      expect(res.error.message).toContain("connection closed")
+      expect(res.error!.retryable).toBe(true)
+      expect(res.error!.code).toBe("platform_5xx")
+      expect(res.error!.message).toContain("connection closed")
     }
     await adapter.stop()
   })
@@ -570,8 +571,8 @@ describe("createWeComAdapter — errcode handling", () => {
     )
     expect(res.ok).toBe(false)
     if (!res.ok) {
-      expect(res.error.retryable).toBe(false)
-      expect(res.error.message).toContain("45033")
+      expect(res.error!.retryable).toBe(false)
+      expect(res.error!.message).toContain("45033")
     }
     await adapter.stop()
   })

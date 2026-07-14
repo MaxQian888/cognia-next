@@ -103,7 +103,7 @@ jest.mock("@/lib/db/adapter-instances", () => ({
   listAdapterInstancesByType: jest.fn().mockResolvedValue([]),
 }))
 
-const getTemplateWarningsMock = jest.fn(() => [] as unknown[])
+const getTemplateWarningsMock = jest.fn((_id: string) => [] as unknown[])
 jest.mock("@/lib/plugin/registries/agent-team-template-registry", () => ({
   getTemplateWarnings: (id: string) => getTemplateWarningsMock(id),
 }))

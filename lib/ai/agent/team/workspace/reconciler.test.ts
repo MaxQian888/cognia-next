@@ -13,6 +13,7 @@ function makeGit(): WorktreeGitOps & {
     },
     list: async () => [],
     commit: async () => "sha",
+    prune: async () => {},
   }
 }
 

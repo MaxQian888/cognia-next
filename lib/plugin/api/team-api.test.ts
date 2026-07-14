@@ -218,7 +218,7 @@ describe("createTeamAPI", () => {
     })
 
     it("assignTask validates task + same-team assignee", async () => {
-      const { team, mate, failed } = seed()
+      const { mate, failed } = seed()
       const api = createTeamAPI(PLUGIN)
       await api.assignTask(failed.id, mate.id)
       expect(useAgentTeamStore.getState().tasks[failed.id].assignedTo).toBe(mate.id)

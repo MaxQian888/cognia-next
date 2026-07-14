@@ -25,6 +25,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "docs/.next/**",
     "docs/.source/**",
+    // Docs is a static export (Fumadocs → Cloudflare Pages); docs/out/ holds
+    // the minified bundle, same rationale as the root out/ artifact dir.
+    "docs/out/**",
     "docs/next-env.d.ts",
     ".agents/**",
     ".claude/**",

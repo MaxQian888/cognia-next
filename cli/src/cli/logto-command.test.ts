@@ -1,9 +1,11 @@
 /**
  * @jest-environment node
  */
-import type { LogtoSession } from "@/lib/logto/client"
+import type { LogtoClientConfig, LogtoDrivers, LogtoSession } from "@/lib/logto/client"
 
 import type { LogtoSessionFs } from "../config/logto-session"
+
+import path from "node:path"
 
 import { parseArgv } from "./args"
 import { logtoCommand } from "./logto-command"
@@ -12,7 +14,11 @@ function captureOut() {
   const lines: string[] = []
   const errs: string[] = []
   return {
-    sink: { write: (s: string) => lines.push(s), error: (s: string) => errs.push(s) },
+    sink: {
+      write: (s: string) => lines.push(s),
+      error: (s: string) => errs.push(s),
+      json: (obj: unknown) => lines.push(JSON.stringify(obj) + "\n"),
+    },
     text: () => lines.join(""),
     errText: () => errs.join(""),
   }
@@ -42,7 +48,9 @@ function fakeServer() {
 }
 
 const HOME = "/home/u/.cognia"
-const SESSION_FILE = `${HOME}/logto.json`
+// Build the expected path the same way the source does (path.join), so the
+// store key matches on both POSIX and Windows separators.
+const SESSION_FILE = path.join(HOME, "logto.json")
 const sampleSession: LogtoSession = {
   issuer: "https://logto.test/oidc",
   clientId: "cli-1",
@@ -59,7 +67,9 @@ describe("logtoCommand", () => {
     const cap = captureOut()
     const fs = memFs()
     const server = fakeServer()
-    const login = jest.fn(async () => sampleSession)
+    const login = jest.fn<Promise<LogtoSession>, [LogtoClientConfig, LogtoDrivers]>(
+      async () => sampleSession
+    )
     const openBrowser = jest.fn(async () => true)
 
     const code = await logtoCommand(
@@ -89,10 +99,7 @@ describe("logtoCommand", () => {
     )
 
     expect(code).toBe(0)
-    const [cfg, drivers] = login.mock.calls[0] as [
-      Record<string, unknown>,
-      { waitForCode: (p: { redirectUri: string; state: string }) => Promise<unknown> },
-    ]
+    const [cfg, drivers] = login.mock.calls[0]
     expect(cfg).toMatchObject({
       issuer: "https://logto.test/oidc",
       clientId: "cli-1",
@@ -111,7 +118,9 @@ describe("logtoCommand", () => {
 
   it("login: reads config from env when flags are absent", async () => {
     const cap = captureOut()
-    const login = jest.fn(async () => sampleSession)
+    const login = jest.fn<Promise<LogtoSession>, [LogtoClientConfig, LogtoDrivers]>(
+      async () => sampleSession
+    )
     const code = await logtoCommand(parseArgv(["logto", "login"]), {
       home: HOME,
       out: cap.sink,

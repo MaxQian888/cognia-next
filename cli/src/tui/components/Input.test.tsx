@@ -654,7 +654,7 @@ describe("Input vim mode (/vim)", () => {
 
   it("NORMAL-mode edits work end to end (0, dw)", () => {
     const onSubmit = jest.fn()
-    const { container } = render(<Harness onSubmit={onSubmit} vimEnabled />)
+    render(<Harness onSubmit={onSubmit} vimEnabled />)
     type("one two")
     key("", { escape: true })
     type("0dw")

@@ -8,16 +8,19 @@ jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
 let mockResolvedTheme: string | undefined = "dark"
 jest.mock("next-themes", () => ({ useTheme: () => ({ resolvedTheme: mockResolvedTheme }) }))
 
-const mountMock = jest.fn(() => ({ uri: "file:///repo/src/a.ts", dispose: jest.fn() }))
+const mountMock = jest.fn((..._a: unknown[]) => ({
+  uri: "file:///repo/src/a.ts",
+  dispose: jest.fn(),
+}))
 jest.mock("@/lib/editor-workbench/monaco-workbench", () => ({
   mountMonacoWorkbench: (...a: unknown[]) => mountMock(...a),
 }))
-const registerActionsMock = jest.fn(() => [{ dispose: jest.fn() }])
+const registerActionsMock = jest.fn((..._a: unknown[]) => [{ dispose: jest.fn() }])
 jest.mock("@/lib/editor-workbench/register-editor-actions", () => ({
   registerEditorActions: (...a: unknown[]) => registerActionsMock(...a),
 }))
-const snippetsMock = jest.fn(() => [])
-const emmetMock = jest.fn(() => [])
+const snippetsMock = jest.fn((..._a: unknown[]) => [])
+const emmetMock = jest.fn((..._a: unknown[]) => [])
 jest.mock("@/lib/monaco/snippets", () => ({
   registerAllSnippets: (...a: unknown[]) => snippetsMock(...a),
   registerEmmetSupport: (...a: unknown[]) => emmetMock(...a),
@@ -51,10 +54,15 @@ jest.mock("@monaco-editor/react", () => {
     onChange: (v: string) => void
   }) => {
     capturedOnChange = onChange
+    // Mimic @monaco-editor/react: fire onMount exactly once, even if the effect
+    // re-runs — a ref guard keeps mount-once semantics while `onMount` stays a dep.
+    const mountedRef = React.useRef(false)
     React.useEffect(() => {
+      if (mountedRef.current) return
+      mountedRef.current = true
       const editor = { revealLineInCenter, setPosition, focus, getId: () => "ed1" }
       onMount(editor, { editor: {}, languages: {} })
-    }, [])
+    }, [onMount])
     return React.createElement("div", { "data-testid": "monaco" })
   }
   return { __esModule: true, default: MockEditor }

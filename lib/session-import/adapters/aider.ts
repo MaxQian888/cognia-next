@@ -20,8 +20,6 @@ import type {
   SessionSummary,
 } from "../types"
 
-type Part = StoredMessage["parts"][number]
-
 const ACCEPTED = [".md"]
 const STARTED_RE = /^#\s*aider chat started at\s+(.+)$/i
 

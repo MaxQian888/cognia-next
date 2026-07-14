@@ -71,6 +71,12 @@ pub fn register_managed_dir(dir: PathBuf) {
 /// binary — so registering it makes a locally-built CLI detectable without
 /// `cargo install` polluting the developer's PATH. Returns `None` when the
 /// exe path is unresolvable.
+// Only `register_dev_build_dir` (below, `#[cfg(debug_assertions)]`) and the
+// unit tests call this, so in a release build it has no live caller and trips
+// `dead_code`. Keep the fn present in all profiles (the doc link above and the
+// always-compiled `register_dev_build_dir` reference it) and silence the lint
+// only where it actually fires.
+#[cfg_attr(not(any(debug_assertions, test)), allow(dead_code))]
 pub fn current_exe_dir() -> Option<PathBuf> {
     std::env::current_exe()
         .ok()

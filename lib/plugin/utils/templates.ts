@@ -1838,8 +1838,8 @@ export interface ScaffoldResult {
 export function scaffoldPluginChecked(options: PluginScaffoldOptions): ScaffoldResult {
   // Lazy import avoids a cycle: scaffold-healthcheck → core/validation is a
   // heavier module graph than templates.ts needs at load time.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { healthcheckScaffold } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     require("./scaffold-healthcheck") as typeof import("./scaffold-healthcheck")
   const files = scaffoldPlugin(options)
   return { files, health: healthcheckScaffold(files) }

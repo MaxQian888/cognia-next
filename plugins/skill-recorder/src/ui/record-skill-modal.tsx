@@ -61,7 +61,7 @@ export function RecordSkillModal({ onClose }: PluginModalProps) {
         resources,
       })
       toast.success(t("recorder.saved", { name: created.name }))
-      useSkillsStore.getState().openEdit(created.id)
+      useSkillsStore.getState().openSkillInEditor(created.id, draft.content)
       onClose()
     } catch {
       toast.error(t("recorder.generateFailed"))

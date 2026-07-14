@@ -4,7 +4,7 @@ import {
   buildPaddleOcrProvider,
   paddleOcrExtract,
 } from "./paddle-ocr"
-import { __setNativeOcrInvoker } from "./tesseract-native"
+import { __setNativeOcrInvoker, type NativeOcrInvoker } from "./tesseract-native"
 import type { OcrInput, OcrProviderContext } from "@/types/ocr"
 
 const input: OcrInput = {
@@ -61,7 +61,9 @@ describe("paddleOcrExtract", () => {
   })
 
   it("sends no options field — the invoke payload has no model knob", async () => {
-    const invoker = jest.fn(async () => ({ text: "ok", blocks: [] }))
+    const invoker = jest.fn<ReturnType<NativeOcrInvoker>, Parameters<NativeOcrInvoker>>(
+      async () => ({ text: "ok", blocks: [] })
+    )
     const ctx: OcrProviderContext = {
       credentials: { secrets: {} },
       config: { invoker },

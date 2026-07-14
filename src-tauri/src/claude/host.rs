@@ -194,10 +194,6 @@ pub(crate) mod test_support {
     }
 
     impl RecordingSidecarHost {
-        pub fn new() -> Arc<Self> {
-            Arc::new(Self::default())
-        }
-
         pub fn with_script(script: PathBuf) -> Arc<Self> {
             Arc::new(Self {
                 emitted: Mutex::new(Vec::new()),

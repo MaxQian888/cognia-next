@@ -55,7 +55,7 @@ declare global {
 
 type SpeechInputMode = "speech-recognition" | "media-recorder" | "none"
 
-export type SpeechInputProps = ComponentProps<typeof Button> & {
+export type SpeechInputProps = Omit<ComponentProps<typeof Button>, "onError"> & {
   onTranscriptionChange?: (text: string) => void
   /**
    * Callback for when audio is recorded using MediaRecorder fallback.

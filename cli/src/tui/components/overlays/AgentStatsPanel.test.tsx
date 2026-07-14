@@ -26,6 +26,8 @@ const overview: AgentStatsOverview = {
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
       costUsd: 0.5,
+      durationMs: 0,
+      reasoningTokens: 0,
     },
   ],
   tokensPerDay: [

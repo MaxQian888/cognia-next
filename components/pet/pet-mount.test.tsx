@@ -36,7 +36,7 @@ jest.mock("@/lib/platform/detect", () => ({ isTauri: () => isTauri() }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => usePlatform() }))
 // Mocked at the module boundary: the real module pulls in `@/lib/tauri`,
 // whose transport probe calls the mocked `isTauri()` at import time (TDZ).
-const onPetNativeStateChanged = jest.fn(() => () => {})
+const onPetNativeStateChanged = jest.fn((_handler: unknown) => () => {})
 jest.mock("@/lib/tauri/pet-window", () => ({
   onPetNativeStateChanged: (handler: unknown) => onPetNativeStateChanged(handler),
 }))

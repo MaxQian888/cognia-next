@@ -234,7 +234,7 @@ describe("buildTeamPrFeedback", () => {
       ciRoutes(30, [{ number: 30, html_url: "https://gh/acme/app/pull/30" }], "passing")
     )
     const runReview: RunReview = jest.fn(async () => ({
-      verdict: "changes_requested",
+      verdict: "changes_requested" as const,
       body: "fix the null check",
     }))
     const { params, messages } = makeParams(octokit, timerDeps, {

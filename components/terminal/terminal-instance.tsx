@@ -1138,7 +1138,7 @@ function TerminalInstanceImpl(
               const abs = resolveLinkPath(cwd, mm.path)
               // Prefer a live project editor rooted at this path (editable +
               // LSP); fall back to the read-only viewer when none is open.
-              if (!openInProjectEditor(abs, mm.line, mm.column)) {
+              if (!openInProjectEditor(abs, mm.line ?? undefined, mm.column ?? undefined)) {
                 useFileViewerStore.getState().openFile(abs, mm.line, mm.column)
               }
             },

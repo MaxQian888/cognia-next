@@ -253,7 +253,7 @@ describe("createMatrixAdapter", () => {
   })
 
   it("send() uploads image segments and sends native m.image events", async () => {
-    mockInvoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
+    mockInvoke.mockImplementation(async (cmd: string, _args: Record<string, unknown>) => {
       if (cmd === "connectors_media_upload") return "mxc://matrix.org/uploaded"
       if (cmd === "connectors_http_request") return httpResp(200, { event_id: "$img" })
       throw new Error(`unexpected command ${cmd}`)

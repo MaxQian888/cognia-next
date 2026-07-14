@@ -224,7 +224,7 @@ describe("createRunPrReview", () => {
   })
 
   it("PII-gates the reviewer prompt (user-derived PR title) before dispatch", async () => {
-    const dispatch = jest.fn(async () => ({
+    const dispatch = jest.fn(async (_ctx: unknown, _opts: { prompt: string }) => ({
       value: { verdict: "approved", body: "ok" },
       teammateId: "x",
       raw: "{}",

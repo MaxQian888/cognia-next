@@ -6,6 +6,7 @@ import { usePendingGatesStore, type PendingGate } from "@/stores/agent/pending-g
 
 const budgetGate: PendingGate = {
   key: { scope: "team-budget", id: "team-1" },
+  status: "open",
   gateType: "budget",
   title: "Token budget reached",
   teamId: "team-1",

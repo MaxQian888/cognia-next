@@ -1,6 +1,8 @@
 import { render, waitFor } from "@testing-library/react"
 
-const notify = jest.fn(async () => "n1")
+import type { NotificationInput } from "@/types/notifications"
+
+const notify = jest.fn<Promise<string>, [NotificationInput]>(async () => "n1")
 let entries: Array<{ requestId: string; status: string }> = []
 
 jest.mock("next-intl", () => ({
@@ -11,7 +13,7 @@ jest.mock("@/stores/agent/approval-journal-store", () => ({
   useApprovalJournalStore: { getState: () => ({ entries }) },
 }))
 jest.mock("@/lib/notifications/runtime", () => ({
-  notify: (...args: unknown[]) => notify(...(args as [])),
+  notify: (...args: unknown[]) => notify(...(args as [NotificationInput])),
 }))
 
 import { ApprovalJournalInitializer } from "./approval-journal-initializer"

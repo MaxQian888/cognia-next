@@ -93,7 +93,7 @@ it("disconnects its observers on unmount", () => {
 })
 
 it("stays visible and observes nothing when the ref is empty", () => {
-  const ref = { current: null } as React.RefObject<HTMLElement>
+  const ref = { current: null } as React.RefObject<HTMLElement | null>
   const { result } = renderHook(() => useRegionVisibility(ref))
   expect(result.current).toBe(true)
   expect(ioObserve).not.toHaveBeenCalled()

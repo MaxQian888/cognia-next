@@ -154,6 +154,7 @@ export type PluginCapability =
   | "context-provider" // Contributes declarative agent context providers
   | "external-agent-preset" // cognia-next: contributes external-agent presets (Claude Code / Codex / etc.)
   | "external-agent-adapter" // cognia-next: contributes external-agent protocol adapters (new protocols)
+  | "session-importer" // cognia-next: contributes external-agent session-history importers (Cursor / Cline / Windsurf / …)
   | "mcp-server-preset" // Contributes MCP server presets to the gallery
   | "connectors" // Provides Platform Connector adapters (Task 110)
   | "workflow" // Contributes custom workflow node executors (ADR 0017)

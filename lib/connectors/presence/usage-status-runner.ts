@@ -37,6 +37,7 @@ import {
 } from "@/types/connectors/presence"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
+import type { OutboundJobRow } from "@/lib/db/connector-types"
 
 export const PRESENCE_REFRESH_TASK_TYPE = "connection:presence:refresh"
 
@@ -162,7 +163,7 @@ async function refreshCard(args: {
   if (!state.cardMessageId && state.cardJobId) {
     let jobId: string | undefined = state.cardJobId
     for (let hop = 0; hop < 3 && jobId; hop++) {
-      const job = await getDb().outboundQueue.get(jobId)
+      const job: OutboundJobRow | undefined = await getDb().outboundQueue.get(jobId)
       if (!job || (job.status === "deadlettered" && !job.reroutedToJobId)) {
         // Cancelled or terminally failed: forget it so THIS tick re-creates
         // the card cleanly and tracks the new creating job.

@@ -681,7 +681,7 @@ function ComposerInner(props: InnerProps) {
               useChatStore.getState().toggleEphemeralSkill(skillId),
             addReferencedWorkflowElement: (el) =>
               useChatStore.getState().addReferencedWorkflowElement(el),
-            applyPreset: (preset, session) => applyPreset(preset, session),
+            applyPreset: (preset, session) => applyPreset(preset, session).then(() => {}),
             session: props.session,
             clearWorkflowHighlight: () => props.workflowMention?.onHighlight?.([]),
             strings: {

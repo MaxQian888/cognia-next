@@ -24,9 +24,9 @@ jest.mock("@/hooks/skills/use-skill-generation", () => ({
 const createSkillMock = jest.fn()
 jest.mock("@/lib/db/skills", () => ({ createSkill: (...a: unknown[]) => createSkillMock(...a) }))
 
-const openEditMock = jest.fn()
+const openInEditorMock = jest.fn()
 jest.mock("@/stores/skills", () => ({
-  useSkillsStore: { getState: () => ({ openEdit: openEditMock }) },
+  useSkillsStore: { getState: () => ({ openSkillInEditor: openInEditorMock }) },
 }))
 
 const toastInfo = jest.fn()
@@ -49,7 +49,7 @@ const onClose = jest.fn()
 
 beforeEach(() => {
   createSkillMock.mockReset().mockResolvedValue({ id: "new-skill", name: "Export report" })
-  openEditMock.mockReset()
+  openInEditorMock.mockReset()
   toastInfo.mockReset()
   toastSuccess.mockReset()
   toastError.mockReset()
@@ -105,7 +105,7 @@ describe("RecordSkillModal", () => {
     expect(createSkillMock).toHaveBeenCalledWith(
       expect.objectContaining({ source: "generated", name: "Export report" })
     )
-    expect(openEditMock).toHaveBeenCalledWith("new-skill")
+    expect(openInEditorMock).toHaveBeenCalledWith("new-skill", "## Steps\n1. x")
     expect(onClose).toHaveBeenCalled()
   })
 

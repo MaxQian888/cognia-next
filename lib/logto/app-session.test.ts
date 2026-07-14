@@ -71,7 +71,10 @@ describe("getActiveLogtoSession", () => {
   it("refreshes and persists when the token is within the skew window", async () => {
     const s = session({ expiresAt: NOW + REFRESH_SKEW_MS - 1 })
     const refreshed = session({ accessToken: "at2", expiresAt: NOW + 3_600_000 })
-    const refresh = jest.fn(async () => refreshed)
+    const refresh = jest.fn<
+      Promise<LogtoSession>,
+      Parameters<NonNullable<LogtoAppSessionDeps["refresh"]>>
+    >(async () => refreshed)
     const save = jest.fn(async () => {})
     const result = await getActiveLogtoSession(
       base({ load: jest.fn(async () => s), refresh, save })
@@ -97,7 +100,10 @@ describe("getActiveLogtoSession", () => {
 
   it("threads the organization id into the refresh config", async () => {
     const s = session({ expiresAt: NOW - 1, organizationId: "org_9" })
-    const refresh = jest.fn(async () => session())
+    const refresh = jest.fn<
+      Promise<LogtoSession>,
+      Parameters<NonNullable<LogtoAppSessionDeps["refresh"]>>
+    >(async () => session())
     await getActiveLogtoSession(base({ load: jest.fn(async () => s), refresh, save: jest.fn() }))
     expect(refresh.mock.calls[0]![0]).toMatchObject({ organizationId: "org_9" })
   })

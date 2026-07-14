@@ -7,6 +7,10 @@ import type { ImportedConversation } from "./importers/types"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 
+// Cold Dexie delete + reseed in beforeEach can exceed the default 5s hook
+// timeout under parallel-worker CPU contention (repo idiom for Dexie suites).
+jest.setTimeout(30_000)
+
 function makeConv(
   id: string,
   session: Partial<ChatSession> = {},

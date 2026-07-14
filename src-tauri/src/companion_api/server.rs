@@ -492,10 +492,13 @@ mod tests {
             )
             .await
             .unwrap();
-        // No ingress on desktop: the path falls through to the router
-        // fallback, which the JWT layer wraps (pre-existing behavior) → 401.
-        // The load-bearing half of the assertion is "not 200".
-        assert_eq!(resp.status().as_u16(), 401, "desktop has no ingress");
+        // No ingress on desktop: `/connectors/*` is never nested, so the path
+        // matches no route and hits axum's default fallback → 404. The
+        // load-bearing half of the assertion is "not 200"; 404 (route absent)
+        // is the correct signal that the ingress isn't mounted. Genuinely
+        // protected routes (acp/a2a/whoami) still return 401 via their JWT
+        // layer — see `acp_route_requires_device_jwt`.
+        assert_eq!(resp.status().as_u16(), 404, "desktop has no ingress");
 
         // The pre-auth rate limiter requires a peer address; oneshot has no
         // TCP connection, so inject ConnectInfo the way the make-service

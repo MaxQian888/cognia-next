@@ -92,8 +92,8 @@ export interface SubagentPart {
   parentSubagentId?: string
   /** Token usage snapshot for the tree's token column. */
   tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number }
-  /** Set when this dispatch was refused by a nesting guard. */
-  rejection?: { reason: "max-depth" | "cycle"; message: string }
+  /** Set when this dispatch was refused by a nesting guard or dispatch policy. */
+  rejection?: { reason: "max-depth" | "cycle" | "policy"; message: string }
   /** True while the run is detached (backgrounded) and awaiting a later result. */
   backgrounded?: boolean
 

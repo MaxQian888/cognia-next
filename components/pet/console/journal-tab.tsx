@@ -10,7 +10,6 @@ import { useLiveQuery } from "dexie-react-hooks"
 import {
   BellIcon,
   BotIcon,
-  BugPlayIcon,
   CalendarClockIcon,
   CheckCircle2Icon,
   CookieIcon,

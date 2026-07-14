@@ -471,7 +471,7 @@ export function LogPanel({
               esc(log.message),
               esc(log.traceId ?? ""),
               esc(log.sessionId ?? ""),
-              esc(log.source ?? ""),
+              esc(log.source ? JSON.stringify(log.source) : ""),
               esc(log.data ? JSON.stringify(log.data) : ""),
             ].join(",")
           )

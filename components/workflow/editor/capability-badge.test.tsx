@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, renderHook, waitFor } from "@testing-library/react"
+import { render, screen, renderHook } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ReactNode } from "react"
 import enMessages from "@/i18n/messages/en.json"

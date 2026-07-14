@@ -372,6 +372,7 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
     }),
     [
       autoRefresh,
+      setAutoRefresh,
       levelFilter,
       moduleFilter,
       sourceFilter,

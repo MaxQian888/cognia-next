@@ -263,7 +263,7 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
               // Chat allow/blocklist gate (audited fix #12) — callback
               // events used to bypass gateInboundEvent entirely.
               const cbChatId = String(update.callback_query.message?.chat.id ?? "")
-              if (!(await callbackChatAllowed(opts.id, cbChatId, callback.conversationKey))) {
+              if (!(await callbackChatAllowed(opts.id, cbChatId, callback.conversationKey ?? ""))) {
                 continue
               }
               lastActivityAt = Date.now()
@@ -305,7 +305,7 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
                 !(await callbackChatAllowed(
                   opts.id,
                   frChatId,
-                  forceReplyCallback.conversationKey
+                  forceReplyCallback.conversationKey ?? ""
                 ))
               ) {
                 continue
@@ -452,9 +452,7 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
         chat_id: chatId,
         message_id: Number(msgId),
         text,
-        ...(textCall?.payload["parse_mode"]
-          ? { parse_mode: textCall.payload["parse_mode"] }
-          : {}),
+        ...(textCall?.payload["parse_mode"] ? { parse_mode: textCall.payload["parse_mode"] } : {}),
         ...(textCall?.payload["reply_markup"]
           ? { reply_markup: textCall.payload["reply_markup"] }
           : {}),

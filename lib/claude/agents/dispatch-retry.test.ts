@@ -1,5 +1,4 @@
 import {
-  DEFAULT_DISPATCH_RETRY,
   retryDelayMs,
   shouldRetryDispatch,
   waitForRetry,

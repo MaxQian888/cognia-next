@@ -54,8 +54,8 @@ export function mergeImportedSession(
 ): ChatSession {
   if (!existing) return incoming
   const merged: ChatSession = { ...incoming }
-  const source = existing as Record<string, unknown>
-  const target = merged as Record<string, unknown>
+  const source = existing as unknown as Record<string, unknown>
+  const target = merged as unknown as Record<string, unknown>
   for (const key of PRESERVED_DECORATIONS) {
     if (source[key] !== undefined) target[key] = source[key]
   }

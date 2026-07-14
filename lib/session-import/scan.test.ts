@@ -48,7 +48,7 @@ describe("scanFileSummaries — picked files", () => {
   }
 
   it("summarizes only accepted files and skips null summaries", async () => {
-    const summarize = (content: string, locator: string) =>
+    const summarize = (content: string, _locator: string) =>
       content === "B" ? null : summaryOf(content, content === "A" ? 100 : 0)
     const out = await scanFileSummaries(input, [], accept, summarize)
     expect(out.map((s) => s.title)).toEqual(["A"]) // .txt filtered, B → null

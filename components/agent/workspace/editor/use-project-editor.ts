@@ -21,7 +21,7 @@ import {
   unregisterProjectWorkspace,
 } from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 import { watchWorkspace } from "@/lib/files/workspace-watch"
-import { languageFromPath, type MonacoLanguage } from "@/components/editor/editor-language"
+import { languageFromPath, type EditorLanguage } from "@/components/editor/editor-language"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { loggers } from "@cognia/logging"
 
@@ -42,7 +42,7 @@ export interface OpenFile {
   /** Path relative to the active root. */
   relPath: string
   absolutePath: string
-  language: MonacoLanguage
+  language: EditorLanguage
   savedContent: string
   draftContent: string
   /** Set when the file changed on disk under us while open. */

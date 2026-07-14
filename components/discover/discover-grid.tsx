@@ -86,6 +86,9 @@ export function DiscoverGrid({
   // count doesn't map onto a row virtualizer). The hook is called
   // unconditionally (React rules); `count: 0` makes it inert when not windowed.
   const windowed = (view === "list" || view === "compact") && items.length > VIRTUALIZE_THRESHOLD
+  // TanStack Virtual's useVirtualizer returns non-memoizable functions; the
+  // React Compiler correctly skips it. Nothing to fix on our side.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: windowed ? items.length : 0,
     getScrollElement: () => scrollRef.current,

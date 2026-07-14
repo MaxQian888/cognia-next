@@ -31,6 +31,7 @@ function makeIo() {
     getPosition: jest.fn(async () => ({ x: 500, y: GROUND })),
     setPosition: jest.fn(async () => true),
     getSurfaces: jest.fn(async () => surfaces),
+    onWorkAreaChanged: jest.fn(() => () => {}),
     now: () => now,
     raf: (cb) => {
       const id = nextId++
