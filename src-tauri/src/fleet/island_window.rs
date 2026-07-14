@@ -33,6 +33,7 @@
 //! covered by `tauri-smoke`.
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime};
 
 pub const ISLAND_LABEL: &str = "island";
@@ -41,6 +42,29 @@ pub const ISLAND_LABEL: &str = "island";
 /// placement path runs against a possibly different monitor (re-show,
 /// set-monitor), so the shell can re-pad below the notch without polling.
 pub const ISLAND_GEOMETRY_EVENT: &str = "fleet://island-geometry";
+
+/// Cursor-over-island transitions pushed by the native hover monitor. The
+/// renderer needs them because the tucked island ignores cursor events at the
+/// OS level (see [`island_set_tucked`]) — DOM mouseenter/mouseleave never fire
+/// on a click-through window, so Rust polls the global cursor instead and the
+/// shell folds these into its `hovering` state (Dock-style slam-to-top reveal).
+pub const ISLAND_HOVER_EVENT: &str = "fleet://island-hover";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IslandHover {
+    pub hovering: bool,
+}
+
+/// Hover-monitor poll cadence while the island window is visible. Coarse
+/// enough to be free, fine enough that a slam-to-top reveal feels immediate.
+const HOVER_POLL_MS: u64 = 120;
+/// Idle cadence while the island window is hidden.
+const HOVER_POLL_HIDDEN_MS: u64 = 500;
+
+/// Single-flight guard for the hover monitor task (mirrors the runtime's
+/// `reaper_running` pattern).
+static HOVER_MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -274,6 +298,98 @@ fn island_anchor<R: Runtime>(app: &AppHandle<R>) -> IslandAnchor {
     }
 }
 
+/// Whether a global cursor point sits inside a window rect. All physical px.
+/// Pure for unit tests.
+fn point_in_rect(point: (f64, f64), origin: (f64, f64), size: (f64, f64)) -> bool {
+    point.0 >= origin.0
+        && point.0 < origin.0 + size.0
+        && point.1 >= origin.1
+        && point.1 < origin.1 + size.1
+}
+
+/// Is the global cursor currently over the island window? `false` on any
+/// query failure (treat unknown as "not hovering" so a broken query can only
+/// tuck the island, never pin it).
+fn cursor_inside_island<R: Runtime>(window: &tauri::WebviewWindow<R>) -> bool {
+    let (Ok(cursor), Ok(pos), Ok(size)) = (
+        window.cursor_position(),
+        window.outer_position(),
+        window.outer_size(),
+    ) else {
+        return false;
+    };
+    point_in_rect(
+        (cursor.x, cursor.y),
+        (pos.x as f64, pos.y as f64),
+        (size.width as f64, size.height as f64),
+    )
+}
+
+/// Poll the global cursor against the island window frame and push
+/// enter/leave transitions to the renderer (`fleet://island-hover`).
+///
+/// This is the island's authoritative hover source: while tucked the window
+/// ignores cursor events entirely (so it can't shadow clicks on the menu bar /
+/// whatever sits under the top-center strip), which also means the DOM never
+/// sees mouseenter — without this monitor a tucked island could never slide
+/// back out. It also self-heals a stuck DOM `hovering` (a missed mouseleave
+/// after an OS-level window resize) because a cursor that is genuinely outside
+/// the frame always produces a trailing `hovering: false`.
+fn spawn_hover_monitor<R: Runtime>(app: &AppHandle<R>) {
+    if HOVER_MONITOR_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut was_inside = false;
+        loop {
+            let Some(window) = app.get_webview_window(ISLAND_LABEL) else {
+                // Window destroyed (app teardown) — let a future open respawn.
+                HOVER_MONITOR_RUNNING.store(false, Ordering::SeqCst);
+                return;
+            };
+            if !window.is_visible().unwrap_or(false) {
+                was_inside = false;
+                tokio::time::sleep(std::time::Duration::from_millis(HOVER_POLL_HIDDEN_MS)).await;
+                continue;
+            }
+            let inside = cursor_inside_island(&window);
+            if inside != was_inside {
+                was_inside = inside;
+                let _ = app.emit_to(
+                    ISLAND_LABEL,
+                    ISLAND_HOVER_EVENT,
+                    IslandHover { hovering: inside },
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(HOVER_POLL_MS)).await;
+        }
+    });
+}
+
+/// Renderer-driven click-through toggle: a tucked island is a 6-px sliver,
+/// but its window still spans the whole pill strip under the notch — without
+/// this it silently swallowed every click aimed at the menu bar / fullscreen
+/// toolbar behind that strip. Tucked → the window ignores cursor events (the
+/// hover monitor above keeps the slam-to-top reveal working); untucked → it
+/// is interactive again.
+///
+/// The AppKit call (`setIgnoresMouseEvents:`) is bridged to the main thread —
+/// same trap as the panel reclass in `open_island_window_inner` (this command
+/// is async, so it executes on a tokio worker).
+#[tauri::command]
+pub async fn island_set_tucked(app: AppHandle, tucked: bool) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(ISLAND_LABEL) else {
+        return Ok(());
+    };
+    app.run_on_main_thread(move || {
+        if let Err(e) = window.set_ignore_cursor_events(tucked) {
+            log::warn!("island: set_ignore_cursor_events({tucked}) failed: {e}");
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
 /// Push the current display geometry to a live island renderer so it can
 /// re-pad below the notch after a monitor change. Best-effort.
 fn emit_island_geometry<R: Runtime>(app: &AppHandle<R>, anchor: &IslandAnchor) {
@@ -318,6 +434,7 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
         // position.
         let _ = reposition_island(app, &window);
         window.show().map_err(|e| e.to_string())?;
+        spawn_hover_monitor(app);
         return Ok(());
     }
 
@@ -379,6 +496,8 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
         .map_err(|e| e.to_string())?;
     }
 
+    spawn_hover_monitor(app);
+
     // Reveal is renderer-driven after first paint; force-show safety net
     // mirrors the pet window's (a hung hydrate must not strand an invisible
     // island forever).
@@ -391,7 +510,13 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
                     log::warn!(
                         "island window still hidden 8s after open; force-showing (renderer never signaled first paint)"
                     );
-                    crate::window_utils::bring_window_to_front(&window);
+                    // Reveal WITHOUT stealing focus: the island is a passive
+                    // status overlay and must never pull the user's foreground
+                    // app (especially one on another display). Plain `show()`
+                    // on the non-activating NSPanel reveals it in place;
+                    // `bring_window_to_front` would also `set_focus()`, which
+                    // activates the window and yanks focus away.
+                    let _ = window.show();
                 }
             }
         });
@@ -569,6 +694,25 @@ mod tests {
         };
         assert_eq!(anchor.top_inset_logical(), 37.0);
         assert_eq!(anchor.content_max_logical(), (1512.0, 982.0 - 37.0));
+    }
+
+    #[test]
+    fn point_in_rect_covers_edges_and_outside() {
+        let origin = (100.0, 0.0);
+        let size = (420.0, 50.0);
+        // Inclusive top-left, exclusive bottom-right (half-open, like frames).
+        assert!(point_in_rect((100.0, 0.0), origin, size));
+        assert!(point_in_rect((519.9, 49.9), origin, size));
+        assert!(!point_in_rect((520.0, 25.0), origin, size));
+        assert!(!point_in_rect((99.9, 25.0), origin, size));
+        assert!(!point_in_rect((300.0, 50.0), origin, size));
+        assert!(!point_in_rect((300.0, -0.1), origin, size));
+    }
+
+    #[test]
+    fn hover_event_payload_is_camel_case() {
+        let json = serde_json::to_string(&IslandHover { hovering: true }).unwrap();
+        assert_eq!(json, r#"{"hovering":true}"#);
     }
 
     #[test]

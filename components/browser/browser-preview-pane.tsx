@@ -117,6 +117,17 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
   }, [committedUrl, getRect])
   useEffect(() => () => setActivePaneRect(null), [])
 
+  // The in-page info panel (drawn by the injected overlay) can't reach next-intl,
+  // so push its localized toggle labels down once the preview webview exists.
+  const panelDetailsLabel = t("panel.details")
+  const panelCollapseLabel = t("panel.collapse")
+  useEffect(() => {
+    if (!isTauri() || !committedUrl) return
+    void browserClient
+      .embedSetPanelLabels({ details: panelDetailsLabel, collapse: panelCollapseLabel })
+      .catch(() => {})
+  }, [committedUrl, panelDetailsLabel, panelCollapseLabel])
+
   // The preview's real location (follows in-page navigations and redirects).
   const currentUrl = navigated?.url ?? committedUrl
 
@@ -164,6 +175,7 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
   const cancelComment = useCallback(() => {
     clearSelection()
     setComment("")
+    void browserClient.embedClearSelection().catch(() => {})
   }, [clearSelection])
 
   const onSend = useCallback(async () => {
@@ -178,6 +190,7 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
         toast.success(t("comment.sent"))
         setComment("")
         clearSelection()
+        void browserClient.embedClearSelection().catch(() => {})
       } else {
         toast.error(t("comment.noSession"))
       }
@@ -397,7 +410,7 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
                 {selection.tagName.toLowerCase()}
               </Badge>
               <p className="truncate font-mono text-xs text-muted-foreground">
-                {selection.selector}
+                {selection.componentName ? `<${selection.componentName}>` : selection.selector}
               </p>
             </div>
             <TooltipIconButton

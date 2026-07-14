@@ -21,6 +21,7 @@ import { useEffect } from "react"
 import { toast } from "sonner"
 
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 export function ComputerUseKillSwitchInitializer() {
   useEffect(() => {
@@ -40,14 +41,14 @@ export function ComputerUseKillSwitchInitializer() {
         })
       })
       if (cancelled) {
-        u()
+        safeUnlisten(u)
       } else {
         unlisten = u
       }
     })()
     return () => {
       cancelled = true
-      if (unlisten) unlisten()
+      safeUnlisten(unlisten)
     }
   }, [])
 

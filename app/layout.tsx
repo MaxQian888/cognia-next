@@ -55,6 +55,7 @@ import { RemoteControlReceiver } from "@/components/providers/remote-control-rec
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { HookTrustSyncProvider } from "@/components/providers/hook-trust-sync-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
+import { A2UIBuiltInActionsProvider } from "@/components/providers/a2ui-built-in-actions-provider"
 import { PluginToolDispatchProvider } from "@/components/providers/plugin-tool-dispatch-provider"
 import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-link-router"
 import { PluginModalRoot } from "@/components/plugins/dialogs/plugin-modal-root"
@@ -221,6 +222,10 @@ export default async function RootLayout({
                                 <CanvasBridgeProvider>
                                   <HookTrustSyncProvider>
                                     <A2UIDispatchProvider>
+                                      {/* Global, single-instance built-in A2UI action handling
+                                          (calculator/timer/todo/…). Renders null — mounted here
+                                          so every route's surfaces are interactive. */}
+                                      <A2UIBuiltInActionsProvider />
                                       <PluginToolDispatchProvider>
                                         <DataAdapterProvider adapter={dexieAdapter}>
                                           {/* Appearance v47 — Typography / density / radius

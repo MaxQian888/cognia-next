@@ -52,7 +52,7 @@ export function agentsIn(rows: readonly FleetSessionHistoryRow[]): FleetAgent[] 
 }
 
 export function FleetHistoryPanel() {
-  const t = useTranslations("settings.hooks.fleet.history")
+  const t = useTranslations("settings.fleet.history")
   const [busy, setBusy] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [agentFilter, setAgentFilter] = useState<AgentFilter>("all")

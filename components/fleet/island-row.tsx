@@ -14,6 +14,7 @@ import { AlertTriangleIcon, ChevronDownIcon, FileTextIcon } from "lucide-react"
 import { AgentBadge } from "./agent-badge"
 import { TerminalBadge } from "./terminal-badge"
 import { IslandPermissionActions } from "./island-permission-actions"
+import { IslandQuestionActions } from "./island-question-actions"
 import { IslandReply } from "./island-reply"
 import { SessionMetaChips } from "./session-meta-chips"
 import { SessionDetail } from "./session-detail"
@@ -98,10 +99,14 @@ export function IslandRow({
       ? formatElapsed(session.lastEventAt, nowMs)
       : null
 
-  // A parked AskUserQuestion replaces the generic waiting-input status line
-  // with the actual question + option chips (display-only — it is answered in
-  // the agent's own terminal).
+  // A parked AskUserQuestion replaces the generic waiting-input status line with
+  // the actual question(s). When its PermissionRequest long-poll is waiting
+  // (`pendingQuestionRequest`), the options are selectable and the answer rides
+  // back to the agent; otherwise it is display-only (a bare PreToolUse).
   const questions = session.status === "waiting-input" ? (session.pendingQuestions ?? []) : []
+  const questionRequest =
+    session.status === "waiting-input" ? (session.pendingQuestionRequest ?? null) : null
+  const answerableQuestion = questionRequest && questions.length > 0 ? questionRequest : null
   const firstQuestion = questions.length > 0 ? questions[0] : null
   const moreQuestions = Math.max(0, questions.length - 1)
   const subagents = session.subagents ?? []
@@ -276,7 +281,22 @@ export function IslandRow({
         </p>
       ) : null}
 
-      {firstQuestion ? (
+      {answerableQuestion ? (
+        // Answerable: selectable options + Submit, wired back to the agent.
+        // Stop clicks bubbling to the row's focus-terminal handler.
+        <div
+          className="ml-3.5"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          role="presentation"
+        >
+          <IslandQuestionActions
+            key={answerableQuestion.requestId}
+            request={answerableQuestion}
+            questions={questions}
+          />
+        </div>
+      ) : firstQuestion ? (
         <div
           data-testid="pending-question"
           className="ml-3.5 space-y-1 rounded-lg border border-amber-400/20 bg-amber-500/10 px-2 py-1.5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"

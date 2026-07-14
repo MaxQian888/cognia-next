@@ -5,10 +5,11 @@ import { fn } from "storybook/test"
 import { ModelOverrideFields, type ProviderOption } from "./model-override-fields"
 import type { UtilityModelConfig } from "@cognia/agent-config-types"
 
-// Pure props: a provider select (configured providers + "use chat default")
-// plus a free-text model id. Used by conversation-title / timeline-label /
-// pet-speak utility-model configs. The stories keep local state so the select
-// and input behave interactively.
+// Props: a provider select (configured providers + "use chat default") plus a
+// model select scoped to that provider's models. Used by conversation-title /
+// timeline-label / pet-speak utility-model configs. The stories keep local
+// state so the two selects behave interactively. (The model list is sourced
+// from the settings store, so it only populates inside a running app.)
 const PROVIDERS: ProviderOption[] = [
   { id: "anthropic", name: "Anthropic" },
   { id: "openai", name: "OpenAI" },

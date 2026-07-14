@@ -7,8 +7,9 @@
 // Docs: https://api-docs.deepseek.com/api/get-user-balance
 //
 // Note: `/user/balance` sits at the API root, NOT under the `/v1` chat prefix.
-// We strip a trailing `/v1` off the configured baseUrl so a preset pointing at
-// "https://api.deepseek.com/v1" still resolves the correct path.
+// We build from the baseUrl ORIGIN so both the chat preset
+// ("https://api.deepseek.com/v1") and the Anthropic relay preset
+// ("https://api.deepseek.com/anthropic") resolve the correct root path.
 
 import type {
   BalanceAdapter,
@@ -17,11 +18,7 @@ import type {
   BalanceSnapshot,
 } from "@/types/subscription"
 
-import { bearer, errorSnapshot, parseJsonObject, toNum, trimBase } from "./_shared"
-
-function rootOf(baseUrl: string): string {
-  return trimBase(baseUrl).replace(/\/v1$/, "")
-}
+import { apiRootOf, bearer, errorSnapshot, parseJsonObject, toNum } from "./_shared"
 
 export const deepseekBalanceAdapter: BalanceAdapter = {
   key: "deepseek",
@@ -32,7 +29,7 @@ export const deepseekBalanceAdapter: BalanceAdapter = {
   },
 
   request(q: BalanceQuery): BalanceRequestDescriptor {
-    return { url: `${rootOf(q.baseUrl)}/user/balance`, headers: bearer(q.token) }
+    return { url: `${apiRootOf(q.baseUrl)}/user/balance`, headers: bearer(q.token) }
   },
 
   parse(status: number, body: string, q: BalanceQuery): BalanceSnapshot {

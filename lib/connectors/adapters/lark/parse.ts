@@ -89,6 +89,11 @@ export interface LarkEventHeader {
   create_time?: string
   token?: string
   app_id?: string
+  /**
+   * Sender's tenant. Present on every 2.0 envelope header; in an external
+   * (cross-tenant) group this identifies which tenant the message came from.
+   */
+  tenant_key?: string
 }
 
 export interface LarkEventBody {
@@ -120,6 +125,26 @@ export interface LarkEventEnvelope {
   schema?: string
   header: LarkEventHeader
   event: LarkEventBody
+}
+
+/**
+ * Pull the sender's `tenant_key` out of an inbound envelope. The 2.0 header
+ * carries it on every event; older/edge payloads only nest it under the
+ * sender (message events) or reader (read indicators), so fall back to those.
+ * Returns undefined when absent (e.g. synthetic history envelopes).
+ *
+ * Used to backfill `lastWhoamiResult.tenantKey` — the `/bot/v3/info` whoami
+ * probe cannot return it, so the first real inbound event supplies it. This
+ * is the only signal that identifies the tenant behind a cross-tenant
+ * (external-group) sender.
+ */
+export function extractTenantKey(envelope: LarkEventEnvelope): string | undefined {
+  return (
+    envelope.header?.tenant_key ||
+    envelope.event?.sender?.tenant_key ||
+    envelope.event?.reader?.tenant_key ||
+    undefined
+  )
 }
 
 // ---------------------------------------------------------------------------

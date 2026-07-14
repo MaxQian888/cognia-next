@@ -218,11 +218,8 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
                 .outer_size()
                 .map(|s| (s.width as f64, s.height as f64))
                 .unwrap_or_else(|_| physical_overlay_size((opts.width, opts.height), scale));
-            let (x, y) = resolve_initial_position(
-                Some(saved),
-                (area_x, area_y, area_w, area_h),
-                size,
-            );
+            let (x, y) =
+                resolve_initial_position(Some(saved), (area_x, area_y, area_w, area_h), size);
             if x != saved.0 || y != saved.1 {
                 let _ = window.set_position(PhysicalPosition::new(x, y));
             }

@@ -256,7 +256,9 @@
     "testDesktopOnly": "仅桌面端可用",
     "testTooltip": "测试连接（10 秒超时）",
     "toolsOne": "{count} 个工具",
-    "toolsOther": "{count} 个工具"
+    "toolsOther": "{count} 个工具",
+    "logs": "查看 {name} 日志",
+    "logsTooltip": "查看日志"
   },
   "tabs": {
     "agents": "Agent 同步",

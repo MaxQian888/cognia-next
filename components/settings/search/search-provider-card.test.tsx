@@ -14,6 +14,9 @@ let providerSettings: {
   enabled: boolean
   priority: number
   cx?: string
+  apiKeys?: string[]
+  apiKeyRotationEnabled?: boolean
+  apiKeyRotationStrategy?: string
 } = {
   providerId: "tavily",
   apiKey: "",
@@ -35,6 +38,33 @@ jest.mock("@/stores/settings", () => ({
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+// Native <select> stub so the pool's rotation-strategy picker is interactable.
+jest.mock("@/components/ui/select", () => ({
+  Select: ({
+    children,
+    value,
+    onValueChange,
+  }: {
+    children: React.ReactNode
+    value?: string
+    onValueChange?: (v: string) => void
+  }) => (
+    <select
+      data-testid="strategy-select"
+      value={value}
+      onChange={(e) => onValueChange?.(e.target.value)}
+    >
+      {children}
+    </select>
+  ),
+  SelectTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SelectValue: () => null,
+  SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SelectItem: ({ children, value }: { children: React.ReactNode; value: string }) => (
+    <option value={value}>{children}</option>
+  ),
 }))
 
 const mockLogInfo = jest.fn()
@@ -103,7 +133,8 @@ describe("SearchProviderCard", () => {
       priority: 1,
     }
     renderCard()
-    fireEvent.click(screen.getByRole("switch"))
+    // switch[0] = the provider enable toggle (switch[1] is the key-rotation toggle)
+    fireEvent.click(screen.getAllByRole("switch")[0])
     expect(mocks.setSearchProviderEnabled).toHaveBeenCalledWith("tavily", true)
   })
 
@@ -139,7 +170,7 @@ describe("SearchProviderCard", () => {
       priority: 1,
     }
     renderCard()
-    fireEvent.click(screen.getByRole("switch"))
+    fireEvent.click(screen.getAllByRole("switch")[0])
     expect(mockLogInfo).toHaveBeenCalledWith("provider_enabled_changed", {
       providerId: "tavily",
       enabled: true,
@@ -160,6 +191,78 @@ describe("SearchProviderCard", () => {
     const [, ctx] = calls[calls.length - 1]
     expect((ctx as Record<string, unknown>).apiKey).toBeUndefined()
     expect(JSON.stringify(ctx)).not.toContain("tvly-1234567890abc")
+  })
+
+  it("toggles key rotation via the pool switch", () => {
+    providerSettings = {
+      providerId: "tavily",
+      apiKey: "tvly-1234567890abc",
+      enabled: true,
+      priority: 1,
+    }
+    renderCard()
+    // switch[1] is the key-rotation toggle inside the pool
+    fireEvent.click(screen.getAllByRole("switch")[1])
+    expect(mocks.setSearchProviderSettings).toHaveBeenCalledWith("tavily", {
+      apiKeyRotationEnabled: true,
+    })
+  })
+
+  it("adds a backup key through the pool", () => {
+    providerSettings = {
+      providerId: "tavily",
+      apiKey: "tvly-1234567890abc",
+      enabled: true,
+      priority: 1,
+    }
+    renderCard()
+    const inputs = screen.getAllByPlaceholderText(/tvly-/)
+    // last input is the pool's draft field (first is the primary key)
+    fireEvent.change(inputs[inputs.length - 1], { target: { value: "tvly-backup999" } })
+    fireEvent.click(screen.getByText("addBackupKey"))
+    expect(mocks.setSearchProviderSettings).toHaveBeenCalledWith("tavily", {
+      apiKeys: ["tvly-backup999"],
+    })
+  })
+
+  it("changes the rotation strategy through the pool", () => {
+    providerSettings = {
+      providerId: "tavily",
+      apiKey: "tvly-1234567890abc",
+      enabled: true,
+      priority: 1,
+      apiKeyRotationEnabled: true,
+      apiKeyRotationStrategy: "round-robin",
+    }
+    renderCard()
+    fireEvent.change(screen.getByTestId("strategy-select"), { target: { value: "least-used" } })
+    expect(mocks.setSearchProviderSettings).toHaveBeenCalledWith("tavily", {
+      apiKeyRotationStrategy: "least-used",
+    })
+  })
+
+  it("does not show the rotation pool until a primary key exists", () => {
+    providerSettings = { providerId: "tavily", apiKey: "", enabled: false, priority: 1 }
+    renderCard()
+    expect(screen.queryByText("rotateKeys")).not.toBeInTheDocument()
+  })
+
+  it("updates the google cx field and logs on blur", () => {
+    providerSettings = {
+      providerId: "google",
+      apiKey: "AIzakey123456",
+      enabled: false,
+      priority: 1,
+    }
+    renderCard({ providerId: "google" })
+    const cx = screen.getByPlaceholderText("googleCxPlaceholder")
+    fireEvent.change(cx, { target: { value: "abc:123" } })
+    expect(mocks.setSearchProviderSettings).toHaveBeenCalledWith("google", { cx: "abc:123" })
+    fireEvent.blur(cx, { target: { value: "abc:123" } })
+    expect(mockLogInfo).toHaveBeenCalledWith("provider_cx_changed", {
+      providerId: "google",
+      hasCx: true,
+    })
   })
 
   it("adjusts priority up and down", () => {

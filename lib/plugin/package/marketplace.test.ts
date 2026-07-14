@@ -617,6 +617,39 @@ describe("PluginMarketplace", () => {
       await marketplace.getPlugin("cached-plugin")
       expect(mockFetch).toHaveBeenCalledTimes(2)
     })
+
+    it("negative-caches getPlugin network failures so repeated checks don't re-fetch", async () => {
+      mockFetch.mockRejectedValue(new Error("Failed to fetch"))
+
+      expect(await marketplace.getPlugin("offline-plugin")).toBeNull()
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+
+      // A second lookup within the negative-cache window short-circuits — this
+      // is what stops "Check for updates" from re-hitting the registry (and
+      // re-logging) once per installed plugin, every check.
+      expect(await marketplace.getPlugin("offline-plugin")).toBeNull()
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it("negative-caches getPlugin 404s", async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 404 })
+
+      expect(await marketplace.getPlugin("missing")).toBeNull()
+      expect(await marketplace.getPlugin("missing")).toBeNull()
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it("re-fetches a previously-failed getPlugin after clearCache", async () => {
+      mockFetch.mockRejectedValue(new Error("Failed to fetch"))
+
+      await marketplace.getPlugin("offline-plugin")
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+
+      marketplace.clearCache()
+
+      await marketplace.getPlugin("offline-plugin")
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
   })
 
   describe("Popular and Recent Plugins", () => {

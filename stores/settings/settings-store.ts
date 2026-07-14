@@ -191,6 +191,7 @@ interface SettingsState {
   setSearchEnabled: (v: boolean) => Promise<void>
   setSearchMaxResults: (n: number) => Promise<void>
   setSearchFallbackEnabled: (v: boolean) => Promise<void>
+  setSearchMaxRetries: (n: number) => Promise<void>
   setDefaultSearchProvider: (p: SearchProviderType) => Promise<void>
   setSearchProviderEnabled: (id: SearchProviderType, enabled: boolean) => Promise<void>
   setSearchProviderApiKey: (id: SearchProviderType, key: string) => Promise<void>
@@ -838,6 +839,12 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     },
     setSearchFallbackEnabled: async (searchFallbackEnabled) => {
       const next = await saveSettings({ searchFallbackEnabled })
+      set({ settings: next })
+    },
+    setSearchMaxRetries: async (searchMaxRetries) => {
+      // Clamp to a sane range so a runaway value can't stack unbounded retries.
+      const clamped = Math.max(0, Math.min(5, Math.round(searchMaxRetries)))
+      const next = await saveSettings({ searchMaxRetries: clamped })
       set({ settings: next })
     },
     setDefaultSearchProvider: async (defaultSearchProvider) => {

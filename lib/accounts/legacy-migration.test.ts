@@ -8,6 +8,10 @@ import { legacyDatabaseExists, migrateLegacyDatabaseToAccount } from "./legacy-m
 import { CogniaDB, LEGACY_COGNIA_DB_NAME } from "@/lib/db/schema"
 import type { PasswordVerifierRecord } from "./account-types"
 
+// This suite seeds a v86 database and opens CogniaDB over it to exercise the
+// migration — opt out of the Jest collapsed-schema fast path.
+;(globalThis as { __COGNIA_DB_FULL_SCHEMA__?: boolean }).__COGNIA_DB_FULL_SCHEMA__ = true
+
 const verifier: PasswordVerifierRecord = {
   algorithm: "test-only",
   salt: "salt",

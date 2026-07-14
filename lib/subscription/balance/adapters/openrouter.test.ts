@@ -26,6 +26,10 @@ describe("openrouterBalanceAdapter", () => {
   it("builds the /key request (works with the inference key, not /credits)", () => {
     const req = a.request(Q)
     expect(req.url).toBe("https://openrouter.ai/api/v1/key")
+    // The Anthropic relay preset baseUrl ("…/api", no "/v1") resolves the same.
+    expect(a.request({ ...Q, baseUrl: "https://openrouter.ai/api" }).url).toBe(
+      "https://openrouter.ai/api/v1/key"
+    )
     expect(req.headers.Authorization).toBe("Bearer sk-or-test")
   })
 

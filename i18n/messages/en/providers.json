@@ -583,7 +583,18 @@
   "protocolOpenAIDesc": "OpenAI-compatible API (most common)",
   "protocolPluginDesc": "Provided by plugin {plugin}",
   "provider": "Provider",
+  "followStepsToStart": "Follow these steps to get started",
+  "providerGroups": {
+    "advanced": "Advanced",
+    "advancedDesc": "Power-user & server runtimes",
+    "recommended": "Recommended",
+    "recommendedDesc": "Easiest to set up for most users",
+    "specialized": "Specialized",
+    "specializedDesc": "Purpose-built inference servers"
+  },
   "providerModels": "{provider} Models",
+  "providerSetup": "{provider} Setup",
+  "setupGuide": "Setup guide",
   "providerName": "Provider Name",
   "providerNamePlaceholder": "My Provider",
   "providerOff": "OFF",

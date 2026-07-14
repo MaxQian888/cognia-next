@@ -24,10 +24,7 @@ import { createLogger } from "@cognia/logging"
 const log = createLogger("settings.search.cache")
 
 export function SearchCacheSettings() {
-  const tc = useTranslations("searchSettings.cache")
-  // Live top-level namespace (i18n/messages/*/searchCache.json) — the dotted
-  // "searchSettings.cache" namespace above predates the split-source layout.
-  const tCacheNs = useTranslations("searchCache")
+  const tc = useTranslations("searchCache")
   const [stats, setStats] = useState(() => getSearchCache().getStats())
   const [selectedProvider, setSelectedProvider] = useState<string>("all")
 
@@ -93,7 +90,7 @@ export function SearchCacheSettings() {
         <>
           <div className="space-y-2">
             <Label className="text-sm">
-              {tc("ttl")}: {tCacheNs("ttlMinutes", { minutes: ttlMinutes })}
+              {tc("ttl")}: {tc("ttlMinutes", { minutes: ttlMinutes })}
             </Label>
             <Slider
               value={[searchCacheTTL]}

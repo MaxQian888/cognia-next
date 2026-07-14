@@ -567,3 +567,260 @@ describe("load-complete signal", () => {
     }
   })
 })
+
+// --- Component-aware enrichment (React fiber) -------------------------------
+
+type Fiber = {
+  type: unknown
+  memoizedProps?: Record<string, unknown>
+  return: Fiber | null
+}
+type RichOverlay = {
+  buildPayload: (el: Element) => Record<string, unknown>
+  componentInfo: (
+    el: Element
+  ) => { name: string | null; stack: string | null; props: Record<string, string> | null } | null
+  shallowProps: (props: unknown) => Record<string, string> | null
+  readSourceHint: (el: Element) => { path: string; line: number; column?: number } | null
+  showSelection: (el: Element, payload: unknown) => void
+  clearSelection: () => void
+  selectedElement: () => Element | null
+}
+const rich = () => install() as unknown as RichOverlay
+
+/** Attach a fake React fiber to a DOM node the way React does (`__reactFiber$…`). */
+function attachFiber(el: Element, fiber: Fiber) {
+  ;(el as unknown as Record<string, unknown>)["__reactFiber$test"] = fiber
+}
+
+function fiberChain(el: Element) {
+  const app: Fiber = { type: function App() {}, memoizedProps: {}, return: null }
+  const form: Fiber = { type: function CheckoutForm() {}, memoizedProps: {}, return: app }
+  const submit: Fiber = {
+    type: function SubmitButton() {},
+    memoizedProps: {
+      variant: "primary",
+      disabled: false,
+      label: "提交订单",
+      onClick: () => {},
+      user: { id: 1 },
+    },
+    return: form,
+  }
+  const host: Fiber = { type: "button", memoizedProps: { className: "btn" }, return: submit }
+  attachFiber(el, host)
+}
+
+describe("overlay.injected componentInfo", () => {
+  it("walks the fiber tree for the owning component name, stack and shallow props", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    const btn = document.getElementById("go")!
+    fiberChain(btn)
+    const info = api.componentInfo(btn)!
+    expect(info.name).toBe("SubmitButton")
+    expect(info.stack).toBe("App > CheckoutForm > SubmitButton")
+    // functions + React elements dropped; nested object flattened to a marker.
+    expect(info.props).toEqual({
+      variant: "primary",
+      disabled: "false",
+      label: "提交订单",
+      user: "[Object]",
+    })
+  })
+
+  it("resolves memo / forwardRef display names", () => {
+    document.body.innerHTML = `<span id="x">x</span>`
+    const api = rich()
+    const el = document.getElementById("x")!
+    const inner = { displayName: "Fancy" }
+    attachFiber(el, { type: { $$typeof: Symbol.for("react.memo"), type: inner }, return: null })
+    expect(api.componentInfo(el)!.name).toBe("Fancy")
+  })
+
+  it("returns null when the node has no fiber (non-React page)", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    expect(api.componentInfo(document.getElementById("go")!)).toBeNull()
+  })
+})
+
+describe("overlay.injected shallowProps", () => {
+  it("caps the number of keys and truncates long values", () => {
+    const api = rich()
+    const props: Record<string, unknown> = { long: "x".repeat(200) }
+    for (let i = 0; i < 20; i++) props["k" + i] = i
+    const out = api.shallowProps(props)!
+    expect(Object.keys(out).length).toBeLessThanOrEqual(10)
+    expect((out.long as string).length).toBeLessThanOrEqual(81) // 80 + ellipsis
+  })
+
+  it("drops children, functions and React elements", () => {
+    const api = rich()
+    const out = api.shallowProps({
+      children: "ignored",
+      onClick: () => {},
+      node: { $$typeof: Symbol.for("react.element") },
+      keep: 3,
+    })
+    expect(out).toEqual({ keep: "3" })
+  })
+})
+
+describe("overlay.injected readSourceHint", () => {
+  it("reads react-dev-inspector attributes off the node", () => {
+    document.body.innerHTML = `<button id="go" data-inspector-relative-path="src/App.tsx" data-inspector-line="42" data-inspector-column="6">go</button>`
+    const api = rich()
+    expect(api.readSourceHint(document.getElementById("go")!)).toEqual({
+      path: "src/App.tsx",
+      line: 42,
+      column: 6,
+    })
+  })
+
+  it("falls back to a near ancestor and omits a missing column", () => {
+    document.body.innerHTML = `<div data-inspector-relative-path="src/Card.tsx" data-inspector-line="7"><button id="go">go</button></div>`
+    const api = rich()
+    expect(api.readSourceHint(document.getElementById("go")!)).toEqual({
+      path: "src/Card.tsx",
+      line: 7,
+    })
+  })
+
+  it("returns null when no inspector attributes are present", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    expect(api.readSourceHint(document.getElementById("go")!)).toBeNull()
+  })
+})
+
+describe("overlay.injected buildPayload enrichment", () => {
+  it("attaches component fields + framework when a fiber is present", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    const btn = document.getElementById("go")!
+    fiberChain(btn)
+    const payload = api.buildPayload(btn)
+    expect(payload.componentName).toBe("SubmitButton")
+    expect(payload.componentStack).toBe("App > CheckoutForm > SubmitButton")
+    expect(payload.framework).toBe("react")
+    expect(payload.props).toMatchObject({ variant: "primary" })
+  })
+
+  it("omits component fields on a non-React node", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    const payload = api.buildPayload(document.getElementById("go")!)
+    expect(payload.componentName).toBeUndefined()
+    expect(payload.framework).toBeUndefined()
+  })
+})
+
+// --- In-page info panel ----------------------------------------------------
+
+const PANEL = "#__cognia-info-panel"
+const BOX = "#__cognia-select-box"
+
+describe("overlay.injected info panel", () => {
+  it("draws the selection box + basic panel on pick, and clears it", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    ;(window as unknown as { __cogniaSignal: () => void }).__cogniaSignal = () => {}
+    const btn = document.getElementById("go")!
+    fiberChain(btn)
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    btn.click()
+
+    const panel = document.querySelector(PANEL)!
+    expect(panel).toBeTruthy()
+    expect(document.querySelector(BOX)).toBeTruthy()
+    expect(panel.textContent).toContain("<SubmitButton>")
+    // Basic view: no detail lines yet.
+    expect(panel.textContent).not.toContain("selector:")
+
+    ;(window as unknown as { __cogniaClearSelection: () => void }).__cogniaClearSelection()
+    expect(document.querySelector(PANEL)).toBeNull()
+    expect(document.querySelector(BOX)).toBeNull()
+    expect(api.selectedElement()).toBeNull()
+  })
+
+  it("expands to detailed fields when the toggle is clicked", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    rich()
+    ;(window as unknown as { __cogniaSignal: () => void }).__cogniaSignal = () => {}
+    const btn = document.getElementById("go")!
+    fiberChain(btn)
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    btn.click()
+
+    const toggle = document.querySelector("[data-cognia-toggle]") as HTMLButtonElement
+    toggle.click()
+    const panel = document.querySelector(PANEL)!
+    expect(panel.textContent).toContain("selector:")
+    expect(panel.textContent).toContain("stack:")
+    expect(panel.textContent).toContain("props:")
+  })
+
+  it("shows localized toggle labels once React pushes them", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    api.showSelection(document.getElementById("go")!, {
+      tagName: "button",
+      selector: "#go",
+      rect: { width: 10, height: 10 },
+    })
+    // Pre-label fallback is the bare chevron.
+    expect(document.querySelector("[data-cognia-toggle]")!.textContent).toBe("▾")
+    ;(window as unknown as { __cogniaSetPanelLabels: (j: string) => void }).__cogniaSetPanelLabels(
+      JSON.stringify({ details: "详情", collapse: "收起" })
+    )
+    expect(document.querySelector("[data-cognia-toggle]")!.textContent).toContain("详情")
+  })
+
+  it("drops the overlay when the tracked element unmounts, on the next scroll", () => {
+    const raf = jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb: FrameRequestCallback) => {
+        cb(0)
+        return 0
+      })
+    try {
+      document.body.innerHTML = `<button id="go">go</button>`
+      const api = rich()
+      api.showSelection(document.getElementById("go")!, {
+        tagName: "button",
+        selector: "#go",
+        rect: { width: 10, height: 10 },
+      })
+      expect(document.querySelector(BOX)).toBeTruthy()
+      // Element unmounts, then a scroll fires: the stale overlay is torn down.
+      document.body.innerHTML = ""
+      document.dispatchEvent(new Event("scroll", { bubbles: true }))
+      expect(api.selectedElement()).toBeNull()
+      expect(document.querySelector(BOX)).toBeNull()
+    } finally {
+      raf.mockRestore()
+    }
+  })
+
+  it("never selects overlay chrome while picking", () => {
+    document.body.innerHTML = `<div data-cognia-chrome="1"><button id="chrome-btn">x</button></div><button id="go">go</button>`
+    rich()
+    const received: unknown[] = []
+    ;(window as unknown as { __cogniaSignal: (p: unknown) => void }).__cogniaSignal = (p) =>
+      received.push(p)
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    // A click inside our own chrome is ignored…
+    document.getElementById("chrome-btn")!.click()
+    expect(received).toHaveLength(0)
+    // …a real element still emits.
+    document.getElementById("go")!.click()
+    expect(received).toHaveLength(1)
+  })
+})

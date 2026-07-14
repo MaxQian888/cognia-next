@@ -319,6 +319,7 @@
     "fetchedAt": "Updated {time}",
     "meter": {
       "credit": "Credit balance",
+      "monthly": "Current month",
       "overage": "Pay-as-you-go overage",
       "session": "Current session",
       "weekly": "Current week (all models)",

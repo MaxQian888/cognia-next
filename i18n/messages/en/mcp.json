@@ -256,7 +256,9 @@
     "testDesktopOnly": "Desktop only",
     "testTooltip": "Test connection (10s timeout)",
     "toolsOne": "{count} tool",
-    "toolsOther": "{count} tools"
+    "toolsOther": "{count} tools",
+    "logs": "View {name} logs",
+    "logsTooltip": "View logs"
   },
   "tabs": {
     "agents": "Agent Sync",

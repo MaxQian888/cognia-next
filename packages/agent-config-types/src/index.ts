@@ -2850,6 +2850,11 @@ export interface AppSettings {
   searchMaxResults?: number
   /** When true, retry next provider on failure. */
   searchFallbackEnabled?: boolean
+  /**
+   * Max EXTRA attempts per provider on a transient failure (network / 429 / 5xx)
+   * before falling through to the next provider. 0 disables retry. Default 2.
+   */
+  searchMaxRetries?: number
   /** Active provider for new searches; falls back to first enabled provider. */
   defaultSearchProvider?: SearchProviderType
   /** Per-provider config (API key, enabled, priority, optional `cx` for Google). */

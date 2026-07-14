@@ -10,9 +10,10 @@
  * - app-builder/share.ts — Share codes, URLs, clipboard, social sharing
  */
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useA2UI } from "./use-a2ui"
 import { useA2UIStore } from "@/stores/a2ui"
+import { globalEventEmitter } from "@/lib/a2ui/events"
 import {
   appTemplates,
   getTemplateById,
@@ -36,6 +37,36 @@ import { useAppActionHandlers } from "./app-builder/action-handlers"
 import { useAppImportExport } from "./app-builder/import-export"
 import { useAppShare } from "./app-builder/share"
 
+// Module-level singleton for the built-in-action emitter subscription. The A2UI
+// event emitter is global, so if two builders that both opted into
+// `wireBuiltInActions` are mounted at once (e.g. the chat view and the Mini
+// Apps hub inside a persistent shell), a per-hook subscription would run every
+// handler twice — typing "1" once would append "11". Instead exactly ONE
+// emitter listener exists at a time; it forwards to the most recently mounted
+// builder's handler (all built-in handlers are equivalent — they mutate the
+// store by surfaceId), and it is torn down only when the last opted-in builder
+// unmounts.
+let activeBuiltInHandler: ((action: A2UIUserAction) => void) | null = null
+let builtInEmitterUnsub: (() => void) | null = null
+let builtInRefCount = 0
+
+function registerBuiltInActionHandler(handler: (action: A2UIUserAction) => void): () => void {
+  builtInRefCount += 1
+  activeBuiltInHandler = handler
+  if (!builtInEmitterUnsub) {
+    builtInEmitterUnsub = globalEventEmitter.onAction((action) => activeBuiltInHandler?.(action))
+  }
+  return () => {
+    builtInRefCount -= 1
+    if (builtInRefCount <= 0) {
+      builtInRefCount = 0
+      builtInEmitterUnsub?.()
+      builtInEmitterUnsub = null
+      activeBuiltInHandler = null
+    }
+  }
+}
+
 /**
  * App builder options
  */
@@ -44,6 +75,16 @@ interface UseA2UIAppBuilderOptions {
   onDataChange?: (change: A2UIDataModelChange) => void
   onAppCreated?: (appId: string, templateId: string) => void
   onAppDeleted?: (appId: string) => void
+  /**
+   * Subscribe the built-in template action handlers (calculator / timer /
+   * todo / …) to the global A2UI event emitter so rendered surfaces are
+   * interactive. Opt-in because the emitter is global: enabling it on more
+   * than one builder mounted at once would run every handler multiple times.
+   * Enable it on exactly the one builder that owns a route's interactive
+   * surfaces; leave it off for builders used only for CRUD/export (e.g. the
+   * workspace toolbar). Unhandled actions still escalate to `onAction`.
+   */
+  wireBuiltInActions?: boolean
 }
 
 /**
@@ -51,9 +92,14 @@ interface UseA2UIAppBuilderOptions {
  * Composes sub-module hooks for action handling, import/export, and sharing
  */
 export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
-  const { onAction, onDataChange, onAppCreated, onAppDeleted } = options
+  const { onAction, onDataChange, onAppCreated, onAppDeleted, wireBuiltInActions } = options
 
-  const a2ui = useA2UI({ onAction, onDataChange })
+  // Data-model changes flow straight through to the consumer, but actions do
+  // NOT subscribe here — the built-in handler owns the action subscription
+  // (see below) and escalates unhandled actions to `onAction`. Subscribing
+  // `onAction` here as well would double-dispatch, and any caller that chained
+  // `handleAppAction` back into `onAction` would recurse without bound.
+  const a2ui = useA2UI({ onDataChange })
   const surfaces = useA2UIStore((state) => state.surfaces)
   const deleteSurfaceStore = useA2UIStore((state) => state.deleteSurface)
 
@@ -158,6 +204,37 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     return validApps.sort((a, b) => b.lastModified - a.lastModified)
   }, [surfaces])
 
+  /**
+   * Rebuild renderable surfaces for saved apps whose component tree is absent
+   * after a reload. Two cases produce an orphaned instance: apps created before
+   * full-surface persistence landed (their tree was stripped from storage), and
+   * apps evicted past the store's LRU persistence cap. Template-backed apps are
+   * regenerated deterministically from their template so they open instead of
+   * spinning forever; custom apps whose tree was lost cannot be reconstructed
+   * here and are left untouched. Idempotent — already-renderable surfaces are
+   * skipped, so it is safe to call on every mount. Returns the recovered count.
+   */
+  const hydratePersistedApps = useCallback((): number => {
+    const instances = getAppInstancesCache()
+    if (instances.size === 0) return 0
+
+    let recovered = 0
+    for (const [id, instance] of instances) {
+      const surface = surfaces[id]
+      const renderable =
+        Boolean(surface?.ready) && Object.keys(surface?.components ?? {}).length > 0
+      if (renderable) continue
+
+      const template = getTemplateById(instance.templateId)
+      if (!template) continue
+
+      const { messages } = createAppFromTemplate(template, id)
+      a2ui.processMessages(messages)
+      recovered++
+    }
+    return recovered
+  }, [surfaces, a2ui])
+
   // ========== App Data ==========
 
   const getAppData = useCallback(
@@ -207,6 +284,18 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     setDataValue: a2ui.setDataValue,
     onAction,
   })
+
+  // Drive the built-in handlers off the global emitter when the caller opts in.
+  // A ref keeps the latest `handleAppAction` without re-registering the
+  // subscription on every render (its identity changes with surface state).
+  const handleAppActionRef = useRef(handleAppAction)
+  useEffect(() => {
+    handleAppActionRef.current = handleAppAction
+  }, [handleAppAction])
+  useEffect(() => {
+    if (!wireBuiltInActions) return
+    return registerBuiltInActionHandler((action) => handleAppActionRef.current(action))
+  }, [wireBuiltInActions])
 
   const importExport = useAppImportExport({
     surfaces,
@@ -325,6 +414,7 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     renameApp,
     getAppInstance,
     getAllApps,
+    hydratePersistedApps,
 
     // App data
     getAppData,

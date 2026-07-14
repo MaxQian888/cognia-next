@@ -92,9 +92,10 @@ pub struct FleetActivity {
     pub detail: Option<String>,
 }
 
-/// A parked AskUserQuestion the user must answer in the agent's own terminal.
-/// Display-only: the hook path cannot answer it, so the island renders the
-/// question and its options while the session sits in `WaitingInput`.
+/// A parked AskUserQuestion. Rendered while the session sits in `WaitingInput`.
+/// When [`FleetSession::pending_question_request`] is also set the island lets
+/// the user pick options and answers it over the hook long-poll; otherwise it
+/// is display-only (a bare `PreToolUse` with no parked `PermissionRequest`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingQuestion {
@@ -104,6 +105,22 @@ pub struct PendingQuestion {
     /// Option labels in tool order (capped — the island shows chips).
     pub options: Vec<String>,
     pub multi_select: bool,
+}
+
+/// The answerable handle for a parked AskUserQuestion. Present only while the
+/// tool's `PermissionRequest` long-poll is waiting (Claude/Codex fire both
+/// `PreToolUse` and `PermissionRequest` for AskUserQuestion — the latter is the
+/// wait-mode hook we can answer). The island posts the user's option
+/// selections to `fleet_question_respond` with `request_id`; the answer rides
+/// back as the hook's `allow` + `updatedInput.answers` decision.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingQuestionRequest {
+    /// Correlation id the island passes back to `fleet_question_respond`.
+    pub request_id: String,
+    /// Epoch ms the request arrived — the island renders the answer-window
+    /// countdown off this plus the (shared) permission wait budget.
+    pub requested_at: u64,
 }
 
 /// One live subagent spawned by the session's Task tool. Correlation is
@@ -167,6 +184,10 @@ pub struct FleetSession {
     pub pending_plan: Option<String>,
     /// Questions parked by AskUserQuestion while the session is `WaitingInput`.
     pub pending_questions: Vec<PendingQuestion>,
+    /// Answerable handle for the parked questions — present only while the
+    /// AskUserQuestion `PermissionRequest` long-poll is waiting for the island.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_question_request: Option<PendingQuestionRequest>,
     /// Live subagents (Task tool), foreground and background.
     pub subagents: Vec<FleetSubagent>,
     pub capabilities: FleetCapabilities,
@@ -195,6 +216,16 @@ pub struct FleetSession {
     /// Never serialized — the frontend has no use for it.
     #[serde(skip)]
     pub git_checked: bool,
+}
+
+impl FleetSession {
+    /// Drop any parked AskUserQuestion — both the display DTOs and the
+    /// answerable handle — so the two never drift apart. Called wherever a turn
+    /// boundary or completion supersedes the question.
+    fn clear_questions(&mut self) {
+        self.pending_questions.clear();
+        self.pending_question_request = None;
+    }
 }
 
 /// Full snapshot emitted to the frontend on every change.
@@ -233,6 +264,10 @@ pub enum RegistryEffect {
     Updated,
     /// A new permission request was parked — emit `fleet://permission` too.
     PermissionRequested { request_id: String },
+    /// An AskUserQuestion is parked and answerable — the caller long-polls for
+    /// the island's option selections, then answers the hook with an `allow` +
+    /// `updatedInput.answers` decision.
+    QuestionRequested { request_id: String },
     /// Event was unusable (no session id, unknown shape) — nothing to emit.
     Ignored,
 }
@@ -332,7 +367,7 @@ impl FleetRegistry {
                 // A new turn supersedes anything parked for the previous one;
                 // background subagents keep running across turns.
                 entry.pending_plan = None;
-                entry.pending_questions.clear();
+                entry.clear_questions();
                 entry.subagents.retain(|s| s.background);
                 // A new turn clears a stale error and re-arms the per-turn git
                 // branch refresh (catches a mid-session checkout).
@@ -349,16 +384,20 @@ impl FleetRegistry {
                     entry.activity = None;
                     entry.pending_plan = extract_plan(&ev.payload);
                 } else if tool.as_deref().is_some_and(is_ask_user_question_tool) {
-                    // The agent is blocked on a terminal answer — surface the
-                    // question(s) instead of a generic "working" line.
+                    // The agent is blocked on the user — surface the question(s)
+                    // instead of a generic "working" line. Display-only for now:
+                    // the paired `PermissionRequest` (wait-mode hook) arrives
+                    // next and attaches the answerable handle. Drop any stale
+                    // handle so a re-fired Pre never leaves a dead answer window.
                     entry.status = FleetStatus::WaitingInput;
                     entry.activity = None;
                     entry.pending_questions = extract_questions(&ev.payload);
+                    entry.pending_question_request = None;
                 } else {
                     entry.status = FleetStatus::Working;
                     // Another tool running means the plan/question moment passed.
                     entry.pending_plan = None;
-                    entry.pending_questions.clear();
+                    entry.clear_questions();
                     if tool.as_deref().is_some_and(is_task_tool) {
                         push_subagent(entry, &ev.payload, now_ms);
                     }
@@ -375,7 +414,7 @@ impl FleetRegistry {
                 // The tool returned — a parked plan approval / question was
                 // answered in the terminal.
                 entry.pending_plan = None;
-                entry.pending_questions.clear();
+                entry.clear_questions();
                 // Surface a failed tool as a `Tool` error; a clean result
                 // clears a prior tool error but leaves a turn error standing.
                 match extract_tool_error(&ev.payload) {
@@ -406,9 +445,35 @@ impl FleetRegistry {
                 }
             }
             "Notification" => {
+                // Notifications are display hints, and they only mean "the
+                // agent is blocked mid-turn". Claude Code also fires an
+                // `idle_prompt` notification ~60 s after a turn ends cleanly
+                // (it is idle at the prompt) — honoring that flipped a
+                // finished (Idle/Ended) session back to "needs input" forever,
+                // which pinned the island on screen. Mid-turn statuses only.
+                let mid_turn = matches!(
+                    entry.status,
+                    FleetStatus::Working
+                        | FleetStatus::WaitingInput
+                        | FleetStatus::WaitingPermission
+                        | FleetStatus::PlanPending
+                );
+                // A row already parked on something the user must act on — a
+                // plan review or a question, whether answerable or still
+                // display-only — owns its pose. A notification is only a display
+                // hint, and the authoritative event (PreToolUse / PermissionRequest)
+                // has already set the right status; letting a generic
+                // permission/idle hint overwrite it would drop the plan text or
+                // question card (the same "special tool treated as a generic
+                // event" class of bug as ExitPlanMode).
+                let parked_on_user = entry.pending_plan.is_some()
+                    || !entry.pending_questions.is_empty()
+                    || entry.pending_question_request.is_some();
                 match payload_str(&ev.payload, "notification_type").as_deref() {
-                    Some("idle_prompt") => entry.status = FleetStatus::WaitingInput,
-                    Some("permission_prompt") => {
+                    Some("idle_prompt") if mid_turn && !parked_on_user => {
+                        entry.status = FleetStatus::WaitingInput
+                    }
+                    Some("permission_prompt") if mid_turn && !parked_on_user => {
                         // Only a display hint — the real approval flow arrives
                         // via the PermissionRequest long-poll (P3).
                         if entry.pending_permission.is_none() {
@@ -421,6 +486,46 @@ impl FleetRegistry {
             "PermissionRequest" => {
                 let request_id = permission_request_id(&ev.agent, &session_id, now_ms);
                 let tool_name = payload_str(&ev.payload, "tool_name");
+                // AskUserQuestion fires BOTH PreToolUse and PermissionRequest.
+                // Its request is not a yes/no permission — it is a question the
+                // user must answer. Park it as an *answerable* question (not a
+                // generic Approve/Deny) so the island shows the options and the
+                // selection rides back as the hook's `allow` + `updatedInput`
+                // answer decision. OpenCode has no AskUserQuestion tool, so this
+                // is scoped to Claude/Codex.
+                if ev.agent != FleetAgent::Opencode
+                    && tool_name.as_deref().is_some_and(is_ask_user_question_tool)
+                {
+                    entry.status = FleetStatus::WaitingInput;
+                    entry.activity = None;
+                    entry.pending_permission = None;
+                    entry.pending_questions = extract_questions(&ev.payload);
+                    entry.pending_question_request = Some(PendingQuestionRequest {
+                        request_id: request_id.clone(),
+                        requested_at: now_ms,
+                    });
+                    return RegistryEffect::QuestionRequested { request_id };
+                }
+                // ExitPlanMode also fires BOTH PreToolUse and PermissionRequest.
+                // The Pre parked the plan preview (`PlanPending`); the paired
+                // request must NOT collapse that into a generic "ExitPlanMode"
+                // Approve/Deny card — that would treat a plan review like any
+                // other tool permission and drop the plan text. Keep the plan
+                // pose while staying answerable: approving the request is how
+                // the user accepts the plan and lets the agent proceed.
+                if tool_name.as_deref().is_some_and(is_exit_plan_tool) {
+                    entry.status = FleetStatus::PlanPending;
+                    entry.activity = None;
+                    entry.pending_plan = extract_plan(&ev.payload);
+                    entry.pending_permission = Some(PendingPermission {
+                        request_id: request_id.clone(),
+                        tool_name,
+                        detail: None,
+                        requested_at: now_ms,
+                    });
+                    entry.capabilities.approve_permission = true;
+                    return RegistryEffect::PermissionRequested { request_id };
+                }
                 entry.status = FleetStatus::WaitingPermission;
                 entry.pending_permission = Some(PendingPermission {
                     request_id: request_id.clone(),
@@ -441,7 +546,7 @@ impl FleetRegistry {
                 entry.activity = None;
                 entry.pending_permission = None;
                 entry.pending_plan = None;
-                entry.pending_questions.clear();
+                entry.clear_questions();
                 entry.subagents.retain(|s| s.background);
                 entry.last_error = None;
             }
@@ -453,7 +558,7 @@ impl FleetRegistry {
                 entry.activity = None;
                 entry.pending_permission = None;
                 entry.pending_plan = None;
-                entry.pending_questions.clear();
+                entry.clear_questions();
                 entry.subagents.retain(|s| s.background);
                 entry.last_error = Some(FleetError {
                     kind: FleetErrorKind::Turn,
@@ -488,11 +593,19 @@ impl FleetRegistry {
                 entry.activity = None;
             }
             // A denied permission (auto-mode or an out-of-band "no") releases the
-            // parked request so the row leaves the waiting state.
+            // parked request so the row leaves the waiting state. A rejected plan
+            // review parks its approval the same way (`PlanPending` +
+            // `pending_permission`), so release it symmetrically — drop the stale
+            // plan text and return to Working instead of leaving the row stuck on
+            // a plan whose answer won't come back through Cognia.
             "PermissionDenied" => {
                 entry.pending_permission = None;
-                if entry.status == FleetStatus::WaitingPermission {
+                if matches!(
+                    entry.status,
+                    FleetStatus::WaitingPermission | FleetStatus::PlanPending
+                ) {
                     entry.status = FleetStatus::Working;
+                    entry.pending_plan = None;
                 }
             }
             "agent-turn-complete" => {
@@ -503,6 +616,11 @@ impl FleetRegistry {
                 // assistant reply as the trailing activity line.
                 entry.status = FleetStatus::Idle;
                 entry.pending_permission = None;
+                // A completed turn supersedes anything still parked for it —
+                // same contract as Claude's `Stop` (a stale plan/question must
+                // not keep the row in a "needs you" pose after the turn ended).
+                entry.pending_plan = None;
+                entry.clear_questions();
                 // The notify program's per-turn signal — the only turn marker
                 // on the Codex path.
                 entry.turn_count = entry.turn_count.saturating_add(1);
@@ -526,7 +644,7 @@ impl FleetRegistry {
                 entry.activity = None;
                 entry.pending_permission = None;
                 entry.pending_plan = None;
-                entry.pending_questions.clear();
+                entry.clear_questions();
                 entry.subagents.clear();
             }
             // OpenCode plugin events (normalized in `cognia-fleet.js` so we
@@ -548,6 +666,13 @@ impl FleetRegistry {
             "session-idle" => {
                 entry.status = FleetStatus::Idle;
                 entry.activity = None;
+                // Idle means nothing is blocked on the user anymore — release
+                // anything still parked (an ask answered in OpenCode's own TUI
+                // never reports back through us; the long-poll responder times
+                // out on its own).
+                entry.pending_permission = None;
+                entry.pending_plan = None;
+                entry.clear_questions();
             }
             // Subagent events only bump last_event_at (already done above).
             _ => {}
@@ -640,6 +765,25 @@ impl FleetRegistry {
         false
     }
 
+    /// Clear the answerable handle for a parked AskUserQuestion (answered or
+    /// timed out). The display DTOs stay until `PostToolUse` so a fail-open
+    /// (timed-out) question keeps showing until the terminal answer lands; a
+    /// successful answer is superseded by the tool's own `PostToolUse`. Returns
+    /// true when the snapshot changed.
+    pub fn resolve_question(&mut self, request_id: &str) -> bool {
+        for session in self.sessions.values_mut() {
+            if session
+                .pending_question_request
+                .as_ref()
+                .is_some_and(|q| q.request_id == request_id)
+            {
+                session.pending_question_request = None;
+                return true;
+            }
+        }
+        false
+    }
+
     /// Drop ended rows past their linger window and stale rows whose agent
     /// process is gone. `pid_alive` is injected so tests don't need real pids.
     pub fn reap(&mut self, now_ms: u64, pid_alive: impl Fn(u32) -> bool) -> bool {
@@ -689,6 +833,7 @@ fn new_session(
         pending_permission: None,
         pending_plan: None,
         pending_questions: Vec::new(),
+        pending_question_request: None,
         subagents: Vec::new(),
         capabilities: FleetCapabilities::default(),
         started_at: now_ms,
@@ -815,6 +960,62 @@ fn extract_questions(payload: &serde_json::Value) -> Vec<PendingQuestion> {
         })
         .take(MAX_QUESTIONS)
         .collect()
+}
+
+/// One option's display label — `{label}` objects, or a bare string for the
+/// bridged variants (mirrors the fallback in [`extract_questions`]).
+fn option_label(opt: &serde_json::Value) -> Option<String> {
+    opt.get("label")
+        .and_then(|l| l.as_str())
+        .or_else(|| opt.as_str())
+        .map(str::to_owned)
+}
+
+/// Build the AskUserQuestion answer decision's `updatedInput` from the raw
+/// `tool_input.questions` and the island's per-question option selections
+/// (indices into each question's `options`). Mirrors the Agent SDK user-input
+/// contract: the original `questions` are passed through unchanged, and
+/// `answers` maps each question's (untruncated) text to the selected option
+/// label(s) — a single string for single-select, an array for multi-select.
+/// Questions with no valid selection are omitted. `selections[i]` answers
+/// `questions[i]`; extra/short selection rows are ignored.
+pub fn build_ask_user_answer_input(
+    raw_questions: &serde_json::Value,
+    selections: &[Vec<u32>],
+) -> serde_json::Value {
+    let mut answers = serde_json::Map::new();
+    if let Some(questions) = raw_questions.as_array() {
+        for (i, selected) in selections.iter().enumerate() {
+            let Some(q) = questions.get(i) else { continue };
+            let Some(question_text) = q.get("question").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let opts = q.get("options").and_then(|o| o.as_array());
+            let multi = q
+                .get("multiSelect")
+                .or_else(|| q.get("multi_select"))
+                .and_then(|m| m.as_bool())
+                .unwrap_or(false);
+            let labels: Vec<String> = selected
+                .iter()
+                .filter_map(|&idx| opts.and_then(|o| o.get(idx as usize)).and_then(option_label))
+                .collect();
+            if labels.is_empty() {
+                continue;
+            }
+            let value = if multi {
+                serde_json::Value::Array(labels.into_iter().map(serde_json::Value::String).collect())
+            } else {
+                // Single-select: the first (and only expected) label.
+                serde_json::Value::String(labels.into_iter().next().unwrap_or_default())
+            };
+            answers.insert(question_text.to_string(), value);
+        }
+    }
+    serde_json::json!({
+        "questions": raw_questions.clone(),
+        "answers": serde_json::Value::Object(answers),
+    })
 }
 
 fn subagent_description(payload: &serde_json::Value) -> Option<String> {
@@ -1127,6 +1328,9 @@ mod tests {
         // Plain-string options (bridged variants) also parse.
         assert_eq!(s.pending_questions[1].options, vec!["Yes", "No"]);
         assert!(s.pending_questions[1].multi_select);
+        // PreToolUse alone is display-only — the answerable handle is unset
+        // until the paired PermissionRequest arrives.
+        assert!(s.pending_question_request.is_none());
 
         // Answering in the terminal → PostToolUse clears and resumes working.
         let mut post = base_payload();
@@ -1135,6 +1339,143 @@ mod tests {
         let s = only_session(&reg);
         assert_eq!(s.status, FleetStatus::Working);
         assert!(s.pending_questions.is_empty());
+    }
+
+    #[test]
+    fn permission_request_for_ask_user_question_parks_answerable_question() {
+        let mut reg = FleetRegistry::new();
+        let mut payload = base_payload();
+        payload["tool_name"] = serde_json::json!("AskUserQuestion");
+        payload["tool_input"] = serde_json::json!({
+            "questions": [{
+                "question": "Which auth method?",
+                "header": "Auth",
+                "multiSelect": false,
+                "options": [
+                    {"label": "OAuth", "description": "…"},
+                    {"label": "API key", "description": "…"}
+                ]
+            }]
+        });
+        let effect = reg.apply(&claude_ev("PermissionRequest", payload), 7000);
+
+        // It is a *question*, not a generic Approve/Deny: WaitingInput, the
+        // answerable handle is set, and NO generic permission is parked.
+        let RegistryEffect::QuestionRequested { request_id } = effect else {
+            panic!("expected QuestionRequested, got {effect:?}");
+        };
+        let s = only_session(&reg);
+        assert_eq!(s.status, FleetStatus::WaitingInput);
+        assert!(s.pending_permission.is_none());
+        assert_eq!(s.pending_questions.len(), 1);
+        assert_eq!(s.pending_questions[0].options, vec!["OAuth", "API key"]);
+        let req = s.pending_question_request.expect("answerable handle set");
+        assert_eq!(req.request_id, request_id);
+        assert_eq!(req.requested_at, 7000);
+
+        // resolve_question clears the handle but leaves the display DTOs
+        // (fail-open questions keep showing until PostToolUse).
+        assert!(reg.resolve_question(&request_id));
+        let s = only_session(&reg);
+        assert!(s.pending_question_request.is_none());
+        assert_eq!(s.pending_questions.len(), 1);
+        assert!(!reg.resolve_question("nope"));
+    }
+
+    #[test]
+    fn permission_request_for_exit_plan_keeps_plan_pose_and_stays_answerable() {
+        for tool in [
+            "ExitPlanMode",
+            "exit_plan_mode",
+            "mcp__cognia-tools__exit_plan_mode",
+        ] {
+            let mut reg = FleetRegistry::new();
+            // PreToolUse parks the plan preview.
+            let mut pre = base_payload();
+            pre["tool_name"] = serde_json::json!(tool);
+            pre["tool_input"] = serde_json::json!({"plan": "## Steps\n1. Do X"});
+            reg.apply(&claude_ev("PreToolUse", pre), 0);
+
+            // The paired PermissionRequest must NOT collapse the plan into a
+            // generic tool approval: the row stays PlanPending, keeps the plan
+            // text, and parks an answerable permission (Approve/Deny).
+            let mut req = base_payload();
+            req["tool_name"] = serde_json::json!(tool);
+            req["tool_input"] = serde_json::json!({"plan": "## Steps\n1. Do X"});
+            let effect = reg.apply(&claude_ev("PermissionRequest", req), 7000);
+            let RegistryEffect::PermissionRequested { request_id } = effect else {
+                panic!("expected PermissionRequested, got {effect:?} for {tool}");
+            };
+            let s = only_session(&reg);
+            assert_eq!(s.status, FleetStatus::PlanPending, "{tool}");
+            assert_eq!(s.pending_plan.as_deref(), Some("## Steps\n1. Do X"), "{tool}");
+            let pending = s.pending_permission.as_ref().expect("answerable permission");
+            assert_eq!(pending.request_id, request_id, "{tool}");
+            assert_eq!(pending.tool_name.as_deref(), Some(tool), "{tool}");
+            assert!(s.capabilities.approve_permission, "{tool}");
+            // Answering releases the permission the standard way.
+            assert!(reg.resolve_permission(&request_id));
+            assert!(
+                only_session(&reg).pending_permission.is_none(),
+                "{tool}"
+            );
+        }
+    }
+
+    #[test]
+    fn ask_user_question_permission_stays_generic_for_opencode() {
+        // OpenCode has no AskUserQuestion tool — a same-named permission must
+        // still park as a generic approval, not the answerable-question path.
+        let mut reg = FleetRegistry::new();
+        let mut payload = base_payload();
+        payload["session_id"] = serde_json::json!("oc-auq");
+        payload["tool_name"] = serde_json::json!("AskUserQuestion");
+        payload["tool_input"] = serde_json::json!({ "questions": [{ "question": "Q?" }] });
+        let effect = reg.apply(&ev(FleetAgent::Opencode, "PermissionRequest", payload), 0);
+        assert!(matches!(effect, RegistryEffect::PermissionRequested { .. }));
+        let s = only_session(&reg);
+        assert_eq!(s.status, FleetStatus::WaitingPermission);
+        assert!(s.pending_permission.is_some());
+        assert!(s.pending_question_request.is_none());
+    }
+
+    #[test]
+    fn build_ask_user_answer_input_maps_selections_to_labels() {
+        let raw = serde_json::json!({
+            "questions": [
+                {
+                    "question": "Which auth method?",
+                    "multiSelect": false,
+                    "options": [{"label": "OAuth"}, {"label": "API key"}]
+                },
+                {
+                    "question": "Which sections?",
+                    "multiSelect": true,
+                    "options": ["Intro", "Body", "Outro"]
+                }
+            ]
+        });
+        let questions = &raw["questions"];
+        // Q0 single-select → index 1 ("API key"); Q1 multi-select → 0 and 2.
+        let updated = build_ask_user_answer_input(questions, &[vec![1], vec![0, 2]]);
+        // Original questions pass through unchanged.
+        assert_eq!(updated["questions"], *questions);
+        // Single-select answer is a string; multi-select is an array of labels.
+        assert_eq!(updated["answers"]["Which auth method?"], "API key");
+        assert_eq!(
+            updated["answers"]["Which sections?"],
+            serde_json::json!(["Intro", "Outro"])
+        );
+    }
+
+    #[test]
+    fn build_ask_user_answer_input_omits_empty_or_out_of_range() {
+        let raw = serde_json::json!({
+            "questions": [{ "question": "Pick?", "options": [{"label": "A"}] }]
+        });
+        // Out-of-range index → no label → question omitted from answers.
+        let updated = build_ask_user_answer_input(&raw["questions"], &[vec![9]]);
+        assert!(updated["answers"].as_object().unwrap().is_empty());
     }
 
     #[test]
@@ -1213,8 +1554,7 @@ mod tests {
 
         let mut bg = base_payload();
         bg["tool_name"] = serde_json::json!("Task");
-        bg["tool_input"] =
-            serde_json::json!({"description": "watcher", "run_in_background": true});
+        bg["tool_input"] = serde_json::json!({"description": "watcher", "run_in_background": true});
         reg.apply(&claude_ev("PreToolUse", bg), 1);
 
         let mut prompt = base_payload();
@@ -1246,8 +1586,7 @@ mod tests {
         // A Task spawn supersedes the parked question and lists the subagent.
         let mut task = base_payload();
         task["tool_name"] = serde_json::json!("Task");
-        task["tool_input"] =
-            serde_json::json!({"description": "d", "subagent_type": "Explore", "run_in_background": true});
+        task["tool_input"] = serde_json::json!({"description": "d", "subagent_type": "Explore", "run_in_background": true});
         reg.apply(&claude_ev("PreToolUse", task), 2);
         let json = serde_json::to_value(reg.snapshot(3)).unwrap();
         let s = &json["sessions"][0];
@@ -1259,12 +1598,115 @@ mod tests {
     }
 
     #[test]
-    fn idle_prompt_notification_marks_waiting_input() {
+    fn pending_question_request_serializes_camel_case() {
         let mut reg = FleetRegistry::new();
         let mut payload = base_payload();
+        payload["tool_name"] = serde_json::json!("AskUserQuestion");
+        payload["tool_input"] =
+            serde_json::json!({ "questions": [{"question": "Q?", "options": ["A", "B"]}] });
+        reg.apply(&claude_ev("PermissionRequest", payload), 42);
+        let json = serde_json::to_value(reg.snapshot(43)).unwrap();
+        let req = &json["sessions"][0]["pendingQuestionRequest"];
+        assert!(req["requestId"].is_string());
+        assert_eq!(req["requestedAt"], 42);
+        // Absent (skipped) when no question is parked.
+        let mut reg2 = FleetRegistry::new();
+        reg2.apply(&claude_ev("SessionStart", base_payload()), 0);
+        let json2 = serde_json::to_value(reg2.snapshot(1)).unwrap();
+        assert!(json2["sessions"][0].get("pendingQuestionRequest").is_none());
+    }
+
+    #[test]
+    fn idle_prompt_notification_marks_waiting_input_only_mid_turn() {
+        let mut reg = FleetRegistry::new();
+        // Mid-turn (Working): the notification is a real "blocked on you".
+        reg.apply(&claude_ev("UserPromptSubmit", base_payload()), 0);
+        let mut payload = base_payload();
         payload["notification_type"] = serde_json::json!("idle_prompt");
-        reg.apply(&claude_ev("Notification", payload), 0);
+        reg.apply(&claude_ev("Notification", payload.clone()), 1);
         assert_eq!(only_session(&reg).status, FleetStatus::WaitingInput);
+
+        // After a clean Stop the session is Idle; Claude Code still fires an
+        // `idle_prompt` notification ~60 s later — it must NOT resurrect the
+        // "needs input" pose (the reported stuck-attention bug).
+        reg.apply(&claude_ev("Stop", base_payload()), 2);
+        reg.apply(&claude_ev("Notification", payload.clone()), 3);
+        assert_eq!(only_session(&reg).status, FleetStatus::Idle);
+
+        // Same guard for the permission hint on an idle session.
+        let mut perm = base_payload();
+        perm["notification_type"] = serde_json::json!("permission_prompt");
+        reg.apply(&claude_ev("Notification", perm), 4);
+        assert_eq!(only_session(&reg).status, FleetStatus::Idle);
+
+        // And an ended session stays ended.
+        reg.apply(&claude_ev("SessionEnd", base_payload()), 5);
+        reg.apply(&claude_ev("Notification", payload), 6);
+        assert_eq!(only_session(&reg).status, FleetStatus::Ended);
+    }
+
+    #[test]
+    fn notification_does_not_clobber_a_display_only_plan_pose() {
+        // A bare PreToolUse parks the plan (display-only: no PermissionRequest
+        // yet, so no pending_permission). A permission/idle notification hint
+        // arriving in that window must NOT overwrite the plan pose — the plan
+        // text and PlanPending status own the row until the real event lands.
+        for notif in ["permission_prompt", "idle_prompt"] {
+            let mut reg = FleetRegistry::new();
+            let mut pre = base_payload();
+            pre["tool_name"] = serde_json::json!("ExitPlanMode");
+            pre["tool_input"] = serde_json::json!({"plan": "## Steps\n1. Do X"});
+            reg.apply(&claude_ev("PreToolUse", pre), 0);
+            assert_eq!(only_session(&reg).status, FleetStatus::PlanPending, "{notif}");
+
+            let mut hint = base_payload();
+            hint["notification_type"] = serde_json::json!(notif);
+            reg.apply(&claude_ev("Notification", hint), 1);
+            let s = only_session(&reg);
+            assert_eq!(s.status, FleetStatus::PlanPending, "{notif}");
+            assert_eq!(s.pending_plan.as_deref(), Some("## Steps\n1. Do X"), "{notif}");
+            assert!(s.pending_permission.is_none(), "{notif}");
+        }
+    }
+
+    #[test]
+    fn notification_does_not_clobber_a_display_only_question_pose() {
+        // Same guard for a bare AskUserQuestion PreToolUse (display-only
+        // questions, no answerable handle yet).
+        let mut reg = FleetRegistry::new();
+        let mut pre = base_payload();
+        pre["tool_name"] = serde_json::json!("AskUserQuestion");
+        pre["tool_input"] = serde_json::json!({ "questions": [{ "question": "Q?" }] });
+        reg.apply(&claude_ev("PreToolUse", pre), 0);
+        assert_eq!(only_session(&reg).status, FleetStatus::WaitingInput);
+
+        let mut hint = base_payload();
+        hint["notification_type"] = serde_json::json!("permission_prompt");
+        reg.apply(&claude_ev("Notification", hint), 1);
+        let s = only_session(&reg);
+        assert_eq!(s.status, FleetStatus::WaitingInput);
+        assert_eq!(s.pending_questions.len(), 1);
+    }
+
+    #[test]
+    fn permission_denied_releases_a_parked_plan() {
+        // A rejected plan review (auto-mode / out-of-band "no") must release the
+        // plan pose the same way a denied generic permission does — drop the
+        // plan text and return to Working, not leave the row stuck PlanPending.
+        let mut reg = FleetRegistry::new();
+        let mut pre = base_payload();
+        pre["tool_name"] = serde_json::json!("ExitPlanMode");
+        pre["tool_input"] = serde_json::json!({"plan": "## Steps\n1. Do X"});
+        reg.apply(&claude_ev("PreToolUse", pre.clone()), 0);
+        // The paired PermissionRequest parks the answerable permission.
+        reg.apply(&claude_ev("PermissionRequest", pre), 1);
+        assert_eq!(only_session(&reg).status, FleetStatus::PlanPending);
+
+        reg.apply(&claude_ev("PermissionDenied", base_payload()), 2);
+        let s = only_session(&reg);
+        assert_eq!(s.status, FleetStatus::Working);
+        assert!(s.pending_permission.is_none());
+        assert!(s.pending_plan.is_none());
     }
 
     #[test]
@@ -1453,7 +1895,8 @@ mod tests {
         reg.apply(&claude_ev("SessionStart", base_payload()), 0);
         // needs_git_capture yields the cwd until a branch is recorded.
         assert_eq!(
-            reg.needs_git_capture(FleetAgent::ClaudeCode, SID).as_deref(),
+            reg.needs_git_capture(FleetAgent::ClaudeCode, SID)
+                .as_deref(),
             Some("/Users/x/proj/cognia-next")
         );
         assert!(reg.set_git_branch(FleetAgent::ClaudeCode, SID, Some("main".into())));
@@ -1664,6 +2107,44 @@ mod tests {
         reg.apply(&ev(FleetAgent::Opencode, "session-idle", idle), 1);
         assert_eq!(only_session(&reg).status, FleetStatus::Idle);
         assert!(only_session(&reg).activity.is_none());
+    }
+
+    #[test]
+    fn opencode_session_idle_releases_parked_permission() {
+        let mut reg = FleetRegistry::new();
+        let mut ask = base_payload();
+        ask["session_id"] = serde_json::json!("oc-perm");
+        ask["tool_name"] = serde_json::json!("bash");
+        reg.apply(&ev(FleetAgent::Opencode, "PermissionRequest", ask), 0);
+        assert_eq!(only_session(&reg).status, FleetStatus::WaitingPermission);
+
+        // Answered in OpenCode's own TUI → the session just goes idle; the
+        // parked permission must not keep the row (and the island) waiting.
+        let mut idle = base_payload();
+        idle["session_id"] = serde_json::json!("oc-perm");
+        reg.apply(&ev(FleetAgent::Opencode, "session-idle", idle), 1);
+        let s = only_session(&reg);
+        assert_eq!(s.status, FleetStatus::Idle);
+        assert!(s.pending_permission.is_none());
+    }
+
+    #[test]
+    fn codex_turn_complete_clears_parked_plan_and_questions() {
+        let mut reg = FleetRegistry::new();
+        let mut pre = base_payload();
+        pre["session_id"] = serde_json::json!("cx-1");
+        pre["tool_name"] = serde_json::json!("AskUserQuestion");
+        pre["tool_input"] = serde_json::json!({"questions": [{"question": "Q?"}]});
+        reg.apply(&ev(FleetAgent::Codex, "PreToolUse", pre), 0);
+        assert_eq!(only_session(&reg).status, FleetStatus::WaitingInput);
+
+        let mut done = base_payload();
+        done["session_id"] = serde_json::json!("cx-1");
+        reg.apply(&ev(FleetAgent::Codex, "agent-turn-complete", done), 1);
+        let s = only_session(&reg);
+        assert_eq!(s.status, FleetStatus::Idle);
+        assert!(s.pending_questions.is_empty());
+        assert!(s.pending_plan.is_none());
     }
 
     #[test]

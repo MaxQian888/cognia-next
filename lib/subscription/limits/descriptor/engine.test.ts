@@ -449,4 +449,73 @@ describe("descriptorToSource", () => {
     )
     expect(snap?.meters[0]).toMatchObject({ remaining: 9 })
   })
+
+  it("matches when providerKey or baseUrlIncludes is an array", () => {
+    const arrayDescriptor: SourceDescriptor = {
+      id: "multi",
+      match: { providerKey: ["a", "b"], baseUrlIncludes: ["z.ai", "bigmodel.cn"] },
+      request: { path: "/x" },
+      extract: { kind: "balance", remainingPath: "bal" },
+    }
+    const src = descriptorToSource(arrayDescriptor)
+    expect(src.matches({ providerKey: "b" })).toBe(true)
+    expect(src.matches({ providerKey: "c" })).toBe(false)
+    expect(src.matches({ baseUrl: "https://open.bigmodel.cn/api/anthropic" })).toBe(true)
+    expect(src.matches({ baseUrl: "https://api.z.ai/api/anthropic" })).toBe(true)
+    expect(src.matches({ baseUrl: "https://example.com" })).toBe(false)
+  })
+})
+
+describe("runDescriptor — useBaseUrlOrigin", () => {
+  const originDescriptor: SourceDescriptor = {
+    id: "origin",
+    match: { providerKey: "origin" },
+    request: { useBaseUrlOrigin: true, path: "/api/monitor/quota" },
+    extract: { kind: "balance", remainingPath: "bal", unit: "USD", currency: "USD" },
+  }
+
+  it("anchors the path at the host origin, ignoring a relay path segment", async () => {
+    let seenUrl = ""
+    await runDescriptor(
+      originDescriptor,
+      ctx({
+        baseUrl: "https://open.bigmodel.cn/api/anthropic",
+        authedGet: async (url) => {
+          seenUrl = url
+          return JSON.stringify({ bal: 1 })
+        },
+      })
+    )
+    expect(seenUrl).toBe("https://open.bigmodel.cn/api/monitor/quota")
+  })
+
+  it("still resolves for a bare-host baseUrl (origin === host)", async () => {
+    let seenUrl = ""
+    await runDescriptor(
+      originDescriptor,
+      ctx({
+        baseUrl: "https://api.z.ai",
+        authedGet: async (url) => {
+          seenUrl = url
+          return JSON.stringify({ bal: 1 })
+        },
+      })
+    )
+    expect(seenUrl).toBe("https://api.z.ai/api/monitor/quota")
+  })
+
+  it("falls back to the trimmed base when the URL can't be parsed", async () => {
+    let seenUrl = ""
+    await runDescriptor(
+      originDescriptor,
+      ctx({
+        baseUrl: "not-a-valid-url",
+        authedGet: async (url) => {
+          seenUrl = url
+          return JSON.stringify({ bal: 1 })
+        },
+      })
+    )
+    expect(seenUrl).toBe("not-a-valid-url/api/monitor/quota")
+  })
 })

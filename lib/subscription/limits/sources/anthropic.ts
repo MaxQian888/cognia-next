@@ -77,20 +77,39 @@ export function createAnthropicLimitsSource(
     },
     async fetch(ctx: LimitsSourceContext): Promise<ProviderLimits | null> {
       if (!ctx.token) return null
+      let token = ctx.token
 
       // 1) Free OAuth usage endpoint (no token cost, 4 windows).
       let meters: LimitsMeter[] = []
       try {
-        meters = await fetchUsage(ctx.token, { authedGet: ctx.authedGet })
+        meters = await fetchUsage(token, { authedGet: ctx.authedGet })
       } catch {
         meters = []
+      }
+
+      // 1b) Reactive refresh + retry. The free endpoint returns `[]` on a 401
+      // (the error is swallowed one layer down in `fetchOAuthUsage`), so an
+      // expired bearer is indistinguishable from "no windows" here. Refresh the
+      // token once and retry before spending tokens on the paid probe. Mirrors
+      // the (dormant) scheduler's 401 handling — this is the seam that keeps the
+      // Claude quota panel working past the ~8h token expiry.
+      if (meters.length === 0 && ctx.refreshToken) {
+        const refreshed = await ctx.refreshToken().catch(() => null)
+        if (refreshed && refreshed !== token) {
+          token = refreshed
+          try {
+            meters = await fetchUsage(token, { authedGet: ctx.authedGet })
+          } catch {
+            meters = []
+          }
+        }
       }
 
       // 2) Paid probe fallback (only if the free endpoint gave nothing).
       if (meters.length === 0 && probe) {
         try {
           // `probeOnce` only reads `accessToken`; the rest of the shape is unused.
-          const outcome = await probe({ accessToken: ctx.token } as AnthropicCredentialData)
+          const outcome = await probe({ accessToken: token } as AnthropicCredentialData)
           meters = metersFromProbe(outcome, ctx.now)
         } catch {
           meters = []

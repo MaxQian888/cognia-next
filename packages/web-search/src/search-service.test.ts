@@ -66,6 +66,7 @@ import {
   aggregateSearch,
 } from "./search-service"
 import { getProviderHealth, resetProviderHealth } from "./provider-health"
+import { resetRotationState } from "./key-rotation"
 
 beforeAll(() => {
   setSearchUsageReporter((...args) => incrementSearchUsageMock(...args))
@@ -92,6 +93,7 @@ beforeEach(() => {
   routeSearchMock.mockReset()
   incrementSearchUsageMock.mockClear()
   resetProviderHealth()
+  resetRotationState()
   jest.spyOn(console, "warn").mockImplementation(() => {})
 })
 
@@ -187,6 +189,96 @@ describe("search()", () => {
     expect(r.provider).toBe("perplexity")
     expect(routeSearchMock).toHaveBeenCalledTimes(1)
     expect(routeSearchMock.mock.calls[0][1]).toBe("perplexity")
+  })
+})
+
+describe("search() retry + key rotation", () => {
+  const ok = (provider: SearchProviderSettings["providerId"]): SearchResponse => ({
+    provider,
+    query: "q",
+    results: [],
+    responseTime: 1,
+  })
+
+  it("retries the same provider on a transient error, then succeeds", async () => {
+    routeSearchMock
+      .mockRejectedValueOnce(new Error("Tavily API error: 429 - rate limited"))
+      .mockResolvedValueOnce(ok("tavily"))
+    const r = await search("q", {
+      provider: "tavily",
+      providerSettings: { tavily: makeSettings("tavily") },
+      fallbackEnabled: false,
+      retryBackoffMs: 0,
+    })
+    expect(r.provider).toBe("tavily")
+    expect(routeSearchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("rotates to the next key across retries when the pool has multiple keys", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", {
+        apiKey: "key-A",
+        apiKeys: ["key-B"],
+        apiKeyRotationEnabled: true,
+        apiKeyRotationStrategy: "round-robin",
+      }),
+    }
+    routeSearchMock
+      .mockRejectedValueOnce(new Error("API error: 429 - x"))
+      .mockResolvedValueOnce(ok("tavily"))
+    await search("q", {
+      provider: "tavily",
+      providerSettings: settings,
+      fallbackEnabled: false,
+      retryBackoffMs: 0,
+    })
+    const key1 = (routeSearchMock.mock.calls[0][2] as SearchProviderSettings).apiKey
+    const key2 = (routeSearchMock.mock.calls[1][2] as SearchProviderSettings).apiKey
+    expect(key1).toBe("key-A")
+    expect(key2).toBe("key-B")
+  })
+
+  it("does not retry when maxRetries is 0", async () => {
+    routeSearchMock.mockRejectedValueOnce(new Error("API error: 429 - x"))
+    await expect(
+      search("q", {
+        provider: "tavily",
+        providerSettings: { tavily: makeSettings("tavily") },
+        fallbackEnabled: false,
+        maxRetries: 0,
+      })
+    ).rejects.toThrow(/429/)
+    expect(routeSearchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not retry a permanent (4xx) error — falls straight through to the next provider", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      perplexity: makeSettings("perplexity", { priority: 2 }),
+    }
+    routeSearchMock
+      .mockRejectedValueOnce(new Error("API error: 400 - bad query"))
+      .mockResolvedValueOnce(ok("perplexity"))
+    const r = await search("q", { providerSettings: settings, retryBackoffMs: 0 })
+    expect(r.provider).toBe("perplexity")
+    // tavily attempted once (no retry) + perplexity once
+    expect(routeSearchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("exhausts retries then falls back to the next provider", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      perplexity: makeSettings("perplexity", { priority: 2 }),
+    }
+    routeSearchMock
+      .mockRejectedValueOnce(new Error("API error: 500 - x"))
+      .mockRejectedValueOnce(new Error("API error: 500 - x"))
+      .mockRejectedValueOnce(new Error("API error: 500 - x"))
+      .mockResolvedValueOnce(ok("perplexity"))
+    const r = await search("q", { providerSettings: settings, retryBackoffMs: 0 })
+    expect(r.provider).toBe("perplexity")
+    // tavily: 1 + 2 retries = 3 attempts (default maxRetries=2), then perplexity
+    expect(routeSearchMock).toHaveBeenCalledTimes(4)
   })
 })
 

@@ -402,4 +402,65 @@ describe("useA2UIStore", () => {
       expect(useA2UIStore.getState().activeSurfaceId).toBe("surface-meta")
     })
   })
+
+  describe("persist round-trip (surface survives reload)", () => {
+    it("persists the component tree + data model, not just metadata", () => {
+      act(() => {
+        useA2UIStore.getState().createSurface("surface-1", "inline", { title: "Calc" })
+        useA2UIStore
+          .getState()
+          .updateComponents("surface-1", [
+            { id: "root", component: "Button", text: "1", action: "input_1" } as never,
+          ])
+        useA2UIStore.getState().updateDataModel("surface-1", { display: "0" })
+        useA2UIStore.getState().setSurfaceReady("surface-1")
+      })
+
+      // partialize output is the ONLY durable copy — it must carry the heavy
+      // data, otherwise the surface rehydrates empty and never becomes ready.
+      const raw = localStorage.getItem("cognia-a2ui-surfaces")
+      expect(raw).toBeTruthy()
+      const persistedSurface = JSON.parse(raw as string).state.surfaces["surface-1"]
+      expect(persistedSurface.components.root).toBeDefined()
+      expect(persistedSurface.dataModel.display).toBe("0")
+      expect(persistedSurface.ready).toBe(true)
+    })
+
+    it("rehydrates a full surface back to a ready, renderable state", async () => {
+      localStorage.setItem(
+        "cognia-a2ui-surfaces",
+        JSON.stringify({
+          state: {
+            surfaces: {
+              "surface-full": {
+                id: "surface-full",
+                type: "inline",
+                rootId: "root",
+                components: { root: { id: "root", component: "Button", text: "1" } },
+                dataModel: { display: "0" },
+                createdAt: 1,
+                updatedAt: 2,
+                ready: true,
+              },
+            },
+            activeSurfaceId: "surface-full",
+          },
+          version: 3,
+        })
+      )
+
+      await act(async () => {
+        await (
+          useA2UIStore as unknown as { persist: { rehydrate: () => Promise<void> } }
+        ).persist.rehydrate()
+      })
+
+      const surface = useA2UIStore.getState().surfaces["surface-full"]
+      expect(surface).toBeDefined()
+      expect(surface.ready).toBe(true)
+      expect(surface.components.root).toBeDefined()
+      expect(surface.dataModel.display).toBe("0")
+      expect(useA2UIStore.getState().activeSurfaceId).toBe("surface-full")
+    })
+  })
 })

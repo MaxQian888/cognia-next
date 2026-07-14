@@ -658,6 +658,12 @@ export function getInstallInstructions(providerId: LocalProviderName): {
   steps: string[]
   downloadUrl: string
   docsUrl: string
+  /** Command that starts the local server. Omitted for GUI apps that expose a server toggle. */
+  serveCommand?: string
+  /** Example command that fetches a first model. Omitted when models load via a GUI or auto-download. */
+  modelPullCommand?: string
+  /** Where to browse/download models compatible with this provider. */
+  modelsUrl: string
 } {
   const instructions: Record<LocalProviderName, ReturnType<typeof getInstallInstructions>> = {
     ollama: {
@@ -670,6 +676,9 @@ export function getInstallInstructions(providerId: LocalProviderName): {
       ],
       downloadUrl: "https://ollama.ai/download",
       docsUrl: "https://ollama.ai/docs",
+      serveCommand: "ollama serve",
+      modelPullCommand: "ollama pull llama3.2",
+      modelsUrl: "https://ollama.ai/library",
     },
     lmstudio: {
       title: "Install LM Studio",
@@ -681,6 +690,8 @@ export function getInstallInstructions(providerId: LocalProviderName): {
       ],
       downloadUrl: "https://lmstudio.ai",
       docsUrl: "https://lmstudio.ai/docs",
+      // GUI app: the server is toggled from the Developer tab, no shell command.
+      modelsUrl: "https://huggingface.co/models?library=gguf",
     },
     llamacpp: {
       title: "Install llama.cpp Server",
@@ -692,6 +703,8 @@ export function getInstallInstructions(providerId: LocalProviderName): {
       ],
       downloadUrl: "https://github.com/ggerganov/llama.cpp/releases",
       docsUrl: "https://github.com/ggerganov/llama.cpp/blob/master/examples/server/README.md",
+      serveCommand: "./llama-server -m model.gguf",
+      modelsUrl: "https://huggingface.co/models?search=gguf",
     },
     llamafile: {
       title: "Install llamafile",
@@ -702,6 +715,8 @@ export function getInstallInstructions(providerId: LocalProviderName): {
       ],
       downloadUrl: "https://github.com/Mozilla-Ocho/llamafile/releases",
       docsUrl: "https://github.com/Mozilla-Ocho/llamafile",
+      serveCommand: "./model.llamafile --server",
+      modelsUrl: "https://huggingface.co/models?search=gguf",
     },
     vllm: {
       title: "Install vLLM",
@@ -712,6 +727,8 @@ export function getInstallInstructions(providerId: LocalProviderName): {
       ],
       downloadUrl: "https://vllm.ai",
       docsUrl: "https://docs.vllm.ai",
+      serveCommand: "vllm serve meta-llama/Llama-3.2-3B-Instruct",
+      modelsUrl: "https://huggingface.co/models",
     },
     localai: {
       title: "Install LocalAI",
@@ -722,6 +739,8 @@ export function getInstallInstructions(providerId: LocalProviderName): {
       ],
       downloadUrl: "https://github.com/mudler/LocalAI/releases",
       docsUrl: "https://localai.io/docs",
+      serveCommand: "docker run -p 8080:8080 localai/localai",
+      modelsUrl: "https://localai.io/models",
     },
     jan: {
       title: "Install Jan",
@@ -733,6 +752,8 @@ export function getInstallInstructions(providerId: LocalProviderName): {
       ],
       downloadUrl: "https://jan.ai/download",
       docsUrl: "https://jan.ai/docs",
+      // GUI app: the Local API Server is enabled from settings, no shell command.
+      modelsUrl: "https://huggingface.co/models?library=gguf",
     },
     textgenwebui: {
       title: "Install Text Generation WebUI",
@@ -743,6 +764,8 @@ export function getInstallInstructions(providerId: LocalProviderName): {
       ],
       downloadUrl: "https://github.com/oobabooga/text-generation-webui",
       docsUrl: "https://github.com/oobabooga/text-generation-webui/wiki",
+      // The start script is OS-specific (start_linux.sh / start_windows.bat / …).
+      modelsUrl: "https://huggingface.co/models",
     },
     koboldcpp: {
       title: "Install KoboldCpp",
@@ -754,6 +777,8 @@ export function getInstallInstructions(providerId: LocalProviderName): {
       ],
       downloadUrl: "https://github.com/LostRuins/koboldcpp/releases",
       docsUrl: "https://github.com/LostRuins/koboldcpp/wiki",
+      // Prebuilt executable / GUI launcher, no canonical shell command.
+      modelsUrl: "https://huggingface.co/models?search=gguf",
     },
     tabbyapi: {
       title: "Install TabbyAPI",
@@ -765,6 +790,8 @@ export function getInstallInstructions(providerId: LocalProviderName): {
       ],
       downloadUrl: "https://github.com/theroyallab/tabbyAPI",
       docsUrl: "https://github.com/theroyallab/tabbyAPI/wiki",
+      serveCommand: "python main.py",
+      modelsUrl: "https://huggingface.co/models?search=exl2",
     },
   }
 

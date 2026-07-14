@@ -103,6 +103,21 @@ describe("PluginUpdater", () => {
 
       expect(Array.isArray(results)).toBe(true)
     })
+
+    it("installUpdate installs the requested version via update()", async () => {
+      const result = await updater.installUpdate("plugin-a", "2.0.0")
+
+      expect(result.pluginId).toBe("plugin-a")
+      expect(result.newVersion).toBe("2.0.0")
+    })
+
+    it("cancelUpdate clears a queued pending update", async () => {
+      await updater.checkForUpdates(["plugin-a"])
+      expect(updater.getPendingUpdates().map((u) => u.pluginId)).toContain("plugin-a")
+
+      updater.cancelUpdate("plugin-a")
+      expect(updater.getPendingUpdates().map((u) => u.pluginId)).not.toContain("plugin-a")
+    })
   })
 
   describe("Progress Handlers", () => {

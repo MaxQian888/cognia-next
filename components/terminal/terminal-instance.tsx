@@ -226,7 +226,14 @@ function cursorPixelPosition(term: unknown): { left: number; top: number } | nul
 type TerminalFontWeight =
   "normal" | "bold" | "100" | "200" | "300" | "400" | "500" | "600" | "700" | "800" | "900"
 
-const DEFAULT_FONT_FAMILY = '"JetBrains Mono", "Cascadia Code", "Menlo", "Consolas", monospace'
+// Lead with the app-bundled Nerd Font (see the `@font-face` in globals.css) so
+// oh-my-posh / powerlevel10k prompt glyphs render out of the box — the rest are
+// plain-coding-font fallbacks for the rare machine that lacks it. Keeping the
+// bundled family first also makes the char-width measurement and the rendered
+// glyphs come from the *same* font, which avoids the "every character is spaced
+// one cell too wide" artifact from measuring against a fallback.
+const DEFAULT_FONT_FAMILY =
+  '"MesloLGS NF", "JetBrains Mono", "Cascadia Code", "Menlo", "Consolas", monospace'
 const DEFAULT_FONT_SIZE = 13
 const DEFAULT_SCROLLBACK = 10000
 const MIN_ZOOM_FONT_SIZE = 6
@@ -235,6 +242,49 @@ const MAX_ZOOM_FONT_SIZE = 40
 /** Clamp a (possibly zoomed) font size to a sane rendering range. */
 function clampFontSize(size: number): number {
   return Math.max(MIN_ZOOM_FONT_SIZE, Math.min(MAX_ZOOM_FONT_SIZE, size))
+}
+
+/**
+ * Extract the first family from a CSS font-family stack for the CSS Font
+ * Loading API (`document.fonts.load` takes a single family, not a stack).
+ * Strips wrapping quotes: `'"MesloLGS NF", monospace'` → `MesloLGS NF`.
+ * Returns `""` for an empty/blank stack so callers can skip the load.
+ */
+function primaryFontFamily(stack: string): string {
+  const first = stack.split(",")[0]?.trim() ?? ""
+  return first.replace(/^["']|["']$/g, "").trim()
+}
+
+/**
+ * Rebuild the accelerated (WebGL/Canvas) renderer's glyph atlas once the
+ * configured font has actually loaded, then re-fit. xterm measures the cell
+ * size and builds its texture atlas from whatever font is resolvable at
+ * `term.open()` time; a bundled woff2 (or an OS font the WebView hasn't
+ * resolved yet) can still be in flight then, so the atlas gets the fallback's
+ * metrics and every cell renders one glyph too wide. Awaiting the font and
+ * clearing the atlas fixes that. Best-effort and fire-and-forget: a missing
+ * Font Loading API or a font that never resolves must never block or throw
+ * into terminal startup. `settle` is expected to no-op when the terminal is
+ * already disposed.
+ */
+function rebuildAtlasWhenFontReady(
+  fontFamily: string,
+  fontSizePx: number,
+  settle: () => void
+): void {
+  try {
+    const fonts = typeof document !== "undefined" ? document.fonts : undefined
+    if (!fonts) return
+    const family = primaryFontFamily(fontFamily)
+    const pending = family ? fonts.load(`${fontSizePx}px "${family}"`) : fonts.ready
+    Promise.resolve(pending)
+      .then(settle)
+      .catch(() => {
+        /* font failed to load — keep whatever the browser resolved */
+      })
+  } catch {
+    /* Font Loading API unavailable (older WebView / jsdom) — skip */
+  }
 }
 
 /**
@@ -904,6 +954,21 @@ function TerminalInstanceImpl(
       }
       refitRef.current = refit
 
+      // The atlas built at `term.open()` above may have measured a fallback
+      // font (bundled woff2 still fetching, or the OS font not yet resolved by
+      // the WebView). Once the configured font loads, rebuild the glyph atlas
+      // and re-fit so the cell metrics match the real font — this is what
+      // clears the "characters spaced one cell too wide" artifact.
+      rebuildAtlasWhenFontReady(fontFamily, fontSize, () => {
+        if (disposedRef.current) return
+        try {
+          term.clearTextureAtlas?.()
+        } catch {
+          /* no atlas on the DOM renderer — nothing to clear */
+        }
+        refit()
+      })
+
       const bp = new TerminalBackpressure({
         term: { write: (data, cb) => term.write(data, cb) },
       })
@@ -1322,7 +1387,27 @@ function TerminalInstanceImpl(
       if (term.options.minimumContrastRatio !== minimumContrastRatio) {
         term.options.minimumContrastRatio = minimumContrastRatio
       }
-      if (fontChanged) refitRef.current?.()
+      if (fontChanged) {
+        // A font-metric change invalidates the accelerated renderer's glyph
+        // atlas. Clear it so the new font's cell width takes effect — without
+        // this the stale atlas keeps the old font's metrics and every glyph
+        // renders one cell too wide (the reported "spaced-out characters" bug
+        // when switching to a Nerd Font).
+        const applyMetrics = () => {
+          try {
+            term.clearTextureAtlas?.()
+          } catch {
+            /* DOM renderer has no atlas — nothing to clear */
+          }
+          refitRef.current?.()
+        }
+        // Apply immediately (handles an already-resident font)...
+        applyMetrics()
+        // ...and once more after a not-yet-loaded family (bundled woff2 on a
+        // machine that lacks it) finishes, so the rebuild measures the real
+        // font instead of the fallback resolvable on this synchronous pass.
+        rebuildAtlasWhenFontReady(fontFamily, effectiveSize, applyMetrics)
+      }
     } catch {
       /* noop */
     }

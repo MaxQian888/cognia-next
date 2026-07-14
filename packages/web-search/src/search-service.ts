@@ -15,6 +15,8 @@ import { getProviderHealth } from "./provider-health"
 import { log } from "./log"
 
 import { routeSearch } from "./search-type-router"
+import { buildKeyPool, pickStartIndex, recordKeyAttempt } from "./key-rotation"
+import { classifySearchError, backoffDelay, sleep } from "./retry"
 import { testTavilyConnection } from "./providers/tavily"
 import { testPerplexityConnection } from "./providers/perplexity"
 import { testExaConnection } from "./providers/exa"
@@ -30,7 +32,24 @@ export interface UnifiedSearchOptions extends SearchOptions {
   provider?: SearchProviderType
   fallbackEnabled?: boolean
   providerSettings?: Partial<Record<SearchProviderType, SearchProviderSettings>>
+  /**
+   * Max EXTRA attempts per provider on a transient failure (network / 429 / 5xx),
+   * beyond the first try. Each extra attempt rotates to the next key in the
+   * provider's pool (when multi-key) and waits an exponential backoff. Default 2.
+   * A permanent error (e.g. 400/404) never retries; `fallbackEnabled` then moves
+   * on to the next provider.
+   */
+  maxRetries?: number
+  /** Base backoff delay in ms for the first retry (default 300, doubling thereafter). */
+  retryBackoffMs?: number
+  /** Abort the whole search (cancels in-flight backoff waits). */
+  abortSignal?: AbortSignal
+  /** Injectable RNG for deterministic tests (random rotation / jitter). */
+  random?: () => number
 }
+
+/** Default extra attempts per provider before falling through to the next one. */
+const DEFAULT_MAX_RETRIES = 2
 
 /**
  * Unified search function. Searches using the specified provider or falls
@@ -41,11 +60,22 @@ export async function search(
   query: string,
   options: UnifiedSearchOptions = {}
 ): Promise<SearchResponse> {
-  const { provider, fallbackEnabled = true, providerSettings, ...searchOptions } = options
+  const {
+    provider,
+    fallbackEnabled = true,
+    providerSettings,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    retryBackoffMs,
+    abortSignal,
+    random,
+    ...searchOptions
+  } = options
 
   if (!providerSettings) {
     throw new Error("Provider settings are required")
   }
+
+  const retry: ProviderRetryConfig = { maxRetries, retryBackoffMs, abortSignal, random }
 
   const enabledProviders = getEnabledProviders(providerSettings)
 
@@ -78,16 +108,14 @@ export async function search(
   for (const providerConfig of providersToTry) {
     const startTime = Date.now()
     try {
-      const result = await routeSearch(
-        query,
-        providerConfig.providerId,
-        providerConfig,
-        searchOptions
-      )
+      const result = await attemptProviderWithRotation(query, providerConfig, searchOptions, retry)
       health.recordResult(providerConfig.providerId, true)
       void recordUsage(providerConfig.providerId, Date.now() - startTime, true)
       return result
     } catch (error) {
+      // A caller-driven abort is not a provider failure — surface it immediately
+      // instead of silently trying the next provider.
+      if (isAbortError(error)) throw error
       log.warn(`Search with ${providerConfig.providerId} failed`, { error })
       lastError = error instanceof Error ? error : new Error(String(error))
       health.recordResult(providerConfig.providerId, false)
@@ -100,6 +128,79 @@ export async function search(
   }
 
   throw lastError || new Error("All search providers failed")
+}
+
+interface ProviderRetryConfig {
+  maxRetries: number
+  retryBackoffMs?: number
+  abortSignal?: AbortSignal
+  random?: () => number
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" || /(?:^|\b)abort(?:ed)?\b/i.test(error.message))
+  )
+}
+
+/**
+ * Run one provider's search with multi-key rotation + bounded retry. Walks the
+ * provider's key pool starting at the rotation-selected index; on a transient
+ * failure it advances to the next key and waits an exponential backoff, up to
+ * `maxRetries` extra attempts. A permanent error (client 4xx) aborts immediately
+ * so the caller's provider-level fallback takes over without wasting retries.
+ *
+ * The per-provider circuit breaker (`recordResult`) stays outside this loop —
+ * it sees one aggregate outcome per provider, not one per key attempt.
+ */
+async function attemptProviderWithRotation(
+  query: string,
+  providerConfig: SearchProviderSettings,
+  searchOptions: SearchOptions,
+  retry: ProviderRetryConfig
+): Promise<SearchResponse> {
+  const { providerId } = providerConfig
+  const pool = buildKeyPool(providerConfig)
+  const startIndex = pickStartIndex(providerId, pool, providerConfig, { random: retry.random })
+  const maxAttempts = Math.max(1, retry.maxRetries + 1)
+
+  let lastError: unknown = null
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const keyIndex = pool.length > 0 ? (startIndex + attempt) % pool.length : 0
+    const apiKey = pool.length > 0 ? pool[keyIndex] : providerConfig.apiKey
+    // Reuse the original config reference when the primary key is already the
+    // one selected, so callers/tests observing that object see it untouched.
+    const attemptConfig =
+      apiKey === providerConfig.apiKey ? providerConfig : { ...providerConfig, apiKey }
+
+    if (pool.length > 0) recordKeyAttempt(providerId, apiKey, keyIndex)
+
+    try {
+      return await routeSearch(query, providerId, attemptConfig, searchOptions)
+    } catch (error) {
+      lastError = error
+      const classification = classifySearchError(error)
+      const hasAttemptsLeft = attempt < maxAttempts - 1
+      if (!classification.retryable || !hasAttemptsLeft) {
+        throw error
+      }
+      log.warn(`Search attempt failed for ${providerId}, retrying`, {
+        attempt: attempt + 1,
+        maxAttempts,
+        status: classification.status,
+        rotateKey: classification.rotateKey,
+        poolSize: pool.length,
+      })
+      await sleep(
+        backoffDelay(attempt, { baseMs: retry.retryBackoffMs, random: retry.random }),
+        retry.abortSignal
+      )
+    }
+  }
+
+  throw lastError ?? new Error(`Search with ${providerId} failed`)
 }
 
 /**

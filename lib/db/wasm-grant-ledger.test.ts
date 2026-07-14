@@ -3,6 +3,10 @@ import "fake-indexeddb/auto"
 
 import Dexie from "dexie"
 import { CogniaDB, __resetDbForTesting, getDb, whenSeeded } from "./schema"
+
+// The pre-v88 upgrade test needs the real version chain — opt out of the
+// Jest collapsed-schema fast path (which declares only the latest version).
+;(globalThis as { __COGNIA_DB_FULL_SCHEMA__?: boolean }).__COGNIA_DB_FULL_SCHEMA__ = true
 import {
   clearWasmGrantRecords,
   listWasmGrantRecords,

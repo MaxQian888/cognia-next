@@ -26,6 +26,11 @@
     "request": "Permission: {tool}",
     "requestGeneric": "Permission requested"
   },
+  "question": {
+    "expired": "Answered in terminal",
+    "submit": "Submit",
+    "submitted": "Sent"
+  },
   "reply": {
     "open": "Reply",
     "placeholder": "Send a message…",

@@ -28,6 +28,11 @@ export const browserClient = {
   embedReload: () => transport.call<void>("browser_embed_reload", {}),
   embedSetSelectMode: (on: boolean) =>
     transport.call<void>("browser_embed_set_select_mode", { on }),
+  /** Tear down the post-selection info panel + outline in the previewed page. */
+  embedClearSelection: () => transport.call<void>("browser_embed_clear_selection", {}),
+  /** Push localized info-panel toggle labels into the previewed page. */
+  embedSetPanelLabels: (labels: { details: string; collapse: string }) =>
+    transport.call<void>("browser_embed_set_panel_labels", { labels: JSON.stringify(labels) }),
   /** Capture the embedded preview's on-screen region as a PNG screenshot. */
   embedCapture: (rect: ElementRect) =>
     transport.call<Screenshot>("browser_embed_capture", { ...rect }),

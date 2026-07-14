@@ -5,6 +5,11 @@
 // freshly opened DB, which means the latest schema version opens cleanly.
 
 import "fake-indexeddb/auto"
+
+// This suite exercises historical upgrade hooks (v49 backfill etc.), which the
+// Jest collapsed-schema fast path skips — force the full version chain.
+;(globalThis as { __COGNIA_DB_FULL_SCHEMA__?: boolean }).__COGNIA_DB_FULL_SCHEMA__ = true
+
 import {
   CogniaDB,
   LEGACY_COGNIA_DB_NAME,
@@ -219,10 +224,7 @@ describe("getDb", () => {
     expect(await db.codeAdoptionTurns.where("runId").equals(2).count()).toBe(1)
     expect(await db.codeAdoptionTurns.where("workspaceRoot").equals("/repo").count()).toBe(2)
     expect(
-      await db.codeAdoptionTurns
-        .where("[sessionId+ts]")
-        .between(["s1", 150], ["s1", 300])
-        .count()
+      await db.codeAdoptionTurns.where("[sessionId+ts]").between(["s1", 150], ["s1", 300]).count()
     ).toBe(1)
   })
 

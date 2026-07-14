@@ -38,13 +38,7 @@ export interface UpdateResult {
 export interface UpdateProgress {
   pluginId: string
   stage:
-    | "checking"
-    | "downloading"
-    | "backing_up"
-    | "installing"
-    | "verifying"
-    | "complete"
-    | "error"
+    "checking" | "downloading" | "backing_up" | "installing" | "verifying" | "complete" | "error"
   progress: number
   message: string
   error?: string
@@ -307,6 +301,25 @@ export class PluginUpdater {
       this.updateHistory.push(result)
       return result
     }
+  }
+
+  /**
+   * Install a specific version of a plugin. Thin, explicitly-versioned wrapper
+   * over {@link update} — this is the method the update dialog and the batch
+   * actions bar call. `force` lets it install the requested version even when
+   * no pending-update record was seeded first (e.g. a direct batch install).
+   */
+  async installUpdate(pluginId: string, version: string): Promise<UpdateResult> {
+    return this.update(pluginId, { version, force: true })
+  }
+
+  /**
+   * Drop the pending-update record for a plugin. The updater applies updates
+   * atomically (no partial in-flight state to unwind), so cancellation just
+   * clears the queued marker so the surfaces stop offering it.
+   */
+  cancelUpdate(pluginId: string): void {
+    this.clearPendingUpdate(pluginId)
   }
 
   async updateAll(options: { skipBreaking?: boolean } = {}): Promise<UpdateResult[]> {

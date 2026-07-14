@@ -14,7 +14,7 @@ import { getDb } from "@/lib/db/schema"
 
 import { anthropicOauthSavePkceResult, getAccount, setActiveAccount } from "../core/transport"
 import { discoverAnthropicAuth, type DiscoveredAnthropicAuth } from "./discovery"
-import { refreshAccessToken } from "./oauth"
+import { refreshAndPersistAnthropicAccount } from "./refresh"
 import type {
   AnthropicCredentialData,
   ProviderCredential,
@@ -120,34 +120,11 @@ export function useActiveAnthropicCredential(): UseActiveAnthropicCredentialResu
 
   const refresh = useCallback(async () => {
     if (!credential || !activeAccountId) return null
-    const updated = await refreshAccessToken({
-      refreshToken: credential.refreshToken,
-      mode: credential.mode,
-    })
-    const merged: AnthropicCredentialData = {
-      ...credential,
-      ...updated,
-      email: updated.email ?? credential.email,
-      plan: updated.plan ?? credential.plan,
-    }
-    // `anthropic_oauth_save_pkce_result` deliberately APPENDS a new account
-    // instead of updating in-place, which is wrong for refresh — but we can
-    // model refresh as "update the active credential in the vault" by
-    // round-tripping through `subscription_save_account`. We achieve that
-    // by saving a new Account with the SAME id, which the Rust vault layer
-    // treats as an upsert.
-    const account = await getAccount("anthropic", activeAccountId)
-    if (!account) return null
-    const next = {
-      ...account,
-      credential: { provider: "anthropic" as const, ...merged },
-      lastUsedAtMs: Date.now(),
-    }
-    const { saveAccount } = await import("../core/transport")
-    await saveAccount("anthropic", next)
-    // Re-activate so the in-process bearer + sidecar pick up the new token.
-    await setActiveAccount("anthropic", activeAccountId)
-    setCredential(merged)
+    // Shared with the unified-limits runner. `reactivate: true` re-activates the
+    // account so the in-process bearer + sidecar pick up the new token (the
+    // Account tab's historical behaviour).
+    const merged = await refreshAndPersistAnthropicAccount(activeAccountId, { reactivate: true })
+    if (merged) setCredential(merged)
     return merged
   }, [activeAccountId, credential])
 

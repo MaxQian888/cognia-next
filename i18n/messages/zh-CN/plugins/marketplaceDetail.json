@@ -8,6 +8,8 @@
   "installing": "安装中…",
   "license": "许可",
   "optional": "可选权限",
+  "rawManifest": "查看原始 manifest",
+  "rawManifestTitle": "原始 manifest",
   "readme": "README",
   "repository": "代码仓库",
   "uninstall": "卸载",

@@ -40,6 +40,48 @@ describe("formatSelectionComment", () => {
     expect(out).not.toContain("Text:")
     expect(out).not.toContain("```html")
   })
+
+  it("surfaces the owning component, props and points the agent at its definition", () => {
+    const out = formatSelectionComment(
+      {
+        ...SELECTION,
+        componentName: "SubmitButton",
+        componentStack: "App > CheckoutForm > SubmitButton",
+        props: { variant: "primary", disabled: "false" },
+        framework: "react",
+      },
+      "make it green"
+    )
+    expect(out).toContain("Component: <SubmitButton>")
+    expect(out).toContain("Component path: App > CheckoutForm > SubmitButton")
+    expect(out).toContain("Props: variant=primary, disabled=false")
+    expect(out).toContain(
+      "Rendered by the <SubmitButton> component; locate its definition (grep/LSP) and edit there."
+    )
+  })
+
+  it("prefers a precise source pointer when an inspector hint is present", () => {
+    const out = formatSelectionComment(
+      {
+        ...SELECTION,
+        componentName: "SubmitButton",
+        sourceHint: { path: "src/components/SubmitButton.tsx", line: 42, column: 6 },
+      },
+      "x"
+    )
+    expect(out).toContain("Source: src/components/SubmitButton.tsx:42:6")
+    expect(out).toContain("Likely source: src/components/SubmitButton.tsx:42 — start there.")
+    // The source pointer supersedes the component-grep directive.
+    expect(out).not.toContain("locate its definition")
+  })
+
+  it("adds no component context on a non-React page", () => {
+    const out = formatSelectionComment(SELECTION, "x")
+    expect(out).not.toContain("Component:")
+    expect(out).not.toContain("Props:")
+    expect(out).not.toContain("Rendered by")
+    expect(out).not.toContain("Likely source:")
+  })
 })
 
 describe("normalizePreviewUrl", () => {

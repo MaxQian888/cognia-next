@@ -143,6 +143,7 @@ export async function runWebBuiltinTool(
       providerSettings: deps.providerSettings,
       searchMaxResults: deps.searchMaxResults,
       searchFallbackEnabled: deps.searchFallbackEnabled,
+      searchMaxRetries: deps.searchMaxRetries,
       searchOptions: deps.searchOptions,
       searchCache: deps.searchCache,
       sourceVerification: deps.sourceVerification,

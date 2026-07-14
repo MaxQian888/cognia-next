@@ -44,15 +44,31 @@ const createJestConfig = nextJest({
 // coverage only and the fast non-coverage path keeps Jest's defaults.
 const isCoverage = process.env.JEST_COVERAGE === "1" || process.argv.includes("--coverage")
 
+// Memory signal for worker budgeting. `os.freemem()` alone is unusable on
+// macOS (and Linux, which reports MemFree not MemAvailable): the OS counts
+// reclaimable file cache as "used", so a 48GB Mac routinely reports ~2GB free
+// and the RAM budget collapses to 1 worker. Treat at least 60% of physical
+// RAM as available — the file cache yields under pressure — while still
+// honoring a genuinely-free reading when it is higher.
+const usableMemGb = Math.max(os.freemem(), os.totalmem() * 0.6) / 1e9
+
 // Pick the coverage worker count from whichever is scarcer: CPU or RAM.
-// Budget ~1.5GB of *currently-free* RAM per worker and reserve ~2GB for the
-// parent's empty-coverage aggregation. This self-tunes across machines — a
-// RAM-rich CI box stays CPU-bound (50% of cores), while a high-core but
-// RAM-modest dev box (e.g. 32 cores / 34GB with other apps resident) drops the
-// worker count so 16 heavy coverage workers don't gang up and swap-thrash.
+// Budget ~1.5GB of usable RAM per worker and reserve ~2GB for the parent's
+// empty-coverage aggregation. This self-tunes across machines — a RAM-rich CI
+// box stays CPU-bound (50% of cores), while a high-core but RAM-modest dev
+// box drops the worker count so heavy coverage workers don't swap-thrash.
 const halfCores = Math.max(1, Math.ceil(os.cpus().length / 2))
-const ramBudgetedWorkers = Math.max(1, Math.floor((os.freemem() / 1e9 - 2) / 1.5))
+const ramBudgetedWorkers = Math.max(1, Math.floor((usableMemGb - 2) / 1.5))
 const coverageWorkers = Math.min(halfCores, ramBudgetedWorkers)
+
+// Non-coverage runs: the old fixed "50% of cores + 1GB recycle ceiling" left
+// half the cores idle and — because the big suites' module graphs sit right
+// at ~1–1.5GB — recycled workers constantly, re-requiring the whole graph
+// each time. When usable RAM can hold 75%-of-cores workers at a 2GB ceiling,
+// use that; otherwise keep the conservative legacy values.
+const fastCpuWorkers = Math.max(1, Math.floor(os.cpus().length * 0.75))
+const fastRamWorkers = Math.floor((usableMemGb - 2) / 2)
+const fastRoomy = fastRamWorkers >= fastCpuWorkers
 
 // This config is loaded two ways depending on the Node version: ts-node
 // compiles it to CJS (`__dirname` defined), while Node ≥ 22.18's native
@@ -454,9 +470,10 @@ const globalConfig: Config = {
   // maps for every module it loads), so 50%-of-cores (16 on a 32-core box) was
   // measured at ~8.8 GB of Jest RSS across 17 processes for a 121-file subset —
   // the full suite holds those 16 workers the whole run. `coverageWorkers`
-  // (computed above) drops to whatever currently-free RAM can afford so the
-  // coverage run no longer swap-thrashes; non-coverage runs keep the fast 50%.
-  maxWorkers: isCoverage ? coverageWorkers : "50%",
+  // (computed above) drops to whatever usable RAM can afford so the coverage
+  // run no longer swap-thrashes; non-coverage runs use 75% of cores when RAM
+  // is roomy (see `fastRoomy` above) and fall back to the legacy 50% cap.
+  maxWorkers: isCoverage ? coverageWorkers : fastRoomy ? fastCpuWorkers : "50%",
 
   // Recycle a worker once its heap crosses this ceiling. Jest reuses a worker
   // process across many test files and never clears the module registry
@@ -469,7 +486,7 @@ const globalConfig: Config = {
   // maps, so we recycle them sooner (768MB) to keep the (already RAM-budgeted)
   // pool's footprint low; non-coverage workers keep the 1GB ceiling tuned for
   // the plain suite.
-  workerIdleMemoryLimit: isCoverage ? "768MB" : "1GB",
+  workerIdleMemoryLimit: isCoverage ? "768MB" : fastRoomy ? "2GB" : "1GB",
 
   // Use this configuration option to add custom reporters to Jest
   reporters: [

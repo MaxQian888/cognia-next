@@ -67,6 +67,15 @@ jest.mock("./project-editor-tabs", () => ({
 jest.mock("./project-root-switcher", () => ({
   ProjectRootSwitcher: () => <div data-testid="mock-switcher" />,
 }))
+const supportedMock = jest.fn(async () => true)
+jest.mock("@/lib/codeserver/client", () => ({
+  codeServerClient: { supported: () => supportedMock() },
+}))
+jest.mock("./code-server-pane", () => ({
+  CodeServerPane: (p: { root: string }) => (
+    <div data-testid="mock-code-server" data-root={p.root} />
+  ),
+}))
 
 import { AgentTeamEditor, hasFsBackend } from "./agent-team-editor"
 import type { AgentTeam } from "@/types/agent/agent-team"
@@ -82,6 +91,9 @@ function team(workingDir?: string): AgentTeam {
 beforeEach(() => {
   isTauriMock.mockReturnValue(true)
   loadCompanionConfigMock.mockReturnValue(null)
+  // Default to a pending probe so generic render tests don't fire an async
+  // setState (act warning); Pro-IDE tests override + await explicitly.
+  supportedMock.mockReset().mockImplementation(() => new Promise(() => {}))
   editorState.activeFile = null
   editorState.dirtyCount = 0
 })
@@ -116,6 +128,42 @@ describe("AgentTeamEditor", () => {
     expect(screen.getByTestId("agent-team-editor")).toBeInTheDocument()
     expect(screen.getByTestId("mock-tree")).toBeInTheDocument()
     expect(screen.getByTestId("editor-empty")).toBeInTheDocument()
+  })
+
+  it("shows the editor-engine toggle on desktop", () => {
+    render(<AgentTeamEditor team={team("/repo")} />)
+    expect(screen.getByTestId("editor-mode-monaco")).toBeInTheDocument()
+    expect(screen.getByTestId("editor-mode-codeserver")).toBeInTheDocument()
+  })
+
+  it("switches to the code-server pane when Pro IDE is enabled", async () => {
+    supportedMock.mockResolvedValue(true)
+    render(<AgentTeamEditor team={team("/repo")} />)
+    // supported() resolves → the VS Code button enables.
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("editor-mode-codeserver"))
+    })
+    expect(screen.getByTestId("mock-code-server")).toHaveAttribute("data-root", "/repo")
+    expect(screen.queryByTestId("mock-tree")).not.toBeInTheDocument()
+  })
+
+  it("disables Pro IDE when the platform has no code-server binary", async () => {
+    supportedMock.mockResolvedValue(false)
+    render(<AgentTeamEditor team={team("/repo")} />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(screen.getByTestId("editor-mode-codeserver")).toBeDisabled()
+  })
+
+  it("hides the toggle off desktop", () => {
+    isTauriMock.mockReturnValue(false)
+    loadCompanionConfigMock.mockReturnValue({ ip: "x" } as never)
+    render(<AgentTeamEditor team={team("/repo")} />)
+    expect(screen.queryByTestId("editor-mode-codeserver")).not.toBeInTheDocument()
   })
 
   it("toggles the left pane to search", () => {

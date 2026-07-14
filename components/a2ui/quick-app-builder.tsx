@@ -69,16 +69,16 @@ export function QuickAppBuilder({
   const t = useTranslations("a2ui")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const a2ui = useA2UI({ onAction, onDataChange })
+  // Surface plumbing only (processMessages for flash generation); action and
+  // data-change handling is owned by the app builder below.
+  const a2ui = useA2UI()
 
   // Reactive data model for the currently previewed app
   const previewDataModel = useA2UIDataModel(previewAppId || "")
 
   const appBuilder = useA2UIAppBuilder({
-    onAction: (action) => {
-      appBuilder.handleAppAction(action)
-      onAction?.(action)
-    },
+    // Built-in actions are handled app-wide by <A2UIBuiltInActionsProvider>.
+    onAction,
     onDataChange,
     onAppCreated: (appId) => {
       setPreviewAppId(appId)

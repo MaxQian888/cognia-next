@@ -867,6 +867,12 @@ export class ConnectorBus {
       })
       return
     }
+    // Lark chat-member/bot events carry `external:true` when the chat is a
+    // cross-tenant (external) group. Surface it in the audit so an operator
+    // can tell an external group was joined/left; absent (or non-boolean) on
+    // every other platform, so it is only included when actually present.
+    const rawExternal = (event.raw as { event?: { external?: boolean } } | undefined)?.event
+      ?.external
     await appendAudit({
       adapterId: event.adapterId,
       kind,
@@ -876,6 +882,7 @@ export class ConnectorBus {
         actorOpenId: event.sender.remoteUserId,
         rawType: (event.raw as { header?: { event_type?: string } } | undefined)?.header
           ?.event_type,
+        ...(typeof rawExternal === "boolean" ? { external: rawExternal } : {}),
       },
     })
 

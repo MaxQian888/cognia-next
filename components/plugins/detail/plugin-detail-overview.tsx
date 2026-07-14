@@ -29,6 +29,7 @@ import { usePluginsStore } from "@/stores/plugins"
 import { PluginLicense } from "../_shared/plugin-license"
 import { PluginDependencyPanel } from "../_shared/plugin-dependency-panel"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { CodeBlock } from "@/components/chat/renderers/code-block"
 import type { PluginManifest } from "@/types/plugin"
 
 interface OverviewManifestMeta {
@@ -85,9 +86,17 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
               <DialogTitle>{t("rawManifestTitle")}</DialogTitle>
             </DialogHeader>
             <ScrollArea className="flex-1 min-h-0">
-              <pre className="p-4 text-xs font-mono leading-snug">
-                {JSON.stringify(plugin.manifest, null, 2)}
-              </pre>
+              {/* Reuse the chat CodeBlock so the raw manifest gets Shiki JSON
+                  syntax highlighting plus copy / download / line-number
+                  affordances, instead of the old flat monochrome <pre>. */}
+              <div className="p-4">
+                <CodeBlock
+                  code={JSON.stringify(plugin.manifest, null, 2)}
+                  language="json"
+                  filename={`${plugin.id}.json`}
+                  className="my-0"
+                />
+              </div>
             </ScrollArea>
           </DialogContent>
         </Dialog>

@@ -479,6 +479,48 @@ pub async fn browser_embed_set_select_mode(app: AppHandle, on: bool) -> Result<(
     }
 }
 
+/// Tear down the post-selection info panel + outline in the previewed page.
+/// Driven by the preview pane when the comment box is cancelled or sent.
+#[tauri::command]
+pub async fn browser_embed_clear_selection(app: AppHandle) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        eval_embed(&app, "window.__cogniaClearSelection()")
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+/// Build the `window.__cogniaSetPanelLabels(<json>)` call. `labels_json` is a
+/// JSON object string passed *as a JS string literal* (double-encoded) so the
+/// page can `JSON.parse` it back — the injected overlay can't reach next-intl,
+/// so React pushes the localized toggle labels down this channel.
+#[cfg(desktop)]
+fn build_set_panel_labels_call(labels_json: &str) -> Result<String, String> {
+    Ok(format!(
+        "window.__cogniaSetPanelLabels({})",
+        js_string(labels_json)?
+    ))
+}
+
+/// Push localized info-panel toggle labels (a `{"details":…,"collapse":…}` JSON
+/// string) into the previewed page.
+#[tauri::command]
+pub async fn browser_embed_set_panel_labels(app: AppHandle, labels: String) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        eval_embed(&app, &build_set_panel_labels_call(&labels)?)
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, labels);
+        Err("desktop only".to_string())
+    }
+}
+
 /// Capture the embedded preview's on-screen region as a PNG. `x,y,width,height`
 /// are the reserved rect (logical px, window-relative). Reuses the automation
 /// screenshot pipeline (`capture_primary`) but bypasses its consent/audit gate —
@@ -599,5 +641,25 @@ mod tests {
         // The malicious ref is contained inside a JSON string literal.
         assert!(call.contains(r#"alert(1)"#));
         assert!(!call.contains(r#"e"); alert"#));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn panel_labels_call_passes_json_as_a_string_literal() {
+        let call = build_set_panel_labels_call(r#"{"details":"详情","collapse":"收起"}"#).unwrap();
+        assert!(call.starts_with("window.__cogniaSetPanelLabels("));
+        // The JSON is a JS string literal (double-encoded), so its inner quotes
+        // are escaped — the page `JSON.parse`s it back.
+        assert!(call.contains(r#"\"details\""#));
+        assert!(call.contains("详情"));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn panel_labels_call_escapes_injection() {
+        let call = build_set_panel_labels_call(r#"{"x":"a"});alert(1)//"#).unwrap();
+        assert!(call.contains("alert(1)"));
+        // The break-out attempt stays inside the string literal.
+        assert!(!call.contains(r#"a"});alert"#));
     }
 }

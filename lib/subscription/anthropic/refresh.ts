@@ -1,0 +1,97 @@
+// Refresh + persist an Anthropic OAuth account's access token.
+//
+// This is the single source of truth for "the stored access token is stale →
+// swap the refresh_token for a fresh access_token and write it back to the
+// vault". Two callers use it:
+//   * `useActiveAnthropicCredential.refresh` (Account tab) — with
+//     `reactivate: true`, so the in-process bearer + sidecar pick up the new
+//     token (its historical behaviour).
+//   * the unified-limits runner (`limits/runner.ts`) — with `reactivate: false`,
+//     so a background quota refresh keeps the vaulted token fresh WITHOUT
+//     flipping the active pointer / restarting the sidecar mid-chat.
+//
+// The function always re-reads the account from the vault so it uses the latest
+// refresh_token (the server may rotate it on every refresh — see oauth.ts). All
+// I/O is injected via `deps` so the runner + hook stay unit-testable offline.
+
+import {
+  getAccount as defaultGetAccount,
+  saveAccount as defaultSaveAccount,
+  setActiveAccount as defaultSetActiveAccount,
+} from "@/lib/subscription/core/transport"
+
+import { refreshAccessToken as defaultRefreshAccessToken } from "./oauth"
+
+import type { Account, AnthropicCredentialData, ProviderId } from "@/types/subscription"
+
+export interface RefreshAnthropicDeps {
+  refreshAccessToken: typeof defaultRefreshAccessToken
+  getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
+  saveAccount: (provider: ProviderId, account: Account) => Promise<void>
+  setActiveAccount: (provider: ProviderId, accountId: string | null) => Promise<void>
+  now: () => number
+  /**
+   * When `true`, re-activate the account after persisting so the in-process
+   * OAuth bearer + sidecar pick up the new token (restarts the sidecar).
+   * Defaults to `false` — background quota refreshes must not restart the
+   * sidecar.
+   */
+  reactivate: boolean
+}
+
+const DEFAULT_DEPS: RefreshAnthropicDeps = {
+  refreshAccessToken: defaultRefreshAccessToken,
+  getAccount: defaultGetAccount,
+  saveAccount: defaultSaveAccount,
+  setActiveAccount: defaultSetActiveAccount,
+  now: () => Date.now(),
+  reactivate: false,
+}
+
+/**
+ * Refresh the OAuth access token for one Anthropic account and persist the
+ * result back to the vault (an upsert by the same account id). Returns the
+ * merged credential on success, or `null` when the account no longer exists or
+ * isn't an Anthropic credential. Throws only if the refresh exchange itself
+ * fails (network / invalid_grant) — callers decide whether to swallow.
+ */
+export async function refreshAndPersistAnthropicAccount(
+  accountId: string,
+  deps: Partial<RefreshAnthropicDeps> = {}
+): Promise<AnthropicCredentialData | null> {
+  const { refreshAccessToken, getAccount, saveAccount, setActiveAccount, now, reactivate } = {
+    ...DEFAULT_DEPS,
+    ...deps,
+  }
+
+  const account = await getAccount("anthropic", accountId)
+  if (!account || account.credential.provider !== "anthropic") return null
+  const credential = account.credential
+
+  const updated = await refreshAccessToken({
+    refreshToken: credential.refreshToken,
+    mode: credential.mode,
+  })
+  const merged: AnthropicCredentialData = {
+    ...credential,
+    ...updated,
+    // The refresh response may omit claims present on the original login; keep
+    // the richer of the two so the UI badge doesn't lose email / plan.
+    email: updated.email ?? credential.email,
+    plan: updated.plan ?? credential.plan,
+  }
+
+  const next: Account = {
+    ...account,
+    credential: { provider: "anthropic", ...merged },
+    lastUsedAtMs: now(),
+  }
+  // The Rust vault treats a save with an existing id as an upsert.
+  await saveAccount("anthropic", next)
+
+  // Only the Account-tab refresh wants the sidecar to adopt the new bearer
+  // immediately; the quota path deliberately skips this to avoid a restart.
+  if (reactivate) await setActiveAccount("anthropic", accountId)
+
+  return merged
+}

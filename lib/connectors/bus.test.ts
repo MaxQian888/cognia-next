@@ -10,6 +10,7 @@ import type {
   ConnectorCallbackEvent,
 } from "@/types/connectors"
 import { getBus, __resetBusForTesting } from "./bus"
+import { appendAudit } from "./audit"
 import { evaluatePolicy } from "./policy-eval"
 import type { TriggerPolicy } from "@/types/connectors/policy"
 
@@ -136,6 +137,41 @@ describe("ConnectorBus — dispatchInbound", () => {
     await expect(bus.dispatchInbound(makeEvent("a1", "m1"))).rejects.toThrow(
       "inbound handler not set"
     )
+  })
+})
+
+describe("ConnectorBus — system event external flag (Lark external group)", () => {
+  function systemEvent(external?: boolean): NormalizedInboundEvent {
+    return {
+      ...makeEvent("a1", "m_sys"),
+      kind: "system",
+      systemKind: "member_removed",
+      raw: {
+        header: { event_type: "im.chat.member.bot.deleted_v1" },
+        event: external === undefined ? {} : { external },
+      },
+    }
+  }
+
+  it("surfaces external:true in the member audit when the chat is external", async () => {
+    const bus = getBus()
+    await bus.dispatchInboundFull(systemEvent(true))
+    expect(appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "inbound.member_removed",
+        fields: expect.objectContaining({ external: true }),
+      })
+    )
+  })
+
+  it("omits external from the audit when the raw envelope has no external flag", async () => {
+    const bus = getBus()
+    await bus.dispatchInboundFull(systemEvent(undefined))
+    const call = (appendAudit as jest.Mock).mock.calls.find(
+      (c) => c[0]?.kind === "inbound.member_removed"
+    )
+    expect(call).toBeDefined()
+    expect(call![0].fields).not.toHaveProperty("external")
   })
 })
 

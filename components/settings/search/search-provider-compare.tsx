@@ -27,7 +27,7 @@ import { createLogger } from "@cognia/logging"
 const log = createLogger("settings.search.compare")
 
 export function SearchProviderCompare() {
-  const tc = useTranslations("searchSettings.compare")
+  const tc = useTranslations("providerCompare")
   const [query, setQuery] = useState("")
   const [providerA, setProviderA] = useState<SearchProviderType>("tavily")
   const [providerB, setProviderB] = useState<SearchProviderType>("brave")

@@ -56,6 +56,7 @@ export function SearchGlobalSettings({ onConfigureProviders }: SearchGlobalSetti
   const setSearchEnabled = useSettingsStore((s) => s.setSearchEnabled)
   const setSearchMaxResults = useSettingsStore((s) => s.setSearchMaxResults)
   const setSearchFallbackEnabled = useSettingsStore((s) => s.setSearchFallbackEnabled)
+  const setSearchMaxRetries = useSettingsStore((s) => s.setSearchMaxRetries)
   const setDefaultSearchProvider = useSettingsStore((s) => s.setDefaultSearchProvider)
   const setDefaultSearchSources = useSettingsStore((s) => s.setDefaultSearchSources)
   const addCustomSearchSource = useSettingsStore((s) => s.addCustomSearchSource)
@@ -64,6 +65,7 @@ export function SearchGlobalSettings({ onConfigureProviders }: SearchGlobalSetti
   const searchEnabled = settings?.searchEnabled ?? false
   const searchMaxResults = settings?.searchMaxResults ?? 5
   const searchFallbackEnabled = settings?.searchFallbackEnabled ?? true
+  const searchMaxRetries = settings?.searchMaxRetries ?? 2
   const defaultSearchProvider: SearchProviderType = settings?.defaultSearchProvider ?? "tavily"
   const defaultSearchSources = settings?.defaultSearchSources ?? []
   const searchProviders = settings?.searchProviders ?? DEFAULT_SEARCH_PROVIDER_SETTINGS
@@ -191,6 +193,22 @@ export function SearchGlobalSettings({ onConfigureProviders }: SearchGlobalSetti
           />
         </div>
       </SettingsGrid>
+
+      <div className="space-y-2">
+        <Label className="text-sm">
+          {t("maxRetries")}: {searchMaxRetries}
+        </Label>
+        <Slider
+          value={[searchMaxRetries]}
+          onValueChange={([v]) => void setSearchMaxRetries(v)}
+          onValueCommit={([value]) => log.info("max_retries_changed", { value })}
+          min={0}
+          max={5}
+          step={1}
+          disabled={!searchEnabled}
+        />
+        <p className="text-[10px] text-muted-foreground">{t("maxRetriesDesc")}</p>
+      </div>
 
       <SettingsGroup
         title={t("researchSources")}

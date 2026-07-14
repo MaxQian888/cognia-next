@@ -30,6 +30,7 @@ import {
   parseLarkBotMenuEvent,
   parseLarkInteractiveCallback,
 } from "./parse"
+import { applyTenantKeyBackfill } from "./tenant-key-backfill"
 import { getBus } from "@/lib/connectors/bus"
 import type { LarkEventEnvelope } from "./parse"
 import type { LarkQuickCommand } from "./quick-commands"
@@ -184,6 +185,9 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
   let healthReason: string | undefined = undefined
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
+  // One-shot guard for the tenant_key backfill below (`/bot/v3/info` can't
+  // return it, so the first real inbound event supplies it).
+  let tenantKeyBackfilled = false
 
   /** Inbound traffic proves the transport is delivering — mark running. */
   function markInboundActivity(): void {
@@ -191,6 +195,28 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     if (healthState !== "running") {
       healthState = "running"
       healthReason = undefined
+    }
+  }
+
+  /**
+   * Backfill `lastWhoamiResult.tenantKey` from the first inbound envelope that
+   * carries a `tenant_key` (external-group tenant awareness). Best-effort and
+   * fire-and-forget: it must never block or fail an inbound dispatch. Settles
+   * at most once per adapter session; `applyTenantKeyBackfill` returns whether
+   * it is done (written / already present) so we stop calling.
+   */
+  async function maybeBackfillTenantKey(envelope: LarkEventEnvelope): Promise<void> {
+    if (tenantKeyBackfilled) return
+    try {
+      const { getAdapterInstance, updateAdapterInstance } =
+        await import("@/lib/db/adapter-instances")
+      const done = await applyTenantKeyBackfill(opts.id, envelope, {
+        getAdapterInstance,
+        updateAdapterInstance,
+      })
+      if (done) tenantKeyBackfilled = true
+    } catch {
+      // Best-effort — a read/write failure just leaves it for the next event.
     }
   }
 
@@ -361,6 +387,8 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       // Any envelope — even one that gets gated or fails to parse — proves
       // the transport is connected and delivering.
       markInboundActivity()
+      // Record the sender's tenant on first sight (external-group awareness).
+      void maybeBackfillTenantKey(envelope)
       loggers.network.info("[lark] inbound envelope", {
         id: opts.id,
         eventType: envelope.header?.event_type,

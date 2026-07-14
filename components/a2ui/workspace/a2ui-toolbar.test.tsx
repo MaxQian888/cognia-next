@@ -3,7 +3,7 @@
  */
 
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import enMessages from "@/i18n/messages/en.json"
@@ -11,6 +11,7 @@ import enMessages from "@/i18n/messages/en.json"
 const undo = jest.fn()
 const redo = jest.fn()
 const exportApp = jest.fn()
+const saveApp = jest.fn(async () => true)
 const storeState: Record<string, unknown> = {
   undo,
   redo,
@@ -24,6 +25,10 @@ jest.mock("@/stores/a2ui", () => ({
 
 jest.mock("@/hooks/a2ui/use-app-builder", () => ({
   useA2UIAppBuilder: () => ({ exportApp }),
+}))
+
+jest.mock("@/hooks/a2ui/use-a2ui-save", () => ({
+  useA2UISave: () => saveApp,
 }))
 
 jest.mock("sonner", () => ({
@@ -64,6 +69,8 @@ describe("A2UIToolbar", () => {
     undo.mockReset()
     redo.mockReset()
     exportApp.mockReset()
+    saveApp.mockReset()
+    saveApp.mockResolvedValue(true)
     ;(toast.success as jest.Mock).mockReset()
     ;(toast.error as jest.Mock).mockReset()
     storeState.undoStacks = { sx: [{ id: "s1" }] }
@@ -101,15 +108,25 @@ describe("A2UIToolbar", () => {
     expect(redo).toHaveBeenCalledWith("sx")
   })
 
-  it("save fires a toast success", () => {
+  it("save persists via useA2UISave and toasts success", async () => {
     renderToolbar()
-    // The save button has the saveApp aria label. Use title attribute via tooltip text.
     const saveButtons = screen
       .getAllByRole("button")
       .filter((b) => b.querySelector("svg.lucide-save"))
     expect(saveButtons.length).toBeGreaterThan(0)
     fireEvent.click(saveButtons[0])
+    await waitFor(() => expect(saveApp).toHaveBeenCalled())
     expect(toast.success).toHaveBeenCalled()
+  })
+
+  it("save toasts an error when the save cannot complete", async () => {
+    saveApp.mockResolvedValueOnce(false)
+    renderToolbar()
+    const saveButtons = screen
+      .getAllByRole("button")
+      .filter((b) => b.querySelector("svg.lucide-save"))
+    fireEvent.click(saveButtons[0])
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
   })
 
   it("export calls appBuilder.exportApp + success toast", () => {

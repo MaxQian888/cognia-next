@@ -83,8 +83,13 @@ pub struct Header {
 pub struct Frame {
     #[prost(int64, tag = "1")]
     pub seqid: i64,
-    #[prost(string, tag = "2")]
-    pub logid: String,
+    // pbbp2 `logid` (tag 2) is a NUMERIC varint on the wire, not a string — the
+    // string log id is a separate higher-tag field. Declaring this as `String`
+    // made prost reject EVERY inbound frame with "logid: invalid wire type:
+    // Varint (expected LengthDelimited)", so all events were silently dropped
+    // (the decode error was logged at debug and invisible at the INFO log level).
+    #[prost(uint64, tag = "2")]
+    pub logid: u64,
     #[prost(int32, tag = "3")]
     pub service: i32,
     #[prost(int32, tag = "4")]
@@ -434,7 +439,21 @@ async fn connect_and_run(
                     Some(Ok(Message::Binary(bytes))) => {
                         match Frame::decode(bytes.as_ref()) {
                             Ok(frame) => handle_frame(app, handle_id, frame, &mut reasm, &tx).await,
-                            Err(e) => log::debug!("[lark-ws] {handle_id} frame decode failed: {e}"),
+                            Err(e) => {
+                                // Elevated from debug: a decode failure on a real
+                                // inbound frame is the silent drop we must see. The
+                                // hex head lets us reverse the wire layout when the
+                                // hand-rolled pbbp2 tags disagree with the server.
+                                let head: String = bytes
+                                    .iter()
+                                    .take(64)
+                                    .map(|b| format!("{b:02x}"))
+                                    .collect();
+                                log::warn!(
+                                    "[lark-ws] {handle_id} frame decode FAILED ({} bytes): {e}; head={head}",
+                                    bytes.len()
+                                );
+                            }
                         }
                     }
                     // WS-level control ping (distinct from Feishu's app-level
@@ -442,7 +461,16 @@ async fn connect_and_run(
                     Some(Ok(Message::Ping(p))) => {
                         let _ = tx.send(Message::Pong(p)).await;
                     }
-                    Some(Ok(Message::Close(_))) => break Err("ws closed by server".to_string()),
+                    Some(Ok(Message::Close(c))) => {
+                        log::warn!("[lark-ws] {handle_id} ws closed by server: {c:?}");
+                        break Err("ws closed by server".to_string());
+                    }
+                    Some(Ok(Message::Text(t))) => {
+                        log::warn!(
+                            "[lark-ws] {handle_id} recv unexpected TEXT frame ({} bytes) — events are protobuf Binary, not Text",
+                            t.len()
+                        );
+                    }
                     Some(Ok(_)) => {}
                     Some(Err(e)) => break Err(format!("ws read error: {e}")),
                     None => break Err("ws stream ended".to_string()),
@@ -466,6 +494,19 @@ async fn handle_frame(
     reasm: &mut Reassembler,
     tx: &mpsc::Sender<Message>,
 ) {
+    // Per-frame trace (debug): method + headers of every decoded frame. Kept at
+    // debug so it is available when diagnosing (a data event with an unexpected
+    // `type`, or headers that misparse to an empty `type`) without spamming the
+    // INFO log. A genuine decode FAILURE is logged at WARN in the read loop.
+    log::debug!(
+        "[lark-ws] {handle_id} frame recv: method={} type={:?} msg_id={:?} sum={:?} seq={:?} enc={:?}",
+        frame.method,
+        frame.header(H_TYPE),
+        frame.header(H_MESSAGE_ID),
+        frame.header(H_SUM),
+        frame.header(H_SEQ),
+        frame.payload_encoding,
+    );
     if frame.method == METHOD_CONTROL {
         // Server ping/pong — the SDK only reads config out of these and never
         // replies. We keepalive on our own timer, so nothing to do.
@@ -518,7 +559,7 @@ mod tests {
     fn frame_roundtrip_preserves_fields() {
         let frame = Frame {
             seqid: 42,
-            logid: "log-1".into(),
+            logid: 9_876_543_210,
             service: 7,
             method: METHOD_DATA,
             headers: vec![
@@ -540,6 +581,29 @@ mod tests {
         assert_eq!(decoded, frame);
         assert_eq!(decoded.header(H_TYPE), Some(T_EVENT));
         assert_eq!(decoded.header(H_MESSAGE_ID), Some("msg-9"));
+    }
+
+    #[test]
+    fn decodes_wire_frame_with_numeric_logid() {
+        // Regression: the live server sends `logid` (tag 2) as a VARINT, not a
+        // string. When this field was declared `String`, prost rejected every
+        // real frame ("logid: invalid wire type: Varint (expected
+        // LengthDelimited)") and all events were silently dropped. Hand-encoded
+        // wire bytes (tag 2 = varint) that must now decode with headers intact.
+        let bytes: &[u8] = &[
+            0x08, 0x01, // tag1 seqid = 1 (varint)
+            0x10, 0x01, // tag2 logid = 1 (VARINT — used to be String → decode err)
+            0x20, 0x01, // tag4 method = 1 (DATA)
+            0x2a, 0x0d, // tag5 headers, length 13
+            0x0a, 0x04, b't', b'y', b'p', b'e', // Header.key = "type"
+            0x12, 0x05, b'e', b'v', b'e', b'n', b't', // Header.value = "event"
+            0x42, 0x02, b'{', b'}', // tag8 payload = "{}"
+        ];
+        let frame = Frame::decode(bytes).expect("wire frame with numeric logid must decode");
+        assert_eq!(frame.method, METHOD_DATA);
+        assert_eq!(frame.logid, 1);
+        assert_eq!(frame.header(H_TYPE), Some(T_EVENT));
+        assert_eq!(frame.payload, b"{}");
     }
 
     #[test]

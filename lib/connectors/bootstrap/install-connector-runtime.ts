@@ -86,6 +86,7 @@ import {
   startResumeReconnect,
   type ResumeReconnectHandle,
 } from "@/lib/connectors/bootstrap/resume-reconnect"
+import { liveQuery } from "dexie"
 
 export type ConnectorRuntimeLogLevel = "info" | "warn" | "error"
 
@@ -122,6 +123,15 @@ export interface InstallConnectorRuntimeOptions {
    * Test seam.
    */
   acquireRuntimeLock?: (signal: AbortSignal) => Promise<boolean>
+  /**
+   * Subscribe to changes in the enabled-adapter set so a bot configured/enabled
+   * (or disabled/deleted) AFTER boot is reconciled into the running runtime
+   * without an app restart. `onChange` is invoked whenever the
+   * `adapterInstances` table changes; the installer diffs the enabled set and
+   * hot-adds / hot-removes adapters. Returns an unsubscribe handle. Default: a
+   * Dexie `liveQuery` over `listEnabledAdapterInstances`. Test seam.
+   */
+  subscribeAdapterChanges?: (onChange: () => void) => () => void
 }
 
 /** The Web Locks name — one exclusive holder per origin across all webviews. */
@@ -176,6 +186,23 @@ function defaultAcquireRuntimeLock(signal: AbortSignal): Promise<boolean> {
         resolveAcquired(!(err instanceof Error && err.name === "AbortError"))
       })
   })
+}
+
+/**
+ * Default enabled-adapter-set watcher. A Dexie `liveQuery` over
+ * `listEnabledAdapterInstances` re-fires whenever the `adapterInstances` table
+ * changes — creating a bot, toggling `enabled`, deleting a row, or a sync
+ * import all write that table — so every path that adds or removes an adapter
+ * reaches the reconcile without per-form wiring. The first emission fires
+ * immediately with the current rows; the reconcile no-ops because those rows
+ * are already booted.
+ */
+function defaultSubscribeAdapterChanges(onChange: () => void): () => void {
+  const sub = liveQuery(() => listEnabledAdapterInstances()).subscribe({
+    next: () => onChange(),
+    error: () => undefined,
+  })
+  return () => sub.unsubscribe()
 }
 
 const consoleLog = (level: ConnectorRuntimeLogLevel, message: string): void => {
@@ -554,6 +581,119 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       // Wire to the same AbortController so the teardown releases the
       // listener too.
       ac.signal.addEventListener("abort", unsubscribe, { once: true })
+    }
+
+    // Hot-reconcile the enabled-adapter set: a bot created/enabled AFTER boot
+    // (or disabled/deleted) is registered/torn down without an app restart.
+    // The boot loop above only reads the enabled rows once, so a new adapter
+    // was previously invisible to the bus (outbound → `adapter_not_found`)
+    // until a reload. This diffs the enabled set against the running set on
+    // every `adapterInstances` change and adds/removes the delta. The diff is
+    // by id-set, so unrelated row writes (presence, capability refresh,
+    // heartbeat metadata) reconcile to a no-op and never churn a live adapter.
+    if (!cancelled) {
+      let reconcileRunning = false
+      let reconcilePending = false
+
+      const reconcileEnabledAdapters = async (): Promise<void> => {
+        if (cancelled) return
+        let rows: Awaited<ReturnType<typeof listEnabledAdapterInstances>>
+        try {
+          rows = await listEnabledAdapterInstances()
+        } catch {
+          return
+        }
+        if (cancelled) return
+        const enabledRows = opts.rowFilter ? rows.filter(opts.rowFilter) : rows
+        const enabledIds = new Set(enabledRows.map((r) => r.id))
+        const running = listRunningAdapters()
+
+        // Hot-remove: a running adapter no longer in the enabled set
+        // (disabled or deleted). Mirrors the teardown's per-adapter reap.
+        for (const entry of running) {
+          const id = entry.adapter.id
+          if (enabledIds.has(id)) continue
+          unregisterRunningAdapter(id) // aborts signal + stops transport
+          bus.unregisterAdapter(id)
+          if (serverAdapterIds.has(id)) {
+            serverAdapterIds.delete(id)
+            void connectorsUnregisterAdapter(id).catch(() => undefined)
+          }
+          void appendAudit({ adapterId: id, kind: "adapter.stopped", at: Date.now() }).catch(
+            () => undefined
+          )
+        }
+
+        // Hot-add: an enabled adapter not yet running (newly created/enabled).
+        const runningIds = new Set(running.map((e) => e.adapter.id))
+        for (const row of enabledRows) {
+          if (cancelled) return
+          if (runningIds.has(row.id)) continue
+          try {
+            const adapter = await buildAdapterFromRow(row)
+            if (cancelled) return
+            if (!adapter) continue
+            bus.registerAdapter(adapter)
+            try {
+              const { getDb } = await import("@/lib/db/schema")
+              await getDb().adapterInstances.update(row.id, {
+                lastKnownCapabilities: adapter.a2uiCapability(),
+                updatedAt: Date.now(),
+              })
+            } catch {
+              // Best-effort capability refresh; falls back to the stale matrix.
+            }
+            await bootAdapter(adapter, row, bus)
+          } catch (err) {
+            log(
+              "error",
+              `[connector-bus] hot-enable of adapter ${row.id} failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            )
+          }
+        }
+
+        // A hot-added webhook / reverse-WS adapter needs the inbound server.
+        // Idempotent in Rust ("already running" ⇒ success), so a no-op when it
+        // is already up for another adapter.
+        if (!cancelled && serverAdapterIds.size > 0) {
+          try {
+            await connectorsStartServer(CONNECTORS_SERVER_PORT, true)
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err)
+            if (!/already running/i.test(message)) {
+              log(
+                "error",
+                `[connector-bus] inbound server failed to start after hot-enable: ${message}`
+              )
+            }
+          }
+        }
+      }
+
+      // Serialize reconciles so a burst of table writes can't run two at once
+      // (which would race the running-set check and double-boot an adapter).
+      const runReconcile = (): void => {
+        if (reconcileRunning) {
+          reconcilePending = true
+          return
+        }
+        reconcileRunning = true
+        void reconcileEnabledAdapters()
+          .catch(() => undefined)
+          .finally(() => {
+            reconcileRunning = false
+            if (reconcilePending && !cancelled) {
+              reconcilePending = false
+              runReconcile()
+            }
+          })
+      }
+
+      const subscribeChanges = opts.subscribeAdapterChanges ?? defaultSubscribeAdapterChanges
+      const unsubscribeChanges = subscribeChanges(runReconcile)
+      ac.signal.addEventListener("abort", unsubscribeChanges, { once: true })
     }
   })()
 

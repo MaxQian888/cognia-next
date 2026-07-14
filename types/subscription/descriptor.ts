@@ -110,14 +110,37 @@ export interface SourceDescriptor {
   id: string
   /** Provider-match signals. At least one should be set or it matches nothing. */
   match: {
-    /** Exact preset `templateId` / provider key, e.g. "stepfun". */
-    providerKey?: string
-    /** Substring the account's resolved baseUrl must contain, e.g. "stepfun.com". */
-    baseUrlIncludes?: string
+    /**
+     * Exact preset `templateId` / provider key, e.g. "stepfun". An array matches
+     * any of the listed keys (a provider shipped under several catalog ids, e.g.
+     * "glm" plus the "glm-anthropic" relay).
+     */
+    providerKey?: string | string[]
+    /**
+     * Substring(s) the account's resolved baseUrl must contain, e.g.
+     * "stepfun.com". An array matches when the baseUrl contains ANY entry (a
+     * provider reachable on several hosts, e.g. Zhipu's CN "bigmodel.cn" and
+     * international "z.ai").
+     */
+    baseUrlIncludes?: string | string[]
   }
   request: {
-    /** Path appended to the resolved baseUrl. Supports `{{...}}` placeholders. */
+    /**
+     * Path appended to the resolved base. Supports `{{...}}` placeholders. When
+     * `useBaseUrlOrigin` is set the base is the preset URL's scheme+host origin;
+     * otherwise it is the full trimmed preset baseUrl.
+     */
     path: string
+    /**
+     * Build the request URL from the preset baseUrl's ORIGIN (scheme + host)
+     * rather than its full path. Set this for quota/balance endpoints whose path
+     * is fixed at the host root but whose preset baseUrl carries an unrelated
+     * path segment (e.g. an `.../api/anthropic` relay preset, or an `.../v1`
+     * chat base). `path` must then be absolute-from-origin (e.g.
+     * "/api/monitor/usage/quota/limit"). Defaults to `false` (append to the full
+     * baseUrl — used by providers whose usage path is relative to the base).
+     */
+    useBaseUrlOrigin?: boolean
     method?: "GET"
     /**
      * Extra headers; values support `{{token}}`/`{{baseUrl}}`/`{{accountId}}`.

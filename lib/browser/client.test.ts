@@ -40,6 +40,18 @@ describe("browserClient (embedded pane)", () => {
     expect(call).toHaveBeenCalledWith("browser_embed_set_select_mode", { on: true })
   })
 
+  it("embedClearSelection takes no args", async () => {
+    await browserClient.embedClearSelection()
+    expect(call).toHaveBeenCalledWith("browser_embed_clear_selection", {})
+  })
+
+  it("embedSetPanelLabels serializes the labels to a JSON string", async () => {
+    await browserClient.embedSetPanelLabels({ details: "Details", collapse: "Collapse" })
+    expect(call).toHaveBeenCalledWith("browser_embed_set_panel_labels", {
+      labels: JSON.stringify({ details: "Details", collapse: "Collapse" }),
+    })
+  })
+
   it("embedCapture returns the screenshot for the rect", async () => {
     call.mockResolvedValueOnce({ bytes: "AAAA", width: 10, height: 10 })
     const shot = await browserClient.embedCapture(rect)

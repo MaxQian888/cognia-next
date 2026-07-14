@@ -34,9 +34,11 @@ jest.mock("@/lib/connectors/outbound-runner", () => ({
 
 // ── Mock getBus + registerAdapter ────────────────────────────────────────────
 const mockRegisterAdapter = jest.fn()
+const mockUnregisterAdapterBus = jest.fn()
 const mockListAdapters = jest.fn().mockReturnValue([])
 const mockBus = {
   registerAdapter: mockRegisterAdapter,
+  unregisterAdapter: mockUnregisterAdapterBus,
   listAdapters: mockListAdapters,
 }
 jest.mock("@/lib/connectors/bus", () => ({
@@ -935,5 +937,262 @@ describe("installConnectorRuntime", () => {
     )
     expect(warnSpy).not.toHaveBeenCalled()
     warnSpy.mockRestore()
+  })
+
+  describe("hot-reconciles the enabled-adapter set (no restart)", () => {
+    // Drive the runtime with an injected adapter-change watcher so a test can
+    // fire "the adapterInstances table changed" on demand, then assert the
+    // installer reconciles the enabled set into the running set.
+    const installWithWatch = async (
+      initialRows: ReturnType<typeof makeTelegramRow>[],
+      extraOpts: Parameters<typeof install>[0] = {}
+    ) => {
+      mockedIsTauri.mockReturnValue(true)
+      mockListEnabled.mockResolvedValue(initialRows)
+      mockBuildAdapterFromRow.mockImplementation(async (row: { id: string }) =>
+        makeFakeAdapter(row.id)
+      )
+      let captured: (() => void) | null = null
+      const unsub = jest.fn()
+      install({
+        ...extraOpts,
+        subscribeAdapterChanges: (cb) => {
+          captured = cb
+          return unsub
+        },
+      })
+      // The watcher is wired at the tail of the async boot, so waiting for it
+      // also guarantees the initial rows finished booting.
+      await waitFor(() => expect(captured).not.toBeNull())
+      return { fire: () => captured!(), unsub }
+    }
+
+    it("registers + boots a newly enabled adapter without a restart", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const { fire } = await installWithWatch([rowA])
+      await waitFor(() =>
+        expect(mockRegisterAdapter).toHaveBeenCalledWith(expect.objectContaining({ id: "cai_A" }))
+      )
+      mockRegisterAdapter.mockClear()
+
+      // A new bot appears in the enabled set after boot.
+      const rowB = makeTelegramRow("cai_B")
+      mockListEnabled.mockResolvedValue([rowA, rowB])
+      fire()
+
+      await waitFor(() => {
+        expect(mockRegisterAdapter).toHaveBeenCalledWith(expect.objectContaining({ id: "cai_B" }))
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_B", expect.anything())
+      })
+      // The already-running adapter is NOT re-registered (no churn).
+      expect(mockRegisterAdapter).not.toHaveBeenCalledWith(expect.objectContaining({ id: "cai_A" }))
+    })
+
+    it("stops + unregisters an adapter that was disabled/deleted", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const rowB = makeTelegramRow("cai_B")
+      const { fire } = await installWithWatch([rowA, rowB])
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_B", expect.anything())
+      )
+
+      // cai_B is disabled — it drops out of the enabled set.
+      mockListEnabled.mockResolvedValue([rowA])
+      fire()
+
+      await waitFor(() => {
+        expect(mockUnregisterRunning).toHaveBeenCalledWith("cai_B")
+        expect(mockUnregisterAdapterBus).toHaveBeenCalledWith("cai_B")
+      })
+      // The still-enabled adapter is left untouched.
+      expect(mockUnregisterRunning).not.toHaveBeenCalledWith("cai_A")
+    })
+
+    it("is a no-op when the enabled set is unchanged (no churn)", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const { fire } = await installWithWatch([rowA])
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_A", expect.anything())
+      )
+      mockRegisterAdapter.mockClear()
+      mockBuildAdapterFromRow.mockClear()
+
+      // Same enabled set (e.g. a presence/capability row write re-fired it).
+      fire()
+      await new Promise((r) => setTimeout(r, 30))
+
+      expect(mockRegisterAdapter).not.toHaveBeenCalled()
+      expect(mockBuildAdapterFromRow).not.toHaveBeenCalled()
+      expect(mockUnregisterRunning).not.toHaveBeenCalled()
+    })
+
+    it("hot-adds a webhook adapter (Rust register + inbound server), reaps it on disable", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const { fire } = await installWithWatch([rowA])
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_A", expect.anything())
+      )
+
+      const hook = makeWebhookRow("cai_hook")
+      mockBuildAdapterFromRow.mockImplementation(
+        async (row: { transportMode?: string; id: string }) =>
+          row.transportMode === "webhook" ? makeWebhookAdapter(row.id) : makeFakeAdapter(row.id)
+      )
+      mockListEnabled.mockResolvedValue([rowA, hook])
+      fire()
+      await waitFor(() => {
+        expect(mockRegisterAdapterCmd).toHaveBeenCalledWith({
+          adapterId: "cai_hook",
+          adapterType: "lark",
+        })
+        expect(mockStartServer).toHaveBeenCalled()
+      })
+
+      // Disable it → hot-remove reaps the Rust webhook registration too.
+      mockListEnabled.mockResolvedValue([rowA])
+      fire()
+      await waitFor(() => {
+        expect(mockUnregisterRunning).toHaveBeenCalledWith("cai_hook")
+        expect(mockUnregisterAdapterCmd).toHaveBeenCalledWith("cai_hook")
+      })
+    })
+
+    it("skips a hot-add when buildAdapterFromRow returns null", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const { fire } = await installWithWatch([rowA])
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_A", expect.anything())
+      )
+      mockRegisterAdapter.mockClear()
+
+      const rowB = makeTelegramRow("cai_B")
+      mockBuildAdapterFromRow.mockImplementation(async (row: { id: string }) =>
+        row.id === "cai_B" ? null : makeFakeAdapter(row.id)
+      )
+      mockListEnabled.mockResolvedValue([rowA, rowB])
+      fire()
+      await new Promise((r) => setTimeout(r, 30))
+      expect(mockRegisterAdapter).not.toHaveBeenCalledWith(expect.objectContaining({ id: "cai_B" }))
+    })
+
+    it("logs and keeps going when buildAdapterFromRow throws during hot-add", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const log = jest.fn()
+      const { fire } = await installWithWatch([rowA], { log })
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_A", expect.anything())
+      )
+
+      const rowB = makeTelegramRow("cai_B")
+      mockBuildAdapterFromRow.mockImplementation(async (row: { id: string }) => {
+        if (row.id === "cai_B") throw new Error("build boom")
+        return makeFakeAdapter(row.id)
+      })
+      mockListEnabled.mockResolvedValue([rowA, rowB])
+      fire()
+      await waitFor(() =>
+        expect(log).toHaveBeenCalledWith(
+          "error",
+          expect.stringContaining("hot-enable of adapter cai_B failed")
+        )
+      )
+    })
+
+    it("swallows a read error during reconcile (no crash, no churn)", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const { fire } = await installWithWatch([rowA])
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_A", expect.anything())
+      )
+      mockRegisterAdapter.mockClear()
+
+      mockListEnabled.mockRejectedValueOnce(new Error("db read boom"))
+      fire()
+      await new Promise((r) => setTimeout(r, 30))
+      expect(mockRegisterAdapter).not.toHaveBeenCalled()
+      expect(mockUnregisterRunning).not.toHaveBeenCalled()
+    })
+
+    it("logs when the inbound server fails to start after a webhook hot-add", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const log = jest.fn()
+      const { fire } = await installWithWatch([rowA], { log })
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_A", expect.anything())
+      )
+
+      mockStartServer.mockRejectedValueOnce(new Error("port in use"))
+      const hook = makeWebhookRow("cai_hook")
+      mockBuildAdapterFromRow.mockImplementation(
+        async (row: { transportMode?: string; id: string }) =>
+          row.transportMode === "webhook" ? makeWebhookAdapter(row.id) : makeFakeAdapter(row.id)
+      )
+      mockListEnabled.mockResolvedValue([rowA, hook])
+      fire()
+      await waitFor(() =>
+        expect(log).toHaveBeenCalledWith(
+          "error",
+          expect.stringContaining("inbound server failed to start after hot-enable")
+        )
+      )
+    })
+
+    it("serializes overlapping reconciles so an adapter is not double-booted", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const { fire } = await installWithWatch([rowA])
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_A", expect.anything())
+      )
+
+      // Gate the cai_B build so a second fire() lands while reconcile #1 is
+      // still in-flight — exercising the reconcileRunning → pending re-run path.
+      const rowB = makeTelegramRow("cai_B")
+      let releaseBuild: () => void = () => {}
+      const buildGate = new Promise<void>((r) => {
+        releaseBuild = r
+      })
+      mockBuildAdapterFromRow.mockImplementation(async (row: { id: string }) => {
+        if (row.id === "cai_B") await buildGate
+        return makeFakeAdapter(row.id)
+      })
+      mockListEnabled.mockResolvedValue([rowA, rowB])
+
+      fire() // reconcile #1 starts, parks on the cai_B build
+      await new Promise((r) => setTimeout(r, 10))
+      fire() // reconcile #2 requested mid-flight → queued, not run concurrently
+      releaseBuild() // let #1 finish → the queued #2 runs
+
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_B", expect.anything())
+      )
+      // Booted exactly once despite two overlapping fires.
+      const bBoots = mockRegisterRunning.mock.calls.filter((c) => c[0] === "cai_B")
+      expect(bBoots).toHaveLength(1)
+    })
+
+    it("still boots a hot-added adapter when the capability refresh write fails", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const { fire } = await installWithWatch([rowA])
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_A", expect.anything())
+      )
+
+      mockAdapterInstancesUpdate.mockRejectedValueOnce(new Error("update boom"))
+      const rowB = makeTelegramRow("cai_B")
+      mockListEnabled.mockResolvedValue([rowA, rowB])
+      fire()
+      // The best-effort capability write threw, but boot proceeds regardless.
+      await waitFor(() =>
+        expect(mockRegisterRunning).toHaveBeenCalledWith("cai_B", expect.anything())
+      )
+    })
+
+    it("unsubscribes the watcher on teardown", async () => {
+      const rowA = makeTelegramRow("cai_A")
+      const { unsub } = await installWithWatch([rowA])
+      expect(unsub).not.toHaveBeenCalled()
+      for (const dispose of disposers.splice(0)) dispose()
+      expect(unsub).toHaveBeenCalledTimes(1)
+    })
   })
 })

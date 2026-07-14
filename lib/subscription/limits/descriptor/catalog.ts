@@ -8,7 +8,10 @@
 //
 // Grounding: endpoints/field paths verified against CC Switch
 // (`farion1231/cc-switch`) `services/balance.rs` + `services/coding_plan.rs`
-// (v3.16), the MiniMax Token Plan FAQ, and the opencode-glm-quota plugin. The
+// (re-verified v3.17), the MiniMax Token Plan FAQ, and the opencode-glm-quota
+// plugin. Coding-plan descriptors use `request.useBaseUrlOrigin` so they resolve
+// for the Anthropic relay presets (baseUrl `…/api/anthropic`) as well as the
+// OpenAI-compatible chat presets — the quota path anchors at the host root. The
 // engine supports three primitives that let the Chinese "Coding/Token Plan"
 // quota providers join this catalog as pure data:
 //   - count-based windows (`usedPath`/`totalPath`/`remainingPath`) for providers
@@ -21,18 +24,27 @@
 // extraction + these primitives cover every Coding/Token Plan shape seen so far.
 // Providers with genuinely no documented usage API (Qwen/通义, Baichuan/百川,
 // 01.AI/零一万物) stay absent — users add those via the custom-source UI.
+//
+// Volcengine (火山方舟) Agent/Coding Plan quota is NOT a descriptor: its usage
+// OpenAPI requires a Volcengine SigV4 signature over an access-key/secret pair
+// (not the bearer coding-plan token our accounts store), which the bearer-only
+// declarative engine can't express. It ships instead as a hand-written source
+// (`sources/volcengine.ts`) backed by the SigV4-signing Rust command
+// `subscription_volcengine_usage`; the AK/SK live in the preset's `x-cognia-volc-*`
+// extraHeaders (stripped from the wire so the account-wide key never leaks).
 
 import { descriptorToSource } from "./engine"
 
 import type { LimitsSource, SourceDescriptor } from "@/types/subscription"
 
 // StepFun (阶跃星辰) — balance at `https://api.stepfun.com/v1/accounts`, Bearer,
-// `balance` (CNY). The path is relative to the account's OpenAI-compatible
-// baseUrl, which ends in `/v1` by convention → `/accounts`.
+// `balance` (CNY). Built from the baseUrl ORIGIN so it resolves for both the
+// OpenAI-compatible chat preset (`…/v1`) and the Anthropic relay preset
+// (`…/step_plan`) — the balance path is fixed at the host root either way.
 const stepfun: SourceDescriptor = {
   id: "stepfun",
-  match: { providerKey: "stepfun", baseUrlIncludes: "stepfun." },
-  request: { path: "/accounts" },
+  match: { providerKey: ["stepfun", "stepfun-anthropic"], baseUrlIncludes: "stepfun." },
+  request: { useBaseUrlOrigin: true, path: "/v1/accounts" },
   extract: { kind: "balance", remainingPath: "balance", unit: "CNY", currency: "CNY" },
 }
 
@@ -46,8 +58,16 @@ const stepfun: SourceDescriptor = {
 // the opencode-glm-quota plugin (raw-key, no Bearer).
 const glm: SourceDescriptor = {
   id: "glm",
-  match: { providerKey: "glm", baseUrlIncludes: "api.z.ai" },
+  // Zhipu ships on two hosts: CN `open.bigmodel.cn` and international `api.z.ai`.
+  // The quota path is host-root-anchored, so `useBaseUrlOrigin` lets ONE
+  // descriptor serve both the chat preset and the `…/api/anthropic` relay preset
+  // on either host — the origin (bigmodel.cn vs z.ai) is derived from the preset.
+  match: {
+    providerKey: ["glm", "glm-anthropic", "glm-anthropic-intl"],
+    baseUrlIncludes: ["api.z.ai", "bigmodel.cn"],
+  },
   request: {
+    useBaseUrlOrigin: true,
     path: "/api/monitor/usage/quota/limit",
     headers: { Authorization: "{{token}}" },
   },
@@ -83,8 +103,13 @@ const glm: SourceDescriptor = {
 // countdown). Endpoint + shape per the MiniMax Token Plan FAQ and cc-switch.
 const minimax: SourceDescriptor = {
   id: "minimax",
-  match: { providerKey: "minimax", baseUrlIncludes: "minimax" },
-  request: { path: "/v1/token_plan/remains" },
+  // "minimax" matches both CN `api.minimaxi.com` and intl `api.minimax.io`.
+  // Origin-based so the `…/anthropic` relay preset resolves the same root path.
+  match: {
+    providerKey: ["minimax", "minimax-anthropic", "minimax-anthropic-intl"],
+    baseUrlIncludes: "minimax",
+  },
+  request: { useBaseUrlOrigin: true, path: "/v1/token_plan/remains" },
   extract: {
     kind: "window",
     windows: [
@@ -118,7 +143,9 @@ const minimax: SourceDescriptor = {
 const kimiCoding: SourceDescriptor = {
   id: "kimi-coding",
   match: { providerKey: "kimi-coding", baseUrlIncludes: "api.kimi.com" },
-  request: { path: "/coding/v1/usages" },
+  // Origin-based: the relay preset baseUrl is `https://api.kimi.com/coding/`, so
+  // the usage path must anchor at the host root (not double the `/coding`).
+  request: { useBaseUrlOrigin: true, path: "/coding/v1/usages" },
   extract: {
     kind: "window",
     windows: [

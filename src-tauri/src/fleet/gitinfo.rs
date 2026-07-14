@@ -48,10 +48,7 @@ mod tests {
     #[test]
     fn parse_branch_trims_a_normal_branch() {
         assert_eq!(parse_branch("main\n"), Some("main".to_string()));
-        assert_eq!(
-            parse_branch("  feature/x  "),
-            Some("feature/x".to_string())
-        );
+        assert_eq!(parse_branch("  feature/x  "), Some("feature/x".to_string()));
     }
 
     #[test]
@@ -73,10 +70,7 @@ mod tests {
     fn current_branch_of_non_repo_is_none() {
         // A path that is not a git repository (and almost certainly absent)
         // fast-fails to `None` without panicking.
-        assert_eq!(
-            current_branch("/definitely/not/a/git/repo/xyzzy"),
-            None
-        );
+        assert_eq!(current_branch("/definitely/not/a/git/repo/xyzzy"), None);
     }
 
     #[test]

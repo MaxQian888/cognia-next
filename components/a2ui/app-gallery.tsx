@@ -76,10 +76,8 @@ export function AppGallery({
   const [detailApp, setDetailApp] = useState<A2UIAppInstance | null>(null)
 
   const appBuilder = useA2UIAppBuilder({
-    onAction: (action) => {
-      appBuilder.handleAppAction(action)
-      onAction?.(action)
-    },
+    // Built-in actions are handled app-wide by <A2UIBuiltInActionsProvider>.
+    onAction,
     onDataChange,
   })
 

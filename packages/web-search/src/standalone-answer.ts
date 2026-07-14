@@ -66,6 +66,8 @@ export interface StandaloneAnswerDeps {
   getConfig: () => {
     providerSettings: Partial<Record<SearchProviderType, SearchProviderSettings>> | undefined
     maxResults?: number
+    /** Max extra attempts per provider on a transient failure. Default 2. */
+    maxRetries?: number
   }
   /**
    * Resolve the BYOK answer-synthesis model (transport/fetch/headers already
@@ -128,6 +130,7 @@ export async function runStandaloneSearchAnswer(
       maxResults,
       includeAnswer: true,
       fallbackEnabled: true,
+      maxRetries: config.maxRetries,
     })
   } catch (err) {
     throw new StandaloneSearchError(

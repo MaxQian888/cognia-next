@@ -138,7 +138,9 @@ describe("TerminalCard", () => {
     })
     expect(settingsSave).toHaveBeenLastCalledWith({
       terminal: expect.objectContaining({
-        fontFamily: expect.stringContaining("Nerd Font"),
+        // Leads with the app-bundled Nerd Font so the icons render without the
+        // user installing anything, and still carries a Nerd-Font fallback.
+        fontFamily: expect.stringMatching(/^"MesloLGS NF".*Nerd Font/),
       }),
     })
   })

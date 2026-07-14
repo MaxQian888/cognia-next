@@ -120,11 +120,24 @@ function A2UIPageContent() {
   const urlActionHandledRef = useRef(false)
 
   const appBuilder = useA2UIAppBuilder({
+    // Built-in mini-app interactions (calculator/timer/todo/…) are handled
+    // app-wide by <A2UIBuiltInActionsProvider> in the root layout, so this
+    // builder does not opt in — it is used here only for app CRUD/hydration.
     onAppCreated: (appId) => {
       setPreviewAppId(appId)
       toast.success(t("appCreated") || "App created!")
     },
   })
+
+  // Rebuild renderable surfaces for saved apps that lost their component tree
+  // across a reload (pre-persistence-fix data, or LRU-evicted surfaces). Runs
+  // once after mount, after the store has rehydrated from localStorage.
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    if (hydratedRef.current) return
+    hydratedRef.current = true
+    appBuilder.hydratePersistedApps()
+  }, [appBuilder])
 
   const allApps = useMemo(() => appBuilder.getAllApps(), [appBuilder])
 

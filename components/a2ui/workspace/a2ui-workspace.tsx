@@ -22,6 +22,7 @@ import { PropertyInspectorPanel } from "./property-inspector-panel"
 import { DataModelPanel } from "./data-model-panel"
 import { A2UIErrorPanel } from "./a2ui-error-panel"
 import { useA2UIWorkspaceShortcuts } from "@/hooks/a2ui/use-a2ui-workspace-shortcuts"
+import { useA2UISave } from "@/hooks/a2ui/use-a2ui-save"
 import { toast } from "sonner"
 
 interface A2UIWorkspaceProps {
@@ -40,10 +41,17 @@ function WorkspaceContent() {
     setSelectedComponentId,
   } = useWorkspaceContext()
   const [mobileTab, setMobileTab] = React.useState<string>("preview")
+  const saveApp = useA2UISave(surfaceId)
 
-  const handleSave = useCallback(() => {
-    toast.success(t("appSaved"))
-  }, [t])
+  const handleSave = useCallback(async () => {
+    try {
+      const ok = await saveApp()
+      if (ok) toast.success(t("appSaved"))
+      else toast.error(t("generationFailed"))
+    } catch {
+      toast.error(t("generationFailed"))
+    }
+  }, [saveApp, t])
 
   const handleDeselect = useCallback(() => {
     setSelectedComponentId(null)

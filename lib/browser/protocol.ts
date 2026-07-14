@@ -29,6 +29,18 @@ export interface ElementRect {
   height: number
 }
 
+/**
+ * Best-effort element→source mapping (tier 2). Populated only when the previewed
+ * dev server emits `data-inspector-relative-path` / `-line` / `-column` on the
+ * DOM (the react-dev-inspector convention); read verbatim from the node, so it
+ * survives React 19 which dropped the fiber `_debugSource`.
+ */
+export interface SourceHint {
+  path: string
+  line: number
+  column?: number
+}
+
 export interface BrowserSelection {
   paneId: string
   selector: string
@@ -42,6 +54,19 @@ export interface BrowserSelection {
   text: string
   pageUrl: string
   pageTitle: string
+  // --- Component-aware enrichment (tier 1, React only) --------------------
+  // Read from the DOM node's React fiber at pick time; absent on non-React
+  // pages (the payload then degrades to the DOM-only fields above).
+  /** Nearest owning component's display name, e.g. `"SubmitButton"`. */
+  componentName?: string | null
+  /** Outermost→innermost component chain, e.g. `"App > CheckoutForm > SubmitButton"`. */
+  componentStack?: string | null
+  /** Shallow, truncated `memoizedProps` of the owning component (primitives only). */
+  props?: Record<string, string> | null
+  /** Framework the enrichment came from, or null when undetected. */
+  framework?: "react" | null
+  /** Exact source location when the dev build emits inspector attributes (tier 2). */
+  sourceHint?: SourceHint | null
 }
 
 export interface BrowserNavigated {
@@ -55,20 +80,54 @@ export interface BrowserLoaded {
   url: string
 }
 
+/** Render a shallow props map as `key=value` pairs for the prompt. */
+function formatProps(props: Record<string, string>): string {
+  return Object.entries(props)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(", ")
+}
+
 /**
- * Compose the chat prompt for a selected element + the user's comment. The
- * agent uses the selector / dom path / outerHTML to grep the project source
- * (zero-config fuzzy mapping — no source-location plugin required).
+ * The closing directive that tells the agent how to reach the source: a precise
+ * pointer when the dev build supplied an inspector source hint, otherwise the
+ * component name as the resolution anchor, otherwise nothing (the agent falls
+ * back to grepping by selector / outerHTML, the zero-config default).
+ */
+function resolutionDirective(sel: BrowserSelection): string | null {
+  if (sel.sourceHint) {
+    const { path, line } = sel.sourceHint
+    return `Likely source: ${path}:${line} — start there.`
+  }
+  if (sel.componentName) {
+    return `Rendered by the <${sel.componentName}> component; locate its definition (grep/LSP) and edit there.`
+  }
+  return null
+}
+
+/**
+ * Compose the chat prompt for a selected element + the user's comment. Beyond
+ * the DOM signals, it surfaces the owning React component (name / stack / props)
+ * and any inspector source hint so the agent maps element→code precisely; the
+ * closing directive points it straight at the source (see {@link resolutionDirective}).
  */
 export function formatSelectionComment(sel: BrowserSelection, comment: string): string {
   const lines: string[] = [comment.trim(), "", "— Selected element (in-app browser) —"]
   lines.push(`Selector: ${sel.selector}`)
   if (sel.domPath) lines.push(`Path: ${sel.domPath}`)
+  if (sel.componentName) lines.push(`Component: <${sel.componentName}>`)
+  if (sel.componentStack) lines.push(`Component path: ${sel.componentStack}`)
+  if (sel.sourceHint) {
+    const { path, line, column } = sel.sourceHint
+    lines.push(`Source: ${path}:${line}${column != null ? `:${column}` : ""}`)
+  }
+  if (sel.props && Object.keys(sel.props).length > 0) lines.push(`Props: ${formatProps(sel.props)}`)
   if (sel.text) lines.push(`Text: ${sel.text}`)
   lines.push(`Page: ${sel.pageUrl}`)
   if (sel.outerHTML) {
     lines.push("HTML:", "```html", sel.outerHTML, "```")
   }
+  const directive = resolutionDirective(sel)
+  if (directive) lines.push("", directive)
   return lines.join("\n")
 }
 

@@ -12,8 +12,10 @@
 // `limit` and `limit_remaining` are `null` when the key has no cap (then we can
 // only surface `used`).
 //
-// The configured preset baseUrl is already "https://openrouter.ai/api/v1", so
-// `${baseUrl}/key` is the path.
+// The per-key endpoint lives at "https://openrouter.ai/api/v1/key". We build
+// from the baseUrl ORIGIN + the fixed "/api/v1/key" path so both the chat preset
+// ("https://openrouter.ai/api/v1") and the Anthropic relay preset
+// ("https://openrouter.ai/api") resolve correctly.
 
 import type {
   BalanceAdapter,
@@ -22,7 +24,7 @@ import type {
   BalanceSnapshot,
 } from "@/types/subscription"
 
-import { bearer, errorSnapshot, parseJsonObject, toNum, trimBase } from "./_shared"
+import { apiRootOf, bearer, errorSnapshot, parseJsonObject, toNum } from "./_shared"
 
 export const openrouterBalanceAdapter: BalanceAdapter = {
   key: "openrouter",
@@ -33,7 +35,7 @@ export const openrouterBalanceAdapter: BalanceAdapter = {
   },
 
   request(q: BalanceQuery): BalanceRequestDescriptor {
-    return { url: `${trimBase(q.baseUrl)}/key`, headers: bearer(q.token) }
+    return { url: `${apiRootOf(q.baseUrl)}/api/v1/key`, headers: bearer(q.token) }
   },
 
   parse(status: number, body: string, q: BalanceQuery): BalanceSnapshot {

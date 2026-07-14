@@ -36,10 +36,12 @@ import {
   fleetMonitorStatus,
   fleetMonitorStop,
   fleetPermissionRespond,
+  fleetQuestionRespond,
   fleetRevealTranscript,
   islandListMonitors,
   islandResize,
   islandSetMonitor,
+  islandSetTucked,
   isIslandWindowOpen,
   openIslandWindow,
 } from "./fleet"
@@ -65,6 +67,7 @@ describe("off Tauri (web)", () => {
     expect(await fleetMonitorRestore()).toEqual({ enabled: false, port: null, configPath: null })
     expect(await fleetGetSnapshot()).toEqual({ sessions: [], generatedAt: 0 })
     expect(await fleetPermissionRespond("r", "allow")).toBe(false)
+    expect(await fleetQuestionRespond("r", [[0]])).toBe(false)
     expect(await fleetFocusTerminal("claude-code", "s")).toBe(false)
     expect(await fleetCodexStatus()).toEqual({
       status: "unavailable",
@@ -89,6 +92,7 @@ describe("off Tauri (web)", () => {
     expect(await closeIslandWindow()).toBe(false)
     expect(await isIslandWindowOpen()).toBe(false)
     expect(await islandResize(400, 44)).toBe(0)
+    expect(await islandSetTucked(true)).toBe(false)
     expect(await fleetRevealTranscript("/x/t.jsonl")).toBe(false)
     expect(invokeMock).not.toHaveBeenCalled()
     expect(revealMock).not.toHaveBeenCalled()
@@ -134,6 +138,15 @@ describe("on Tauri", () => {
     expect(invokeMock).toHaveBeenCalledWith("fleet_permission_respond", {
       requestId: "req-1",
       behavior: "deny",
+    })
+  })
+
+  it("passes question answers (per-question option indices) through", async () => {
+    invokeMock.mockResolvedValue(true)
+    expect(await fleetQuestionRespond("req-2", [[1], [0, 2]])).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("fleet_question_respond", {
+      requestId: "req-2",
+      selections: [[1], [0, 2]],
     })
   })
 
@@ -222,6 +235,14 @@ describe("on Tauri", () => {
     expect(await isIslandWindowOpen()).toBe(true)
   })
 
+  it("mirrors the tuck state to the click-through toggle", async () => {
+    invokeMock.mockResolvedValue(undefined)
+    expect(await islandSetTucked(true)).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("island_set_tucked", { tucked: true })
+    expect(await islandSetTucked(false)).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("island_set_tucked", { tucked: false })
+  })
+
   it("lists monitors and persists the island display choice", async () => {
     const monitors = [
       { name: "Built-in", index: 0, isPrimary: true, selected: false, width: 1512, height: 982 },
@@ -250,6 +271,7 @@ describe("on Tauri", () => {
     expect(await closeIslandWindow()).toBe(false)
     expect(await isIslandWindowOpen()).toBe(false)
     expect(await islandResize(1, 1)).toBe(0)
+    expect(await islandSetTucked(true)).toBe(false)
     expect(warnSpy).toHaveBeenCalled()
   })
 })

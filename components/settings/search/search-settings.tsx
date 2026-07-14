@@ -42,54 +42,73 @@ export function SearchSettings() {
   return (
     <TooltipProvider delayDuration={300}>
       <SearchSectionNavProvider navigate={navigate}>
-        <SettingsPageHeader
-          title={t("title")}
-          description={t("description")}
-          icon={<Search className="h-5 w-5" />}
-        />
+        <div className="flex h-full min-h-0 flex-col gap-4">
+          <SettingsPageHeader
+            title={t("title")}
+            description={t("description")}
+            icon={<Search className="h-5 w-5" />}
+            className="mb-0"
+          />
 
-        {isNarrow ? (
-          <Accordion
-            type="single"
-            collapsible
-            value={active}
-            onValueChange={(v) => {
-              if (isSearchSection(v)) navigate(v)
-            }}
-          >
-            {SEARCH_SECTIONS.map((section) => {
-              const SectionComponent = section.Component
-              return (
-                <AccordionItem key={section.id} value={section.id}>
-                  <AccordionTrigger>
-                    <span className="flex items-center gap-2">
-                      {section.icon}
-                      {t(section.labelKey)}
-                    </span>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <div className="pt-1">
-                      <SectionComponent />
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              )
-            })}
-          </Accordion>
-        ) : (
-          <div className="flex gap-6">
-            <aside className="w-52 shrink-0 self-start sticky top-0">
-              <SearchSettingsNav active={active} onSelect={navigate} />
-            </aside>
-            <div className="min-w-0 flex-1 space-y-4">
-              <div className="space-y-0.5">
-                <h3 className="text-base font-semibold">{t(activeSection.labelKey)}</h3>
-                <p className="text-xs text-muted-foreground">{t(activeSection.descKey)}</p>
-              </div>
-              <ActiveComponent />
+          {isNarrow ? (
+            <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
+              <Accordion
+                type="single"
+                collapsible
+                value={active}
+                onValueChange={(v) => {
+                  if (isSearchSection(v)) navigate(v)
+                }}
+              >
+                {SEARCH_SECTIONS.map((section) => {
+                  const SectionComponent = section.Component
+                  return (
+                    <AccordionItem key={section.id} value={section.id}>
+                      <AccordionTrigger>
+                        <span className="flex items-center gap-2">
+                          {section.icon}
+                          {t(section.labelKey)}
+                        </span>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="pt-1">
+                          <SectionComponent />
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  )
+                })}
+              </Accordion>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="grid min-h-0 flex-1 grid-cols-[220px_1fr] gap-4">
+              {/* ── Master rail ─────────────────────────────────────────── */}
+              <aside className="min-h-0 overflow-y-auto rounded-lg border p-2">
+                <SearchSettingsNav active={active} onSelect={navigate} />
+              </aside>
+
+              {/* ── Detail panel ────────────────────────────────────────── */}
+              <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+                <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                    {activeSection.icon}
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold leading-tight">
+                      {t(activeSection.labelKey)}
+                    </h3>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {t(activeSection.descKey)}
+                    </p>
+                  </div>
+                </header>
+                <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+                  <ActiveComponent />
+                </div>
+              </section>
+            </div>
+          )}
+        </div>
       </SearchSectionNavProvider>
     </TooltipProvider>
   )

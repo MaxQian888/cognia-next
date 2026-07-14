@@ -38,6 +38,38 @@ describe("built-in provider catalog", () => {
     expect(getBuiltInProviderDefaultBaseURL("deepseek")).toContain("deepseek")
   })
 
+  it("registers cc-switch Anthropic-wire relay presets under the anthropic-native family", () => {
+    const relay = getBuiltInProviderCatalogEntry("deepseek-anthropic")
+    expect(relay).toMatchObject({
+      protocol: "anthropic",
+      family: "anthropic-native",
+      adapter: "anthropic",
+      defaultEnabled: false,
+    })
+    expect(getBuiltInProviderDefaultBaseURL("glm-anthropic")).toContain("bigmodel.cn")
+    expect(getBuiltInProviderDefaultBaseURL("glm-anthropic-intl")).toContain("z.ai")
+    // Distinct from the existing OpenAI-compatible DeepSeek entry.
+    expect(getBuiltInProviderProtocol("deepseek")).toBe("openai")
+    expect(getBuiltInProviderProtocol("deepseek-anthropic")).toBe("anthropic")
+  })
+
+  it("gives every anthropic-native relay a non-empty model list containing its default", () => {
+    const catalog = getBuiltInProviderCatalog()
+    const relays = catalog.filter((e) => e.family === "anthropic-native" && e.defaultBaseURL)
+    expect(relays.length).toBeGreaterThanOrEqual(20)
+    for (const e of relays) {
+      const ids = (e.models ?? []).map((m) => m.id)
+      // No relay ships an empty dropdown, and the default is selectable.
+      expect(ids.length).toBeGreaterThan(0)
+      expect(ids).toContain(e.defaultModel)
+    }
+    // Kimi specifically (the reported case) carries a current kimi-k2 model.
+    expect(getBuiltInProviderDefaultModel("kimi-anthropic")).toBe("kimi-k2.7-code")
+    expect(
+      (getBuiltInProviderCatalogEntry("kimi-anthropic")?.models ?? []).map((m) => m.id)
+    ).toContain("kimi-k2.7-code")
+  })
+
   it("creates quick-add presets only for entries with default base URLs", () => {
     const presets = buildQuickAddProviderPresets()
 

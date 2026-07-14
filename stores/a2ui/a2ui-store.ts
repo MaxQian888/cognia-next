@@ -734,7 +734,14 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
           state.activeSurfaceId = activeSurfaceId
         },
         partialize: (state) => {
-          // LRU: only persist the 20 most recently used surfaces (metadata only)
+          // LRU: persist the 20 most recently used surfaces in full. The
+          // component tree + data model MUST be persisted — nothing regenerates
+          // them on reload (custom apps have no template, and template apps
+          // carry user edits + live data-model state). Dropping them was what
+          // left every surface stuck at `ready:false` (perpetual loading
+          // spinner) after a refresh. `partialize` output round-trips through
+          // `normalizePersistedSurfaces` on rehydrate, which restores `ready`
+          // only when a renderable tree is present.
           const MAX_PERSISTED_SURFACES = 20
           const entries = Object.entries(state.surfaces)
           const sorted = entries
@@ -742,15 +749,13 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
             .sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
             .slice(0, MAX_PERSISTED_SURFACES)
 
-          const lightSurfaces: Record<string, unknown> = {}
+          const persistedSurfaces: Record<string, A2UISurfaceState> = {}
           for (const [id, surface] of sorted) {
-            // Strip heavy data — components and dataModel are regenerated from templates
-            const { components: _c, dataModel: _d, ...metadata } = surface
-            lightSurfaces[id] = metadata
+            persistedSurfaces[id] = surface
           }
 
           return {
-            surfaces: lightSurfaces,
+            surfaces: persistedSurfaces,
             activeSurfaceId: state.activeSurfaceId,
             // Exclude undo/redo stacks from persistence
           }

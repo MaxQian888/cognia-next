@@ -182,6 +182,21 @@ function extractMeters(
  * snapshot (meters or an `error`), or `null` when the source doesn't apply
  * (no token, no baseUrl, or an unrecognized response shape).
  */
+/**
+ * Resolve the request base for a descriptor. With `useBaseUrlOrigin` we take the
+ * preset URL's scheme+host origin (so an `.../api/anthropic` relay preset still
+ * hits a root-anchored quota path); otherwise the full trimmed baseUrl. Falls
+ * back to `trimBase` if the URL can't be parsed.
+ */
+function requestBase(base: string, useOrigin: boolean | undefined): string {
+  if (!useOrigin) return trimBase(base)
+  try {
+    return new URL(base).origin
+  } catch {
+    return trimBase(base)
+  }
+}
+
 export async function runDescriptor(
   descriptor: SourceDescriptor,
   ctx: LimitsSourceContext
@@ -190,12 +205,13 @@ export async function runDescriptor(
   const base = ctx.baseUrl
   if (!base) return null
 
+  const requestOrigin = requestBase(base, descriptor.request.useBaseUrlOrigin)
   const vars: DescriptorVars = {
     token: ctx.token,
-    baseUrl: trimBase(base),
+    baseUrl: requestOrigin,
     accountId: ctx.accountId,
   }
-  const url = `${trimBase(base)}${substitute(descriptor.request.path, vars)}`
+  const url = `${requestOrigin}${substitute(descriptor.request.path, vars)}`
   const extra = descriptor.request.headers ?? {}
   const hasAuthOverride = Object.keys(extra).some((k) => k.toLowerCase() === "authorization")
   const headers: Record<string, string> = { Accept: "application/json" }
@@ -241,8 +257,14 @@ export function descriptorToSource(descriptor: SourceDescriptor): LimitsSource {
     key: descriptor.id,
     matches(q) {
       const { providerKey, baseUrlIncludes } = descriptor.match
-      if (providerKey && q.providerKey === providerKey) return true
-      if (baseUrlIncludes && q.baseUrl?.includes(baseUrlIncludes)) return true
+      if (providerKey && q.providerKey) {
+        const keys = Array.isArray(providerKey) ? providerKey : [providerKey]
+        if (keys.includes(q.providerKey)) return true
+      }
+      if (baseUrlIncludes && q.baseUrl) {
+        const needles = Array.isArray(baseUrlIncludes) ? baseUrlIncludes : [baseUrlIncludes]
+        if (needles.some((n) => q.baseUrl!.includes(n))) return true
+      }
       return false
     },
     fetch(ctx) {

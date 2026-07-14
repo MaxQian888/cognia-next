@@ -40,6 +40,7 @@ import { LOCAL_PROVIDER_CONFIGS } from "@cognia/provider-core/providers/local-pr
 import {
   getProviderCapabilities,
   checkAllProvidersInstallation,
+  getInstallInstructions,
   type InstallCheckResult,
 } from "@cognia/provider-core/providers/local-provider-service"
 import { useSettingsStore } from "@/stores/settings"
@@ -129,7 +130,15 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
   // Count running providers
   const runningCount = Array.from(scanResults.values()).filter((r) => r.running).length
   const installedCount = Array.from(scanResults.values()).filter((r) => r.installed).length
-  const _isAnyScanning = isScanning || isServerScanning
+  const isAnyScanning = isScanning || isServerScanning
+
+  // Pick the best provider for the "quick start" shortcuts: the first
+  // recommended one that isn't already running, falling back to the first
+  // recommended provider. Keeps the footer actions from being Ollama-locked.
+  const quickStartProvider =
+    PROVIDER_GROUPS.recommended.find((id) => !scanResults.get(id)?.running) ??
+    PROVIDER_GROUPS.recommended[0]
+  const browseModelsUrl = getInstallInstructions(quickStartProvider).modelsUrl
 
   // Handle provider toggle
   const handleToggleProvider = (providerId: LocalProviderName, enabled: boolean) => {
@@ -239,7 +248,7 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
                 enabled={status.enabled}
                 baseUrl={status.baseUrl}
                 isConnected={status.isConnected}
-                isLoading={isScanning}
+                isLoading={isAnyScanning}
                 version={status.version}
                 modelsCount={undefined}
                 latency={undefined}
@@ -252,6 +261,7 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
                     ? () => handleManageModels(providerId)
                     : undefined
                 }
+                onSetup={() => handleSetupWizard(providerId)}
               />
             )
           })}
@@ -279,8 +289,8 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
                   {runningCount} {t("running")}
                 </Badge>
               )}
-              <Button variant="outline" size="sm" onClick={scanProviders} disabled={isScanning}>
-                {isScanning ? (
+              <Button variant="outline" size="sm" onClick={scanProviders} disabled={isAnyScanning}>
+                {isAnyScanning ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-1" />
                 ) : (
                   <Scan className="h-4 w-4 mr-1" />
@@ -332,13 +342,13 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
               variant="outline"
               size="sm"
               className="flex-1"
-              onClick={() => handleSetupWizard("ollama")}
+              onClick={() => handleSetupWizard(quickStartProvider)}
             >
               <Download className="h-4 w-4 mr-1" />
               {t("quickSetup")}
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <a href="https://ollama.ai/library" target="_blank" rel="noopener noreferrer">
+              <a href={browseModelsUrl} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="h-4 w-4 mr-1" />
                 {t("browseModels")}
               </a>

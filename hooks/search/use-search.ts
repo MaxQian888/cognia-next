@@ -67,6 +67,7 @@ export function useSearch(options: UseSearchOptions = {}): UseSearchReturn {
           provider,
           providerSettings,
           fallbackEnabled: settings?.searchFallbackEnabled ?? true,
+          maxRetries: settings?.searchMaxRetries,
           maxResults: opts.maxResults ?? settings?.searchMaxResults ?? 5,
           searchType: opts.searchType ?? settings?.defaultSearchType,
           searchDepth: opts.searchDepth ?? settings?.defaultSearchDepth,

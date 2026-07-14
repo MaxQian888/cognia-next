@@ -109,7 +109,41 @@ async fn hook_handler(
                 None => StatusCode::NO_CONTENT.into_response(),
             }
         }
+        // AskUserQuestion long-poll: answer with the island's option selections
+        // as an `allow` + `updatedInput.answers` decision; empty `204` on
+        // timeout so the agent's own terminal picker takes over (fail-open).
+        RegistryEffect::QuestionRequested { request_id } => {
+            let raw_questions = event
+                .payload
+                .get("tool_input")
+                .and_then(|i| i.get("questions"))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            match runtime
+                .wait_for_question(&request_id, raw_questions, super::permission_wait_ms())
+                .await
+            {
+                Some(updated_input) => Json(question_decision(updated_input)).into_response(),
+                None => StatusCode::NO_CONTENT.into_response(),
+            }
+        }
     }
+}
+
+/// The AskUserQuestion answer decision. Same `hookSpecificOutput` envelope as a
+/// permission `allow`, but carries the built `updatedInput` (`{questions,
+/// answers}`) so the tool resolves with the island's answer instead of
+/// prompting in the terminal. Claude/Codex only (OpenCode never routes here).
+fn question_decision(updated_input: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {
+                "behavior": "allow",
+                "updatedInput": updated_input
+            }
+        }
+    })
 }
 
 /// The decision JSON each agent's forwarder expects back:
@@ -315,6 +349,65 @@ mod tests {
             .find(|s| s.session_id == "route-perm-session")
             .unwrap();
         assert!(session.pending_permission.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ask_user_question_long_poll_returns_answer_decision() {
+        let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+        let token = arm("routes-test-token-question");
+        let rt = runtime();
+
+        // Answer the question (single-select → option index 0) as soon as the
+        // answerable handle shows up in the snapshot.
+        let responder = tokio::spawn(async move {
+            for _ in 0..100 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                let snap = rt.snapshot();
+                if let Some(req) = snap
+                    .sessions
+                    .iter()
+                    .find(|s| s.session_id == "route-question-session")
+                    .and_then(|s| s.pending_question_request.clone())
+                {
+                    rt.respond_question(&req.request_id, vec![vec![0]]);
+                    return true;
+                }
+            }
+            false
+        });
+
+        let body = serde_json::json!({
+            "agent": "claude-code",
+            "event": "PermissionRequest",
+            "pid": 111, "ppid": 222,
+            "env": {"TERM_PROGRAM": "ghostty"},
+            "payload": {
+                "session_id": "route-question-session",
+                "cwd": "/tmp/proj",
+                "tool_name": "AskUserQuestion",
+                "tool_input": { "questions": [{
+                    "question": "Which auth method?",
+                    "options": [{"label": "OAuth"}, {"label": "API key"}]
+                }] }
+            }
+        });
+        let resp = router()
+            .oneshot(hook_request(loopback_peer(), Some(&token), body))
+            .await
+            .unwrap();
+        assert!(responder.await.unwrap(), "responder saw the parked question");
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let decision = &json["hookSpecificOutput"]["decision"];
+        assert_eq!(json["hookSpecificOutput"]["hookEventName"], "PermissionRequest");
+        assert_eq!(decision["behavior"], "allow");
+        assert_eq!(decision["updatedInput"]["answers"]["Which auth method?"], "OAuth");
+        // Original questions pass through for the tool to process.
+        assert!(decision["updatedInput"]["questions"].is_array());
     }
 
     #[tokio::test]

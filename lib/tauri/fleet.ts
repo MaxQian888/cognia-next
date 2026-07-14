@@ -90,6 +90,26 @@ export async function fleetPermissionRespond(
   }
 }
 
+/**
+ * Answer a parked AskUserQuestion. `selections[i]` is the option indices the
+ * user picked for question `i` (one for single-select, one or more for
+ * multi-select). Returns false when the answer window already lapsed on the
+ * Rust side (the row clears via the next snapshot; the terminal picker takes
+ * over).
+ */
+export async function fleetQuestionRespond(
+  requestId: string,
+  selections: number[][]
+): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    return await invoke<boolean>("fleet_question_respond", { requestId, selections })
+  } catch (err) {
+    console.warn("fleetQuestionRespond failed", err)
+    return false
+  }
+}
+
 /** Install state of the Codex `notify` integration (mirrors `fleet/codex.rs`). */
 export type CodexStatus = "installed" | "conflict" | "not-installed" | "unavailable"
 
@@ -260,6 +280,25 @@ export async function islandResize(width: number, height: number): Promise<numbe
   } catch (err) {
     console.warn("islandResize failed", err)
     return 0
+  }
+}
+
+/**
+ * Mirror the shell's tucked state to the window layer. A tucked island's
+ * window is made click-through (`set_ignore_cursor_events`) so the invisible
+ * pill strip under the notch can't swallow clicks aimed at the menu bar /
+ * fullscreen toolbar behind it; untucking restores interactivity. The
+ * slam-to-top reveal keeps working because Rust polls the global cursor and
+ * pushes `fleet://island-hover` transitions to the shell.
+ */
+export async function islandSetTucked(tucked: boolean): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    await invoke("island_set_tucked", { tucked })
+    return true
+  } catch (err) {
+    console.warn("islandSetTucked failed", err)
+    return false
   }
 }
 

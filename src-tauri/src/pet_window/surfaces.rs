@@ -685,13 +685,8 @@ mod tests {
         front.bottom = 900;
         front.hwnd_id = 2;
         let back = candidate(); // 200..600 at top=300, inside front's rect
-        let out = filter_and_sort_surfaces(
-            &[front, back],
-            &[],
-            MONITOR,
-            MIN_SURFACE_WIDTH,
-            MIN_TOP_GAP,
-        );
+        let out =
+            filter_and_sort_surfaces(&[front, back], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP);
         // Only the front window's own edge survives.
         assert_eq!(
             out,
@@ -715,13 +710,8 @@ mod tests {
         let mut back = candidate(); // 200..600 at top=300
         back.left = 80;
         back.right = 900;
-        let out = filter_and_sort_surfaces(
-            &[front, back],
-            &[],
-            MONITOR,
-            MIN_SURFACE_WIDTH,
-            MIN_TOP_GAP,
-        );
+        let out =
+            filter_and_sort_surfaces(&[front, back], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP);
         // Back edge splits into [80, 300) and [500, 900); front's own edge at 250.
         assert_eq!(
             out,
@@ -754,13 +744,8 @@ mod tests {
         front.bottom = 900;
         front.hwnd_id = 2;
         let back = candidate();
-        let out = filter_and_sort_surfaces(
-            &[front, back],
-            &[],
-            MONITOR,
-            MIN_SURFACE_WIDTH,
-            MIN_TOP_GAP,
-        );
+        let out =
+            filter_and_sort_surfaces(&[front, back], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP);
         assert_eq!(out.len(), 2);
     }
 
@@ -815,13 +800,8 @@ mod tests {
         front.bottom = 900;
         front.hwnd_id = 2;
         let back = candidate(); // 200..600 → slivers 200..260 and 540..600
-        let out = filter_and_sort_surfaces(
-            &[front, back],
-            &[],
-            MONITOR,
-            MIN_SURFACE_WIDTH,
-            MIN_TOP_GAP,
-        );
+        let out =
+            filter_and_sort_surfaces(&[front, back], &[], MONITOR, MIN_SURFACE_WIDTH, MIN_TOP_GAP);
         // Only the front window's own (wide) edge remains.
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].y, 250.0);

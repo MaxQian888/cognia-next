@@ -17,7 +17,7 @@ const LEVELS: { value: SafeSearchLevel; labelKey: string; descKey: string }[] = 
 ]
 
 export function SearchSafetySettings() {
-  const ts = useTranslations("searchSettings.safety")
+  const ts = useTranslations("searchSafety")
 
   const settings = useSettingsStore((s) => s.settings)
   const setEnabled = useSettingsStore((s) => s.setSearchSafeSearchEnabled)

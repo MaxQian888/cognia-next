@@ -35,6 +35,10 @@
     "label": "Loading page",
     "title": "Loading {host}…"
   },
+  "panel": {
+    "collapse": "Collapse",
+    "details": "Details"
+  },
   "screenshot": {
     "failed": "Could not capture the preview",
     "sent": "Screenshot sent to chat"

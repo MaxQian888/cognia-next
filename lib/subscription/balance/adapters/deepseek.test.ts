@@ -33,10 +33,21 @@ describe("deepseekBalanceAdapter", () => {
     expect(a.matches({})).toBe(false)
   })
 
-  it("builds the root-level /user/balance request, stripping /v1", () => {
+  it("builds the root-level /user/balance request from the origin", () => {
     const req = a.request(Q)
     expect(req.url).toBe("https://api.deepseek.com/user/balance")
     expect(req.headers.Authorization).toBe("Bearer sk-test")
+  })
+
+  it("resolves the correct root path for an Anthropic relay preset baseUrl", () => {
+    const req = a.request({ ...Q, baseUrl: "https://api.deepseek.com/anthropic" })
+    expect(req.url).toBe("https://api.deepseek.com/user/balance")
+  })
+
+  it("falls back to the trimmed base when the baseUrl can't be parsed", () => {
+    // apiRootOf's catch path → trimBase.
+    const req = a.request({ ...Q, baseUrl: "not-a-url" })
+    expect(req.url).toBe("not-a-url/user/balance")
   })
 
   it("parses a credit snapshot with currency", () => {

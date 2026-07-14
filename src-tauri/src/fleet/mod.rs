@@ -128,12 +128,23 @@ pub struct OpencodeCommand {
     pub text: String,
 }
 
+/// A parked AskUserQuestion long-poll: the sender delivers the built
+/// `updatedInput` answer value, and the raw questions are held so
+/// `respond_question` can turn the island's option selections into that value.
+struct PendingQuestionPoll {
+    tx: tokio::sync::oneshot::Sender<serde_json::Value>,
+    raw_questions: serde_json::Value,
+}
+
 /// Process-global fleet runtime.
 pub struct FleetRuntime {
     registry: Mutex<FleetRegistry>,
     /// Parked permission long-polls keyed by request id. The axum handler
     /// awaits the receiver; `fleet_permission_respond` fires the sender.
     pending: Mutex<HashMap<String, tokio::sync::oneshot::Sender<PermissionBehavior>>>,
+    /// Parked AskUserQuestion long-polls keyed by request id. The axum handler
+    /// awaits the answer; `fleet_question_respond` builds and fires it.
+    question_pending: Mutex<HashMap<String, PendingQuestionPoll>>,
     /// Outbound send-message commands for OpenCode sessions, drained by the
     /// plugin's command poll (`/api/v1/fleet/opencode/commands`).
     opencode_commands: Mutex<Vec<OpencodeCommand>>,
@@ -152,6 +163,7 @@ static RUNTIME: Lazy<Arc<FleetRuntime>> = Lazy::new(|| {
     Arc::new(FleetRuntime {
         registry: Mutex::new(FleetRegistry::new()),
         pending: Mutex::new(HashMap::new()),
+        question_pending: Mutex::new(HashMap::new()),
         opencode_commands: Mutex::new(Vec::new()),
         command_wakers: Mutex::new(Vec::new()),
         token: RwLock::new(None),
@@ -235,7 +247,8 @@ impl FleetRuntime {
 
         match &effect {
             registry::RegistryEffect::Updated
-            | registry::RegistryEffect::PermissionRequested { .. } => self.emit_update(),
+            | registry::RegistryEffect::PermissionRequested { .. }
+            | registry::RegistryEffect::QuestionRequested { .. } => self.emit_update(),
             registry::RegistryEffect::Ignored => {}
         }
         effect
@@ -313,6 +326,54 @@ impl FleetRuntime {
         let sender = self.pending.lock().remove(request_id);
         match sender {
             Some(tx) => tx.send(behavior).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Park an AskUserQuestion long-poll and await the island's answer. `None`
+    /// on timeout — the caller answers the hook with an empty body so the
+    /// agent's own terminal picker takes over (fail-open, never stuck). The
+    /// resolved value is the hook decision's `updatedInput` (questions +
+    /// answers), built by [`respond_question`] from the raw questions held here.
+    pub async fn wait_for_question(
+        &self,
+        request_id: &str,
+        raw_questions: serde_json::Value,
+        wait_ms: u64,
+    ) -> Option<serde_json::Value> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.question_pending
+            .lock()
+            .insert(request_id.to_string(), PendingQuestionPoll { tx, raw_questions });
+
+        let answer = match tokio::time::timeout(std::time::Duration::from_millis(wait_ms), rx).await
+        {
+            Ok(Ok(updated_input)) => Some(updated_input),
+            // Timeout or dropped sender → fail open.
+            _ => None,
+        };
+
+        // Cleanup regardless of outcome: drop the pending entry and clear the
+        // answerable handle so the island stops showing a dead countdown.
+        self.question_pending.lock().remove(request_id);
+        if self.registry.lock().resolve_question(request_id) {
+            self.emit_update();
+        }
+        answer
+    }
+
+    /// Resolve a parked AskUserQuestion from the island. `selections[i]` is the
+    /// selected option indices for question `i`. Builds the answer's
+    /// `updatedInput` from the raw questions held on the parked poll and fires
+    /// it. Returns false when the request already timed out.
+    pub fn respond_question(&self, request_id: &str, selections: Vec<Vec<u32>>) -> bool {
+        let poll = self.question_pending.lock().remove(request_id);
+        match poll {
+            Some(PendingQuestionPoll { tx, raw_questions }) => {
+                let updated_input =
+                    registry::build_ask_user_answer_input(&raw_questions, &selections);
+                tx.send(updated_input).is_ok()
+            }
             None => false,
         }
     }
@@ -556,6 +617,18 @@ pub async fn fleet_permission_respond(
     Ok(runtime().respond_permission(&request_id, behavior))
 }
 
+/// Island question answer → resolves the parked AskUserQuestion long-poll.
+/// `selections[i]` carries the option indices the user picked for question `i`
+/// (one for single-select, one or more for multi-select). Returns false when
+/// the answer window already lapsed (the island shows "answered in terminal").
+#[tauri::command]
+pub async fn fleet_question_respond(
+    request_id: String,
+    selections: Vec<Vec<u32>>,
+) -> Result<bool, String> {
+    Ok(runtime().respond_question(&request_id, selections))
+}
+
 fn mint_token() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 32];
@@ -608,6 +681,33 @@ mod tests {
     #[tokio::test]
     async fn respond_without_waiter_returns_false() {
         assert!(!runtime().respond_permission("ghost-request", PermissionBehavior::Deny));
+    }
+
+    #[tokio::test]
+    async fn question_round_trip_builds_updated_input() {
+        let rt = runtime();
+        let request_id = "test-question-answer";
+        let raw = serde_json::json!([
+            { "question": "Which auth method?", "multiSelect": false,
+              "options": [{"label": "OAuth"}, {"label": "API key"}] }
+        ]);
+        let waiter = {
+            let rt = Arc::clone(&rt);
+            let raw = raw.clone();
+            tokio::spawn(async move { rt.wait_for_question(request_id, raw, 5_000).await })
+        };
+        // Let the waiter park its sender, then answer with option index 1.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(rt.respond_question(request_id, vec![vec![1]]));
+
+        let updated = waiter.await.unwrap().expect("answer delivered");
+        assert_eq!(updated["questions"], raw);
+        assert_eq!(updated["answers"]["Which auth method?"], "API key");
+    }
+
+    #[tokio::test]
+    async fn respond_question_without_waiter_returns_false() {
+        assert!(!runtime().respond_question("ghost-question", vec![vec![0]]));
     }
 
     #[test]

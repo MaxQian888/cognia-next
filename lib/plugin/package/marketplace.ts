@@ -194,6 +194,12 @@ const DEFAULT_CONFIG: MarketplaceConfig = {
 
 const MAX_CACHE_SIZE = 100
 
+// Negative-cache TTL for `getPlugin` lookups that fail or 404. Kept short so a
+// recovering registry / newly-published plugin is picked up quickly, but long
+// enough to collapse the burst of identical lookups that a single "Check for
+// updates" / Sync fires (one per installed plugin) into a single network hit.
+const NEGATIVE_CACHE_TTL = 60_000
+
 const RETRYABLE_CATEGORIES = new Set<MarketplaceErrorCategory>(["network", "rate_limit"])
 
 function parseDate(value: unknown): Date {
@@ -524,6 +530,10 @@ function normalizeDownloadVersionResult(
 export class PluginMarketplace {
   private config: MarketplaceConfig
   private cache: Map<string, { data: unknown; timestamp: number }> = new Map()
+  // Remembers recently-failed `getPlugin` keys (value = expiry timestamp) so a
+  // burst of update checks against an unreachable registry doesn't re-fetch and
+  // re-log the same failure once per installed plugin, every check.
+  private missCache: Map<string, number> = new Map()
   private installListeners: Map<string, (progress: InstallationProgress) => void> = new Map()
 
   constructor(config: Partial<MarketplaceConfig> = {}) {
@@ -597,17 +607,32 @@ export class PluginMarketplace {
     const cached = this.getFromCache<PluginRegistryEntry>(cacheKey)
     if (cached) return cached
 
+    // A recent failure short-circuits: without this a single "Check for
+    // updates" re-fetches every installed plugin against a possibly-unreachable
+    // registry and floods the console with one error apiece — every check.
+    if (this.isRecentMiss(cacheKey)) return null
+
     let response: Response
     try {
       response = await proxyFetch(`${this.config.registryUrl}/plugins/${pluginId}`)
     } catch (error) {
-      loggers.marketplace.error("Get plugin failed:", error as Error)
+      // An unreachable registry (offline, or web/dev where the hosted registry
+      // isn't proxied) is an expected degraded state, not an application error.
+      // Log at debug with the message string — the raw Error serializes to `{}`
+      // — and remember the miss so we stop retrying on every subsequent check.
+      loggers.marketplace.debug("Get plugin failed", {
+        pluginId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      this.rememberMiss(cacheKey)
       return null
     }
 
     if (!response.ok) {
-      if (response.status === 404) return null
-      loggers.marketplace.error("Get plugin failed: HTTP", new Error(String(response.status)))
+      if (response.status !== 404) {
+        loggers.marketplace.warn("Get plugin failed", { pluginId, status: response.status })
+      }
+      this.rememberMiss(cacheKey)
       return null
     }
 
@@ -1076,6 +1101,30 @@ export class PluginMarketplace {
    */
   clearCache() {
     this.cache.clear()
+    this.missCache.clear()
+  }
+
+  /**
+   * Record a failed/absent `getPlugin` lookup so repeated checks within the
+   * negative-cache window short-circuit instead of re-hitting the registry.
+   */
+  private rememberMiss(cacheKey: string): void {
+    if (this.missCache.size >= MAX_CACHE_SIZE) {
+      const oldestKey = this.missCache.keys().next().value
+      if (oldestKey) this.missCache.delete(oldestKey)
+    }
+    this.missCache.set(cacheKey, Date.now() + NEGATIVE_CACHE_TTL)
+  }
+
+  /** Whether `cacheKey` failed recently enough to skip re-fetching. */
+  private isRecentMiss(cacheKey: string): boolean {
+    const expiry = this.missCache.get(cacheKey)
+    if (expiry === undefined) return false
+    if (Date.now() > expiry) {
+      this.missCache.delete(cacheKey)
+      return false
+    }
+    return true
   }
 
   // =============================================================================

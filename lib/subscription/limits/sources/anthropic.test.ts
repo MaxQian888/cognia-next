@@ -79,6 +79,48 @@ describe("anthropicLimitsSource — free endpoint primary", () => {
   })
 })
 
+describe("anthropicLimitsSource — reactive refresh", () => {
+  it("refreshes the token and retries the endpoint once when the first read is empty", async () => {
+    const fetchUsage = jest.fn(async (token: string) =>
+      token === "fresh"
+        ? [{ id: "session", kind: "window" as const, usedPct: 33, status: "ok" as const }]
+        : []
+    )
+    let probed = false
+    const s = createAnthropicLimitsSource({
+      fetchUsage,
+      probe: async () => {
+        probed = true
+        return okOutcome()
+      },
+    })
+    const snap = await s.fetch(ctx({ token: "stale", refreshToken: async () => "fresh" }))
+    expect(fetchUsage).toHaveBeenCalledTimes(2)
+    expect(snap?.meters[0]).toMatchObject({ usedPct: 33 })
+    expect(probed).toBe(false)
+  })
+
+  it("does not retry when refresh yields no new token, and falls to the probe", async () => {
+    const fetchUsage = jest.fn(async () => [])
+    const s = createAnthropicLimitsSource({
+      fetchUsage,
+      probe: async () => okOutcome(),
+    })
+    const snap = await s.fetch(ctx({ token: "stale", refreshToken: async () => null }))
+    // One free read, no retry; the probe fallback then supplies the windows.
+    expect(fetchUsage).toHaveBeenCalledTimes(1)
+    expect(snap?.meters.map((m) => m.id)).toEqual(["session", "weekly"])
+  })
+
+  it("does not retry when refresh returns the same token", async () => {
+    const fetchUsage = jest.fn(async () => [])
+    const s = createAnthropicLimitsSource({ fetchUsage, probe: null })
+    const snap = await s.fetch(ctx({ token: "same", refreshToken: async () => "same" }))
+    expect(fetchUsage).toHaveBeenCalledTimes(1)
+    expect(snap).toBeNull()
+  })
+})
+
 describe("anthropicLimitsSource — probe fallback", () => {
   // Force the free endpoint to yield nothing so the probe path is exercised.
   const noFreeUsage = async () => []

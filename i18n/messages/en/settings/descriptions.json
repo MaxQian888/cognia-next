@@ -22,6 +22,7 @@
   "discover": "Pin, reorder, or hide the Discover categories.",
   "eval": "Default judge model, scorers, quality gates, and cost guards for agent evaluations.",
   "externalBridge": "MCP server that exposes Cognia's wiki, RAG, and runtime entities to external coding agents (Claude Code, Cursor, Cline). Opt-in per scope.",
+  "fleet": "Monitor and control coding agents launched anywhere on this machine (Claude Code, Codex, OpenCode), the Dynamic-Island overlay, and recent-session history.",
   "gateway": "Local OpenAI- and Anthropic-compatible endpoint that lets external tools (Claude Code, any OpenAI client) borrow your providers, routing, and credentials.",
   "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
   "githubDelivery": "AI-driven PR review, Issue → PR loops, and Release automation for your GitHub repos.",

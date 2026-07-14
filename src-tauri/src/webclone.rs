@@ -72,10 +72,21 @@ fn parse_envelope_line(stdout: &str, stderr: &str) -> Result<Value, String> {
         .rev()
         .find(|l| !l.trim().is_empty())
         .ok_or_else(|| {
-            let tail: String = stderr.chars().rev().take(500).collect::<Vec<_>>().into_iter().rev().collect();
+            let tail: String = stderr
+                .chars()
+                .rev()
+                .take(500)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             format!(
                 "web-clone runner produced no output. {}",
-                if tail.is_empty() { "(no stderr)" } else { tail.trim() }
+                if tail.is_empty() {
+                    "(no stderr)"
+                } else {
+                    tail.trim()
+                }
             )
         })?;
     serde_json::from_str(line.trim())
@@ -84,7 +95,10 @@ fn parse_envelope_line(stdout: &str, stderr: &str) -> Result<Value, String> {
 
 /// Run a one-shot web-clone snapshot/convert job. Returns the runner envelope.
 #[tauri::command]
-pub async fn web_clone_snapshot(app: AppHandle, job: WebCloneJob) -> Result<WebCloneOutcome, String> {
+pub async fn web_clone_snapshot(
+    app: AppHandle,
+    job: WebCloneJob,
+) -> Result<WebCloneOutcome, String> {
     let runner = resolve_runner(&app)?;
     let job_json = serde_json::to_string(&serde_json::json!({
         "mode": job.mode,
@@ -92,7 +106,11 @@ pub async fn web_clone_snapshot(app: AppHandle, job: WebCloneJob) -> Result<WebC
         "options": job.options,
     }))
     .map_err(|e| format!("failed to serialize web-clone job: {e}"))?;
-    let timeout = Duration::from_millis(job.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS));
+    let timeout = Duration::from_millis(
+        job.timeout_ms
+            .unwrap_or(DEFAULT_TIMEOUT_MS)
+            .min(MAX_TIMEOUT_MS),
+    );
 
     let mut cmd = Command::new("node");
     cmd.arg(&runner)
@@ -152,7 +170,8 @@ mod tests {
     fn parse_envelope_line_ignores_leading_progress_lines() {
         // Any accidental stdout chatter before the envelope is tolerated: we
         // take the LAST non-empty line.
-        let stdout = "Fetching...\nDownloading...\n{\"ok\":false,\"error\":{\"message\":\"boom\"}}\n";
+        let stdout =
+            "Fetching...\nDownloading...\n{\"ok\":false,\"error\":{\"message\":\"boom\"}}\n";
         let v = parse_envelope_line(stdout, "").unwrap();
         assert_eq!(v["ok"], serde_json::json!(false));
         assert_eq!(v["error"]["message"], serde_json::json!("boom"));

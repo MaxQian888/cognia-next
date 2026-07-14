@@ -159,6 +159,7 @@ async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
       providerSettings: s?.searchProviders,
       searchMaxResults: s?.searchMaxResults,
       searchFallbackEnabled: s?.searchFallbackEnabled,
+      searchMaxRetries: s?.searchMaxRetries,
       // Forward the user's Settings → Search defaults so the agent honors them
       // (previously only provider + maxResults reached the search service).
       searchOptions: {

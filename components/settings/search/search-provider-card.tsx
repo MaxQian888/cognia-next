@@ -31,6 +31,7 @@ import {
 } from "@cognia/web-search/types"
 import { cn } from "@/lib/utils"
 import { createLogger } from "@cognia/logging"
+import { ApiKeyPoolInput } from "./_shared/api-key-pool-input"
 
 const log = createLogger("settings.search.provider")
 
@@ -210,6 +211,35 @@ export function SearchProviderCard({
                 </a>
               </p>
             </div>
+
+            {/* Multi-key rotation pool — only meaningful once a primary key exists */}
+            {settings?.apiKey ? (
+              <ApiKeyPoolInput
+                keys={settings.apiKeys ?? []}
+                onChange={(apiKeys) => {
+                  log.info("provider_backup_keys_changed", { providerId, count: apiKeys.length })
+                  void setSearchProviderSettings(providerId, { apiKeys })
+                }}
+                rotationEnabled={settings.apiKeyRotationEnabled ?? false}
+                onRotationEnabledChange={(apiKeyRotationEnabled) => {
+                  log.info("provider_rotation_toggled", {
+                    providerId,
+                    enabled: apiKeyRotationEnabled,
+                  })
+                  void setSearchProviderSettings(providerId, { apiKeyRotationEnabled })
+                }}
+                strategy={settings.apiKeyRotationStrategy ?? "round-robin"}
+                onStrategyChange={(apiKeyRotationStrategy) => {
+                  log.info("provider_rotation_strategy_changed", {
+                    providerId,
+                    apiKeyRotationStrategy,
+                  })
+                  void setSearchProviderSettings(providerId, { apiKeyRotationStrategy })
+                }}
+                placeholder={config.apiKeyPlaceholder}
+                idPrefix={`${providerId}-backup-key`}
+              />
+            ) : null}
 
             {/* Google cx */}
             {providerId === "google" && (

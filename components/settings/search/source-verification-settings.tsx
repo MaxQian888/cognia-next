@@ -68,7 +68,7 @@ interface Props {
 }
 
 export function SourceVerificationSettings({ className }: Props) {
-  const t = useTranslations("searchSettings.verification")
+  const t = useTranslations("sourceVerification")
 
   const settings = useSettingsStore((s) => s.settings)
   const setVerifSettings = useSettingsStore((s) => s.setSourceVerificationSettings)

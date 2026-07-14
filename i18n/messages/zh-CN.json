@@ -971,6 +971,18 @@
       "newFile": "新建文件",
       "newFolder": "新建文件夹",
       "noWorkingDir": "该团队未设置工作目录。",
+      "proIde": {
+        "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
+        "downloading": "正在下载 VS Code… {percent}%",
+        "errorTitle": "无法启动 VS Code",
+        "retry": "重试",
+        "starting": "正在启动 VS Code…",
+        "switchLabel": "编辑器引擎",
+        "toggleMonaco": "Monaco",
+        "toggleVsCode": "VS Code",
+        "unsupportedDesc": "code-server 没有适配你操作系统的版本，请改用本机 VS Code。",
+        "unsupportedTitle": "此平台不支持 Pro IDE"
+      },
       "refresh": "刷新",
       "rename": "重命名",
       "rootLabel": "项目根目录",
@@ -1986,6 +1998,10 @@
     "loading": {
       "label": "页面加载中",
       "title": "正在加载 {host}…"
+    },
+    "panel": {
+      "collapse": "收起",
+      "details": "详情"
     },
     "screenshot": {
       "failed": "无法截取预览画面",
@@ -5517,6 +5533,11 @@
       "request": "权限请求：{tool}",
       "requestGeneric": "收到权限请求"
     },
+    "question": {
+      "expired": "已在终端中处理",
+      "submit": "提交",
+      "submitted": "已发送"
+    },
     "reply": {
       "open": "回复",
       "placeholder": "发送消息…",
@@ -7440,6 +7461,8 @@
       "edit": "编辑 {name}",
       "enableSwitch": "在 cognia 中启用 {name}",
       "failed": "失败",
+      "logs": "查看 {name} 日志",
+      "logsTooltip": "查看日志",
       "test": "测试 {name}",
       "testDesktopOnly": "仅桌面端可用",
       "testTooltip": "测试连接（10 秒超时）",
@@ -11942,6 +11965,8 @@
       "installing": "安装中…",
       "license": "许可",
       "optional": "可选权限",
+      "rawManifest": "查看原始 manifest",
+      "rawManifestTitle": "原始 manifest",
       "readme": "README",
       "repository": "代码仓库",
       "uninstall": "卸载",
@@ -13017,6 +13042,7 @@
     "fireworks": "Fireworks AI",
     "fireworksDescription": "超快复合 AI",
     "fixNow": "立即修复",
+    "followStepsToStart": "按照以下步骤开始使用",
     "free": "免费",
     "freeTier": "免费（本地）",
     "getApiKey": "获取 API 密钥",
@@ -13325,11 +13351,20 @@
     "protocolOpenAIDesc": "OpenAI 兼容 API（最常用）",
     "protocolPluginDesc": "由插件 {plugin} 提供",
     "provider": "服务商",
+    "providerGroups": {
+      "advanced": "进阶",
+      "advancedDesc": "面向高级用户与服务器运行时",
+      "recommended": "推荐",
+      "recommendedDesc": "对大多数用户最易上手",
+      "specialized": "专用",
+      "specializedDesc": "面向特定场景的推理服务器"
+    },
     "providerModels": "{provider} 模型",
     "providerName": "服务商名称",
     "providerNamePlaceholder": "我的服务商",
     "providerOff": "已关闭",
     "providerOn": "已开启",
+    "providerSetup": "{provider} 设置",
     "providersConfigured": "{count} 个服务商已配置",
     "providersSelected": "个服务商已选择",
     "proxyServices": "代理",
@@ -13547,6 +13582,7 @@
     "serverUrl": "服务器 URL",
     "setAsDefault": "设为默认",
     "setupChecklistTitle": "设置清单",
+    "setupGuide": "安装向导",
     "setupStepBaseUrl": "配置端点",
     "setupStepCredential": "添加凭证",
     "setupStepDefaultModel": "选择默认模型",
@@ -14797,10 +14833,12 @@
   "searchSettings": {
     "active": "活跃",
     "add": "添加",
+    "addBackupKey": "添加密钥",
     "addCustomSource": "添加",
     "addCustomSourceDesc": "为自定义搜索来源命名",
     "addCustomSourceTitle": "添加自定义来源",
     "apiKey": "API 密钥",
+    "backupKeys": "备用密钥",
     "cancel": "取消",
     "configureProviderHint": "请至少配置一个 Provider",
     "connectionFailed": "连接失败",
@@ -14827,10 +14865,28 @@
     "googleCx": "可编程搜索引擎 ID（cx）",
     "googleCxHelp": "Google Custom Search 必填",
     "googleCxPlaceholder": "如 012345678901234567890:abcdefg1234",
+    "hideKeys": "隐藏密钥",
     "higherPriority": "提高优先级",
     "invalidKeyFormat": "密钥格式无效",
+    "keyPoolSize": "轮换池中有 {count} 个密钥",
     "lowerPriority": "降低优先级",
     "maxResults": "最大结果数",
+    "maxRetries": "最大重试次数",
+    "maxRetriesDesc": "单个 Provider 遇到临时错误（网络 / 限流 / 服务器错误）时的额外重试次数，用尽后再切换到下一个 Provider。",
+    "nav": {
+      "basics": "基础",
+      "basicsDesc": "启用联网搜索并选择默认 Provider",
+      "behavior": "搜索行为",
+      "behaviorDesc": "默认搜索类型、深度与过滤",
+      "diagnostics": "诊断",
+      "diagnosticsDesc": "使用统计与 Provider 对比",
+      "performance": "性能",
+      "performanceDesc": "结果缓存与有效期",
+      "providers": "Providers",
+      "providersDesc": "各 Provider 的 API 密钥与配置",
+      "safety": "安全",
+      "safetyDesc": "安全搜索与来源验证"
+    },
     "noMatchingProviders": "无匹配的 Provider",
     "noProviders": "尚未配置任何 Provider",
     "pricingFreeCredits": "{credits} 次免费 •",
@@ -14839,12 +14895,20 @@
     "priority": "优先级",
     "providers": "搜索 Providers",
     "providersDescription": "为各 Provider 配置 API 密钥",
+    "removeKey": "移除密钥",
     "researchSources": "研究来源",
     "researchSourcesDesc": "深度研究模式默认使用的来源",
     "reset": "重置",
+    "rotateKeys": "轮换 API 密钥",
+    "rotateKeysDesc": "在多个密钥间分摊请求；被限流或拒绝的密钥会被自动跳过。",
+    "rotationStrategy": "策略",
     "selectProvider": "选择 Provider",
     "selected": "已选择",
+    "showKeys": "显示密钥",
     "sourceNamePlaceholder": "来源名称",
+    "strategyLeastUsed": "最少使用",
+    "strategyRandom": "随机",
+    "strategyRoundRobin": "轮询",
     "testConnection": "测试",
     "title": "联网搜索"
   },
@@ -18864,6 +18928,7 @@
       "discover": "置顶、排序或隐藏发现页的分类。",
       "eval": "为 Agent 评估设置默认评委模型、评分器、质量门限与费用保护。",
       "externalBridge": "把 Cognia 的 wiki / RAG / 运行时实体通过 MCP 暴露给外部 Agent（Claude Code、Cursor、Cline）。每个 scope 默认 OFF，需手动启用。",
+      "fleet": "监控并控制本机任意位置启动的编码 Agent（Claude Code、Codex、OpenCode）、灵动岛悬浮层，以及最近会话历史。",
       "gateway": "本地 OpenAI / Anthropic 兼容端点，让外部工具（Claude Code、任意 OpenAI 客户端）借用你的服务商、路由和凭据。",
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
       "githubDelivery": "面向你的 GitHub 仓库的 AI 驱动 PR 评审、Issue → PR 闭环与发布自动化。",
@@ -19239,6 +19304,64 @@
       "title": "查找设置",
       "triggerAria": "查找设置"
     },
+    "fleet": {
+      "claude": {
+        "desc": "将转发 hooks 安装到 ~/.claude/settings.json，让每个 Claude Code 会话上报到这里。失败即放行：Cognia 关闭时立即退出。",
+        "label": "Claude Code hooks"
+      },
+      "codex": {
+        "desc": "将 ~/.codex/config.toml 的 notify 指向转发脚本。仅观察——每轮完成上报一次，无需信任步骤。",
+        "label": "Codex notify"
+      },
+      "description": "监控并控制本机任意位置启动的编码 Agent（终端、编辑器）——不限于 Cognia 启动的实例。",
+      "error": "舰队操作失败：{detail}",
+      "history": {
+        "activeFor": "已活动 {duration}",
+        "clear": "清空",
+        "clearEnded": "清除已结束",
+        "count": "{count} 个会话",
+        "delete": "从历史中移除",
+        "empty": "尚无会话记录。",
+        "endedAgo": "{ago}前结束",
+        "filterAll": "全部",
+        "filterAria": "按 Agent 筛选",
+        "import": "导入…",
+        "ranFor": "运行 {duration}",
+        "showLess": "收起",
+        "showMore": "显示全部 {count} 条",
+        "title": "最近会话"
+      },
+      "island": {
+        "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",
+        "label": "灵动岛悬浮层",
+        "monitor": {
+          "label": "显示在哪个屏幕",
+          "option": "{name}（{width}×{height}）",
+          "primary": "主显示器"
+        }
+      },
+      "monitor": {
+        "desc": "外部 Agent hook 的本地事件入口。运行在 companion 服务器上，仅监听回环地址。",
+        "label": "舰队监控",
+        "running": "正在监听 127.0.0.1:{port}。"
+      },
+      "opencode": {
+        "desc": "在 ~/.config/opencode/plugin 安装插件。可在灵动岛上观察会话并批准/拒绝权限。",
+        "label": "OpenCode 插件"
+      },
+      "saved": "舰队设置已更新。",
+      "status": {
+        "codexConflict": "notify 已占用",
+        "codexUnavailable": "未找到 Codex",
+        "installed": "已安装",
+        "opencodeUnavailable": "未找到 OpenCode",
+        "partial": "不完整",
+        "stale": "已被修改",
+        "unavailable": "未找到 Claude Code"
+      },
+      "summaryAria": "{count} 项集成已启用",
+      "title": "Agent 舰队监控"
+    },
     "gateway": {
       "allowlist": "IP 白名单",
       "allowlistHelp": "只有这些 IPv4 地址（CIDR）可以连接。默认仅回环；接入局域网设备需放宽。",
@@ -19542,64 +19665,6 @@
       },
       "description": "在生命周期事件触发时运行 shell 命令或调用 webhook。配置写入 ~/.claude/settings.json (用户作用域) 或项目下的 .claude/settings.json。整份配置原样回写,未识别的字段会被保留。",
       "eventListLabel": "事件",
-      "fleet": {
-        "claude": {
-          "desc": "将转发 hooks 安装到 ~/.claude/settings.json，让每个 Claude Code 会话上报到这里。失败即放行：Cognia 关闭时立即退出。",
-          "label": "Claude Code hooks"
-        },
-        "codex": {
-          "desc": "将 ~/.codex/config.toml 的 notify 指向转发脚本。仅观察——每轮完成上报一次，无需信任步骤。",
-          "label": "Codex notify"
-        },
-        "description": "监控并控制本机任意位置启动的编码 Agent（终端、编辑器）——不限于 Cognia 启动的实例。",
-        "error": "舰队操作失败：{detail}",
-        "history": {
-          "activeFor": "已活动 {duration}",
-          "clear": "清空",
-          "clearEnded": "清除已结束",
-          "count": "{count} 个会话",
-          "delete": "从历史中移除",
-          "empty": "尚无会话记录。",
-          "endedAgo": "{ago}前结束",
-          "filterAll": "全部",
-          "filterAria": "按 Agent 筛选",
-          "import": "导入…",
-          "ranFor": "运行 {duration}",
-          "showLess": "收起",
-          "showMore": "显示全部 {count} 条",
-          "title": "最近会话"
-        },
-        "island": {
-          "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",
-          "label": "灵动岛悬浮层",
-          "monitor": {
-            "label": "显示在哪个屏幕",
-            "option": "{name}（{width}×{height}）",
-            "primary": "主显示器"
-          }
-        },
-        "monitor": {
-          "desc": "外部 Agent hook 的本地事件入口。运行在 companion 服务器上，仅监听回环地址。",
-          "label": "舰队监控",
-          "running": "正在监听 127.0.0.1:{port}。"
-        },
-        "opencode": {
-          "desc": "在 ~/.config/opencode/plugin 安装插件。可在灵动岛上观察会话并批准/拒绝权限。",
-          "label": "OpenCode 插件"
-        },
-        "saved": "舰队设置已更新。",
-        "status": {
-          "codexConflict": "notify 已占用",
-          "codexUnavailable": "未找到 Codex",
-          "installed": "已安装",
-          "opencodeUnavailable": "未找到 OpenCode",
-          "partial": "不完整",
-          "stale": "已被修改",
-          "unavailable": "未找到 Claude Code"
-        },
-        "summaryAria": "{count} 项集成已启用",
-        "title": "Agent 舰队监控"
-      },
       "group": {
         "addHandler": "新建处理器",
         "emptyHandlers": "尚无处理器 — 点击下方按钮添加。",
@@ -20314,6 +20379,7 @@
       "agentRuntime": "Agent 运行时",
       "ariaLabel": "Claude Code 相关设置入口",
       "ccswitch": "CCSwitch",
+      "fleet": "Agent 舰队",
       "hooks": "Hook",
       "mcp": "MCP 服务器",
       "sessions": "会话",
@@ -21213,6 +21279,7 @@
       "discover": "发现",
       "eval": "评估",
       "externalBridge": "外部桥接 (MCP)",
+      "fleet": "Agent 舰队",
       "gateway": "入站网关",
       "general": "常规",
       "githubDelivery": "GitHub 投递",
@@ -21394,10 +21461,10 @@
       },
       "fontFamily": {
         "label": "字体",
-        "nerdFontHelper": "oh-my-posh 和 powerline 提示符的图标需要 Nerd Font。请先安装一款（如 CaskaydiaCove Nerd Font），再在此处填写。",
+        "nerdFontHelper": "oh-my-posh 和 powerlevel10k 提示符的图标需要 Nerd Font。应用已内置 MesloLGS NF，图标开箱即用——点击下方即可选用，或填入你自己安装的 Nerd Font。",
         "pickerHint": "从本机检测到的等宽字体中选择。",
         "pickerLabel": "检测到的字体",
-        "useNerdFont": "使用推荐的 Nerd Font 字体栈"
+        "useNerdFont": "使用内置 Nerd Font（MesloLGS NF）"
       },
       "fontSize": {
         "label": "字号"
@@ -22936,6 +23003,7 @@
       "fetchedAt": "更新于 {time}",
       "meter": {
         "credit": "余额",
+        "monthly": "本月",
         "overage": "按量付费超额",
         "session": "当前会话",
         "weekly": "本周（所有模型）",

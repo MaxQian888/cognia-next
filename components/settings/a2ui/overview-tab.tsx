@@ -9,15 +9,14 @@ import { useTranslations } from "next-intl"
 import { ExternalLinkIcon, BlocksIcon, ActivityIcon, ClockIcon, BookmarkIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { listApps } from "@/lib/db/a2ui-apps"
 import { listEvents } from "@/lib/db/a2ui-event-history"
 import { useA2UIStore } from "@/stores/a2ui"
-import type { A2UIAppRow } from "@/lib/db/a2ui-types"
+import { getAppInstancesCache } from "@/hooks/a2ui/app-builder/persistence"
+import type { A2UIAppInstance } from "@/hooks/a2ui/app-builder/types"
 
 export function OverviewTab() {
   const t = useTranslations("settings.a2ui.overview")
-  const [apps, setApps] = useState<A2UIAppRow[]>([])
+  const [apps, setApps] = useState<A2UIAppInstance[]>([])
   const [recentEventCount, setRecentEventCount] = useState(0)
 
   const surfaces = useA2UIStore((s) => s.surfaces)
@@ -27,9 +26,15 @@ export function OverviewTab() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const [a, e] = await Promise.all([listApps(), listEvents({ limit: 200 })])
+      // Apps live in the localStorage instance store (the same source the Hub
+      // reads), NOT the Dexie `a2uiApps` table — nothing writes that table on
+      // the create path, so reading it always reported "0 saved apps".
+      const instanceList = Array.from(getAppInstancesCache().values()).sort(
+        (a, b) => b.lastModified - a.lastModified
+      )
+      const e = await listEvents({ limit: 200 })
       if (cancelled) return
-      setApps(a)
+      setApps(instanceList)
       setRecentEventCount(e.length)
     })()
     return () => {
@@ -113,8 +118,6 @@ export function OverviewTab() {
                   </div>
                 </div>
                 <div className="ml-2 flex items-center gap-2">
-                  {app.isBuiltIn ? <Badge variant="secondary">{t("recent.builtIn")}</Badge> : null}
-                  {app.isFavorite ? <Badge>{t("recent.favorite")}</Badge> : null}
                   <ExternalLinkIcon className="size-3.5 text-muted-foreground" />
                 </div>
               </Link>

@@ -13,11 +13,18 @@ import { CATALOG_SOURCES } from "./descriptor/catalog"
 import { anthropicLimitsSource } from "./sources/anthropic"
 import { balanceLimitsSource } from "./sources/balance"
 import { codexLimitsSource } from "./sources/codex"
+import { volcengineLimitsSource } from "./sources/volcengine"
 
 import type { LimitsSource } from "@/types/subscription"
 
-/** Built-in sources, windowed first then the generic credit-balance fallthrough. */
+/**
+ * Built-in sources, windowed first then the generic credit-balance fallthrough.
+ * `volcengine` precedes `anthropic` because a Volcengine relay account is
+ * provider `anthropic`; matching on its `volces.com` host first avoids a wasted
+ * `/api/oauth/usage` probe against the wrong endpoint.
+ */
 export const LIMITS_SOURCES: readonly LimitsSource[] = [
+  volcengineLimitsSource,
   anthropicLimitsSource,
   codexLimitsSource,
   balanceLimitsSource,

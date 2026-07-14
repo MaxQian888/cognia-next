@@ -24,9 +24,12 @@ jest.mock("next-intl", () => ({
 jest.mock("motion/react", () => ({ useReducedMotion: () => true }))
 
 const resizeMock = jest.fn()
+const setTuckedMock = jest.fn()
 jest.mock("@/lib/tauri/fleet", () => ({
   islandResize: (...args: unknown[]) => resizeMock(...args),
+  islandSetTucked: (...args: unknown[]) => setTuckedMock(...args),
   fleetPermissionRespond: jest.fn(),
+  fleetQuestionRespond: jest.fn(),
 }))
 
 // Off-Tauri by default (jsdom); the geometry-event test flips it on.
@@ -156,6 +159,25 @@ describe("IslandShell", () => {
     const shell = screen.getByTestId("island-shell")
     expect(shell.getAttribute("data-expanded")).toBe("true")
     // Mouse-leave can't collapse it while the permission is still pending.
+    fireEvent.mouseLeave(screen.getByTestId("island-hover-zone"))
+    expect(shell.getAttribute("data-expanded")).toBe("true")
+  })
+
+  it("force-expands while any session has an answerable AskUserQuestion", () => {
+    streamState.snapshot = {
+      generatedAt: 1,
+      sessions: [
+        session({
+          status: "waiting-input",
+          pendingQuestions: [{ question: "Pick?", options: ["A", "B"], multiSelect: false }],
+          pendingQuestionRequest: { requestId: "q-1", requestedAt: Date.now() },
+        }),
+      ],
+    }
+    render(<IslandShell />)
+    const shell = screen.getByTestId("island-shell")
+    expect(shell.getAttribute("data-expanded")).toBe("true")
+    // Mouse-leave can't collapse it while the question is still answerable.
     fireEvent.mouseLeave(screen.getByTestId("island-hover-zone"))
     expect(shell.getAttribute("data-expanded")).toBe("true")
   })
@@ -348,6 +370,38 @@ describe("IslandShell", () => {
         expect(call[1]).toBeGreaterThanOrEqual(ISLAND_PILL_HEIGHT)
       }
     })
+
+    it("mirrors tuck transitions to the window click-through toggle", () => {
+      render(<IslandShell />)
+      // Mounted untucked → the window must be interactive.
+      expect(setTuckedMock).toHaveBeenLastCalledWith(false)
+      act(() => {
+        jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS)
+      })
+      expect(setTuckedMock).toHaveBeenLastCalledWith(true)
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+      expect(setTuckedMock).toHaveBeenLastCalledWith(false)
+    })
+
+    it("clears a stale pin when the fleet empties so the island can tuck", () => {
+      streamState.snapshot = { generatedAt: 1, sessions: [session()] }
+      const { rerender } = render(<IslandShell />)
+      fireEvent.click(screen.getByTestId("island-pill"))
+      expect(screen.getByTestId("island-shell").getAttribute("data-expanded")).toBe("true")
+      // Pinned open blocks the tuck while sessions exist…
+      act(() => {
+        jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS * 2)
+      })
+      expect(screen.getByTestId("island-shell").getAttribute("data-tucked")).toBe("false")
+
+      // …but once the fleet empties the pin resets and the island tucks away.
+      streamState.snapshot = { generatedAt: 2, sessions: [] }
+      rerender(<IslandShell />)
+      act(() => {
+        jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS)
+      })
+      expect(screen.getByTestId("island-shell").getAttribute("data-tucked")).toBe("true")
+    })
   })
 
   describe("attention ring", () => {
@@ -443,15 +497,18 @@ describe("IslandShell", () => {
 
     it("re-pads when Rust pushes fleet://island-geometry (monitor change)", async () => {
       tauriState.on = true
-      let handler: ((e: { payload?: { topInset?: number } }) => void) | undefined
+      const handlers = new Map<string, (e: { payload?: unknown }) => void>()
       const unlisten = jest.fn()
-      listenMock.mockImplementation(async (_event: string, cb: typeof handler) => {
-        handler = cb
-        return unlisten
-      })
+      listenMock.mockImplementation(
+        async (event: string, cb: (e: { payload?: unknown }) => void) => {
+          handlers.set(event, cb)
+          return unlisten
+        }
+      )
       const { unmount } = render(<IslandShell />)
       await act(async () => {})
       expect(listenMock).toHaveBeenCalledWith("fleet://island-geometry", expect.any(Function))
+      const handler = handlers.get("fleet://island-geometry")
 
       act(() => handler?.({ payload: { topInset: 21 } }))
       expect(screen.getByTestId("island-clip").style.marginTop).toBe("21px")
@@ -462,6 +519,79 @@ describe("IslandShell", () => {
 
       unmount()
       expect(unlisten).toHaveBeenCalled()
+    })
+  })
+
+  describe("native hover events (fleet://island-hover)", () => {
+    it("untucks a click-through island on a Rust hover push and re-tucks on leave", async () => {
+      jest.useFakeTimers()
+      tauriState.on = true
+      const handlers = new Map<string, (e: { payload?: unknown }) => void>()
+      listenMock.mockImplementation(
+        async (event: string, cb: (e: { payload?: unknown }) => void) => {
+          handlers.set(event, cb)
+          return jest.fn()
+        }
+      )
+      try {
+        render(<IslandShell />)
+        await act(async () => {})
+        expect(listenMock).toHaveBeenCalledWith("fleet://island-hover", expect.any(Function))
+        const hover = handlers.get("fleet://island-hover")
+
+        act(() => {
+          jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS)
+        })
+        const shell = screen.getByTestId("island-shell")
+        expect(shell.getAttribute("data-tucked")).toBe("true")
+
+        // While tucked the window ignores cursor events (no DOM mouseenter) —
+        // the Rust cursor poll is the only reveal path.
+        act(() => hover?.({ payload: { hovering: true } }))
+        expect(shell.getAttribute("data-tucked")).toBe("false")
+
+        // Cursor leaves → tuck timer re-arms and the island hides again.
+        act(() => hover?.({ payload: { hovering: false } }))
+        act(() => {
+          jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS)
+        })
+        expect(shell.getAttribute("data-tucked")).toBe("true")
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("a trailing hovering:false heals a hover stuck by a missed mouseleave", async () => {
+      jest.useFakeTimers()
+      tauriState.on = true
+      const handlers = new Map<string, (e: { payload?: unknown }) => void>()
+      listenMock.mockImplementation(
+        async (event: string, cb: (e: { payload?: unknown }) => void) => {
+          handlers.set(event, cb)
+          return jest.fn()
+        }
+      )
+      try {
+        streamState.snapshot = { generatedAt: 1, sessions: [session()] }
+        render(<IslandShell />)
+        await act(async () => {})
+        const shell = screen.getByTestId("island-shell")
+
+        // DOM hover expands, but the matching mouseleave never fires (the OS
+        // window resized under the cursor) — previously pinned it expanded.
+        fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+        expect(shell.getAttribute("data-expanded")).toBe("true")
+
+        const hover = handlers.get("fleet://island-hover")
+        act(() => hover?.({ payload: { hovering: false } }))
+        expect(shell.getAttribute("data-expanded")).toBe("false")
+        act(() => {
+          jest.advanceTimersByTime(ISLAND_TUCK_DELAY_MS)
+        })
+        expect(shell.getAttribute("data-tucked")).toBe("true")
+      } finally {
+        jest.useRealTimers()
+      }
     })
   })
 })

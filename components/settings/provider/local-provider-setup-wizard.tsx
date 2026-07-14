@@ -217,13 +217,13 @@ export function LocalProviderSetupWizard({
               ))}
             </ol>
 
-            {/* Provider-specific commands */}
-            {providerId === "ollama" && (
+            {/* Provider-specific start command (omitted for GUI apps) */}
+            {instructions.serveCommand && (
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">
                   {t("setupWizard.afterInstallation")}
                 </p>
-                {renderCommand("ollama serve")}
+                {renderCommand(instructions.serveCommand)}
               </div>
             )}
 
@@ -257,21 +257,29 @@ export function LocalProviderSetupWizard({
                 </p>
               </div>
 
-              {providerId === "ollama" && (
+              {instructions.modelPullCommand && (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">{t("setupWizard.pullFirstModel")}</p>
-                  {renderCommand("ollama pull llama3.2")}
+                  {renderCommand(instructions.modelPullCommand)}
                   <p className="text-xs text-muted-foreground">{t("setupWizard.pullModelSize")}</p>
                 </div>
               )}
             </div>
 
-            <Button variant="outline" size="sm" className="w-full" asChild>
-              <a href={instructions.docsUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="h-3 w-3 mr-1" />
-                {t("viewDocumentation")}
-              </a>
-            </Button>
+            <div className="space-y-2">
+              <Button variant="outline" size="sm" className="w-full" asChild>
+                <a href={instructions.modelsUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-3 w-3 mr-1" />
+                  {t("browseModels")}
+                </a>
+              </Button>
+              <Button variant="outline" size="sm" className="w-full" asChild>
+                <a href={instructions.docsUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-3 w-3 mr-1" />
+                  {t("viewDocumentation")}
+                </a>
+              </Button>
+            </div>
 
             <div className="flex justify-between">
               <Button variant="outline" onClick={() => setCurrentStep("install")}>

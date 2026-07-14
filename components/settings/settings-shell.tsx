@@ -139,6 +139,10 @@ const HooksSection = dynamic(() => import("./hooks/hooks-section").then((m) => m
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const FleetSection = dynamic(() => import("./fleet/fleet-section").then((m) => m.FleetSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
 const WorkspaceTrustSection = dynamic(
   () => import("./workspace-trust/workspace-trust-section").then((m) => m.WorkspaceTrustSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -283,6 +287,7 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   "skills",
   "hooks",
   "agents",
+  "search",
 ])
 
 function isSection(value: string | null): value is SettingsSectionId {
@@ -451,6 +456,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <EvalSettingsSection />
     case "hooks":
       return <HooksSection />
+    case "fleet":
+      return <FleetSection />
     case "workspace-trust":
       return <WorkspaceTrustSection />
     case "slash-commands":

@@ -187,14 +187,25 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
   }
 }
 
-/** Stub for `useLocalProvidersScan` — Cognia's multi-provider auto-detect. */
+/**
+ * Stub for `useLocalProvidersScan` — Cognia's multi-provider auto-detect.
+ *
+ * The `detected`/`results` maps and the `scan` callback are module-level
+ * singletons so their identities stay stable across renders. Consumers thread
+ * `scan` through a `useCallback` and then feed that into a mount `useEffect`
+ * (see `LocalProviderSettings`); returning a fresh function/Map each render
+ * would invalidate those deps and drive an infinite re-scan loop.
+ */
+const EMPTY_SCAN_RESULTS = new Map<LocalProviderName, LocalServerStatus>()
+const noopScan = async (): Promise<void> => undefined
+
 export function useLocalProvidersScan() {
   return {
-    detected: new Map<LocalProviderName, LocalServerStatus>(),
+    detected: EMPTY_SCAN_RESULTS,
     /** Cognia's components also read this Map under the `results` alias. */
-    results: new Map<LocalProviderName, LocalServerStatus>(),
+    results: EMPTY_SCAN_RESULTS,
     isScanning: false,
     error: null as string | null,
-    scan: async () => undefined,
+    scan: noopScan,
   }
 }

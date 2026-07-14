@@ -27,6 +27,10 @@ describe("siliconflowBalanceAdapter", () => {
   it("builds the /user/info request", () => {
     const req = a.request(Q)
     expect(req.url).toBe("https://api.siliconflow.cn/v1/user/info")
+    // The Anthropic relay preset baseUrl ("…cn", no "/v1") resolves the same.
+    expect(a.request({ ...Q, baseUrl: "https://api.siliconflow.cn" }).url).toBe(
+      "https://api.siliconflow.cn/v1/user/info"
+    )
     expect(req.headers.Authorization).toBe("Bearer sk-sf-test")
   })
 

@@ -8,16 +8,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { FilesIcon, SearchIcon } from "lucide-react"
+import { CodeIcon, FilesIcon, SearchIcon, SquareCodeIcon } from "lucide-react"
 import { isTauri } from "@/lib/tauri"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import { registerProjectEditorOpener } from "@/lib/files/project-editor-bridge"
+import { codeServerClient } from "@/lib/codeserver/client"
 import { cn } from "@/lib/utils"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { useKeybindingStore } from "@/stores/canvas/keybinding-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { EditorActionDef } from "@/lib/editor-workbench/register-editor-actions"
+import { CodeServerPane } from "./code-server-pane"
 import { useProjectEditor } from "./use-project-editor"
 import { ProjectFileTree } from "./project-file-tree"
 import { ProjectEditorTabs } from "./project-editor-tabs"
@@ -59,6 +61,22 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
   const t = useTranslations("agentTeamsWorkspace.editor")
   const bindings = useKeybindingStore((s) => s.bindings)
   const [leftTab, setLeftTab] = useState<"files" | "search">("files")
+  // Optional "Pro IDE" mode — the embedded code-server webview (desktop only).
+  const [mode, setMode] = useState<"monaco" | "codeserver">("monaco")
+  const [proIdeSupported, setProIdeSupported] = useState(false)
+  useEffect(() => {
+    if (!isTauri()) return
+    let alive = true
+    void codeServerClient
+      .supported()
+      .then((ok) => {
+        if (alive) setProIdeSupported(ok)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const editor = useProjectEditor({ teamId: team.id, workingDir })
   const {
@@ -197,85 +215,127 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
       <div className="flex items-center gap-2 border-b px-2 py-1">
         <ProjectRootSwitcher roots={roots} rootKey={rootKey} onSelect={selectRoot} />
         <div className="flex-1" />
+        {isTauri() && (
+          <div
+            className="flex items-center gap-0.5 rounded-md border p-0.5"
+            role="group"
+            aria-label={t("proIde.switchLabel")}
+          >
+            <button
+              type="button"
+              data-testid="editor-mode-monaco"
+              aria-pressed={mode === "monaco"}
+              className={cn(
+                "flex items-center gap-1 rounded px-2 py-0.5 text-xs",
+                mode === "monaco" ? "bg-accent" : "text-muted-foreground hover:bg-accent/50"
+              )}
+              onClick={() => setMode("monaco")}
+            >
+              <CodeIcon className="size-3.5" />
+              {t("proIde.toggleMonaco")}
+            </button>
+            <button
+              type="button"
+              data-testid="editor-mode-codeserver"
+              aria-pressed={mode === "codeserver"}
+              disabled={!proIdeSupported}
+              title={proIdeSupported ? undefined : t("proIde.disabledTooltip")}
+              className={cn(
+                "flex items-center gap-1 rounded px-2 py-0.5 text-xs disabled:cursor-not-allowed disabled:opacity-50",
+                mode === "codeserver" ? "bg-accent" : "text-muted-foreground hover:bg-accent/50"
+              )}
+              onClick={() => setMode("codeserver")}
+            >
+              <SquareCodeIcon className="size-3.5" />
+              {t("proIde.toggleVsCode")}
+            </button>
+          </div>
+        )}
       </div>
-      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel defaultSize={24} minSize={14} className="min-h-0">
-          <div className="flex h-full flex-col">
-            <div className="flex border-b">
-              <button
-                type="button"
-                data-testid="left-tab-files"
-                className={cn(
-                  "flex flex-1 items-center justify-center gap-1 py-1 text-xs",
-                  leftTab === "files" ? "bg-accent" : "text-muted-foreground hover:bg-accent/50"
-                )}
-                onClick={() => setLeftTab("files")}
-              >
-                <FilesIcon className="size-3.5" />
-                {t("filesTab")}
-              </button>
-              <button
-                type="button"
-                data-testid="left-tab-search"
-                className={cn(
-                  "flex flex-1 items-center justify-center gap-1 py-1 text-xs",
-                  leftTab === "search" ? "bg-accent" : "text-muted-foreground hover:bg-accent/50"
-                )}
-                onClick={() => setLeftTab("search")}
-              >
-                <SearchIcon className="size-3.5" />
-                {t("searchTab")}
-              </button>
-            </div>
-            <div className="min-h-0 flex-1">
-              {leftTab === "files" ? (
-                <ProjectFileTree
-                  rootPath={rootPath}
-                  refreshToken={treeRefreshToken}
-                  activePath={activePath}
-                  onOpenFile={(rel) => void openFile(rel)}
-                  deps={editor.deps}
-                />
-              ) : (
-                <ProjectSearchPanel rootPath={rootPath} onOpenMatch={gotoLine} />
-              )}
-            </div>
-          </div>
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={76} minSize={30} className="min-h-0">
-          <div className="flex h-full flex-col">
-            <ProjectEditorTabs
-              files={openFiles}
-              activePath={activePath}
-              dirtyCount={dirtyCount}
-              onSelect={setActivePath}
-              onClose={closeFile}
-              onSaveAll={handleSaveAll}
-            />
-            <div className="min-h-0 flex-1">
-              {activeFile ? (
-                <ProjectMonaco
-                  key={activeFile.absolutePath}
-                  file={activeFile}
-                  projectRoot={rootPath}
-                  onChange={(v) => setDraft(activeFile.relPath, v)}
-                  actions={actions}
-                  actionLabels={actionLabels}
-                  bindings={bindings}
-                />
-              ) : (
-                <div
-                  className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground"
-                  data-testid="editor-empty"
+      {mode === "codeserver" ? (
+        <div className="min-h-0 flex-1">
+          <CodeServerPane root={rootPath} />
+        </div>
+      ) : (
+        <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+          <ResizablePanel defaultSize={24} minSize={14} className="min-h-0">
+            <div className="flex h-full flex-col">
+              <div className="flex border-b">
+                <button
+                  type="button"
+                  data-testid="left-tab-files"
+                  className={cn(
+                    "flex flex-1 items-center justify-center gap-1 py-1 text-xs",
+                    leftTab === "files" ? "bg-accent" : "text-muted-foreground hover:bg-accent/50"
+                  )}
+                  onClick={() => setLeftTab("files")}
                 >
-                  {t("emptyEditor")}
-                </div>
-              )}
+                  <FilesIcon className="size-3.5" />
+                  {t("filesTab")}
+                </button>
+                <button
+                  type="button"
+                  data-testid="left-tab-search"
+                  className={cn(
+                    "flex flex-1 items-center justify-center gap-1 py-1 text-xs",
+                    leftTab === "search" ? "bg-accent" : "text-muted-foreground hover:bg-accent/50"
+                  )}
+                  onClick={() => setLeftTab("search")}
+                >
+                  <SearchIcon className="size-3.5" />
+                  {t("searchTab")}
+                </button>
+              </div>
+              <div className="min-h-0 flex-1">
+                {leftTab === "files" ? (
+                  <ProjectFileTree
+                    rootPath={rootPath}
+                    refreshToken={treeRefreshToken}
+                    activePath={activePath}
+                    onOpenFile={(rel) => void openFile(rel)}
+                    deps={editor.deps}
+                  />
+                ) : (
+                  <ProjectSearchPanel rootPath={rootPath} onOpenMatch={gotoLine} />
+                )}
+              </div>
             </div>
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize={76} minSize={30} className="min-h-0">
+            <div className="flex h-full flex-col">
+              <ProjectEditorTabs
+                files={openFiles}
+                activePath={activePath}
+                dirtyCount={dirtyCount}
+                onSelect={setActivePath}
+                onClose={closeFile}
+                onSaveAll={handleSaveAll}
+              />
+              <div className="min-h-0 flex-1">
+                {activeFile ? (
+                  <ProjectMonaco
+                    key={activeFile.absolutePath}
+                    file={activeFile}
+                    projectRoot={rootPath}
+                    onChange={(v) => setDraft(activeFile.relPath, v)}
+                    actions={actions}
+                    actionLabels={actionLabels}
+                    bindings={bindings}
+                  />
+                ) : (
+                  <div
+                    className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground"
+                    data-testid="editor-empty"
+                  >
+                    {t("emptyEditor")}
+                  </div>
+                )}
+              </div>
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
     </div>
   )
 }

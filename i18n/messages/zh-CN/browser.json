@@ -35,6 +35,10 @@
     "label": "页面加载中",
     "title": "正在加载 {host}…"
   },
+  "panel": {
+    "collapse": "收起",
+    "details": "详情"
+  },
   "screenshot": {
     "failed": "无法截取预览画面",
     "sent": "截图已发送到对话"

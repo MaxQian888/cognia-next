@@ -20,8 +20,8 @@ beforeEach(() => {
 function makeClient(
   updates: Array<{
     pluginId: string
-    fromVersion: string
-    toVersion: string
+    currentVersion: string
+    latestVersion: string
   }> = []
 ) {
   return {
@@ -43,18 +43,23 @@ describe("PluginUpdateDialog", () => {
 
   it("renders update entries returned by the client", async () => {
     const client = makeClient([
-      { pluginId: "alpha", fromVersion: "1.0.0", toVersion: "1.1.0" },
-      { pluginId: "beta", fromVersion: "0.5.0", toVersion: "0.6.0" },
+      { pluginId: "alpha", currentVersion: "1.0.0", latestVersion: "1.1.0" },
+      { pluginId: "beta", currentVersion: "0.5.0", latestVersion: "0.6.0" },
     ])
     __resetPluginUpdateClientForTests(client)
     render(<PluginUpdateDialog open onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText("alpha")).toBeInTheDocument())
     expect(screen.getByText("beta")).toBeInTheDocument()
     expect(screen.getByText("availableCount:2")).toBeInTheDocument()
+    // The version delta renders from currentVersion → latestVersion (an earlier
+    // fromVersion/toVersion mismatch showed "v undefined → v undefined").
+    expect(screen.getByText("v1.0.0 → v1.1.0")).toBeInTheDocument()
   })
 
-  it("install-all calls installUpdate for every entry", async () => {
-    const client = makeClient([{ pluginId: "alpha", fromVersion: "1.0.0", toVersion: "1.1.0" }])
+  it("install-all calls installUpdate with the latest version for every entry", async () => {
+    const client = makeClient([
+      { pluginId: "alpha", currentVersion: "1.0.0", latestVersion: "1.1.0" },
+    ])
     __resetPluginUpdateClientForTests(client)
     render(<PluginUpdateDialog open onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText("alpha")).toBeInTheDocument())

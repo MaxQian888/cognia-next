@@ -75,6 +75,13 @@ impl SubscriptionProvider for AnthropicProvider {
         if let Some(p) = preset {
             env.push(("ANTHROPIC_BASE_URL".to_string(), p.base_url.clone()));
             for (k, v) in &p.extra_headers {
+                // `x-cognia-*` keys are INTERNAL preset config (e.g. the
+                // Volcengine AccessKey ID / Secret used only for the SigV4 usage
+                // query), NOT wire headers. Never forward them to the relay —
+                // an account-wide credential must not ride on every chat request.
+                if k.to_ascii_lowercase().starts_with("x-cognia-") {
+                    continue;
+                }
                 // Sidecar reads custom headers from
                 // `ANTHROPIC_CUSTOM_HEADERS_*` (one env var per header), the
                 // same convention CCSwitch uses. Single-var-per-header keeps
@@ -227,6 +234,32 @@ mod tests {
         assert!(env
             .iter()
             .any(|(k, v)| k == "ANTHROPIC_CUSTOM_HEADER_X-Org" && v == "cognia"));
+    }
+
+    #[test]
+    fn env_for_sidecar_never_forwards_x_cognia_internal_config() {
+        // `x-cognia-*` keys (e.g. Volcengine AK/SK for usage queries) are
+        // internal config and must NOT become wire headers on chat requests.
+        let mut headers = BTreeMap::new();
+        headers.insert("X-Org".into(), "cognia".into());
+        headers.insert("x-cognia-volc-access-key-id".into(), "AKID".into());
+        headers.insert("X-Cognia-Volc-Secret-Access-Key".into(), "SECRET".into());
+        let preset = ProviderPreset {
+            id: "p1".into(),
+            label: "Volcengine".into(),
+            base_url: "https://ark.cn-beijing.volces.com/api/coding".into(),
+            extra_headers: headers,
+            template_id: Some("volcengine-agentplan".into()),
+            model_mapping: BTreeMap::new(),
+        };
+        let env = AnthropicProvider.env_for_sidecar(&account_from(cred()), Some(&preset));
+        // The real wire header is forwarded…
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "ANTHROPIC_CUSTOM_HEADER_X-Org" && v == "cognia"));
+        // …but neither AK nor SK ever appears in the env (no leak to the relay).
+        assert!(!env.iter().any(|(_, v)| v == "AKID" || v == "SECRET"));
+        assert!(!env.iter().any(|(k, _)| k.to_lowercase().contains("cognia")));
     }
 
     #[test]

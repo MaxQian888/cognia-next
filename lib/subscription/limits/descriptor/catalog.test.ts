@@ -34,6 +34,7 @@ describe("stepfun descriptor", () => {
 
   it("matches by providerKey and by host, and yields a CNY credit meter", async () => {
     expect(stepfun.matches({ providerKey: "stepfun" })).toBe(true)
+    expect(stepfun.matches({ providerKey: "stepfun-anthropic" })).toBe(true)
     expect(stepfun.matches({ baseUrl: "https://api.stepfun.com/v1" })).toBe(true)
     expect(stepfun.matches({ providerKey: "deepseek" })).toBe(false)
 
@@ -48,6 +49,21 @@ describe("stepfun descriptor", () => {
     expect(snap?.provider).toBe("stepfun")
     expect(snap?.meters[0]).toMatchObject({ kind: "balance", remaining: 42.5, unit: "CNY" })
   })
+
+  it("anchors /v1/accounts at the origin for a /step_plan relay preset baseUrl", async () => {
+    let seenUrl = ""
+    await stepfun.fetch(
+      ctx({
+        providerKey: "stepfun-anthropic",
+        baseUrl: "https://api.stepfun.com/step_plan",
+        authedGet: async (url) => {
+          seenUrl = url
+          return JSON.stringify({ balance: 1 })
+        },
+      })
+    )
+    expect(seenUrl).toBe("https://api.stepfun.com/v1/accounts")
+  })
 })
 
 describe("glm (Zhipu Coding Plan) descriptor", () => {
@@ -57,6 +73,28 @@ describe("glm (Zhipu Coding Plan) descriptor", () => {
     expect(glm.matches({ providerKey: "glm" })).toBe(true)
     expect(glm.matches({ baseUrl: "https://api.z.ai/api" })).toBe(true)
     expect(glm.matches({ providerKey: "minimax" })).toBe(false)
+    // New anthropic-relay providerKeys + the CN bigmodel.cn host both match.
+    expect(glm.matches({ providerKey: "glm-anthropic" })).toBe(true)
+    expect(glm.matches({ providerKey: "glm-anthropic-intl" })).toBe(true)
+    expect(glm.matches({ baseUrl: "https://open.bigmodel.cn/api/anthropic" })).toBe(true)
+  })
+
+  it("anchors the quota URL at the host origin for a CN relay preset baseUrl", async () => {
+    let seenUrl = ""
+    await glm.fetch(
+      ctx({
+        token: "raw-glm-key",
+        providerKey: "glm-anthropic",
+        // Relay preset baseUrl carries the /api/anthropic path — the quota
+        // endpoint must anchor at the bigmodel.cn origin, not double the path.
+        baseUrl: "https://open.bigmodel.cn/api/anthropic",
+        authedGet: async (url) => {
+          seenUrl = url
+          return JSON.stringify({ data: { limits: [{ unit: 3, percentage: 10 }] } })
+        },
+      })
+    )
+    expect(seenUrl).toBe("https://open.bigmodel.cn/api/monitor/usage/quota/limit")
   })
 
   it("sends a raw-key Authorization (no Bearer) and maps both tiers", async () => {
@@ -157,6 +195,23 @@ describe("kimi-coding (Coding Plan) descriptor", () => {
     expect(snap?.meters.map((m) => m.id)).toEqual(["session"])
     // 1 - 250/1000 = 75%
     expect(snap?.meters[0]).toMatchObject({ usedPct: 75, resetAt: 3_000_000 })
+  })
+
+  it("does not double the /coding segment for the relay preset baseUrl", async () => {
+    let seenUrl = ""
+    await kimi.fetch(
+      ctx({
+        providerKey: "kimi-coding",
+        // The relay preset baseUrl ends in /coding/ — origin-anchoring avoids
+        // the previous `/coding/coding/v1/usages` bug.
+        baseUrl: "https://api.kimi.com/coding/",
+        authedGet: async (url) => {
+          seenUrl = url
+          return JSON.stringify({ usage: { limit: 10, remaining: 5, resetTime: 1 } })
+        },
+      })
+    )
+    expect(seenUrl).toBe("https://api.kimi.com/coding/v1/usages")
   })
 })
 

@@ -50,8 +50,9 @@ export interface FleetActivity {
 }
 
 /**
- * A parked AskUserQuestion (display-only — answered in the agent's own
- * terminal). Mirrors Rust `PendingQuestion`.
+ * A parked AskUserQuestion. Rendered while the session is `waiting-input`; the
+ * island lets the user pick options and answer it when `pendingQuestionRequest`
+ * is also set, otherwise it is display-only. Mirrors Rust `PendingQuestion`.
  */
 export interface PendingQuestion {
   question: string
@@ -60,6 +61,19 @@ export interface PendingQuestion {
   /** Option labels in tool order (capped by the Rust side). */
   options: string[]
   multiSelect: boolean
+}
+
+/**
+ * The answerable handle for a parked AskUserQuestion — present only while the
+ * tool's `PermissionRequest` long-poll is waiting. The island posts the user's
+ * option selections to `fleet_question_respond` with `requestId`; the answer
+ * rides back as the hook's `allow` + `updatedInput.answers` decision. Mirrors
+ * Rust `PendingQuestionRequest`.
+ */
+export interface PendingQuestionRequest {
+  requestId: string
+  /** Epoch ms the request arrived — drives the answer-window countdown. */
+  requestedAt: number
 }
 
 /** One live subagent spawned by the session's Task tool. Mirrors Rust `FleetSubagent`. */
@@ -105,6 +119,9 @@ export interface FleetSession {
   pendingPlan?: string | null
   /** Questions parked by AskUserQuestion while `waiting-input`. */
   pendingQuestions?: PendingQuestion[]
+  /** Answerable handle for the parked questions (present only while the
+   * AskUserQuestion `PermissionRequest` long-poll is waiting). */
+  pendingQuestionRequest?: PendingQuestionRequest | null
   /** Live subagents (Task tool), foreground and background. */
   subagents?: FleetSubagent[]
   capabilities: FleetCapabilities
@@ -150,6 +167,20 @@ export const FLEET_ISLAND_GEOMETRY_EVENT = "fleet://island-geometry"
 export interface IslandGeometry {
   /** Top safe-area inset (logical px): notch height, 0 on non-notched displays. */
   topInset: number
+}
+
+/**
+ * Cursor-over-island transitions pushed by the native hover monitor (must
+ * match `src-tauri/src/fleet/island_window.rs`). Authoritative hover source:
+ * a tucked island ignores cursor events at the OS level (click-through fix),
+ * so DOM mouseenter/mouseleave never fire on it — Rust polls the global
+ * cursor against the window frame and pushes enter/leave here instead.
+ */
+export const FLEET_ISLAND_HOVER_EVENT = "fleet://island-hover"
+
+/** Payload of `FLEET_ISLAND_HOVER_EVENT` (mirrors Rust `IslandHover`). */
+export interface IslandHover {
+  hovering: boolean
 }
 
 /** The island's answer window (ms) — mirrors Rust `PERMISSION_WAIT_MS`. */

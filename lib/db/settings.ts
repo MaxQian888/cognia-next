@@ -108,6 +108,7 @@ export const DEFAULTS: AppSettings = {
   searchEnabled: false,
   searchMaxResults: 5,
   searchFallbackEnabled: true,
+  searchMaxRetries: 2,
   defaultSearchProvider: "tavily",
   searchProviders: { ...DEFAULT_SEARCH_PROVIDER_SETTINGS },
   defaultSearchType: "general",

@@ -583,7 +583,18 @@
   "protocolOpenAIDesc": "OpenAI 兼容 API（最常用）",
   "protocolPluginDesc": "由插件 {plugin} 提供",
   "provider": "服务商",
+  "followStepsToStart": "按照以下步骤开始使用",
+  "providerGroups": {
+    "advanced": "进阶",
+    "advancedDesc": "面向高级用户与服务器运行时",
+    "recommended": "推荐",
+    "recommendedDesc": "对大多数用户最易上手",
+    "specialized": "专用",
+    "specializedDesc": "面向特定场景的推理服务器"
+  },
   "providerModels": "{provider} 模型",
+  "providerSetup": "{provider} 设置",
+  "setupGuide": "安装向导",
   "providerName": "服务商名称",
   "providerNamePlaceholder": "我的服务商",
   "providerOff": "已关闭",

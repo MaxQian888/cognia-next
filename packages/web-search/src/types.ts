@@ -122,11 +122,31 @@ export interface SearchProviderFeatures {
 }
 
 /**
+ * API-key rotation strategy for a search provider's multi-key pool.
+ * Mirrors the AI-provider rotation vocabulary so the UI and mental model match.
+ * - `round-robin`: cycle keys in order, one per request
+ * - `random`: pick a random key each request
+ * - `least-used`: prefer the key with the fewest requests this session
+ */
+export type SearchApiKeyRotationStrategy = "round-robin" | "random" | "least-used"
+
+/**
  * Search provider settings stored in user preferences
  */
 export interface SearchProviderSettings {
   providerId: SearchProviderType
   apiKey: string
+  /**
+   * Additional API keys for this provider. Combined with `apiKey` they form the
+   * rotation pool: on each request one key is chosen (see `apiKeyRotationStrategy`),
+   * and a rate-limited / dead key is skipped for the next retry (see the retry
+   * loop in `search-service`). Empty/duplicate entries are ignored.
+   */
+  apiKeys?: string[]
+  /** When true (and the pool has >1 key), rotate keys per request instead of always using `apiKey`. */
+  apiKeyRotationEnabled?: boolean
+  /** Rotation strategy for the key pool. Defaults to `round-robin`. */
+  apiKeyRotationStrategy?: SearchApiKeyRotationStrategy
   /** Google Programmable Search Engine ID (required for providerId === 'google') */
   cx?: string
   enabled: boolean

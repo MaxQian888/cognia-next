@@ -625,6 +625,24 @@ describe("getInstallInstructions", () => {
     expect(inst.steps.length).toBeGreaterThan(0)
     expect(inst.downloadUrl).toMatch(/^https?:\/\//)
     expect(inst.docsUrl).toMatch(/^https?:\/\//)
+    // Every provider exposes a browse-models URL for the setup flow.
+    expect(inst.modelsUrl).toMatch(/^https?:\/\//)
+  })
+
+  it("exposes ollama's serve + model-pull commands", () => {
+    const inst = getInstallInstructions("ollama")
+    expect(inst.serveCommand).toBe("ollama serve")
+    expect(inst.modelPullCommand).toContain("pull")
+  })
+
+  it("omits the serve command for GUI-driven providers", () => {
+    expect(getInstallInstructions("lmstudio").serveCommand).toBeUndefined()
+    expect(getInstallInstructions("jan").serveCommand).toBeUndefined()
+  })
+
+  it("provides a serve command for CLI/server providers", () => {
+    expect(getInstallInstructions("llamacpp").serveCommand).toBeTruthy()
+    expect(getInstallInstructions("vllm").serveCommand).toContain("vllm serve")
   })
 })
 

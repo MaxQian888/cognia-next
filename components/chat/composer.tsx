@@ -2044,6 +2044,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             providerSettings: settings?.searchProviders,
             provider: settings?.defaultSearchProvider,
             fallbackEnabled: settings?.searchFallbackEnabled ?? true,
+            maxRetries: settings?.searchMaxRetries,
             maxResults: settings?.searchMaxResults ?? 5,
             searchType: settings?.defaultSearchType,
             searchDepth: settings?.defaultSearchDepth,

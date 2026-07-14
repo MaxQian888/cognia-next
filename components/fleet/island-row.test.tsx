@@ -18,8 +18,10 @@ jest.mock("motion/react", () => ({ useReducedMotion: () => true }))
 const focusMock = jest.fn()
 const sendMock = jest.fn()
 const revealMock = jest.fn()
+const questionRespondMock = jest.fn()
 jest.mock("@/lib/tauri/fleet", () => ({
   fleetPermissionRespond: jest.fn(),
+  fleetQuestionRespond: (...args: unknown[]) => questionRespondMock(...args),
   fleetFocusTerminal: (...args: unknown[]) => focusMock(...args),
   fleetOpencodeSendMessage: (...args: unknown[]) => sendMock(...args),
   fleetRevealTranscript: (...args: unknown[]) => revealMock(...args),
@@ -217,6 +219,26 @@ describe("IslandRow", () => {
     expect(screen.queryByTestId("pending-question")).toBeNull()
   })
 
+  it("renders the answerable question card (not display-only) when a request handle is parked", () => {
+    render(
+      <IslandRow
+        session={session({
+          status: "waiting-input",
+          activity: null,
+          pendingQuestions: [
+            { question: "Which auth method?", options: ["OAuth", "API key"], multiSelect: false },
+          ],
+          pendingQuestionRequest: { requestId: "q-9", requestedAt: Date.now() },
+        })}
+      />
+    )
+    // The selectable card replaces the display-only chips.
+    expect(screen.getByTestId("island-question-actions")).toBeInTheDocument()
+    expect(screen.queryByTestId("pending-question")).toBeNull()
+    expect(screen.getByTestId("question-option-0-0")).toHaveTextContent("OAuth")
+    expect(screen.queryByTestId("status-line")).toBeNull()
+  })
+
   it("shows the plan preview while plan-pending", () => {
     render(
       <IslandRow
@@ -235,6 +257,31 @@ describe("IslandRow", () => {
   it("hides the plan preview outside plan-pending", () => {
     render(<IslandRow session={session({ status: "working", pendingPlan: "text" })} />)
     expect(screen.queryByTestId("pending-plan")).toBeNull()
+  })
+
+  it("keeps the plan preview and offers Approve/Deny when the plan is answerable", () => {
+    // An ExitPlanMode PermissionRequest parks an answerable permission WITHOUT
+    // collapsing the plan pose: the plan text and the Approve/Deny controls
+    // both show (not a generic waiting-permission card that drops the plan).
+    render(
+      <IslandRow
+        session={session({
+          status: "plan-pending",
+          activity: null,
+          pendingPlan: "## Steps\n1. Do X\n2. Do Y",
+          pendingPermission: {
+            requestId: "plan-1",
+            toolName: "ExitPlanMode",
+            detail: null,
+            requestedAt: Date.now(),
+          },
+        })}
+      />
+    )
+    expect(screen.getByTestId("pending-plan")).toHaveTextContent("1. Do X")
+    expect(screen.getByTestId("island-permission-actions")).toBeInTheDocument()
+    // The permission card replaces the plain status line while answerable.
+    expect(screen.queryByTestId("status-line")).toBeNull()
   })
 
   it("lists subagents with background markers and an overflow chip", () => {

@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useA2UIStore } from "@/stores/a2ui"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
+import { useA2UISave } from "@/hooks/a2ui/use-a2ui-save"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
@@ -28,14 +29,21 @@ export function A2UIToolbar() {
   const undo = useA2UIStore((state) => state.undo)
   const redo = useA2UIStore((state) => state.redo)
   const appBuilder = useA2UIAppBuilder({})
+  const saveApp = useA2UISave(surfaceId)
   const [shareOpen, setShareOpen] = useState(false)
 
   const handleUndo = useCallback(() => undo(surfaceId), [undo, surfaceId])
   const handleRedo = useCallback(() => redo(surfaceId), [redo, surfaceId])
 
-  const handleSave = useCallback(() => {
-    toast.success(t("appSaved"))
-  }, [t])
+  const handleSave = useCallback(async () => {
+    try {
+      const ok = await saveApp()
+      if (ok) toast.success(t("appSaved"))
+      else toast.error(t("generationFailed"))
+    } catch {
+      toast.error(t("generationFailed"))
+    }
+  }, [saveApp, t])
 
   const buildSharePayload = useCallback(() => {
     const json = appBuilder.exportApp(surfaceId)

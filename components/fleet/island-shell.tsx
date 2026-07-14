@@ -40,9 +40,14 @@ import {
   fleetStatusSummary,
   sortForIsland,
 } from "@/lib/fleet/format"
-import { FLEET_ISLAND_GEOMETRY_EVENT, type IslandGeometry } from "@/lib/fleet/types"
+import {
+  FLEET_ISLAND_GEOMETRY_EVENT,
+  FLEET_ISLAND_HOVER_EVENT,
+  type IslandGeometry,
+  type IslandHover,
+} from "@/lib/fleet/types"
 import { isTauri } from "@/lib/tauri"
-import { islandResize } from "@/lib/tauri/fleet"
+import { islandResize, islandSetTucked } from "@/lib/tauri/fleet"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { IslandRow } from "./island-row"
 import { cn } from "@/lib/utils"
@@ -100,23 +105,33 @@ export function IslandShell() {
   useEffect(() => {
     if (!isTauri()) return undefined
     let alive = true
-    let unlisten: (() => void) | undefined
+    const unlistens: (() => void)[] = []
     void (async () => {
       // Dynamic import keeps the Tauri event module out of web bundles.
       const { listen } = await import("@tauri-apps/api/event")
       if (!alive) return
-      const un = await listen<IslandGeometry>(FLEET_ISLAND_GEOMETRY_EVENT, (e) => {
-        if (alive) applyInset(e.payload?.topInset)
-      })
+      const uns = await Promise.all([
+        listen<IslandGeometry>(FLEET_ISLAND_GEOMETRY_EVENT, (e) => {
+          if (alive) applyInset(e.payload?.topInset)
+        }),
+        // Authoritative hover: while tucked the window is click-through, so
+        // the DOM never sees mouseenter — Rust polls the global cursor and
+        // pushes enter/leave transitions. It also self-heals a `hovering`
+        // stuck true by a missed mouseleave (OS window resize under the
+        // cursor), which used to pin the island expanded indefinitely.
+        listen<IslandHover>(FLEET_ISLAND_HOVER_EVENT, (e) => {
+          if (alive) setHovering(e.payload?.hovering === true)
+        }),
+      ])
       if (!alive) {
-        safeUnlisten(un)
+        uns.forEach(safeUnlisten)
         return
       }
-      unlisten = un
+      unlistens.push(...uns)
     })()
     return () => {
       alive = false
-      safeUnlisten(unlisten)
+      unlistens.forEach(safeUnlisten)
     }
   }, [applyInset])
 
@@ -146,6 +161,9 @@ export function IslandShell() {
       return (
         `${key}:${s.status}:${s.pendingPermission ? 1 : 0}:` +
         `${s.pendingPlan ? 1 : 0}:${s.pendingQuestions?.length ?? 0}:` +
+        // An answerable question swaps the compact display chips for the taller
+        // selectable card — a height change the display-only length misses.
+        `${s.pendingQuestionRequest ? 1 : 0}:` +
         `${s.subagents?.length ?? 0}:${s.lastPrompt ? 1 : 0}:` +
         // Expand state + an error banner both change the row's height.
         `${expandedKeys.has(key) ? 1 : 0}:${s.lastError ? 1 : 0}`
@@ -153,10 +171,21 @@ export function IslandShell() {
     })
     .join("|")
 
-  // A pending permission forces the island open so its Approve/Deny controls
-  // are never hidden behind the collapsed pill. Derived during render from the
+  // A pending permission — or an answerable AskUserQuestion — forces the island
+  // open so its Approve/Deny controls (or the question's options + Submit) are
+  // never hidden behind the collapsed pill. Derived during render from the
   // snapshot — no effect, no setState-to-mirror-a-prop.
-  const forceExpanded = snapshot.sessions.some((s) => s.pendingPermission !== null)
+  const forceExpanded = snapshot.sessions.some(
+    (s) => s.pendingPermission !== null || s.pendingQuestionRequest != null
+  )
+
+  // A pin outlives its purpose once the fleet empties: the user pinned a list
+  // that no longer exists, and a stale pin blocked auto-tuck forever (the
+  // "island camps on screen" report). Render-time state adjustment, same
+  // pattern as the tuck reset below.
+  if (pinnedOpen && empty) {
+    setPinnedOpen(false)
+  }
   const expanded = ((hovering || pinnedOpen) && !empty) || forceExpanded
 
   // Auto-tuck: an un-hovered, un-pinned island with nothing that needs the
@@ -176,6 +205,14 @@ export function IslandShell() {
     const timer = setTimeout(() => setTucked(true), ISLAND_TUCK_DELAY_MS)
     return () => clearTimeout(timer)
   }, [shouldTuck])
+
+  // Mirror the tuck state to the window layer: a tucked island's window turns
+  // click-through (so the invisible pill strip under the notch can't swallow
+  // clicks meant for the menu bar behind it); untucking restores
+  // interactivity. The reveal path stays alive via `fleet://island-hover`.
+  useEffect(() => {
+    void islandSetTucked(tucked)
+  }, [tucked])
 
   // Report the measured content size to the window layer after every paint
   // where shape/content changed. useLayoutEffect: resize before the frame is

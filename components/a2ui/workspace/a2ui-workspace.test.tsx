@@ -53,6 +53,9 @@ jest.mock("@/components/a2ui/a2ui-surface", () => ({
 jest.mock("@/hooks/a2ui/use-app-builder", () => ({
   useA2UIAppBuilder: () => ({ exportApp: jest.fn() }),
 }))
+jest.mock("@/hooks/a2ui/use-a2ui-save", () => ({
+  useA2UISave: () => jest.fn(async () => true),
+}))
 jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }))

@@ -18,6 +18,7 @@ pub use cognia_ccswitch as ccswitch;
 mod claude;
 mod cli_bridge;
 mod code_adoption;
+mod codeserver;
 // ADR-0067 Phase 6 — extracted to cognia-core; re-aliased so `crate::command_error`
 // (claude, logging, plugin_api/vscode, top-level) resolves unchanged.
 pub use cognia_core::command_error;
@@ -69,8 +70,8 @@ mod proxy_config;
 // ADR-0067 follow-up — extracted to `crates/cognia-remote-control`;
 // re-aliased so `crate::remote_control::…` (gateway, generate_handler!)
 // resolves unchanged.
-pub use cognia_remote_control as remote_control;
 pub use cognia_automation::sandbox;
+pub use cognia_remote_control as remote_control;
 // ADR-0067 Phase 6 — scheduler/workflow/timing extracted to the
 // cognia-scheduling cluster; re-aliased so all three module paths resolve.
 pub use cognia_scheduling::scheduler;
@@ -93,8 +94,8 @@ mod supervision_backoff;
 // ADR-0067 Tier B — extracted to `crates/cognia-terminal`; re-aliased so
 // `crate::terminal::…` (companion_api rpc/ws_terminal, plugin_api cli_exec,
 // generate_handler! + .manage()) resolves unchanged.
-pub use cognia_terminal as terminal;
 pub use cognia_scheduling::timing;
+pub use cognia_terminal as terminal;
 // ADR-0067 follow-up — extracted to `crates/cognia-tts`; re-aliased so
 // `crate::tts::…` (generate_handler!) resolves unchanged.
 pub use cognia_tts as tts;
@@ -340,6 +341,7 @@ pub fn run() {
         .plugin(tauri_plugin_upload::init())
         .plugin(tauri_plugin_positioner::init())
         .manage(claude::SidecarState::new())
+        .manage(codeserver::CodeServerState::new())
         .manage(ApiKeyState::new())
         // ADR-0025 — unified subscription module. In-process cache of the
         // active account + resolved env per provider. Populated lazily by
@@ -516,6 +518,7 @@ pub fn run() {
             subscription::commands::subscription_delete_preset,
             subscription::commands::subscription_set_default_preset,
             subscription::commands::subscription_authed_get,
+            subscription::volcengine::subscription_volcengine_usage,
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,
             subscription::commands::claude_proxy_env_for_session,
@@ -567,6 +570,7 @@ pub fn run() {
             fleet::fleet_monitor_status,
             fleet::fleet_get_snapshot,
             fleet::fleet_permission_respond,
+            fleet::fleet_question_respond,
             fleet::fleet_opencode_send_message,
             fleet::control::fleet_focus_terminal,
             fleet::codex::fleet_codex_install,
@@ -582,6 +586,7 @@ pub fn run() {
             fleet::island_window::close_island_window,
             fleet::island_window::is_island_window_open,
             fleet::island_window::island_resize,
+            fleet::island_window::island_set_tucked,
             fleet::island_window::island_list_monitors,
             fleet::island_window::island_set_monitor,
             tray::commands::tray_set_menu,
@@ -1038,8 +1043,22 @@ pub fn run() {
             browser::embedded::browser_embed_navigate,
             browser::embedded::browser_embed_reload,
             browser::embedded::browser_embed_set_select_mode,
+            browser::embedded::browser_embed_clear_selection,
+            browser::embedded::browser_embed_set_panel_labels,
             browser::embedded::browser_embed_capture,
             browser::embedded::browser_embed_destroy,
+            // Optional desktop "Pro IDE" mode — on-demand embedded code-server.
+            codeserver::commands::codeserver_supported,
+            codeserver::commands::codeserver_ensure,
+            codeserver::commands::codeserver_status,
+            codeserver::commands::codeserver_stop,
+            codeserver::commands::codeserver_stop_all,
+            codeserver::commands::codeserver_download,
+            codeserver::webview::codeserver_embed_create,
+            codeserver::webview::codeserver_embed_set_bounds,
+            codeserver::webview::codeserver_embed_set_visible,
+            codeserver::webview::codeserver_embed_navigate,
+            codeserver::webview::codeserver_embed_destroy,
             // Agent browser loop (Phase 1) — snapshot/act/console/network + nav.
             browser::embedded::browser_embed_snapshot,
             browser::embedded::browser_embed_act,

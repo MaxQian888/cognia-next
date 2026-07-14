@@ -1,4 +1,14 @@
-import { startResumeReconnect, DEFAULT_MIN_AWAY_MS } from "./resume-reconnect"
+import {
+  startResumeReconnect,
+  DEFAULT_MIN_AWAY_MS,
+  DEFAULT_ACTIVITY_FRESH_MS,
+} from "./resume-reconnect"
+import type { AdapterHealth } from "@/types/connectors/adapter"
+import { appendAudit } from "@/lib/connectors/audit"
+
+jest.mock("@/lib/connectors/audit", () => ({
+  appendAudit: jest.fn(() => Promise.resolve()),
+}))
 
 /** Minimal EventTarget stand-in that lets a test fire named events. */
 class FakeTarget {
@@ -68,7 +78,7 @@ describe("startResumeReconnect", () => {
     const t = setup()
     t.state.hidden = true
     t.doc.fire("visibilitychange")
-    t.advance(1_000) // < 30s
+    t.advance(1_000) // « the multi-minute away threshold
     t.state.hidden = false
     t.doc.fire("visibilitychange")
     expect(t.requeue).not.toHaveBeenCalled()
@@ -111,6 +121,145 @@ describe("startResumeReconnect", () => {
     t.state.hidden = false // visible again, but network still down
     t.doc.fire("visibilitychange")
     expect(t.requeue).not.toHaveBeenCalled()
+  })
+
+  // Health-gated requeue: a wake only tears down transports that may have gone
+  // half-open. One still delivering traffic is left alone (no message-loss
+  // reconnect window on a self-healing socket like the Lark long-conn).
+  function setupWithHealth(health: () => AdapterHealth) {
+    const win = new FakeTarget()
+    const doc = new FakeTarget()
+    let clock = 1_000_000
+    const state = { hidden: false, offline: false }
+    const requeue = jest.fn(async () => true)
+    const audit = jest.fn()
+    const handle = startResumeReconnect({
+      windowTarget: win,
+      documentTarget: doc,
+      now: () => clock,
+      isHidden: () => state.hidden,
+      isOffline: () => state.offline,
+      listAdapters: () => [{ adapter: { id: "a1", health } }],
+      requeue,
+      audit,
+    })
+    const wake = () => {
+      state.hidden = true
+      doc.fire("visibilitychange")
+      clock += DEFAULT_MIN_AWAY_MS + 1
+      state.hidden = false
+      doc.fire("visibilitychange")
+    }
+    return { requeue, audit, handle, wake, now: () => clock }
+  }
+
+  it("skips a running adapter that delivered traffic within the fresh window", async () => {
+    let t: ReturnType<typeof setupWithHealth>
+    // eslint-disable-next-line prefer-const
+    t = setupWithHealth(() => ({
+      state: "running",
+      lastActivityAt: t.now() - (DEFAULT_ACTIVITY_FRESH_MS - 5_000),
+    }))
+    t.wake()
+    await Promise.resolve()
+    expect(t.requeue).not.toHaveBeenCalled()
+    expect(t.audit).not.toHaveBeenCalled()
+    t.handle.dispose()
+  })
+
+  it("requeues a running adapter whose last activity is stale", async () => {
+    let t: ReturnType<typeof setupWithHealth>
+    // eslint-disable-next-line prefer-const
+    t = setupWithHealth(() => ({
+      state: "running",
+      lastActivityAt: t.now() - (DEFAULT_ACTIVITY_FRESH_MS + 5_000),
+    }))
+    t.wake()
+    await Promise.resolve()
+    expect(t.requeue).toHaveBeenCalledWith("a1")
+    t.handle.dispose()
+  })
+
+  it("requeues a non-running adapter even with fresh activity", async () => {
+    let t: ReturnType<typeof setupWithHealth>
+    // eslint-disable-next-line prefer-const
+    t = setupWithHealth(() => ({
+      state: "degraded",
+      lastActivityAt: t.now() - 1_000,
+    }))
+    t.wake()
+    await Promise.resolve()
+    expect(t.requeue).toHaveBeenCalledWith("a1")
+    t.handle.dispose()
+  })
+
+  it("requeues a running adapter that has never recorded activity", async () => {
+    // `running` but no `lastActivityAt` — cannot prove the socket is alive, so
+    // it is treated as maybe-half-open and requeued.
+    const t = setupWithHealth(() => ({ state: "running" }))
+    t.wake()
+    await Promise.resolve()
+    expect(t.requeue).toHaveBeenCalledWith("a1")
+    t.handle.dispose()
+  })
+
+  it("requeues when the adapter exposes no health() (unknown → maybe dead)", async () => {
+    const win = new FakeTarget()
+    const doc = new FakeTarget()
+    let clock = 1_000_000
+    const state = { hidden: false, offline: false }
+    const requeue = jest.fn(async () => true)
+    const handle = startResumeReconnect({
+      windowTarget: win,
+      documentTarget: doc,
+      now: () => clock,
+      isHidden: () => state.hidden,
+      isOffline: () => state.offline,
+      listAdapters: () => [{ adapter: { id: "a1" } }],
+      requeue,
+      audit: jest.fn(),
+    })
+    state.hidden = true
+    doc.fire("visibilitychange")
+    clock += DEFAULT_MIN_AWAY_MS + 1
+    state.hidden = false
+    doc.fire("visibilitychange")
+    await Promise.resolve()
+    expect(requeue).toHaveBeenCalledWith("a1")
+    handle.dispose()
+  })
+
+  it("audits a real requeue via the default appendAudit sink", async () => {
+    ;(appendAudit as jest.Mock).mockClear()
+    const win = new FakeTarget()
+    const doc = new FakeTarget()
+    let clock = 1_000_000
+    const state = { hidden: false, offline: false }
+    // No `audit` seam → exercises the default appendAudit-backed sink.
+    const handle = startResumeReconnect({
+      windowTarget: win,
+      documentTarget: doc,
+      now: () => clock,
+      isHidden: () => state.hidden,
+      isOffline: () => state.offline,
+      listAdapters: () => [{ adapter: { id: "a1" } }],
+      requeue: jest.fn(async () => true),
+    })
+    state.hidden = true
+    doc.fire("visibilitychange")
+    clock += DEFAULT_MIN_AWAY_MS + 1
+    state.hidden = false
+    doc.fire("visibilitychange")
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapterId: "a1",
+        kind: "adapter.resumed",
+        fields: { reason: "visible", awayMs: DEFAULT_MIN_AWAY_MS + 1 },
+      })
+    )
+    handle.dispose()
   })
 
   it("dispose() detaches every listener and is idempotent", () => {

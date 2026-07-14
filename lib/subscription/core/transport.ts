@@ -215,6 +215,43 @@ export async function authedGet(
   return await transport.call<string>("subscription_authed_get", { url, headers: pairs })
 }
 
+/** One usage window returned by `subscription_volcengine_usage`. */
+export interface VolcengineUsageTier {
+  /** cognia meter id: "session" | "weekly" | "monthly". */
+  name: string
+  /** Used percent (0-100). */
+  utilization: number
+  /** ISO-8601 reset time, when known. */
+  resets_at?: string | null
+}
+
+/** Result of the Volcengine (火山方舟) Agent/Coding Plan usage query. */
+export interface VolcengineUsageResult {
+  ok: boolean
+  plan?: string | null
+  tiers: VolcengineUsageTier[]
+  error?: string | null
+  /** `true` when the AK/SK were rejected (prompt the user to re-enter). */
+  auth_error: boolean
+}
+
+/**
+ * Query Volcengine Agent/Coding Plan usage via the Rust SigV4-signed OpenAPI
+ * command. AK/SK are the Volcengine account AccessKey pair (distinct from the
+ * inference bearer). Rejects only on transient transport errors.
+ */
+export async function volcengineUsage(
+  accessKeyId: string,
+  secretAccessKey: string,
+  baseUrl: string
+): Promise<VolcengineUsageResult> {
+  return await transport.call<VolcengineUsageResult>("subscription_volcengine_usage", {
+    accessKeyId,
+    secretAccessKey,
+    baseUrl,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Anthropic (PKCE save hook)
 // ---------------------------------------------------------------------------

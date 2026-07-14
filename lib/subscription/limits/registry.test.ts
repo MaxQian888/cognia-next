@@ -10,8 +10,13 @@ import type { LimitsSource } from "@/types/subscription"
 afterEach(() => __resetLimitsSourcesForTesting())
 
 describe("LIMITS_SOURCES", () => {
-  it("orders windowed sources before the balance fallthrough", () => {
-    expect(LIMITS_SOURCES.map((s) => s.key)).toEqual(["anthropic", "codex", "balance"])
+  it("orders windowed sources before the balance fallthrough (volcengine ahead of anthropic)", () => {
+    expect(LIMITS_SOURCES.map((s) => s.key)).toEqual([
+      "volcengine",
+      "anthropic",
+      "codex",
+      "balance",
+    ])
   })
 })
 
@@ -34,6 +39,18 @@ describe("resolveLimitsSources", () => {
 
   it("returns [] when nothing matches", () => {
     expect(resolveLimitsSources({ provider: "opencode", providerKey: "groq" })).toEqual([])
+  })
+
+  it("resolves the volcengine source (ahead of anthropic) for a volces.com relay", () => {
+    // A Volcengine relay account is provider `anthropic`; matching on its host
+    // first means volcengine runs before the anthropic OAuth-usage source.
+    expect(
+      resolveLimitsSources({
+        provider: "anthropic",
+        providerKey: "volcengine-agentplan",
+        baseUrl: "https://ark.cn-beijing.volces.com/api/coding",
+      }).map((s) => s.key)
+    ).toEqual(["volcengine", "anthropic"])
   })
 
   it("includes a built-in catalog descriptor (stepfun) ahead of the balance fallthrough", () => {

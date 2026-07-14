@@ -39,64 +39,6 @@
   },
   "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
   "eventListLabel": "Events",
-  "fleet": {
-    "claude": {
-      "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
-      "label": "Claude Code hooks"
-    },
-    "codex": {
-      "desc": "Point ~/.codex/config.toml's notify at a forwarder. Observe-only — one event per completed turn, no trust step.",
-      "label": "Codex notify"
-    },
-    "description": "Watch and control coding agents launched anywhere on this machine (terminals, editors) — not just ones started by Cognia.",
-    "error": "Fleet action failed: {detail}",
-    "history": {
-      "activeFor": "active {duration}",
-      "clear": "Clear",
-      "clearEnded": "Clear ended",
-      "count": "{count, plural, one {# session} other {# sessions}}",
-      "delete": "Remove from history",
-      "empty": "No sessions recorded yet.",
-      "endedAgo": "ended {ago} ago",
-      "filterAll": "All",
-      "filterAria": "Filter by agent",
-      "import": "Import…",
-      "ranFor": "ran {duration}",
-      "showLess": "Show fewer",
-      "showMore": "Show all {count}",
-      "title": "Recent sessions"
-    },
-    "island": {
-      "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
-      "label": "Island overlay",
-      "monitor": {
-        "label": "Show on display",
-        "option": "{name} ({width}×{height})",
-        "primary": "Primary display"
-      }
-    },
-    "monitor": {
-      "desc": "Local event ingress for external agent hooks. Runs on the companion server, loopback only.",
-      "label": "Fleet monitoring",
-      "running": "Listening on 127.0.0.1:{port}."
-    },
-    "opencode": {
-      "desc": "Install a plugin into ~/.config/opencode/plugin. Observe sessions and approve/deny permissions from the island.",
-      "label": "OpenCode plugin"
-    },
-    "saved": "Fleet settings updated.",
-    "status": {
-      "codexConflict": "Notify in use",
-      "codexUnavailable": "Codex not found",
-      "installed": "Installed",
-      "opencodeUnavailable": "OpenCode not found",
-      "partial": "Partial",
-      "stale": "Modified",
-      "unavailable": "Claude Code not found"
-    },
-    "summaryAria": "{count} integrations active",
-    "title": "Agent fleet monitor"
-  },
   "group": {
     "addHandler": "Add handler",
     "emptyHandlers": "No handlers — add one below.",

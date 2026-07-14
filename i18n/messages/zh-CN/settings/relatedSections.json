@@ -2,6 +2,7 @@
   "agentRuntime": "Agent 运行时",
   "ariaLabel": "Claude Code 相关设置入口",
   "ccswitch": "CCSwitch",
+  "fleet": "Agent 舰队",
   "hooks": "Hook",
   "mcp": "MCP 服务器",
   "sessions": "会话",

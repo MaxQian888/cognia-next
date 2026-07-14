@@ -1,4 +1,4 @@
-import { parseLarkEventEnvelope, parseLarkBotMenuEvent } from "./parse"
+import { parseLarkEventEnvelope, parseLarkBotMenuEvent, extractTenantKey } from "./parse"
 import type { LarkEventEnvelope } from "./parse"
 import type { LarkQuickCommand } from "./quick-commands"
 
@@ -674,5 +674,43 @@ describe("history-list mentions (flat id + id_type) — fetchHistory reprojectio
 
   it("drops non-open_id-typed flat mentions instead of misclassifying them", () => {
     expect(result!.mentions.users).not.toContain("uid_someone")
+  })
+})
+
+describe("extractTenantKey", () => {
+  const base = { event_id: "e1", event_type: "im.message.receive_v1" }
+
+  it("reads the 2.0 header tenant_key", () => {
+    const env = { header: { ...base, tenant_key: "tk_hdr" }, event: {} } as LarkEventEnvelope
+    expect(extractTenantKey(env)).toBe("tk_hdr")
+  })
+
+  it("falls back to sender.tenant_key when the header lacks it", () => {
+    const env = {
+      header: base,
+      event: { sender: { sender_id: { open_id: "ou_u" }, tenant_key: "tk_sender" } },
+    } as LarkEventEnvelope
+    expect(extractTenantKey(env)).toBe("tk_sender")
+  })
+
+  it("falls back to reader.tenant_key (read indicators)", () => {
+    const env = {
+      header: base,
+      event: { reader: { tenant_key: "tk_reader" } },
+    } as LarkEventEnvelope
+    expect(extractTenantKey(env)).toBe("tk_reader")
+  })
+
+  it("prefers the header over nested fallbacks", () => {
+    const env = {
+      header: { ...base, tenant_key: "tk_hdr" },
+      event: { sender: { sender_id: { open_id: "ou_u" }, tenant_key: "tk_sender" } },
+    } as LarkEventEnvelope
+    expect(extractTenantKey(env)).toBe("tk_hdr")
+  })
+
+  it("returns undefined when no tenant_key is present anywhere", () => {
+    const env = { header: base, event: {} } as LarkEventEnvelope
+    expect(extractTenantKey(env)).toBeUndefined()
   })
 })

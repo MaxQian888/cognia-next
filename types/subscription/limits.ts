@@ -93,11 +93,25 @@ export interface LimitsSourceContext {
   /** Resolved preset templateId (the authoritative provider-match signal). */
   providerKey?: string
   /**
+   * The resolved preset's `extraHeaders`, verbatim. Carries internal `x-cognia-*`
+   * config a source may need but that never reaches the wire (e.g. the
+   * Volcengine AccessKey ID / Secret for the SigV4 usage query). Absent when the
+   * account has no preset.
+   */
+  presetHeaders?: Record<string, string>
+  /**
    * CORS-free authed GET. Tauri injects `subscription_authed_get`; the CLI
    * injects a node-`fetch`-backed implementation. Sources that fetch their own
    * way (e.g. the Anthropic header probe) may ignore it.
    */
   authedGet: (url: string, headers?: Record<string, string>) => Promise<string>
+  /**
+   * Refresh the account's bearer and return the new token (or `null` if refresh
+   * isn't possible / failed). Injected by the runner for OAuth providers whose
+   * access token expires (Anthropic); a source calls it once on an auth failure
+   * and retries. Absent for token/key providers that never expire.
+   */
+  refreshToken?: () => Promise<string | null>
   /** Injected clock for reset-countdown math. */
   now: number
 }

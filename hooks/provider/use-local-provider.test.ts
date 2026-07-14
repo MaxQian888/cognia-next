@@ -257,4 +257,16 @@ describe("useLocalProvidersScan", () => {
     expect(result.current.error).toBeNull()
     return expect(result.current.scan()).resolves.toBeUndefined()
   })
+
+  it("keeps stable identities across re-renders (guards the re-scan loop)", () => {
+    // Consumers feed `scan`/`detected` into useCallback→useEffect deps; a fresh
+    // reference each render would re-trigger the mount scan forever.
+    const { result, rerender } = renderHook(() => useLocalProvidersScan())
+    const first = result.current
+    rerender()
+    const second = result.current
+    expect(second.scan).toBe(first.scan)
+    expect(second.detected).toBe(first.detected)
+    expect(second.results).toBe(first.results)
+  })
 })

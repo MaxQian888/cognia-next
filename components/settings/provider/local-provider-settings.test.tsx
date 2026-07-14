@@ -183,6 +183,13 @@ jest.mock("@cognia/provider-core/providers/local-provider-service", () => ({
     supportsTools: false,
   })),
   checkAllProvidersInstallation: () => mockCheckAllProvidersInstallation(),
+  getInstallInstructions: (providerId: string) => ({
+    title: `Install ${providerId}`,
+    steps: ["step"],
+    downloadUrl: `https://example.com/${providerId}/download`,
+    docsUrl: `https://example.com/${providerId}/docs`,
+    modelsUrl: `https://models.example/${providerId}`,
+  }),
   LocalProviderService: jest.fn().mockImplementation(() => ({
     getStatus: jest.fn().mockResolvedValue({
       connected: true,
@@ -199,10 +206,12 @@ jest.mock("./local-provider-card", () => ({
     providerId,
     onToggle,
     onTestConnection,
+    onSetup,
   }: {
     providerId: string
     onToggle: (enabled: boolean) => void
     onTestConnection: () => Promise<unknown>
+    onSetup?: () => void
   }) => (
     <div data-testid={`provider-card-${providerId}`}>
       <span>{providerId}</span>
@@ -211,6 +220,9 @@ jest.mock("./local-provider-card", () => ({
       </button>
       <button onClick={() => onTestConnection()} data-testid={`test-${providerId}`}>
         Test
+      </button>
+      <button onClick={() => onSetup?.()} data-testid={`setup-${providerId}`}>
+        Setup
       </button>
     </div>
   ),
@@ -389,14 +401,56 @@ describe("LocalProviderSettings", () => {
     expect(screen.getByText("Quick Setup")).toBeInTheDocument()
   })
 
-  it("should show Browse Models link", async () => {
+  it("should show a per-provider Browse Models link (not Ollama-hardcoded)", async () => {
     await act(async () => {
       render(<LocalProviderSettings />)
     })
 
     expect(screen.getByText("Browse Models")).toBeInTheDocument()
     const link = screen.getByRole("link", { name: /Browse Models/i })
-    expect(link).toHaveAttribute("href", "https://ollama.ai/library")
+    // Derived from the quick-start provider's install instructions, not a fixed Ollama URL.
+    expect(link.getAttribute("href")).toMatch(/^https:\/\/models\.example\//)
+  })
+
+  it("should open the setup wizard for a specific provider from its card", async () => {
+    await act(async () => {
+      render(<LocalProviderSettings />)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("setup-lmstudio")).toBeInTheDocument()
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("setup-lmstudio"))
+    })
+
+    await waitFor(() => {
+      // The wizard opens for the exact provider whose card was used.
+      expect(screen.getByText("lmstudio Setup")).toBeInTheDocument()
+    })
+  })
+
+  it("falls back to the first recommended provider when all are running", async () => {
+    mockCheckAllProvidersInstallation.mockResolvedValue([
+      { providerId: "ollama", installed: true, running: true },
+      { providerId: "lmstudio", installed: true, running: true },
+      { providerId: "jan", installed: true, running: true },
+    ])
+
+    await act(async () => {
+      render(<LocalProviderSettings />)
+    })
+
+    await waitFor(() => {
+      expect(mockCheckAllProvidersInstallation).toHaveBeenCalled()
+    })
+
+    // Browse Models still resolves to a concrete provider URL via the fallback.
+    await waitFor(() => {
+      const link = screen.getByRole("link", { name: /Browse Models/i })
+      expect(link.getAttribute("href")).toMatch(/^https:\/\/models\.example\//)
+    })
   })
 
   it("should open setup wizard when Quick Setup is clicked", async () => {

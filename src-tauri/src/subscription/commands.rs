@@ -460,14 +460,36 @@ pub async fn subscription_set_preset(
 /// Returns the response body as a UTF-8 string on 2xx. On non-2xx, returns
 /// `Err("{status}: {body}")` so the renderer can surface the upstream error
 /// message verbatim.
+/// Build a proxy-aware reqwest client for an authed GET.
+///
+/// The previous bare `reqwest::Client::builder().build()` ignored the user's
+/// proxy, so the free Anthropic usage endpoint (and relay quota GETs) silently
+/// failed for anyone who can only reach those hosts via a proxy (CN / corporate
+/// firewall) — a primary cause of "Claude 额度刷新无效". This mirrors
+/// `proxy_config::proxy_http_request`: honour the configured proxy unless the
+/// target is on the bypass list.
+pub(crate) fn build_authed_get_client(url: &str) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30));
+    let cfg = crate::proxy_config::current();
+    if !cfg.should_bypass(url) {
+        if let Some(proxy) = cfg.build_reqwest_proxy() {
+            builder = builder.proxy(proxy);
+        }
+    }
+    builder
+        .build()
+        .map_err(|e| format!("http client build failed: {e}"))
+}
+
 #[tauri::command]
 pub async fn subscription_authed_get(
     url: String,
     headers: Vec<(String, String)>,
 ) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .build()
-        .map_err(|e| format!("http client build failed: {e}"))?;
+    let client = build_authed_get_client(&url)?;
+    // The caller-supplied headers (including a `claude-cli/...` User-Agent that
+    // the usage endpoint requires — omitting it earns a rate-limited 429) win:
+    // reqwest attaches no default User-Agent, so we never clobber it here.
     let mut req = client.get(&url);
     for (k, v) in &headers {
         req = req.header(k.as_str(), v.as_str());
@@ -1005,10 +1027,17 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn authed_get_builds_request_without_network() {
-        // Verify that the reqwest client builds successfully and the function
-        // compiles correctly. We don't make a real network call here.
-        let client = reqwest::Client::builder().build();
-        assert!(client.is_ok(), "reqwest client must build successfully");
+    fn authed_get_client_builds_for_normal_and_bypass_urls() {
+        // The proxy-aware client must build for both a public host (proxy branch
+        // consulted) and a loopback host (bypass branch). We don't make a real
+        // network call; proxy attachment mirrors the tested `proxy_http_request`.
+        assert!(
+            build_authed_get_client("https://api.anthropic.com/api/oauth/usage").is_ok(),
+            "client must build for a public URL"
+        );
+        assert!(
+            build_authed_get_client("http://127.0.0.1:65535/x").is_ok(),
+            "client must build for a bypassed loopback URL"
+        );
     }
 }

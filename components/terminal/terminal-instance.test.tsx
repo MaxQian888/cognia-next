@@ -23,6 +23,7 @@ const mockTermInstance: {
   registerDecoration?: jest.Mock
   registerLinkProvider?: jest.Mock
   scrollToLine?: jest.Mock
+  clearTextureAtlas?: jest.Mock
   buffer?: { active: { viewportY: number; getLine?: (n: number) => unknown } }
   options: {
     fontFamily: string
@@ -55,6 +56,7 @@ const mockTermInstance: {
   clear: jest.fn(),
   registerMarker: jest.fn(() => ({})),
   registerDecoration: jest.fn(),
+  clearTextureAtlas: jest.fn(),
   options: { fontFamily: "Menlo", fontSize: 13, scrollback: 10000 },
   unicode: { activeVersion: "6" },
   rows: 24,
@@ -219,6 +221,7 @@ beforeEach(() => {
   mockTermInstance.registerDecoration = jest.fn(() => ({ onRender: jest.fn(), dispose: jest.fn() }))
   mockTermInstance.registerLinkProvider = jest.fn(() => ({ dispose: jest.fn() }))
   mockTermInstance.scrollToLine = jest.fn()
+  mockTermInstance.clearTextureAtlas = jest.fn()
   mockTermInstance.buffer = { active: { viewportY: 0 } }
   mockTermInstance.dispose = jest.fn()
   useFileViewerStore.setState({ open: false, path: null, line: null, column: null })
@@ -226,6 +229,15 @@ beforeEach(() => {
   mockTermInstance.rows = 24
   mockTermInstance.cols = 80
   mockFit.mockReset()
+  // Deterministic CSS Font Loading API stub. A never-resolving load()/ready
+  // keeps the terminal's post-open "rebuild atlas once the font loads" path
+  // (fire-and-forget) from spontaneously firing a refit/clearTextureAtlas
+  // mid-test and polluting the `mockFit`/atlas assertions. The synchronous
+  // live-settings path still exercises clearTextureAtlas on a font change.
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: { load: jest.fn(() => new Promise(() => {})), ready: new Promise(() => {}) },
+  })
   mockSearchInstance.findNext.mockReset().mockReturnValue(true)
   mockSearchInstance.findPrevious.mockReset().mockReturnValue(true)
   mockSearchInstance.clearDecorations.mockReset()
@@ -639,14 +651,18 @@ describe("TerminalInstance", () => {
     expect(sessionRegistry.current!.resize).toHaveBeenCalledWith(24, 80)
   })
 
-  it("re-fits when the font family changes", async () => {
+  it("re-fits and rebuilds the glyph atlas when the font family changes", async () => {
     const { rerender } = render(<TerminalInstance sessionId="s-1" fontFamily="Menlo" />)
     await flushAsync()
     mockFit.mockClear()
+    mockTermInstance.clearTextureAtlas!.mockClear()
     rerender(<TerminalInstance sessionId="s-1" fontFamily="Fira Code" />)
     await flushAsync()
     expect(mockTermInstance.options.fontFamily).toBe("Fira Code")
     expect(mockFit).toHaveBeenCalled()
+    // The accelerated renderer's atlas must be cleared so the new font's cell
+    // metrics take effect — otherwise glyphs render one cell too wide.
+    expect(mockTermInstance.clearTextureAtlas).toHaveBeenCalled()
   })
 
   it("does not re-fit when only a non-font setting changes", async () => {

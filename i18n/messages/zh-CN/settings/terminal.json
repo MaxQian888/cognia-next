@@ -69,10 +69,10 @@
   },
   "fontFamily": {
     "label": "字体",
-    "nerdFontHelper": "oh-my-posh 和 powerline 提示符的图标需要 Nerd Font。请先安装一款（如 CaskaydiaCove Nerd Font），再在此处填写。",
+    "nerdFontHelper": "oh-my-posh 和 powerlevel10k 提示符的图标需要 Nerd Font。应用已内置 MesloLGS NF，图标开箱即用——点击下方即可选用，或填入你自己安装的 Nerd Font。",
     "pickerHint": "从本机检测到的等宽字体中选择。",
     "pickerLabel": "检测到的字体",
-    "useNerdFont": "使用推荐的 Nerd Font 字体栈"
+    "useNerdFont": "使用内置 Nerd Font（MesloLGS NF）"
   },
   "fontSize": {
     "label": "字号"

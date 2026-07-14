@@ -14,17 +14,32 @@
  * does: it re-queues the running adapters through `requeueAdapter` (identical
  * to "Reconnect now" and the credentials-rotated auto-requeue), but triggered
  * by the OS/browser resume signals — `online` and `visibilitychange → visible`
- * — that nothing else listened to. A minimum-away threshold keeps a brief tab
- * switch from churning healthy sockets, and a short cooldown de-dupes the
- * near-simultaneous `online` + `visible` pair a real wake produces.
+ * — that nothing else listened to. Two guards keep it from churning healthy
+ * sockets on an ordinary desktop focus change: a minimum-away threshold sized
+ * for a real suspend (not a brief switch), and a per-adapter health check that
+ * skips any transport still delivering traffic (only a maybe-half-open one is
+ * requeued). A short cooldown de-dupes the near-simultaneous `online` +
+ * `visible` pair a real wake produces.
  */
 
 import { listRunningAdapters, requeueAdapter } from "@/lib/connectors/lifecycle"
 import { appendAudit } from "@/lib/connectors/audit"
+import type { AdapterHealth } from "@/types/connectors/adapter"
 
-/** Only a wake after this much time away heals sockets — shorter gaps (a quick
- * tab switch) don't justify tearing every transport down and back up. */
-export const DEFAULT_MIN_AWAY_MS = 30_000
+/** Only a wake after this much *continuous* time away heals sockets. Sized for a
+ * real OS suspend / long outage — NOT an ordinary desktop focus change. A
+ * shorter network drop tears the TCP connection and is already healed by the
+ * transport's own backoff (Rust `lark_ws` logs `connection ended` and re-dials);
+ * resume-reconnect exists only for the HALF-OPEN case a suspend produces (socket
+ * looks alive, no frames flow), which in practice follows a multi-minute away.
+ * Was 30 s, which churned healthy connections on every brief window switch. */
+export const DEFAULT_MIN_AWAY_MS = 300_000
+/** A wake only requeues an adapter that might have gone half-open. One that is
+ * `running` and delivered traffic within this window is provably alive (a hidden
+ * window still receives inbound), so it is skipped instead of torn down —
+ * avoiding a message-loss reconnect window on a self-healing transport like the
+ * Lark long-conn. */
+export const DEFAULT_ACTIVITY_FRESH_MS = 60_000
 /** A real resume fires `online` and `visibilitychange` almost together; this
  * window collapses that pair into a single reconnect burst. */
 export const DEFAULT_RECONNECT_COOLDOWN_MS = 5_000
@@ -35,12 +50,17 @@ interface ListenerTarget {
 }
 
 export interface ResumeReconnectOptions {
-  /** Minimum away time before a wake triggers a requeue. Default 30 s. */
+  /** Minimum away time before a wake triggers a requeue. Default 5 min. */
   minAwayMs?: number
   /** Cooldown between reconnect bursts (dedupes online+visible). Default 5 s. */
   cooldownMs?: number
+  /**
+   * Skip requeue for a `running` adapter whose last activity is within this
+   * window (provably alive). Default 60 s.
+   */
+  activityFreshMs?: number
   /** Running-adapter source (default: lifecycle registry). Test seam. */
-  listAdapters?: () => { adapter: { id: string } }[]
+  listAdapters?: () => { adapter: { id: string; health?: () => AdapterHealth } }[]
   /** Requeue one adapter (default: lifecycle `requeueAdapter`). Test seam. */
   requeue?: (adapterId: string) => Promise<boolean>
   /** Audit sink (default: `appendAudit`). Test seam. */
@@ -71,6 +91,7 @@ export function startResumeReconnect(options: ResumeReconnectOptions = {}): Resu
   const {
     minAwayMs = DEFAULT_MIN_AWAY_MS,
     cooldownMs = DEFAULT_RECONNECT_COOLDOWN_MS,
+    activityFreshMs = DEFAULT_ACTIVITY_FRESH_MS,
     listAdapters = listRunningAdapters,
     requeue = requeueAdapter,
     now = Date.now,
@@ -115,6 +136,18 @@ export function startResumeReconnect(options: ResumeReconnectOptions = {}): Resu
 
     for (const entry of listAdapters()) {
       const adapterId = entry.adapter.id
+      // Only requeue a transport that might have gone half-open. One that is
+      // still `running` and delivered traffic within `activityFreshMs` is
+      // provably alive (a hidden window still receives inbound), so tearing it
+      // down would only open a message-loss window on a self-healing socket.
+      const health = entry.adapter.health?.()
+      if (
+        health?.state === "running" &&
+        health.lastActivityAt != null &&
+        at - health.lastActivityAt < activityFreshMs
+      ) {
+        continue
+      }
       void Promise.resolve(requeue(adapterId))
         .then((ok) => {
           if (ok) audit(adapterId, reason, awayMs)

@@ -3,11 +3,19 @@
  */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { FleetMonitorCard } from "./fleet-monitor-card"
+import { FleetSection } from "./fleet-section"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
+}))
+
+// The "Related" strip depends on the App Router (useRouter/useSearchParams);
+// it's exercised in its own suite, so stub it out to keep this focused on the
+// fleet controls.
+jest.mock("@/components/settings/common/related-sections-strip", () => ({
+  RelatedSectionsStrip: () => null,
+  CLAUDE_CODE_RELATED: [],
 }))
 
 const toastSuccess = jest.fn()
@@ -138,17 +146,17 @@ beforeEach(() => {
   mockHooks.readFleetHooksStatus.mockResolvedValue(hooksStatus("not-installed", "missing"))
 })
 
+// The controls are always visible on the dedicated section (no collapse), so
+// loading is the only barrier to interaction.
 async function renderLoaded() {
-  render(<FleetMonitorCard />)
+  render(<FleetSection />)
   await waitFor(() => {
-    expect(screen.getByTestId("fleet-monitor-card").getAttribute("data-loaded")).toBe("true")
+    expect(screen.getByTestId("fleet-section").getAttribute("data-loaded")).toBe("true")
   })
-  // The switches live in a collapsed body — expand it before interacting.
-  fireEvent.click(screen.getByTestId("fleet-monitor-toggle"))
 }
 
-describe("FleetMonitorCard", () => {
-  it("renders three switches off for a fresh install", async () => {
+describe("FleetSection", () => {
+  it("renders the switches off for a fresh install", async () => {
     await renderLoaded()
     expect(screen.getByTestId("fleet-monitor-switch").getAttribute("aria-checked")).toBe("false")
     expect(screen.getByTestId("fleet-claude-switch").getAttribute("aria-checked")).toBe("false")
@@ -242,30 +250,19 @@ describe("FleetMonitorCard", () => {
 
   it("still marks itself loaded when a status read throws", async () => {
     mockFleet.fleetMonitorStatus.mockRejectedValue(new Error("ipc down"))
-    render(<FleetMonitorCard />)
+    render(<FleetSection />)
     await waitFor(() =>
-      expect(screen.getByTestId("fleet-monitor-card").getAttribute("data-loaded")).toBe("true")
+      expect(screen.getByTestId("fleet-section").getAttribute("data-loaded")).toBe("true")
     )
-    fireEvent.click(screen.getByTestId("fleet-monitor-toggle"))
-    // Fell back to defaults, no crash.
+    // Fell back to defaults, no crash — the controls still render.
     expect(screen.getByTestId("fleet-monitor-switch").getAttribute("aria-checked")).toBe("false")
-  })
-
-  it("keeps the controls collapsed until the header is toggled", async () => {
-    render(<FleetMonitorCard />)
-    await waitFor(() =>
-      expect(screen.getByTestId("fleet-monitor-card").getAttribute("data-loaded")).toBe("true")
-    )
-    expect(screen.queryByTestId("fleet-monitor-switch")).toBeNull()
-    fireEvent.click(screen.getByTestId("fleet-monitor-toggle"))
-    expect(screen.getByTestId("fleet-monitor-switch")).toBeInTheDocument()
   })
 
   it("summarises active integrations in the header badge", async () => {
     mockFleet.fleetMonitorStatus.mockResolvedValue({ enabled: true, port: 7890, configPath: "/x" })
-    render(<FleetMonitorCard />)
+    render(<FleetSection />)
     await waitFor(() =>
-      expect(screen.getByTestId("fleet-monitor-card").getAttribute("data-loaded")).toBe("true")
+      expect(screen.getByTestId("fleet-section").getAttribute("data-loaded")).toBe("true")
     )
     // Monitor enabled → one active integration; the badge (aria-labelled) shows it.
     expect(screen.getByLabelText('summaryAria:{"count":1}')).toBeInTheDocument()
@@ -389,7 +386,7 @@ describe("FleetMonitorCard", () => {
 
     fireEvent.change(select, { target: { value: "Built-in Display" } })
     await waitFor(() => expect(mockFleet.islandSetMonitor).toHaveBeenCalledWith("Built-in Display"))
-    // The card is busy until set + refresh settle; a change fired while busy
+    // The section is busy until set + refresh settle; a change fired while busy
     // is intentionally swallowed, so wait for the control to re-enable.
     await waitFor(() => expect(select).not.toBeDisabled())
 

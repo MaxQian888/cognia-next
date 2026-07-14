@@ -73,7 +73,6 @@ import { cn } from "@/lib/utils"
 import { HookGroupEditor, validateMatcher } from "./hook-group-editor"
 import { validateHandler } from "./hook-handler-form"
 import { BuiltinHooksCard } from "./builtin-hooks-card"
-import { FleetMonitorCard } from "./fleet-monitor-card"
 import { createLogger } from "@cognia/logging"
 import {
   CLAUDE_CODE_RELATED,
@@ -341,8 +340,6 @@ export function HooksSection({ cwd }: Props) {
         <RelatedSectionsStrip current="hooks" targets={CLAUDE_CODE_RELATED} />
 
         <BuiltinHooksCard />
-
-        <FleetMonitorCard />
 
         <Tabs value={scope} onValueChange={(v) => requestScope(v as Scope)}>
           <TabsList>

@@ -4,6 +4,7 @@ const mocks = {
   setSearchEnabled: jest.fn(),
   setSearchMaxResults: jest.fn(),
   setSearchFallbackEnabled: jest.fn(),
+  setSearchMaxRetries: jest.fn(),
   setDefaultSearchProvider: jest.fn(),
   setDefaultSearchSources: jest.fn(),
   addCustomSearchSource: jest.fn(),
@@ -37,10 +38,12 @@ jest.mock("@/components/ui/slider", () => ({
   Slider: ({
     value,
     onValueChange,
+    onValueCommit,
     disabled,
   }: {
     value: number[]
     onValueChange: (v: number[]) => void
+    onValueCommit?: (v: number[]) => void
     disabled?: boolean
   }) => (
     <input
@@ -49,7 +52,10 @@ jest.mock("@/components/ui/slider", () => ({
       aria-valuenow={value?.[0] ?? 0}
       disabled={disabled}
       value={value?.[0] ?? 0}
-      onChange={(e) => onValueChange([Number(e.target.value)])}
+      onChange={(e) => {
+        onValueChange([Number(e.target.value)])
+        onValueCommit?.([Number(e.target.value)])
+      }}
     />
   ),
 }))
@@ -183,8 +189,16 @@ describe("SearchGlobalSettings", () => {
       },
     }
     render(<SearchGlobalSettings />)
-    fireEvent.change(screen.getByRole("slider"), { target: { value: 8 } })
+    // slider[0] = maxResults, slider[1] = maxRetries
+    fireEvent.change(screen.getAllByRole("slider")[0], { target: { value: 8 } })
     expect(mocks.setSearchMaxResults).toHaveBeenCalledWith(8)
+  })
+
+  it("changes maxRetries via the second slider", () => {
+    settings = { searchEnabled: true }
+    render(<SearchGlobalSettings />)
+    fireEvent.change(screen.getAllByRole("slider")[1], { target: { value: 4 } })
+    expect(mocks.setSearchMaxRetries).toHaveBeenCalledWith(4)
   })
 
   it("toggles a search source on click", () => {
@@ -195,6 +209,50 @@ describe("SearchGlobalSettings", () => {
     render(<SearchGlobalSettings />)
     fireEvent.click(screen.getByText("Google"))
     expect(mocks.setDefaultSearchSources).toHaveBeenCalledWith(["google"])
+  })
+
+  it("adds a custom research source", () => {
+    settings = { searchEnabled: true }
+    render(<SearchGlobalSettings />)
+    fireEvent.change(screen.getByPlaceholderText("sourceNamePlaceholder"), {
+      target: { value: "My Source" },
+    })
+    fireEvent.click(screen.getByText("add"))
+    expect(mocks.addCustomSearchSource).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "My Source" })
+    )
+  })
+
+  it("adds a custom research source via the Enter key", () => {
+    settings = { searchEnabled: true }
+    render(<SearchGlobalSettings />)
+    const input = screen.getByPlaceholderText("sourceNamePlaceholder")
+    fireEvent.change(input, { target: { value: "Enter Source" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(mocks.addCustomSearchSource).toHaveBeenCalled()
+  })
+
+  it("toggles a custom research source", () => {
+    settings = {
+      searchEnabled: true,
+      customSearchSources: [{ id: "c1", name: "MySrc" }],
+      defaultSearchSources: [],
+    }
+    render(<SearchGlobalSettings />)
+    fireEvent.click(screen.getByText("MySrc"))
+    expect(mocks.setDefaultSearchSources).toHaveBeenCalledWith(["c1"])
+  })
+
+  it("removes a selected custom research source", () => {
+    settings = {
+      searchEnabled: true,
+      customSearchSources: [{ id: "c1", name: "MySrc" }],
+      defaultSearchSources: ["c1"],
+    }
+    render(<SearchGlobalSettings />)
+    fireEvent.click(screen.getByText("×"))
+    expect(mocks.removeCustomSearchSource).toHaveBeenCalledWith("c1")
+    expect(mocks.setDefaultSearchSources).toHaveBeenCalledWith([])
   })
 
   it("removes a selected source on click", () => {

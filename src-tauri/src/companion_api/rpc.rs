@@ -3276,8 +3276,14 @@ mod tests {
             "fleet_opencode_send_message",
             "fleet_focus_terminal",
         ] {
-            assert!(CONTROL_COMMANDS_SET.contains(cmd), "{cmd} must be control-gated");
-            assert!(KNOWN_COMMANDS_SET.contains(cmd), "{cmd} must be a known command");
+            assert!(
+                CONTROL_COMMANDS_SET.contains(cmd),
+                "{cmd} must be control-gated"
+            );
+            assert!(
+                KNOWN_COMMANDS_SET.contains(cmd),
+                "{cmd} must be a known command"
+            );
         }
     }
 

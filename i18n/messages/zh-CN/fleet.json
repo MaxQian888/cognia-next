@@ -26,6 +26,11 @@
     "request": "权限请求：{tool}",
     "requestGeneric": "收到权限请求"
   },
+  "question": {
+    "expired": "已在终端中处理",
+    "submit": "提交",
+    "submitted": "已发送"
+  },
   "reply": {
     "open": "回复",
     "placeholder": "发送消息…",

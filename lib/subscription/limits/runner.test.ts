@@ -130,6 +130,232 @@ describe("queryAccountLimits", () => {
     expect(snap).toBeNull()
   })
 
+  it("refreshes a stale anthropic token before fetching and injects a retry callback", async () => {
+    let seenToken: string | null = null
+    let sawRefreshCb = false
+    registerLimitsSource(
+      "stub:anthropic",
+      {
+        id: "stub:anthropic",
+        key: "anthropic",
+        matches: (q) => q.provider === "anthropic",
+        fetch: async (ctx) => {
+          seenToken = ctx.token
+          sawRefreshCb = typeof ctx.refreshToken === "function"
+          return {
+            provider: "anthropic",
+            accountId: ctx.accountId,
+            fetchedAt: ctx.now,
+            meters: [{ id: "session", kind: "window", usedPct: 1, status: "ok" }],
+          }
+        },
+      },
+      { pluginId: "stub" }
+    )
+    const refreshAnthropicToken = jest.fn(async () => "fresh-token")
+    const snap = await queryAccountLimits("anthropic", "acc-1", {
+      getAccount: async () => anthropicAccount(),
+      listPresets: async () => [],
+      authedGet: async () => "",
+      refreshAnthropicToken,
+      isCredentialFresh: () => false,
+      now: () => 5,
+    })
+    expect(refreshAnthropicToken).toHaveBeenCalledWith("acc-1")
+    expect(seenToken).toBe("fresh-token")
+    expect(sawRefreshCb).toBe(true)
+    expect(snap?.meters[0].usedPct).toBe(1)
+  })
+
+  it("does not refresh a fresh anthropic token", async () => {
+    let seenToken: string | null = null
+    registerLimitsSource(
+      "stub:anthropic",
+      {
+        id: "stub:anthropic",
+        key: "anthropic",
+        matches: (q) => q.provider === "anthropic",
+        fetch: async (ctx) => {
+          seenToken = ctx.token
+          return {
+            provider: "anthropic",
+            accountId: ctx.accountId,
+            fetchedAt: ctx.now,
+            meters: [{ id: "session", kind: "window", usedPct: 1, status: "ok" }],
+          }
+        },
+      },
+      { pluginId: "stub" }
+    )
+    const refreshAnthropicToken = jest.fn(async () => "fresh-token")
+    await queryAccountLimits("anthropic", "acc-1", {
+      getAccount: async () => anthropicAccount(),
+      listPresets: async () => [],
+      authedGet: async () => "",
+      refreshAnthropicToken,
+      isCredentialFresh: () => true,
+    })
+    expect(refreshAnthropicToken).not.toHaveBeenCalled()
+    expect(seenToken).toBe("sk-ant")
+  })
+
+  it("falls through with the stale token when the refresh throws", async () => {
+    let seenToken: string | null = null
+    registerLimitsSource(
+      "stub:anthropic",
+      {
+        id: "stub:anthropic",
+        key: "anthropic",
+        matches: (q) => q.provider === "anthropic",
+        fetch: async (ctx) => {
+          seenToken = ctx.token
+          return {
+            provider: "anthropic",
+            accountId: ctx.accountId,
+            fetchedAt: ctx.now,
+            meters: [{ id: "session", kind: "window", usedPct: 2, status: "ok" }],
+          }
+        },
+      },
+      { pluginId: "stub" }
+    )
+    const snap = await queryAccountLimits("anthropic", "acc-1", {
+      getAccount: async () => anthropicAccount(),
+      listPresets: async () => [],
+      authedGet: async () => "",
+      refreshAnthropicToken: async () => {
+        throw new Error("net")
+      },
+      isCredentialFresh: () => false,
+    })
+    expect(seenToken).toBe("sk-ant")
+    expect(snap?.meters[0].usedPct).toBe(2)
+  })
+
+  it("exposes a working ctx.refreshToken callback that returns the refreshed token", async () => {
+    let seen: string | null | undefined
+    registerLimitsSource(
+      "stub:anthropic",
+      {
+        id: "stub:anthropic",
+        key: "anthropic",
+        matches: (q) => q.provider === "anthropic",
+        fetch: async (ctx) => {
+          seen = await ctx.refreshToken?.()
+          return {
+            provider: "anthropic",
+            accountId: ctx.accountId,
+            fetchedAt: ctx.now,
+            meters: [{ id: "session", kind: "window", usedPct: 1, status: "ok" }],
+          }
+        },
+      },
+      { pluginId: "stub" }
+    )
+    await queryAccountLimits("anthropic", "acc-1", {
+      getAccount: async () => anthropicAccount(),
+      listPresets: async () => [],
+      authedGet: async () => "",
+      // Fresh so the proactive path is skipped; the callback drives the refresh.
+      isCredentialFresh: () => true,
+      refreshAnthropicToken: async () => "cb-token",
+    })
+    expect(seen).toBe("cb-token")
+  })
+
+  it("ctx.refreshToken returns null when the refresh throws", async () => {
+    let seen: string | null | undefined = "unset"
+    registerLimitsSource(
+      "stub:anthropic",
+      {
+        id: "stub:anthropic",
+        key: "anthropic",
+        matches: (q) => q.provider === "anthropic",
+        fetch: async (ctx) => {
+          seen = await ctx.refreshToken?.()
+          return {
+            provider: "anthropic",
+            accountId: ctx.accountId,
+            fetchedAt: ctx.now,
+            meters: [{ id: "session", kind: "window", usedPct: 1, status: "ok" }],
+          }
+        },
+      },
+      { pluginId: "stub" }
+    )
+    await queryAccountLimits("anthropic", "acc-1", {
+      getAccount: async () => anthropicAccount(),
+      listPresets: async () => [],
+      authedGet: async () => "",
+      isCredentialFresh: () => true,
+      refreshAnthropicToken: async () => {
+        throw new Error("boom")
+      },
+    })
+    expect(seen).toBeNull()
+  })
+
+  it("passes the preset's extraHeaders through to the source context", async () => {
+    let seenHeaders: Record<string, string> | undefined
+    registerLimitsSource(
+      "stub:codex",
+      {
+        id: "stub:codex",
+        key: "codex",
+        matches: (q) => q.provider === "codex",
+        fetch: async (ctx) => {
+          seenHeaders = ctx.presetHeaders
+          return {
+            provider: "codex",
+            accountId: ctx.accountId,
+            fetchedAt: ctx.now,
+            meters: [{ id: "session", kind: "window", usedPct: 1, status: "ok" }],
+          }
+        },
+      },
+      { pluginId: "stub" }
+    )
+    await queryAccountLimits("codex", "acc-2", {
+      getAccount: async () => codexRelayAccount(),
+      listPresets: async () => [
+        { ...moonshotPreset, extraHeaders: { "x-cognia-volc-ak": "AKID" } },
+      ],
+      authedGet: async () => "",
+    })
+    expect(seenHeaders).toEqual({ "x-cognia-volc-ak": "AKID" })
+  })
+
+  it("provides no refresh callback for non-anthropic providers", async () => {
+    let sawRefreshCb = true
+    registerLimitsSource(
+      "stub:codex",
+      {
+        id: "stub:codex",
+        key: "codex",
+        matches: (q) => q.provider === "codex",
+        fetch: async (ctx) => {
+          sawRefreshCb = typeof ctx.refreshToken === "function"
+          return {
+            provider: "codex",
+            accountId: ctx.accountId,
+            fetchedAt: ctx.now,
+            meters: [{ id: "session", kind: "window", usedPct: 3, status: "ok" }],
+          }
+        },
+      },
+      { pluginId: "stub" }
+    )
+    const refreshAnthropicToken = jest.fn(async () => "fresh-token")
+    await queryAccountLimits("codex", "acc-2", {
+      getAccount: async () => codexRelayAccount(),
+      listPresets: async () => [moonshotPreset],
+      authedGet: async () => "",
+      refreshAnthropicToken,
+    })
+    expect(sawRefreshCb).toBe(false)
+    expect(refreshAnthropicToken).not.toHaveBeenCalled()
+  })
+
   it("swallows a throwing source and falls through", async () => {
     registerLimitsSource(
       "stub:boom",

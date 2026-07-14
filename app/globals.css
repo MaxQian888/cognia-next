@@ -2,6 +2,35 @@
 @import "tw-animate-css";
 @import "katex/dist/katex.min.css";
 
+/*
+ * Bundled Powerline / Nerd Font for the integrated terminal (see
+ * components/terminal/terminal-instance.tsx). `local(...)` is listed first so a
+ * machine that already has MesloLGS NF installed (e.g. via `p10k configure`)
+ * uses its own copy and never downloads the woff2; only machines without it
+ * fetch the bundled fallback. This is what lets oh-my-posh / powerlevel10k
+ * prompt glyphs render out of the box instead of showing tofu boxes.
+ * License / provenance: public/fonts/meslolgs-nf/LICENSE.md.
+ */
+@font-face {
+  font-family: "MesloLGS NF";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local("MesloLGS NF"),
+    local("MesloLGS NF Regular"),
+    url("/fonts/meslolgs-nf/MesloLGS-NF-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "MesloLGS NF";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src:
+    local("MesloLGS NF Bold"),
+    url("/fonts/meslolgs-nf/MesloLGS-NF-Bold.woff2") format("woff2");
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

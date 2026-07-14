@@ -8,6 +8,21 @@ describe("buildPresetTemplates", () => {
     }
   })
 
+  it("projects anthropic-native relays (cc-switch presets) with concrete base URLs", () => {
+    const anthropic = buildPresetTemplates("anthropic")
+    const relays = anthropic.filter((t) => t.templateId !== "custom")
+    expect(relays.length).toBeGreaterThan(0)
+    for (const t of relays) {
+      expect(t.baseUrl).toMatch(/^https?:\/\//)
+      expect(t.provider).toBe("anthropic")
+    }
+    // Representative cc-switch relays should surface as one-click templates.
+    expect(relays.some((t) => t.templateId === "deepseek-anthropic")).toBe(true)
+    expect(relays.some((t) => t.templateId === "glm-anthropic")).toBe(true)
+    // The official Anthropic entry has no base URL → never offered as a template.
+    expect(relays.some((t) => t.templateId === "anthropic")).toBe(false)
+  })
+
   it("projects codex (openai-compatible / openrouter) relays with concrete base URLs", () => {
     const codex = buildPresetTemplates("codex")
     const relays = codex.filter((t) => t.templateId !== "custom")

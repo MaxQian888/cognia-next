@@ -51,6 +51,7 @@ import {
   CircleUserIcon,
   ClipboardCheckIcon,
   KeyboardIcon,
+  RadarIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -70,6 +71,7 @@ export type SettingsSectionId =
   | "agent-teams"
   | "eval"
   | "hooks"
+  | "fleet"
   | "workspace-trust"
   | "slash-commands"
   | "tools"
@@ -214,6 +216,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "hooks",
     group: "ai",
     icon: WebhookIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "fleet",
+    labelKey: "fleet",
+    descriptionKey: "fleet",
+    group: "ai",
+    icon: RadarIcon,
     desktopOnly: true,
   },
   {
@@ -1104,6 +1114,24 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "回调",
     "触发",
     "生命周期",
+  ],
+  fleet: [
+    "fleet",
+    "agent fleet",
+    "monitor",
+    "island",
+    "overlay",
+    "claude code",
+    "codex",
+    "opencode",
+    "external agent",
+    "session history",
+    "舰队",
+    "监控",
+    "灵动岛",
+    "悬浮层",
+    "外部 Agent",
+    "会话历史",
   ],
   "workspace-trust": [
     "trust",

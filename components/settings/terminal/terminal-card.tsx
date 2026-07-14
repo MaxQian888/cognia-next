@@ -158,12 +158,13 @@ const RENDERERS: ReadonlyArray<"auto" | "webgl" | "canvas" | "dom"> = [
 ]
 
 /**
- * Recommended font stack for oh-my-posh / powerline prompts. The leading
- * Nerd Font carries the glyphs; the rest are plain-coding-font fallbacks the
- * machine is likely to already have. The user must install a Nerd Font for
- * the icons to render — we can only point the font-family at one.
+ * Recommended font stack for oh-my-posh / powerline prompts. Leads with the
+ * app-bundled "MesloLGS NF" (see the `@font-face` in globals.css) so the icon
+ * glyphs render without the user installing anything; the rest are fallbacks —
+ * CaskaydiaCove for machines that happen to have it, then plain coding fonts.
  */
-const NERD_FONT_STACK = '"CaskaydiaCove Nerd Font", "JetBrains Mono", "Cascadia Code", monospace'
+const NERD_FONT_STACK =
+  '"MesloLGS NF", "CaskaydiaCove Nerd Font", "JetBrains Mono", "Cascadia Code", monospace'
 
 const CURSOR_STYLES: ReadonlyArray<"block" | "bar" | "underline"> = ["block", "bar", "underline"]
 

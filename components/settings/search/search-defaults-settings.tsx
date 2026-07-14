@@ -43,7 +43,7 @@ const RECENCY_OPTIONS: { value: SearchRecency; labelKey: string }[] = [
 ]
 
 export function SearchDefaultsSettings() {
-  const td = useTranslations("searchSettings.defaults")
+  const td = useTranslations("searchDefaults")
 
   const settings = useSettingsStore((s) => s.settings)
   const setDefaultSearchType = useSettingsStore((s) => s.setDefaultSearchType)

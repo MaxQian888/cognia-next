@@ -4,6 +4,8 @@
 
 import { renderHook, act } from "@testing-library/react"
 import { useA2UIAppBuilder } from "./use-app-builder"
+import { getAppInstancesCache } from "./app-builder/persistence"
+import { globalEventEmitter, createUserAction } from "@/lib/a2ui/events"
 
 // Mock localStorage
 const mockLocalStorage: Record<string, string> = {}
@@ -956,6 +958,250 @@ describe("useA2UIAppBuilder", () => {
       expect(publishResult).not.toBeNull()
       expect(typeof publishResult!.valid).toBe("boolean")
       expect(Array.isArray(publishResult!.missing)).toBe(true)
+    })
+  })
+
+  describe("hydratePersistedApps (orphan recovery)", () => {
+    afterEach(() => {
+      // The instance cache is a module singleton — clear it so seeded
+      // instances don't leak into unrelated suites.
+      getAppInstancesCache().clear()
+    })
+
+    it("regenerates a template-backed app whose surface tree is missing", () => {
+      const cache = getAppInstancesCache()
+      cache.clear()
+      cache.set("app-1", {
+        id: "app-1",
+        templateId: "template-1",
+        name: "Calc",
+        createdAt: 1,
+        lastModified: 2,
+      })
+      mockSurfaces = {} // no renderable surface for app-1 → orphaned
+
+      const { result } = renderHook(() => useA2UIAppBuilder())
+
+      let recovered = 0
+      act(() => {
+        recovered = result.current.hydratePersistedApps()
+      })
+
+      expect(recovered).toBe(1)
+      expect(mockProcessMessages).toHaveBeenCalledWith([{ type: "createSurface" }])
+    })
+
+    it("skips apps that already have a renderable surface", () => {
+      const cache = getAppInstancesCache()
+      cache.clear()
+      cache.set("app-ready", {
+        id: "app-ready",
+        templateId: "template-1",
+        name: "Ready",
+        createdAt: 1,
+        lastModified: 2,
+      })
+      mockSurfaces = {
+        "app-ready": { ready: true, components: { root: {} }, dataModel: {} } as never,
+      }
+
+      const { result } = renderHook(() => useA2UIAppBuilder())
+
+      let recovered = 0
+      act(() => {
+        recovered = result.current.hydratePersistedApps()
+      })
+
+      expect(recovered).toBe(0)
+      expect(mockProcessMessages).not.toHaveBeenCalled()
+    })
+
+    it("skips custom apps whose template cannot be resolved", () => {
+      const cache = getAppInstancesCache()
+      cache.clear()
+      cache.set("app-custom", {
+        id: "app-custom",
+        templateId: "custom",
+        name: "Lost Custom App",
+        createdAt: 1,
+        lastModified: 2,
+      })
+      mockSurfaces = {}
+
+      const { result } = renderHook(() => useA2UIAppBuilder())
+
+      let recovered = 0
+      act(() => {
+        recovered = result.current.hydratePersistedApps()
+      })
+
+      expect(recovered).toBe(0)
+      expect(mockProcessMessages).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("wireBuiltInActions (emitter subscription)", () => {
+    afterEach(() => {
+      // The action emitter is a module singleton — drop any subscription left
+      // behind so it can't fire in unrelated suites.
+      globalEventEmitter.clear()
+    })
+
+    it("routes an emitted action through the built-in handler when opted in", () => {
+      mockSurfaces = {
+        "calc-1": {
+          components: { root: {} },
+          dataModel: { display: "5", waitingForOperand: false },
+        } as never,
+      }
+
+      const { unmount } = renderHook(() => useA2UIAppBuilder({ wireBuiltInActions: true }))
+
+      act(() => {
+        globalEventEmitter.emitAction(createUserAction("calc-1", "input_3", "btn-3"))
+      })
+
+      // input_3 appends "3" to the current display via setAppData → setDataValue
+      expect(mockSetDataValue).toHaveBeenCalledWith("calc-1", "/display", "53")
+      unmount()
+    })
+
+    it("handles an action exactly once when two builders both opt in", () => {
+      mockSurfaces = {
+        "calc-1": {
+          components: { root: {} },
+          dataModel: { display: "5", waitingForOperand: false },
+        } as never,
+      }
+
+      // Two concurrently-mounted opted-in builders (e.g. chat view + hub).
+      const a = renderHook(() => useA2UIAppBuilder({ wireBuiltInActions: true }))
+      const b = renderHook(() => useA2UIAppBuilder({ wireBuiltInActions: true }))
+
+      act(() => {
+        globalEventEmitter.emitAction(createUserAction("calc-1", "input_3", "btn-3"))
+      })
+
+      // Single module-level emitter listener → handled once, not twice.
+      expect(mockSetDataValue).toHaveBeenCalledTimes(1)
+      a.unmount()
+      b.unmount()
+    })
+
+    it("does NOT handle actions when the flag is off (avoids double-dispatch)", () => {
+      mockSurfaces = {
+        "calc-1": {
+          components: { root: {} },
+          dataModel: { display: "5", waitingForOperand: false },
+        } as never,
+      }
+
+      const { unmount } = renderHook(() => useA2UIAppBuilder({}))
+
+      act(() => {
+        globalEventEmitter.emitAction(createUserAction("calc-1", "input_3", "btn-3"))
+      })
+
+      expect(mockSetDataValue).not.toHaveBeenCalled()
+      unmount()
+    })
+
+    it("escalates an unhandled action to onAction exactly once (no recursion)", () => {
+      const onAction = jest.fn()
+      const { unmount } = renderHook(() =>
+        useA2UIAppBuilder({ wireBuiltInActions: true, onAction })
+      )
+
+      act(() => {
+        globalEventEmitter.emitAction(createUserAction("s1", "totally_unknown_action", "c1"))
+      })
+
+      // The default branch escalates to onAction; a self-referential wiring
+      // would re-enter the handler unboundedly and blow the stack.
+      expect(onAction).toHaveBeenCalledTimes(1)
+      unmount()
+    })
+  })
+
+  describe("instance-mutating helpers (cache-backed)", () => {
+    beforeEach(() => {
+      const cache = getAppInstancesCache()
+      cache.clear()
+      cache.set("app-x", {
+        id: "app-x",
+        templateId: "template-1",
+        name: "Original",
+        createdAt: 100,
+        lastModified: 100,
+      })
+    })
+
+    afterEach(() => {
+      getAppInstancesCache().clear()
+    })
+
+    it("renameApp updates the instance name", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      act(() => result.current.renameApp("app-x", "Renamed"))
+      expect(result.current.getAppInstance("app-x")?.name).toBe("Renamed")
+    })
+
+    it("updateAppMetadata merges fields while preserving id/createdAt", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      act(() =>
+        result.current.updateAppMetadata("app-x", { description: "Desc", version: "2.0.0" })
+      )
+      const inst = result.current.getAppInstance("app-x")
+      expect(inst?.description).toBe("Desc")
+      expect(inst?.version).toBe("2.0.0")
+      expect(inst?.id).toBe("app-x")
+      expect(inst?.createdAt).toBe(100)
+    })
+
+    it("setAppThumbnail then clearAppThumbnail round-trips the thumbnail", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      act(() => result.current.setAppThumbnail("app-x", "data:image/png;base64,AAA"))
+      expect(result.current.getAppInstance("app-x")?.thumbnail).toBe("data:image/png;base64,AAA")
+      act(() => result.current.clearAppThumbnail("app-x"))
+      expect(result.current.getAppInstance("app-x")?.thumbnail).toBeUndefined()
+    })
+
+    it("incrementAppViews / incrementAppUses bump the stats counters", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      act(() => {
+        result.current.incrementAppViews("app-x")
+        result.current.incrementAppViews("app-x")
+        result.current.incrementAppUses("app-x")
+      })
+      const stats = result.current.getAppInstance("app-x")?.stats
+      expect(stats?.views).toBe(2)
+      expect(stats?.uses).toBe(1)
+    })
+
+    it("prepareForPublish reports every missing field for a bare instance", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      let check: { valid: boolean; missing: string[] } = { valid: true, missing: [] }
+      act(() => {
+        check = result.current.prepareForPublish("app-x")
+      })
+      expect(check.valid).toBe(false)
+      // description, thumbnail, category, and version are all absent here
+      expect(check.missing.length).toBeGreaterThanOrEqual(4)
+    })
+
+    it("setAppData bumps lastModified on the backing instance", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      act(() => result.current.setAppData("app-x", "/value", 42))
+      expect(mockSetDataValue).toHaveBeenCalledWith("app-x", "/value", 42)
+      expect(result.current.getAppInstance("app-x")?.lastModified).toBeGreaterThan(100)
+    })
+
+    it("resetAppData replays the template's data model for a template-backed app", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      act(() => result.current.resetAppData("app-x"))
+      expect(mockProcessMessages).toHaveBeenCalledWith([
+        expect.objectContaining({ type: "dataModelUpdate", surfaceId: "app-x", merge: false }),
+      ])
     })
   })
 })

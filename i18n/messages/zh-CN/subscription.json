@@ -319,6 +319,7 @@
     "fetchedAt": "更新于 {time}",
     "meter": {
       "credit": "余额",
+      "monthly": "本月",
       "overage": "按量付费超额",
       "session": "当前会话",
       "weekly": "本周（所有模型）",

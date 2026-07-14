@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { BrowserNavigated, BrowserSelection, ElementRect } from "@/lib/browser/protocol"
@@ -25,9 +25,15 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => mockTauri }))
 jest.mock("@/lib/tauri/opener", () => ({
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
 }))
+let mockOnRectChange: ((r: ElementRect) => void) | undefined
+jest.mock("@/lib/browser/pane-rect", () => ({ setActivePaneRect: jest.fn() }))
 jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
-  useBrowserPaneWebview: (_ref: unknown, opts: { visible?: boolean }) => {
+  useBrowserPaneWebview: (
+    _ref: unknown,
+    opts: { visible?: boolean; onRectChange?: (r: ElementRect) => void }
+  ) => {
     mockWebviewVisible = opts?.visible
+    mockOnRectChange = opts?.onRectChange
     return { getRect: () => mockRect, setVisible: jest.fn() }
   },
 }))
@@ -56,6 +62,8 @@ jest.mock("@/lib/browser/client", () => ({
     embedForward: jest.fn().mockResolvedValue(undefined),
     embedNavigate: jest.fn().mockResolvedValue(undefined),
     embedSetSelectMode: jest.fn().mockResolvedValue(undefined),
+    embedClearSelection: jest.fn().mockResolvedValue(undefined),
+    embedSetPanelLabels: jest.fn().mockResolvedValue(undefined),
   },
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
@@ -106,6 +114,8 @@ beforeEach(() => {
   ;(browserClient.embedBack as jest.Mock).mockClear()
   ;(browserClient.embedForward as jest.Mock).mockClear()
   ;(browserClient.embedNavigate as jest.Mock).mockClear()
+  ;(browserClient.embedClearSelection as jest.Mock).mockClear()
+  ;(browserClient.embedSetPanelLabels as jest.Mock).mockClear()
   ;(toast.success as jest.Mock).mockClear()
   ;(toast.error as jest.Mock).mockClear()
 })
@@ -255,6 +265,26 @@ it("sends a selection comment to chat and clears on success", async () => {
   )
   expect(toast.success).toHaveBeenCalled()
   expect(mockClearSelection).toHaveBeenCalled()
+  // The in-page overlay panel is torn down on the page side too.
+  expect(browserClient.embedClearSelection).toHaveBeenCalled()
+})
+
+it("shows the owning component name in the identity line when present", () => {
+  mockSelection = { ...SELECTION, componentName: "SubmitButton" }
+  renderPane(<BrowserPreviewPane />)
+  expect(screen.getByText("<SubmitButton>")).toBeInTheDocument()
+  expect(screen.queryByText("#root > button")).not.toBeInTheDocument()
+})
+
+it("pushes localized info-panel labels once a URL is committed", async () => {
+  renderPane(<BrowserPreviewPane />)
+  commitUrl("localhost:3000")
+  await waitFor(() =>
+    expect(browserClient.embedSetPanelLabels).toHaveBeenCalledWith({
+      details: "Details",
+      collapse: "Collapse",
+    })
+  )
 })
 
 it("sends the comment via Ctrl+Enter", async () => {
@@ -271,6 +301,7 @@ it("dismisses the comment box via Escape", () => {
   renderPane(<BrowserPreviewPane />)
   fireEvent.keyDown(screen.getByPlaceholderText(/Describe the change/i), { key: "Escape" })
   expect(mockClearSelection).toHaveBeenCalled()
+  expect(browserClient.embedClearSelection).toHaveBeenCalled()
 })
 
 it("labels the toggle as cancel while select mode is active", () => {
@@ -304,6 +335,7 @@ it("dismisses the comment box via the cancel button", () => {
   renderPane(<BrowserPreviewPane />)
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
   expect(mockClearSelection).toHaveBeenCalled()
+  expect(browserClient.embedClearSelection).toHaveBeenCalled()
 })
 
 it("surfaces an error toast when the send throws", async () => {
@@ -349,6 +381,30 @@ it("keeps the native webview hidden while a modal / off-screen state covers the 
   commitUrl("localhost:3000")
   // Region not visible → webview parked so the overlay isn't blocked (no freeze).
   expect(mockWebviewVisible).toBe(false)
+})
+
+it("publishes the pane rect through the callback only after a URL is committed", () => {
+  const { setActivePaneRect } = jest.requireMock("@/lib/browser/pane-rect") as {
+    setActivePaneRect: jest.Mock
+  }
+  renderPane(<BrowserPreviewPane />)
+  setActivePaneRect.mockClear()
+  // No committed URL yet → the per-frame rect callback is a no-op.
+  act(() => mockOnRectChange?.({ x: 1, y: 1, width: 2, height: 2 }))
+  expect(setActivePaneRect).not.toHaveBeenCalled()
+  // After a commit it publishes the reserved-region rect for the capture path.
+  commitUrl("localhost:3000")
+  setActivePaneRect.mockClear()
+  act(() => mockOnRectChange?.({ x: 5, y: 6, width: 7, height: 8 }))
+  expect(setActivePaneRect).toHaveBeenCalledWith({ x: 5, y: 6, width: 7, height: 8 })
+})
+
+it("shows the raw address in the loading host when the URL can't be parsed", () => {
+  mockNavigated = { paneId: "browser-embed", url: "http://[bad" }
+  renderPane(<BrowserPreviewPane />)
+  commitUrl("localhost:3000")
+  // hostOf() falls back to the raw string rather than throwing.
+  expect(screen.getByText("Loading http://[bad…")).toBeInTheDocument()
 })
 
 it("begins a load on commit, reload, back and forward", () => {

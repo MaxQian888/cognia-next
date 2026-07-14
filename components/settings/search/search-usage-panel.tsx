@@ -17,10 +17,7 @@ import { createLogger } from "@cognia/logging"
 const log = createLogger("settings.search.usage")
 
 export function SearchUsagePanel() {
-  const tu = useTranslations("searchSettings.usage")
-  // Live top-level namespace (i18n/messages/*/searchUsage.json) — the dotted
-  // "searchSettings.usage" namespace above predates the split-source layout.
-  const tUsageNs = useTranslations("searchUsage")
+  const tu = useTranslations("searchUsage")
   const stats = useSettingsStore(
     (s) => s.settings?.searchUsageStats ?? createDefaultSearchUsageStats()
   )
@@ -132,7 +129,7 @@ export function SearchUsagePanel() {
                         </Badge>
                         {errors > 0 && (
                           <Badge variant="destructive" className="text-[10px] px-1 py-0">
-                            {tUsageNs("errCount", { count: errors })}
+                            {tu("errCount", { count: errors })}
                           </Badge>
                         )}
                       </div>

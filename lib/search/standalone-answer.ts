@@ -51,6 +51,7 @@ export async function runStandaloneSearchAnswer(
       return {
         providerSettings: settings?.searchProviders,
         maxResults: settings?.searchMaxResults,
+        maxRetries: settings?.searchMaxRetries,
       }
     },
     resolveModel: () => {

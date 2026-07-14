@@ -971,6 +971,18 @@
       "newFile": "New File",
       "newFolder": "New Folder",
       "noWorkingDir": "This team has no working directory set.",
+      "proIde": {
+        "disabledTooltip": "Not available on this platform — use your local VS Code instead.",
+        "downloading": "Downloading VS Code… {percent}%",
+        "errorTitle": "Couldn't start VS Code",
+        "retry": "Retry",
+        "starting": "Starting VS Code…",
+        "switchLabel": "Editor engine",
+        "toggleMonaco": "Monaco",
+        "toggleVsCode": "VS Code",
+        "unsupportedDesc": "code-server has no build for your operating system. Use your local VS Code instead.",
+        "unsupportedTitle": "Pro IDE unavailable here"
+      },
       "refresh": "Refresh",
       "rename": "Rename",
       "rootLabel": "Project root",
@@ -1986,6 +1998,10 @@
     "loading": {
       "label": "Loading page",
       "title": "Loading {host}…"
+    },
+    "panel": {
+      "collapse": "Collapse",
+      "details": "Details"
     },
     "screenshot": {
       "failed": "Could not capture the preview",
@@ -5517,6 +5533,11 @@
       "request": "Permission: {tool}",
       "requestGeneric": "Permission requested"
     },
+    "question": {
+      "expired": "Answered in terminal",
+      "submit": "Submit",
+      "submitted": "Sent"
+    },
     "reply": {
       "open": "Reply",
       "placeholder": "Send a message…",
@@ -7440,6 +7461,8 @@
       "edit": "Edit {name}",
       "enableSwitch": "Enable {name} in cognia",
       "failed": "failed",
+      "logs": "View {name} logs",
+      "logsTooltip": "View logs",
       "test": "Test {name}",
       "testDesktopOnly": "Desktop only",
       "testTooltip": "Test connection (10s timeout)",
@@ -11942,6 +11965,8 @@
       "installing": "Installing…",
       "license": "License",
       "optional": "Optional permissions",
+      "rawManifest": "View raw manifest",
+      "rawManifestTitle": "Raw manifest",
       "readme": "README",
       "repository": "Repository",
       "uninstall": "Uninstall",
@@ -13017,6 +13042,7 @@
     "fireworks": "Fireworks AI",
     "fireworksDescription": "Ultra-fast compound AI",
     "fixNow": "Fix Now",
+    "followStepsToStart": "Follow these steps to get started",
     "free": "Free",
     "freeTier": "Free (local)",
     "getApiKey": "Get your API key from",
@@ -13325,11 +13351,20 @@
     "protocolOpenAIDesc": "OpenAI-compatible API (most common)",
     "protocolPluginDesc": "Provided by plugin {plugin}",
     "provider": "Provider",
+    "providerGroups": {
+      "advanced": "Advanced",
+      "advancedDesc": "Power-user & server runtimes",
+      "recommended": "Recommended",
+      "recommendedDesc": "Easiest to set up for most users",
+      "specialized": "Specialized",
+      "specializedDesc": "Purpose-built inference servers"
+    },
     "providerModels": "{provider} Models",
     "providerName": "Provider Name",
     "providerNamePlaceholder": "My Provider",
     "providerOff": "OFF",
     "providerOn": "ON",
+    "providerSetup": "{provider} Setup",
     "providersConfigured": "{count} providers configured",
     "providersSelected": "providers selected",
     "proxyServices": "Proxy",
@@ -13547,6 +13582,7 @@
     "serverUrl": "Server URL",
     "setAsDefault": "Set as Default",
     "setupChecklistTitle": "Setup Checklist",
+    "setupGuide": "Setup guide",
     "setupStepBaseUrl": "Configure endpoint",
     "setupStepCredential": "Add credentials",
     "setupStepDefaultModel": "Select default model",
@@ -14797,10 +14833,12 @@
   "searchSettings": {
     "active": "Active",
     "add": "Add",
+    "addBackupKey": "Add key",
     "addCustomSource": "Add",
     "addCustomSourceDesc": "Enter a name for the custom search source",
     "addCustomSourceTitle": "Add custom source",
     "apiKey": "API key",
+    "backupKeys": "Backup keys",
     "cancel": "Cancel",
     "configureProviderHint": "Configure at least one provider below",
     "connectionFailed": "Connection failed",
@@ -14827,10 +14865,28 @@
     "googleCx": "Programmable Search Engine ID (cx)",
     "googleCxHelp": "Required for Google Custom Search",
     "googleCxPlaceholder": "e.g. 012345678901234567890:abcdefg1234",
+    "hideKeys": "Hide keys",
     "higherPriority": "Higher priority",
     "invalidKeyFormat": "Invalid key format",
+    "keyPoolSize": "{count} keys in rotation",
     "lowerPriority": "Lower priority",
     "maxResults": "Max results",
+    "maxRetries": "Max retries",
+    "maxRetriesDesc": "Extra attempts per provider on a transient failure (network / rate-limit / server error) before falling back to the next provider.",
+    "nav": {
+      "basics": "Basics",
+      "basicsDesc": "Enable web search and choose a default provider",
+      "behavior": "Behavior",
+      "behaviorDesc": "Default search type, depth, and filters",
+      "diagnostics": "Diagnostics",
+      "diagnosticsDesc": "Usage statistics and provider comparison",
+      "performance": "Performance",
+      "performanceDesc": "Result caching and time-to-live",
+      "providers": "Providers",
+      "providersDesc": "API keys and per-provider configuration",
+      "safety": "Safety",
+      "safetyDesc": "Safe search and source verification"
+    },
     "noMatchingProviders": "No matching providers",
     "noProviders": "No providers configured",
     "pricingFreeCredits": "{credits} free •",
@@ -14839,12 +14895,20 @@
     "priority": "Priority",
     "providers": "Search providers",
     "providersDescription": "Configure API keys for each provider",
+    "removeKey": "Remove key",
     "researchSources": "Research sources",
     "researchSourcesDesc": "Default sources for deep research",
     "reset": "Reset",
+    "rotateKeys": "Rotate API keys",
+    "rotateKeysDesc": "Spread requests across a pool of keys; a rate-limited or rejected key is skipped automatically.",
+    "rotationStrategy": "Strategy",
     "selectProvider": "Select provider",
     "selected": "selected",
+    "showKeys": "Show keys",
     "sourceNamePlaceholder": "Source name",
+    "strategyLeastUsed": "Least used",
+    "strategyRandom": "Random",
+    "strategyRoundRobin": "Round-robin",
     "testConnection": "Test",
     "title": "Web search"
   },
@@ -18864,6 +18928,7 @@
       "discover": "Pin, reorder, or hide the Discover categories.",
       "eval": "Default judge model, scorers, quality gates, and cost guards for agent evaluations.",
       "externalBridge": "MCP server that exposes Cognia's wiki, RAG, and runtime entities to external coding agents (Claude Code, Cursor, Cline). Opt-in per scope.",
+      "fleet": "Monitor and control coding agents launched anywhere on this machine (Claude Code, Codex, OpenCode), the Dynamic-Island overlay, and recent-session history.",
       "gateway": "Local OpenAI- and Anthropic-compatible endpoint that lets external tools (Claude Code, any OpenAI client) borrow your providers, routing, and credentials.",
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
       "githubDelivery": "AI-driven PR review, Issue → PR loops, and Release automation for your GitHub repos.",
@@ -19239,6 +19304,64 @@
       "title": "Find a setting",
       "triggerAria": "Find a setting"
     },
+    "fleet": {
+      "claude": {
+        "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
+        "label": "Claude Code hooks"
+      },
+      "codex": {
+        "desc": "Point ~/.codex/config.toml's notify at a forwarder. Observe-only — one event per completed turn, no trust step.",
+        "label": "Codex notify"
+      },
+      "description": "Watch and control coding agents launched anywhere on this machine (terminals, editors) — not just ones started by Cognia.",
+      "error": "Fleet action failed: {detail}",
+      "history": {
+        "activeFor": "active {duration}",
+        "clear": "Clear",
+        "clearEnded": "Clear ended",
+        "count": "{count, plural, one {# session} other {# sessions}}",
+        "delete": "Remove from history",
+        "empty": "No sessions recorded yet.",
+        "endedAgo": "ended {ago} ago",
+        "filterAll": "All",
+        "filterAria": "Filter by agent",
+        "import": "Import…",
+        "ranFor": "ran {duration}",
+        "showLess": "Show fewer",
+        "showMore": "Show all {count}",
+        "title": "Recent sessions"
+      },
+      "island": {
+        "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
+        "label": "Island overlay",
+        "monitor": {
+          "label": "Show on display",
+          "option": "{name} ({width}×{height})",
+          "primary": "Primary display"
+        }
+      },
+      "monitor": {
+        "desc": "Local event ingress for external agent hooks. Runs on the companion server, loopback only.",
+        "label": "Fleet monitoring",
+        "running": "Listening on 127.0.0.1:{port}."
+      },
+      "opencode": {
+        "desc": "Install a plugin into ~/.config/opencode/plugin. Observe sessions and approve/deny permissions from the island.",
+        "label": "OpenCode plugin"
+      },
+      "saved": "Fleet settings updated.",
+      "status": {
+        "codexConflict": "Notify in use",
+        "codexUnavailable": "Codex not found",
+        "installed": "Installed",
+        "opencodeUnavailable": "OpenCode not found",
+        "partial": "Partial",
+        "stale": "Modified",
+        "unavailable": "Claude Code not found"
+      },
+      "summaryAria": "{count} integrations active",
+      "title": "Agent fleet monitor"
+    },
     "gateway": {
       "allowlist": "IP allowlist",
       "allowlistHelp": "Only these IPv4 addresses (CIDR) may connect. Defaults to loopback-only; widen it for LAN peers.",
@@ -19542,64 +19665,6 @@
       },
       "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
       "eventListLabel": "Events",
-      "fleet": {
-        "claude": {
-          "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
-          "label": "Claude Code hooks"
-        },
-        "codex": {
-          "desc": "Point ~/.codex/config.toml's notify at a forwarder. Observe-only — one event per completed turn, no trust step.",
-          "label": "Codex notify"
-        },
-        "description": "Watch and control coding agents launched anywhere on this machine (terminals, editors) — not just ones started by Cognia.",
-        "error": "Fleet action failed: {detail}",
-        "history": {
-          "activeFor": "active {duration}",
-          "clear": "Clear",
-          "clearEnded": "Clear ended",
-          "count": "{count, plural, one {# session} other {# sessions}}",
-          "delete": "Remove from history",
-          "empty": "No sessions recorded yet.",
-          "endedAgo": "ended {ago} ago",
-          "filterAll": "All",
-          "filterAria": "Filter by agent",
-          "import": "Import…",
-          "ranFor": "ran {duration}",
-          "showLess": "Show fewer",
-          "showMore": "Show all {count}",
-          "title": "Recent sessions"
-        },
-        "island": {
-          "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
-          "label": "Island overlay",
-          "monitor": {
-            "label": "Show on display",
-            "option": "{name} ({width}×{height})",
-            "primary": "Primary display"
-          }
-        },
-        "monitor": {
-          "desc": "Local event ingress for external agent hooks. Runs on the companion server, loopback only.",
-          "label": "Fleet monitoring",
-          "running": "Listening on 127.0.0.1:{port}."
-        },
-        "opencode": {
-          "desc": "Install a plugin into ~/.config/opencode/plugin. Observe sessions and approve/deny permissions from the island.",
-          "label": "OpenCode plugin"
-        },
-        "saved": "Fleet settings updated.",
-        "status": {
-          "codexConflict": "Notify in use",
-          "codexUnavailable": "Codex not found",
-          "installed": "Installed",
-          "opencodeUnavailable": "OpenCode not found",
-          "partial": "Partial",
-          "stale": "Modified",
-          "unavailable": "Claude Code not found"
-        },
-        "summaryAria": "{count} integrations active",
-        "title": "Agent fleet monitor"
-      },
       "group": {
         "addHandler": "Add handler",
         "emptyHandlers": "No handlers — add one below.",
@@ -20314,6 +20379,7 @@
       "agentRuntime": "Agent runtime",
       "ariaLabel": "Related Claude Code settings",
       "ccswitch": "CCSwitch",
+      "fleet": "Agent Fleet",
       "hooks": "Hooks",
       "mcp": "MCP servers",
       "sessions": "Sessions",
@@ -21213,6 +21279,7 @@
       "discover": "Discover",
       "eval": "Evaluation",
       "externalBridge": "External Bridge (MCP)",
+      "fleet": "Agent Fleet",
       "gateway": "Inbound Gateway",
       "general": "General",
       "githubDelivery": "GitHub Delivery",
@@ -21394,10 +21461,10 @@
       },
       "fontFamily": {
         "label": "Font family",
-        "nerdFontHelper": "oh-my-posh and powerline prompts need a Nerd Font for their icons. Install one (e.g. CaskaydiaCove Nerd Font), then set it here.",
+        "nerdFontHelper": "oh-my-posh and powerlevel10k prompts need a Nerd Font for their icons. The app ships MesloLGS NF, so they render out of the box — click below to select it, or type your own installed Nerd Font.",
         "pickerHint": "Pick from monospace fonts detected on this device.",
         "pickerLabel": "Detected fonts",
-        "useNerdFont": "Use recommended Nerd Font stack"
+        "useNerdFont": "Use bundled Nerd Font (MesloLGS NF)"
       },
       "fontSize": {
         "label": "Font size"
@@ -22936,6 +23003,7 @@
       "fetchedAt": "Updated {time}",
       "meter": {
         "credit": "Credit balance",
+        "monthly": "Current month",
         "overage": "Pay-as-you-go overage",
         "session": "Current session",
         "weekly": "Current week (all models)",

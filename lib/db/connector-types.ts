@@ -385,8 +385,9 @@ export interface AdapterInstanceRow {
     openId: string
     /**
      * Lark tenant key. Optional because the `/bot/v3/info` endpoint does
-     * not return it — the bus backfills this field from the first
-     * inbound event envelope's `tenant_key` header.
+     * not return it — the Lark adapter backfills this field from the first
+     * inbound event that carries a `tenant_key` (see
+     * `adapters/lark/index.ts:maybeBackfillTenantKey`).
      */
     tenantKey?: string
     /**

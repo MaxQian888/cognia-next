@@ -9,3 +9,4 @@
 pub use cognia_subscription::*;
 
 pub mod commands;
+pub mod volcengine;

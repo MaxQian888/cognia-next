@@ -176,6 +176,8 @@ export interface WebSearchDeps {
   searchMaxResults?: number
   /** Whether to fall back to other providers on failure. Default true. */
   searchFallbackEnabled?: boolean
+  /** Max extra attempts per provider on a transient failure (network / 429 / 5xx). Default 2. */
+  searchMaxRetries?: number
   /**
    * The user's configured default search options (type, depth, recency,
    * country, language, include/exclude domains, includeAnswer). Forwarded to
@@ -646,6 +648,7 @@ export async function webSearch(args: WebSearchArgs, deps: WebSearchDeps = {}): 
       ...(args.provider ? { provider: args.provider } : {}),
       ...searchOptions,
       fallbackEnabled: deps.searchFallbackEnabled ?? true,
+      maxRetries: deps.searchMaxRetries,
     })
     if (deps.searchCache) deps.searchCache.set(query, response, args.provider, searchOptions)
     return shapeSearchResponse(query, response, deps.sourceVerification)
