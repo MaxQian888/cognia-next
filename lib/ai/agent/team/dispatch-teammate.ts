@@ -245,7 +245,8 @@ async function runExternalBacked(
   systemPrompt: string,
   signal: AbortSignal,
   onCaptureEvent?: (event: CaptureStreamEvent) => void,
-  cwdOverride?: string
+  cwdOverride?: string,
+  model?: string
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const [
     { getExternalAgentManager },
@@ -275,6 +276,10 @@ async function runExternalBacked(
 
   const result = await manager.execute(agentId, prompt, {
     systemPrompt,
+    // The sidecar and text channels both honour the resolved model; the
+    // external channel used to drop it on the floor, so an external teammate
+    // silently ran on whatever its CLI's own config selected.
+    ...(model ? { model } : {}),
     ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
     ...(merged.allowedTools ? { allowedTools: merged.allowedTools } : {}),
     ...((cwdOverride ?? teamCtx.team.config?.workingDir)
@@ -539,7 +544,10 @@ export async function dispatchTeammate(
         systemPrompt,
         combinedSignal,
         streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined,
-        workspace?.path
+        workspace?.path,
+        // The teammate's own model wins over the run-level hint, mirroring the
+        // sidecar path (where teammateToCharacter applies config.model first).
+        teammate.config?.model ?? modelHint
       )
     } else if (channel === "sidecar") {
       turn = await runToolEnabled(

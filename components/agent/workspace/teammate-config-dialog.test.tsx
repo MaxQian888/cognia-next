@@ -51,6 +51,11 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
     selector({ updateTeammate: updateTeammateMock }),
 }))
 
+const mockSettings: { settings: unknown } = { settings: null }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) => selector(mockSettings),
+}))
+
 import { TeammateConfigDialog } from "./teammate-config-dialog"
 import { listTwins } from "@/lib/db/twins"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
@@ -100,11 +105,94 @@ const teammate: AgentTeammate = {
   createdAt: new Date(),
 }
 
+const lead: AgentTeammate = { ...teammate, id: "lead-1", name: "Lead", role: "lead" }
+
 describe("TeammateConfigDialog", () => {
   beforeEach(() => {
     updateTeammateMock.mockReset()
     listTwinsMock.mockReset()
     listTwinsMock.mockReturnValue(TWINS)
+    mockSettings.settings = {
+      defaultProvider: "anthropic",
+      providerSettings: {
+        anthropic: { enabled: true, apiKey: "k" },
+        openai: { enabled: true, apiKey: "k" },
+        disabled_one: { enabled: false, apiKey: "k" },
+      },
+      customProviders: [{ id: "my-gateway", name: "GW", baseURL: "https://x/v1" }],
+    }
+  })
+
+  describe("lead provider selector", () => {
+    // The lead is never dispatched through a runtime — it runs its planning and
+    // review turns on a resolved provider — so it is the one member for which
+    // picking a provider is meaningful.
+    function getProviderTrigger() {
+      return screen.getByTestId("lead-provider-select")
+    }
+
+    it("offers the configured providers to a lead", async () => {
+      render(
+        <TeammateConfigDialog open={true} onOpenChange={() => {}} teammate={lead} team={team} />
+      )
+
+      fireEvent.click(getProviderTrigger())
+
+      expect(await screen.findByRole("option", { name: "anthropic" })).toBeInTheDocument()
+      expect(screen.getByRole("option", { name: "openai" })).toBeInTheDocument()
+      // Custom providers are configured providers too.
+      expect(screen.getByRole("option", { name: "my-gateway" })).toBeInTheDocument()
+      // A provider the user turned off cannot run the lead.
+      expect(screen.queryByRole("option", { name: "disabled_one" })).not.toBeInTheDocument()
+    })
+
+    it("persists the picked provider onto the lead's config", async () => {
+      render(
+        <TeammateConfigDialog open={true} onOpenChange={() => {}} teammate={lead} team={team} />
+      )
+
+      fireEvent.click(getProviderTrigger())
+      fireEvent.click(await screen.findByRole("option", { name: "openai" }))
+
+      expect(updateTeammateMock).toHaveBeenCalledWith(
+        "lead-1",
+        expect.objectContaining({ config: expect.objectContaining({ provider: "openai" }) })
+      )
+    })
+
+    it("clears the override back to the app default", async () => {
+      render(
+        <TeammateConfigDialog
+          open={true}
+          onOpenChange={() => {}}
+          teammate={{ ...lead, config: { provider: "openai" } }}
+          team={team}
+        />
+      )
+
+      fireEvent.click(getProviderTrigger())
+      fireEvent.click(await screen.findByRole("option", { name: "rosterSection.providerDefault" }))
+
+      expect(updateTeammateMock).toHaveBeenCalledWith(
+        "lead-1",
+        expect.objectContaining({ config: expect.objectContaining({ provider: undefined }) })
+      )
+    })
+
+    it("is not offered for a non-lead teammate", () => {
+      render(
+        <TeammateConfigDialog open={true} onOpenChange={() => {}} teammate={teammate} team={team} />
+      )
+      expect(screen.queryByTestId("lead-provider-select")).not.toBeInTheDocument()
+    })
+
+    it("renders for a lead even before settings have loaded", () => {
+      mockSettings.settings = null
+      render(
+        <TeammateConfigDialog open={true} onOpenChange={() => {}} teammate={lead} team={team} />
+      )
+      expect(screen.getByTestId("lead-provider-select")).toBeInTheDocument()
+    })
   })
 
   it("renders the dialog header keyed by teammate name", () => {

@@ -91,7 +91,8 @@ function makeTeammate(overrides: Partial<AgentTeammate> = {}): AgentTeammate {
 
 function makeCtx(
   teammate: AgentTeammate | null,
-  configOverrides: Partial<AgentTeam["config"]> = {}
+  configOverrides: Partial<AgentTeam["config"]> = {},
+  modelHint?: string
 ) {
   const pool = {
     claim: jest.fn(() => teammate),
@@ -129,7 +130,7 @@ function makeCtx(
     budget: { add: jest.fn() },
     notifier,
     concurrency: { get: () => 3 },
-    modelPref: { get: () => ({ modelHint: undefined }) },
+    modelPref: { get: () => ({ modelHint }) },
     storeWriter,
     resolvedCapabilities: new Map(),
     externalAgentInstances: new Map(),
@@ -344,6 +345,73 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     expect(runAndCaptureMock).not.toHaveBeenCalled()
     expect(executeAgentMock).not.toHaveBeenCalled()
     expect(pool.recordSuccess).toHaveBeenCalledWith("tm1")
+  })
+
+  it("passes the teammate's configured model to the external agent", async () => {
+    // Regression: runExternalBacked never received modelHint and never sent a
+    // model, so an external teammate silently ran on whatever its own CLI
+    // config selected — while the sidecar and text channels both honoured it.
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { ctx } = makeCtx(
+      makeTeammate({ config: { runtime: "codex-app-server", model: "gpt-5.6-sol" } })
+    )
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+
+    expect(externalExecuteMock).toHaveBeenCalledWith(
+      "agent-1",
+      "edit code",
+      expect.objectContaining({ model: "gpt-5.6-sol" })
+    )
+  })
+
+  it("falls back to the run's model hint when the teammate pins no model", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex" } }), {}, "gpt-5.6-codex")
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+
+    expect(externalExecuteMock).toHaveBeenCalledWith(
+      "agent-1",
+      "edit code",
+      expect.objectContaining({ model: "gpt-5.6-codex" })
+    )
+  })
+
+  it("prefers the teammate's model over the run's hint", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { ctx } = makeCtx(
+      makeTeammate({ config: { runtime: "codex", model: "gpt-5.6-sol" } }),
+      {},
+      "gpt-5.6-codex"
+    )
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+
+    expect(externalExecuteMock).toHaveBeenCalledWith(
+      "agent-1",
+      "edit code",
+      expect.objectContaining({ model: "gpt-5.6-sol" })
+    )
+  })
+
+  it("sends no model when neither the teammate nor the run picks one", async () => {
+    // The agent then keeps whatever its own config.toml selects.
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+
+    const opts = externalExecuteMock.mock.calls[0]?.[2] as Record<string, unknown>
+    expect(opts).not.toHaveProperty("model")
   })
 
   it("records a failure when the external agent returns success=false", async () => {

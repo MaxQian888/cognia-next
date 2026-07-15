@@ -1537,6 +1537,11 @@ export class ExternalAgentManager {
       // Per-agent Codex defaults (sandbox mode / reasoning effort / summary)
       // ride to the adapter through metadata — same channel as selectedModel.
       codexOptions: instance.config.codexOptions,
+      // The requested model rides the same channel the interactive model picker
+      // writes, which is the only one adapters read (e.g. the Codex app-server
+      // client lifts it into `thread/start` params.model). Callers used to pass
+      // a `model` that nothing consumed.
+      selectedModel: options?.model,
     } as Record<string, unknown>
     const metadata =
       Object.entries(metadataPayload).filter(([, value]) => value !== undefined).length > 0
@@ -1586,6 +1591,10 @@ export class ExternalAgentManager {
     let session = preferredSessionId
       ? (instance.sessions.get(preferredSessionId) ?? adapter.getSession?.(preferredSessionId))
       : undefined
+    // A cached session was created earlier, with an earlier `selectedModel`;
+    // unlike createSession/resumeSession it never sees `sessionOptions`, so a
+    // model requested now has to be applied to it explicitly (below).
+    const reusedFromCache = Boolean(session)
 
     if (!session && preferredSessionId) {
       const resumeSupport = this.getSessionExtensionSupport(adapter, instance)["session/resume"]
@@ -1691,8 +1700,40 @@ export class ExternalAgentManager {
       }
     }
 
+    if (reusedFromCache && options?.model) {
+      await this.applyModelToReusedSession(adapter, session, options.model)
+    }
+
     instance.sessions.set(session.id, session)
     return session
+  }
+
+  /**
+   * Switch an already-created session onto a newly requested model.
+   *
+   * Best-effort by design: an adapter with no model concept has nothing to
+   * switch, and a rejected model id should not kill an execution that can still
+   * run on the session's current model. Both cases are logged rather than
+   * thrown, matching how the rest of session resolution degrades.
+   */
+  private async applyModelToReusedSession(
+    adapter: ProtocolAdapter,
+    session: ExternalAgentSession,
+    model: string
+  ): Promise<void> {
+    const current = (session.metadata as Record<string, unknown> | undefined)?.selectedModel
+    if (current === model) return
+    if (!adapter.setSessionModel) return
+    try {
+      await adapter.setSessionModel(session.id, model)
+      session.metadata = { ...(session.metadata ?? {}), selectedModel: model }
+    } catch (error) {
+      externalAgentManagerLogger.warn("setSessionModel failed for a reused session", {
+        sessionId: session.id,
+        model,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   private resolveTraceSessionId(

@@ -1444,6 +1444,8 @@
       "description": "编辑该队友的身份、提示词、工具与插件能力。",
       "rosterSection": {
         "description": "存在于队员行而非预设配置上的字段。",
+        "provider": "服务商",
+        "providerDefault": "使用应用默认值",
         "runtime": "运行时",
         "specialization": "专长",
         "temperature": "温度（{value}）",

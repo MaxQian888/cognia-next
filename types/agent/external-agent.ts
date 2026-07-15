@@ -1832,6 +1832,18 @@ export interface ExternalAgentResult {
 export interface ExternalAgentExecutionOptions {
   /** Reuse an existing external agent session */
   sessionId?: string
+  /**
+   * Model id the external agent should run this execution on.
+   *
+   * Bridged to the adapter as `metadata.selectedModel` — the same channel the
+   * interactive model picker writes — so a new session starts on it and a
+   * reused session is switched onto it via `setSessionModel`. Best-effort:
+   * adapters with no model concept ignore it, and the id is passed through
+   * unvalidated (the agent rejects one it doesn't know).
+   *
+   * Omit to inherit whatever the agent's own configuration selects.
+   */
+  model?: string
   /** System prompt override */
   systemPrompt?: string
   /** Permission mode override */

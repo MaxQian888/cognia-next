@@ -91,8 +91,11 @@ class MockAdapter {
   async healthCheck() {
     return this._connectionStatus === "connected"
   }
+  /** The SessionCreateOptions of the most recent createSession call. */
+  lastSessionOptions?: Record<string, unknown>
   async createSession(opts?: unknown): Promise<ExternalAgentSession> {
     const id = `s_${this.sessions.size + 1}`
+    this.lastSessionOptions = opts as Record<string, unknown> | undefined
     const session: ExternalAgentSession = {
       id,
       agentId: "mock-agent",
@@ -101,7 +104,13 @@ class MockAdapter {
       lastActivityAt: new Date(),
       messages: [],
       permissionMode: "default",
-      metadata: opts as Record<string, unknown> | undefined,
+      // Mirror the real adapters: a session carries the metadata BAG it was
+      // created with (see the Codex client's buildSessionMetadata), not the
+      // whole SessionCreateOptions. Recording the options as metadata made
+      // `session.metadata.selectedModel` permanently undefined, which would
+      // hide a model that failed to reach the session. Options are captured
+      // separately above.
+      metadata: (opts as { metadata?: Record<string, unknown> } | undefined)?.metadata,
     }
     this.sessions.set(id, session)
     return session
@@ -468,6 +477,89 @@ describe("Session extensions: list/fork/resume", () => {
   })
 })
 
+describe("execute — model selection", () => {
+  // Regression: `ExternalAgentExecutionOptions` had no `model`, so callers that
+  // passed one (the plugin subagent dispatcher did) were silently dropped —
+  // spread properties bypass TypeScript's excess-property check, so it type-
+  // checked while doing nothing. The only channel adapters actually read is
+  // `metadata.selectedModel`, which `buildSessionOptions` never populated; its
+  // sole writer was the interactive picker, which nothing called.
+  async function connectedManager() {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    await m.connect("agent-1")
+    return m
+  }
+
+  it("bridges the requested model to the adapter as metadata.selectedModel", async () => {
+    const m = await connectedManager()
+    const createSession = jest.spyOn(currentMock, "createSession")
+
+    await m.execute("agent-1", "hi", { model: "gpt-5.6-sol" })
+
+    const opts = createSession.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> }
+    expect(opts.metadata?.selectedModel).toBe("gpt-5.6-sol")
+  })
+
+  it("omits selectedModel entirely when no model is requested", async () => {
+    // So the agent keeps whatever its own configuration selects.
+    const m = await connectedManager()
+    const createSession = jest.spyOn(currentMock, "createSession")
+
+    await m.execute("agent-1", "hi")
+
+    const opts = createSession.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> }
+    expect(opts.metadata?.selectedModel).toBeUndefined()
+  })
+
+  it("switches a reused session onto a newly requested model", async () => {
+    // A cached session never sees sessionOptions, so its model can only change
+    // through setSessionModel.
+    const m = await connectedManager()
+    const first = await m.execute("agent-1", "one", { model: "gpt-5.6-sol" })
+    currentMock.setSessionModelImpl.mockClear()
+
+    await m.execute("agent-1", "two", { sessionId: first.sessionId, model: "gpt-5.6-codex" })
+
+    expect(currentMock.setSessionModelImpl).toHaveBeenCalledWith(first.sessionId, "gpt-5.6-codex")
+  })
+
+  it("does not re-set the model when a reused session already runs it", async () => {
+    const m = await connectedManager()
+    const first = await m.execute("agent-1", "one", { model: "gpt-5.6-sol" })
+    currentMock.setSessionModelImpl.mockClear()
+
+    await m.execute("agent-1", "two", { sessionId: first.sessionId, model: "gpt-5.6-sol" })
+
+    expect(currentMock.setSessionModelImpl).not.toHaveBeenCalled()
+  })
+
+  it("leaves a reused session alone when no model is requested", async () => {
+    const m = await connectedManager()
+    const first = await m.execute("agent-1", "one", { model: "gpt-5.6-sol" })
+    currentMock.setSessionModelImpl.mockClear()
+
+    await m.execute("agent-1", "two", { sessionId: first.sessionId })
+
+    expect(currentMock.setSessionModelImpl).not.toHaveBeenCalled()
+  })
+
+  it("still executes when the adapter rejects the model switch", async () => {
+    // Best-effort: a rejected model id must not kill a run that can proceed on
+    // the session's current model.
+    const m = await connectedManager()
+    const first = await m.execute("agent-1", "one", { model: "gpt-5.6-sol" })
+    currentMock.setSessionModelImpl.mockRejectedValueOnce(new Error("unknown model"))
+
+    const result = await m.execute("agent-1", "two", {
+      sessionId: first.sessionId,
+      model: "bogus-model",
+    })
+
+    expect(result.success).toBe(true)
+  })
+})
+
 describe("Session lifecycle (createSession / closeSession / getSession)", () => {
   it("createSession works only when the adapter is connected", async () => {
     const m = freshManager()
@@ -506,11 +598,8 @@ describe("Session lifecycle (createSession / closeSession / getSession)", () => 
     )
     await m.execute("agent-1", "hello")
     const session = currentMock.getSessions()[0]
-    // The MockAdapter records the SessionCreateOptions it received as metadata.
-    const receivedOptions = session.metadata as {
-      metadata?: { codexOptions?: Record<string, unknown> }
-    }
-    expect(receivedOptions.metadata?.codexOptions).toEqual({
+    const metadata = session.metadata as { codexOptions?: Record<string, unknown> }
+    expect(metadata.codexOptions).toEqual({
       sandboxMode: "readOnly",
       defaultReasoningEffort: "high",
     })

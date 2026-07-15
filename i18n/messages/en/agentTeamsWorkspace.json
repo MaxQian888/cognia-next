@@ -785,6 +785,8 @@
     "description": "Edit identity, prompt, tools, and plugin capabilities for this teammate.",
     "rosterSection": {
       "description": "Fields that live on the teammate row, not on its preset config.",
+      "provider": "Provider",
+      "providerDefault": "Use the app default",
       "runtime": "Runtime",
       "specialization": "Specialization",
       "temperature": "Temperature ({value})",

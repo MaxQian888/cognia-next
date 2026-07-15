@@ -256,6 +256,23 @@ describe("dispatchSubagent — external backing (A2)", () => {
     expect(mockExecute).not.toHaveBeenCalled() // built-in executor never ran
   })
 
+  it("forwards the subagent's declared model to the external agent", async () => {
+    // Regression: this call already spread `def.model`, but
+    // ExternalAgentExecutionOptions had no `model` field, so it was dropped —
+    // silently, because TypeScript's excess-property check doesn't apply to
+    // spread members. The code read as if it worked and did nothing.
+    externalCreatePreset.mockReturnValue({ id: "ext-3", metadata: { preset: "codex-app-server" } })
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+
+    await dispatchSubagent({ ...externalDef, model: "gpt-5.6-sol" }, "build it", {})
+
+    expect(externalExecute).toHaveBeenCalledWith(
+      "ext-3",
+      "build it",
+      expect.objectContaining({ model: "gpt-5.6-sol" })
+    )
+  })
+
   it("forwards declared MCP servers into the external session", async () => {
     externalCreatePreset.mockReturnValue({ id: "ext-2", metadata: { preset: "claude-code" } })
     externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })

@@ -52,8 +52,10 @@ import {
   presetStateToTeammateConfig,
   teammateToPresetState,
 } from "@/lib/ai/agent/team/teammate-preset-adapter"
+import type { ProviderName } from "@cognia/provider-types/provider"
 import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { useSettingsStore } from "@/stores/settings"
 import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
 
 export interface TeammateConfigDialogProps {
@@ -62,6 +64,12 @@ export interface TeammateConfigDialogProps {
   teammate: AgentTeammate
   team: AgentTeam
 }
+
+/**
+ * Sentinel for the "inherit the app default provider" option (Radix reserves
+ * the empty string).
+ */
+const PROVIDER_DEFAULT_VALUE = "__default__"
 
 /** Sentinel for the "no twin" Select option (Radix reserves the empty string). */
 const TWIN_NONE_VALUE = "__none__"
@@ -74,6 +82,18 @@ export function TeammateConfigDialog({
 }: TeammateConfigDialogProps) {
   const t = useTranslations("agentTeamsWorkspace.teammateConfig")
   const tRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
+
+  // Provider ids the app actually has configured. Only meaningful for a lead:
+  // a lead is never dispatched through a runtime, it runs its planning/review
+  // turns on a resolved provider (see lib/ai/agent/team/lead-execution.ts).
+  const settings = useSettingsStore((s) => s.settings)
+  const providerOptions = useMemo(() => {
+    const builtIn = Object.entries(settings?.providerSettings ?? {})
+      .filter(([, entry]) => (entry as { enabled?: boolean } | undefined)?.enabled !== false)
+      .map(([id]) => id)
+    const custom = (settings?.customProviders ?? []).map((p) => p.id)
+    return [...new Set([...builtIn, ...custom])]
+  }, [settings])
 
   const skillsRaw = useLiveQuery(() => listSkills(), [])
   const mcpRaw = useLiveQuery(() => listMcpServers(), [])
@@ -160,6 +180,37 @@ export function TeammateConfigDialog({
                         </SelectContent>
                       </Select>
                     </div>
+                    {teammate.role === "lead" && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">{t("rosterSection.provider")}</Label>
+                        <Select
+                          value={teammate.config.provider ?? PROVIDER_DEFAULT_VALUE}
+                          onValueChange={(v) => {
+                            updateTeammate(teammate.id, {
+                              config: {
+                                ...teammate.config,
+                                provider:
+                                  v === PROVIDER_DEFAULT_VALUE ? undefined : (v as ProviderName),
+                              },
+                            })
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs" data-testid="lead-provider-select">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={PROVIDER_DEFAULT_VALUE}>
+                              {t("rosterSection.providerDefault")}
+                            </SelectItem>
+                            {providerOptions.map((id) => (
+                              <SelectItem key={id} value={id}>
+                                {id}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     <div className="space-y-1">
                       <Label className="text-xs">{t("rosterSection.specialization")}</Label>
                       <Input
