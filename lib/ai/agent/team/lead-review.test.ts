@@ -121,6 +121,40 @@ describe("buildLeadReviewPrompt", () => {
     expect(prompt.length).toBeLessThan(20000)
   })
 
+  it("omits the expected-output line when the task declares none", () => {
+    const { expectedOutput: _drop, ...bare } = task
+    const prompt = buildLeadReviewPrompt({
+      task: bare,
+      workerOutput: "done",
+      evidence: commitEvidence,
+      revision: 0,
+    })
+    expect(prompt).not.toContain("Expected output:")
+  })
+
+  it("survives a revision round with no recorded feedback", () => {
+    // Defensive: the loop always passes its own previous feedback, but a
+    // verdict with an empty feedback string must not render "undefined".
+    const prompt = buildLeadReviewPrompt({
+      task,
+      workerOutput: "fixed",
+      evidence: commitEvidence,
+      revision: 1,
+    })
+    expect(prompt).toContain("(none recorded)")
+    expect(prompt).not.toContain("undefined")
+  })
+
+  it("renders an evidence block with no diff text without printing undefined", () => {
+    const prompt = buildLeadReviewPrompt({
+      task,
+      workerOutput: "done",
+      evidence: { kind: "commit", truncated: false, files: [] },
+      revision: 0,
+    })
+    expect(prompt).not.toContain("undefined")
+  })
+
   it("labels shared-working-dir evidence as uncommitted", () => {
     const prompt = buildLeadReviewPrompt({
       task,

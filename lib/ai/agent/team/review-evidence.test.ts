@@ -135,6 +135,21 @@ describe("buildReviewEvidence — worktree branch (preferred)", () => {
     })
     expect(ev.kind).toBe("text")
   })
+
+  it("falls back to text when every changed file yields an empty patch", async () => {
+    // e.g. a mode-only change: git names the file, the diff carries no hunks.
+    const git = makeGit({
+      diffRefsFiles: jest.fn(async () => [change("a.ts")]),
+      diffRefsFile: jest.fn(async () => ({ ...diff("a.ts", ""), hunks: [] }) as GitDiff),
+    })
+    const ev = await buildReviewEvidence({
+      workspace: handle,
+      repoPath: "/repo",
+      taskId: "t1",
+      git,
+    })
+    expect(ev.kind).toBe("text")
+  })
 })
 
 describe("buildReviewEvidence — shared working dir (isolation off)", () => {
@@ -166,6 +181,43 @@ describe("buildReviewEvidence — shared working dir (isolation off)", () => {
     const git = makeGit({ status: jest.fn(async () => status()) })
     const ev = await buildReviewEvidence({ workingDir: "/repo", taskId: "t1", git })
     expect(ev.kind).toBe("text")
+  })
+
+  it("falls back to text when git fails, rather than approving blind", async () => {
+    const git = makeGit({
+      status: jest.fn(async () => {
+        throw new Error("git bridge unavailable")
+      }),
+    })
+    const ev = await buildReviewEvidence({ workingDir: "/repo", taskId: "t1", git })
+    expect(ev.kind).toBe("text")
+  })
+
+  it("falls back to text when every changed file yields an empty patch", async () => {
+    const git = makeGit({
+      status: jest.fn(async () => status({ changes: [change("b.ts")] })),
+      diffFile: jest.fn(async () => ({ ...diff("b.ts", ""), hunks: [] }) as GitDiff),
+    })
+    const ev = await buildReviewEvidence({ workingDir: "/repo", taskId: "t1", git })
+    expect(ev.kind).toBe("text")
+  })
+})
+
+describe("buildReviewEvidence — default git wiring", () => {
+  // The seam defaults to the real `lib/git/commands` wrappers. Those are inert
+  // off-desktop (no git bridge), which is exactly why this degrades to text
+  // rather than throwing on web/mobile.
+  it("uses the real wrappers when no seam is injected", async () => {
+    const ev = await buildReviewEvidence({ workingDir: "/repo", taskId: "t1" })
+    expect(ev.kind).toBe("text")
+  })
+
+  it("does not commit through the default seam when no allocator is supplied", async () => {
+    // REAL_GIT.commit is a deliberate no-op: only the allocator owns a worktree
+    // handle, so without it there is nothing to commit and nothing to diff.
+    const ev = await buildReviewEvidence({ workspace: handle, repoPath: "/repo", taskId: "t1" })
+    expect(ev.kind).toBe("text")
+    expect(ev.commitSha).toBeUndefined()
   })
 })
 

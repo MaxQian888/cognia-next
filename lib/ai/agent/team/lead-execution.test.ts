@@ -128,6 +128,31 @@ describe("buildLeadExecutionConfig", () => {
       )
     })
 
+    it("sends no defaultProvider when the app has not chosen one", () => {
+      // executeAgent then resolves "any" over the configured providers rather
+      // than being pinned to a provider the user never picked.
+      const cfg = buildLeadExecutionConfig({
+        lead: makeLead(),
+        settings: makeSettings({ defaultProvider: undefined, defaultModel: undefined }),
+      })
+      expect(cfg).not.toHaveProperty("defaultProvider")
+      expect(cfg).not.toHaveProperty("model")
+    })
+
+    it("omits providerSettings entirely when only custom providers exist", () => {
+      const cfg = buildLeadExecutionConfig({
+        lead: makeLead(),
+        settings: makeSettings({
+          providerSettings: undefined,
+          customProviders: [
+            { id: "gw", name: "GW", baseURL: "https://x/v1" },
+          ] as unknown as AppSettings["customProviders"],
+        }),
+      })
+      expect(cfg).not.toHaveProperty("providerSettings")
+      expect(cfg.customProviders).toHaveLength(1)
+    })
+
     it("counts a custom provider as configured", () => {
       const cfg = buildLeadExecutionConfig({
         lead: makeLead(),
