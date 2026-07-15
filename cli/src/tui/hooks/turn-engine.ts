@@ -15,6 +15,7 @@ import { classifyError } from "../format/error-classify"
 import { formatActiveSkillsNotice } from "../runtime/active-skills"
 import { formatAttachmentNotice } from "../runtime/attachment-notice"
 import type { AttachmentSummary } from "../../agent/session-runner"
+import type { CliDbSnapshotError } from "../../db/bootstrap"
 import type { PermissionResponder } from "../../agent/permission-gate"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { TuiAction } from "../state/types"
@@ -29,6 +30,7 @@ export interface TurnSession {
       onActiveSkills?: (skillIds: string[]) => void
       onAttachments?: (summary: AttachmentSummary) => void
       onTwinNotice?: (message: string) => void
+      onDatabaseError?: (error: CliDbSnapshotError) => void
       signal?: AbortSignal
       timeoutMs?: number
     }
@@ -194,6 +196,10 @@ export async function runTurn(
   opts: RunTurnOptions
 ): Promise<{ ok: boolean; result?: RunAndCaptureResult; recoverable?: boolean }> {
   opts.dispatch({ type: "TURN_START", prompt: opts.prompt })
+  // An unsafe-snapshot report arrives mid-turn, but ending the turn on it would
+  // discard a response the user already earned — the db failure is orthogonal to
+  // the reply. Hold it and append a permanent error cell once the turn commits.
+  let databaseError: CliDbSnapshotError | null = null
   try {
     const result = await opts.session.send(opts.prompt, {
       gate: opts.gate,
@@ -215,10 +221,22 @@ export async function runTurn(
       onTwinNotice: (message) => {
         opts.dispatch({ type: "NOTICE", message })
       },
+      onDatabaseError: (error) => {
+        databaseError = error
+      },
       signal: opts.signal,
       timeoutMs: opts.timeoutMs,
     })
     opts.dispatch({ type: "TURN_COMMIT", result })
+    // A NOTICE would scroll away; this one must persist — it is the only thing
+    // telling the user their data was preserved rather than lost.
+    if (databaseError) {
+      opts.dispatch({
+        type: "TURN_ERROR",
+        title: "Database restore failed",
+        message: (databaseError as CliDbSnapshotError).message,
+      })
+    }
     opts.hooks?.onStop(true)
     return { ok: true, result }
   } catch (err) {

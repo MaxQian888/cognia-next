@@ -18,6 +18,7 @@ import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import { getCliSubagentContext } from "./subagent-dispatch"
 import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 import type { AgentSummary } from "./discover-agents"
+import { CliDbSnapshotError } from "../db/bootstrap"
 
 const subagent = (id: string): AgentSummary => ({
   id,
@@ -616,6 +617,7 @@ describe("createAgentSession", () => {
     const resolveOptions = jest.fn(
       async (..._args: unknown[]) => ({ provider: "anthropic" }) as SendOptions
     )
+    const onDatabaseError = jest.fn()
     const session = createAgentSession({
       config: cfg(),
       home: HOME,
@@ -629,9 +631,50 @@ describe("createAgentSession", () => {
       resolveOptions,
       capture: jest.fn(async () => result("ok")),
     })
-    const r = await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const r = await session.send("hi", {
+      gate: createPermissionGate({ yes: true }),
+      onDatabaseError,
+    })
     expect(r.text).toBe("ok")
+    expect(onDatabaseError).not.toHaveBeenCalled()
     // Options resolved with NO skills (the failing db forced a degrade).
+    const ctx = resolveOptions.mock.calls[0][0] as { ephemeralSkillIds?: string[] }
+    expect(ctx.ephemeralSkillIds ?? []).toEqual([])
+  })
+
+  it("reports an unsafe snapshot and still runs without skills", async () => {
+    const error = new CliDbSnapshotError(
+      "Database snapshot is corrupt (invalid JSON). It was preserved at /home/u/.cognia/db.json.corrupt-1; no data was overwritten.",
+      "/home/u/.cognia/db.json",
+      "/home/u/.cognia/db.json.corrupt-1"
+    )
+    const resolveOptions = jest.fn(
+      async (..._args: unknown[]) => ({ provider: "anthropic" }) as SendOptions
+    )
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      resolveSkillIds: () => ["skill-a"],
+      ensureDb: async () => {
+        throw error
+      },
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions,
+      capture: jest.fn(async () => result("ok")),
+    })
+    const onDatabaseError = jest.fn()
+
+    const r = await session.send("hi", {
+      gate: createPermissionGate({ yes: true }),
+      onDatabaseError,
+    })
+
+    expect(r.text).toBe("ok")
+    expect(onDatabaseError).toHaveBeenCalledWith(error)
     const ctx = resolveOptions.mock.calls[0][0] as { ephemeralSkillIds?: string[] }
     expect(ctx.ephemeralSkillIds ?? []).toEqual([])
   })

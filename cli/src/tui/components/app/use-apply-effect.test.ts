@@ -11,6 +11,12 @@ import { resolveNotices, DEFAULT_RESOLVED_CONFIG } from "../../../config/schema"
 import type { ResolvedConfig } from "../../../config/schema"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
+import { runRuntimeRequest } from "../../runtime"
+import { CliDbSnapshotError } from "../../../db/bootstrap"
+
+jest.mock("../../runtime", () => ({ runRuntimeRequest: jest.fn(() => Promise.resolve()) }))
+
+const runRuntimeRequestMock = jest.mocked(runRuntimeRequest)
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 const flush = () => new Promise((r) => setTimeout(r, 0))
@@ -72,6 +78,8 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
 const run = (deps: ApplyEffectDeps) => renderHook(() => useApplyEffect(deps)).result.current
 
 describe("useApplyEffect", () => {
+  beforeEach(() => runRuntimeRequestMock.mockResolvedValue())
+
   it("dispatches a NOTICE for the notice effect", () => {
     const deps = buildDeps()
     run(deps)({ kind: "notice", message: "hi" })
@@ -125,6 +133,26 @@ describe("useApplyEffect", () => {
     run(deps)({ kind: "runtime", runtime: { feature: "mcp", action: "toggle", arg: "x" } })
     await flush()
     expect(deps.agent.invalidate).toHaveBeenCalled()
+  })
+
+  it("surfaces an unsafe database snapshot as an error cell", async () => {
+    const deps = buildDeps()
+    runRuntimeRequestMock.mockRejectedValueOnce(
+      new CliDbSnapshotError(
+        "Database snapshot is corrupt (invalid JSON). It was preserved at /tmp/db.json.corrupt-1; no data was overwritten.",
+        "/tmp/db.json",
+        "/tmp/db.json.corrupt-1"
+      )
+    )
+
+    run(deps)({ kind: "runtime", runtime: { feature: "goal", action: "list" } })
+    await flush()
+
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "TURN_ERROR",
+      message: expect.stringContaining("preserved at /tmp/db.json.corrupt-1"),
+      title: "Database restore failed",
+    })
   })
 
   it("opens an overlay and refreshes the model picker for a model overlay", () => {

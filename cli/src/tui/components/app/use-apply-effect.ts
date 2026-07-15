@@ -11,6 +11,7 @@ import { detectEditor, editorInfo, type openInEditor } from "../../runtime/edito
 import { buildGitDiffDoc } from "../../runtime/git-diff"
 import { applyMouseMode, type ScreenStream } from "../../screen"
 import { runRuntimeRequest } from "../../runtime"
+import { CliDbSnapshotError } from "../../../db/bootstrap"
 import { VERSION } from "../../../version"
 import {
   setConfigValue,
@@ -682,12 +683,20 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             inflightTools: state.inflight.tools,
             mcpProbeCache,
           })
-            .catch((err: unknown) =>
+            .catch((err: unknown) => {
+              if (err instanceof CliDbSnapshotError) {
+                dispatch({
+                  type: "TURN_ERROR",
+                  message: err.message,
+                  title: "Database restore failed",
+                })
+                return
+              }
               dispatch({
                 type: "NOTICE",
                 message: `Runtime error: ${err instanceof Error ? err.message : String(err)}`,
               })
-            )
+            })
             .finally(() => {
               if (getRuntimeAbort() === controller) setRuntimeAbort(null)
               // Config-mutating features (MCP / skill / plugin toggles) must

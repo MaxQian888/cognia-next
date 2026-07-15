@@ -8,6 +8,7 @@ import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { SidecarBootstrap } from "../runtime/bootstrap"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import { CliDbSnapshotError } from "../db/bootstrap"
 
 const HOME = "/home/u/.cognia"
 
@@ -309,6 +310,7 @@ describe("runHeadlessTurn", () => {
   it("drops skills but still runs the turn when opening the db fails", async () => {
     const fb = fakeBoot()
     const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
+    const onDatabaseError = jest.fn()
     const res = await runHeadlessTurn({
       config: cfg(),
       prompt: "x",
@@ -322,11 +324,49 @@ describe("runHeadlessTurn", () => {
       ensureDb: async () => {
         throw new Error("db locked")
       },
+      onDatabaseError,
       transcriptFs: memFs().fsx,
     })
     expect(res.text).toBe("the reply")
+    expect(onDatabaseError).not.toHaveBeenCalled()
     const ctx = resolveOptions.mock.calls[0][0]
     expect(ctx.ephemeralSkillIds ?? []).toEqual([])
+  })
+
+  it("reports an unsafe snapshot to stderr and still runs without skills", async () => {
+    const fb = fakeBoot()
+    const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
+    const write = jest.spyOn(process.stderr, "write").mockImplementation(() => true)
+    const error = new CliDbSnapshotError(
+      "Database snapshot is corrupt (invalid JSON). It was preserved at /home/u/.cognia/db.json.corrupt-1; no data was overwritten.",
+      "/home/u/.cognia/db.json",
+      "/home/u/.cognia/db.json.corrupt-1"
+    )
+    try {
+      const res = await runHeadlessTurn({
+        config: cfg(),
+        prompt: "x",
+        sessionId: "s1",
+        gate: createPermissionGate({ yes: true }),
+        home: HOME,
+        bootstrap: async () => fb.boot,
+        resolveOptions,
+        capture: async () => captureResult(),
+        resolveSkillIds: () => ["skill_x"],
+        ensureDb: async () => {
+          throw error
+        },
+        transcriptFs: memFs().fsx,
+      })
+
+      expect(res.text).toBe("the reply")
+      expect(write).toHaveBeenCalledWith(expect.stringContaining(error.snapshotPath))
+      expect(write).toHaveBeenCalledWith(expect.stringContaining(error.preservedPath!))
+      const ctx = resolveOptions.mock.calls[0][0]
+      expect(ctx.ephemeralSkillIds ?? []).toEqual([])
+    } finally {
+      write.mockRestore()
+    }
   })
 
   it("does not touch the plugin runtime when pluginTools is off and no skills are enabled", async () => {

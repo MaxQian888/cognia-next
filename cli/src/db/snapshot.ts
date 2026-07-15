@@ -23,6 +23,23 @@ export interface DbSnapshot {
   tables: Record<string, unknown[]>
 }
 
+export type SnapshotParseResult =
+  { kind: "absent" } | { kind: "corrupt"; reason: string } | { kind: "valid"; snapshot: DbSnapshot }
+
+export class SnapshotVersionMismatchError extends Error {
+  readonly snapshotVersion: number
+  readonly databaseVersion: number
+
+  constructor(snapshotVersion: number, databaseVersion: number) {
+    super(
+      `Snapshot schema version ${snapshotVersion} does not match database schema version ${databaseVersion}.`
+    )
+    this.name = "SnapshotVersionMismatchError"
+    this.snapshotVersion = snapshotVersion
+    this.databaseVersion = databaseVersion
+  }
+}
+
 /** Dump every table to a snapshot keyed by table name. */
 export async function serializeDb(db: DbLike): Promise<DbSnapshot> {
   const tables: Record<string, unknown[]> = {}
@@ -38,6 +55,9 @@ export async function serializeDb(db: DbLike): Promise<DbSnapshot> {
  * schema are ignored.
  */
 export async function restoreSnapshot(db: DbLike, snapshot: DbSnapshot): Promise<void> {
+  if (snapshot.version !== db.verno) {
+    throw new SnapshotVersionMismatchError(snapshot.version, db.verno)
+  }
   for (const table of db.tables) {
     const rows = snapshot.tables[table.name]
     if (!rows) continue
@@ -46,20 +66,33 @@ export async function restoreSnapshot(db: DbLike, snapshot: DbSnapshot): Promise
   }
 }
 
-/** Parse snapshot JSON, returning null for missing/invalid/wrong-shape input. */
-export function parseSnapshot(text: string | null | undefined): DbSnapshot | null {
-  if (!text) return null
+/** Parse snapshot JSON while preserving the absent-versus-corrupt distinction. */
+export function parseSnapshot(text: string | null | undefined): SnapshotParseResult {
+  if (text === null || text === undefined) return { kind: "absent" }
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
   } catch {
-    return null
+    return { kind: "corrupt", reason: "invalid JSON" }
   }
-  if (!parsed || typeof parsed !== "object") return null
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { kind: "corrupt", reason: "snapshot root is not an object" }
+  }
   const obj = parsed as Record<string, unknown>
-  if (typeof obj.version !== "number") return null
-  if (!obj.tables || typeof obj.tables !== "object") return null
-  return { version: obj.version, tables: obj.tables as Record<string, unknown[]> }
+  if (typeof obj.version !== "number" || !Number.isFinite(obj.version)) {
+    return { kind: "corrupt", reason: "snapshot version is not a finite number" }
+  }
+  if (!obj.tables || typeof obj.tables !== "object" || Array.isArray(obj.tables)) {
+    return { kind: "corrupt", reason: "snapshot tables are not an object" }
+  }
+  const tables = obj.tables as Record<string, unknown>
+  if (Object.values(tables).some((rows) => !Array.isArray(rows))) {
+    return { kind: "corrupt", reason: "one or more snapshot tables are not arrays" }
+  }
+  return {
+    kind: "valid",
+    snapshot: { version: obj.version, tables: tables as Record<string, unknown[]> },
+  }
 }
 
 export function serializeSnapshot(snapshot: DbSnapshot): string {

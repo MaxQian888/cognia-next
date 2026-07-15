@@ -6,6 +6,7 @@ import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
 
 import { createGateController, runTurn, type TurnSession } from "./turn-engine"
 import type { TuiAction } from "../state/types"
+import { CliDbSnapshotError } from "../../db/bootstrap"
 
 const okResult = (overrides?: Partial<RunAndCaptureResult>): RunAndCaptureResult => ({
   text: "done",
@@ -235,6 +236,38 @@ describe("runTurn", () => {
       type: "NOTICE",
       message: "Active skills (2): web-search, my-skill",
     })
+  })
+
+  it("appends an unsafe-snapshot error cell after the successful response", async () => {
+    const actions: TuiAction[] = []
+    const error = new CliDbSnapshotError(
+      "Database snapshot is corrupt (invalid JSON). It was preserved at /home/u/.cognia/db.json.corrupt-1; no data was overwritten.",
+      "/home/u/.cognia/db.json",
+      "/home/u/.cognia/db.json.corrupt-1"
+    )
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        opts.onDatabaseError?.(error)
+        return okResult()
+      },
+    }
+
+    const out = await runTurn({
+      session,
+      prompt: "go",
+      dispatch: (action) => actions.push(action),
+      gate: async () => ({ decision: "allow" }),
+    })
+
+    expect(out.ok).toBe(true)
+    expect(actions.slice(-2)).toEqual([
+      { type: "TURN_COMMIT", result: okResult() },
+      {
+        type: "TURN_ERROR",
+        title: "Database restore failed",
+        message: error.message,
+      },
+    ])
   })
 
   it("suppresses the active-skills NOTICE by default (showActiveSkills off)", async () => {

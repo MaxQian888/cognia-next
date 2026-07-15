@@ -38,7 +38,7 @@ import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
 import { readEnabled } from "../skill/skill-state"
 import { bootstrapSidecar, type SidecarBootstrap } from "../runtime/bootstrap"
-import { ensureCliDb } from "../db/bootstrap"
+import { ensureCliDb, CliDbSnapshotError } from "../db/bootstrap"
 import { ensurePluginRuntime } from "../plugin/plugin-runtime"
 import { resolveDevPluginsDir } from "../plugin/dev-plugins"
 import { subscribePluginToolDispatch } from "../plugin/plugin-tool-dispatch"
@@ -179,6 +179,13 @@ export interface SendTurnOptions {
   /** Fired at most once per session when twin grounding is enabled but the
    * desktop bridge is unreachable — the turn proceeds without twin context. */
   onTwinNotice?: (message: string) => void
+  /** Fired at most once per session when the CLI-local db could not be opened
+   * because its snapshot was corrupt or schema-incompatible. The snapshot has
+   * been moved aside (see {@link CliDbSnapshotError.preservedPath}) and the turn
+   * proceeds without skills. Unlike a transient open failure this MUST reach the
+   * user: their sessions/goals/memory are intact on disk, but nothing else says
+   * so, and an unannounced empty db reads as silent data loss. */
+  onDatabaseError?: (error: CliDbSnapshotError) => void
   signal?: AbortSignal
   timeoutMs?: number
 }
@@ -292,6 +299,11 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   const twinEnabled = params.config.twin?.enabled === true && !!params.config.twin.characterId
   let twinStableInjected = false
   let twinNoticeShown = false
+  // Set when the db refused to open because its snapshot was unsafe; reported to
+  // the UI on the next send, once. Distinct from a transient open failure, which
+  // stays silent.
+  let databaseError: CliDbSnapshotError | null = null
+  let databaseErrorShown = false
 
   async function ensureReady(): Promise<SendOptions> {
     if (closed) throw new Error("agent session is closed")
@@ -310,11 +322,14 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       if (ephemeralSkillIds.length > 0) {
         try {
           await ensureDb()
-        } catch {
-          // Opening the CLI-local db failed (corrupt snapshot, locked file, …).
+        } catch (err) {
+          // Opening the CLI-local db failed (locked file, missing shim, …).
           // Degrade gracefully: resolve options WITHOUT skills rather than let
           // the build-options Dexie read crash the whole turn. Chat still works;
           // the skills just don't attach this session.
+          // An unsafe snapshot is different in kind: the user's data was moved
+          // aside, so degrading silently would read as it having vanished.
+          if (err instanceof CliDbSnapshotError) databaseError = err
           ephemeralSkillIds = []
         }
       }
@@ -435,6 +450,13 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       if (!skillsAnnounced && activeSkillIds.length > 0) {
         skillsAnnounced = true
         opts.onActiveSkills?.(activeSkillIds)
+      }
+      // Report an unsafe snapshot exactly once per session. `ensureReady` caches,
+      // so the failure is detected on one turn only — but the user must hear
+      // about it even though the turn itself succeeds.
+      if (databaseError && !databaseErrorShown) {
+        databaseErrorShown = true
+        opts.onDatabaseError?.(databaseError)
       }
       // Digital-twin grounding (opt-in): REDACTED context from the running
       // desktop. Stable segment appends to the cached system prompt once;

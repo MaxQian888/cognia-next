@@ -25,6 +25,7 @@ import {
   restoreSnapshot,
   serializeDb,
   serializeSnapshot,
+  SnapshotVersionMismatchError,
   type DbLike,
 } from "./snapshot"
 
@@ -61,9 +62,112 @@ export interface CliDbHandle {
 
 let cached: CliDbHandle | null = null
 
+export class CliDbSnapshotError extends Error {
+  readonly snapshotPath: string
+  readonly preservedPath: string | null
+
+  constructor(message: string, snapshotPath: string, preservedPath: string | null) {
+    super(message)
+    this.name = "CliDbSnapshotError"
+    this.snapshotPath = snapshotPath
+    this.preservedPath = preservedPath
+  }
+}
+
 function defaultSchedule(fn: () => void | Promise<void>, ms: number): () => void {
   const handle = setTimeout(() => void fn(), ms)
   return () => clearTimeout(handle)
+}
+
+function replaceFile(source: string, destination: string): void {
+  if (process.platform === "win32") {
+    try {
+      fs.rmSync(destination, { force: true })
+    } catch {
+      // A missing destination is fine; rename below remains the source of truth.
+    }
+  }
+  fs.renameSync(source, destination)
+}
+
+function writeSyncedFile(file: string, data: string): void {
+  const descriptor = fs.openSync(file, "w", 0o600)
+  try {
+    fs.writeFileSync(descriptor, data, "utf8")
+    fs.fsyncSync(descriptor)
+  } finally {
+    fs.closeSync(descriptor)
+  }
+}
+
+function syncExistingFile(file: string): void {
+  const descriptor = fs.openSync(file, "r")
+  try {
+    fs.fsyncSync(descriptor)
+  } finally {
+    fs.closeSync(descriptor)
+  }
+}
+
+function syncParentDirectory(file: string): void {
+  if (process.platform === "win32") return
+  const descriptor = fs.openSync(path.dirname(file), "r")
+  try {
+    fs.fsyncSync(descriptor)
+  } finally {
+    fs.closeSync(descriptor)
+  }
+}
+
+export function writeSnapshotAtomically(file: string, data: string): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const temporary = `${file}.tmp`
+  const backup = `${file}.bak`
+  const backupTemporary = `${backup}.tmp`
+
+  writeSyncedFile(temporary, data)
+  if (fs.existsSync(file)) {
+    fs.copyFileSync(file, backupTemporary)
+    fs.chmodSync(backupTemporary, 0o600)
+    syncExistingFile(backupTemporary)
+    replaceFile(backupTemporary, backup)
+  }
+  replaceFile(temporary, file)
+  fs.chmodSync(file, 0o600)
+  syncParentDirectory(file)
+}
+
+function nextPreservedPath(file: string, label: "corrupt" | "incompatible"): string {
+  let generation = 1
+  let candidate = `${file}.${label}-${generation}`
+  while (fs.existsSync(candidate)) {
+    generation++
+    candidate = `${file}.${label}-${generation}`
+  }
+  return candidate
+}
+
+function preserveUnsafeSnapshot(
+  file: string,
+  label: "corrupt" | "incompatible",
+  problem: string
+): CliDbSnapshotError {
+  const preservedPath = nextPreservedPath(file, label)
+  try {
+    fs.renameSync(file, preservedPath)
+    return new CliDbSnapshotError(
+      `Database snapshot is ${problem}. It was preserved at ${preservedPath}; no data was overwritten.`,
+      file,
+      preservedPath
+    )
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    return new CliDbSnapshotError(
+      `Database snapshot is ${problem}. No data was overwritten, but the snapshot could not be moved aside: ${detail}`,
+      file,
+      null
+    )
+  }
 }
 
 function create(opts: EnsureCliDbOptions): CliDbHandle {
@@ -74,12 +178,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   const getDatabase = opts.getDatabase ?? (() => getDb() as unknown as DbLike)
   const waitReady = opts.whenReady ?? whenSeeded
   const read = opts.readSnapshot ?? ((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null))
-  const write =
-    opts.writeSnapshot ??
-    ((p, data) => {
-      fs.mkdirSync(path.dirname(p), { recursive: true })
-      fs.writeFileSync(p, data, { mode: 0o600 })
-    })
+  const write = opts.writeSnapshot ?? writeSnapshotAtomically
   const schedule = opts.schedule ?? defaultSchedule
 
   let db: DbLike
@@ -90,8 +189,24 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
     await installGlobals()
     db = getDatabase()
     await waitReady()
-    const snapshot = parseSnapshot(read(file))
-    if (snapshot) await restoreSnapshot(db, snapshot)
+    const parsed = parseSnapshot(read(file))
+    if (parsed.kind === "corrupt") {
+      throw preserveUnsafeSnapshot(file, "corrupt", `corrupt (${parsed.reason})`)
+    }
+    if (parsed.kind === "valid") {
+      try {
+        await restoreSnapshot(db, parsed.snapshot)
+      } catch (error) {
+        if (error instanceof SnapshotVersionMismatchError) {
+          throw preserveUnsafeSnapshot(
+            file,
+            "incompatible",
+            `incompatible: snapshot schema version ${error.snapshotVersion} does not match database schema version ${error.databaseVersion}`
+          )
+        }
+        throw error
+      }
+    }
   })()
 
   async function flush(): Promise<void> {
@@ -137,8 +252,13 @@ export async function ensureCliDb(opts: EnsureCliDbOptions = {}): Promise<CliDbH
     },
   }
   cached = wrapped
-  await wrapped.ready
-  return wrapped
+  try {
+    await wrapped.ready
+    return wrapped
+  } catch (error) {
+    if (cached === wrapped) cached = null
+    throw error
+  }
 }
 
 /** Test-only: drop the cached handle. */

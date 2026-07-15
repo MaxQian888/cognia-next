@@ -62,26 +62,42 @@ describe("restoreSnapshot", () => {
     })
     expect(goals.rows).toEqual([{ id: "g" }])
   })
+
+  it("refuses to restore a snapshot from a different schema version", async () => {
+    const goals = new FakeTable("goals", [{ id: "seed" }])
+    const db = fakeDb([goals], 82)
+
+    await expect(
+      restoreSnapshot(db, { version: 81, tables: { goals: [{ id: "old" }] } })
+    ).rejects.toThrow("schema version 81 does not match database schema version 82")
+    expect(goals.rows).toEqual([{ id: "seed" }])
+  })
 })
 
 describe("parseSnapshot", () => {
   it("parses a valid snapshot", () => {
     expect(parseSnapshot('{"version":82,"tables":{"goals":[]}}')).toEqual({
-      version: 82,
-      tables: { goals: [] },
+      kind: "valid",
+      snapshot: {
+        version: 82,
+        tables: { goals: [] },
+      },
     })
   })
-  it("returns null for missing input, invalid JSON, or the wrong shape", () => {
-    expect(parseSnapshot(null)).toBeNull()
-    expect(parseSnapshot("not json")).toBeNull()
-    expect(parseSnapshot("[1,2,3]")).toBeNull()
-    expect(parseSnapshot('{"version":1}')).toBeNull()
+
+  it("distinguishes an absent snapshot from corrupt content", () => {
+    expect(parseSnapshot(null)).toEqual({ kind: "absent" })
+    expect(parseSnapshot(undefined)).toEqual({ kind: "absent" })
+    expect(parseSnapshot("")).toMatchObject({ kind: "corrupt" })
+    expect(parseSnapshot("not json")).toMatchObject({ kind: "corrupt" })
+    expect(parseSnapshot("[1,2,3]")).toMatchObject({ kind: "corrupt" })
+    expect(parseSnapshot('{"version":1}')).toMatchObject({ kind: "corrupt" })
   })
 })
 
 describe("serializeSnapshot", () => {
   it("round-trips through parseSnapshot", () => {
     const snap = { version: 82, tables: { goals: [{ id: "g" }] } }
-    expect(parseSnapshot(serializeSnapshot(snap))).toEqual(snap)
+    expect(parseSnapshot(serializeSnapshot(snap))).toEqual({ kind: "valid", snapshot: snap })
   })
 })

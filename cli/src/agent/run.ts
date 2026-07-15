@@ -31,7 +31,7 @@ import { toBuildContext } from "../config/to-build-context"
 import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled } from "../mcp/mcp-state"
 import { readEnabled } from "../skill/skill-state"
-import { ensureCliDb } from "../db/bootstrap"
+import { ensureCliDb, CliDbSnapshotError } from "../db/bootstrap"
 import { bootstrapSidecar, type SidecarBootstrap } from "../runtime/bootstrap"
 import { ensurePluginRuntime } from "../plugin/plugin-runtime"
 import { resolveDevPluginsDir } from "../plugin/dev-plugins"
@@ -89,6 +89,11 @@ export interface RunHeadlessParams {
    * requires) before resolving options — only when a skill is enabled, the lone
    * build-options read that routes through Dexie. Defaults to {@link ensureCliDb}. */
   ensureDb?: () => Promise<unknown>
+  /** Report a corrupt / schema-incompatible db snapshot. Defaults to a stderr
+   * write. The turn still runs (without skills), but the user must be told: the
+   * snapshot was moved aside, and an unannounced empty db reads as data loss.
+   * A transient open failure (locked file, …) stays silent and never lands here. */
+  onDatabaseError?: (error: CliDbSnapshotError) => void
   /** Fetch the twin context from the running desktop (only when `config.twin`
    * is enabled). Resolves `null` on any failure — the turn then proceeds
    * without twin grounding. Injected in tests. */
@@ -131,6 +136,11 @@ export async function runHeadlessTurn(params: RunHeadlessParams): Promise<RunHea
     (() => applyDisabled(loadMcpServers([params.config.cwd, home]), readDisabled(home)))
   const resolveSkillIds = params.resolveSkillIds ?? (() => [...readEnabled(home)])
   const ensureDb = params.ensureDb ?? (() => ensureCliDb())
+  const onDatabaseError =
+    params.onDatabaseError ??
+    ((error: CliDbSnapshotError) => {
+      process.stderr.write(`cognia-agent: ${error.message}\n`)
+    })
   let ephemeralSkillIds = resolveSkillIds()
   // Skills are read from Dexie in build-options; open the CLI db first (only when
   // a skill is enabled). Degrade gracefully — a db failure drops skills rather
@@ -138,7 +148,10 @@ export async function runHeadlessTurn(params: RunHeadlessParams): Promise<RunHea
   if (ephemeralSkillIds.length > 0) {
     try {
       await ensureDb()
-    } catch {
+    } catch (err) {
+      // An unsafe snapshot moved the user's data aside; staying silent about it
+      // would read as the data having vanished. A transient failure stays quiet.
+      if (err instanceof CliDbSnapshotError) onDatabaseError(err)
       ephemeralSkillIds = []
     }
   }

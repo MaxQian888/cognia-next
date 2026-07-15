@@ -1,6 +1,8 @@
 /**
  * @jest-environment node
  */
+import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
 import Dexie from "dexie"
@@ -89,6 +91,50 @@ describe("ensureCliDb", () => {
     expect(goals.rows).toEqual([{ id: "seed" }])
   })
 
+  it("preserves and surfaces a truncated snapshot instead of allowing a flush", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-corrupt-"))
+    const file = path.join(home, "db.json")
+    const truncated = '{"version":82,"tabl'
+    fs.writeFileSync(file, truncated, "utf8")
+    const { opts, h } = makeOpts({
+      home,
+      readSnapshot: () => truncated,
+      writeSnapshot: undefined,
+    })
+
+    try {
+      await expect(ensureCliDb(opts)).rejects.toThrow("snapshot is corrupt")
+      expect(fs.existsSync(file)).toBe(false)
+      expect(fs.readFileSync(`${file}.corrupt-1`, "utf8")).toBe(truncated)
+      expect(h.writes).toHaveLength(0)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("preserves and surfaces a snapshot schema mismatch without restoring rows", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-version-"))
+    const file = path.join(home, "db.json")
+    const oldSnapshot = JSON.stringify({ version: 81, tables: { goals: [{ id: "old" }] } })
+    fs.writeFileSync(file, oldSnapshot, "utf8")
+    const { opts, goals } = makeOpts({
+      home,
+      readSnapshot: () => oldSnapshot,
+      writeSnapshot: undefined,
+    })
+
+    try {
+      await expect(ensureCliDb(opts)).rejects.toThrow(
+        "snapshot schema version 81 does not match database schema version 82"
+      )
+      expect(goals.rows).toEqual([{ id: "seed" }])
+      expect(fs.existsSync(file)).toBe(false)
+      expect(fs.readFileSync(`${file}.incompatible-1`, "utf8")).toBe(oldSnapshot)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("debounces flushes: re-scheduling cancels the prior timer", async () => {
     const { opts, h } = makeOpts()
     const handle = await ensureCliDb(opts)
@@ -107,6 +153,28 @@ describe("ensureCliDb", () => {
     await handle.flush()
     expect(h.writes[0].path).toBe(path.join("/home", "db.json"))
     expect(JSON.parse(h.writes[0].data).tables.goals).toEqual([{ id: "g1" }, { id: "g2" }])
+  })
+
+  it("atomically replaces the snapshot and keeps one backup generation", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-atomic-"))
+    const file = path.join(home, "db.json")
+    const { opts, goals } = makeOpts({ home, writeSnapshot: undefined })
+
+    try {
+      const handle = await ensureCliDb(opts)
+      goals.rows = [{ id: "first" }]
+      await handle.flush()
+      const first = fs.readFileSync(file, "utf8")
+
+      goals.rows = [{ id: "second" }]
+      await handle.flush()
+
+      expect(JSON.parse(fs.readFileSync(file, "utf8")).tables.goals).toEqual([{ id: "second" }])
+      expect(fs.readFileSync(`${file}.bak`, "utf8")).toBe(first)
+      expect(fs.existsSync(`${file}.tmp`)).toBe(false)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
   })
 
   it("dispose() final-flushes, is safe to double-call, and clears the cache", async () => {
