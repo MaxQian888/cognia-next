@@ -111,7 +111,7 @@ Topology ladder:
 - The brain authenticates to localhost cognia-server with a dedicated **service token** (scoped, loopback-minted) — never a device JWT.
 - `spawn_external_agent`-class commands on the headless RPC surface are **RCE-grade**: preset-only allowlist (no arbitrary argv), separate scope, full audit trail.
 - `remote_control` (47821) and the LLM `gateway` (47823) keep their loopback-only threat model — never exposed beyond the container.
-- The PII redaction gate (`lib/twin/ingest/redact.ts:hasNoLeakingPii`) sits in the brain and therefore survives the move unchanged; verify with the pii-gate audit before each phase ships.
+- The PII redaction gate (`packages/redact/src/index.ts:hasNoLeakingPii`) sits in the brain and therefore survives the move unchanged; verify with the pii-gate audit before each phase ships.
 - Client-side secrets keep the keyring; **server-side secrets move to an encrypted file store** (pattern precedent: `FilePushCredStore`), master key via env/boot secret.
 
 ## Plan

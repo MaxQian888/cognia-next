@@ -109,7 +109,7 @@ flowchart LR
 ## 隐私红线
 
 <Callout type="warn" title="任何数据离开渲染端前先脱敏">
-  ingest 的第 3 阶段（`redact`，`lib/twin/ingest/redact.ts:227`）在 chunk 被嵌入或发给任何 LLM **之前**，
+  ingest 的第 3 阶段（`redact`，`packages/redact/src/index.ts:227`）在 chunk 被嵌入或发给任何 LLM **之前**，
   就把 11 类 PII 替换为 `<KIND_NNN>` 占位符。只有 `contentRedacted` 会进入嵌入器
   （`lib/twin/ingest/embed.ts:48`）或远程向量负载（`lib/twin/ingest/persist.ts:137`）。逆向映射以 AES-GCM-256
   加密落盘，原始文本从不持久化。

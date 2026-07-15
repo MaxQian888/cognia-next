@@ -180,7 +180,7 @@ flowchart TD
 
 对于桌面应用内（非 IM）会话，闸门 4 和 5 是空操作（`dispatcher.ts:123`）——内置技能在
 桌面聊天中始终暴露，因为用户已经在盯着它。PII 闸门复用了
-`lib/twin/ingest/redact.ts` 中的 `hasNoLeakingPii`（`dispatcher.ts:36`），即保护 Twin、
+`packages/redact/src/index.ts` 中的 `hasNoLeakingPii`（`dispatcher.ts:36`），即保护 Twin、
 Goal 和连接器自动模式的同一条红线。
 
 ```ts

@@ -51,7 +51,7 @@ renderer do RAG directly.
 
 ### 3. PII redaction before any cloud call
 
-Every chunk passes through `lib/twin/ingest/redact.ts` before we embed
+Every chunk passes through `packages/redact/src/index.ts` before we embed
 it or feed it to the distill LLM. Redaction is symmetric: we keep the
 original text in `twinChunks.content` (for the workbench display) and
 the placeholder version in `twinChunks.contentRedacted` (for the
@@ -204,7 +204,7 @@ plan (`~/.claude/plans/harmonic-popping-lovelace.md`).
     on the request. `rag:twin` is **not** in `DEFAULT_ENABLED_SCOPES`
     — the user must opt in explicitly.
 - **Privacy**
-  - `lib/twin/ingest/redact.ts` — PII coverage extended to IPv4
+  - `packages/redact/src/index.ts` — PII coverage extended to IPv4
     (public ranges only), uncompressed IPv6, named API key prefixes
     (sk-, ghp\_, AIza…, etc.), hint-driven secrets, CN passport
     prefixes (E/G/EH/EJ), and CN driver-license card numbers

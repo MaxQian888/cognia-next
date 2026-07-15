@@ -18,6 +18,7 @@ These are project-level hard rules. They override any default behavior to the co
 4. **Every frontend component is i18n-wired.** No hard-coded user-facing strings in `.tsx`. Use `useTranslations()` / `getTranslations()` from `next-intl`, add the new keys to **both** `i18n/messages/en.json` and `i18n/messages/zh-CN.json`, and run `pnpm lint:i18n` to confirm parity with the baseline. Aria labels, placeholders, toasts, and error messages count as user-facing.
 5. **Language convention.** Internal narration (status updates, tool-call rationale, end-of-turn summaries, code comments) is written in **English**. Questions to the user — clarifications, `AskUserQuestion` prompts, confirmation requests — are written in **Chinese**.
 6. **Record a changeset for every user-facing change.** After implementing a feature, fix, or behavior/breaking change that a user would notice, run `pnpm changeset` — select the **`cognia-next`** package, pick the semver bump (`patch` fix, `minor` feature, `major` breaking), and write a one-line summary. This creates a `.changeset/*.md` file you commit alongside the code. Skip it only for internal-only work (tests, refactors, docs, chore, CI). See **Versioning & Release** below for the full model.
+7. **Label intentional dormancy on all three axes.** Intentional dormancy must be documented at the type AND labeled inert in the UI AND pinned by a test. Any two of three is a latent bug.
 
 ## Development Commands
 
@@ -164,7 +165,7 @@ One line per subsystem — the **full detail lives in the ADR** under `docs/cont
 
 ### Cross-cutting hooks (reuse, don't reinvent)
 
-- **PII redaction**: `lib/twin/ingest/redact.ts:hasNoLeakingPii` is the gate before any LLM/embed call (encrypted master key in `lib/twin/ingest/redaction-key.ts`). Shared by Twin, Goal, Connector auto-mode (`lib/connectors/ai-loop/safe-send-prompt.ts`), and Agent Team shared-memory.
+- **PII redaction**: `packages/redact/src/index.ts:hasNoLeakingPii` is the gate before any LLM/embed call (encrypted master key in `lib/twin/ingest/redaction-key.ts`). Shared by Twin, Goal, Connector auto-mode (`lib/connectors/ai-loop/safe-send-prompt.ts`), and Agent Team shared-memory.
 - **Quiet hours**: `lib/connectors/outbound-runner.isInQuietHours` / `msUntilQuietEnd` exported; reused by the GitHub Delivery policy gate.
 - **Build-options pipeline**: `lib/claude/build-options.ts:resolveSendOptions` is where A2UI, brief mode, active goal, computer-use tools, twin runtime, and the per-channel A2UI capability prompt converge (incl. the IM computer-use blacklist).
 - **A2UI ⇄ IM bridge**: `lib/connectors/a2ui-bridge/*` projects assistant surfaces into platform-native rich content and routes inbound callbacks via `ConnectorBus.dispatchConnectorCallback`. Shared toolkit: `lib/connectors/adapters/_shared/a2ui-mapper.ts`.

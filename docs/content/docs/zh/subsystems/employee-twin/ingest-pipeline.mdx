@@ -93,7 +93,7 @@ await progress(job.id, `chunking:${raw.filename}`, (stageBase + 3) / TOTAL_STAGE
 
 逆向映射由 `tokenize`（`redact.ts:209`）构建，对同一原文的重复出现复用同一占位符（文档内稳定）：
 
-```ts title="lib/twin/ingest/redact.ts:209-217"
+```ts title="packages/redact/src/index.ts:209-217"
 function tokenize(state: RedactState, kind: PiiKind, original: string): string {
   const cached = state.reuse.get(original)
   if (cached) return cached

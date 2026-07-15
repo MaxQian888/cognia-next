@@ -36,7 +36,7 @@ export interface AgentTraceTransportDetailSettings {
   /**
    * Persist `inputPreview` / `outputPreview` payloads on spans. Off by
    * default — when on, the transport runs each preview through
-   * `lib/twin/ingest/redact.ts:hasNoLeakingPii` and drops fields that leak
+   * `packages/redact/src/index.ts:hasNoLeakingPii` and drops fields that leak
    * PII before they hit Dexie.
    */
   captureContent: boolean

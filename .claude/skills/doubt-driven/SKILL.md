@@ -23,7 +23,7 @@ A decision is non-trivial when at least one holds. In this repo especially:
   built-in, or a server-only package in bundled code (`app/api/` does not exist
   at runtime; wrong setup silently breaks the Tauri/Capacitor `out/` build).
 - **Outbound model call** — a new prompt/embed/cloud send that must pass the PII
-  gate (`lib/twin/ingest/redact.ts:hasNoLeakingPii`).
+  gate (`packages/redact/src/index.ts:hasNoLeakingPii`).
 - **Dexie schema change** — a new table/index/backfill (native-version rule; a
   wrong `verno` corrupts existing users' IndexedDB).
 - **New module reachability** — a component/command/plugin/initializer that

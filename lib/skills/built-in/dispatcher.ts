@@ -7,7 +7,7 @@
  *   1. Resolve skill from the shared registry.
  *   2. Validate args against the skill's Zod input schema.
  *   3. PII gate on serialised args — reuses `hasNoLeakingPii` from
- *      `lib/twin/ingest/redact.ts` so the same red-line that protects
+ *      `packages/redact/src/index.ts` so the same red-line that protects
  *      Twin + Goal also protects every built-in skill call.
  *   4. Channel allowlist check against
  *      `ConversationOverrideRow.allowedBuiltInSkillIds` (supports the

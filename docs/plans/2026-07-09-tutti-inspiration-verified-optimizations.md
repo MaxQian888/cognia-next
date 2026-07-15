@@ -88,7 +88,7 @@
 
 ### 10. PII-gate funnel guard (complementary, not a replacement) 🟡
 
-- **Verified state:** choke points are real and broadly adopted — `hasNoLeakingPii` (`lib/twin/ingest/redact.ts:392`), `safeSendPrompt` (`lib/connectors/ai-loop/safe-send-prompt.ts:109`), 60+ callers. Enforcement today is **only** the `pii-gate-auditor` LLM subagent (advisory, not in CI). Additionally, the companion write seam (`src-tauri/src/companion_api/desktop_writes_bridge.rs`) is a natural place to enforce the gate but does not today.
+- **Verified state:** choke points are real and broadly adopted — `hasNoLeakingPii` (`packages/redact/src/index.ts:392`), `safeSendPrompt` (`lib/connectors/ai-loop/safe-send-prompt.ts:109`), 60+ callers. Enforcement today is **only** the `pii-gate-auditor` LLM subagent (advisory, not in CI). Additionally, the companion write seam (`src-tauri/src/companion_api/desktop_writes_bridge.rs`) is a natural place to enforce the gate but does not today.
 - **Caveat:** a deterministic funnel can only prove "provider egress is centralized" — it cannot prove "this payload was user-derived and gated" (branch-aware data-flow), which still warrants the LLM auditor. So this **augments**, not replaces.
 - **How:** a guard forbidding new AI-SDK/provider-`fetch` egress outside sanctioned modules with `// pii-gate-exempt: <reason>` escapes (surface: 19 AI-SDK calls across 13 files + the `lib/claude/` send paths); optionally enforce `hasNoLeakingPii` at the companion write seam.
 

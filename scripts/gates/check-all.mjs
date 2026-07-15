@@ -7,6 +7,7 @@
  * Gates (all read-only — none mutate the working tree):
  *   typecheck · lint · lint:i18n · i18n:build:check · audit:slots
  *   audit:trusted-publishers · audit:silent-flags · audit:command-parity
+ *   audit:pii-boundaries
  *   lint:static-export
  *   lint:plugin-sdk-wit · release:sync-keys:check · version:sync:check
  *   config:sync:check
@@ -37,6 +38,7 @@ export const GATES = [
   "audit:slots",
   "audit:trusted-publishers",
   "audit:silent-flags",
+  "audit:pii-boundaries",
   "audit:command-parity",
   "lint:static-export",
   "lint:plugin-sdk-wit",

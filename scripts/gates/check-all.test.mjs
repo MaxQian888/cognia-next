@@ -19,6 +19,7 @@ test("GATES lists the read-only gates and excludes the unsorted i18n:sort:check"
   assert.ok(GATES.includes("release:sync-keys:check"))
   assert.ok(GATES.includes("i18n:build:check"))
   assert.ok(GATES.includes("audit:command-parity"))
+  assert.ok(GATES.includes("audit:pii-boundaries"))
   assert.ok(GATES.includes("lint:static-export"))
   assert.ok(GATES.includes("config:sync:check"))
   assert.ok(!GATES.includes("i18n:sort:check"))

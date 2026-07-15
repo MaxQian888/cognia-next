@@ -1,6 +1,6 @@
 /**
  * PII redaction for `/goal` objectives — thin wrapper around
- * `lib/twin/ingest/redact.ts` so the cloud-bound objective text never
+ * `packages/redact/src/index.ts` so the cloud-bound objective text never
  * carries emails, phone numbers, bank cards, API keys, or other recognised
  * PII shapes.
  *

@@ -4,7 +4,7 @@
  * Redact-review sheet for mobile twin ingest.
  *
  * The twin ingest pipeline already redacts PII server-side before any
- * LLM/embed call (`lib/twin/ingest/redact.ts` is the shared gate). This
+ * LLM/embed call (`packages/redact/src/index.ts` is the shared gate). This
  * sheet surfaces that gate on the phone *before* the text leaves the device:
  * when a text ingest path (paste / OCR) carries detectable PII, we show the
  * `redactText()` output and let the user ship the redacted version (default,

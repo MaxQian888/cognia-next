@@ -41,7 +41,7 @@ if (!isPiiSafeSendContent(prompt)) {
 }
 ```
 
-`isPiiSafeSendContent` (`safe-send-prompt.ts:123`) walks every `type: "text"` block of the `SendContent` union via `hasNoLeakingPii` (from `@/lib/twin/ingest/redact`) — image/file blocks are skipped because the gate is about leakable text; binary attachments are encrypted on disk by `attachments.rs` instead. The convergence is: build-options' `resolveSendOptions` assembles the prompt and capability tail → `safeSendPrompt` gates → `runAndCaptureAssistantReply` runs the turn → `assistantReplyToSegments` projects the captured reply → `enqueueOutbound` hands off to the queue.
+`isPiiSafeSendContent` (`safe-send-prompt.ts:123`) walks every `type: "text"` block of the `SendContent` union via `hasNoLeakingPii` (from `@cognia/redact`) — image/file blocks are skipped because the gate is about leakable text; binary attachments are encrypted on disk by `attachments.rs` instead. The convergence is: build-options' `resolveSendOptions` assembles the prompt and capability tail → `safeSendPrompt` gates → `runAndCaptureAssistantReply` runs the turn → `assistantReplyToSegments` projects the captured reply → `enqueueOutbound` hands off to the queue.
 
 ```mermaid
 flowchart TD

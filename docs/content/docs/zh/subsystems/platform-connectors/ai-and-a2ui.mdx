@@ -41,7 +41,7 @@ if (!isPiiSafeSendContent(prompt)) {
 }
 ```
 
-`isPiiSafeSendContent`（`safe-send-prompt.ts:123`）通过 `hasNoLeakingPii`（来自 `@/lib/twin/ingest/redact`）遍历 `SendContent` 联合体里的每个 `type: "text"` 块 —— 图片/文件块被跳过，因为该门只针对可泄漏文本；二进制附件改由 `attachments.rs` 在磁盘上加密。收敛路径为：build-options 的 `resolveSendOptions` 组装 prompt 与能力尾巴 → `safeSendPrompt` 门控 → `runAndCaptureAssistantReply` 跑回合 → `assistantReplyToSegments` 投影捕获的回复 → `enqueueOutbound` 交接给队列。
+`isPiiSafeSendContent`（`safe-send-prompt.ts:123`）通过 `hasNoLeakingPii`（来自 `@cognia/redact`）遍历 `SendContent` 联合体里的每个 `type: "text"` 块 —— 图片/文件块被跳过，因为该门只针对可泄漏文本；二进制附件改由 `attachments.rs` 在磁盘上加密。收敛路径为：build-options 的 `resolveSendOptions` 组装 prompt 与能力尾巴 → `safeSendPrompt` 门控 → `runAndCaptureAssistantReply` 跑回合 → `assistantReplyToSegments` 投影捕获的回复 → `enqueueOutbound` 交接给队列。
 
 ```mermaid
 flowchart TD

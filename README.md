@@ -198,7 +198,7 @@ These are project-level hard rules — see [`CLAUDE.md`](./CLAUDE.md) for the fu
    co-located test. Coverage stays ≥ 90 % lines / branches / functions.
 4. **i18n is mandatory.** No hard-coded user-facing strings in `.tsx`. Add keys to **both**
    `i18n/messages/en.json` and `i18n/messages/zh-CN.json`, then `pnpm lint:i18n`.
-5. **Reuse shared hooks.** PII redaction (`lib/twin/ingest/redact.ts`), quiet-hours
+5. **Reuse shared hooks.** PII redaction (`packages/redact/src/index.ts`), quiet-hours
    (`lib/connectors/outbound-runner`), the build-options pipeline
    (`lib/claude/build-options.ts`), and the A2UI ⇄ IM bridge (`lib/connectors/a2ui-bridge/`) are
    shared entry points — touch them, don't fork them.

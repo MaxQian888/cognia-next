@@ -27,7 +27,7 @@
  *
  * PII: `agent_dispatch` / `team_run` can surface twin / shared-memory context
  * outward, so the returned text is run through the redaction gate
- * (`lib/twin/ingest/redact.ts`) inside `*Core` before it leaves the boundary.
+ * (`packages/redact/src/index.ts`) inside `*Core` before it leaves the boundary.
  */
 
 import { isTauri } from "@/lib/tauri"

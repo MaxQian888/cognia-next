@@ -14,20 +14,11 @@
 
 /** Top-level OTel `gen_ai.operation.name`. */
 export type SpanOperationName =
-  | "invoke_agent"
-  | "execute_tool"
-  | "chat"
-  | "invoke_workflow"
-  | "retrieval"
+  "invoke_agent" | "execute_tool" | "chat" | "invoke_workflow" | "retrieval"
 
 /** OTel `gen_ai.provider.name` plus our vendor extensions. */
 export type SpanProviderName =
-  | "anthropic"
-  | "openai"
-  | "cognia.plugin"
-  | "cognia.team"
-  | "cognia.connector"
-  | "cognia.workflow"
+  "anthropic" | "openai" | "cognia.plugin" | "cognia.team" | "cognia.connector" | "cognia.workflow"
 
 /** Surface that produced the span — drives the agent-trace UI grouping. */
 export type SpanSurface = "chat" | "agent-team" | "plugin-hook" | "connector" | "workflow"
@@ -110,7 +101,7 @@ export interface AgentTraceSpan {
 
   // Opt-in content. Captured only when
   // `transports.agentTrace.captureContent === true`, and only after the
-  // payload passes `lib/twin/ingest/redact.ts:hasNoLeakingPii`.
+  // payload passes `packages/redact/src/index.ts:hasNoLeakingPii`.
   inputPreview?: string
   outputPreview?: string
 

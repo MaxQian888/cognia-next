@@ -7,7 +7,7 @@
  *
  * Node count: 10. Complexity: advanced. The redaction step calls the
  * sandboxed `data.code` executor with a hand-rolled gate so it composes
- * cleanly with `lib/twin/ingest/redact.ts:hasNoLeakingPii` in production
+ * cleanly with `packages/redact/src/index.ts:hasNoLeakingPii` in production
  * runtimes (where the editor can swap the snippet for a direct import).
  */
 

@@ -6,10 +6,14 @@ tools: Read, Grep, Glob, Bash
 
 You audit cognia-next for bypasses of the repo's PII gate. The contract
 (CLAUDE.md "Cross-cutting hooks"): text derived from local user data must pass
-`hasNoLeakingPii` / `hasNoLeakingPiiDeep` (`lib/twin/ingest/redact.ts`) before
+`hasNoLeakingPii` / `hasNoLeakingPiiDeep` (`packages/redact/src/index.ts`) before
 any LLM or embedding call. Connector auto-mode must go through
 `lib/connectors/ai-loop/safe-send-prompt.ts` rather than calling send paths
 directly.
+
+Start by grepping production imports of `@cognia/redact` and tracing each
+outbound sink to one of those imports. Do not couple discovery to a concrete
+redactor source path: package imports remain stable when its implementation moves.
 
 ## Scope
 

@@ -193,7 +193,7 @@ pnpm dlx shadcn@latest add <component>
    覆盖率维持在 ≥ 90 % 行 / 分支 / 函数。
 4. **i18n 是硬性要求。** `.tsx` 中禁止硬编码用户可见字符串。同步把键加到
    `i18n/messages/en.json` 与 `i18n/messages/zh-CN.json`，再跑 `pnpm lint:i18n`。
-5. **复用共享 Hook。** PII 脱敏（`lib/twin/ingest/redact.ts`）、静默时段
+5. **复用共享 Hook。** PII 脱敏（`packages/redact/src/index.ts`）、静默时段
    （`lib/connectors/outbound-runner`）、构建选项管道（`lib/claude/build-options.ts`）以及
    A2UI ⇄ IM 桥（`lib/connectors/a2ui-bridge/`）都是共享入口 —— 修改它们，而不是开分叉。
 

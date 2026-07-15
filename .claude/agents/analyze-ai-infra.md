@@ -33,7 +33,7 @@ For each area:
 - `sidecar/claude-host.mjs` — Main sidecar entry
 - `lib/claude/build-options.ts` — Central options pipeline (cross-cutting)
 - `lib/ai/` — AI SDK wrappers
-- `lib/twin/ingest/redact.ts` — PII redaction gate
+- `packages/redact/src/index.ts` — PII redaction gate
 - `lib/chat/` — Chat state and message pipeline
 
 ## Commands

@@ -2,7 +2,7 @@
  * PII red-line for plugin-initiated model calls.
  *
  * The app-wide rule (Twin/Goal/Connector auto-mode, enforced via
- * `lib/twin/ingest/redact.ts:hasNoLeakingPii` and the
+ * `packages/redact/src/index.ts:hasNoLeakingPii` and the
  * `lib/connectors/ai-loop/safe-send-prompt.ts` wrapper) is: raw
  * user-supplied text MUST pass the PII gate before it leaves the device.
  * `ctx.ai.chat/embed` and `ctx.vector.embed/embedBatch` are plugin-driven

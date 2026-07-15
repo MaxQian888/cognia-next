@@ -3,7 +3,7 @@
  *
  * Returns a {@link PluginToolPermissionFn} that, instead of hard-denying a tool
  * call, rewrites every string-valued argument through the twin ingest redactor
- * (`lib/twin/ingest/redact.ts`) and lets the call proceed with placeholders
+ * (`packages/redact/src/index.ts`) and lets the call proceed with placeholders
  * substituted (`<EMAIL_001>`, `<API_KEY_002>`, …). This mirrors the sidecar's
  * rewrite-capable `canUseTool` contract (`{ behavior: "allow", updatedInput }`)
  * and reuses the same redactor the Twin / Goal / Connector paths gate on.

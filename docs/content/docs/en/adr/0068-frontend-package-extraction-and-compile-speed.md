@@ -51,7 +51,7 @@ The measured `lib/` subsystem sizes also expose the shape of the extraction fron
 
 | Extractable (leaf-like) | Coupled core (stays in app) |
 | --- | --- |
-| `lib/twin/ingest/redact.ts` (0 `@/` imports), `lib/search` (24, 3 injectable leaks), `lib/logging` (26 + `types/logging` leaf), `lib/claude/types.ts` (type-only hub), `lib/tts` (25, 4-file native bridge) | `lib/db` (119, _is_ the Dexie schema), `lib/workflow` (150), `lib/plugin` (265), `lib/connectors` (184), `lib/scheduler` (43), `lib/goal`/`lib/radar`/`lib/memory`/`lib/a2ui`/`lib/slash-commands`/`lib/ocr` (Dexie/twin glue) |
+| `packages/redact/src/index.ts` (0 `@/` imports), `lib/search` (24, 3 injectable leaks), `lib/logging` (26 + `types/logging` leaf), `lib/claude/types.ts` (type-only hub), `lib/tts` (25, 4-file native bridge) | `lib/db` (119, _is_ the Dexie schema), `lib/workflow` (150), `lib/plugin` (265), `lib/connectors` (184), `lib/scheduler` (43), `lib/goal`/`lib/radar`/`lib/memory`/`lib/a2ui`/`lib/slash-commands`/`lib/ocr` (Dexie/twin glue) |
 
 ## Decision
 
@@ -79,7 +79,7 @@ Each rung uses the zero-build source-package template. The rung order is **coupl
 
 | # | Package | Moves in | Coupling to break | Effort | Payoff |
 | --- | --- | --- | --- | --- | --- |
-| **E1** | `@cognia/redact` | `lib/twin/ingest/redact.ts` (pure-regex PII scrubber) | **None** — 0 `@/` imports. Sibling `redaction-key.ts` (keyring) has 2 consumers, stays app-side or injects a `KeyProvider` | **S** | Security-critical gate shared by 81 sites (Twin, Goal, connector auto-mode, Agent-Team, plan gate); independently auditable; sidecar can adopt the real scrubber |
+| **E1** | `@cognia/redact` | `packages/redact/src/index.ts` (pure-regex PII scrubber) | **None** — 0 `@/` imports. Sibling `redaction-key.ts` (keyring) has 2 consumers, stays app-side or injects a `KeyProvider` | **S** | Security-critical gate shared by 81 sites (Twin, Goal, connector auto-mode, Agent-Team, plan gate); independently auditable; sidecar can adopt the real scrubber |
 | **E2** | `@cognia/web-search` | all of `lib/search` (24 files, 11 provider adapters) | 3 injectable leaks: `useSettingsStore` → `SearchConfig` param; `standalone-answer.ts:19-25` model/fetch → `{ model, fetch }` handle | M | Framework-agnostic; today app-only. CLI has no web search; a package makes it reusable across shells and hides 11 third-party adapters behind peer deps |
 | **E3** | `@cognia/tts` | `lib/tts` (25 files) + `types/media` leaf | Native bridge confined to 4 files (`keyring`, `proxy-fetch`, `providers/edge`, `providers/openai-realtime`) → inject `{ fetch, getSecret }` | M | Wanted on mobile (Capacitor) + sidecar; isolates 3rd-party TTS providers |
 | **E4** | `@cognia/logging` | `lib/logging` core + `types/logging` (near-pure leaf) | Platform transports isolated to 5 bootstrap/transport files → keep as app-registered plugins (already pluggable) | M | **344 import sites** (2nd-widest hub). CLI carries its own 11-file logger → real convergence target; compile-isolating the hub cuts incremental rebuild fan-out |
@@ -160,5 +160,5 @@ Each step is an independent commit, gated by `pnpm test:changed` (or scoped `npx
 
 - Compile-speed targets: `next.config.ts:129-131` (C1), `.github/workflows/quality.yml` (C2), `app/layout.tsx:210-249` + `components/providers/initializers/desktop-only-initializers.tsx` (C3 pattern), `scripts/build/build-webclone-sidecar.mjs:70-71` + `build-vscode-ext-host-sidecar.mjs` (C4)
 - Extraction template: `packages/primitives/{package.json,tsconfig.json}` (zero-build), `packages/provider-types/tsup.config.ts` (the sole build step); wiring in `tsconfig.json:25-53`, `jest.config.ts:130-144`, `jest.config.ts:259-289` (coverage globs)
-- Extraction candidates: `lib/twin/ingest/redact.ts` (E1), `lib/search/standalone-answer.ts:19-25` (E2 injection points), `lib/tts/` (E3), `lib/logging/` + `types/logging` (E4), `lib/claude/types.ts` (E5), `cli/src` (the 188× `@/lib/claude` consumer that E5 stabilizes)
+- Extraction candidates: `packages/redact/src/index.ts` (E1), `lib/search/standalone-answer.ts:19-25` (E2 injection points), `lib/tts/` (E3), `lib/logging/` + `types/logging` (E4), `lib/claude/types.ts` (E5), `cli/src` (the 188× `@/lib/claude` consumer that E5 stabilizes)
 - God-files: `components/workflow/editor/inspector/forms/index.tsx` (S1), `lib/workflow/nodes/built-ins.ts` (S2), `lib/claude/build-options.ts:897-3247` (S3), `hooks/chat/use-claude-chat.ts` (S4), `stores/artifact/artifact-store.ts` + `stores/agent/agent-team-store/slices/` (S5 target + precedent)

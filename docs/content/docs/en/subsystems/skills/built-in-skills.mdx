@@ -182,7 +182,7 @@ flowchart TD
 
 Gates 4 and 5 are no-ops for desktop in-app (non-IM) sessions (`dispatcher.ts:123`) — built-in skills are
 always exposed in desktop chat because the user is already watching it. The PII gate reuses
-`hasNoLeakingPii` from `lib/twin/ingest/redact.ts` (`dispatcher.ts:36`), the same red-line that protects Twin,
+`hasNoLeakingPii` from `packages/redact/src/index.ts` (`dispatcher.ts:36`), the same red-line that protects Twin,
 Goal, and connector auto-mode.
 
 ```ts

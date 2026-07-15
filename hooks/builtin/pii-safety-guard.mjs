@@ -2,7 +2,7 @@
 //
 // Fires on UserPromptSubmit (scans `prompt`) and PreToolUse (scans the
 // stringified `tool_input`). Defense-in-depth only: the authoritative redaction
-// gate is the in-app `lib/twin/ingest/redact` path; this catches plain
+// gate is the in-app `packages/redact/src/index.ts` path; this catches plain
 // credentials and identifiers that slip into an agent turn outside that gate.
 //
 // Blocks by exiting 2 with the matched category on stderr (the shared Rust + CLI

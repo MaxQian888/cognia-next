@@ -101,7 +101,7 @@ export interface TwinSource {
    * Encrypted PII↔placeholder map. Encrypted with the user's stronghold key
    * before being written here so the Dexie row never holds raw originals.
    * Stored as base64-encoded ciphertext + nonce + tag (format owned by
-   * `lib/twin/ingest/redact.ts`).
+   * `packages/redact/src/index.ts`).
    */
   redactionMapEnc?: string
   /**

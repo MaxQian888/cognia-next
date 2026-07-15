@@ -133,7 +133,7 @@ Delegates to `lib/document/document-processor`. Outputs a normalised text + meta
 
 ### 3. redact
 
-**This is the privacy red-line.** `lib/twin/ingest/redact.ts` replaces PII with `<KIND_NNN>` placeholders **before any embed or LLM call**:
+**This is the privacy red-line.** `packages/redact/src/index.ts` replaces PII with `<KIND_NNN>` placeholders **before any embed or LLM call**:
 
 | Kind        | Detection                                                            |
 | ----------- | -------------------------------------------------------------------- |
@@ -354,7 +354,7 @@ Cron-driven retries (e.g., "re-ingest weekly") via the scheduler executor are a 
 ## Tests
 
 <Callout type="error" title="Safety-critical: redaction tests">
-  `lib/twin/ingest/redact.test.ts` is the most safety-critical test in the whole repo — it asserts
+  `packages/redact/src/index.test.ts` is the most safety-critical test in the whole repo — it asserts
   `hasNoLeakingPii` on a corpus of synthetic PII strings. Treat changes there with extreme care; add
   fixtures, never remove them.
 </Callout>
@@ -366,7 +366,7 @@ Cron-driven retries (e.g., "re-ingest weekly") via the scheduler executor are a 
 | Goal                              | Files                                                                           |
 | --------------------------------- | ------------------------------------------------------------------------------- |
 | Add a new ingest format           | `lib/twin/ingest/dispatch.ts`, `lib/document/document-processor.ts`, `parse.ts` |
-| Tighten redaction                 | `lib/twin/ingest/redact.ts` (and its tests!)                                    |
+| Tighten redaction                 | `packages/redact/src/index.ts` (and its tests!)                                    |
 | Add a new distill agent           | `lib/twin/distill/agents/`, register in `orchestrator.ts`                       |
 | Tweak runtime context shape       | `lib/twin/runtime/system-prompt-template.ts`                                    |
 | Wire runtime into a new send path | call `applyTwinContext` from your build-options helper                          |

@@ -170,7 +170,7 @@ pub fn publish_to_monitor() {
 ```
 
 The renderer side (`lib/native/crash-context.ts`) **redacts before crossing the boundary** —
-`pushCrashContext` deep-redacts every string via `redactText` from `lib/twin/ingest/redact.ts`, the
+`pushCrashContext` deep-redacts every string via `redactText` from `packages/redact/src/index.ts`, the
 same PII gate the rest of the app uses.
 
 ## Commands & UI

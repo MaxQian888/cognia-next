@@ -95,7 +95,7 @@ surfaces); `dexie-migration` (schema); `workflow-node` (visual workflows);
 `wiring-auditor`. `preflight` dispatches whichever the diff triggers.
 
 **Cross-cutting reuse gates (from CLAUDE.md)** — before writing an outbound
-LLM/embed path, route it through `lib/twin/ingest/redact.ts:hasNoLeakingPii`;
+LLM/embed path, route it through `packages/redact/src/index.ts:hasNoLeakingPii`;
 before adding a server-only dep, update `next.config.ts` (static-export
 caveat). The Subsystem Map + Cross-cutting hooks table in CLAUDE.md is the
 first place to look for something to reuse.

@@ -5,7 +5,7 @@
  * call, or the system-section injection — must first clear this gate, exactly
  * as `lib/goal/redact-objective.ts` gates goal objectives and
  * `lib/connectors/ai-loop/safe-send-prompt.ts` gates auto-mode sends. The
- * shared detector is `lib/twin/ingest/redact.ts:hasNoLeakingPii(Deep)`.
+ * shared detector is `packages/redact/src/index.ts:hasNoLeakingPii(Deep)`.
  *
  * The gate is a *check*, not a redactor: plans are the agent's own structured
  * output, so a leak is a signal to surface (and let the caller redact at the

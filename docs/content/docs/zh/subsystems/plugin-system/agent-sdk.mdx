@@ -71,7 +71,7 @@ import { createPiiRedactionGate } from "@cognia/plugin-sdk"
 await ctx.agent.run("...", { toolsEnabled: true, canUseTool: createPiiRedactionGate() })
 ```
 
-对工具运行（sidecar）而言，许可门应答 sidecar 既有的 `permission_request` 往返，并经 `approveTool` 回传改写后的 `updatedInput` —— 端到端复用可改写契约。内置的 `createPiiRedactionGate()` 把每个字符串参数过一遍 twin 摄取脱敏器（`lib/twin/ingest/redact.ts`），以占位符替换而非硬拒。运行级门与每工具 `canUseTool` 组合：工具级门先跑，其改写后的输入流入运行级门，任一方 `deny` 即短路。
+对工具运行（sidecar）而言，许可门应答 sidecar 既有的 `permission_request` 往返，并经 `approveTool` 回传改写后的 `updatedInput` —— 端到端复用可改写契约。内置的 `createPiiRedactionGate()` 把每个字符串参数过一遍 twin 摄取脱敏器（`packages/redact/src/index.ts`），以占位符替换而非硬拒。运行级门与每工具 `canUseTool` 组合：工具级门先跑，其改写后的输入流入运行级门，任一方 `deny` 即短路。
 
 > **覆盖范围限制。** 被权限规则集自动放行的宿主工具不会发出 `permission_request`，因此许可门只拦截 ask 档的宿主工具；插件自有的内联工具始终受门把关。
 

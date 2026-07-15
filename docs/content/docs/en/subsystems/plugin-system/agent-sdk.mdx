@@ -71,7 +71,7 @@ import { createPiiRedactionGate } from "@cognia/plugin-sdk"
 await ctx.agent.run("...", { toolsEnabled: true, canUseTool: createPiiRedactionGate() })
 ```
 
-For tool-enabled (sidecar) runs the gate answers the sidecar's existing `permission_request` round-trip and forwards a rewritten `updatedInput` via `approveTool` — reusing the rewrite-capable contract end-to-end. The built-in `createPiiRedactionGate()` runs every string argument through the twin ingest redactor (`lib/twin/ingest/redact.ts`) and substitutes placeholders instead of hard-denying. A run-level gate composes with per-tool `canUseTool`: the tool-level gate runs first, its rewritten input flows into the run-level gate, and a `deny` from either short-circuits.
+For tool-enabled (sidecar) runs the gate answers the sidecar's existing `permission_request` round-trip and forwards a rewritten `updatedInput` via `approveTool` — reusing the rewrite-capable contract end-to-end. The built-in `createPiiRedactionGate()` runs every string argument through the twin ingest redactor (`packages/redact/src/index.ts`) and substitutes placeholders instead of hard-denying. A run-level gate composes with per-tool `canUseTool`: the tool-level gate runs first, its rewritten input flows into the run-level gate, and a `deny` from either short-circuits.
 
 > **Coverage limit.** Host tools auto-allowed by the permission ruleset do not emit a `permission_request`, so the gate intercepts only ask-tier host tools. A plugin's own inline tools are always gated.
 

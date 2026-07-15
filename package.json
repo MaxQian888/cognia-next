@@ -39,6 +39,8 @@
     "audit:trusted-publishers": "ts-node --project scripts/tsconfig.audit.json scripts/gates/check-trusted-publishers.ts",
     "audit:silent-flags": "node scripts/gates/check-silent-failure-flags.mjs",
     "audit:silent-flags:test": "node --test scripts/gates/check-silent-failure-flags.test.mjs",
+    "audit:pii-boundaries": "node scripts/gates/check-pii-boundaries.mjs",
+    "audit:pii-boundaries:test": "node --test scripts/gates/check-pii-boundaries.test.mjs",
     "audit:command-parity": "node scripts/gates/check-command-parity.mjs",
     "audit:command-parity:test": "node --test scripts/gates/check-command-parity.test.mjs scripts/gates/lib/generate-handler.test.mjs",
     "lint:static-export": "node scripts/gates/check-static-export.mjs",

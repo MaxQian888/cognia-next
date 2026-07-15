@@ -15,7 +15,7 @@ import {
  * native-crash report.
  *
  * Secrets/PII are the red line: every string value is run through
- * `redactText` (`lib/twin/ingest/redact.ts`) before it crosses the boundary,
+ * `redactText` (`packages/redact/src/index.ts`) before it crosses the boundary,
  * so even an accidental token in a config field is scrubbed.
  */
 

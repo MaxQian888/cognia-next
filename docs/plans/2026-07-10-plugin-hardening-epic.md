@@ -149,7 +149,7 @@ Root cause #1. Shipped changes (reference implementation for the pattern — mir
 
 #### W2.4 · Medium · PII redaction for plugin model calls
 
-- **Evidence:** `ctx.ai.chat/embed` (`ai-provider-api.ts`) and `ctx.vector.embed` (`vector-api.ts`) send to the model/embedder with no redaction, diverging from the app's cross-cutting gate `lib/twin/ingest/redact.ts::hasNoLeakingPii` (used by Twin/Goal/Connector via `lib/connectors/ai-loop/safe-send-prompt.ts`).
+- **Evidence:** `ctx.ai.chat/embed` (`ai-provider-api.ts`) and `ctx.vector.embed` (`vector-api.ts`) send to the model/embedder with no redaction, diverging from the app's cross-cutting gate `packages/redact/src/index.ts::hasNoLeakingPii` (used by Twin/Goal/Connector via `lib/connectors/ai-loop/safe-send-prompt.ts`).
 - **Approach:** route plugin AI/embed content through `hasNoLeakingPii` (reuse `safe-send-prompt` pattern) before dispatch.
 - **Files:** `lib/plugin/api/ai-provider-api.ts`, `vector-api.ts` (+ tests). Re-run the `pii-gate-auditor` agent after.
 - **Depends on:** W2.3 (same files).
