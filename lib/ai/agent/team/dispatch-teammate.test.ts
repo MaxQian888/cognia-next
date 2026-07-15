@@ -347,6 +347,35 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     expect(pool.recordSuccess).toHaveBeenCalledWith("tm1")
   })
 
+  it("does not mark a task completed when the lead still has to review it", async () => {
+    // Regression: the dispatcher wrote `completed` before the review node ran,
+    // so the board claimed work was done while it was still under review — and
+    // flipped completed → failed when the lead rejected it. With review on the
+    // task stays `in_progress` (true, and a runtime-owned column no one can
+    // hand-move) until the review node writes the terminal status.
+    isTauriMock.mockReturnValue(false)
+    executeAgentMock.mockResolvedValue({ text: "the work" })
+    const { ctx, storeWriter } = makeCtx(makeTeammate(), { taskReview: { enabled: true } })
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it", recordToStore: true })
+
+    expect(storeWriter.setTaskStatus).not.toHaveBeenCalled()
+    // The result message still lands — only the acceptance decision moves.
+    expect(storeWriter.addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "result_share", taskId: "t1" })
+    )
+  })
+
+  it("still completes the task itself when review is off", async () => {
+    isTauriMock.mockReturnValue(false)
+    executeAgentMock.mockResolvedValue({ text: "the work" })
+    const { ctx, storeWriter } = makeCtx(makeTeammate())
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it", recordToStore: true })
+
+    expect(storeWriter.setTaskStatus).toHaveBeenCalledWith("t1", "completed", "the work")
+  })
+
   it("passes the teammate's configured model to the external agent", async () => {
     // Regression: runExternalBacked never received modelHint and never sent a
     // model, so an external teammate silently ran on whatever its own CLI

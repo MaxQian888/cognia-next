@@ -28,6 +28,7 @@ import { resolveTeammateCapabilities } from "./capability-resolver"
 import { teammateToCharacter } from "./teammate-character"
 import { applyTeammateTwinContext } from "./twin-context"
 import type { TeamRunContext } from "./team-run-context"
+import { isTaskReviewEnabled } from "./task-review-policy"
 import type { ClaimOptions } from "./teammate-pool"
 import type { WorktreeHandle } from "./workspace/allocator"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
@@ -539,12 +540,13 @@ export async function dispatchTeammate(
 
   let turn: { text: string; usage?: TokenUsage }
   let workspace: WorktreeHandle | undefined
-  const recordWorkspace = (ok: boolean, output?: string): void => {
+  const recordWorkspace = (ok: boolean, output?: string, commitSha?: string): void => {
     if (workspace && teamCtx.workspaceLedger) {
       teamCtx.workspaceLedger.set(workspace.key, {
         handle: workspace,
         ok,
         ...(output ? { output } : {}),
+        ...(commitSha ? { commitSha } : {}),
       })
     }
   }
@@ -706,20 +708,33 @@ export async function dispatchTeammate(
       content: text.length > 1200 ? `${text.slice(0, 1199)}…` : text,
       taskId: args.taskId,
     })
-    // Acceptance gate (opt-in): route auto-success through the board's
-    // human-owned `review` column instead of jumping straight to `completed`.
-    // Board acceptance only — the wave runner's in-memory doneIds still
-    // unblocks dependents, so this never stalls the run itself.
-    const requireReview =
-      teamCtx.team?.config?.governancePolicy?.approval?.requireResultReview === true
-    teamCtx.storeWriter.setTaskStatus(args.taskId, requireReview ? "review" : "completed", text)
+    // Blocking lead review (ADR-0071) owns the terminal status when it is on:
+    // a dispatch that finished is NOT accepted yet, it is awaiting review, and
+    // the review node writes `completed` / `review` / `failed` once it knows.
+    // Writing `completed` here would make the board claim work is done while it
+    // is still under review — and flip completed → failed when the lead rejects
+    // it. The task stays `in_progress`, which is both true and the board's
+    // runtime-owned column, so no one can hand-move it mid-review.
+    if (!isTaskReviewEnabled(teamCtx.team?.config)) {
+      // Acceptance gate (opt-in): route auto-success through the board's
+      // human-owned `review` column instead of jumping straight to `completed`.
+      // Board acceptance only — the wave runner's in-memory doneIds still
+      // unblocks dependents, so this never stalls the run itself.
+      const requireReview =
+        teamCtx.team?.config?.governancePolicy?.approval?.requireResultReview === true
+      teamCtx.storeWriter.setTaskStatus(args.taskId, requireReview ? "review" : "completed", text)
+    }
   }
   // Workspace isolation: capture the agent's work on its branch (worktrees are
   // GC'd; reconcile merge/select operate on commits). Best-effort — the turn
   // already succeeded, so a commit failure only warns.
+  let commitSha: string | null = null
   if (workspace && teamCtx.workspaceAllocator) {
     try {
-      await teamCtx.workspaceAllocator.commit(workspace, `${teammate.name}: ${args.taskId}`)
+      commitSha = await teamCtx.workspaceAllocator.commit(
+        workspace,
+        `${teammate.name}: ${args.taskId}`
+      )
     } catch {
       teamCtx.notifier.notify({
         level: "warn",
@@ -732,7 +747,7 @@ export async function dispatchTeammate(
       })
     }
   }
-  recordWorkspace(true, text)
+  recordWorkspace(true, text, commitSha ?? undefined)
   reporter?.finalize("done")
   release("success")
 

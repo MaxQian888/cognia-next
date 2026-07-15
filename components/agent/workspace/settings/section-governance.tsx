@@ -34,7 +34,11 @@ import type {
   TeamGovernancePolicy,
 } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { DEFAULT_TASK_REVIEW_MAX_REVISIONS } from "@/lib/ai/agent/team/task-review-policy"
+import {
+  clampMaxRevisions,
+  DEFAULT_TASK_REVIEW_MAX_REVISIONS,
+  MAX_TASK_REVIEW_REVISIONS,
+} from "@/lib/ai/agent/team/task-review-policy"
 import { markSettingsSaved } from "./settings-save-indicator"
 import { ConfirmActionDialog } from "./confirm-action-dialog"
 
@@ -178,23 +182,21 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
             <Input
               type="number"
               min={0}
-              max={5}
+              max={MAX_TASK_REVIEW_REVISIONS}
               className="h-7 w-20 text-xs"
               data-testid="task-review-max-revisions"
               defaultValue={
                 team.config.taskReview?.maxRevisions ?? DEFAULT_TASK_REVIEW_MAX_REVISIONS
               }
-              onBlur={(e) => {
-                const parsed = Number.parseInt(e.target.value, 10)
+              onBlur={(e) =>
                 patchConfig({
                   taskReview: {
                     ...team.config.taskReview,
-                    maxRevisions: Number.isFinite(parsed)
-                      ? Math.max(0, Math.min(5, parsed))
-                      : DEFAULT_TASK_REVIEW_MAX_REVISIONS,
+                    // Same bounds the runtime resolves against — see task-review-policy.
+                    maxRevisions: clampMaxRevisions(Number.parseInt(e.target.value, 10)),
                   },
                 })
-              }}
+              }
             />
           </div>
         )}

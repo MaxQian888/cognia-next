@@ -51,22 +51,35 @@ export interface ReviewEvidence {
 
 /** Injectable git seam so this unit-tests without Tauri. */
 export interface ReviewGitOps {
-  commit(worktreePath: string, message: string): Promise<string | null>
   diffRefsFiles(repoPath: string, base: string, target: string): Promise<GitFileChange[]>
   diffRefsFile(repoPath: string, base: string, target: string, path: string): Promise<GitDiff>
   status(repoPath: string): Promise<GitStatus>
   diffFile(repoPath: string, path: string, staged: boolean): Promise<GitDiff>
 }
 
-export interface BuildReviewEvidenceArgs {
-  /** The task's worktree, when workspace isolation is on. */
-  workspace?: WorktreeHandle
+/**
+ * The task's worktree and everything needed to diff it.
+ *
+ * One object rather than four loose optional fields, because they are only ever
+ * meaningful together: committing is the allocator's job (it owns the handle),
+ * and without a commit there is nothing on the branch to diff against
+ * `repoPath`. Splitting them let a caller supply a repo with no way to commit,
+ * which would silently produce "no diff" — the lead would then review prose
+ * believing the worker changed nothing. The type now makes that unbuildable.
+ */
+export interface ReviewWorktreeSource {
+  handle: WorktreeHandle
+  /** The team's main repo — the diff base for the worktree branch. */
+  repoPath: string
   /** Commits the worktree's work onto its branch. Usually `allocator.commit`. */
-  commitWorkspace?: (handle: WorktreeHandle, message: string) => Promise<string | null>
-  /** The team's main repo — the diff base for a worktree branch. */
-  repoPath?: string
+  commit: (handle: WorktreeHandle, message: string) => Promise<string | null>
   /** Ref the worktree branched from. Defaults to `HEAD`. */
   baseRef?: string
+}
+
+export interface BuildReviewEvidenceArgs {
+  /** The task's worktree, when workspace isolation is on. */
+  worktree?: ReviewWorktreeSource
   /** Shared working dir, used when there is no worktree. */
   workingDir?: string
   taskId: string
@@ -74,9 +87,6 @@ export interface BuildReviewEvidenceArgs {
 }
 
 const REAL_GIT: ReviewGitOps = {
-  // `commit` is supplied by the allocator (it owns the worktree handle); the
-  // rest are the plain wrappers.
-  commit: async () => null,
   diffRefsFiles: gitDiffRefsFiles,
   diffRefsFile: gitDiffRefsFile,
   status: gitStatus,
@@ -125,70 +135,94 @@ function assemble(parts: Array<{ path: string; text: string }>): {
   return { diff: kept.join("\n") + notice, truncated, files }
 }
 
+const EMPTY: ReviewEvidence = { kind: "text", truncated: false, files: [] }
+
+/** Diff the task's branch against the run's base. `null` = nothing to show. */
+async function branchDiff(
+  git: ReviewGitOps,
+  worktree: ReviewWorktreeSource,
+  taskId: string
+): Promise<ReviewEvidence | null> {
+  // Commit first: the worker is not required to commit, and an uncommitted
+  // worktree has nothing to diff against the base ref. `commit` returns null
+  // when the tree is already clean (the usual case — the dispatcher commits).
+  const sha = await worktree.commit(worktree.handle, `agent: ${taskId}`)
+
+  const base = worktree.baseRef ?? "HEAD"
+  const changed = await git.diffRefsFiles(worktree.repoPath, base, worktree.handle.branch)
+  if (changed.length === 0) return null
+
+  const parts = await Promise.all(
+    changed.map(async (f) => ({
+      path: f.path,
+      text: renderDiff(
+        await git.diffRefsFile(worktree.repoPath, base, worktree.handle.branch, f.path)
+      ),
+    }))
+  )
+  const { diff, truncated, files } = assemble(parts)
+  if (!files.length && !truncated) return null
+  return { kind: "commit", diff, truncated, files, ...(sha ? { commitSha: sha } : {}) }
+}
+
+/** Diff a directory's uncommitted (staged + unstaged) changes. */
+async function uncommittedDiff(git: ReviewGitOps, dir: string): Promise<ReviewEvidence | null> {
+  const status = await git.status(dir)
+  const seen = new Set<string>()
+  const unique = [...status.staged, ...status.changes].filter(
+    (f) => !seen.has(f.path) && seen.add(f.path)
+  )
+  if (unique.length === 0) return null
+
+  const parts = await Promise.all(
+    unique.map(async (f) => ({
+      path: f.path,
+      text: renderDiff(await git.diffFile(dir, f.path, f.staged)),
+    }))
+  )
+  const { diff, truncated, files } = assemble(parts)
+  if (!files.length && !truncated) return null
+  return { kind: "worktree", diff, truncated, files }
+}
+
+/** Run a rung, treating any git failure as "this rung produced nothing". */
+async function attempt(fn: () => Promise<ReviewEvidence | null>): Promise<ReviewEvidence | null> {
+  try {
+    return await fn()
+  } catch {
+    // Git is best-effort EVIDENCE, not the gate: a failure here drops to the
+    // next rung and ultimately to the text, never to an approval.
+    return null
+  }
+}
+
 /**
  * Assemble the diff the lead reviews.
  *
- * Order: the task's own worktree branch (committing whatever the worker left
- * uncommitted, so every revision round diffs the cumulative work against the
- * run's base) → uncommitted changes in the shared working dir → nothing, in
- * which case the deliverable text is the only evidence.
+ * Rungs, in order: the task's own worktree branch → uncommitted changes (in
+ * that worktree, else in the shared working dir) → nothing, in which case the
+ * deliverable text is the only evidence. Each rung falls through on failure or
+ * on finding no changes, so a git hiccup on the branch still gets the lead a
+ * diff if the working tree has one.
  */
 export async function buildReviewEvidence(args: BuildReviewEvidenceArgs): Promise<ReviewEvidence> {
   const git = args.git ?? REAL_GIT
-  const empty: ReviewEvidence = { kind: "text", truncated: false, files: [] }
 
-  if (args.workspace && args.repoPath) {
-    try {
-      // Commit first: the worker is not required to commit, and an uncommitted
-      // worktree has nothing to diff against the base ref. `commit` is a no-op
-      // returning null when the tree is already clean.
-      const sha = args.commitWorkspace
-        ? await args.commitWorkspace(args.workspace, `agent: ${args.taskId}`)
-        : await git.commit(args.workspace.path, `agent: ${args.taskId}`)
-
-      const base = args.baseRef ?? "HEAD"
-      const changed = await git.diffRefsFiles(args.repoPath, base, args.workspace.branch)
-      if (changed.length === 0) return empty
-
-      const parts = await Promise.all(
-        changed.map(async (f) => ({
-          path: f.path,
-          text: renderDiff(
-            await git.diffRefsFile(args.repoPath!, base, args.workspace!.branch, f.path)
-          ),
-        }))
-      )
-      const { diff, truncated, files } = assemble(parts)
-      if (!files.length && !truncated) return empty
-      return { kind: "commit", diff, truncated, files, ...(sha ? { commitSha: sha } : {}) }
-    } catch {
-      // Git is best-effort evidence, not the gate. Falling back to the text
-      // keeps the review blocking (a failure here must not silently approve).
-      return empty
-    }
+  if (args.worktree) {
+    const branch = await attempt(() => branchDiff(git, args.worktree!, args.taskId))
+    if (branch) return branch
+    // The branch rung came up empty — try what is sitting in the worktree
+    // uncommitted (e.g. the commit itself failed). Never the shared workingDir:
+    // the work is in the worktree, so diffing the shared dir would be evidence
+    // about the wrong directory.
+    const dirty = await attempt(() => uncommittedDiff(git, args.worktree!.handle.path))
+    return dirty ?? EMPTY
   }
 
   if (args.workingDir) {
-    try {
-      const status = await git.status(args.workingDir)
-      const changed = [...status.staged, ...status.changes]
-      const seen = new Set<string>()
-      const unique = changed.filter((f) => !seen.has(f.path) && seen.add(f.path))
-      if (unique.length === 0) return empty
-
-      const parts = await Promise.all(
-        unique.map(async (f) => ({
-          path: f.path,
-          text: renderDiff(await git.diffFile(args.workingDir!, f.path, f.staged)),
-        }))
-      )
-      const { diff, truncated, files } = assemble(parts)
-      if (!files.length && !truncated) return empty
-      return { kind: "worktree", diff, truncated, files }
-    } catch {
-      return empty
-    }
+    const dirty = await attempt(() => uncommittedDiff(git, args.workingDir!))
+    return dirty ?? EMPTY
   }
 
-  return empty
+  return EMPTY
 }

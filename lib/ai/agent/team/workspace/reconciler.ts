@@ -28,6 +28,11 @@ export interface ReconcileCandidate {
   /** Teammate output — context for the `judge` select strategy. */
   output?: string
   /**
+   * The commit `dispatchTeammate` captured the agent's work as, when the tree
+   * was dirty. `null`/absent means the dispatch changed nothing.
+   */
+  commitSha?: string
+  /**
    * Commit the blocking lead review (ADR-0071) took its diff against, recorded
    * by the review node. Present only for a reviewed task whose worker actually
    * changed something; reconcile does not depend on it (it merges branches, not

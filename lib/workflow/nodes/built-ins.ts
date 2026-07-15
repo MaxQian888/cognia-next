@@ -3317,10 +3317,12 @@ registerNodeExecutor({
       { getTeamRunContext },
       { dispatchTeammate, UnavailableRequiredTeammateError },
       { buildReviewEvidence },
+      { DEFAULT_TASK_REVIEW_MAX_REVISIONS },
     ] = await Promise.all([
       import("@/lib/ai/agent/team/team-run-context"),
       import("@/lib/ai/agent/team/dispatch-teammate"),
       import("@/lib/ai/agent/team/review-evidence"),
+      import("@/lib/ai/agent/team/task-review-policy"),
     ])
 
     const teamCtx = getTeamRunContext(ctx.runId)
@@ -3360,8 +3362,9 @@ registerNodeExecutor({
     let workerOutput = upstream.text
     let workerId = upstream.teammateId
     let workerName = upstream.teammateName
-    const maxRevisions = Math.max(0, params.maxRevisions ?? 0)
-    const history: Array<{ verdict: string; feedback: string }> = []
+    // Schema-validated at the node boundary (`z.number().int().min(0)`), and
+    // baked in by the synthesizer — no clamping needed here.
+    const maxRevisions = params.maxRevisions ?? DEFAULT_TASK_REVIEW_MAX_REVISIONS
     let previousFeedback: string | undefined
 
     const fail = (reason: string): never => {
@@ -3370,30 +3373,34 @@ registerNodeExecutor({
     }
 
     for (let revision = 0; revision <= maxRevisions; revision++) {
-      const workspace = teamCtx.workspaceLedger?.get(taskId)?.handle
+      // A worktree is only diffable alongside the allocator that can commit it,
+      // so the two are resolved together or not at all.
+      const handle = teamCtx.workspaceLedger?.get(taskId)?.handle
+      const allocator = teamCtx.workspaceAllocator
+      const baseRef = teamCtx.team.config?.workspaceIsolation?.baseRef
       const evidence = await buildReviewEvidence({
-        ...(workspace ? { workspace } : {}),
-        ...(teamCtx.workspaceAllocator
+        ...(handle && allocator
           ? {
-              commitWorkspace: (h, message) => teamCtx.workspaceAllocator!.commit(h, message),
-              repoPath: teamCtx.workspaceAllocator.repo,
+              worktree: {
+                handle,
+                repoPath: allocator.repo,
+                commit: (h, message) => allocator.commit(h, message),
+                ...(baseRef ? { baseRef } : {}),
+              },
             }
-          : {}),
-        ...(teamCtx.team.config?.workspaceIsolation?.baseRef
-          ? { baseRef: teamCtx.team.config.workspaceIsolation.baseRef }
           : {}),
         ...(teamCtx.team.config?.workingDir ? { workingDir: teamCtx.team.config.workingDir } : {}),
         taskId,
       })
 
       // Record what was reviewed, so reconcile / the UI can point at the commit
-      // the verdict was actually about.
+      // the verdict was actually about. `dispatchTeammate` already commits the
+      // worker's work, so our own commit usually finds a clean tree and returns
+      // null — the dispatcher's recorded sha is then the one we diffed.
       const ledgerEntry = teamCtx.workspaceLedger?.get(taskId)
-      if (ledgerEntry && evidence.commitSha) {
-        teamCtx.workspaceLedger!.set(taskId, {
-          ...ledgerEntry,
-          reviewedCommitSha: evidence.commitSha,
-        })
+      const reviewedCommitSha = evidence.commitSha ?? ledgerEntry?.commitSha
+      if (ledgerEntry && reviewedCommitSha) {
+        teamCtx.workspaceLedger!.set(taskId, { ...ledgerEntry, reviewedCommitSha })
       }
 
       let verdict: { verdict: "approved" | "changes_requested"; feedback: string }
@@ -3416,7 +3423,6 @@ registerNodeExecutor({
         )
       }
 
-      history.push({ verdict: verdict.verdict, feedback: verdict.feedback })
       teamCtx.storeWriter.addMessage({
         teamId,
         senderId: lead.id,
@@ -3450,7 +3456,7 @@ registerNodeExecutor({
             text: workerOutput,
             verdict: "approved",
             revisions: revision,
-            reviewedCommitSha: evidence.commitSha,
+            reviewedCommitSha,
             ...(workerId ? { teammateId: workerId } : {}),
             ...(workerName ? { teammateName: workerName } : {}),
           },

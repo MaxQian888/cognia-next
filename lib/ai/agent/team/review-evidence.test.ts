@@ -38,7 +38,6 @@ const status = (over: Partial<GitStatus> = {}): GitStatus =>
 
 function makeGit(over: Partial<ReviewGitOps> = {}): ReviewGitOps {
   return {
-    commit: jest.fn(async () => "sha1"),
     diffRefsFiles: jest.fn(async () => []),
     diffRefsFile: jest.fn(async () => diff("a.ts", "@@ -1 +1 @@\n-a\n+b")),
     status: jest.fn(async () => status()),
@@ -47,6 +46,13 @@ function makeGit(over: Partial<ReviewGitOps> = {}): ReviewGitOps {
   }
 }
 
+/** The allocator's commit — required alongside a worktree, since only the
+ *  allocator owns the handle. */
+let commit: jest.Mock<Promise<string | null>, [unknown, string]>
+beforeEach(() => {
+  commit = jest.fn<Promise<string | null>, [unknown, string]>(async () => "sha1")
+})
+
 describe("buildReviewEvidence — worktree branch (preferred)", () => {
   it("commits the worker's work and diffs the branch against the run's base", async () => {
     // The worker is not required to commit; without this the branch has nothing
@@ -54,14 +60,12 @@ describe("buildReviewEvidence — worktree branch (preferred)", () => {
     const git = makeGit({ diffRefsFiles: jest.fn(async () => [change("a.ts")]) })
 
     const ev = await buildReviewEvidence({
-      workspace: handle,
-      repoPath: "/repo",
-      baseRef: "main",
+      worktree: { handle, repoPath: "/repo", commit, baseRef: "main" },
       taskId: "t1",
       git,
     })
 
-    expect(git.commit).toHaveBeenCalledWith("/wt/t1", expect.stringContaining("t1"))
+    expect(commit).toHaveBeenCalledWith(handle, expect.stringContaining("t1"))
     expect(git.diffRefsFiles).toHaveBeenCalledWith("/repo", "main", "agent/run1/coder/t1")
     expect(ev.kind).toBe("commit")
     expect(ev.commitSha).toBe("sha1")
@@ -70,21 +74,22 @@ describe("buildReviewEvidence — worktree branch (preferred)", () => {
     expect(ev.truncated).toBe(false)
   })
 
-  it("prefers the allocator's commit when one is supplied", async () => {
-    const commitWorkspace = jest.fn(async () => "sha-alloc")
+  it("reports no sha when the tree was already clean", async () => {
+    // The usual case: dispatchTeammate already committed the worker's work, so
+    // our commit is a no-op. The caller then falls back to the sha the
+    // dispatcher recorded — this function only reports what IT committed.
     const git = makeGit({ diffRefsFiles: jest.fn(async () => [change("a.ts")]) })
+    commit.mockResolvedValueOnce(null)
 
     const ev = await buildReviewEvidence({
-      workspace: handle,
-      commitWorkspace,
-      repoPath: "/repo",
+      worktree: { handle, repoPath: "/repo", commit },
       taskId: "t1",
       git,
     })
 
-    expect(commitWorkspace).toHaveBeenCalled()
-    expect(git.commit).not.toHaveBeenCalled()
-    expect(ev.commitSha).toBe("sha-alloc")
+    expect(ev.kind).toBe("commit")
+    expect(ev.commitSha).toBeUndefined()
+    expect(ev.files).toEqual(["a.ts"])
   })
 
   it("diffs cumulatively against base, so a revision round still sees the whole change", async () => {
@@ -92,9 +97,7 @@ describe("buildReviewEvidence — worktree branch (preferred)", () => {
     // since the lead's feedback, hiding the work being approved.
     const git = makeGit({ diffRefsFiles: jest.fn(async () => [change("a.ts")]) })
     await buildReviewEvidence({
-      workspace: handle,
-      repoPath: "/repo",
-      baseRef: "main",
+      worktree: { handle, repoPath: "/repo", commit, baseRef: "main" },
       taskId: "t1",
       git,
     })
@@ -103,48 +106,53 @@ describe("buildReviewEvidence — worktree branch (preferred)", () => {
 
   it("defaults the base ref to HEAD", async () => {
     const git = makeGit({ diffRefsFiles: jest.fn(async () => [change("a.ts")]) })
-    await buildReviewEvidence({ workspace: handle, repoPath: "/repo", taskId: "t1", git })
+    await buildReviewEvidence({
+      worktree: { handle, repoPath: "/repo", commit },
+      taskId: "t1",
+      git,
+    })
     expect(git.diffRefsFiles).toHaveBeenCalledWith("/repo", "HEAD", handle.branch)
   })
 
   it("falls back to text when the worker changed nothing", async () => {
-    const git = makeGit({
-      commit: jest.fn(async () => null),
-      diffRefsFiles: jest.fn(async () => []),
-    })
+    const git = makeGit({ diffRefsFiles: jest.fn(async () => []) })
+    commit.mockResolvedValueOnce(null)
     const ev = await buildReviewEvidence({
-      workspace: handle,
-      repoPath: "/repo",
+      worktree: { handle, repoPath: "/repo", commit },
       taskId: "t1",
       git,
     })
     expect(ev).toEqual({ kind: "text", truncated: false, files: [] })
   })
 
-  it("falls back to text when git fails, rather than approving blind", async () => {
+  it("drops to the worktree's uncommitted changes when the branch diff fails", async () => {
+    // A git hiccup on the branch must not cost the lead its evidence.
     const git = makeGit({
       diffRefsFiles: jest.fn(async () => {
         throw new Error("not a git repo")
       }),
+      status: jest.fn(async () => status({ changes: [change("c.ts")] })),
+      diffFile: jest.fn(async () => diff("c.ts", "@@ -1 +1 @@\n-p\n+q")),
     })
     const ev = await buildReviewEvidence({
-      workspace: handle,
-      repoPath: "/repo",
+      worktree: { handle, repoPath: "/repo", commit },
       taskId: "t1",
       git,
     })
-    expect(ev.kind).toBe("text")
+    // Diffed the WORKTREE, never the shared dir — the work lives here.
+    expect(ev.kind).toBe("worktree")
+    expect(ev.files).toEqual(["c.ts"])
+    expect(git.status).toHaveBeenCalledWith("/wt/t1")
   })
 
-  it("falls back to text when every changed file yields an empty patch", async () => {
+  it("falls back to text when both the branch and the worktree are clean", async () => {
     // e.g. a mode-only change: git names the file, the diff carries no hunks.
     const git = makeGit({
       diffRefsFiles: jest.fn(async () => [change("a.ts")]),
       diffRefsFile: jest.fn(async () => ({ ...diff("a.ts", ""), hunks: [] }) as GitDiff),
     })
     const ev = await buildReviewEvidence({
-      workspace: handle,
-      repoPath: "/repo",
+      worktree: { handle, repoPath: "/repo", commit },
       taskId: "t1",
       git,
     })
@@ -212,12 +220,15 @@ describe("buildReviewEvidence — default git wiring", () => {
     expect(ev.kind).toBe("text")
   })
 
-  it("does not commit through the default seam when no allocator is supplied", async () => {
-    // REAL_GIT.commit is a deliberate no-op: only the allocator owns a worktree
-    // handle, so without it there is nothing to commit and nothing to diff.
-    const ev = await buildReviewEvidence({ workspace: handle, repoPath: "/repo", taskId: "t1" })
+  it("degrades to text on a worktree when the real wrappers are inert", async () => {
+    const ev = await buildReviewEvidence({
+      worktree: { handle, repoPath: "/repo", commit },
+      taskId: "t1",
+    })
     expect(ev.kind).toBe("text")
-    expect(ev.commitSha).toBeUndefined()
+    // It still asked the allocator to commit — the allocator, not this module,
+    // decides whether git is reachable.
+    expect(commit).toHaveBeenCalled()
   })
 })
 
@@ -239,8 +250,7 @@ describe("buildReviewEvidence — size cap", () => {
     })
 
     const ev = await buildReviewEvidence({
-      workspace: handle,
-      repoPath: "/repo",
+      worktree: { handle, repoPath: "/repo", commit },
       taskId: "t1",
       git,
     })
@@ -263,8 +273,7 @@ describe("buildReviewEvidence — size cap", () => {
       ),
     })
     const ev = await buildReviewEvidence({
-      workspace: handle,
-      repoPath: "/repo",
+      worktree: { handle, repoPath: "/repo", commit },
       taskId: "t1",
       git,
     })
@@ -279,8 +288,7 @@ describe("buildReviewEvidence — size cap", () => {
       diffRefsFile: jest.fn(async () => ({ ...diff("logo.png", ""), isBinary: true }) as GitDiff),
     })
     const ev = await buildReviewEvidence({
-      workspace: handle,
-      repoPath: "/repo",
+      worktree: { handle, repoPath: "/repo", commit },
       taskId: "t1",
       git,
     })

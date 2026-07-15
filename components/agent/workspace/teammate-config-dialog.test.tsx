@@ -57,6 +57,7 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 import { TeammateConfigDialog } from "./teammate-config-dialog"
+import { getProviderDisplayName } from "@/lib/ai/icons"
 import { listTwins } from "@/lib/db/twins"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
@@ -138,12 +139,19 @@ describe("TeammateConfigDialog", () => {
 
       fireEvent.click(getProviderTrigger())
 
-      expect(await screen.findByRole("option", { name: "anthropic" })).toBeInTheDocument()
-      expect(screen.getByRole("option", { name: "openai" })).toBeInTheDocument()
-      // Custom providers are configured providers too.
-      expect(screen.getByRole("option", { name: "my-gateway" })).toBeInTheDocument()
+      // Labelled by display name, not the raw id the user never typed.
+      expect(
+        await screen.findByRole("option", { name: getProviderDisplayName("anthropic") })
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("option", { name: getProviderDisplayName("openai") })
+      ).toBeInTheDocument()
+      // A custom provider carries its own name; the catalog does not know it.
+      expect(screen.getByRole("option", { name: "GW" })).toBeInTheDocument()
       // A provider the user turned off cannot run the lead.
-      expect(screen.queryByRole("option", { name: "disabled_one" })).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("option", { name: getProviderDisplayName("disabled_one") })
+      ).not.toBeInTheDocument()
     })
 
     it("persists the picked provider onto the lead's config", async () => {
@@ -152,7 +160,7 @@ describe("TeammateConfigDialog", () => {
       )
 
       fireEvent.click(getProviderTrigger())
-      fireEvent.click(await screen.findByRole("option", { name: "openai" }))
+      fireEvent.click(await screen.findByRole("option", { name: getProviderDisplayName("openai") }))
 
       expect(updateTeammateMock).toHaveBeenCalledWith(
         "lead-1",

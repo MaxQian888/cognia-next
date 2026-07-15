@@ -54,6 +54,7 @@ import {
 } from "@/lib/ai/agent/team/teammate-preset-adapter"
 import type { ProviderName } from "@cognia/provider-types/provider"
 import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
+import { getProviderDisplayName } from "@/lib/ai/icons"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useSettingsStore } from "@/stores/settings"
 import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
@@ -90,9 +91,16 @@ export function TeammateConfigDialog({
   const providerOptions = useMemo(() => {
     const builtIn = Object.entries(settings?.providerSettings ?? {})
       .filter(([, entry]) => (entry as { enabled?: boolean } | undefined)?.enabled !== false)
-      .map(([id]) => id)
-    const custom = (settings?.customProviders ?? []).map((p) => p.id)
-    return [...new Set([...builtIn, ...custom])]
+      // Built-ins have catalog display names ("anthropic" → "Anthropic").
+      .map(([id]) => ({ id, label: getProviderDisplayName(id) }))
+    const custom = (settings?.customProviders ?? []).map((p) => ({
+      id: p.id,
+      // A custom provider's own name is the only label it has; the catalog
+      // doesn't know it, and its id is a slug the user shouldn't have to read.
+      label: p.name || p.customName || p.id,
+    }))
+    const seen = new Set<string>()
+    return [...builtIn, ...custom].filter((p) => !seen.has(p.id) && seen.add(p.id))
   }, [settings])
 
   const skillsRaw = useLiveQuery(() => listSkills(), [])
@@ -202,9 +210,9 @@ export function TeammateConfigDialog({
                             <SelectItem value={PROVIDER_DEFAULT_VALUE}>
                               {t("rosterSection.providerDefault")}
                             </SelectItem>
-                            {providerOptions.map((id) => (
-                              <SelectItem key={id} value={id}>
-                                {id}
+                            {providerOptions.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.label}
                               </SelectItem>
                             ))}
                           </SelectContent>

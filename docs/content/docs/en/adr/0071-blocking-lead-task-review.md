@@ -70,15 +70,21 @@ one that did the work. So `review-evidence.ts` assembles what the task actually
 changed, deterministically — no model, no tools, no network:
 
 1. **The task's worktree branch** (preferred). Commit whatever the worker left
-   uncommitted — workers are not required to commit — then diff
+   uncommitted — workers are not required to commit, though `dispatchTeammate`
+   usually already has, so this is normally a no-op — then diff
    `baseRef...agent/<runId>/<teammate>/<taskId>`. Diffing against the base (not
    the previous commit) means a revision round still sees the **cumulative**
    work, not just the delta since the last feedback.
-2. **Uncommitted changes in the shared working dir**, when workspace isolation
-   is off.
+2. **Uncommitted changes** — in that worktree when there is one (e.g. the commit
+   itself failed), otherwise in the shared working dir when isolation is off.
+   Never the shared dir while a worktree exists: the work is in the worktree, so
+   that would be evidence about the wrong directory.
 3. **Nothing** — then the deliverable text is the only evidence, and the prompt
    says so, telling the lead to treat an unbacked claim of code changes as
    grounds to request changes.
+
+Each rung falls through on failure *or* on finding no changes, so a git hiccup
+on the branch still gets the lead a diff if the tree has one.
 
 Capped at **64 KiB** of UTF-8, dropping whole files rather than splitting them:
 a truncated patch reads as a complete one, so the omission is named in the
@@ -111,7 +117,16 @@ the task `failed` and throw non-retryably. The node is deliberately
 would let a flaky reviewer eventually rubber-stamp. **A gate that gives up and
 approves is not a gate.**
 
-### Composition with the human board gate
+### Who owns the board status
+
+With review on, **the review node owns the terminal status** — `dispatchTeammate`
+does not write one. A dispatch that finished is not accepted yet, it is awaiting
+review, so the task stays `in_progress` until the lead rules. Letting the
+dispatcher write `completed` first would have the board claim work was done
+while it was still under review, and flip `completed → failed` on a rejection.
+`in_progress` is also a runtime-owned column (`task-move-guard.ts`), so nobody
+can hand-move a card mid-review. The result message still posts on dispatch —
+only the acceptance decision moves.
 
 `requireResultReview` is orthogonal and composes: automated approval routes the
 card to `review` (a human still has the last word) when it is set, and to
