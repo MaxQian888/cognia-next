@@ -41,6 +41,7 @@ import {
   acpTerminalList,
 } from "@/lib/native/external-agent"
 import { initialState } from "../initial-state"
+import { hydrateAgentConfig } from "../selectors"
 import type {
   StoredExternalAgentConfig,
   RunningAgentInstance,
@@ -268,19 +269,11 @@ export const createExternalAgentActionsSlice = (
     const stored = get().agents[id]
     if (!stored) return undefined
 
-    return {
-      ...stored,
-      createdAt: new Date(stored.createdAt),
-      updatedAt: new Date(stored.updatedAt),
-    }
+    return hydrateAgentConfig(stored)
   },
 
   getAllAgents: (): ExternalAgentConfig[] => {
-    return Object.values(get().agents).map((stored) => ({
-      ...stored,
-      createdAt: new Date(stored.createdAt),
-      updatedAt: new Date(stored.updatedAt),
-    }))
+    return Object.values(get().agents).map((stored) => hydrateAgentConfig(stored))
   },
 
   // ========================================

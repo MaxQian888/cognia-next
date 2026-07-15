@@ -1,4 +1,36 @@
-import type { ExternalAgentStore } from "./types"
+import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import type { ExternalAgentStore, StoredExternalAgentConfig } from "./types"
+
+// Config hydration
+// ============================================================================
+
+/**
+ * The store persists `createdAt`/`updatedAt` as ISO strings; consumers expect
+ * `Date`s. Hydrating inline in a selector minted a fresh config object on every
+ * call, so a selector could never return an equal snapshot for unchanged state.
+ * `useSyncExternalStore` re-reads the snapshot after each render and forces
+ * another render whenever it changed — a never-equal snapshot is an infinite
+ * render loop that hard-freezes the renderer, and `useShallow` cannot save it
+ * because it compares *element* references. An empty result compares equal, so
+ * this only bit once at least one agent existed.
+ *
+ * Keying the cache on the stored object's identity fixes that: zustand replaces
+ * the stored object only when the agent actually changes, so unchanged agents
+ * keep yielding the same hydrated instance, and a changed one re-hydrates.
+ */
+const hydratedConfigs = new WeakMap<StoredExternalAgentConfig, ExternalAgentConfig>()
+
+export function hydrateAgentConfig(stored: StoredExternalAgentConfig): ExternalAgentConfig {
+  const cached = hydratedConfigs.get(stored)
+  if (cached) return cached
+  const hydrated: ExternalAgentConfig = {
+    ...stored,
+    createdAt: new Date(stored.createdAt),
+    updatedAt: new Date(stored.updatedAt),
+  }
+  hydratedConfigs.set(stored, hydrated)
+  return hydrated
+}
 
 // Selectors
 // ============================================================================
@@ -17,29 +49,17 @@ export const selectDefaultPermissionMode = (state: ExternalAgentStore) =>
 export const selectConnectedAgents = (state: ExternalAgentStore) =>
   Object.entries(state.agents)
     .filter(([id]) => state.connectionStatus[id] === "connected")
-    .map(([_, config]) => ({
-      ...config,
-      createdAt: new Date(config.createdAt),
-      updatedAt: new Date(config.updatedAt),
-    }))
+    .map(([_, config]) => hydrateAgentConfig(config))
 
 export const selectEnabledAgents = (state: ExternalAgentStore) =>
   Object.values(state.agents)
     .filter((config) => config.enabled)
-    .map((config) => ({
-      ...config,
-      createdAt: new Date(config.createdAt),
-      updatedAt: new Date(config.updatedAt),
-    }))
+    .map((config) => hydrateAgentConfig(config))
 
 export const selectAgentById = (id: string) => (state: ExternalAgentStore) => {
   const config = state.agents[id]
   if (!config) return undefined
-  return {
-    ...config,
-    createdAt: new Date(config.createdAt),
-    updatedAt: new Date(config.updatedAt),
-  }
+  return hydrateAgentConfig(config)
 }
 
 export const selectActiveAgent = (state: ExternalAgentStore) => {

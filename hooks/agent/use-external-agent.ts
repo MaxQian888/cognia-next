@@ -46,6 +46,57 @@ import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/ag
 import { normalizeExternalAgentValiditySnapshot } from "@/lib/ai/agent/external/canonical-contract"
 
 // ============================================================================
+// Validity projection
+// ============================================================================
+
+interface CachedValidityNormalization {
+  fallbackProtocol: string | undefined
+  fallbackSource: string | undefined
+  value: ExternalAgentValiditySnapshot
+}
+
+/**
+ * `normalizeExternalAgentValiditySnapshot` builds a fresh object per call (and
+ * mints `checkedAt` when the input lacks one), so re-projecting an *unchanged*
+ * runtime validity used to yield a value that could never compare equal to the
+ * one already in the store. Caching by the source snapshot's identity makes the
+ * projection referentially stable, which is what lets `refresh()` below detect
+ * "nothing actually changed" and skip the write.
+ *
+ * Why that matters: `refresh()` writes into the store, and the store subscriber
+ * calls `refresh()` — so a write that isn't genuinely needed re-triggers itself
+ * forever. The manager replaces `instance.validity` wholesale on every real
+ * change (`updateInstanceState`), so keying on identity tracks real changes
+ * exactly. The options are part of the key because the same snapshot normalised
+ * under a different fallback protocol/source is a different value.
+ */
+const normalizedValidityBySource = new WeakMap<object, CachedValidityNormalization>()
+
+function stableNormalizeValidity(
+  snapshot: ExternalAgentValiditySnapshot,
+  options: { fallbackProtocol?: string; fallbackSource?: ExternalAgentValiditySnapshot["source"] }
+): ExternalAgentValiditySnapshot {
+  const cached = normalizedValidityBySource.get(snapshot)
+  if (
+    cached &&
+    cached.fallbackProtocol === options.fallbackProtocol &&
+    cached.fallbackSource === options.fallbackSource
+  ) {
+    return cached.value
+  }
+  const value = normalizeExternalAgentValiditySnapshot(snapshot, {
+    fallbackProtocol: options.fallbackProtocol as never,
+    fallbackSource: options.fallbackSource,
+  })
+  normalizedValidityBySource.set(snapshot, {
+    fallbackProtocol: options.fallbackProtocol,
+    fallbackSource: options.fallbackSource,
+    value,
+  })
+  return value
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -300,18 +351,27 @@ export function useExternalAgent(): UseExternalAgentReturn {
         if (runtime) {
           const currentStatus = storeGetConnectionStatus(config.id)
           const normalizedRuntimeValidity = runtime.validity
-            ? normalizeExternalAgentValiditySnapshot(runtime.validity, {
+            ? stableNormalizeValidity(runtime.validity, {
                 fallbackProtocol: config.protocol,
                 fallbackSource: runtime.validity.source,
               })
             : undefined
-          if (currentStatus !== runtime.connectionStatus || runtime.validity) {
+          // Write only what genuinely changed. The old guard was
+          // `|| runtime.validity`, which is truthy for the whole life of a
+          // connected agent — so this always wrote a fresh `agentValidity`
+          // object, the store subscriber saw a change and called `refresh()`
+          // again, and the two spun forever (starving the microtask queue and
+          // re-persisting the store on every turn).
+          const statusChanged = currentStatus !== runtime.connectionStatus
+          const validityChanged =
+            normalizedRuntimeValidity !== undefined &&
+            storeGetAgentValidity(config.id) !== normalizedRuntimeValidity
+          if (statusChanged || validityChanged) {
             useExternalAgentStore.setState((state) => ({
-              connectionStatus:
-                currentStatus !== runtime.connectionStatus
-                  ? { ...state.connectionStatus, [config.id]: runtime.connectionStatus }
-                  : state.connectionStatus,
-              agentValidity: normalizedRuntimeValidity
+              connectionStatus: statusChanged
+                ? { ...state.connectionStatus, [config.id]: runtime.connectionStatus }
+                : state.connectionStatus,
+              agentValidity: validityChanged
                 ? { ...state.agentValidity, [config.id]: normalizedRuntimeValidity }
                 : state.agentValidity,
             }))
@@ -423,19 +483,25 @@ export function useExternalAgent(): UseExternalAgentReturn {
         const storeState = useExternalAgentStore.getState()
         const protocol = storeState.agents[event.agentId]?.protocol ?? "acp"
         const normalizedValidity = event.validity
-          ? normalizeExternalAgentValiditySnapshot(event.validity, {
+          ? stableNormalizeValidity(event.validity, {
               fallbackProtocol: protocol,
               fallbackSource: event.validity.source,
             })
           : undefined
         const currentStatus = storeState.getConnectionStatus(event.agentId)
-        if (currentStatus !== event.connectionStatus || event.validity) {
+        // Same idempotence rule as `refresh()`: a lifecycle event that carries
+        // an unchanged validity must not rewrite the store, or it needlessly
+        // re-triggers the store subscriber (and a persist write) per event.
+        const statusChanged = currentStatus !== event.connectionStatus
+        const validityChanged =
+          normalizedValidity !== undefined &&
+          storeState.getAgentValidity(event.agentId) !== normalizedValidity
+        if (statusChanged || validityChanged) {
           useExternalAgentStore.setState((state) => ({
-            connectionStatus:
-              currentStatus !== event.connectionStatus
-                ? { ...state.connectionStatus, [event.agentId]: event.connectionStatus }
-                : state.connectionStatus,
-            agentValidity: normalizedValidity
+            connectionStatus: statusChanged
+              ? { ...state.connectionStatus, [event.agentId]: event.connectionStatus }
+              : state.connectionStatus,
+            agentValidity: validityChanged
               ? { ...state.agentValidity, [event.agentId]: normalizedValidity }
               : state.agentValidity,
           }))
