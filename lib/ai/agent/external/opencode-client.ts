@@ -29,6 +29,7 @@ import type {
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/utils"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
+import { isExternalAgentAlreadyRunningError } from "./spawn-reclaim"
 import type {
   ExternalAgentConfig,
   ExternalAgentSession,
@@ -406,20 +407,44 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     ]
     const startupTimeout = config.process?.startupTimeout ?? 10000
 
-    // Register listeners before spawning so we never miss the listening line.
-    const urlPromise = this.waitForServerUrl(native, id, startupTimeout)
-
-    try {
-      await native.spawnExternalAgent({
+    const spawnOnce = () =>
+      native.spawnExternalAgent({
         id,
         command,
         args,
         env: config.process?.env,
         cwd: config.process?.cwd,
       })
+
+    // Register listeners before spawning so we never miss the listening line.
+    let urlPromise = this.waitForServerUrl(native, id, startupTimeout)
+
+    try {
+      await spawnOnce()
     } catch (error) {
       void urlPromise.catch(() => {})
-      throw error
+      if (!isExternalAgentAlreadyRunningError(error)) throw error
+
+      // The process manager keys children by this id and outlives the JS realm,
+      // so a page reload / dev Fast Refresh leaves a server nothing listens to
+      // while every respawn is refused — bricking the agent until the whole app
+      // restarts. Reclaim the id. Safe here because `connect()` returns early
+      // when already connected, so nothing in this realm consumes that child.
+      log.warn("Reclaiming an orphaned OpenCode server process", { id })
+      await native.killExternalAgent(id)
+
+      // Re-arm only AFTER the kill: the orphan's exit event carries this same
+      // id, and the wait above would read it as "server exited before becoming
+      // ready". The supervisor emits that exit asynchronously, so if it still
+      // slips into the fresh wait this connect fails and the manager's retry —
+      // which now finds the id free — succeeds.
+      urlPromise = this.waitForServerUrl(native, id, startupTimeout)
+      try {
+        await spawnOnce()
+      } catch (retryError) {
+        void urlPromise.catch(() => {})
+        throw retryError
+      }
     }
 
     try {

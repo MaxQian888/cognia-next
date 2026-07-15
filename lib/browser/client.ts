@@ -14,6 +14,7 @@ import type {
   NetworkState,
   SnapshotOptions,
 } from "@/lib/browser/protocol"
+import type { RecordedStep } from "@/lib/browser/recording/protocol"
 import { transport } from "@/lib/tauri"
 
 export const browserClient = {
@@ -95,6 +96,18 @@ export const browserClient = {
   embedGetTitle: () => transport.call<string>("browser_embed_get_title", {}),
   /** Whether the embedded page's visible text currently contains `text`. */
   embedHasText: (text: string) => transport.call<boolean>("browser_embed_has_text", { text }),
+
+  // --- Action recording (ADR-0072) ----------------------------------------
+  /** Resolve a recorded selector to a live snapshot ref; "" when not found. */
+  embedRefFor: (selector: string) => transport.call<string>("browser_embed_ref_for", { selector }),
+  /** Begin a fresh take, discarding anything the page had buffered. */
+  embedStartRecord: () => transport.call<string>("browser_embed_start_record", {}),
+  /** Re-arm after a navigation, keeping the buffer (see `resumeRecord`). */
+  embedResumeRecord: () => transport.call<string>("browser_embed_resume_record", {}),
+  embedStopRecord: () => transport.call<string>("browser_embed_stop_record", {}),
+  /** Take the steps buffered since the last drain. */
+  embedDrainRecord: async (): Promise<RecordedStep[]> =>
+    JSON.parse(await transport.call<string>("browser_embed_drain_record", {})) as RecordedStep[],
 }
 
 export type BrowserClient = typeof browserClient

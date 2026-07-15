@@ -134,6 +134,8 @@ type SummaryCredentials = NonNullable<
 interface SummaryProviderResolution {
   model?: string
   protocol: string
+  /** Built-in provider id backing `credentials`; see ResolvedCompaction.summary. */
+  providerId: string
   credentials: SummaryCredentials
   protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
 }
@@ -243,6 +245,7 @@ async function resolveSummaryProviderForCompaction(args: {
     return {
       model: args.summaryModel ?? r.model,
       protocol: r.protocol,
+      providerId: args.providerId,
       credentials,
       ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
     }
@@ -257,6 +260,7 @@ async function resolveSummaryProviderForCompaction(args: {
     return {
       model: args.summaryModel ?? getBuiltInProviderDefaultModel(args.providerId),
       protocol: "openai",
+      providerId: args.providerId,
       credentials,
       ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
     }
@@ -2667,6 +2671,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             resolved.summary = {
               model: summary.model,
               protocol: summary.protocol,
+              // Travels WITH `credentials`: the sidecar keys the OpenAI endpoint
+              // family off the id, which a relay preset's host can't reveal.
+              providerId: summary.providerId,
               credentials: summary.credentials,
               ...(summary.protocolAdapterSpec
                 ? { protocolAdapterSpec: summary.protocolAdapterSpec }

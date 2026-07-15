@@ -109,7 +109,14 @@ export function SubscriptionOverviewTab({
     return (
       <SettingsEmptyState
         title={t("overview.noDataTitle")}
-        description={t("overview.noDataBody")}
+        // A failed query is not "no data yet": show why (expired bearer,
+        // throttle, outage) rather than the generic empty copy, which is what
+        // made a broken quota read indistinguishable from an idle account.
+        description={
+          snapshot?.error
+            ? t("limits.error", { message: snapshot.error })
+            : t("overview.noDataBody")
+        }
         action={
           <Button
             onClick={() => void refresh()}

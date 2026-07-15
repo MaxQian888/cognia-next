@@ -6,6 +6,7 @@ import {
   isGenuineOpenAiEndpoint,
   isResponsesOnlyEndpoint,
   buildReasoningProviderOptions,
+  buildCodexResponsesProviderOptions,
 } from "./ai-sdk-adapter.mjs"
 
 test("buildModel throws on unsupported protocols", async () => {
@@ -122,6 +123,129 @@ test("buildModel(openai) routes the Codex ChatGPT backend to the Responses API",
     headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
   })
   assert.equal(m.provider, "openai.responses")
+})
+
+test("buildModel(openai) routes a Codex RELAY preset to the Responses API via providerId", async () => {
+  // Regression: the sidecar called decideOpenAiEndpointFlavor WITHOUT providerId,
+  // so RESPONSES_ONLY_PROVIDERS(["codex"]) was dead here and a codex account on a
+  // third-party relay preset (wire_api="responses") built via .chat() — which the
+  // relay doesn't serve. The renderer passed providerId and disagreed.
+  const m = await buildModel({
+    protocol: "openai",
+    model: "gpt-5.6-sol",
+    apiKey: "sk-relay",
+    baseURL: "https://ai-pixel.online",
+    providerId: "codex",
+  })
+  assert.equal(m.provider, "openai.responses")
+})
+
+test("buildModel(openai) leaves a non-codex gateway on Chat Completions", async () => {
+  // The providerId arm must not drag other openai-protocol gateways onto /responses.
+  const m = await buildModel({
+    protocol: "openai",
+    model: "deepseek-chat",
+    apiKey: "sk",
+    baseURL: "https://api.deepseek.com/v1",
+    providerId: "deepseek",
+  })
+  assert.equal(m.provider, "openai.chat")
+})
+
+test("buildReasoningProviderOptions(openai): the Codex backend + relay are native surfaces", () => {
+  // Regression: the gate was isGenuineOpenAiEndpoint(baseURL), false for both of
+  // these, so reasoningEffort/reasoningSummary were dropped on the whole Codex
+  // subscription path — every Codex model is a reasoning model, so reasoning ran
+  // off and invisible.
+  const expected = { openai: { reasoningEffort: "high", reasoningSummary: "auto" } }
+  assert.deepEqual(
+    buildReasoningProviderOptions("openai", "https://chatgpt.com/backend-api/codex", {
+      effort: "high",
+    }),
+    expected
+  )
+  assert.deepEqual(
+    buildReasoningProviderOptions(
+      "openai",
+      "https://ai-pixel.online",
+      { effort: "high" },
+      {
+        providerId: "codex",
+      }
+    ),
+    expected
+  )
+  // A compatible gateway still opts out (it may 400 on the unknown field).
+  assert.equal(
+    buildReasoningProviderOptions(
+      "openai",
+      "https://api.deepseek.com/v1",
+      { effort: "high" },
+      {
+        providerId: "deepseek",
+      }
+    ),
+    null
+  )
+})
+
+test("buildCodexResponsesProviderOptions: store:false, encrypted reasoning only when reasoning is on", () => {
+  // Matches openai/codex build_responses_request: store:false always (non-Azure),
+  // include:["reasoning.encrypted_content"] only when reasoning is enabled.
+  assert.deepEqual(
+    buildCodexResponsesProviderOptions({
+      providerId: "codex",
+      flavor: "responses",
+      hasReasoning: true,
+    }),
+    { openai: { store: false, include: ["reasoning.encrypted_content"] } }
+  )
+  assert.deepEqual(
+    buildCodexResponsesProviderOptions({
+      providerId: "codex",
+      flavor: "responses",
+      hasReasoning: false,
+    }),
+    { openai: { store: false } }
+  )
+  // Scoped: the general openai provider keeps the server's storage default.
+  assert.equal(
+    buildCodexResponsesProviderOptions({
+      providerId: "openai",
+      flavor: "responses",
+      hasReasoning: true,
+    }),
+    null
+  )
+  // A codex row forced onto chat completions has no responses fields to send.
+  assert.equal(
+    buildCodexResponsesProviderOptions({ providerId: "codex", flavor: "chat", hasReasoning: true }),
+    null
+  )
+})
+
+test("start merges the Codex responses fields with reasoning into one openai block", async () => {
+  let captured = null
+  const fakeStreamText = (args) => {
+    captured = args
+    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+  }
+  await makeAiSdkAdapter("openai").start({
+    model: "gpt-5.6-sol",
+    messages: [],
+    providerId: "codex",
+    credentials: { apiKey: "bearer", baseURL: "https://chatgpt.com/backend-api/codex" },
+    reasoning: { effort: "high" },
+    streamTextFn: fakeStreamText,
+  })
+  assert.deepEqual(captured.providerOptions, {
+    openai: {
+      reasoningEffort: "high",
+      reasoningSummary: "auto",
+      store: false,
+      include: ["reasoning.encrypted_content"],
+    },
+  })
 })
 
 test("start passes model/messages/params through to streamText verbatim", async () => {

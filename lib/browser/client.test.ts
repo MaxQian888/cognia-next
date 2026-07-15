@@ -164,4 +164,30 @@ describe("browserClient agent methods", () => {
     expect(await browserClient.embedHasText("Loaded")).toBe(true)
     expect(call).toHaveBeenCalledWith("browser_embed_has_text", { text: "Loaded" })
   })
+
+  describe("action recording", () => {
+    it("start/stop take no arguments", async () => {
+      call.mockResolvedValue("1")
+      await browserClient.embedStartRecord()
+      await browserClient.embedStopRecord()
+      expect(call).toHaveBeenNthCalledWith(1, "browser_embed_start_record", {})
+      expect(call).toHaveBeenNthCalledWith(2, "browser_embed_stop_record", {})
+    })
+
+    it("embedDrainRecord parses the json array the page returns", async () => {
+      const step = {
+        act: "click",
+        at: 1,
+        target: { selector: "#go", role: "button", name: "Go", domPath: "body > button" },
+      }
+      call.mockResolvedValueOnce(JSON.stringify([step]))
+      expect(await browserClient.embedDrainRecord()).toEqual([step])
+      expect(call).toHaveBeenCalledWith("browser_embed_drain_record", {})
+    })
+
+    it("embedDrainRecord yields an empty list when nothing was buffered", async () => {
+      call.mockResolvedValueOnce("[]")
+      expect(await browserClient.embedDrainRecord()).toEqual([])
+    })
+  })
 })

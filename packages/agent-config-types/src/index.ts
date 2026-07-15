@@ -78,6 +78,15 @@ export interface ResolvedCompaction {
   summary?: {
     model?: string
     protocol?: string
+    /**
+     * Built-in provider id backing `credentials` (NOT the protocol). Set only
+     * alongside `credentials`, i.e. when the summary runs on a DIFFERENT
+     * provider than the turn; absent ⇒ the sidecar reuses the turn's provider
+     * id along with its credentials. The sidecar needs the id — not just the
+     * base URL — to pick the OpenAI endpoint family, since a responses-only
+     * provider (codex) behind a relay preset is unidentifiable from its host.
+     */
+    providerId?: string
     credentials?: {
       apiKey?: string
       baseURL?: string

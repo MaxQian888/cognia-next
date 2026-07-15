@@ -319,6 +319,65 @@ describe("getDb", () => {
     upgraded.close()
   })
 
+  // v110 — recorded browser flows (ADR-0072). Pure additive: no upgrade hook,
+  // so the guarantee to pin is that the table and its indexes resolve, and that
+  // a flow survives the round-trip with its nested step list intact.
+  it("v110 browserRecordings round-trips and resolves its indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(110)
+
+    await db.browserRecordings.bulkPut([
+      {
+        id: "f1",
+        name: "login",
+        baseUrl: "http://localhost:3000",
+        createdAt: 100,
+        updatedAt: 100,
+        steps: [
+          { act: "navigate", at: 0, url: "http://localhost:3000/login" },
+          {
+            act: "click",
+            at: 1,
+            target: { selector: "#go", role: "button", name: "Go", domPath: "form > button" },
+          },
+        ],
+      },
+      {
+        id: "f2",
+        name: "checkout",
+        baseUrl: "http://localhost:3000",
+        createdAt: 200,
+        updatedAt: 300,
+        steps: [],
+      },
+      {
+        id: "f3",
+        name: "other app",
+        baseUrl: "http://localhost:4000",
+        createdAt: 400,
+        updatedAt: 400,
+        steps: [],
+      },
+    ])
+
+    // The nested step list survives structured cloning — a flow is stored whole.
+    expect((await db.browserRecordings.get("f1"))?.steps).toHaveLength(2)
+    // baseUrl scopes the pane's "flows for this origin" list.
+    expect(
+      await db.browserRecordings.where("baseUrl").equals("http://localhost:3000").count()
+    ).toBe(2)
+    // updatedAt drives recency ordering.
+    expect(await db.browserRecordings.where("updatedAt").above(150).count()).toBe(2)
+    // The compound index backs "this origin's flows, newest first".
+    expect(
+      await db.browserRecordings
+        .where("[baseUrl+updatedAt]")
+        .between(["http://localhost:3000", Dexie.minKey], ["http://localhost:3000", Dexie.maxKey])
+        .count()
+    ).toBe(2)
+  })
+
   it("v109_preserves_user_accepted_rows", async () => {
     const name = `cognia-v109-preserve-user-${Date.now()}`
     const legacy = new Dexie(name)

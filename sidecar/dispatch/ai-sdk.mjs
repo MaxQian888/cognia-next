@@ -791,6 +791,11 @@ export function dispatchAiSdk({
           tools: undefined,
           maxSteps: 1,
           credentials: summaryCreds,
+          // Must track whichever credentials won above: a distinct summary
+          // provider carries its own id, otherwise these ARE the turn's creds
+          // and so is its provider. Omitting it dropped codex-on-a-relay back
+          // to `.chat()` for compaction only — the turn itself still worked.
+          providerId: sum.credentials ? sum.providerId : provider,
           // Interruptible: a hung summary provider must not stall the turn
           // head forever. Absent for a between-turns manual compaction (no
           // active controller) — that call has no turn to stall.
@@ -857,6 +862,8 @@ export function dispatchAiSdk({
           tools: undefined,
           maxSteps: 1,
           credentials: sum.credentials || creds,
+          // Same pairing as the summary call above.
+          providerId: sum.credentials ? sum.providerId : provider,
           ...(activeAbortController ? { abortSignal: activeAbortController.signal } : {}),
           streamTextFn: streamTextOverride,
         })
@@ -1149,6 +1156,10 @@ export function dispatchAiSdk({
           tools: toolsCache,
           maxSteps: perLegCap,
           credentials: creds,
+          // The built-in provider id (NOT the protocol): the openai endpoint
+          // decision and Codex's Responses-API fields are keyed on the id, since
+          // a provider's host alone can't identify it behind a relay preset.
+          providerId: provider,
           // Enable reasoning per provider — `effort` (thinking level) and
           // `maxThinkingTokens` (budget) were dropped here, so non-Anthropic
           // reasoning models ran with thinking off. The adapter maps these to

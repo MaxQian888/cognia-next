@@ -164,6 +164,12 @@ async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  // `clearAllMocks` clears call records but NOT queued `mockResolvedValueOnce` /
+  // `mockRejectedValueOnce` implementations — an unconsumed one-shot leaks into
+  // the next test and makes results order-dependent. Reset the spawn/kill queues
+  // so each test starts from a known state.
+  mockSpawn.mockReset()
+  mockKill.mockReset()
   mockIsTauri.mockReturnValue(false)
   // Default: stderr listener registers fine but never emits. Individual
   // spawn tests override it to exercise the stderr "listening" path.
@@ -383,6 +389,59 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
 
     await a.disconnect()
     expect(mockKill).toHaveBeenCalledWith("opencode-server-agent")
+  })
+
+  it("reclaims an orphaned server process when the id is already registered", async () => {
+    // The Rust process manager keys children by id and outlives the JS realm, so
+    // a page reload / dev Fast Refresh leaves an `opencode-server-<id>` child
+    // that nothing listens to while every respawn is rejected — bricking the
+    // agent until the whole app restarts.
+    mockIsTauri.mockReturnValue(true)
+    mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
+    mockSpawn
+      .mockRejectedValueOnce("Agent opencode-server-agent is already running")
+      .mockResolvedValueOnce("agent")
+    mockKill.mockResolvedValue(undefined)
+    mockOnExit.mockResolvedValue(() => {})
+    mockOnStdout.mockImplementation((cb: (e: { agentId: string; data: string }) => void) => {
+      setTimeout(
+        () =>
+          cb({
+            agentId: "opencode-server-agent",
+            data: "opencode server listening on http://127.0.0.1:55001\n",
+          }),
+        0
+      )
+      return Promise.resolve(() => {})
+    })
+
+    const a = new OpenCodeClientAdapter()
+    await a.connect(
+      buildConfig({ metadata: { autoSpawnServer: true }, process: { command: "opencode" } })
+    )
+
+    expect(mockKill).toHaveBeenCalledWith("opencode-server-agent")
+    expect(mockSpawn).toHaveBeenCalledTimes(2)
+    expect(mockCreateOpencodeClient).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: "http://127.0.0.1:55001" })
+    )
+  })
+
+  it("propagates a spawn failure that is not an already-running collision", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
+    mockSpawn.mockRejectedValueOnce("Failed to spawn process: ENOENT")
+    mockKill.mockResolvedValue(undefined)
+    mockOnExit.mockResolvedValue(() => {})
+    mockOnStdout.mockResolvedValue(() => {})
+
+    const a = new OpenCodeClientAdapter()
+    await expect(
+      a.connect(
+        buildConfig({ metadata: { autoSpawnServer: true }, process: { command: "opencode" } })
+      )
+    ).rejects.toMatch(/ENOENT/)
+    expect(mockSpawn).toHaveBeenCalledTimes(1)
   })
 
   it("also resolves the listening URL from stderr (some runtimes log there)", async () => {

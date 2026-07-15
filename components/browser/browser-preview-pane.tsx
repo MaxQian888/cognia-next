@@ -20,6 +20,7 @@ import {
   BrowserAgentIndicator,
   useBrowserAgentActivity,
 } from "@/components/browser/browser-agent-indicator"
+import { BrowserRecorderPanel } from "@/components/browser/browser-recorder-panel"
 import {
   WebPreview,
   WebPreviewBody,
@@ -108,7 +109,7 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
   const { selection, navigated, selectMode, setSelectMode, clearSelection } = useElementSelection({
     driver: browserClient.embedSetSelectMode,
   })
-  const { sendComment, sendScreenshot } = useSelectionToChat()
+  const { sendComment, sendScreenshot, sendText } = useSelectionToChat()
   const { driver, lastAction } = useBrowserAgentActivity()
 
   useEffect(() => {
@@ -441,6 +442,11 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
           </div>
         </div>
       )}
+
+      <BrowserRecorderPanel
+        pageUrl={currentUrl ?? null}
+        onSendToChat={(markdown) => void sendText(markdown, { sessionId })}
+      />
     </div>
   )
 }

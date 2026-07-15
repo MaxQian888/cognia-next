@@ -51,6 +51,35 @@ describe("catalog → PROVIDERS merge", () => {
     expect(getProviderConfig("openai")).toBe(PROVIDERS.openai)
     expect(PROVIDERS.openai?.models.length).toBeGreaterThan(0)
   })
+
+  it("resolves codex from the catalog, keeping its protocol and default base URL", () => {
+    // Regression: an inline `codex` entry used to shadow the catalog one.
+    // Because the merge replaces wholesale rather than deep-merging, and the
+    // inline map has no slot for `protocol` / `defaultBaseURL`, both silently
+    // resolved to `undefined` — and the model list had to be edited twice to
+    // take effect. codex must stay catalog-only.
+    expect(PROVIDERS.codex?.defaultBaseURL).toBe("https://api.openai.com/v1")
+    expect(PROVIDERS.codex?.protocol).toBe("openai")
+  })
+
+  it("offers the current Codex model line-up, not the retired 5.1/5.2-codex one", () => {
+    const ids = PROVIDERS.codex?.models.map((m) => m.id) ?? []
+    expect(ids).toEqual([
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+    ])
+    // The default must be a model the provider actually lists, or the picker
+    // opens on an id the backend will reject.
+    expect(PROVIDERS.codex?.defaultModel).toBe("gpt-5.6-sol")
+    expect(ids).toContain(PROVIDERS.codex?.defaultModel)
+    // `gpt-5.2` and `gpt-5.3-codex` are deprecated in Codex under a ChatGPT
+    // login; the 5.1/5.2-codex generation is gone from the picker entirely.
+    expect(ids.some((id) => id.includes("-codex"))).toBe(false)
+  })
 })
 
 describe("catalogEntryToProviderConfig", () => {

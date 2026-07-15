@@ -26,23 +26,12 @@
 // and the child inherits its own config exactly as codex-cli would.
 
 import { getSettings } from "@/lib/db/settings"
-import {
-  isCodexCredentialFresh,
-  refreshCodexToken,
-  toProviderCredential,
-  tokenResponseToCredential,
-} from "@/lib/subscription/codex/oauth"
-import {
-  getAccount,
-  getActiveAccount,
-  saveAccount,
-  setActiveAccount,
-} from "@/lib/subscription/core/transport"
+import { refreshCodexAccountIfStale } from "@/lib/subscription/codex/refresh"
+import { getActiveAccount } from "@/lib/subscription/core/transport"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import {
   DEFAULT_CODEX_SUBSCRIPTION_SETTINGS,
   type ActiveSnapshot,
-  type CodexCredentialData,
   type CodexSubscriptionSettings,
 } from "@/types/subscription"
 
@@ -145,17 +134,12 @@ function pairsToRecord(pairs: Array<[string, string]>): Record<string, string> {
  */
 async function maybeRefreshActiveCodex(accountId: string): Promise<ActiveSnapshot | null> {
   try {
-    const account = await getAccount("codex", accountId)
-    if (!account || account.credential.provider !== "codex") return null
-    const cred = account.credential as CodexCredentialData & { provider: "codex" }
-    if (cred.authMode !== "chatgpt" || !cred.refreshToken) return null
-    if (isCodexCredentialFresh(cred)) return null
-
-    const response = await refreshCodexToken(cred.refreshToken)
-    const fresh = tokenResponseToCredential(response, { previous: cred, authMode: "chatgpt" })
-    await saveAccount("codex", { ...account, credential: toProviderCredential(fresh) })
-    // Re-running set-active rebuilds the in-process env cache with the new bearer.
-    await setActiveAccount("codex", accountId)
+    // Staleness check, refresh exchange and vault write-back are shared with the
+    // chat path (`lib/subscription/codex/refresh.ts`) so the two can't drift.
+    // `reactivate: true` re-runs set-active, which rebuilds the in-process env
+    // cache with the new bearer — the part only this path needs.
+    const fresh = await refreshCodexAccountIfStale(accountId, { reactivate: true })
+    if (!fresh) return null
     return await getActiveAccount("codex")
   } catch (err) {
     console.warn("env-builder: codex auto-refresh failed:", err)

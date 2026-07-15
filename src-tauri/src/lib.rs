@@ -1075,6 +1075,12 @@ pub fn run() {
             browser::embedded::browser_embed_has_selector,
             browser::embedded::browser_embed_evaluate,
             browser::embedded::browser_embed_network_state,
+            // Action recording (ADR-0072).
+            browser::embedded::browser_embed_ref_for,
+            browser::embedded::browser_embed_start_record,
+            browser::embedded::browser_embed_resume_record,
+            browser::embedded::browser_embed_stop_record,
+            browser::embedded::browser_embed_drain_record,
             plugins::computer_use::commands::plugin_computer_use_execute,
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,

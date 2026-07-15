@@ -176,6 +176,24 @@ export function isResponsesOnlyEndpoint(baseURL) {
 }
 
 /**
+ * True when an openai-protocol turn talks to an OpenAI-NATIVE surface: genuine
+ * `*.openai.com`, the Codex ChatGPT backend, or a responses-only provider id
+ * (codex, whose preset base URL may be an arbitrary relay host). These accept
+ * OpenAI's proprietary reasoning fields (`reasoning_effort`, `reasoning.summary`,
+ * `include: ["reasoning.encrypted_content"]`, `store`).
+ *
+ * The OpenAI-*compatible* gateways this protocol also serves (DeepSeek / Groq /
+ * OpenRouter / Ollama / …) implement their own reasoning and may 400 on an
+ * unknown field, so they must stay out — which is why this is an allowlist of
+ * native surfaces rather than a "not a gateway" check.
+ */
+export function isOpenAiNativeSurface({ providerId, baseURL } = {}) {
+  if (providerId && RESPONSES_ONLY_PROVIDERS.has(providerId)) return true
+  if (isResponsesOnlyEndpoint(baseURL)) return true
+  return isGenuineOpenAiEndpoint(baseURL)
+}
+
+/**
  * THE single decision for "build this openai/azure model via `.responses()` or
  * `.chat()`?". Used by both the sidecar (`ai-sdk-adapter.mjs:buildModel`) and the
  * renderer (`provider-core/client.ts:getProviderModel`) so they never disagree.

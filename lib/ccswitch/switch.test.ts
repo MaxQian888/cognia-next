@@ -51,6 +51,7 @@ import {
   adoptAndActivateDiscoveredAuth,
 } from "@/lib/subscription/anthropic/discovery"
 import { applySwitch, ccswitchProviderRefId, detectActive, planSwitch, _internals } from "./switch"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { CcswitchProvider, SwitchScope } from "@/types/ccswitch"
 
 const mIsTauri = isTauri as jest.Mock
@@ -621,6 +622,40 @@ describe("applySwitch — relay model registration", () => {
     // Third arg is an explicit {} — replaces (clears) any previous headers.
     const call = mSetProviderEnv.mock.calls[0]
     expect(call[2]).toEqual({})
+  })
+
+  it("re-seeds the settings store so provider surfaces see the switch without a reload", async () => {
+    // Regression: applySwitch used to call `saveSettings` directly, so Dexie
+    // held the new relay while the store — what Settings → Providers and the
+    // model picker render from — kept the pre-switch settings. `load()`
+    // early-returns once `loaded` is true, so the stale list survived until
+    // an app restart.
+    const stale = {
+      id: "singleton" as const,
+      defaultProvider: "openai",
+      defaultModel: "gpt-4o",
+      providerSettings: { openai: { providerId: "openai", enabled: true } },
+    }
+    useSettingsStore.setState({ settings: stale as never, loaded: true })
+    mGet.mockResolvedValue(stale)
+    // Mirror the real `saveSettings`: merge the patch over current and return it.
+    mSave.mockImplementation(async (patch: Record<string, unknown>) => ({ ...stale, ...patch }))
+
+    const p = provider({
+      id: "kimi",
+      name: "Kimi",
+      kind: "claude",
+      apiKey: "sk-moon",
+      baseUrl: "https://api.moonshot.cn/anthropic",
+      sonnetModel: "kimi-k2-0905",
+    })
+    await applySwitch(planSwitch(p, { cognia: true, agents: [] }, { apiKey: "old" }))
+
+    const settings = useSettingsStore.getState().settings
+    expect(settings?.defaultProvider).toBe("anthropic")
+    expect(settings?.defaultModel).toBe("kimi-k2-0905")
+    expect(settings?.providerSettings?.anthropic?.enabledModels).toEqual(["kimi-k2-0905"])
+    expect(settings?.apiKey).toBe("sk-moon")
   })
 })
 

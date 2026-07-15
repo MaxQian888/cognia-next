@@ -97,5 +97,25 @@ export function useSelectionToChat() {
     [send, interruptAndSteer]
   )
 
-  return { sendComment, sendScreenshot }
+  /**
+   * Ship a plain-text prompt to chat — the recorded-flow agent export. Returns
+   * false when no chat session is available.
+   *
+   * Unlike {@link sendComment} this does NOT interrupt a live stream: the
+   * interrupt exists only because the steer queue drops image blocks, and there
+   * is no image here. Enqueuing text mid-turn is the intended path.
+   */
+  const sendText = useCallback(
+    async (text: string, options: { sessionId?: string } = {}): Promise<boolean> => {
+      if (!text.trim()) return false
+      const sessionId = options.sessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return false
+      const { content } = await buildSendContent(text, [])
+      await send(content, undefined, { sessionId })
+      return true
+    },
+    [send]
+  )
+
+  return { sendComment, sendScreenshot, sendText }
 }

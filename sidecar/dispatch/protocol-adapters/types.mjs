@@ -12,11 +12,15 @@
  * @property {string} [apiKey]
  * @property {string} [baseURL]
  * @property {string} [protocol]  Resolved protocol id (builtin or `${pluginId}:${id}`).
+ * @property {Record<string,string>} [headers]  Extra default headers (Codex ChatGPT-login extras).
+ * @property {"auto"|"responses"|"chat"} [apiFlavor]  Explicit OpenAI endpoint family.
  */
 
 /**
  * @typedef {Object} NormalizedRequest
  * @property {string} model                       Concrete model id for the upstream.
+ * @property {string} [providerId]                Built-in provider id (NOT the protocol);
+ *   keys the OpenAI responses-vs-chat decision and Codex's Responses-API fields.
  * @property {Array<{role: string, content: any, providerOptions?: any}>} messages
  * @property {Record<string, unknown>} [modelParams]  AI SDK v6 call-option names.
  * @property {Record<string, unknown>} [tools]    Native AI SDK tools (declarative adapters ignore; documented v1 gap).

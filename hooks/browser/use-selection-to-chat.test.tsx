@@ -29,7 +29,10 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
   })),
 }))
 
+import { buildSendContent } from "@/lib/chat/attachments/dispatch"
 import { useSelectionToChat } from "./use-selection-to-chat"
+
+const mockBuild = buildSendContent as jest.Mock
 
 const SELECTION: BrowserSelection = {
   paneId: "browser-pane",
@@ -163,5 +166,77 @@ describe("sendScreenshot", () => {
     const { result } = renderHook(() => useSelectionToChat())
     await expect(result.current.sendScreenshot(RECT)).rejects.toThrow("no image")
     expect(mockSend).not.toHaveBeenCalled()
+  })
+})
+
+describe("sendText", () => {
+  it("builds text-only content and sends it to the active session", async () => {
+    const { result } = renderHook(() => useSelectionToChat())
+    const ok = await result.current.sendText("replay the login flow")
+    expect(ok).toBe(true)
+    // No files — the recorded-flow export is a prompt, never an image.
+    expect(mockBuild).toHaveBeenCalledWith("replay the login flow", [])
+    const [content, opts, callOpts] = mockSend.mock.calls[0]
+    expect(content).toBe("replay the login flow") // no image blocks
+    expect(opts).toBeUndefined()
+    expect(callOpts).toEqual({ sessionId: "s1" })
+    expect(mockCapture).not.toHaveBeenCalled()
+  })
+
+  it("no-ops on empty text", async () => {
+    const { result } = renderHook(() => useSelectionToChat())
+    expect(await result.current.sendText("")).toBe(false)
+    expect(mockBuild).not.toHaveBeenCalled()
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it("no-ops on whitespace-only text", async () => {
+    const { result } = renderHook(() => useSelectionToChat())
+    expect(await result.current.sendText("  \n\t ")).toBe(false)
+    expect(mockBuild).not.toHaveBeenCalled()
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  // Unlike sendComment, which throws — a missing session is a normal outcome
+  // here, so the caller gets a false rather than an exception.
+  it("returns false when there is no session and none was given", async () => {
+    mockStoreState = { activeSessionId: null, sessions: {} }
+    const { result } = renderHook(() => useSelectionToChat())
+    expect(await result.current.sendText("go")).toBe(false)
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it("targets an explicit session id over the active one", async () => {
+    const { result } = renderHook(() => useSelectionToChat())
+    const ok = await result.current.sendText("go", { sessionId: "other" })
+    expect(ok).toBe(true)
+    expect(mockSend.mock.calls[0][2]).toEqual({ sessionId: "other" })
+  })
+
+  it("sends to an explicit session even when none is active", async () => {
+    mockStoreState = { activeSessionId: null, sessions: {} }
+    const { result } = renderHook(() => useSelectionToChat())
+    expect(await result.current.sendText("go", { sessionId: "other" })).toBe(true)
+    expect(mockSend.mock.calls[0][2]).toEqual({ sessionId: "other" })
+  })
+
+  // The documented contract vs sendComment: the interrupt exists only because
+  // the steer queue drops image blocks. Text has none, so a mid-turn send must
+  // ride the steer queue instead of tearing down the live turn.
+  it("does not interrupt a streaming session — enqueuing text mid-turn is intended", async () => {
+    mockStoreState.sessions.s1.status = "streaming"
+    const { result } = renderHook(() => useSelectionToChat())
+    const ok = await result.current.sendText("go")
+    expect(ok).toBe(true)
+    expect(mockInterrupt).not.toHaveBeenCalled()
+    expect(mockSend).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not interrupt a session awaiting approval either", async () => {
+    mockStoreState.sessions.s1.status = "awaiting_approval"
+    const { result } = renderHook(() => useSelectionToChat())
+    await result.current.sendText("go")
+    expect(mockInterrupt).not.toHaveBeenCalled()
+    expect(mockSend).toHaveBeenCalledTimes(1)
   })
 })

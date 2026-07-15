@@ -9,6 +9,16 @@ const mockSetSelectMode = jest.fn().mockResolvedValue(undefined)
 const mockClearSelection = jest.fn()
 const mockSendComment = jest.fn().mockResolvedValue(true)
 const mockSendScreenshot = jest.fn().mockResolvedValue(true)
+const mockSendText = jest.fn().mockResolvedValue(true)
+
+// The recorder panel is a separately-tested unit (browser-recorder-panel.test.tsx)
+// and pulls in the Dexie graph; stub it here and assert only that the pane
+// mounts it and hands it the live URL.
+jest.mock("@/components/browser/browser-recorder-panel", () => ({
+  BrowserRecorderPanel: ({ pageUrl }: { pageUrl: string | null }) => (
+    <div data-testid="recorder-panel" data-page-url={pageUrl ?? ""} />
+  ),
+}))
 const mockOpenExternal = jest.fn().mockResolvedValue(undefined)
 let mockSelection: BrowserSelection | null = null
 let mockNavigated: BrowserNavigated | null = null
@@ -53,7 +63,11 @@ jest.mock("@/hooks/browser/use-element-selection", () => ({
   }),
 }))
 jest.mock("@/hooks/browser/use-selection-to-chat", () => ({
-  useSelectionToChat: () => ({ sendComment: mockSendComment, sendScreenshot: mockSendScreenshot }),
+  useSelectionToChat: () => ({
+    sendComment: mockSendComment,
+    sendScreenshot: mockSendScreenshot,
+    sendText: mockSendText,
+  }),
 }))
 jest.mock("@/lib/browser/client", () => ({
   browserClient: {
@@ -415,4 +429,27 @@ it("begins a load on commit, reload, back and forward", () => {
   fireEvent.click(screen.getByRole("button", { name: "Back" }))
   fireEvent.click(screen.getByRole("button", { name: "Forward" }))
   expect(mockBeginLoad).toHaveBeenCalledTimes(4)
+})
+
+// The recorder is only useful if the pane actually mounts it and tells it which
+// page is live — a panel that renders but never learns the URL can never arm.
+describe("recorder panel wiring", () => {
+  it("mounts the recorder panel", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(screen.getByTestId("recorder-panel")).toBeInTheDocument()
+  })
+
+  it("hands it no url before a page is committed", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(screen.getByTestId("recorder-panel")).toHaveAttribute("data-page-url", "")
+  })
+
+  it("hands it the committed url", () => {
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("localhost:3000")
+    expect(screen.getByTestId("recorder-panel")).toHaveAttribute(
+      "data-page-url",
+      "http://localhost:3000/"
+    )
+  })
 })

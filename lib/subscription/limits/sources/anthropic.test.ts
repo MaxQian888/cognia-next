@@ -33,6 +33,25 @@ function okOutcome(over: Partial<UsageSnapshot> = {}): ProbeOutcome {
   }
 }
 
+/** The endpoint answered cleanly but reported no windows. */
+const emptyUsage = async () => ({ ok: true as const, meters: [] })
+
+/** An expired bearer, as `fetchOAuthUsage` reports it. */
+const authFailure = () => ({
+  ok: false as const,
+  kind: "auth" as const,
+  status: 401,
+  message: "401 Unauthorized: {}",
+})
+
+/** A throttled endpoint, as `fetchOAuthUsage` reports it. */
+const rateLimitFailure = () => ({
+  ok: false as const,
+  kind: "rate_limited" as const,
+  status: 429,
+  message: "429 Too Many Requests: slow down",
+})
+
 /** A free-endpoint usage body carrying all four windows. */
 function usageBody(): string {
   return JSON.stringify({
@@ -72,7 +91,7 @@ describe("anthropicLimitsSource — free endpoint primary", () => {
 
   it("returns null when there is no token", async () => {
     const s = createAnthropicLimitsSource({
-      fetchUsage: async () => [],
+      fetchUsage: emptyUsage,
       probe: async () => okOutcome(),
     })
     expect(await s.fetch(ctx({ token: null }))).toBeNull()
@@ -80,11 +99,16 @@ describe("anthropicLimitsSource — free endpoint primary", () => {
 })
 
 describe("anthropicLimitsSource — reactive refresh", () => {
-  it("refreshes the token and retries the endpoint once when the first read is empty", async () => {
+  it("refreshes the token and retries the endpoint once on a 401", async () => {
     const fetchUsage = jest.fn(async (token: string) =>
       token === "fresh"
-        ? [{ id: "session", kind: "window" as const, usedPct: 33, status: "ok" as const }]
-        : []
+        ? {
+            ok: true as const,
+            meters: [
+              { id: "session", kind: "window" as const, usedPct: 33, status: "ok" as const },
+            ],
+          }
+        : authFailure()
     )
     let probed = false
     const s = createAnthropicLimitsSource({
@@ -100,34 +124,98 @@ describe("anthropicLimitsSource — reactive refresh", () => {
     expect(probed).toBe(false)
   })
 
-  it("does not retry when refresh yields no new token, and falls to the probe", async () => {
-    const fetchUsage = jest.fn(async () => [])
-    const s = createAnthropicLimitsSource({
-      fetchUsage,
-      probe: async () => okOutcome(),
-    })
-    const snap = await s.fetch(ctx({ token: "stale", refreshToken: async () => null }))
-    // One free read, no retry; the probe fallback then supplies the windows.
+  // A throttle is not an expired bearer. Refreshing on a 429 rotates the token
+  // pair for nothing and still can't read the quota.
+  it("does not refresh on a 429, and surfaces the throttle", async () => {
+    const fetchUsage = jest.fn(async () => rateLimitFailure())
+    const refreshToken = jest.fn(async () => "fresh")
+    const s = createAnthropicLimitsSource({ fetchUsage, probe: null })
+    const snap = await s.fetch(ctx({ token: "stale", refreshToken }))
+    expect(refreshToken).not.toHaveBeenCalled()
     expect(fetchUsage).toHaveBeenCalledTimes(1)
-    expect(snap?.meters.map((m) => m.id)).toEqual(["session", "weekly"])
+    expect(snap?.error).toContain("429")
+  })
+
+  it("surfaces the auth error when the refresh yields no new token", async () => {
+    const fetchUsage = jest.fn(async () => authFailure())
+    const s = createAnthropicLimitsSource({ fetchUsage, probe: null })
+    const snap = await s.fetch(ctx({ token: "stale", refreshToken: async () => null }))
+    expect(fetchUsage).toHaveBeenCalledTimes(1)
+    expect(snap?.error).toContain("401")
+    expect(snap?.meters).toEqual([])
   })
 
   it("does not retry when refresh returns the same token", async () => {
-    const fetchUsage = jest.fn(async () => [])
+    const fetchUsage = jest.fn(async () => authFailure())
     const s = createAnthropicLimitsSource({ fetchUsage, probe: null })
     const snap = await s.fetch(ctx({ token: "same", refreshToken: async () => "same" }))
     expect(fetchUsage).toHaveBeenCalledTimes(1)
-    expect(snap).toBeNull()
+    expect(snap?.error).toContain("401")
+  })
+})
+
+describe("anthropicLimitsSource — failures surface instead of vanishing", () => {
+  // The regression this guards: every failure used to collapse into `null`, so
+  // the panel rendered blank next to a stale number with nothing in the log.
+  it.each([
+    ["rate_limited", rateLimitFailure(), "429"],
+    [
+      "http",
+      { ok: false as const, kind: "http" as const, status: 500, message: "500: boom" },
+      "500",
+    ],
+    [
+      "network",
+      { ok: false as const, kind: "network" as const, message: "request failed: dns" },
+      "dns",
+    ],
+    [
+      "parse",
+      {
+        ok: false as const,
+        kind: "parse" as const,
+        message: "unrecognized usage response: <html>",
+      },
+      "unrecognized",
+    ],
+  ])("reports a %s failure as an error snapshot", async (_kind, failure, needle) => {
+    const s = createAnthropicLimitsSource({ fetchUsage: async () => failure, probe: null })
+    const snap = await s.fetch(ctx())
+    expect(snap).toMatchObject({ provider: "anthropic", accountId: "acc-1", meters: [] })
+    expect(snap?.error).toContain(needle)
+  })
+
+  // The probe shares the bearer and host, so it would fail the same way — and
+  // each attempt costs ~10 tokens.
+  it("does not spend the paid probe on a throttled endpoint", async () => {
+    let probed = false
+    const s = createAnthropicLimitsSource({
+      fetchUsage: async () => rateLimitFailure(),
+      probe: async () => {
+        probed = true
+        return okOutcome()
+      },
+    })
+    const snap = await s.fetch(ctx())
+    expect(probed).toBe(false)
+    expect(snap?.error).toContain("429")
+  })
+
+  it("normalizes a fetchUsage that throws instead of reporting", async () => {
+    const s = createAnthropicLimitsSource({
+      fetchUsage: async () => {
+        throw new Error("429 Too Many Requests: bucket")
+      },
+      probe: null,
+    })
+    expect((await s.fetch(ctx()))?.error).toContain("429")
   })
 })
 
 describe("anthropicLimitsSource — probe fallback", () => {
-  // Force the free endpoint to yield nothing so the probe path is exercised.
-  const noFreeUsage = async () => []
-
-  it("falls back to the probe (5h → session, 7d → weekly) when the endpoint is empty", async () => {
+  it("falls back to the probe (5h → session, 7d → weekly) when the endpoint reports no windows", async () => {
     const s = createAnthropicLimitsSource({
-      fetchUsage: noFreeUsage,
+      fetchUsage: emptyUsage,
       probe: async () => okOutcome(),
     })
     const snap = await s.fetch(ctx())
@@ -138,12 +226,12 @@ describe("anthropicLimitsSource — probe fallback", () => {
 
   it("returns null when the probe fails or throws", async () => {
     const failed = createAnthropicLimitsSource({
-      fetchUsage: noFreeUsage,
+      fetchUsage: emptyUsage,
       probe: async () => ({ ok: false, reason: "auth", status: 401 }),
     })
     expect(await failed.fetch(ctx())).toBeNull()
     const threw = createAnthropicLimitsSource({
-      fetchUsage: noFreeUsage,
+      fetchUsage: emptyUsage,
       probe: async () => {
         throw new Error("net")
       },
@@ -153,19 +241,14 @@ describe("anthropicLimitsSource — probe fallback", () => {
 
   it("returns null when both windows are absent", async () => {
     const s = createAnthropicLimitsSource({
-      fetchUsage: noFreeUsage,
+      fetchUsage: emptyUsage,
       probe: async () => okOutcome({ fiveHour: null, sevenDay: null }),
     })
     expect(await s.fetch(ctx())).toBeNull()
   })
 
-  it("returns null when the free endpoint throws and the probe is disabled", async () => {
-    const s = createAnthropicLimitsSource({
-      fetchUsage: async () => {
-        throw new Error("net")
-      },
-      probe: null,
-    })
+  it("returns null when the endpoint reports no windows and the probe is disabled", async () => {
+    const s = createAnthropicLimitsSource({ fetchUsage: emptyUsage, probe: null })
     expect(await s.fetch(ctx())).toBeNull()
   })
 })

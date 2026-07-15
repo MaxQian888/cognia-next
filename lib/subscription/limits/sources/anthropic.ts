@@ -9,9 +9,10 @@
 import { probeOnce } from "@/lib/subscription/anthropic/usage-probe"
 import type { ProbeOutcome } from "@/lib/subscription/anthropic/usage-probe"
 import { summarizeCurrentWindow } from "@/lib/subscription/anthropic/usage-analytics"
-import { fetchOAuthUsage } from "@/lib/subscription/anthropic/usage-endpoint"
+import { classifyUsageError, fetchOAuthUsage } from "@/lib/subscription/anthropic/usage-endpoint"
+import type { OAuthUsageResult } from "@/lib/subscription/anthropic/usage-endpoint"
 
-import { windowMeter } from "../meters"
+import { errorLimits, windowMeter } from "../meters"
 
 import type {
   AnthropicCredentialData,
@@ -25,13 +26,40 @@ export type ProbeFn = (credential: AnthropicCredentialData) => Promise<ProbeOutc
 export type FetchUsageFn = (
   token: string,
   deps: { authedGet: LimitsSourceContext["authedGet"] }
-) => Promise<LimitsMeter[]>
+) => Promise<OAuthUsageResult>
 
 export interface AnthropicLimitsSourceOptions {
   /** Free OAuth-usage fetcher (primary). Tests inject a stub. */
   fetchUsage?: FetchUsageFn
   /** Paid probe (fallback). Tests inject a stub. Pass `null` to disable the fallback. */
   probe?: ProbeFn | null
+}
+
+/** Assemble a successful snapshot for this account. */
+function snapshotOf(ctx: LimitsSourceContext, meters: LimitsMeter[]): ProviderLimits {
+  return {
+    provider: "anthropic",
+    accountId: ctx.accountId,
+    accountLabel: ctx.accountLabel,
+    fetchedAt: ctx.now,
+    meters,
+  }
+}
+
+/**
+ * `fetchOAuthUsage` reports failures rather than throwing, but an injected stub
+ * may still throw — normalize both into the same result shape.
+ */
+async function callUsage(
+  fetchUsage: FetchUsageFn,
+  token: string,
+  ctx: LimitsSourceContext
+): Promise<OAuthUsageResult> {
+  try {
+    return await fetchUsage(token, { authedGet: ctx.authedGet })
+  } catch (err) {
+    return classifyUsageError(err)
+  }
 }
 
 /** Build the meters from a probe outcome (paid fallback path). */
@@ -79,52 +107,49 @@ export function createAnthropicLimitsSource(
       if (!ctx.token) return null
       let token = ctx.token
 
-      // 1) Free OAuth usage endpoint (no token cost, 4 windows).
-      let meters: LimitsMeter[] = []
-      try {
-        meters = await fetchUsage(token, { authedGet: ctx.authedGet })
-      } catch {
-        meters = []
-      }
+      // 1) Free OAuth usage endpoint (no token cost, 4+ windows).
+      let result = await callUsage(fetchUsage, token, ctx)
 
-      // 1b) Reactive refresh + retry. The free endpoint returns `[]` on a 401
-      // (the error is swallowed one layer down in `fetchOAuthUsage`), so an
-      // expired bearer is indistinguishable from "no windows" here. Refresh the
-      // token once and retry before spending tokens on the paid probe. Mirrors
-      // the (dormant) scheduler's 401 handling — this is the seam that keeps the
-      // Claude quota panel working past the ~8h token expiry.
-      if (meters.length === 0 && ctx.refreshToken) {
+      // 1b) Reactive refresh + retry — now driven by a real 401/403 rather than
+      // an empty-list guess, so a throttled or reshaped response no longer
+      // burns a token refresh. This is the seam that keeps the panel alive past
+      // the ~8h bearer expiry.
+      if (!result.ok && result.kind === "auth" && ctx.refreshToken) {
         const refreshed = await ctx.refreshToken().catch(() => null)
         if (refreshed && refreshed !== token) {
           token = refreshed
-          try {
-            meters = await fetchUsage(token, { authedGet: ctx.authedGet })
-          } catch {
-            meters = []
-          }
+          result = await callUsage(fetchUsage, token, ctx)
         }
       }
 
-      // 2) Paid probe fallback (only if the free endpoint gave nothing).
-      if (meters.length === 0 && probe) {
+      if (result.ok && result.meters.length > 0) {
+        return snapshotOf(ctx, result.meters)
+      }
+
+      // A throttle / outage / expired bearer / broken contract is NOT "no
+      // windows". Surface it (cc-switch returns the HTTP status + body the same
+      // way) instead of silently returning null — which rendered as a blank
+      // panel next to a stale number, with nothing in the log. The paid probe
+      // shares the same bearer and endpoint, so it would fail identically:
+      // skipping it here also saves ~10 tokens per poll.
+      if (!result.ok) {
+        return errorLimits(ctx, "anthropic", result.message)
+      }
+
+      // 2) Paid probe fallback — only when the endpoint genuinely reported no
+      // windows (a well-formed response we simply have no meters for).
+      if (probe) {
         try {
           // `probeOnce` only reads `accessToken`; the rest of the shape is unused.
           const outcome = await probe({ accessToken: token } as AnthropicCredentialData)
-          meters = metersFromProbe(outcome, ctx.now)
+          const meters = metersFromProbe(outcome, ctx.now)
+          if (meters.length > 0) return snapshotOf(ctx, meters)
         } catch {
-          meters = []
+          // The probe is a best-effort fallback; its failure is not the story.
         }
       }
 
-      if (meters.length === 0) return null
-
-      return {
-        provider: "anthropic",
-        accountId: ctx.accountId,
-        accountLabel: ctx.accountLabel,
-        fetchedAt: ctx.now,
-        meters,
-      }
+      return null
     },
   }
 }

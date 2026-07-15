@@ -1,0 +1,19 @@
+{
+  "w": 1900, "h": 960, "bg": "#ffffff", "accent": "teal",
+  "headerX": 60, "headerY": 44,
+  "title": "cognia-next · 系统总览",
+  "subtitle": "本地优先一站式 AI 工作台 · 按 层 → 子系统 → 关键模块 组织 · Next.js 16 / Tauri 2.9 / Capacitor 8",
+  "cards": [
+    { "color": "slate", "x": 60, "y": 155, "w": 415, "title": "① 三端外壳", "items": ["浏览器 Web · :3000", "Tauri 桌面", "Capacitor 移动端", "共享 out/ 静态导出"] },
+    { "color": "blue", "x": 515, "y": 155, "w": 415, "title": "② 前端应用层", "items": ["app/ · App Router", "components · shadcn · ai-elements", "hooks · stores (Zustand)", "i18n · next-intl (en · zh)", "Tailwind v4 · oklch"] },
+    { "color": "purple", "x": 970, "y": 155, "w": 415, "title": "③ AI / Agent 核心", "items": ["sidecar · claude-host", "双路 dispatch (Claude / AI SDK)", "build-options 汇聚", "Agent Team · Skills · MCP", "光学压缩 · v101"] },
+    { "color": "green", "x": 1425, "y": 155, "w": 415, "title": "④ 数字孪生 & 记忆", "items": ["Twin · ingest / RAG (v14)", "PII 冗余门 (统一闸口)", "/goal 命令 (v30)", "Radar v96 · Capture v97"] },
+    { "color": "cyan", "x": 60, "y": 441, "w": 415, "title": "⑤ 平台连接器", "items": ["Lark · OneBot / NapCat", "A2UI ⇄ IM 桥", "Inbox", "多 bot · dispatchRules v107"] },
+    { "color": "orange", "x": 515, "y": 441, "w": 415, "title": "⑥ Rust 后端 · 26 crates", "items": ["cognia-core", "mcp-server · connectors", "automation · ocr · terminal", "vector · secrets"] },
+    { "color": "amber", "x": 970, "y": 441, "w": 415, "title": "⑦ 数据层", "items": ["Dexie IndexedDB · v108", "sqlite-vec 向量库", "备份 · 同步 v46 · 订阅"] },
+    { "color": "rose", "x": 1425, "y": 441, "w": 415, "title": "⑧ 插件 & 工作流", "items": ["plugins/ 一方插件", "WASM 运行时", "React Flow 工作流", "GitHub Delivery"] },
+    { "color": "teal", "x": 60, "y": 687, "w": 415, "title": "⑨ 服务 · 非静态导出", "items": ["信令 · WebRTC (v33)", "分享 · CF Worker (v54)", "公开分享链接 · v54"] },
+    { "color": "indigo", "x": 515, "y": 687, "w": 415, "title": "⑩ 文档", "items": ["Fumadocs · :3001", "ADR 决策记录"] },
+    { "color": "slate", "x": 970, "y": 687, "w": 415, "title": "⑪ 工程化", "items": ["Jest · Playwright", "Changesets · Husky", "i18n 门禁 · lint:i18n", "@cognia/* 工作区包"] }
+  ]
+}

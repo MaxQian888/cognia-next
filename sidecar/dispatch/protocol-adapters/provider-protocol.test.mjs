@@ -10,9 +10,32 @@ import {
   resolveProviderProtocol,
   isGenuineOpenAiEndpoint,
   isResponsesOnlyEndpoint,
+  isOpenAiNativeSurface,
   isMisroutedToOpenAi,
   decideOpenAiEndpointFlavor,
 } from "./provider-protocol.mjs"
+
+test("isOpenAiNativeSurface covers genuine OpenAI, the Codex backend, and codex relays", () => {
+  // Genuine OpenAI (or the implicit default endpoint).
+  assert.equal(isOpenAiNativeSurface({ baseURL: "https://api.openai.com/v1" }), true)
+  assert.equal(isOpenAiNativeSurface({ providerId: "openai" }), true)
+  // The Codex ChatGPT backend — host is NOT *.openai.com, so the host check alone misses it.
+  assert.equal(isOpenAiNativeSurface({ baseURL: "https://chatgpt.com/backend-api/codex" }), true)
+  // A codex account on an arbitrary relay preset: only the id identifies it.
+  assert.equal(
+    isOpenAiNativeSurface({ providerId: "codex", baseURL: "https://ai-pixel.online" }),
+    true
+  )
+  // Compatible gateways are NOT native — they may 400 on OpenAI's proprietary fields.
+  assert.equal(
+    isOpenAiNativeSurface({ providerId: "deepseek", baseURL: "https://api.deepseek.com/v1" }),
+    false
+  )
+  assert.equal(
+    isOpenAiNativeSurface({ providerId: "ollama", baseURL: "http://localhost:11434/v1" }),
+    false
+  )
+})
 
 test("normalizeProtocol folds the gemini alias to google, passes everything else", () => {
   assert.equal(normalizeProtocol("gemini"), "google")

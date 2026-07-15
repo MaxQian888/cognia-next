@@ -94,6 +94,18 @@ function resetHarness() {
   stderrCb = undefined
   exitCb = undefined
   writes.length = 0
+  // `clearMocks` only clears call records, not queued `mockResolvedValueOnce`
+  // implementations — an unconsumed one-shot would leak into the next test and
+  // make results order-dependent. Reset the spawn/kill queues and restore their
+  // defaults so each test starts from the same place.
+  const native = jest.requireMock("@/lib/native/external-agent") as {
+    spawnExternalAgent: jest.Mock
+    killExternalAgent: jest.Mock
+  }
+  native.spawnExternalAgent.mockReset()
+  native.spawnExternalAgent.mockImplementation(async () => "proc-1")
+  native.killExternalAgent.mockReset()
+  native.killExternalAgent.mockImplementation(async () => {})
   for (const key of Object.keys(responders)) delete responders[key]
   Object.assign(responders, {
     initialize: () => ({
@@ -139,6 +151,61 @@ function iterator(
 beforeEach(resetHarness)
 
 describe("CodexAppServerAdapter", () => {
+  describe("connect / process reclaim", () => {
+    // The Rust process manager keys running agents by the persisted config id
+    // and outlives the JS realm. After a webview reload (or a dev Fast Refresh,
+    // or a connect that threw after spawning) the renderer holds no listeners
+    // for that child, but `spawn_external_agent` still rejects with
+    // "Agent <id> is already running" — leaving the agent permanently
+    // unconnectable until the whole app restarts.
+    it("reclaims an orphaned process when the id is already registered", async () => {
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        spawnExternalAgent: jest.Mock
+        killExternalAgent: jest.Mock
+      }
+      native.spawnExternalAgent
+        .mockRejectedValueOnce(`Agent ${config.id} is already running`)
+        .mockResolvedValueOnce("proc-1")
+
+      const adapter = new CodexAppServerAdapter()
+      await adapter.connect(config)
+
+      expect(native.killExternalAgent).toHaveBeenCalledWith(config.id)
+      expect(native.spawnExternalAgent).toHaveBeenCalledTimes(2)
+      expect(adapter.isConnected()).toBe(true)
+    })
+
+    it("does not leak the spawned process when the handshake fails", async () => {
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        killExternalAgent: jest.Mock
+      }
+      responders["initialize"] = () => ({
+        __error: { code: -32603, message: "handshake exploded" },
+      })
+
+      const adapter = new CodexAppServerAdapter()
+      await expect(adapter.connect(config)).rejects.toThrow(/handshake exploded/)
+
+      // Otherwise the child stays registered under this id and every later
+      // connect fails with "already running".
+      expect(native.killExternalAgent).toHaveBeenCalledWith("proc-1")
+    })
+
+    it("propagates a spawn failure that is not an already-running collision", async () => {
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        spawnExternalAgent: jest.Mock
+        killExternalAgent: jest.Mock
+      }
+      native.spawnExternalAgent.mockRejectedValueOnce("Failed to spawn process: ENOENT")
+
+      const adapter = new CodexAppServerAdapter()
+      // The Tauri command rejects with a bare string, not an Error.
+      await expect(adapter.connect(config)).rejects.toMatch(/ENOENT/)
+      expect(native.killExternalAgent).not.toHaveBeenCalled()
+      expect(native.spawnExternalAgent).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe("connect / handshake", () => {
     it("sends initialize WITHOUT a jsonrpc field and then the initialized notification", async () => {
       const adapter = await connectedAdapter()
@@ -1441,6 +1508,52 @@ describe("CodexAppServerAdapter", () => {
       expect(status.account).toBeUndefined()
       expect(status.rateLimits).toBeUndefined()
       expect(adapter.isConnected()).toBe(true)
+    })
+
+    it("keeps an api-key / third-party login's account when rate limits need ChatGPT auth", async () => {
+      // Real responses from codex-cli 0.141 with a third-party provider
+      // (`model_provider = "custom"` + `base_url` in ~/.codex/config.toml) and
+      // an API key in ~/.codex/auth.json. Rate limits are a ChatGPT-subscription
+      // concept, so the server refuses them — that is the correct answer for
+      // this auth mode, not a failure. It must not discard the account that was
+      // already read, and must not surface as an error.
+      responders["account/read"] = () => ({
+        account: { type: "apiKey" },
+        requiresOpenaiAuth: true,
+      })
+      responders["account/rateLimits/read"] = () => ({
+        __error: { code: -32600, message: "chatgpt authentication required to read rate limits" },
+      })
+      const adapter = await connectedAdapter()
+      const seen: unknown[] = []
+      adapter.onStatusUpdate((s) => seen.push(s))
+      await adapter.refreshAccount()
+
+      const status = adapter.getStatus()
+      // The third-party login is recognised as signed in.
+      expect(status.account).toEqual({ type: "apiKey", email: undefined, planType: undefined })
+      expect(status.requiresOpenaiAuth).toBe(true)
+      // No rate limits exist for this auth mode — recorded as absent, not stale.
+      expect(status.rateLimits).toBeNull()
+      expect(adapter.isConnected()).toBe(true)
+      // The UI must actually be told (the throw used to skip notifyStatus).
+      expect(seen.length).toBeGreaterThan(0)
+    })
+
+    it("still reports rate-limit failures that are not an auth-mode mismatch", async () => {
+      responders["account/read"] = () => ({
+        account: { type: "chatgpt" },
+        requiresOpenaiAuth: false,
+      })
+      responders["account/rateLimits/read"] = () => ({
+        __error: { code: -32603, message: "internal error" },
+      })
+      const adapter = await connectedAdapter()
+      await adapter.refreshAccount()
+      const status = adapter.getStatus()
+      expect(status.account).toEqual({ type: "chatgpt", email: undefined, planType: undefined })
+      // A real failure leaves rate limits unknown rather than asserting "none".
+      expect(status.rateLimits).toBeUndefined()
     })
 
     it("applies account/rateLimits/updated notifications to the status", async () => {

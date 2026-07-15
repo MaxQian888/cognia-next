@@ -329,15 +329,7 @@ export interface BYOKKeyEntry {
 }
 
 export type BYOKProvider =
-  | "openai"
-  | "anthropic"
-  | "google"
-  | "azure"
-  | "bedrock"
-  | "vertex"
-  | "mistral"
-  | "cohere"
-  | "groq"
+  "openai" | "anthropic" | "google" | "azure" | "bedrock" | "vertex" | "mistral" | "cohere" | "groq"
 
 /**
  * The three protocols custom providers can speak out of the box.
@@ -374,12 +366,7 @@ export type ApiProtocol = BuiltInApiProtocol | (string & {})
  * `packages/provider-core/.../provider-persistence.ts`) share one definition.
  */
 export type ResolverProtocol =
-  | "openai"
-  | "anthropic"
-  | "google"
-  | "mistral"
-  | "cohere"
-  | (string & {})
+  "openai" | "anthropic" | "google" | "mistral" | "cohere" | (string & {})
 
 /**
  * OpenAI endpoint family selection. "responses"/"chat" override the host
@@ -1782,55 +1769,11 @@ const INLINE_PROVIDERS: Record<string, ProviderConfig> = {
       },
     ],
   },
-  codex: {
-    id: "codex",
-    name: "Codex (OpenAI)",
-    type: "cloud",
-    apiKeyRequired: true,
-    baseURLRequired: false,
-    defaultModel: "gpt-5.2-codex",
-    category: "aggregator",
-    description:
-      "OpenAI Codex — drive your ChatGPT Codex subscription or an OpenAI API key as a chat model",
-    website: "https://openai.com/codex",
-    dashboardUrl: "https://platform.openai.com/usage",
-    docsUrl: "https://developers.openai.com/codex/",
-    models: [
-      {
-        id: "gpt-5.2-codex",
-        name: "GPT-5.2 Codex",
-        contextLength: 400000,
-        supportsTools: true,
-        supportsVision: true,
-        supportsAudio: false,
-        supportsVideo: false,
-        supportsStreaming: true,
-        pricing: { promptPer1M: 1.75, completionPer1M: 14 },
-      },
-      {
-        id: "gpt-5.1-codex",
-        name: "GPT-5.1 Codex",
-        contextLength: 400000,
-        supportsTools: true,
-        supportsVision: true,
-        supportsAudio: false,
-        supportsVideo: false,
-        supportsStreaming: true,
-        pricing: { promptPer1M: 1.25, completionPer1M: 10 },
-      },
-      {
-        id: "gpt-5.1-codex-mini",
-        name: "GPT-5.1 Codex Mini",
-        contextLength: 400000,
-        supportsTools: true,
-        supportsVision: false,
-        supportsAudio: false,
-        supportsVideo: false,
-        supportsStreaming: true,
-        pricing: { promptPer1M: 0.25, completionPer1M: 2 },
-      },
-    ],
-  },
+  // `codex` is intentionally NOT inlined here: it is defined once in the
+  // built-in catalog, which carries the fields this map has no slot for
+  // (protocol + defaultBaseURL). An inline copy would shadow the catalog
+  // entry wholesale — see {@link buildBuiltInProviders} — and silently drop
+  // both, so the model list must be edited in the catalog only.
   cohere: {
     id: "cohere",
     name: "Cohere",

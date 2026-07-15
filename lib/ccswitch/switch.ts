@@ -6,7 +6,9 @@
 //
 //   applySwitch(plan)
 //     Execute the plan. Order:
-//       1. Persist apiKey/apiBaseUrl/activeProviderId to AppSettings (Dexie).
+//       1. Persist apiKey/apiBaseUrl/activeProviderId to AppSettings through
+//          the settings store, so Dexie and the store the UI renders from
+//          land the switch together.
 //       2. Push the new env to the sidecar via setProviderEnv() and restart.
 //       3. For each supported agent, write the env block via the per-agent
 //          IPC and collect any errors.
@@ -24,8 +26,9 @@
 // invariants — `detectActive()` running on focus is what closes the loop.
 
 import { hasApiKey, restartSidecar, setProviderEnv } from "@/lib/claude/ipc"
-import { saveSettings, getSettings } from "@/lib/db/settings"
+import { getSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import {
   writeClaudeSettingsEnv,
@@ -443,7 +446,13 @@ export async function applySwitch(plan: SwitchPlan): Promise<ApplyResult> {
   const registration = buildProviderRegistration(plan.provider, {
     providerSettings: current?.providerSettings,
   })
-  await saveSettings({
+  // Write through the settings store rather than calling `saveSettings`
+  // directly. The store's `save` persists via the same Dexie path and then
+  // re-seeds its in-memory `settings`, which is what every provider surface
+  // renders from (Settings → Providers, the model picker). Persisting behind
+  // the store's back left those latched on the pre-switch provider list until
+  // an app reload, because `load()` early-returns once `loaded` is true.
+  await useSettingsStore.getState().save({
     apiKey: plan.cogniaChanges.apiKeyAfter,
     apiBaseUrl: plan.cogniaChanges.baseUrlAfter,
     activeProviderId: plan.cogniaChanges.activeProviderIdAfter,

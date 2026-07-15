@@ -37,6 +37,7 @@ import {
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import { JsonRpcPeer } from "./json-rpc-peer"
 import { buildAgentEnv } from "./env-builder"
+import { spawnReclaimingOrphan } from "./spawn-reclaim"
 import { MODE_RANK } from "./permission-cascade"
 import {
   createExternalAgentUnsupportedSessionExtensionError,
@@ -338,13 +339,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       })
 
       const env = await buildAgentEnv(config, config.process.env || {})
-      this.processId = await spawnExternalAgent({
-        id: config.id,
-        command: config.process.command,
-        args: config.process.args ?? [],
-        env,
-        cwd: config.process.cwd,
-      })
+      this.processId = await this.spawnProcess(config, env)
 
       this.registerProcessListeners()
 
@@ -386,10 +381,42 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       log.info("Connected to Codex app-server", { name: config.name, info: this.serverInfo })
     } catch (error) {
       this.cleanupListeners()
+      // Never leave the child registered behind a failed connect: the process
+      // manager keys it by config id, so an orphan makes every later connect
+      // fail with "already running" until the whole app restarts.
+      if (this.processId) {
+        try {
+          await killExternalAgent(this.processId)
+        } catch (killError) {
+          log.warn("Failed to kill Codex app-server process after a failed connect", { killError })
+        }
+        this.processId = undefined
+      }
+      this.peer = undefined
       this._connectionStatus = "error"
       log.error("Codex app-server connection failed", { error })
       throw error
     }
+  }
+
+  /** Spawn the app-server, reclaiming the agent id from an orphaned process. */
+  private async spawnProcess(
+    config: ExternalAgentConfig,
+    env: Record<string, string>
+  ): Promise<string> {
+    const spawnConfig = {
+      id: config.id,
+      command: config.process!.command,
+      args: config.process!.args ?? [],
+      env,
+      cwd: config.process!.cwd,
+    }
+    return spawnReclaimingOrphan({
+      id: config.id,
+      spawn: () => spawnExternalAgent(spawnConfig),
+      kill: (id) => killExternalAgent(id),
+      onReclaim: (id) => log.warn("Reclaiming an orphaned Codex app-server process", { id }),
+    })
   }
 
   async disconnect(): Promise<void> {
@@ -1965,7 +1992,14 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   // Account + rate limits (status card)
   // --------------------------------------------------------------------------
 
-  /** Fetch account + rate-limit snapshots (best-effort; degrades on old CLIs). */
+  /**
+   * Fetch account + rate-limit snapshots (best-effort; degrades on old CLIs).
+   *
+   * The two reads are independent: a login that has an account but no rate
+   * limits (see {@link isCodexChatgptAuthRequiredError}) must still surface its
+   * account, and the status listeners are always notified so the UI reflects
+   * whatever we did learn.
+   */
   async refreshAccount(): Promise<void> {
     try {
       const account = await this.callOptional<{
@@ -1979,6 +2013,11 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           requiresOpenaiAuth: account.requiresOpenaiAuth === true,
         }
       }
+    } catch (error) {
+      log.warn("Codex account read failed", { error })
+    }
+
+    try {
       // `account/rateLimits/read` takes no params (serde unit) — omit them.
       const limits = await this.callOptional<{ rateLimits?: Record<string, unknown> }>(
         "account/rateLimits/read"
@@ -1986,10 +2025,20 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       if (limits !== undefined) {
         this.status = { ...this.status, rateLimits: mapRateLimits(readObject(limits.rateLimits)) }
       }
-      this.notifyStatus()
     } catch (error) {
-      log.warn("Codex account refresh failed", { error })
+      if (isCodexChatgptAuthRequiredError(error)) {
+        // Expected for this auth mode, not a failure: record "no rate limits"
+        // (null) rather than "unknown" (undefined) so the UI can stop asking.
+        this.status = { ...this.status, rateLimits: null }
+        log.debug("Codex rate limits unavailable without ChatGPT auth", {
+          accountType: this.status.account?.type,
+        })
+      } else {
+        log.warn("Codex rate-limit read failed", { error })
+      }
     }
+
+    this.notifyStatus()
   }
 
   // --------------------------------------------------------------------------
@@ -2348,6 +2397,26 @@ function mapModelInfo(raw: Record<string, unknown>): CodexModelInfo {
     supportedReasoningEfforts: efforts,
     supportsPersonality: raw.supportsPersonality === true,
   }
+}
+
+/**
+ * True for the app-server's "you are not signed in with ChatGPT" refusal
+ * (`-32600 chatgpt authentication required to read rate limits`).
+ *
+ * This is the *correct* answer for a perfectly healthy login that simply isn't
+ * a ChatGPT subscription — an API key in `~/.codex/auth.json`, including a
+ * third-party provider configured via `model_provider` + `model_providers.<n>.
+ * base_url` in `~/.codex/config.toml`. Rate limits are a subscription concept,
+ * so those accounts have none to report. Treating it as an error made the
+ * client log a scary warning and skip notifying the status listeners, so a
+ * working third-party login never reached the UI.
+ *
+ * Matched on the message because `-32600` is the generic "invalid request"
+ * code, which we must NOT blanket-swallow.
+ */
+function isCodexChatgptAuthRequiredError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /chatgpt authentication required/i.test(message)
 }
 
 function mapAccountInfo(raw: Record<string, unknown>): CodexAccountInfo {

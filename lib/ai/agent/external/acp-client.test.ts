@@ -578,6 +578,80 @@ describe("AcpClientAdapter — terminal/write", () => {
   })
 })
 
+describe("AcpClientAdapter — orphaned process reclaim", () => {
+  // The Rust process manager keys children by the persisted config id and
+  // outlives the JS realm, so a page reload / dev Fast Refresh leaves a child
+  // nothing listens to while `spawn_external_agent` keeps refusing the id —
+  // bricking the agent until the whole app restarts.
+  function connectWithSpawn(spawn: () => string): {
+    adapter: AcpClientAdapter
+    calls: string[]
+    connected: Promise<void>
+  } {
+    mockIsTauri.mockReturnValue(true)
+    const calls: string[] = []
+    let stdoutCb: ((event: { payload: { agentId: string; data: string } }) => void) | undefined
+
+    mockListen.mockImplementation(async (channel: string, cb: (e: unknown) => void) => {
+      if (channel === "external-agent://stdout") stdoutCb = cb as typeof stdoutCb
+      return jest.fn()
+    })
+
+    mockInvoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      calls.push(cmd)
+      if (cmd === "spawn_external_agent") return spawn()
+      if (cmd === "send_to_external_agent") {
+        const msg = JSON.parse(args!.message as string) as Record<string, unknown>
+        if (msg.method === "initialize") {
+          queueMicrotask(() =>
+            stdoutCb?.({
+              payload: {
+                agentId: "proc-1",
+                data: JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: msg.id,
+                  result: {
+                    protocolVersion: 1,
+                    agentCapabilities: {},
+                    agentInfo: { name: "codex-acp", version: "1" },
+                  },
+                }),
+              },
+            })
+          )
+        }
+      }
+      return undefined
+    })
+
+    const adapter = new AcpClientAdapter()
+    return { adapter, calls, connected: adapter.connect(stdioConfig()) }
+  }
+
+  it("kills the orphan and respawns when the id is already registered", async () => {
+    let attempt = 0
+    const { calls, connected } = connectWithSpawn(() => {
+      attempt++
+      if (attempt === 1) throw "Agent acp-agent is already running"
+      return "proc-1"
+    })
+
+    await connected
+
+    expect(calls.filter((c) => c === "spawn_external_agent")).toHaveLength(2)
+    expect(calls).toContain("kill_external_agent")
+  })
+
+  it("propagates a spawn failure that is not an already-running collision", async () => {
+    const { calls, connected } = connectWithSpawn(() => {
+      throw "Failed to spawn process: ENOENT"
+    })
+
+    await expect(connected).rejects.toMatch(/ENOENT/)
+    expect(calls.filter((c) => c === "spawn_external_agent")).toHaveLength(1)
+  })
+})
+
 // After the JsonRpcPeer migration (json-rpc-peer.ts), the request/response loop
 // is delegated to the shared peer. These tests drive a real stdio connect over
 // the mocked Tauri bridge to lock the integration seam: outbound framing keeps

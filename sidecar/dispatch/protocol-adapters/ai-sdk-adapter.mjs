@@ -11,7 +11,9 @@
 import {
   isGenuineOpenAiEndpoint,
   isResponsesOnlyEndpoint,
+  isOpenAiNativeSurface,
   decideOpenAiEndpointFlavor,
+  RESPONSES_ONLY_PROVIDERS,
 } from "./provider-protocol.mjs"
 
 export { isGenuineOpenAiEndpoint, isResponsesOnlyEndpoint }
@@ -69,9 +71,10 @@ function normalizeOpenAiEffort(effort) {
  * @param {string} protocol  openai | anthropic | google | mistral | cohere
  * @param {string|undefined} baseURL  the provider base URL (gates openai)
  * @param {{ effort?: string, maxThinkingTokens?: number }|undefined} reasoning
+ * @param {{ providerId?: string }} [opts]  provider id (gates openai; see below)
  * @returns {Record<string, Record<string, unknown>>|null}
  */
-export function buildReasoningProviderOptions(protocol, baseURL, reasoning) {
+export function buildReasoningProviderOptions(protocol, baseURL, reasoning, opts = {}) {
   if (!reasoning) return null
   const effort = typeof reasoning.effort === "string" && reasoning.effort ? reasoning.effort : null
   const budget =
@@ -92,11 +95,16 @@ export function buildReasoningProviderOptions(protocol, baseURL, reasoning) {
       return { google: { thinkingConfig: { thinkingBudget, includeThoughts: true } } }
     }
     case "openai": {
-      // `reasoning_effort` is an OpenAI Responses/Chat field. Emit it ONLY for a
-      // genuine *.openai.com endpoint — OpenAI-compatible gateways (DeepSeek,
-      // Groq, Ollama, …) implement their own reasoning and may 400 on an
-      // unknown field; their models surface reasoning unprompted regardless.
-      if (!effort || !isGenuineOpenAiEndpoint(baseURL)) return null
+      // `reasoning_effort` is an OpenAI Responses/Chat field. Emit it ONLY for an
+      // OpenAI-native surface — OpenAI-compatible gateways (DeepSeek, Groq,
+      // Ollama, …) implement their own reasoning and may 400 on an unknown
+      // field; their models surface reasoning unprompted regardless. The check
+      // is `isOpenAiNativeSurface`, not a bare host test: Codex's ChatGPT
+      // backend (chatgpt.com) and its relay presets are native surfaces whose
+      // hosts are NOT *.openai.com, so a host-only gate silently dropped these
+      // options for the entire Codex subscription path — reasoning ran off and
+      // invisible on the one provider whose models are all reasoning models.
+      if (!effort || !isOpenAiNativeSurface({ providerId: opts.providerId, baseURL })) return null
       // `reasoningSummary: "auto"` is REQUIRED for the reasoning to be visible:
       // OpenAI o-series / gpt-5 emit NO reasoning parts in the stream without it,
       // so the user would pay for reasoning tokens and see nothing.
@@ -107,6 +115,38 @@ export function buildReasoningProviderOptions(protocol, baseURL, reasoning) {
     default:
       // mistral / cohere have no standard reasoning-enable option in the SDK.
       return null
+  }
+}
+
+/**
+ * The Responses-API request fields Codex itself sends, which the AI SDK does not
+ * default for us. Verified against `openai/codex`
+ * (`codex-rs/core/src/client.rs:build_responses_request`):
+ *
+ *   • `store: false` — Codex sets `store` to `is_azure_responses_endpoint()`,
+ *     i.e. false for BOTH the ChatGPT backend and api.openai.com. Omitting it
+ *     lets the server default (`store: true`) stand, so every Codex turn is
+ *     persisted server-side against the user's account — the opposite of what
+ *     the Codex client does, and wrong for a zero-retention subscription.
+ *   • `include: ["reasoning.encrypted_content"]` — sent when reasoning is on.
+ *     With `store: false` the server keeps no reasoning state, so without this
+ *     the encrypted reasoning item never comes back and the model loses its
+ *     chain of thought between turns of an agentic loop.
+ *
+ * Scoped to the responses-only provider ids (codex) and the responses flavor:
+ * the general-purpose `openai` provider keeps the server's storage default,
+ * which existing users may rely on.
+ *
+ * @returns {Record<string, Record<string, unknown>>|null}
+ */
+export function buildCodexResponsesProviderOptions({ providerId, flavor, hasReasoning }) {
+  if (!providerId || !RESPONSES_ONLY_PROVIDERS.has(providerId)) return null
+  if (flavor !== "responses") return null
+  return {
+    openai: {
+      store: false,
+      ...(hasReasoning ? { include: ["reasoning.encrypted_content"] } : {}),
+    },
   }
 }
 
@@ -145,13 +185,29 @@ async function withReasoningExtraction(model) {
  * for OpenAI when the user is on Anthropic, etc. Every model is wrapped with
  * `<think>`-tag reasoning extraction (see withReasoningExtraction).
  */
-export async function buildModel({ protocol, model, apiKey, baseURL, headers, apiFlavor }) {
-  const base = await buildRawModel({ protocol, model, apiKey, baseURL, headers, apiFlavor })
+export async function buildModel({
+  protocol,
+  model,
+  apiKey,
+  baseURL,
+  headers,
+  apiFlavor,
+  providerId,
+}) {
+  const base = await buildRawModel({
+    protocol,
+    model,
+    apiKey,
+    baseURL,
+    headers,
+    apiFlavor,
+    providerId,
+  })
   return withReasoningExtraction(base)
 }
 
 /** Construct the un-wrapped provider model. Split out so the wrap is uniform. */
-async function buildRawModel({ protocol, model, apiKey, baseURL, headers, apiFlavor }) {
+async function buildRawModel({ protocol, model, apiKey, baseURL, headers, apiFlavor, providerId }) {
   switch (protocol) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai")
@@ -164,8 +220,12 @@ async function buildRawModel({ protocol, model, apiKey, baseURL, headers, apiFla
       // protocol also serves (DeepSeek, OpenCode, Groq, Ollama, …) only implement
       // `/chat/completions`, so routing them to `/responses` 404s. The shared
       // decision honors an explicit `apiFlavor` (so the user can opt a gateway /
-      // custom URL into Responses) and otherwise falls back to the host heuristic.
-      const flavor = decideOpenAiEndpointFlavor({ apiFlavor, baseURL })
+      // custom URL into Responses) and otherwise falls back to the host/id
+      // heuristic. `providerId` is REQUIRED for that heuristic's id arm
+      // (RESPONSES_ONLY_PROVIDERS): dropping it here made codex-on-a-relay-preset
+      // fall through to `.chat()` while the renderer — which does pass it — said
+      // `.responses()`, the exact drift this shared module exists to prevent.
+      const flavor = decideOpenAiEndpointFlavor({ apiFlavor, baseURL, providerId })
       return flavor === "responses" ? client.responses(model) : client.chat(model)
     }
     case "anthropic": {
@@ -227,6 +287,7 @@ export function makeAiSdkAdapter(protocol) {
     id: `ai-sdk:${protocol}`,
     async start(req) {
       const creds = req.credentials ?? {}
+      const providerId = req.providerId
       const modelInstance = await buildModel({
         protocol,
         model: req.model,
@@ -234,6 +295,7 @@ export function makeAiSdkAdapter(protocol) {
         baseURL: creds.baseURL,
         headers: creds.headers,
         apiFlavor: creds.apiFlavor,
+        providerId,
       })
       const streamTextFn = req.streamTextFn ?? (await import("ai")).streamText
       const streamArgs = {
@@ -245,10 +307,29 @@ export function makeAiSdkAdapter(protocol) {
       // deep-merged onto any providerOptions the modelParams already carried
       // (e.g. the anthropic cacheControl breakpoint) so neither clobbers the
       // other.
-      const reasoningOptions = buildReasoningProviderOptions(protocol, creds.baseURL, req.reasoning)
+      const reasoningOptions = buildReasoningProviderOptions(
+        protocol,
+        creds.baseURL,
+        req.reasoning,
+        { providerId }
+      )
+      // Codex's own Responses-API fields (store:false + encrypted reasoning).
+      // Merged after the reasoning block so both land under the `openai` key.
+      const codexOptions =
+        protocol === "openai"
+          ? buildCodexResponsesProviderOptions({
+              providerId,
+              flavor: decideOpenAiEndpointFlavor({
+                apiFlavor: creds.apiFlavor,
+                baseURL: creds.baseURL,
+                providerId,
+              }),
+              hasReasoning: reasoningOptions !== null,
+            })
+          : null
       const mergedProviderOptions = mergeProviderOptions(
-        streamArgs.providerOptions,
-        reasoningOptions
+        mergeProviderOptions(streamArgs.providerOptions, reasoningOptions),
+        codexOptions
       )
       if (mergedProviderOptions) streamArgs.providerOptions = mergedProviderOptions
       // Forward the abort signal so an interrupt actually cancels the in-flight

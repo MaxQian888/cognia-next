@@ -208,6 +208,18 @@ async fn eval_embed_with_result(app: &AppHandle, js: &str) -> Result<String, Str
     }
 }
 
+/// wry serializes the JS result into a JSON string before handing it to the
+/// callback (tauri `Webview::eval_with_callback`), so a page helper returning a
+/// JS *string* arrives here JSON-quoted. Peel exactly one layer.
+///
+/// Defensive by construction: a value that is not a JSON string literal (a bare
+/// `true`, or an already-unwrapped payload) fails to parse and passes through
+/// unchanged — so this is correct whether or not the runtime quotes it.
+#[cfg(desktop)]
+fn unwrap_js_string(raw: String) -> String {
+    serde_json::from_str::<String>(&raw).unwrap_or(raw)
+}
+
 /// Snapshot the embedded page's accessibility tree (JSON envelope from
 /// `__cogniaSnapshot`). `args` is an optional JSON options string
 /// (`{"includeText":true}`) forwarded verbatim to the page helper; absent → the
@@ -221,7 +233,9 @@ pub async fn browser_embed_snapshot(
     {
         let opts = args.unwrap_or_else(|| "{}".to_string());
         let call = format!("window.__cogniaSnapshot({})", js_string(&opts)?);
-        eval_embed_with_result(&app, &call).await
+        // `__cogniaSnapshot` returns a JSON *string*; peel wry's quoting so the
+        // client's single `JSON.parse` lands on the envelope object.
+        Ok(unwrap_js_string(eval_embed_with_result(&app, &call).await?))
     }
     #[cfg(not(desktop))]
     {
@@ -259,7 +273,10 @@ pub async fn browser_embed_evaluate(app: AppHandle, expr: String) -> Result<Stri
             expr
         );
         let raw = eval_embed_with_result(&app, &wrapped).await?;
-        Ok(truncate_eval(raw))
+        // Unwrap *before* truncating: truncating the JSON-quoted form would
+        // leave an unterminated string literal that no longer parses, silently
+        // falling back to the quoted payload.
+        Ok(truncate_eval(unwrap_js_string(raw)))
     }
     #[cfg(not(desktop))]
     {
@@ -290,7 +307,9 @@ pub async fn browser_embed_has_selector(app: AppHandle, selector: String) -> Res
 pub async fn browser_embed_network_state(app: AppHandle) -> Result<String, String> {
     #[cfg(desktop)]
     {
-        eval_embed_with_result(&app, "window.__cogniaNetworkState()").await
+        Ok(unwrap_js_string(
+            eval_embed_with_result(&app, "window.__cogniaNetworkState()").await?,
+        ))
     }
     #[cfg(not(desktop))]
     {
@@ -310,7 +329,7 @@ pub async fn browser_embed_act(
     #[cfg(desktop)]
     {
         let call = build_act_call(&reference, &action, &args)?;
-        eval_embed_with_result(&app, &call).await
+        Ok(unwrap_js_string(eval_embed_with_result(&app, &call).await?))
     }
     #[cfg(not(desktop))]
     {
@@ -323,7 +342,9 @@ pub async fn browser_embed_act(
 pub async fn browser_embed_drain_console(app: AppHandle) -> Result<String, String> {
     #[cfg(desktop)]
     {
-        eval_embed_with_result(&app, "window.__cogniaDrainConsole()").await
+        Ok(unwrap_js_string(
+            eval_embed_with_result(&app, "window.__cogniaDrainConsole()").await?,
+        ))
     }
     #[cfg(not(desktop))]
     {
@@ -336,7 +357,107 @@ pub async fn browser_embed_drain_console(app: AppHandle) -> Result<String, Strin
 pub async fn browser_embed_drain_network(app: AppHandle) -> Result<String, String> {
     #[cfg(desktop)]
     {
-        eval_embed_with_result(&app, "window.__cogniaDrainNetwork()").await
+        Ok(unwrap_js_string(
+            eval_embed_with_result(&app, "window.__cogniaDrainNetwork()").await?,
+        ))
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+/// Build the `window.__cogniaRefFor(selector)` call string.
+#[cfg(desktop)]
+fn build_ref_for_call(selector: &str) -> Result<String, String> {
+    Ok(format!("window.__cogniaRefFor({})", js_string(selector)?))
+}
+
+/// Resolve a CSS selector to a snapshot ref so replay can act by ref (ADR-0072).
+/// Returns "" when the selector matches nothing.
+#[tauri::command]
+pub async fn browser_embed_ref_for(app: AppHandle, selector: String) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        let call = build_ref_for_call(&selector)?;
+        // `__cogniaRefFor` returns a JS string, so peel wry's quoting: otherwise
+        // every `refMap` lookup misses on a quoted ref, and the documented
+        // ""-on-no-match arrives as the *truthy* `"\"\""`.
+        Ok(unwrap_js_string(eval_embed_with_result(&app, &call).await?))
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, selector);
+        Err("desktop only".to_string())
+    }
+}
+
+/// Arm action recording in the previewed page (ADR-0072). The page keeps the
+/// buffer and mirrors it to sessionStorage so it survives a same-origin
+/// navigation; the renderer polls `browser_embed_drain_record` and re-arms on
+/// `browser://loaded` for the cross-origin case.
+#[tauri::command]
+pub async fn browser_embed_start_record(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        Ok(unwrap_js_string(
+            eval_embed_with_result(&app, "window.__cogniaStartRecord()").await?,
+        ))
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+/// Re-arm recording after a navigation WITHOUT discarding the page's buffer.
+/// See `resumeRecord` in the overlay: on a same-origin navigation the buffer
+/// survived in sessionStorage and starting a fresh take would drop the click
+/// that caused the navigation.
+#[tauri::command]
+pub async fn browser_embed_resume_record(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        Ok(unwrap_js_string(
+            eval_embed_with_result(&app, "window.__cogniaResumeRecord()").await?,
+        ))
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn browser_embed_stop_record(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        Ok(unwrap_js_string(
+            eval_embed_with_result(&app, "window.__cogniaStopRecord()").await?,
+        ))
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+/// Take the steps buffered since the last drain, as a JSON array.
+#[tauri::command]
+pub async fn browser_embed_drain_record(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        // `__cogniaDrainRecord` returns a JSON array *as a string*: without this
+        // peel the client parses `"[]"` into the 2-char string `[]`, whose
+        // `.length === 2` slips past the empty-guard in `recording/recorder.ts`
+        // and gets iterated character by character.
+        Ok(unwrap_js_string(
+            eval_embed_with_result(&app, "window.__cogniaDrainRecord()").await?,
+        ))
     }
     #[cfg(not(desktop))]
     {
@@ -406,7 +527,9 @@ pub async fn browser_embed_has_text(app: AppHandle, text: String) -> Result<bool
 pub async fn browser_embed_get_url(app: AppHandle) -> Result<String, String> {
     #[cfg(desktop)]
     {
-        eval_embed_with_result(&app, "String(window.location.href)").await
+        Ok(unwrap_js_string(
+            eval_embed_with_result(&app, "String(window.location.href)").await?,
+        ))
     }
     #[cfg(not(desktop))]
     {
@@ -419,7 +542,9 @@ pub async fn browser_embed_get_url(app: AppHandle) -> Result<String, String> {
 pub async fn browser_embed_get_title(app: AppHandle) -> Result<String, String> {
     #[cfg(desktop)]
     {
-        eval_embed_with_result(&app, "String(document.title)").await
+        Ok(unwrap_js_string(
+            eval_embed_with_result(&app, "String(document.title)").await?,
+        ))
     }
     #[cfg(not(desktop))]
     {
@@ -652,6 +777,68 @@ mod tests {
         // are escaped — the page `JSON.parse`s it back.
         assert!(call.contains(r#"\"details\""#));
         assert!(call.contains("详情"));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn unwrap_js_string_peels_exactly_one_json_layer() {
+        // wry hands us the JS string `[]` as the JSON literal `"[]"`.
+        assert_eq!(unwrap_js_string(r#""[]""#.to_string()), "[]");
+        // A JSON envelope string keeps its inner structure after one peel.
+        assert_eq!(
+            unwrap_js_string(r#""{\"ok\":true}""#.to_string()),
+            r#"{"ok":true}"#
+        );
+        // Escapes inside the string literal are decoded, not re-escaped.
+        assert_eq!(unwrap_js_string(r#""a\"b""#.to_string()), r#"a"b"#);
+        // The empty-ref contract: `""` must survive as a *falsy* empty string.
+        assert_eq!(unwrap_js_string(r#""""#.to_string()), "");
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn unwrap_js_string_passes_through_non_string_json() {
+        // JS booleans serialize bare — `has_text`/`has_selector` rely on this.
+        assert_eq!(unwrap_js_string("true".to_string()), "true");
+        assert_eq!(unwrap_js_string("false".to_string()), "false");
+        assert_eq!(unwrap_js_string("null".to_string()), "null");
+        assert_eq!(unwrap_js_string("42".to_string()), "42");
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn unwrap_js_string_passes_through_already_unwrapped_or_garbage() {
+        // Already-unwrapped payloads are not JSON string literals → unchanged.
+        assert_eq!(unwrap_js_string("[]".to_string()), "[]");
+        assert_eq!(
+            unwrap_js_string(r#"{"ok":true}"#.to_string()),
+            r#"{"ok":true}"#
+        );
+        // Garbage / unterminated literals pass through rather than panicking.
+        assert_eq!(unwrap_js_string(String::new()), "");
+        assert_eq!(
+            unwrap_js_string(r#""unterminated"#.to_string()),
+            r#""unterminated"#
+        );
+        assert_eq!(unwrap_js_string("undefined".to_string()), "undefined");
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn ref_for_call_is_json_safe() {
+        let call = build_ref_for_call("#login > input[name=\"user\"]").unwrap();
+        assert!(call.starts_with("window.__cogniaRefFor("));
+        // The selector's own quotes are escaped inside the JS string literal.
+        assert!(call.contains(r#"input[name=\"user\"]"#));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn ref_for_call_escapes_injection_in_selector() {
+        let call = build_ref_for_call(r#"a"); alert(1)//"#).unwrap();
+        // The malicious selector is contained inside a JSON string literal.
+        assert!(call.contains(r#"alert(1)"#));
+        assert!(!call.contains(r#"a"); alert"#));
     }
 
     #[cfg(desktop)]

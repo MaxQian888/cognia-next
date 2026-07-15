@@ -282,6 +282,12 @@ const globalConfig: Config = {
     "components/**/*.{js,jsx,ts,tsx}",
     "hooks/**/*.{js,jsx,ts,tsx}",
     "lib/**/*.{js,jsx,ts,tsx}",
+    // The overlay is shipped as a string and loaded by its suites via
+    // readFileSync + eval, so V8 cannot attribute any coverage to it and all
+    // ~1.8k lines report 0% — diluting the `global` bucket (the
+    // `./lib/**/*.{ts,tsx}` group doesn't match `.js`). Its behavior is covered
+    // by overlay.injected.test.ts + overlay.injected.record.test.ts.
+    "!lib/browser/overlay.injected.js",
     "stores/**/*.{js,jsx,ts,tsx}",
     // Extracted provider workspace packages. provider-core originated from
     // lib/ai/providers (coverage-gated), so keep it collected. provider-types is

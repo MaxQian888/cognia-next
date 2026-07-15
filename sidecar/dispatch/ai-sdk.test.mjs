@@ -447,6 +447,110 @@ test("maybeCompact: caps the summary call output, reuses frozen summaries, emits
   }
 })
 
+test("maybeCompact: the summary call inherits the turn's providerId (codex relay → Responses)", async () => {
+  // Regression: providerId reached the MAIN turn's adapter but not the summary
+  // call, so a codex account on a relay preset (host is neither *.openai.com nor
+  // chatgpt.com) built the summary via .chat() — which a Responses-only provider
+  // doesn't serve. The turn succeeded while compaction failed on the same session.
+  const { events, emit } = captureEmit()
+  const { calls, fn } = capturingStream(
+    [
+      { type: "text-delta", id: "1", text: "SUM" },
+      { type: "finish", finishReason: "stop" },
+    ],
+    { promptTokens: 50_000, completionTokens: 3 }
+  )
+  const session = dispatchAiSdk({
+    provider: "codex",
+    sessionId: "s-codex",
+    firstPrompt: "m0",
+    sendOptions: {
+      model: "gpt-5.6-sol",
+      providerCredentials: {
+        apiKey: "sk-relay",
+        baseURL: "https://ai-pixel.online",
+        protocol: "openai",
+      },
+      compaction: {
+        enabled: true,
+        keepRecent: 2,
+        fraction: 0.1,
+        strategy: "summary",
+        maxSummaryTokens: 64,
+        summaryPrompt: "SUMMARIZE",
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: fn,
+  })
+  const waitForTurns = waitForTurnsFactory(events)
+  await waitForTurns(1)
+  session.pushUserMessage("m1")
+  await waitForTurns(2)
+  session.closeInput()
+
+  const summaryCall = calls.find(
+    (a) => a.maxOutputTokens === 64 && a.messages?.[0]?.content === "SUMMARIZE"
+  )
+  assert.ok(summaryCall, "summary call happened")
+  assert.equal(summaryCall.model.provider, "openai.responses")
+})
+
+test("maybeCompact: a DISTINCT summary provider keeps its own id, not the turn's", async () => {
+  // The summary may run on a different provider than the turn. Its credentials
+  // carry their own providerId; passing the turn's would misidentify it — here a
+  // deepseek summariser must stay on /chat/completions even though the turn is codex.
+  const { events, emit } = captureEmit()
+  const { calls, fn } = capturingStream(
+    [
+      { type: "text-delta", id: "1", text: "SUM" },
+      { type: "finish", finishReason: "stop" },
+    ],
+    { promptTokens: 50_000, completionTokens: 3 }
+  )
+  const session = dispatchAiSdk({
+    provider: "codex",
+    sessionId: "s-mixed",
+    firstPrompt: "m0",
+    sendOptions: {
+      model: "gpt-5.6-sol",
+      providerCredentials: {
+        apiKey: "sk-relay",
+        baseURL: "https://ai-pixel.online",
+        protocol: "openai",
+      },
+      compaction: {
+        enabled: true,
+        keepRecent: 2,
+        fraction: 0.1,
+        strategy: "summary",
+        maxSummaryTokens: 64,
+        summaryPrompt: "SUMMARIZE",
+        summary: {
+          model: "deepseek-chat",
+          providerId: "deepseek",
+          credentials: { apiKey: "sk-ds", baseURL: "https://api.deepseek.com/v1" },
+        },
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: fn,
+  })
+  const waitForTurns = waitForTurnsFactory(events)
+  await waitForTurns(1)
+  session.pushUserMessage("m1")
+  await waitForTurns(2)
+  session.closeInput()
+
+  const summaryCall = calls.find(
+    (a) => a.maxOutputTokens === 64 && a.messages?.[0]?.content === "SUMMARIZE"
+  )
+  assert.ok(summaryCall, "summary call happened")
+  assert.equal(summaryCall.model.provider, "openai.chat")
+})
+
 test("maybeCompact: sliding-window strategy compacts WITHOUT an LLM summary call", async () => {
   const { events, emit } = captureEmit()
   const { calls, fn } = capturingStream(

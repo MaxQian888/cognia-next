@@ -132,6 +132,27 @@ describe("SubscriptionOverviewTab", () => {
     expect(refreshMock).toHaveBeenCalledTimes(2)
   })
 
+  // A failed query used to render the same "No usage data yet" copy as an idle
+  // account, which is how a throttled/expired quota read stayed invisible.
+  it("failed query → the reason replaces the generic empty copy", () => {
+    limitsResult = {
+      snapshot: {
+        provider: "anthropic",
+        accountId: "acc-1",
+        fetchedAt: NOW,
+        meters: [],
+        error: "429 Too Many Requests: slow down",
+      },
+      refreshing: false,
+    }
+    render(<SubscriptionOverviewTab />)
+    expect(screen.getByText(/429 Too Many Requests/)).toBeInTheDocument()
+    // The "just fetch it, it's free" pitch is wrong once the fetch is failing.
+    expect(screen.queryByText(/no token cost/)).not.toBeInTheDocument()
+    // The refresh CTA must survive the error branch.
+    expect(screen.getByTestId("overview-refresh")).toBeInTheDocument()
+  })
+
   it("renders all endpoint windows in the grid plus the overage extra", () => {
     limitsResult = { snapshot: endpointSnapshot(), refreshing: false }
     render(<SubscriptionOverviewTab />)

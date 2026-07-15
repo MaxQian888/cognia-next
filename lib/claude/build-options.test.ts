@@ -883,6 +883,28 @@ describe("resolveSendOptions — compaction config", () => {
     expect(opts.compaction?.summary?.credentials?.apiKey).toBeUndefined()
   })
 
+  it("carries providerId on a Codex summary bound to a relay preset (host can't identify it)", async () => {
+    // The relay's host is neither *.openai.com nor chatgpt.com, so `providerId`
+    // is the ONLY thing that tells the sidecar to route this to /responses.
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "sk-relay",
+      baseURL: "https://ai-pixel.online",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "codex", model: "gpt-5.6-sol" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary?.providerId).toBe("codex")
+    expect(opts.compaction?.summary?.credentials?.baseURL).toBe("https://ai-pixel.online")
+  })
+
   it("resolves a Codex summary provider from the subscription vault when settings have no key", async () => {
     mResolveCodexVaultCredential.mockResolvedValue({
       apiKey: "chatgpt-bearer",
@@ -904,6 +926,9 @@ describe("resolveSendOptions — compaction config", () => {
     expect(opts.compaction?.summary).toEqual({
       model: "gpt-5.2-codex",
       protocol: "openai",
+      // Travels with `credentials`: the sidecar needs the id (not just the base
+      // URL) to route codex to the Responses API behind a relay preset.
+      providerId: "codex",
       credentials: {
         apiKey: "chatgpt-bearer",
         baseURL: "https://chatgpt.com/backend-api/codex",
@@ -962,6 +987,7 @@ describe("resolveSendOptions — compaction config", () => {
     expect(opts.compaction?.summary).toEqual({
       model: "kimi-k2.6",
       protocol: "openai",
+      providerId: "opencode-go",
       credentials: {
         apiKey: "sk-go-vault",
         baseURL: "https://opencode.ai/zen/go/v1",
@@ -1147,7 +1173,7 @@ describe("resolveSendOptions — codex vault auto-fallback", () => {
       headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
     })
     // Model backfilled from the built-in catalog default.
-    expect(opts.model).toBe("gpt-5.2-codex")
+    expect(opts.model).toBe("gpt-5.6-sol")
   })
 
   it("api_key mode carries no special headers", async () => {

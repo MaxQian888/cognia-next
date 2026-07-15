@@ -22,6 +22,8 @@ import {
   listAccounts,
   listPresets,
 } from "@/lib/subscription/core/transport"
+import { isCodexCredentialFresh } from "./oauth"
+import { refreshCodexAccountIfStale } from "./refresh"
 import {
   CODEX_CHATGPT_BASE_URL,
   CODEX_DEFAULT_API_BASE_URL,
@@ -57,20 +59,39 @@ export async function resolveCodexVaultCredential(
     if (!candidate) return null
     const full = await getAccount("codex", candidate.id)
     if (!full || full.credential.provider !== "codex") return null
-    const apiKey = full.credential.accessToken?.trim()
+
+    // Renew a near-expiry ChatGPT bearer before handing it to the provider. The
+    // external-agent spawn path has always done this; chat never did, so a
+    // reused ChatGPT subscription 401'd once its token aged out even though the
+    // vault held a usable refresh token.
+    //
+    // The freshness pre-check is what keeps this off the hot path: this resolver
+    // runs on EVERY turn, and `refreshCodexAccountIfStale` re-reads the account
+    // over IPC before deciding. Skipping the call outright for the overwhelmingly
+    // common fresh/api_key case avoids a round-trip per turn; the helper repeats
+    // the check internally against the freshly-read credential, so this is a
+    // fast path, not the safety guarantee.
+    //
+    // A failed refresh degrades to the stored token (which may still work, and
+    // otherwise 401s with the provider's own message) rather than killing the
+    // turn with no credential at all.
+    const credential = isCodexCredentialFresh(full.credential)
+      ? full.credential
+      : ((await refreshCodexAccountIfStale(candidate.id).catch(() => null)) ?? full.credential)
+    const apiKey = credential.accessToken?.trim()
     if (!apiKey) return null
 
     const preset = await resolvePresetFor(full)
     const presetBase = preset?.baseUrl?.trim()
 
-    if (full.credential.authMode === "chatgpt") {
+    if (credential.authMode === "chatgpt") {
       const headers: Record<string, string> = {
         "OpenAI-Beta": "responses=experimental",
         originator: "codex_cli_rs",
         "OAI-Product-Sku": "codex",
         "User-Agent": "codex-cli",
       }
-      const accountId = full.credential.accountId?.trim()
+      const accountId = credential.accountId?.trim()
       if (accountId) headers["ChatGPT-Account-Id"] = accountId
       return {
         apiKey,

@@ -62,6 +62,20 @@ function windowFrom(w: unknown, id: string, labelKey: string): LimitsMeter | nul
   return windowMeter(id, labelKey, { utilization: pct, resetAt: resolveReset(win) })
 }
 
+/**
+ * A window key we don't know about yet. cc-switch's `query_claude_quota` walks
+ * every field outside its `KNOWN_TIERS` list rather than a fixed map, so a
+ * server-side tier addition degrades to "shown with a raw label" instead of
+ * "silently absent". `labelKey` is deliberately left unset: no i18n key can
+ * exist for a tier we've never seen, and `MeterRow` already falls back to
+ * `label` (guarded by `tr.has`).
+ */
+function unknownWindowFrom(key: string, w: unknown): LimitsMeter | null {
+  const meter = windowFrom(w, key, "")
+  if (!meter) return null
+  return { ...meter, labelKey: undefined, label: key }
+}
+
 interface OAuthExtraUsage {
   is_enabled?: unknown
   monthly_limit?: unknown
@@ -107,22 +121,39 @@ function overageFrom(raw: unknown): LimitsMeter | null {
  * response are simply skipped.
  */
 export function parseOAuthUsage(body: string): LimitsMeter[] {
+  return parseOAuthUsageBody(body)?.meters ?? []
+}
+
+/**
+ * Parse the body into meters, distinguishing "not a JSON object" (`null` — the
+ * endpoint contract broke) from "valid object, no windows in it" (`[]`). The
+ * old `[]`-for-everything return made those indistinguishable, so a changed
+ * response shape looked exactly like an idle account.
+ */
+export function parseOAuthUsageBody(body: string): { meters: LimitsMeter[] } | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(body)
   } catch {
-    return []
+    return null
   }
-  if (!parsed || typeof parsed !== "object") return []
+  if (!parsed || typeof parsed !== "object") return null
   const root = parsed as Record<string, unknown>
   const meters: LimitsMeter[] = []
   for (const { key, id, labelKey } of WINDOW_MAP) {
     const meter = windowFrom(root[key], id, labelKey)
     if (meter) meters.push(meter)
   }
+  // Any remaining window-shaped field is a tier we don't model yet.
+  const known = new Set(WINDOW_MAP.map((w) => w.key))
+  for (const key of Object.keys(root)) {
+    if (known.has(key) || key === "extra_usage") continue
+    const meter = unknownWindowFrom(key, root[key])
+    if (meter) meters.push(meter)
+  }
   const overage = overageFrom(root.extra_usage)
   if (overage) meters.push(overage)
-  return meters
+  return { meters }
 }
 
 export interface OAuthUsageDeps {
@@ -130,11 +161,50 @@ export interface OAuthUsageDeps {
 }
 
 /**
- * Fetch + parse the free OAuth usage windows. Returns `[]` on any failure
- * (transport, non-JSON, no recognizable windows) so the caller can fall back to
- * the paid probe.
+ * Why the reading failed. Mirrors the distinction cc-switch's
+ * `query_claude_quota` draws: 401/403 means "re-login" (`CredentialStatus::Expired`),
+ * every other non-2xx surfaces the HTTP status + body verbatim. Each kind needs a
+ * different response — refresh the bearer / back off / show the outage — and the
+ * previous `[]`-for-everything return made them indistinguishable.
  */
-export async function fetchOAuthUsage(token: string, deps: OAuthUsageDeps): Promise<LimitsMeter[]> {
+export type OAuthUsageFailureKind = "auth" | "rate_limited" | "http" | "network" | "parse"
+
+export interface OAuthUsageFailure {
+  ok: false
+  kind: OAuthUsageFailureKind
+  /** HTTP status when the transport surfaced one. */
+  status?: number
+  /** Verbatim detail, surfaced through `ProviderLimits.error`. */
+  message: string
+}
+
+export type OAuthUsageResult = { ok: true; meters: LimitsMeter[] } | OAuthUsageFailure
+
+/**
+ * Recover the failure kind from a rejected `authedGet`. The Rust
+ * `subscription_authed_get` command rejects non-2xx as `"{status}: {body}"`
+ * (e.g. `"429 Too Many Requests: ..."`), and Tauri rejects with the bare
+ * `Err(String)` payload rather than an `Error`, so both shapes are handled.
+ */
+export function classifyUsageError(err: unknown): OAuthUsageFailure {
+  const message = err instanceof Error ? err.message : String(err)
+  const matched = /(^|\s)(\d{3})(\s|:)/.exec(message)
+  const status = matched ? Number(matched[2]) : null
+  if (status == null) return { ok: false, kind: "network", message }
+  if (status === 401 || status === 403) return { ok: false, kind: "auth", status, message }
+  if (status === 429) return { ok: false, kind: "rate_limited", status, message }
+  return { ok: false, kind: "http", status, message }
+}
+
+/**
+ * Fetch + parse the free OAuth usage windows. Never throws: every outcome is
+ * reported as a discriminated result so the caller can tell an expired bearer
+ * from a throttle from a broken response contract.
+ */
+export async function fetchOAuthUsage(
+  token: string,
+  deps: OAuthUsageDeps
+): Promise<OAuthUsageResult> {
   let body: string
   try {
     body = await deps.authedGet(OAUTH_USAGE_ENDPOINT, {
@@ -147,8 +217,16 @@ export async function fetchOAuthUsage(token: string, deps: OAuthUsageDeps): Prom
       // validates the shape, not the version (see constants.ts).
       "User-Agent": CLAUDE_CLI_USER_AGENT,
     })
-  } catch {
-    return []
+  } catch (err) {
+    return classifyUsageError(err)
   }
-  return parseOAuthUsage(body)
+  const parsed = parseOAuthUsageBody(body)
+  if (!parsed) {
+    return {
+      ok: false,
+      kind: "parse",
+      message: `unrecognized usage response: ${body.slice(0, 200)}`,
+    }
+  }
+  return { ok: true, meters: parsed.meters }
 }

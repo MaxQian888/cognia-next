@@ -2463,6 +2463,25 @@ export class CogniaDB extends Dexie {
         }
       })
 
+    // v110 — Recorded browser flows (ADR-0072). A flow is the human's captured
+    //   interaction with the `/browser` preview, replayable and exportable.
+    //
+    //   Indexed by `baseUrl` so the pane can offer the flows recorded against
+    //   the origin currently loaded, and by `updatedAt` for a recency-ordered
+    //   list. `steps` is stored as a nested array (not a separate table): a
+    //   flow is only ever read and written whole, so splitting it would buy
+    //   nothing and cost a join.
+    //
+    //   Local-only: intentionally NOT registered in `lib/sync` (SyncableTable /
+    //   DEFAULT_HANDLERS). A flow is a script for one machine's dev server, and
+    //   syncing it would push localhost URLs off the device for no benefit.
+    //   Credentials are never in here to begin with — the recorder captures
+    //   `{value:"", secret:true}` for password fields and never their value
+    //   (see `lib/browser/recording/protocol.ts`). Pure additive.
+    this.version(110).stores({
+      browserRecordings: "&id, baseUrl, updatedAt, [baseUrl+updatedAt]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -2537,6 +2556,8 @@ export class CogniaDB extends Dexie {
   opticalArchives!: Table<import("./optical-archives").OpticalArchiveRow, string>
   // v108 — Local code-adoption tracking (write-attribution). See `lib/code-adoption/types.ts`.
   codeAdoptionTurns!: Table<import("@/lib/code-adoption/types").CodeAdoptionTurnRow, string>
+  // v110 — Recorded browser flows (ADR-0072). See `lib/db/browser-recordings.ts`.
+  browserRecordings!: Table<import("./browser-recordings").BrowserRecordingRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated

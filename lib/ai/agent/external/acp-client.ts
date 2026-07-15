@@ -30,6 +30,7 @@ import {
 } from "@/lib/native/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import { JsonRpcPeer, JsonRpcMethodError } from "./json-rpc-peer"
+import { spawnReclaimingOrphan } from "./spawn-reclaim"
 import { buildAgentEnv } from "./env-builder"
 import {
   createExternalAgentUnsupportedSessionExtensionError,
@@ -510,8 +511,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // env vars on the agent config always win.
     const finalEnv = await buildAgentEnv(config, config.process.env || {})
 
-    // Spawn the external agent process
-    this.processId = await agentInvoke<string>("spawn_external_agent", {
+    // Spawn the external agent process, reclaiming the id if a process from a
+    // previous JS realm (page reload / dev Fast Refresh) is still registered
+    // under it — otherwise the agent stays unconnectable until the app
+    // restarts. Safe here because `connect()` returns early when already
+    // connected, and the stdout/exit listeners below are only armed after this
+    // resolves, so the orphan's exit event has nowhere to land.
+    const spawnArgs = {
       config: {
         id: config.id,
         command: config.process.command,
@@ -519,6 +525,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         env: finalEnv,
         cwd: config.process.cwd,
       },
+    }
+    this.processId = await spawnReclaimingOrphan({
+      id: config.id,
+      spawn: () => agentInvoke<string>("spawn_external_agent", spawnArgs),
+      kill: (id) => agentInvoke("kill_external_agent", { agentId: id }),
+      onReclaim: (id) => log.warn("Reclaiming an orphaned ACP agent process", { id }),
     })
 
     log.info("Spawned process", { processId: this.processId })
