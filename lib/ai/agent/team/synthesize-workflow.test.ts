@@ -37,6 +37,119 @@ const task = (id: string, deps: string[] = [], order = 0): AgentTeamTask =>
     order,
   }) satisfies AgentTeamTask
 
+const reviewTeam = (maxRevisions?: number): AgentTeam =>
+  ({
+    ...team,
+    config: {
+      ...team.config,
+      taskReview: { enabled: true, ...(maxRevisions === undefined ? {} : { maxRevisions }) },
+    },
+  }) as AgentTeam
+
+describe("synthesizeTeamWorkflow — blocking lead review (ADR-0071)", () => {
+  it("emits no review nodes when review is off", () => {
+    const { workflow } = synthesizeTeamWorkflow({
+      team,
+      tasks: [task("t1")],
+      initialConcurrency: 3,
+    })
+    expect(workflow.nodes.map((n) => n.type)).toEqual(["action.team.task.dispatch"])
+  })
+
+  it("emits one review node per task, guarding its dispatch", () => {
+    const { workflow } = synthesizeTeamWorkflow({
+      team: reviewTeam(),
+      tasks: [task("t1")],
+      initialConcurrency: 3,
+    })
+
+    const review = workflow.nodes.find((n) => n.type === "action.team.task.review")
+    expect(review?.id).toBe("review:t1")
+    expect(review?.data.params).toMatchObject({
+      teamId: "team-1",
+      taskId: "t1",
+      title: "t1",
+      dispatchNodeId: "t1",
+      maxRevisions: 2,
+    })
+    // The dispatch must finish before its review runs.
+    expect(workflow.edges).toContainEqual(
+      expect.objectContaining({ source: "t1", target: "review:t1" })
+    )
+  })
+
+  it("bakes an explicit revision budget into the node", () => {
+    const { workflow } = synthesizeTeamWorkflow({
+      team: reviewTeam(0),
+      tasks: [task("t1")],
+      initialConcurrency: 3,
+    })
+    const review = workflow.nodes.find((n) => n.type === "action.team.task.review")
+    expect(review?.data.params).toMatchObject({ maxRevisions: 0 })
+  })
+
+  it("blocks a dependent on the review, not on the raw dispatch", () => {
+    // The whole point: t2 must not start until t1's work is approved.
+    const { workflow } = synthesizeTeamWorkflow({
+      team: reviewTeam(),
+      tasks: [task("t1"), task("t2", ["t1"])],
+      initialConcurrency: 3,
+    })
+
+    expect(workflow.edges).toContainEqual(
+      expect.objectContaining({ source: "review:t1", target: "t2" })
+    )
+    expect(workflow.edges).not.toContainEqual(
+      expect.objectContaining({ source: "t1", target: "t2" })
+    )
+  })
+
+  it("keeps the dependency in the dependent's params so it still reads the blackboard", () => {
+    const { workflow } = synthesizeTeamWorkflow({
+      team: reviewTeam(),
+      tasks: [task("t1"), task("t2", ["t1"])],
+      initialConcurrency: 3,
+    })
+    const t2 = workflow.nodes.find((n) => n.id === "t2")
+    // Params carry TASK ids (blackboard keys), never node ids.
+    expect(t2?.data.params).toMatchObject({ dependencies: ["t1"] })
+  })
+
+  it("does not review a dependency satisfied outside this workflow", () => {
+    // A prior wave already ran (and reviewed) it; there is no dispatch node here
+    // to hang a review off, and re-reviewing it would re-run its worker.
+    const { workflow } = synthesizeTeamWorkflow({
+      team: reviewTeam(),
+      tasks: [task("t2", ["t0"])],
+      initialConcurrency: 3,
+      satisfiedDependencyIds: new Set(["t0"]),
+    })
+
+    expect(workflow.nodes.map((n) => n.id).sort()).toEqual(["review:t2", "t2"])
+    expect(workflow.edges).toEqual([expect.objectContaining({ source: "t2", target: "review:t2" })])
+  })
+
+  it("still detects a cycle across the review indirection", () => {
+    expect(() =>
+      synthesizeTeamWorkflow({
+        team: reviewTeam(),
+        tasks: [task("t1", ["t2"]), task("t2", ["t1"])],
+        initialConcurrency: 3,
+      })
+    ).toThrow(SynthesizeError)
+  })
+
+  it("maps review nodes back to their task", () => {
+    const { nodeIdToTaskId } = synthesizeTeamWorkflow({
+      team: reviewTeam(),
+      tasks: [task("t1")],
+      initialConcurrency: 3,
+    })
+    expect(nodeIdToTaskId.get("review:t1")).toBe("t1")
+    expect(nodeIdToTaskId.get("t1")).toBe("t1")
+  })
+})
+
 describe("synthesizeTeamWorkflow", () => {
   it("converts a flat task list to a VW with no edges", () => {
     const { workflow, nodeIdToTaskId } = synthesizeTeamWorkflow({

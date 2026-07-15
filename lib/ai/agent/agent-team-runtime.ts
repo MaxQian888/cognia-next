@@ -38,6 +38,7 @@ import {
 import { synthesizeTeamWorkflow } from "./team/synthesize-workflow"
 import { applyGateBehavior, resolveGatePolicy, type TeamRunOrigin } from "./team/gate-policy"
 import { buildTeamRiskInput } from "./team/risk-input"
+import { isTaskReviewEnabled } from "./team/task-review-policy"
 import { classifyRisk } from "@/lib/policy/risk/classify-risk"
 import { requiredCeremony } from "@/lib/policy/risk/ceremony"
 import { createDeadlockHandler } from "./team/deadlock-gate"
@@ -64,13 +65,33 @@ export interface RunTeamLifecycleDeps {
     getTeamTasks(teamId: string): AgentTeamTask[]
   }
   storeWriter: TeamStoreWriter
-  /** Only called when team.config.requirePlanApproval is true. */
+  /**
+   * Called when the plan-approval gate is open — i.e. when
+   * `team.config.requirePlanApproval` is set OR the risk assessment raised it
+   * (ADR-0070), so this fires for teams that never set the flag.
+   */
   runLeadPlanning?: (params: {
     team: AgentTeam
     lead: AgentTeammate
     feedback?: string
     signal: AbortSignal
   }) => Promise<LeadPlanResult>
+  /**
+   * Ask the lead to review one task's work (ADR-0071). Only called when
+   * `team.config.taskReview.enabled`. Reaches the review node through
+   * `TeamRunContext.runLeadReview`.
+   */
+  runLeadReview?: (params: {
+    team: AgentTeam
+    lead: AgentTeammate
+    task: import("./team/lead-review").LeadReviewTask
+    workerName?: string
+    workerOutput: string
+    evidence: import("./team/review-evidence").ReviewEvidence
+    revision: number
+    previousFeedback?: string
+    signal: AbortSignal
+  }) => Promise<import("./team/lead-review").LeadReviewVerdict>
   /** Wired by buildAgentTeamRuntimeDeps in production. */
   notifierDeps?: TeamNotifierDeps
   /**
@@ -784,6 +805,18 @@ export async function runTeamLifecycle(
       concurrency,
       modelPref,
       gatePolicy,
+      // Blocking task review (ADR-0071). Both only when review is enabled, so a
+      // team without it carries no reviewer and the review node is never
+      // emitted. `allMembers` (not `workers`) — the lead is excluded from
+      // dispatch, which is exactly why it can review.
+      ...(isTaskReviewEnabled(team.config)
+        ? {
+            ...(allMembers.find((m) => m.id === team.leadId)
+              ? { lead: allMembers.find((m) => m.id === team.leadId)! }
+              : {}),
+            ...(deps.runLeadReview ? { runLeadReview: deps.runLeadReview } : {}),
+          }
+        : {}),
       // IM/workflow trigger origin — lets run-scoped consumers (e.g. the
       // team_post_to_chat collaboration tool) resolve the bound conversation.
       ...(deps.triggeredFrom ? { triggeredFrom: deps.triggeredFrom } : {}),

@@ -27,6 +27,13 @@ export interface ReconcileCandidate {
   ok: boolean
   /** Teammate output — context for the `judge` select strategy. */
   output?: string
+  /**
+   * Commit the blocking lead review (ADR-0071) took its diff against, recorded
+   * by the review node. Present only for a reviewed task whose worker actually
+   * changed something; reconcile does not depend on it (it merges branches, not
+   * commits) — it is the record of what was reviewed and approved.
+   */
+  reviewedCommitSha?: string
 }
 
 export interface ReconcileResult {

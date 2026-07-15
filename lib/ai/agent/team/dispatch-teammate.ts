@@ -28,6 +28,7 @@ import { resolveTeammateCapabilities } from "./capability-resolver"
 import { teammateToCharacter } from "./teammate-character"
 import { applyTeammateTwinContext } from "./twin-context"
 import type { TeamRunContext } from "./team-run-context"
+import type { ClaimOptions } from "./teammate-pool"
 import type { WorktreeHandle } from "./workspace/allocator"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
@@ -44,6 +45,18 @@ export interface TokenUsage {
   promptTokens: number
   completionTokens: number
   totalTokens: number
+}
+
+/**
+ * An exact-worker claim (`requireTeammateId`) could not be satisfied. Distinct
+ * from the generic "no available teammate", which is retryable because any
+ * teammate will do — here only one will, so retrying cannot help.
+ */
+export class UnavailableRequiredTeammateError extends Error {
+  constructor(readonly teammateId: string) {
+    super(`dispatchTeammate: required teammate "${teammateId}" is unavailable`)
+    this.name = "UnavailableRequiredTeammateError"
+  }
 }
 
 export interface DispatchTeammateArgs {
@@ -75,6 +88,12 @@ export interface DispatchTeammateArgs {
    * round-robin. Set from a task's `assignedTo`.
    */
   preferTeammateId?: string
+  /**
+   * Exact-worker claim forwarded to `pool.claim`: dispatch to THIS teammate or
+   * fail. Used by the lead-review revision loop (ADR-0071) so a revision goes
+   * back to the author of the work under review. Wins over `preferTeammateId`.
+   */
+  requireTeammateId?: string
   /**
    * Under workspace isolation, groups dispatches that must share ONE git
    * worktree (pipeline handoff). Defaults to `taskId` → one worktree per
@@ -336,11 +355,18 @@ export async function dispatchTeammate(
   teamCtx: TeamRunContext,
   args: DispatchTeammateArgs
 ): Promise<DispatchTeammateResult> {
-  const teammate = teamCtx.pool.claim(
-    args.taskId,
-    args.preferTeammateId ? { preferTeammateId: args.preferTeammateId } : undefined
-  )
+  const claimOptions: ClaimOptions | undefined = args.requireTeammateId
+    ? { requireTeammateId: args.requireTeammateId }
+    : args.preferTeammateId
+      ? { preferTeammateId: args.preferTeammateId }
+      : undefined
+  const teammate = teamCtx.pool.claim(args.taskId, claimOptions)
   if (!teammate) {
+    if (args.requireTeammateId) {
+      // Distinguishable on purpose: an exact-worker claim has no substitute, so
+      // the review loop must fail the task rather than retry into the same wall.
+      throw new UnavailableRequiredTeammateError(args.requireTeammateId)
+    }
     // Retryable — workflow runStep backs off; the pool may free up.
     throw new Error("dispatchTeammate: no available teammate")
   }

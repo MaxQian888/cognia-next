@@ -371,6 +371,20 @@ const TeamTaskDispatchParams = z.object({
   dependencies: z.array(z.string()).optional(),
 })
 
+// Synthesizer-emitted review node (ADR-0071): one per task when
+// `taskReview.enabled`. `dispatchNodeId` is how the executor finds the worker's
+// output + author on `ctx.upstream`; `maxRevisions` is baked in at synthesis so
+// a mid-run config edit cannot change a budget the DAG was already shaped by.
+const TeamTaskReviewParams = z.object({
+  teamId: requiredString("required"),
+  taskId: requiredString("required"),
+  title: requiredString("required"),
+  description: requiredString("required"),
+  expectedOutput: optionalString,
+  dispatchNodeId: requiredString("required"),
+  maxRevisions: z.number().int().min(0),
+})
+
 // action.team.reconcile — all optional; unset fields fall back to the team's
 // workspaceIsolation config. Only meaningful inside a workspace-isolated run.
 const TeamReconcileParams = z.object({
@@ -1678,6 +1692,7 @@ export const PARAMS_SCHEMAS = {
   // Actions: teams
   "action.team.run": TeamRunParams,
   "action.team.task.dispatch": TeamTaskDispatchParams,
+  "action.team.task.review": TeamTaskReviewParams,
   "action.team.reconcile": TeamReconcileParams,
   "action.team.compose": TeamComposeParams,
   "action.team.status": TeamStatusParams,

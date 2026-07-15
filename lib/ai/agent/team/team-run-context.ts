@@ -102,6 +102,16 @@ export interface TeamRunContext {
    * `gate-policy.ts`). Optional so tests that hand-build a context keep
    * working — consumers treat absence as the interactive (block) policy.
    */
+  /**
+   * The lead of this team, and its review dependency (ADR-0071). Both are set
+   * only when `team.config.taskReview.enabled`; the `action.team.task.review`
+   * executor fails the task when review is on but either is missing, rather
+   * than passing work no one reviewed.
+   */
+  readonly lead?: AgentTeammate
+  readonly runLeadReview?: NonNullable<
+    import("../agent-team-runtime").RunTeamLifecycleDeps["runLeadReview"]
+  >
   readonly gatePolicy?: import("./gate-policy").TeamGatePolicy
   /**
    * Trigger origin of this run (IM conversation binding, workflow, …).

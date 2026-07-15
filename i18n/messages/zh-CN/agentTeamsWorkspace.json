@@ -491,7 +491,10 @@
         "requireDelegationApproval": "向外部智能体委派前需要审批",
         "requirePlanApproval": "运行前需要计划审批",
         "requireResultReview": "结果需人工验收",
-        "requireResultReviewHint": "自动运行成功的任务将进入「评审」列等待人工验收；运行本身不受阻塞。"
+        "requireResultReviewHint": "自动运行成功的任务将进入「评审」列等待人工验收；运行本身不受阻塞。",
+        "taskReview": "由 Lead 评审每个任务",
+        "taskReviewHint": "在依赖任务开始之前，Lead 会评审每个任务的产出及其实际改动的 diff。被驳回的工作会退回给同一位成员修订。无法通过评审的任务会让整个运行失败。",
+        "taskReviewMaxRevisions": "修订次数"
       },
       "budget": {
         "criticalThreshold": "严重阈值（0–1）",

@@ -62,7 +62,12 @@ export interface AgentTeamManager {
  */
 type ConfiguredDeps = Pick<
   RunTeamLifecycleDeps,
-  "runLeadPlanning" | "notifierDeps" | "resolveTeamRepo" | "resolvePrObserveOctokit" | "runPrReview"
+  | "runLeadPlanning"
+  | "runLeadReview"
+  | "notifierDeps"
+  | "resolveTeamRepo"
+  | "resolvePrObserveOctokit"
+  | "runPrReview"
 >
 let configuredDeps: ConfiguredDeps | null = null
 
@@ -144,6 +149,7 @@ async function runManaged(
     storeReader: bindStoreReader(),
     storeWriter: bindStoreWriter(),
     runLeadPlanning: deps.runLeadPlanning,
+    ...(deps.runLeadReview ? { runLeadReview: deps.runLeadReview } : {}),
     notifierDeps: deps.notifierDeps,
     ...(deps.resolveTeamRepo ? { resolveTeamRepo: deps.resolveTeamRepo } : {}),
     ...(deps.resolvePrObserveOctokit

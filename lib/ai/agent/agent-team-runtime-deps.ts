@@ -21,6 +21,13 @@ import {
   type AgentHookContext,
   type LifecycleHookFirer,
 } from "@/lib/claude/hooks/lifecycle-firer"
+import { parseProposedPlan } from "./agent-team-runtime"
+import {
+  buildLeadReviewPrompt,
+  leadReviewVerdictSchema,
+  LEAD_REVIEW_SYSTEM_PROMPT,
+  type LeadReviewVerdict,
+} from "./team/lead-review"
 import type { LeadPlanResult, RunTeamLifecycleDeps } from "./agent-team-runtime"
 import type { TeamNotifierDeps } from "./team/team-notifier"
 import {
@@ -131,7 +138,12 @@ export function buildAgentTeamRuntimeDeps(
   opts: BuildAgentTeamRuntimeDepsOptions = {}
 ): Pick<
   RunTeamLifecycleDeps,
-  "runLeadPlanning" | "notifierDeps" | "resolveTeamRepo" | "resolvePrObserveOctokit" | "runPrReview"
+  | "runLeadPlanning"
+  | "runLeadReview"
+  | "notifierDeps"
+  | "resolveTeamRepo"
+  | "resolvePrObserveOctokit"
+  | "runPrReview"
 > {
   const executeAgent = opts.executeAgent ?? defaultExecuteAgent
   const firer = opts.firer ?? defaultLifecycleFirer
@@ -249,8 +261,61 @@ export function buildAgentTeamRuntimeDeps(
     },
   }
 
+  /**
+   * Blocking task review (ADR-0071). Shares `runLeadTurn` with planning, so the
+   * reviewer resolves onto the same provider the planner did — a lead that
+   * planned on Opus and reviewed on something else would be two different
+   * judgements wearing one name. No tools are passed: the lead reviews, and is
+   * handed the diff rather than fetching it.
+   */
+  const runLeadReview: NonNullable<RunTeamLifecycleDeps["runLeadReview"]> = async ({
+    team,
+    lead,
+    task,
+    workerName,
+    workerOutput,
+    evidence,
+    revision,
+    previousFeedback,
+    signal,
+  }): Promise<LeadReviewVerdict> => {
+    const text = await runLeadTurn({
+      team,
+      lead,
+      prompt: buildLeadReviewPrompt({
+        task,
+        ...(workerName ? { workerName } : {}),
+        workerOutput,
+        evidence,
+        revision,
+        ...(previousFeedback ? { previousFeedback } : {}),
+      }),
+      // The reviewer's role overrides any persona the lead carries: a lead whose
+      // systemPrompt says "you build features" must still review as a reviewer.
+      systemPrompt: LEAD_REVIEW_SYSTEM_PROMPT,
+      phase: "review",
+      signal,
+    })
+
+    // Fail loudly on anything unreadable. Treating a malformed verdict as
+    // approval would turn the gate into a rubber stamp exactly when the
+    // reviewer is malfunctioning.
+    const parsed = parseProposedPlan(text)
+    if (!parsed.ok) {
+      throw new Error(`runLeadReview: the lead's verdict was not valid JSON (${parsed.reason})`)
+    }
+    const verdict = leadReviewVerdictSchema.safeParse(parsed.plan)
+    if (!verdict.success) {
+      throw new Error(
+        `runLeadReview: the lead did not return a usable verdict (${verdict.error.issues[0]?.message ?? "unparseable"})`
+      )
+    }
+    return verdict.data
+  }
+
   return {
     runLeadPlanning,
+    runLeadReview,
     notifierDeps: opts.notifierDeps ?? defaultNotifierDeps,
     // PR feedback loop resolvers (ADR — team PR feedback). Fail-closed: each
     // returns null off-desktop / without creds, so the loop stays inert unless a

@@ -57,6 +57,7 @@
     "0067-src-tauri-crate-decomposition-and-build-speed",
     "0068-frontend-package-extraction-and-compile-speed",
     "0069-long-term-memory-external-api-surfaces",
-    "0070-risk-ceremony-policy-layer"
+    "0070-risk-ceremony-policy-layer",
+    "0071-blocking-lead-task-review"
   ]
 }

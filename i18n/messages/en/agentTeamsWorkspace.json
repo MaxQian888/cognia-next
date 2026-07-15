@@ -491,7 +491,10 @@
         "requireDelegationApproval": "Require approval before delegating to an external agent",
         "requirePlanApproval": "Require plan approval before run starts",
         "requireResultReview": "Require result review",
-        "requireResultReviewHint": "Successful auto-runs land in the Review column for human acceptance; the run itself keeps progressing."
+        "requireResultReviewHint": "Successful auto-runs land in the Review column for human acceptance; the run itself keeps progressing.",
+        "taskReview": "Lead reviews each task",
+        "taskReviewHint": "The lead reviews every task's work — and the diff it produced — before dependent tasks may start. Work the lead rejects goes back to the same teammate to revise. A task that cannot be approved fails the run.",
+        "taskReviewMaxRevisions": "Revision attempts"
       },
       "budget": {
         "criticalThreshold": "Critical threshold (0–1)",

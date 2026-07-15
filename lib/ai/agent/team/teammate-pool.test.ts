@@ -71,6 +71,32 @@ describe("TeammatePool (v1 baseline)", () => {
     expect(pool.claim("t1", { preferTeammateId: "a" })?.id).toBe("b")
   })
 
+  describe("exact-worker claim (requireTeammateId)", () => {
+    // A lead-review revision (ADR-0071) is addressed to the author of the diff
+    // under review, in that author's worktree — substituting a different
+    // teammate would ask them to revise work they never wrote.
+    it("claims exactly the required teammate", () => {
+      const pool = createTeammatePool({ teammates: [tm("a"), tm("b")] })
+      expect(pool.claim("t1", { requireTeammateId: "b" })?.id).toBe("b")
+    })
+
+    it("returns null rather than substituting when the required teammate is unavailable", () => {
+      const pool = createTeammatePool({ teammates: [tm("a"), tm("b")] })
+      pool.recordFailure("b", new Error("401 Unauthorized: invalid API key"))
+      expect(pool.claim("t1", { requireTeammateId: "b" })).toBeNull()
+    })
+
+    it("returns null rather than substituting when the required teammate is unknown", () => {
+      const pool = createTeammatePool({ teammates: [tm("a")] })
+      expect(pool.claim("t1", { requireTeammateId: "ghost" })).toBeNull()
+    })
+
+    it("wins over preferTeammateId", () => {
+      const pool = createTeammatePool({ teammates: [tm("a"), tm("b")] })
+      expect(pool.claim("t1", { requireTeammateId: "b", preferTeammateId: "a" })?.id).toBe("b")
+    })
+  })
+
   it("recordSuccess and recordFailure update the breaker without throwing", () => {
     const a = tm("a")
     const pool = createTeammatePool({ teammates: [a] })

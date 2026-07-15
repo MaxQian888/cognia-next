@@ -2698,6 +2698,335 @@ describe("action.team.task.dispatch", () => {
   })
 })
 
+// ── action.team.task.review (ADR-0071) ───────────────────────────────────
+describe("action.team.task.review", () => {
+  type Verdict = { verdict: "approved" | "changes_requested"; feedback: string }
+
+  const setupReviewCtx = async (params: {
+    runId: string
+    verdicts: Verdict[] | (() => Promise<Verdict>)
+    workers?: { id: string; name: string }[]
+    requireResultReview?: boolean
+    workingDir?: string
+    omitReviewer?: boolean
+    omitLead?: boolean
+  }) => {
+    const { registerTeamRunContext, __resetTeamRunContextForTesting } =
+      await import("@/lib/ai/agent/team/team-run-context")
+    const { createTeammatePool } = await import("@/lib/ai/agent/team/teammate-pool")
+    const { createBudgetGuard } = await import("@/lib/ai/agent/team/budget-guard")
+    const { createTeamNotifier } = await import("@/lib/ai/agent/team/team-notifier")
+    const { createConcurrencyController } =
+      await import("@/lib/workflow/runtime/concurrency-controller")
+    const { createModelPreferenceController } =
+      await import("@/lib/workflow/runtime/model-preference-controller")
+    __resetTeamRunContextForTesting()
+
+    const member = (id: string, name: string, role: "lead" | "teammate") => ({
+      id,
+      name,
+      teamId: "team-1",
+      description: "",
+      role,
+      status: "idle" as const,
+      config: {},
+      completedTaskIds: [],
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      progress: 0,
+      createdAt: new Date(),
+    })
+    const workers = (params.workers ?? [{ id: "w1", name: "W1" }]).map((w) =>
+      member(w.id, w.name, "teammate")
+    )
+    const lead = member("lead-1", "Lead", "lead")
+
+    const notifier = createTeamNotifier({ runId: params.runId, teamId: "team-1" })
+    const messages: Array<Record<string, unknown>> = []
+    const taskStatuses: Array<Record<string, unknown>> = []
+    const events: Array<Record<string, unknown>> = []
+    const concurrency = createConcurrencyController(3)
+    const modelPref = createModelPreferenceController()
+    const pool = createTeammatePool({ teammates: workers })
+    const budget = createBudgetGuard({
+      runId: params.runId,
+      limit: 0,
+      onCritical: "notify",
+      notifier,
+      concurrencyCtrl: concurrency,
+      modelCtrl: modelPref,
+    })
+
+    const reviewCalls: Array<Record<string, unknown>> = []
+    const queue = Array.isArray(params.verdicts) ? [...params.verdicts] : null
+    const runLeadReview = jest.fn(async (args: Record<string, unknown>) => {
+      reviewCalls.push(args)
+      if (!queue) return (params.verdicts as () => Promise<Verdict>)()
+      const next = queue.shift()
+      if (!next) throw new Error("test: ran out of verdicts")
+      return next
+    })
+
+    const ctx = {
+      runId: params.runId,
+      teamId: "team-1",
+      team: {
+        id: "team-1",
+        name: "Test",
+        config: {
+          defaultTimeout: 1_000,
+          taskReview: { enabled: true },
+          ...(params.workingDir ? { workingDir: params.workingDir } : {}),
+          ...(params.requireResultReview
+            ? { governancePolicy: { approval: { requireResultReview: true } } }
+            : {}),
+        },
+      } as never,
+      pool,
+      budget,
+      notifier,
+      concurrency,
+      modelPref,
+      ...(params.omitLead ? {} : { lead }),
+      ...(params.omitReviewer ? {} : { runLeadReview }),
+      storeWriter: {
+        addMessage: (m: Record<string, unknown>) => messages.push(m),
+        setTaskStatus: (id: string, status: string, result?: string, error?: string) =>
+          taskStatuses.push({ id, status, result, error }),
+        updateTeammate: () => {},
+        addEvent: (e: Record<string, unknown>) => events.push(e),
+      },
+      resolvedCapabilities: new Map(),
+    }
+    registerTeamRunContext(ctx as never)
+    return { messages, taskStatuses, events, runLeadReview, reviewCalls }
+  }
+
+  /** `upstream: null` = the dispatch node published nothing. */
+  const reviewCtx = (runId: string, upstream?: Record<string, unknown> | null) => {
+    const dispatchOutput =
+      upstream === undefined ? { text: "the work", teammateId: "w1", teammateName: "W1" } : upstream
+    const ctx = makeCtx(
+      "action.team.task.review",
+      {
+        teamId: "team-1",
+        taskId: "t1",
+        title: "Title",
+        description: "Desc",
+        dispatchNodeId: "t1",
+        maxRevisions: 2,
+      },
+      dispatchOutput === null ? {} : { t1: dispatchOutput }
+    ) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = runId
+    return ctx
+  }
+
+  beforeEach(async () => {
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockReset()
+  })
+
+  it("approves on the first round and completes the task", async () => {
+    const { taskStatuses, reviewCalls } = await setupReviewCtx({
+      runId: "rv_ok",
+      verdicts: [{ verdict: "approved", feedback: "looks good" }],
+    })
+
+    const r = await exec("action.team.task.review", reviewCtx("rv_ok"))
+
+    expect((r.output as { verdict: string }).verdict).toBe("approved")
+    expect((r.output as { revisions: number }).revisions).toBe(0)
+    expect(taskStatuses).toContainEqual(
+      expect.objectContaining({ id: "t1", status: "completed", result: "the work" })
+    )
+    // The lead judges the worker's actual deliverable, not just the task text.
+    expect(reviewCalls[0]).toMatchObject({ workerOutput: "the work", revision: 0 })
+  })
+
+  it("leaves the card in human review when a human also wants the last word", async () => {
+    const { taskStatuses } = await setupReviewCtx({
+      runId: "rv_human",
+      verdicts: [{ verdict: "approved", feedback: "ok" }],
+      requireResultReview: true,
+    })
+
+    await exec("action.team.task.review", reviewCtx("rv_human"))
+
+    expect(taskStatuses).toContainEqual(expect.objectContaining({ id: "t1", status: "review" }))
+    expect(taskStatuses).not.toContainEqual(expect.objectContaining({ status: "completed" }))
+  })
+
+  it("re-dispatches the SAME worker with the lead's feedback, then approves", async () => {
+    const { taskStatuses, reviewCalls } = await setupReviewCtx({
+      runId: "rv_revise",
+      verdicts: [
+        { verdict: "changes_requested", feedback: "handle the empty case" },
+        { verdict: "approved", feedback: "fixed" },
+      ],
+    })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({ text: "revised work" })
+
+    const r = await exec("action.team.task.review", reviewCtx("rv_revise"))
+
+    // The worker was actually asked to revise, with the feedback verbatim.
+    const prompt = (executeAgent as jest.Mock).mock.calls[0][0] as string
+    expect(prompt).toContain("handle the empty case")
+    // The second review judges the REVISED output and replays its own feedback.
+    expect(reviewCalls[1]).toMatchObject({
+      workerOutput: "revised work",
+      revision: 1,
+      previousFeedback: "handle the empty case",
+    })
+    expect((r.output as { revisions: number }).revisions).toBe(1)
+    expect(taskStatuses).toContainEqual(
+      expect.objectContaining({ id: "t1", status: "completed", result: "revised work" })
+    )
+  })
+
+  it("fails the task when the revision budget is exhausted", async () => {
+    // A gate that gives up and approves is not a gate.
+    const { taskStatuses } = await setupReviewCtx({
+      runId: "rv_exhaust",
+      verdicts: [
+        { verdict: "changes_requested", feedback: "no" },
+        { verdict: "changes_requested", feedback: "still no" },
+        { verdict: "changes_requested", feedback: "final no" },
+      ],
+    })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({ text: "attempt" })
+
+    await expect(exec("action.team.task.review", reviewCtx("rv_exhaust"))).rejects.toThrow(
+      /still requested changes after 2 revision/
+    )
+    expect(taskStatuses).toContainEqual(expect.objectContaining({ id: "t1", status: "failed" }))
+  })
+
+  it("reviews once and never revises when the budget is zero", async () => {
+    const { taskStatuses } = await setupReviewCtx({
+      runId: "rv_zero",
+      verdicts: [{ verdict: "changes_requested", feedback: "no" }],
+    })
+    const ctx = reviewCtx("rv_zero")
+    ;(ctx.params as { maxRevisions: number }).maxRevisions = 0
+
+    await expect(exec("action.team.task.review", ctx)).rejects.toThrow(/after 0 revision/)
+    expect(taskStatuses).toContainEqual(expect.objectContaining({ status: "failed" }))
+  })
+
+  it("fails the task when the original worker is gone", async () => {
+    const { taskStatuses } = await setupReviewCtx({
+      runId: "rv_gone",
+      verdicts: [{ verdict: "changes_requested", feedback: "fix it" }],
+    })
+    // Upstream names a worker that is not in this run's pool.
+    const ctx = reviewCtx("rv_gone", { text: "work", teammateId: "ghost", teammateName: "Ghost" })
+
+    await expect(exec("action.team.task.review", ctx)).rejects.toThrow(/no longer available/)
+    expect(taskStatuses).toContainEqual(expect.objectContaining({ status: "failed" }))
+  })
+
+  it("fails the task when the reviewer itself fails — never silently approves", async () => {
+    const { taskStatuses } = await setupReviewCtx({
+      runId: "rv_boom",
+      verdicts: async () => {
+        throw new Error("No candidate providers were available.")
+      },
+    })
+
+    await expect(exec("action.team.task.review", reviewCtx("rv_boom"))).rejects.toThrow(
+      /could not review this task/
+    )
+    expect(taskStatuses).toContainEqual(expect.objectContaining({ status: "failed" }))
+  })
+
+  it("fails closed when review is enabled but no reviewer is wired", async () => {
+    await setupReviewCtx({
+      runId: "rv_nodep",
+      verdicts: [{ verdict: "approved", feedback: "ok" }],
+      omitReviewer: true,
+    })
+    await expect(exec("action.team.task.review", reviewCtx("rv_nodep"))).rejects.toThrow(
+      /no lead\/reviewer is wired/
+    )
+  })
+
+  it("fails closed when the team has no lead", async () => {
+    await setupReviewCtx({
+      runId: "rv_nolead",
+      verdicts: [{ verdict: "approved", feedback: "ok" }],
+      omitLead: true,
+    })
+    await expect(exec("action.team.task.review", reviewCtx("rv_nolead"))).rejects.toThrow(
+      /no lead\/reviewer is wired/
+    )
+  })
+
+  it("fails when the dispatch node produced no output to review", async () => {
+    await setupReviewCtx({ runId: "rv_noout", verdicts: [{ verdict: "approved", feedback: "" }] })
+    await expect(exec("action.team.task.review", reviewCtx("rv_noout", null))).rejects.toThrow(
+      /no output from dispatch node/
+    )
+  })
+
+  it("records the verdict in the team's messages and activity", async () => {
+    const { messages, events } = await setupReviewCtx({
+      runId: "rv_record",
+      verdicts: [{ verdict: "approved", feedback: "ship it" }],
+    })
+
+    await exec("action.team.task.review", reviewCtx("rv_record"))
+
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        senderId: "lead-1",
+        recipientId: "w1",
+        taskId: "t1",
+        content: expect.stringContaining("ship it"),
+      })
+    )
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "plan_approved", taskId: "t1", teammateId: "lead-1" })
+    )
+  })
+
+  it("records a rejection in the activity surface too", async () => {
+    const { events } = await setupReviewCtx({
+      runId: "rv_reject_evt",
+      verdicts: [
+        { verdict: "changes_requested", feedback: "nope" },
+        { verdict: "approved", feedback: "ok" },
+      ],
+    })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({ text: "revised" })
+
+    await exec("action.team.task.review", reviewCtx("rv_reject_evt"))
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "plan_rejected", taskId: "t1" }))
+  })
+
+  it("reviews the deliverable text when there is no repo to diff", async () => {
+    const { reviewCalls } = await setupReviewCtx({
+      runId: "rv_text",
+      verdicts: [{ verdict: "approved", feedback: "ok" }],
+    })
+
+    await exec("action.team.task.review", reviewCtx("rv_text"))
+
+    expect(reviewCalls[0]).toMatchObject({ evidence: { kind: "text", files: [] } })
+  })
+
+  it("fails without a TeamRunContext", async () => {
+    const { __resetTeamRunContextForTesting } = await import("@/lib/ai/agent/team/team-run-context")
+    __resetTeamRunContextForTesting()
+    await expect(exec("action.team.task.review", reviewCtx("rv_missing"))).rejects.toThrow(
+      /no TeamRunContext/
+    )
+  })
+})
+
 // ── action.team.task.dispatch output validation (PR 6) ────────────────────
 describe("action.team.task.dispatch output validation", () => {
   beforeEach(async () => {

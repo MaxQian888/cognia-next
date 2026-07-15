@@ -23,7 +23,10 @@ const INTENTIONAL_FALLBACKS = new Set<WorkflowNodeKind>([
   //     Hub, ADR-0045).
   //   • the six `pattern.*` kinds — ultracode orchestration nodes emitted by
   //     `synthesize-ultracode.ts` (ADR-0022 addendum).
+  //   • `action.team.task.review` — one-per-task blocking lead review, emitted
+  //     by `synthesize-workflow.ts` when `taskReview.enabled` (ADR-0071).
   "action.plan.step.dispatch",
+  "action.team.task.review",
   "pattern.multi-modal-sweep",
   "pattern.loop-until-dry",
   "pattern.adversarial-verify",

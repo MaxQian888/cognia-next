@@ -18,11 +18,7 @@ import {
 import type { AgentTeammate } from "@/types/agent/agent-team"
 
 export type TeammateFailureKind =
-  | "ordinary"
-  | "rate_limited"
-  | "catastrophic"
-  | "empty_output"
-  | "refusal"
+  "ordinary" | "rate_limited" | "catastrophic" | "empty_output" | "refusal"
 
 /** Options for a single claim. */
 export interface ClaimOptions {
@@ -32,6 +28,17 @@ export interface ClaimOptions {
    * round-robin. Circuit-breaker availability is always respected.
    */
   preferTeammateId?: string
+  /**
+   * Exact-worker claim: return ONLY this teammate, or `null` if it is
+   * unavailable — never round-robin onto someone else.
+   *
+   * Used by the lead-review revision loop (ADR-0071): a "please fix this"
+   * revision is addressed to the author of the work under review, in that
+   * author's worktree. Handing it to a different teammate would ask them to
+   * revise a diff they did not write, so an unavailable author is a failure,
+   * not a cue to substitute. Wins over `preferTeammateId` when both are set.
+   */
+  requireTeammateId?: string
 }
 
 export interface TeammatePool {
@@ -164,6 +171,15 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
     claim: (taskId, options) => {
       const ids = [...entries.keys()]
       if (ids.length === 0) return null
+
+      // Exact-worker claim: this teammate or nobody. No round-robin fallback —
+      // see ClaimOptions.requireTeammateId.
+      const requireId = options?.requireTeammateId
+      if (requireId) {
+        const required = entries.get(requireId)
+        if (!required || !isAvailable(required)) return null
+        return finalizeClaim(required, taskId)
+      }
 
       // Skill-aware fast path: honor the preferred teammate when available.
       const preferId = options?.preferTeammateId

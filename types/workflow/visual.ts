@@ -68,6 +68,9 @@ export type WorkflowNodeKind =
   | "action.team.create"
   | "action.team.update"
   | "action.team.task.dispatch"
+  // Blocking lead review of a task's work (ADR-0071). Synthesizer-emitted only,
+  // never placed by users in the editor.
+  | "action.team.task.review"
   | "action.team.reconcile"
   // Agent-team surface exposure (multi-bot orchestration): auto-compose a
   // team from an objective, query team state/results mid-workflow, delegate
@@ -327,6 +330,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.team.create",
   "action.team.update",
   "action.team.task.dispatch",
+  "action.team.task.review",
   "action.team.reconcile",
   "action.plan.create",
   "action.plan.get",

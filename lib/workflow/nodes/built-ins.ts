@@ -3280,6 +3280,227 @@ registerNodeExecutor({
   },
 })
 
+// ── action.team.task.review ───────────────────────────────────────────────
+// Per ADR-0071. Synthesizer-emitted: one per task when `taskReview.enabled`,
+// placed between a task's dispatch node and that task's dependents, so an
+// unapproved task blocks downstream work at the SCHEDULER — dependents are not
+// runnable, rather than downstream nodes being trusted to check a flag.
+//
+// The lead judges the worker's output plus a deterministic diff of what the
+// task actually changed, and returns approved / changes_requested. A
+// changes_requested re-dispatches the SAME worker into the SAME worktree with
+// the lead's feedback, then reviews again, up to the budget frozen at synthesis.
+//
+// Not retryable: every failure mode here (exhausted budget, missing worker,
+// reviewer failure) is a decision that unreviewed work must not land. Retrying
+// would re-run the worker against the same wall and, worse, could let a flaky
+// reviewer eventually rubber-stamp.
+registerNodeExecutor({
+  kind: "action.team.task.review",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      teamId?: string
+      taskId?: string
+      title?: string
+      description?: string
+      expectedOutput?: string
+      dispatchNodeId?: string
+      maxRevisions?: number
+    }
+    if (!params.teamId || !params.taskId || !params.dispatchNodeId) {
+      throw nonRetryable("action.team.task.review requires 'teamId', 'taskId' and 'dispatchNodeId'")
+    }
+    const { teamId, taskId } = params
+    const [
+      { getTeamRunContext },
+      { dispatchTeammate, UnavailableRequiredTeammateError },
+      { buildReviewEvidence },
+    ] = await Promise.all([
+      import("@/lib/ai/agent/team/team-run-context"),
+      import("@/lib/ai/agent/team/dispatch-teammate"),
+      import("@/lib/ai/agent/team/review-evidence"),
+    ])
+
+    const teamCtx = getTeamRunContext(ctx.runId)
+    if (!teamCtx) {
+      throw nonRetryable(
+        `action.team.task.review: no TeamRunContext registered for runId=${ctx.runId}`
+      )
+    }
+    // Fail closed. Review is on, so work that reaches here has to be reviewed;
+    // silently skipping would be the worst outcome — an unreviewed task
+    // presented as approved.
+    if (!teamCtx.lead || !teamCtx.runLeadReview) {
+      throw nonRetryable(
+        "action.team.task.review: task review is enabled but no lead/reviewer is wired for this run"
+      )
+    }
+    const runLeadReview = teamCtx.runLeadReview
+    const lead = teamCtx.lead
+
+    const task = {
+      id: taskId,
+      title: params.title ?? taskId,
+      description: params.description ?? "",
+      ...(params.expectedOutput ? { expectedOutput: params.expectedOutput } : {}),
+    }
+
+    // The dispatch node's output carries both the deliverable and its author —
+    // the author is what makes "send it back to whoever wrote it" possible.
+    const upstream = ctx.upstream[params.dispatchNodeId] as
+      { text?: string; teammateId?: string; teammateName?: string } | undefined
+    if (!upstream || typeof upstream.text !== "string") {
+      throw nonRetryable(
+        `action.team.task.review: no output from dispatch node "${params.dispatchNodeId}"`
+      )
+    }
+
+    let workerOutput = upstream.text
+    let workerId = upstream.teammateId
+    let workerName = upstream.teammateName
+    const maxRevisions = Math.max(0, params.maxRevisions ?? 0)
+    const history: Array<{ verdict: string; feedback: string }> = []
+    let previousFeedback: string | undefined
+
+    const fail = (reason: string): never => {
+      teamCtx.storeWriter.setTaskStatus(taskId, "failed", undefined, reason)
+      throw nonRetryable(`action.team.task.review: ${reason}`)
+    }
+
+    for (let revision = 0; revision <= maxRevisions; revision++) {
+      const workspace = teamCtx.workspaceLedger?.get(taskId)?.handle
+      const evidence = await buildReviewEvidence({
+        ...(workspace ? { workspace } : {}),
+        ...(teamCtx.workspaceAllocator
+          ? {
+              commitWorkspace: (h, message) => teamCtx.workspaceAllocator!.commit(h, message),
+              repoPath: teamCtx.workspaceAllocator.repo,
+            }
+          : {}),
+        ...(teamCtx.team.config?.workspaceIsolation?.baseRef
+          ? { baseRef: teamCtx.team.config.workspaceIsolation.baseRef }
+          : {}),
+        ...(teamCtx.team.config?.workingDir ? { workingDir: teamCtx.team.config.workingDir } : {}),
+        taskId,
+      })
+
+      // Record what was reviewed, so reconcile / the UI can point at the commit
+      // the verdict was actually about.
+      const ledgerEntry = teamCtx.workspaceLedger?.get(taskId)
+      if (ledgerEntry && evidence.commitSha) {
+        teamCtx.workspaceLedger!.set(taskId, {
+          ...ledgerEntry,
+          reviewedCommitSha: evidence.commitSha,
+        })
+      }
+
+      let verdict: { verdict: "approved" | "changes_requested"; feedback: string }
+      try {
+        verdict = await runLeadReview({
+          team: teamCtx.team,
+          lead,
+          task,
+          ...(workerName ? { workerName } : {}),
+          workerOutput,
+          evidence,
+          revision,
+          ...(previousFeedback ? { previousFeedback } : {}),
+          signal: ctx.signal,
+        })
+      } catch (err) {
+        // A reviewer/provider failure is not an approval.
+        return fail(
+          `the lead could not review this task (${err instanceof Error ? err.message : String(err)})`
+        )
+      }
+
+      history.push({ verdict: verdict.verdict, feedback: verdict.feedback })
+      teamCtx.storeWriter.addMessage({
+        teamId,
+        senderId: lead.id,
+        type: "direct",
+        ...(workerId ? { recipientId: workerId } : {}),
+        content: `[review] ${verdict.verdict === "approved" ? "Approved" : "Changes requested"}: ${verdict.feedback}`,
+        taskId,
+      })
+      teamCtx.storeWriter.addEvent?.({
+        type: verdict.verdict === "approved" ? "plan_approved" : "plan_rejected",
+        teamId,
+        teammateId: lead.id,
+        taskId,
+        data: { scope: "task-review", revision, feedback: verdict.feedback },
+        timestamp: new Date(),
+      })
+
+      if (verdict.verdict === "approved") {
+        // The human board gate composes with this one: an automated approval
+        // hands the card to a human when they asked for the last word,
+        // otherwise it completes it.
+        const requireHumanReview =
+          teamCtx.team?.config?.governancePolicy?.approval?.requireResultReview === true
+        teamCtx.storeWriter.setTaskStatus(
+          taskId,
+          requireHumanReview ? "review" : "completed",
+          workerOutput
+        )
+        return {
+          output: {
+            text: workerOutput,
+            verdict: "approved",
+            revisions: revision,
+            reviewedCommitSha: evidence.commitSha,
+            ...(workerId ? { teammateId: workerId } : {}),
+            ...(workerName ? { teammateName: workerName } : {}),
+          },
+        }
+      }
+
+      previousFeedback = verdict.feedback
+      if (revision === maxRevisions) break
+
+      if (!workerId) {
+        return fail("the original worker is unknown, so the lead's changes cannot be applied")
+      }
+      try {
+        const revised = await dispatchTeammate(teamCtx, {
+          taskId,
+          prompt: [
+            `Your work on "${task.title}" was reviewed and needs changes.`,
+            "",
+            "Reviewer feedback:",
+            verdict.feedback,
+            "",
+            "Revise your work in the same workspace and report what you changed.",
+          ].join("\n"),
+          signal: ctx.signal,
+          validateOutput: true,
+          recordToStore: true,
+          // Same author, same worktree: a revision addresses feedback on a diff
+          // this teammate wrote, so substituting anyone else is meaningless.
+          requireTeammateId: workerId,
+          workspaceKey: taskId,
+        })
+        workerOutput = revised.text
+        workerId = revised.teammateId
+        workerName = revised.teammateName
+      } catch (err) {
+        if (err instanceof UnavailableRequiredTeammateError) {
+          return fail(`the original worker is no longer available to revise this task`)
+        }
+        return fail(
+          `the revision dispatch failed (${err instanceof Error ? err.message : String(err)})`
+        )
+      }
+    }
+
+    return fail(
+      `the lead still requested changes after ${maxRevisions} revision(s): ${previousFeedback ?? "no feedback recorded"}`
+    )
+  },
+})
+
 // ── action.team.reconcile ─────────────────────────────────────────────────
 // Workspace-isolation reconcile for a fan-out group. Reads the per-run
 // TeamRunContext; when isolation is active, reconciles the agent branches

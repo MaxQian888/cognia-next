@@ -165,6 +165,98 @@ describe("buildAgentTeamRuntimeDeps", () => {
 // Per-task dispatch now lives in the action.team.task.dispatch workflow node
 // executor; its tests are in lib/workflow/nodes/built-ins.test.ts.
 
+describe("runLeadReview", () => {
+  const reviewArgs = (over: Record<string, unknown> = {}) => ({
+    team: makeTeam(),
+    lead: makeLead(),
+    task: { id: "t1", title: "Add validation", description: "Validate input" },
+    workerName: "Coder",
+    workerOutput: "I added validation",
+    evidence: { kind: "commit" as const, diff: "--- a.ts\n+b", truncated: false, files: ["a.ts"] },
+    revision: 0,
+    signal: new AbortController().signal,
+    ...over,
+  })
+
+  const verdictExecutor = (text: string) =>
+    jest.fn(async () => ({ text, channel: "text" as const, toolsAvailable: false }))
+
+  it("returns the lead's structured verdict", async () => {
+    const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"lgtm"}\n```')
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await expect(runLeadReview!(reviewArgs())).resolves.toEqual({
+      verdict: "approved",
+      feedback: "lgtm",
+    })
+  })
+
+  it("resolves the same provider planning does", async () => {
+    // A lead that planned on one provider and reviewed on another would be two
+    // different judgements wearing one name.
+    const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"ok"}\n```')
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await runLeadReview!(reviewArgs())
+
+    const opts = (executeAgent as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>
+    expect(opts.defaultProvider).toBe("anthropic")
+    expect(opts.model).toBe("claude-opus-4-8")
+  })
+
+  it("never gives the lead execution tools", async () => {
+    // The reviewer reviews; it is handed the diff rather than fetching it.
+    const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"ok"}\n```')
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await runLeadReview!(reviewArgs())
+
+    const opts = (executeAgent as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>
+    expect(opts.toolsEnabled).toBeUndefined()
+    expect(opts.tools).toBeUndefined()
+  })
+
+  it("carries the diff evidence into the prompt", async () => {
+    const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"ok"}\n```')
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await runLeadReview!(reviewArgs())
+
+    const prompt = (executeAgent as jest.Mock).mock.calls[0]?.[0] as string
+    expect(prompt).toContain("+b")
+    expect(prompt).toContain("I added validation")
+  })
+
+  it("throws on an unparseable verdict rather than reading it as approval", async () => {
+    const executeAgent = verdictExecutor("I think it looks fine, ship it!")
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await expect(runLeadReview!(reviewArgs())).rejects.toThrow(/not valid JSON/)
+  })
+
+  it("throws on a well-formed but invalid verdict", async () => {
+    const executeAgent = verdictExecutor('```json\n{"verdict":"probably","feedback":"eh"}\n```')
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await expect(runLeadReview!(reviewArgs())).rejects.toThrow(/usable verdict/)
+  })
+
+  it("brackets the review with its own lifecycle phase", async () => {
+    const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"ok"}\n```')
+    const seen: Array<Record<string, unknown>> = []
+    const firer = jest.fn(async (_event: string, _ctx: unknown, payload: unknown) => {
+      seen.push(payload as Record<string, unknown>)
+      return null
+    })
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, firer, readSettings })
+
+    await runLeadReview!(reviewArgs())
+
+    // Distinct from planning, so spend tracking can tell them apart.
+    expect(JSON.stringify(seen)).toContain("team-review")
+  })
+})
+
 describe("runLeadPlanning", () => {
   // After the PR 4 cutover (ADR-0022 §3.9) runLeadPlanning is silent — it
   // returns planText from executeAgent and rethrows on failure. Message

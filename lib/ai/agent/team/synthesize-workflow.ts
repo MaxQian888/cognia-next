@@ -13,6 +13,7 @@
  */
 
 import { nanoid } from "nanoid"
+import { isTaskReviewEnabled, resolveMaxRevisions, reviewNodeId } from "./task-review-policy"
 import type { AgentTeam, AgentTeamConfig, AgentTeamTask } from "@/types/agent/agent-team"
 import { DEFAULT_RETRY_POLICY } from "@/types/workflow/visual"
 import type {
@@ -154,15 +155,65 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
       }) as WorkflowNode
   )
 
+  // Blocking lead review (ADR-0071): one review node per task, gating its
+  // dispatch. Emitted here rather than by the executor so the *scheduler*
+  // enforces the gate — an unapproved task's dependents are simply not
+  // runnable, instead of relying on downstream nodes to check a flag.
+  const reviewEnabled = isTaskReviewEnabled(input.team.config)
+  if (reviewEnabled) {
+    const maxRevisions = resolveMaxRevisions(input.team.config)
+    for (const t of input.tasks) {
+      nodes.push({
+        id: reviewNodeId(t.id),
+        type: "action.team.task.review",
+        typeVersion: 1,
+        position: { x: 0, y: 0 },
+        data: {
+          label: t.title,
+          params: {
+            teamId: input.team.id,
+            taskId: t.id,
+            title: t.title,
+            description: t.description,
+            ...(t.expectedOutput ? { expectedOutput: t.expectedOutput } : {}),
+            // Where the executor reads the worker's output + author from
+            // `ctx.upstream`. The dispatch node's id IS the task id today, but
+            // naming it keeps the review node honest if that ever changes.
+            dispatchNodeId: t.id,
+            // Frozen at synthesis: the DAG was shaped by this budget, so a
+            // mid-run config edit must not change it under a running node.
+            maxRevisions,
+          },
+        },
+      } as WorkflowNode)
+    }
+  }
+
+  // An intra-workflow dep is satisfied by its task's review node when review is
+  // on, and by the task's dispatch node otherwise. This single indirection is
+  // what makes approval unlock downstream work.
+  const gateOf = (taskId: string): string => (reviewEnabled ? reviewNodeId(taskId) : taskId)
+
   const edges: WorkflowEdge[] = []
+  if (reviewEnabled) {
+    for (const t of input.tasks) {
+      edges.push({
+        id: `${t.id}->${reviewNodeId(t.id)}`,
+        source: t.id,
+        target: reviewNodeId(t.id),
+      } as WorkflowEdge)
+    }
+  }
   for (const t of input.tasks) {
     for (const dep of t.dependencies) {
       // Only intra-workflow deps become scheduling edges; external (satisfied)
-      // deps stay as params-only blackboard reads.
+      // deps stay as params-only blackboard reads. A dep satisfied outside this
+      // workflow was already reviewed in the wave that ran it, so it gets no
+      // review node here — hence gateOf is only consulted for intra deps.
       if (!isIntra(dep)) continue
       edges.push({
-        id: `${dep}->${t.id}`,
-        source: dep,
+        id: `${gateOf(dep)}->${t.id}`,
+        source: gateOf(dep),
         target: t.id,
       } as WorkflowEdge)
     }
@@ -197,6 +248,9 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
   }
 
   const nodeIdToTaskId = new Map<string, string>(input.tasks.map((t) => [t.id, t.id]))
+  if (reviewEnabled) {
+    for (const t of input.tasks) nodeIdToTaskId.set(reviewNodeId(t.id), t.id)
+  }
 
   return { workflow, nodeIdToTaskId }
 }

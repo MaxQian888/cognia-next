@@ -395,6 +395,31 @@ export interface AgentTeamConfig {
    * note that this also lets a *headless* risky run proceed unattended.
    */
   riskGating?: boolean
+  /**
+   * Blocking lead review of every task's work before dependents may start
+   * (ADR-0071). When `enabled`, the synthesizer emits an
+   * `action.team.task.review` node after each task's dispatch and repoints that
+   * task's dependents at the review node, so an unapproved task blocks
+   * downstream work instead of being caught after the fact.
+   *
+   * The configured lead judges the worker's output plus a deterministic diff of
+   * what it actually changed, and returns `approved` / `changes_requested`. A
+   * `changes_requested` verdict re-dispatches the SAME worker in the SAME
+   * worktree with the lead's feedback, then reviews again — up to
+   * `maxRevisions` times (default 2). Exhausting the budget, losing the
+   * original worker, or a reviewer/provider failure fails the task and the run:
+   * the point of a blocking gate is that unreviewed work never lands.
+   *
+   * Default OFF — a run with no reviewer configured behaves exactly as before.
+   * Distinct from `governancePolicy.approval.requireResultReview`, which is a
+   * HUMAN board gate; the two compose (automated approval then hands the card
+   * to a human instead of completing it).
+   */
+  taskReview?: {
+    enabled?: boolean
+    /** Worker revision attempts after a `changes_requested`. Default 2. */
+    maxRevisions?: number
+  }
   /** Auto-shutdown teammates when all tasks complete */
   autoShutdown?: boolean
   /** Token budget for the entire team */

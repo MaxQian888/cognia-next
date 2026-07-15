@@ -34,6 +34,7 @@ import type {
   TeamGovernancePolicy,
 } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { DEFAULT_TASK_REVIEW_MAX_REVISIONS } from "@/lib/ai/agent/team/task-review-policy"
 import { markSettingsSaved } from "./settings-save-indicator"
 import { ConfirmActionDialog } from "./confirm-action-dialog"
 
@@ -157,6 +158,46 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
           />
         </div>
         <p className="text-[11px] text-muted-foreground">{t("approval.requireResultReviewHint")}</p>
+
+        {/* Blocking lead review (ADR-0071). Sits under Approval because it is
+            the automated sibling of requireResultReview — the two compose. */}
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("approval.taskReview")}</Label>
+          <Switch
+            data-testid="task-review-toggle"
+            checked={team.config.taskReview?.enabled === true}
+            onCheckedChange={(v) =>
+              patchConfig({ taskReview: { ...team.config.taskReview, enabled: v } })
+            }
+          />
+        </div>
+        <p className="text-[11px] text-muted-foreground">{t("approval.taskReviewHint")}</p>
+        {team.config.taskReview?.enabled === true && (
+          <div className="flex items-center justify-between gap-2">
+            <Label className="text-xs">{t("approval.taskReviewMaxRevisions")}</Label>
+            <Input
+              type="number"
+              min={0}
+              max={5}
+              className="h-7 w-20 text-xs"
+              data-testid="task-review-max-revisions"
+              defaultValue={
+                team.config.taskReview?.maxRevisions ?? DEFAULT_TASK_REVIEW_MAX_REVISIONS
+              }
+              onBlur={(e) => {
+                const parsed = Number.parseInt(e.target.value, 10)
+                patchConfig({
+                  taskReview: {
+                    ...team.config.taskReview,
+                    maxRevisions: Number.isFinite(parsed)
+                      ? Math.max(0, Math.min(5, parsed))
+                      : DEFAULT_TASK_REVIEW_MAX_REVISIONS,
+                  },
+                })
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Budget */}
