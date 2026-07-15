@@ -77,6 +77,28 @@ describe("createWorkflow", () => {
     expect(wf.createdAt).toBe(wf.updatedAt)
   })
 
+  // ── ADR-0070 Phase 3 — migration stamp ─────────────────────────────────
+  it("stamps riskGating on new workflows", async () => {
+    const wf = await createWorkflow({ name: "X" })
+    expect(wf.settings.riskGating).toBe(true)
+  })
+
+  it("stamps riskGating even when the caller supplies its own settings", async () => {
+    // The stamp merges over draft.settings rather than living in the defaults,
+    // so a seeded/templated workflow is gated too.
+    const wf = await createWorkflow({
+      name: "X",
+      settings: {
+        errorPolicy: "continue",
+        timeoutMs: 1000,
+        concurrency: 5,
+        retryDefaults: { attempts: 1, backoff: "fixed", baseMs: 500 },
+      },
+    })
+    expect(wf.settings.riskGating).toBe(true)
+    expect(wf.settings.errorPolicy).toBe("continue")
+  })
+
   it("falls back to 'Untitled workflow' on empty name", async () => {
     const wf = await createWorkflow({ name: "   " })
     expect(wf.name).toBe("Untitled workflow")

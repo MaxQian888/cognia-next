@@ -8,8 +8,9 @@
  *      from)
  *   ② binary resolution + trust: `requires` binaries resolve through
  *      `detect_binary` to an absolute path with a minVersion gate;
- *      `plugin-dir` binaries pass the fingerprint trust policy (untrusted →
- *      one-time consent prompt)
+ *      `plugin-dir` binaries pass the `approvedBinaries` policy (no
+ *      hash-matching user approval → consent prompt, which is also where
+ *      the user can opt into a durable, hash-pinned approval)
  *   ③ injection-proof argv substitution (`buildArgv`) — params land as
  *      discrete argv elements, never through a shell
  *   ④ cwd policy resolution (workspace-bounded for `param` cwds)
@@ -25,6 +26,8 @@
 import type { PluginBinaryRequirement, PluginCliToolDef, PluginPermission } from "@/types/plugin"
 import type { AutomationAuditLogRow } from "@/lib/db/schema"
 import type { BinaryDetectionResult } from "@/lib/cli-bridge/detect-cli"
+import type { BinaryConsentOutcome } from "@/lib/plugin/security/binary-consent"
+import { toBinaryConsentOutcome } from "@/lib/plugin/security/binary-consent"
 import type { CliBinaryEvaluation } from "./cli-binary-policy"
 import { buildArgv, parseOutput, resolveCwd, CliTemplateError } from "./template"
 
@@ -68,19 +71,29 @@ export interface ExecuteCliToolContext {
   pluginPath: string
   /** Manifest `requires.binaries` declarations. */
   requiresBinaries: PluginBinaryRequirement[]
-  /** `manifest.author.publicKey` fingerprint, if any. */
-  publisherFingerprint?: string
 }
 
 export interface CliToolDeps {
   checkPermission: (pluginId: string, reason: string) => Promise<boolean>
-  requestBinaryConsent: (pluginId: string, reason: string) => Promise<boolean>
+  /**
+   * Prompt the user to approve one plugin-shipped binary.
+   *
+   * Returns `{ granted, remember }` so the user's durability choice survives
+   * the call; a bare `boolean` is still accepted and reads as "granted,
+   * session-scoped" (see `toBinaryConsentOutcome`). The default implementation
+   * routes through `confirmBinarySpawn`, which is what persists the ledger row
+   * when — and only when — `remember` is true.
+   */
+  requestBinaryConsent: (
+    pluginId: string,
+    reason: string,
+    binary: { path: string; relPath: string }
+  ) => Promise<boolean | BinaryConsentOutcome>
   detect: (name: string, versionArg?: string) => Promise<BinaryDetectionResult>
   satisfiesMin: (version: string | null, minVersion?: string) => boolean
   evaluatePluginDirBinary: (input: {
     pluginId: string
     binaryPath: string
-    publisherFingerprint?: string
     pluginPath: string
   }) => Promise<CliBinaryEvaluation>
   invokeExec: (request: Record<string, unknown>) => Promise<CliExecWireResult>
@@ -100,6 +113,7 @@ async function defaultDeps(): Promise<CliToolDeps> {
   const [
     { getPermissionGuard },
     { getPluginConsentBroker },
+    { confirmBinarySpawn },
     { detectCli, satisfiesMinVersion },
     { evaluateCliBinary },
     { invoke },
@@ -107,6 +121,7 @@ async function defaultDeps(): Promise<CliToolDeps> {
   ] = await Promise.all([
     import("@/lib/plugin/security/permission-guard"),
     import("@/lib/plugin/security/consent-broker"),
+    import("@/lib/plugin/security/binary-consent"),
     import("@/lib/cli-bridge/detect-cli"),
     import("./cli-binary-policy"),
     import("@tauri-apps/api/core"),
@@ -118,8 +133,14 @@ async function defaultDeps(): Promise<CliToolDeps> {
         reason,
         context: "executeCliTool",
       }),
-    requestBinaryConsent: (pluginId, reason) =>
-      getPluginConsentBroker().request({ pluginId, permission: CLI_EXECUTE, reason }),
+    requestBinaryConsent: (pluginId, reason, binary) =>
+      confirmBinarySpawn({
+        pluginId,
+        permission: CLI_EXECUTE,
+        binaryPath: binary.path,
+        relPath: binary.relPath,
+        reason,
+      }),
     detect: detectCli,
     satisfiesMin: satisfiesMinVersion,
     evaluatePluginDirBinary: evaluateCliBinary,
@@ -198,18 +219,25 @@ async function resolveBinary(
   const decision = await deps.evaluatePluginDirBinary({
     pluginId,
     binaryPath,
-    publisherFingerprint: ctx.publisherFingerprint,
     pluginPath: ctx.pluginPath,
   })
   if (decision.allowed) {
     return binaryPath
   }
   if (decision.requiresPrompt) {
-    const granted = await deps.requestBinaryConsent(
-      pluginId,
-      `Run plugin binary ${binary.relPath}: ${decision.reason}`
+    // The prompt owns the durability decision (and the ledger write it implies)
+    // — this path only needs to know whether to spawn.
+    const outcome = toBinaryConsentOutcome(
+      await deps.requestBinaryConsent(
+        pluginId,
+        `Run plugin binary ${binary.relPath}: ${decision.reason}`,
+        {
+          path: binaryPath,
+          relPath: binary.relPath,
+        }
+      )
     )
-    if (granted) {
+    if (outcome.granted) {
       return binaryPath
     }
   }

@@ -30,6 +30,8 @@ import {
   listLiveSubagents,
 } from "./subagent-live-output"
 
+let testHome = ""
+
 // For the end-to-end test below: mock the live-sidecar collaborators so a call
 // routed through the REAL handle → REAL handleCliDispatchAgent → REAL
 // runCliSubagent exercises the full path without a sidecar. Tests that inject
@@ -64,7 +66,7 @@ function makeCtx(overrides: Partial<CliSubagentDispatchContext> = {}): CliSubage
       builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
       cwd: "/work",
     },
-    home: "/home/.cognia",
+    home: testHome,
     cwd: "/work",
     gate: createPermissionGate({ yes: true }),
     mcpServers: [],
@@ -82,11 +84,19 @@ function req(
   return { type: "plugin_tool_exec", sessionId: "s1", toolUseId: "t1", name, args }
 }
 
+beforeEach(() => {
+  testHome = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-dispatch-"))
+})
+
 afterEach(async () => {
-  clearCliSubagentContext("s1")
-  await __disposeCliBackgroundJournalForTesting()
-  __clearAllCliBackgroundRunsForTesting()
-  __clearLiveSubagentsForTesting()
+  try {
+    clearCliSubagentContext("s1")
+    await __disposeCliBackgroundJournalForTesting()
+    __clearAllCliBackgroundRunsForTesting()
+    __clearLiveSubagentsForTesting()
+  } finally {
+    fs.rmSync(testHome, { recursive: true, force: true })
+  }
 })
 
 describe("buildCliSubagentToolManifest", () => {

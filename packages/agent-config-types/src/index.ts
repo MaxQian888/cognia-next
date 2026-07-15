@@ -209,6 +209,21 @@ export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
 }
 
 export interface SendOptions {
+  /**
+   * Per-send turn id, stamped by `runAndCaptureAssistantReply` — an envelope
+   * field rather than a real SDK option (it rides in `options` only because
+   * Rust's `SendOptions.extra` flatten forwards unknown keys verbatim, and the
+   * sidecar's dispatchers pick SDK options field-by-field, so it never reaches
+   * the SDK).
+   *
+   * The sidecar echoes it back on every session-scoped event, bound to the loop
+   * that was live when the turn started. That lets a capture discard events
+   * belonging to a PREVIOUS turn of the same session: after a turn times out,
+   * its best-effort `interruptSession` produces a late `session_ended` which the
+   * NEXT turn's capture would otherwise consume (sessionId alone can't tell them
+   * apart) and report as a spurious "ended with no assistant text".
+   */
+  turnId?: string
   cwd?: string
   model?: string
   fallbackModel?: string

@@ -134,7 +134,6 @@ describe("lsp-registry", () => {
         ownerId: "publisher.eslint",
         config: makeServer(),
         pluginPath: "/plugins/publisher.eslint",
-        publisherFingerprint: "fp-abc",
       })
 
       expect(record.state).toBe("running")
@@ -149,11 +148,16 @@ describe("lsp-registry", () => {
       const policyArg = evaluateLspBinaryMock.mock.calls[0][0] as {
         binaryPath: string
         pluginPath: string
-        publisherFingerprint?: string
       }
       // The relative `command` resolved against the plugin install path.
       expect(policyArg.binaryPath).toBe("/plugins/publisher.eslint/node_modules/.bin/eslint-server")
-      expect(policyArg.publisherFingerprint).toBe("fp-abc")
+      // v109: the registry hands the policy only facts it can verify itself —
+      // never a publisher identity the plugin asserted about itself.
+      expect(policyArg).toEqual({
+        pluginId: "publisher.eslint",
+        binaryPath: "/plugins/publisher.eslint/node_modules/.bin/eslint-server",
+        pluginPath: "/plugins/publisher.eslint",
+      })
     })
 
     it("absolute command paths are passed through to the policy unchanged", async () => {
@@ -428,7 +432,6 @@ describe("lsp-registry", () => {
       const records = await registerPluginLspServers({
         pluginId: "pub.lsp",
         pluginPath: "/p",
-        publisherFingerprint: "fp",
         servers: [
           makeServer({ id: "ts" }),
           makeServer({ id: "py", languages: ["python"], command: "pylsp" }),
@@ -444,9 +447,8 @@ describe("lsp-registry", () => {
       let calls = 0
       client.start = async (input) => {
         calls += 1
-        if (input.serverId === "ts")
-          throw new Error("boom")
-          // The fake otherwise just records.
+        if (input.serverId === "ts") throw new Error("boom")
+        // The fake otherwise just records.
         ;(client as { started: typeof client.started }).started.push({
           ownerId: input.ownerId,
           serverId: input.serverId,

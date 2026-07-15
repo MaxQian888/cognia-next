@@ -51,6 +51,7 @@ import {
   manageConnectorsAction,
   manageMcpServerAction,
   newAgentTeamAction,
+  newChatAction,
   newCharacterAction,
   newWorkflowAction,
   pluginDevtoolsAction,
@@ -334,10 +335,11 @@ export function TitleBar() {
 
   // ---- File menu actions --------------------------------------------------
 
+  // Delegates so this File menu and the native menu bar (which fires
+  // `menu://new-chat` → `newChatAction`) cannot drift apart.
   const handleNewChat = () => {
     log.info("title-bar menu new-chat")
-    useChatStore.getState().clear()
-    setSelectedGuild({ kind: "dm" })
+    newChatAction()
   }
   const handleOpenWorkspace = async () => {
     log.info("title-bar menu open-workspace")

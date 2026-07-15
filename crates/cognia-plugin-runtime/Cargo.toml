@@ -20,6 +20,9 @@ path = "src/lib.rs"
 
 [dependencies]
 cognia-core = { path = "../cognia-core" }
+# Proxy-aware outbound config + the shared streaming/hashing downloader the
+# Open VSX `.vsix` fetch uses.
+cognia-net = { path = "../cognia-net" }
 cognia-secrets = { path = "../cognia-secrets" }
 cognia-automation = { path = "../cognia-automation" }
 cognia-terminal = { path = "../cognia-terminal" }

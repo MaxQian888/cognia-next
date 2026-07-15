@@ -7,10 +7,11 @@
 //!
 //! Module layout mirrors `src-tauri/src/plugin_api/wasm/`:
 //!
-//! - [`host`]         — sidecar lifecycle (spawn / kill / health).
-//! - [`installer`]    — `.vsix` extraction + checksum.
-//! - [`commands`]     — `tauri::generate_handler!` entry points.
-//! - [`capabilities`] — per-extension file path / process / network gates.
+//! - [`host`]              — sidecar lifecycle (spawn / kill / health).
+//! - [`installer`]         — `.vsix` extraction + checksum.
+//! - [`openvsx_download`]  — Open VSX `.vsix` fetch + SHA-256 verification.
+//! - [`commands`]          — `tauri::generate_handler!` entry points.
+//! - [`capabilities`]      — per-extension file path / process / network gates.
 //!
 //! `ExtensionRuntime` is published by the Tauri state but not yet read
 //! back — the renderer queries runtime telemetry through the Dexie
@@ -22,6 +23,7 @@ pub mod capabilities;
 pub mod commands;
 pub mod host;
 pub mod installer;
+pub mod openvsx_download;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

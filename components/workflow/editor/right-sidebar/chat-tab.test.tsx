@@ -10,10 +10,21 @@ import { NextIntlClientProvider } from "next-intl"
 // session it is bound to (`activeSession.id`) and to expose the `onCreate`
 // callback as a clickable button.
 jest.mock("@/components/chat/chat-view", () => ({
-  ChatPane: (props: { activeSession: { id: string } | null; onCreate: () => void }) => (
+  ChatPane: (props: {
+    activeSession: { id: string } | null
+    onCreate: () => void
+    onUseSample: (text: string) => void
+  }) => (
     <div data-testid="chatpane" data-session-id={props.activeSession?.id ?? "none"}>
       <button type="button" data-testid="chatpane-create" onClick={() => props.onCreate()}>
         create
+      </button>
+      <button
+        type="button"
+        data-testid="chatpane-use-sample"
+        onClick={() => props.onUseSample("add a webhook trigger")}
+      >
+        use sample
       </button>
     </div>
   ),
@@ -26,9 +37,10 @@ jest.mock("@/components/workflow/editor/chat/session-bar", () => ({
   ),
 }))
 
+const claudeSend = jest.fn(async () => undefined)
 jest.mock("@/hooks/chat/use-claude-chat", () => ({
   useClaudeChat: () => ({
-    send: jest.fn(async () => undefined),
+    send: claudeSend,
     stop: jest.fn(async () => undefined),
     regenerate: jest.fn(async () => undefined),
     editAndResend: jest.fn(async () => undefined),
@@ -175,6 +187,16 @@ describe("WorkflowEditorChatTab session wiring", () => {
       expect(useChatStore.getState().sessions["workflow:wf_a"]?.messages).toEqual([{ id: "m1" }])
     )
     expect(mListMessages).toHaveBeenCalledWith("workflow:wf_a")
+  })
+
+  // A starter card must reach `claude.send` as a `SendContent` (string | blocks).
+  // Passing a bare `{type,text}` object threw inside the mention-expansion
+  // `.map` and the throw was swallowed into an opaque toast — nothing was sent.
+  it("sends a starter prompt as SendContent when ChatPane's onUseSample fires", async () => {
+    const user = userEvent.setup()
+    harness()
+    await user.click(screen.getByTestId("chatpane-use-sample"))
+    await waitFor(() => expect(claudeSend).toHaveBeenCalledWith("add a webhook trigger"))
   })
 
   it("creates a new workflow session when ChatPane's onCreate fires", async () => {

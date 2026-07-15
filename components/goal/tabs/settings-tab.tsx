@@ -48,6 +48,7 @@ export function GoalSettingsTab({ goal }: Props) {
     (draft.maxPromiseDenials ?? 3) !== (goal.config.maxPromiseDenials ?? 3) ||
     (draft.adaptivePacing ?? false) !== (goal.config.adaptivePacing ?? false) ||
     (draft.requireAcceptance ?? false) !== (goal.config.requireAcceptance ?? false) ||
+    (draft.riskGating ?? true) !== (goal.config.riskGating ?? true) ||
     (draft.maxBudgetUsd ?? 0) !== (goal.config.maxBudgetUsd ?? 0)
 
   async function handleSave() {
@@ -64,6 +65,8 @@ export function GoalSettingsTab({ goal }: Props) {
         maxPromiseDenials: Math.max(1, draft.maxPromiseDenials ?? 3),
         adaptivePacing: draft.adaptivePacing || undefined,
         requireAcceptance: draft.requireAcceptance || undefined,
+        // Default is ON, so only an explicit opt-out is worth persisting.
+        riskGating: draft.riskGating === false ? false : undefined,
         maxBudgetUsd: draft.maxBudgetUsd && draft.maxBudgetUsd > 0 ? draft.maxBudgetUsd : undefined,
       })
     } finally {
@@ -195,6 +198,17 @@ export function GoalSettingsTab({ goal }: Props) {
             onCheckedChange={(checked) => setDraft({ ...draft, requireAcceptance: checked })}
             aria-label={t("config.requireAcceptance")}
             data-testid="goal-config-require-acceptance"
+          />
+        </div>
+      </Field>
+      <Field label={t("config.riskGating")} hint={t("config.riskGatingHint")}>
+        <div className="pt-1">
+          <Switch
+            checked={draft.riskGating ?? true}
+            disabled={disabled}
+            onCheckedChange={(checked) => setDraft({ ...draft, riskGating: checked })}
+            aria-label={t("config.riskGating")}
+            data-testid="goal-config-risk-gating"
           />
         </div>
       </Field>

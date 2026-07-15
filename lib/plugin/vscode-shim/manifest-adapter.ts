@@ -28,6 +28,8 @@ import type {
 } from "@/types/plugin/plugin-vscode"
 import type { ActivationEventDeclaration } from "@/lib/plugin/contracts/plugin-points"
 import type { VsixInstallResult } from "./vsix-installer"
+import { canonicalExtensionId } from "./extension-id"
+import { evaluateEngineCompat } from "./engine-compat"
 
 export interface AdaptVscodeManifestInput {
   /** Output of `installVsix`. */
@@ -36,6 +38,14 @@ export interface AdaptVscodeManifestInput {
   inference: VsCodePermissionInference
   /** Install source. Use `"vsix-upload"` for drag-drop, `"openvsx"` for registry. */
   source: VsCodeExtensionBlock["source"]
+  /**
+   * The Open VSX `targetPlatform` this build was resolved for. Supplied by the
+   * marketplace path (which is the only caller that knows it — the platform is
+   * a registry fact, absent from the archive's own `package.json`); omitted for
+   * `.vsix` uploads. Recorded so the update check re-queries the platform that
+   * was actually installed.
+   */
+  targetPlatform?: string
 }
 
 /**
@@ -46,7 +56,7 @@ export interface AdaptVscodeManifestInput {
  * warnings the adapter emitted during translation.
  */
 export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExtensionAdapterResult {
-  const { vsix, inference, source } = input
+  const { vsix, inference, source, targetPlatform } = input
   const { pkgJson } = vsix
   const warnings: string[] = []
 
@@ -92,6 +102,29 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
   // permission upgrades on first sensitive `require()` call.
   const permissions: PluginPermission[] = [...new Set(inference.permissions)]
 
+  // ── Engine / API compatibility (advisory) ─────────────────────────────
+  // Evaluated here so the outcome rides the manifest all the way to the
+  // extension card — a warning that only lived in the install dialog would
+  // disappear at the moment it becomes most relevant (the extension is now
+  // installed and misbehaving). Reported, never enforced: `blocked` is
+  // typed `false`, and nothing below reads it.
+  const engineCompat = evaluateEngineCompat({
+    engineVscode: pkgJson.engines?.vscode,
+    inference,
+  })
+  for (const warning of engineCompat.warnings) {
+    if (warning.kind === "unsupported-api") {
+      warnings.push(
+        `This extension uses APIs cognia doesn't implement (${warning.namespaces.join(", ")}) — it may not work.`
+      )
+    } else if (warning.kind === "engine-mismatch") {
+      warnings.push(
+        `Extension requires VS Code ${warning.required}; cognia's shim reports ${warning.shimVersion}. ` +
+          `Not a blocker — the range says nothing about which APIs are used.`
+      )
+    }
+  }
+
   // ── vscodeExtension block ─────────────────────────────────────────────
   const vscodeExtensionBlock: VsCodeExtensionBlock = {
     identifier: id,
@@ -101,6 +134,13 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
     source,
     bundleFormat: vsix.bundleFormat ?? "cjs",
     activationEvents: rawActivation as VsCodeActivationEvent[],
+    // Both spread-conditionally: an absent key is "not applicable" (a `.vsix`
+    // upload has no registry platform), whereas `[]` would assert "we looked
+    // and found none" — a claim the minified path cannot support.
+    ...(targetPlatform !== undefined ? { targetPlatform } : {}),
+    ...(engineCompat.unsupportedApis.length > 0
+      ? { unsupportedApis: engineCompat.unsupportedApis }
+      : {}),
   }
 
   // ── Themes contributed via VS Code ────────────────────────────────────
@@ -207,8 +247,15 @@ export function adaptVscodeManifest(input: AdaptVscodeManifestInput): VsCodeExte
  * Dexie namespacing or filesystem paths.
  */
 function canonicalId(pkgJson: VsCodeManifest): string {
-  const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]/g, "-")
-  return `${safe(pkgJson.publisher)}.${safe(pkgJson.name)}`
+  // Delegates to the shared rule so this stays in lockstep with
+  // `sanitize_plugin_id_strict` on the Rust side — the id is both a Dexie key
+  // and a directory name, and a drift between the two means the row and the
+  // directory stop describing the same extension.
+  //
+  // The previous rule here rewrote hostile characters to `-` but preserved
+  // `.`, so `publisher: ""` + `name: "."` composed into `".."` — a traversing
+  // path component. `canonicalExtensionId` rejects instead of rewriting.
+  return canonicalExtensionId(pkgJson.publisher, pkgJson.name)
 }
 
 function resolveRepositoryUrl(repo: VsCodeManifest["repository"]): string | undefined {

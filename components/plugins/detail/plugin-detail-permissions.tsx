@@ -19,6 +19,7 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { AuditLogEntry } from "../audit-log-entry"
+import { PluginApprovedBinariesCard } from "./plugin-approved-binaries-card"
 import { PluginFrontendTrustCard } from "./plugin-frontend-trust-card"
 import type { PluginManifest, PluginPermission, PluginSource, PluginType } from "@/types/plugin"
 
@@ -121,6 +122,8 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
           </Table>
         </div>
       </Card>
+
+      <PluginApprovedBinariesCard pluginId={pluginId} />
 
       <div className="space-y-1">
         <h3 className="text-xs font-semibold">{t("auditLogTitle")}</h3>

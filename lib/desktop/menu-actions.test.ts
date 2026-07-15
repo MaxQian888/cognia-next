@@ -34,9 +34,14 @@ jest.mock("@tauri-apps/api/window", () => ({
   }),
 }))
 
-const chatClear = jest.fn()
-jest.mock("@/stores/chat/chat-store", () => ({
-  useChatStore: { getState: () => ({ clear: chatClear }) },
+const startNewSessionMock = jest.fn().mockResolvedValue({ id: "s-new" })
+jest.mock("@/lib/chat/start-session", () => ({
+  startNewSession: (...args: unknown[]) => startNewSessionMock(...args),
+}))
+
+const isMainAppWindowMock = jest.fn(() => true)
+jest.mock("@/lib/pet/window-role", () => ({
+  isMainAppWindow: () => isMainAppWindowMock(),
 }))
 
 const setSelectedGuild = jest.fn()
@@ -137,7 +142,8 @@ beforeEach(() => {
   winClose.mockClear().mockResolvedValue(undefined)
   winIsFullscreen.mockClear().mockResolvedValue(false)
   winSetFullscreen.mockClear().mockResolvedValue(undefined)
-  chatClear.mockClear()
+  startNewSessionMock.mockClear()
+  isMainAppWindowMock.mockClear().mockReturnValue(true)
   setSelectedGuild.mockClear()
   toggleSidebar.mockClear()
   toggleGuildRail.mockClear()
@@ -167,10 +173,20 @@ test("GO_ROUTES covers every non-DM/Canvas go-* id", () => {
   }
 })
 
-test("newChatAction clears chat and resets guild", () => {
+// Rust broadcasts menu:// / tray:// to every window, and the pet overlay /
+// popup / island load the same root layout. Creating a session is not
+// idempotent, so a secondary window acting on it would double-create.
+test("newChatAction is a no-op outside the main window", () => {
+  isMainAppWindowMock.mockReturnValue(false)
   newChatAction()
-  expect(chatClear).toHaveBeenCalled()
+  expect(startNewSessionMock).not.toHaveBeenCalled()
+  expect(setSelectedGuild).not.toHaveBeenCalled()
+})
+
+test("newChatAction starts a conversation and resets guild", () => {
+  newChatAction()
   expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+  expect(startNewSessionMock).toHaveBeenCalled()
 })
 
 test("newWorkflowAction requests workflow creation and routes to /workflows", () => {

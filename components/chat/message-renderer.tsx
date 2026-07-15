@@ -49,7 +49,12 @@ import {
 } from "@/components/chat/message-parts/tool-activity-group"
 import { MotionReveal } from "@/components/chat/motion/motion-reveal"
 import { useAgentFlowMode } from "@/hooks/chat/use-agent-flow-mode"
-import { groupAgentParts, isToolPartType } from "@/lib/chat/agent-flow-grouping"
+import {
+  groupAgentParts,
+  isToolOnlyFlow,
+  isToolPartType,
+  SILENT_CONTROL_PART_TYPES,
+} from "@/lib/chat/agent-flow-grouping"
 import { parseTodoInput } from "@/lib/chat/todos"
 import type { AgentFlowMode } from "@/types/appearance"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
@@ -218,6 +223,15 @@ function MessageRendererInner({
   // Plain text of the message, for the "share as card" action + gate.
   const messageText = useMemo(() => extractText(message), [message])
 
+  // A turn that is nothing but tool calls has no prose to copy, quote, read
+  // aloud or card, so it renders no action bar. The bar is `opacity-0` until
+  // hover but still reserves a ~40px row (icon buttons) plus a `gap-2`, which
+  // is what put a strip of chrome between every pair of consecutive tool calls.
+  const isToolOnlyTurn = useMemo(
+    () => message.role === "assistant" && isToolOnlyFlow(message.parts),
+    [message.role, message.parts]
+  )
+
   // Mention highlighting pattern over known character names. Honor longest
   // match first so e.g. `@Alice Smith` wins over `@Alice`.
   const mentionPattern = useMemo(() => {
@@ -341,7 +355,12 @@ function MessageRendererInner({
             </div>
           </div>
         ) : (
-          <MessageContent>
+          // `MessageContent` is `w-fit` so a user bubble hugs its text. For the
+          // assistant that makes the column width follow the widest mounted
+          // child — collapsing a tool card unmounts its body and the whole
+          // column snaps narrow. Pin the assistant side to the full row so
+          // expand/collapse never moves the width.
+          <MessageContent className="group-[.is-assistant]:w-full">
             {(() => {
               const inboundA2UI = (
                 message as {
@@ -445,7 +464,7 @@ function MessageRendererInner({
             nothing when no plugin contributed items. */}
         <div
           className={cn(
-            "opacity-0 transition-opacity group-hover:opacity-100",
+            "opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
             message.role === "user" ? "ml-auto" : ""
           )}
         >
@@ -460,7 +479,7 @@ function MessageRendererInner({
           />
         </div>
 
-        {!editing && (
+        {!editing && !isToolOnlyTurn && (
           <MessageActions
             className={cn(
               "text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100",
@@ -807,9 +826,6 @@ function renderToolPart(
   )
 }
 
-/** AI SDK structural/control part types that intentionally render nothing. */
-const SILENT_CONTROL_PART_TYPES = new Set(["step-start", "step-finish"])
-
 function renderPart(
   part: UIMessage["parts"][number],
   key: string,
@@ -872,6 +888,10 @@ function renderPart(
 
   if (type === "text") {
     const text = (part as { text?: string }).text ?? ""
+    // An empty text part carries no prose — the model emitted none between two
+    // tool calls. Rendering it would add a zero-height box that still eats a
+    // `gap-2` from `MessageContent`'s flex column.
+    if (!text.trim()) return null
     if (mentionPattern && characterById) {
       const segments = highlightMentions(text, mentionPattern, characterById)
       return (

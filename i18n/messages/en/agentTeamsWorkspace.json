@@ -617,6 +617,7 @@
       "title": "PR feedback loop"
     },
     "requirePlanApproval": "Require plan approval",
+    "riskGating": "Risk-based plan approval",
     "save": "Save",
     "saveIndicator": {
       "auditCompleted": "Audit complete · {count} stale id(s)",

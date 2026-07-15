@@ -711,7 +711,9 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       await result.current.send("hi")
     })
-    expect(chatState.setError).toHaveBeenCalledWith("No session selected")
+    expect(chatState.setError).toHaveBeenCalledWith(
+      "No conversation is open. Start a new one to send this."
+    )
   })
 
   it("send() applies pending command overrides", async () => {

@@ -6,8 +6,13 @@
     "reject": "Reject"
   },
   "ariaLabel": "Plugin consent dialog",
+  "binary": {
+    "rememberHint": "Skips this prompt for these exact bytes only. The approval is pinned to the file's SHA-256, so any change to the binary — an update, a rebuild, or tampering — asks you again. It does not trust the plugin's publisher, and it covers no other binary. Revoke it any time under the plugin's Permissions tab.",
+    "rememberLabel": "Remember this binary"
+  },
   "fields": {
     "autoReject": "Auto-reject in {seconds}s",
+    "binary": "Binary:",
     "defaultReason": "No reason supplied.",
     "morePending": "{count} more pending",
     "permission": "Permission:",

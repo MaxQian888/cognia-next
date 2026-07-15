@@ -2,12 +2,12 @@
 
 // "Share as card" dialog: turns a single chat message into a styled quote card,
 // previews it live, and offers the two quick-share paths — download as PNG
-// (html2canvas) and publish through the zero-knowledge ShareLinkDialog
+// (html2canvas-pro) and publish through the zero-knowledge ShareLinkDialog
 // (`chat-quote` kind). Mirrors UsageShareDialog.
 
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import html2canvas from "html2canvas"
+import html2canvas from "html2canvas-pro"
 import { ImageDownIcon, Link2Icon, MessageSquareQuoteIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"

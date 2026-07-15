@@ -41,6 +41,12 @@
       "targetLabel": "WCAG contrast target"
     }
   },
+  "accent": {
+    "label": "Accent color",
+    "description": "Retint buttons and highlights without editing the full theme.",
+    "usingTheme": "Using theme accent",
+    "reset": "Reset"
+  },
   "advanced": {
     "description": "Inject your own CSS into the app. Remote @import / url(http) statements are stripped on save. Use carefully — bad CSS can hide UI elements.",
     "enabledLabel": "Enable custom CSS",
@@ -107,12 +113,6 @@
       "sunset": "Sunrise & sunset",
       "system": "Follow system"
     }
-  },
-  "accent": {
-    "label": "Accent color",
-    "description": "Retint buttons and highlights without editing the full theme.",
-    "usingTheme": "Using theme accent",
-    "reset": "Reset"
   },
   "colorPresetLabel": "Color preset",
   "colorPresets": {
@@ -233,7 +233,6 @@
     "namePlaceholder": "Theme name",
     "newButton": "New theme",
     "noSaved": "No custom themes yet.",
-    "previewLabel": "Live preview",
     "rail": {
       "activeBadgeAria": "Active theme",
       "copySuffix": "{name} (copy)",
@@ -348,6 +347,65 @@
       "sectionLabel": "Usage display"
     }
   },
+  "library": {
+    "importTitle": "Import from VSCode",
+    "packsTitle": "Theme packs"
+  },
+  "nav": {
+    "groups": {
+      "advancedGroup": "Advanced",
+      "interfaceGroup": "Interface",
+      "themeGroup": "Theme"
+    },
+    "items": {
+      "a11y": {
+        "description": "Contrast, motion, colorblind modes",
+        "label": "Accessibility"
+      },
+      "advanced": {
+        "description": "Inject your own stylesheet",
+        "label": "Custom CSS"
+      },
+      "auto": {
+        "description": "Switch on a schedule or with the system",
+        "label": "Auto light/dark"
+      },
+      "components": {
+        "description": "Per-surface tonality and elevation",
+        "label": "Components"
+      },
+      "custom": {
+        "description": "Edit the color tokens directly",
+        "label": "Custom theme"
+      },
+      "library": {
+        "description": "Theme packs and VSCode import",
+        "label": "Theme library"
+      },
+      "personalization": {
+        "description": "Your name and the welcome page style",
+        "label": "Personalization"
+      },
+      "plugins": {
+        "description": "Appearance panels added by plugins",
+        "label": "Plugins"
+      },
+      "theme": {
+        "description": "Preset palettes and light/dark mode",
+        "label": "Theme & presets"
+      },
+      "typography": {
+        "description": "Fonts, size, spacing, corner radius",
+        "label": "Type & density"
+      },
+      "wallpaper": {
+        "description": "Background image, gradient, or color",
+        "label": "Wallpaper"
+      }
+    },
+    "mobileTrigger": "Sections",
+    "title": "Appearance"
+  },
   "personalization": {
     "description": "How the chat welcome page greets you and how much it shows.",
     "nameLabel": "Your name",
@@ -381,6 +439,7 @@
       "row2": "Tokens"
     },
     "title": "Live preview",
+    "tokensLabel": "Other tokens",
     "user": "Looks great!",
     "windowTitle": "Preview"
   },
@@ -420,6 +479,10 @@
     "title": "Theme packs"
   },
   "title": "Appearance",
+  "typographyPanel": {
+    "fontsTitle": "Typography",
+    "layoutTitle": "Layout & density"
+  },
   "usageDisplay": {
     "hint": {
       "detailed": "Every section expanded with extra columns, per-session detail, and raw snapshots.",
@@ -552,6 +615,13 @@
     "scopeGlobal": "Global",
     "scopeLabel": "Apply to",
     "scopeSidebar": "Sidebar",
+    "tiles": {
+      "dropHint": "Drop an image anywhere here",
+      "gradient": "Gradient",
+      "gradientAria": "Create a gradient wallpaper",
+      "upload": "Upload",
+      "uploadAria": "Upload a wallpaper image"
+    },
     "title": "Wallpaper",
     "tooLarge": "File is too large (max 32 MB).",
     "uploadHint": "Drop an image here or browse",

@@ -66,9 +66,9 @@ describe("collectStatusReport", () => {
 
   it("falls back to the pattern table when no override is given", () => {
     const report = collectStatusReport(deps({ usage: { inputTokens: 100_000 } }))
-    // "claude-x" matches no pattern → 200k default → 50%.
-    expect(report.contextWindow).toBe(200_000)
-    expect(report.contextPct).toBe(50)
+    // "claude-x" matches no pattern → 128k default → 78%.
+    expect(report.contextWindow).toBe(128_000)
+    expect(report.contextPct).toBe(78)
   })
 })
 

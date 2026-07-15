@@ -418,28 +418,35 @@ export function applySdkEvent(
       return { messages, turnComplete: false }
     }
     case "rate_limit_event": {
-      // Surface a notice only when the subscription rate limit is restrictive
-      // (`allowed_warning` / `rejected`). The SDK emits this every turn with
-      // `allowed` during normal use — ignore those to avoid transcript spam.
+      // A rate-limit notice describes a *live* condition, not something that
+      // happened at a point in the transcript, so every event first drops any
+      // previous marker and then re-posts one only if the limit is still
+      // restrictive (`allowed_warning` / `rejected`).
+      //
+      // Dropping unconditionally is what makes the notice self-clearing. The
+      // SDK emits this event whenever the info changes — including back to
+      // `allowed` — so recovery reliably removes the marker. Previously
+      // `allowed` was a no-op rather than a clear, which left a single past
+      // warning pinned in the persisted transcript forever: it survived
+      // reloads and still read "limit reached", with a `resetsAt` in the past.
+      //
+      // It also subsumes the old `collapsePrev` de-spam, which only fired when
+      // the notice was the *last* message — never true once an assistant turn
+      // followed it, so warnings accumulated one marker per turn.
       const info = (evt as unknown as { rate_limit_info?: RateLimitInfo }).rate_limit_info
+      const cleared = dropSessionNotices(messages, "rate-limit")
       if (!info || info.status === "allowed") {
-        return { messages, turnComplete: false }
+        return { messages: cleared, turnComplete: false }
       }
       return {
-        messages: appendSessionNotice(
-          messages,
-          {
-            type: "session-notice",
-            variant: "rate-limit",
-            uuid: (evt as unknown as { uuid?: string }).uuid,
-            status: info.status,
-            rateLimitType: info.rateLimitType,
-            resetsAt: info.resetsAt,
-          },
-          // Collapse consecutive rate-limit notices so a multi-turn warning
-          // window leaves one (latest) marker rather than one per turn.
-          true
-        ),
+        messages: appendSessionNotice(cleared, {
+          type: "session-notice",
+          variant: "rate-limit",
+          uuid: (evt as unknown as { uuid?: string }).uuid,
+          status: info.status,
+          rateLimitType: info.rateLimitType,
+          resetsAt: info.resetsAt,
+        }),
         turnComplete: false,
       }
     }
@@ -469,35 +476,41 @@ export interface SessionNoticePartData {
   resetsAt?: number
 }
 
+/** True when a message is a session-notice marker of the given variant. */
+function isSessionNoticeOf(message: UIMessage, variant: SessionNoticePartData["variant"]): boolean {
+  if (message.role !== "system") return false
+  const part = message.parts?.[0] as { type?: string; variant?: string } | undefined
+  return part?.type === "session-notice" && part.variant === variant
+}
+
+/**
+ * Drop every session-notice marker of one variant, wherever it sits in the
+ * transcript. Used for notices that project a live condition rather than a past
+ * event, so the transcript holds at most the latest one — and none once the
+ * condition clears.
+ *
+ * `persistMessages` diffs by id and deletes what disappeared, so removing a
+ * marker here also deletes its row. Returns the original array when nothing
+ * matched, since the persist layer and the chat store both key off identity.
+ */
+function dropSessionNotices(
+  messages: UIMessage[],
+  variant: SessionNoticePartData["variant"]
+): UIMessage[] {
+  if (!messages.some((m) => isSessionNoticeOf(m, variant))) return messages
+  return messages.filter((m) => !isSessionNoticeOf(m, variant))
+}
+
 /**
  * Append a non-conversational "session notice" marker (auto-deny / rate-limit)
- * to the transcript, mirroring the compact-boundary projection. When
- * `collapsePrev` is set and the last message is a same-variant notice, it is
- * replaced rather than appended (used to de-spam per-turn rate-limit events).
+ * to the transcript, mirroring the compact-boundary projection.
  */
-function appendSessionNotice(
-  messages: UIMessage[],
-  data: SessionNoticePartData,
-  collapsePrev = false
-): UIMessage[] {
+function appendSessionNotice(messages: UIMessage[], data: SessionNoticePartData): UIMessage[] {
   const id = `notice-${data.variant}-${data.uuid ?? crypto.randomUUID()}`
   const marker: UIMessage = {
     id,
     role: "system",
     parts: [data as unknown as UIMessage["parts"][number]],
-  }
-  if (collapsePrev && messages.length > 0) {
-    const last = messages[messages.length - 1]
-    const lastPart = last.parts?.[0] as { type?: string; variant?: string } | undefined
-    if (
-      last.role === "system" &&
-      lastPart?.type === "session-notice" &&
-      lastPart.variant === data.variant
-    ) {
-      const copy = messages.slice(0, -1)
-      copy.push(marker)
-      return copy
-    }
   }
   return [...messages, marker]
 }

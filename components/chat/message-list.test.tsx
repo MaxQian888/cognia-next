@@ -14,10 +14,16 @@ jest.mock("@/components/ai-elements/shimmer", () => {
 })
 
 // The thinking indicator has its own suite (phases / tips / reduced motion).
-// Stub it to the bare label so message-list's shouldShowThinking assertions
-// stay isolated from its timers and motion wiring.
+// Stub it to a bare label so message-list's `thinkingMode` assertions stay
+// isolated from its timers and motion wiring. The stub echoes `compact` so the
+// tests below can tell the two modes apart.
 jest.mock("./thinking-indicator", () => ({
-  ChatThinkingIndicator: () => ReactForMocks.createElement("span", null, "Claude is thinking…"),
+  ChatThinkingIndicator: ({ compact }: { compact?: boolean }) =>
+    ReactForMocks.createElement(
+      "span",
+      null,
+      compact ? "Claude is working…" : "Claude is thinking…"
+    ),
 }))
 
 // jsdom has no layout engine so useVirtualizer always returns empty items.
@@ -442,7 +448,7 @@ describe("MessageList", () => {
       parts: [{ type: "text", text }],
     })
 
-    it("the actively-streaming row is the last [data-index] row (virtualized path)", () => {
+    it("the actively-streaming row sits directly above the thinking row (virtualized path)", () => {
       const Wrapper = withAdapter(makeAdapter())
       // Force the virtualized path: fillers + a final streaming assistant row.
       const fillers = manyMsgs(VIRTUALIZE_THRESHOLD)
@@ -455,12 +461,14 @@ describe("MessageList", () => {
         </Wrapper>
       )
       const rows = container.querySelectorAll("[data-index]")
-      // fillers + streaming row (no thinking shimmer: the streaming row has text).
-      expect(rows).toHaveLength(fillers.length + 1)
-      // The streaming row (last index) skips the measureElement ref; we verify
-      // it is rendered and carries the streaming text — the ref-skip is
-      // exercised by the snapshot rendering correctly.
-      expect(rows[rows.length - 1].textContent).toContain("partial")
+      // fillers + streaming row + the compact thinking row, which trails the
+      // turn's content for its whole duration (see `thinkingMode`).
+      expect(rows).toHaveLength(fillers.length + 2)
+      expect(rows[rows.length - 1].textContent).toContain("Claude is working…")
+      // The streaming row skips the measureElement ref; we verify it is
+      // rendered and carries the streaming text — the ref-skip is exercised by
+      // the snapshot rendering correctly.
+      expect(rows[rows.length - 2].textContent).toContain("partial")
     })
 
     it("renders the streaming row in document flow for short lists", () => {
@@ -621,64 +629,73 @@ describe("MessageList", () => {
   })
 })
 
-describe("shouldShowThinking", () => {
-  it("shows thinking shimmer when streaming and last message is from user", () => {
+describe("thinkingMode", () => {
+  const renderList = (
+    messages: UIMessage[],
+    status: "idle" | "streaming" | "awaiting_approval"
+  ) => {
     const Wrapper = withAdapter(makeAdapter())
-    render(
+    return render(
       <Wrapper>
-        <MessageList messages={[userMsg("u1", "hi")]} status="streaming" />
+        <MessageList messages={messages} status={status} />
       </Wrapper>
     )
-    expect(screen.getByText("Claude is thinking…")).toBeInTheDocument()
+  }
+  /** The stub renders exactly one of these; neither ⇒ indicator hidden. */
+  const full = () => screen.queryByText("Claude is thinking…")
+  const compact = () => screen.queryByText("Claude is working…")
+
+  it("shows the full indicator when streaming and last message is from user", () => {
+    renderList([userMsg("u1", "hi")], "streaming")
+    expect(full()).toBeInTheDocument()
+    expect(compact()).toBeNull()
   })
 
-  it("does not show thinking shimmer when streaming but assistant already has text", () => {
-    const Wrapper = withAdapter(makeAdapter())
-    const assistantMsg: UIMessage = {
+  it("shows the full indicator when streaming with no messages yet", () => {
+    renderList([], "streaming")
+    expect(full()).toBeInTheDocument()
+  })
+
+  it("shows the full indicator when the assistant part is only whitespace", () => {
+    const msg: UIMessage = { id: "a1", role: "assistant", parts: [{ type: "text", text: "   " }] }
+    renderList([msg], "streaming")
+    expect(full()).toBeInTheDocument()
+  })
+
+  it("hides the indicator when status is idle", () => {
+    renderList([], "idle")
+    expect(full()).toBeNull()
+    expect(compact()).toBeNull()
+  })
+
+  it("hides the indicator during awaiting_approval (the dialog is the feedback)", () => {
+    renderList([userMsg("u1", "hi")], "awaiting_approval")
+    expect(full()).toBeNull()
+    expect(compact()).toBeNull()
+  })
+
+  // The regression this whole mode split exists for: an agentic turn is mostly
+  // tool calls, and the indicator used to vanish at the first one — leaving
+  // minutes of a live run with no sign of life.
+  it("keeps a compact indicator while a tool call is on screen and the turn runs", () => {
+    const msg: UIMessage = {
       id: "a1",
       role: "assistant",
-      parts: [{ type: "text", text: "hello" }],
+      parts: [{ type: "tool-invocation" } as unknown as UIMessage["parts"][number]],
     }
-    render(
-      <Wrapper>
-        <MessageList messages={[assistantMsg]} status="streaming" />
-      </Wrapper>
-    )
-    expect(screen.queryByText("Claude is thinking…")).toBeNull()
+    renderList([msg], "streaming")
+    expect(compact()).toBeInTheDocument()
+    expect(full()).toBeNull()
   })
 
-  it("does not show thinking shimmer when status is idle", () => {
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <MessageList messages={[]} status="idle" />
-      </Wrapper>
-    )
-    expect(screen.queryByText("Claude is thinking…")).toBeNull()
+  it("keeps a compact indicator once the assistant has streamed text", () => {
+    const msg: UIMessage = { id: "a1", role: "assistant", parts: [{ type: "text", text: "hello" }] }
+    renderList([msg], "streaming")
+    expect(compact()).toBeInTheDocument()
+    expect(full()).toBeNull()
   })
 
-  it("shows thinking shimmer when streaming with no messages yet", () => {
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <MessageList messages={[]} status="streaming" />
-      </Wrapper>
-    )
-    expect(screen.getByText("Claude is thinking…")).toBeInTheDocument()
-  })
-
-  it("does not show thinking shimmer during awaiting_approval", () => {
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <MessageList messages={[userMsg("u1", "hi")]} status="awaiting_approval" />
-      </Wrapper>
-    )
-    expect(screen.queryByText("Claude is thinking…")).toBeNull()
-  })
-
-  it("does not show thinking shimmer when assistant has non-empty reasoning text", () => {
-    const Wrapper = withAdapter(makeAdapter())
+  it("keeps a compact indicator once the assistant has reasoning text", () => {
     const msg: UIMessage = {
       id: "a1",
       role: "assistant",
@@ -686,57 +703,25 @@ describe("shouldShowThinking", () => {
         { type: "reasoning", text: "I am reasoning…" } as unknown as UIMessage["parts"][number],
       ],
     }
-    render(
-      <Wrapper>
-        <MessageList messages={[msg]} status="streaming" />
-      </Wrapper>
-    )
-    expect(screen.queryByText("Claude is thinking…")).toBeNull()
+    renderList([msg], "streaming")
+    expect(compact()).toBeInTheDocument()
   })
 
-  it("does not show thinking shimmer when assistant has a tool-call part", () => {
-    const Wrapper = withAdapter(makeAdapter())
-    const msg: UIMessage = {
-      id: "a1",
-      role: "assistant",
-      parts: [{ type: "tool-invocation" } as unknown as UIMessage["parts"][number]],
-    }
-    render(
-      <Wrapper>
-        <MessageList messages={[msg]} status="streaming" />
-      </Wrapper>
-    )
-    expect(screen.queryByText("Claude is thinking…")).toBeNull()
-  })
-
-  it("does not show thinking shimmer when assistant has a file part", () => {
-    const Wrapper = withAdapter(makeAdapter())
+  it("keeps a compact indicator once the assistant has a file part", () => {
     const msg: UIMessage = {
       id: "a1",
       role: "assistant",
       parts: [{ type: "file" } as unknown as UIMessage["parts"][number]],
     }
-    render(
-      <Wrapper>
-        <MessageList messages={[msg]} status="streaming" />
-      </Wrapper>
-    )
-    expect(screen.queryByText("Claude is thinking…")).toBeNull()
+    renderList([msg], "streaming")
+    expect(compact()).toBeInTheDocument()
   })
 
-  it("shows thinking shimmer when assistant part has empty text", () => {
-    const Wrapper = withAdapter(makeAdapter())
-    const msg: UIMessage = {
-      id: "a1",
-      role: "assistant",
-      parts: [{ type: "text", text: "   " }],
-    }
-    render(
-      <Wrapper>
-        <MessageList messages={[msg]} status="streaming" />
-      </Wrapper>
-    )
-    expect(screen.getByText("Claude is thinking…")).toBeInTheDocument()
+  it("drops the indicator entirely once the turn settles to idle", () => {
+    const msg: UIMessage = { id: "a1", role: "assistant", parts: [{ type: "text", text: "done" }] }
+    renderList([msg], "idle")
+    expect(full()).toBeNull()
+    expect(compact()).toBeNull()
   })
 })
 
@@ -768,6 +753,137 @@ describe("MessageList — auto-scroll gate (composerBehavior.autoScrollOnStream)
       </Wrapper>
     )
     expect(screen.getByText("hi")).toBeInTheDocument()
+  })
+})
+
+describe("MessageList — content-resize follow (deferred markdown growth)", () => {
+  const RealResizeObserver = globalThis.ResizeObserver
+  let roCallbacks: ResizeObserverCallback[]
+
+  beforeEach(() => {
+    roCallbacks = []
+    class CapturingResizeObserver {
+      constructor(cb: ResizeObserverCallback) {
+        roCallbacks.push(cb)
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    globalThis.ResizeObserver = CapturingResizeObserver as unknown as typeof ResizeObserver
+  })
+  afterEach(() => {
+    globalThis.ResizeObserver = RealResizeObserver
+    useSettingsStore.setState({ settings: undefined as never })
+  })
+
+  // scrollHeight is stable; scrollTop is a closure-backed getter/setter so the
+  // component's programmatic pin is observable. clientHeight decides isAtBottom.
+  function primeScroll(el: Element): { get scrollTop(): number } {
+    Object.defineProperty(el, "scrollHeight", { value: 1000, configurable: true })
+    Object.defineProperty(el, "clientHeight", { value: 200, configurable: true })
+    let top = 0
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v
+      },
+    })
+    return {
+      get scrollTop() {
+        return top
+      },
+    }
+  }
+
+  const fireResize = () =>
+    act(() => {
+      roCallbacks.forEach((cb) => cb([], {} as ResizeObserver))
+    })
+
+  it("re-pins to the bottom when the content box grows after a streamed commit", () => {
+    // Reproduces the deferred-markdown gap: `messages` did NOT change (so the
+    // messages-effect never re-fires), but the visible DOM grew — the observer
+    // must still follow the bottom.
+    useSettingsStore.setState({ settings: {} as never })
+    const Wrapper = withAdapter(makeAdapter())
+    const assistant: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "hi" }],
+    }
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[assistant]} status="streaming" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    const scroll = primeScroll(scrollEl)
+    expect(roCallbacks.length).toBeGreaterThan(0)
+    // Default isAtBottom = true → the observer pins to scrollHeight.
+    fireResize()
+    expect(scroll.scrollTop).toBe(1000)
+  })
+
+  it("does not follow on resize once the user has scrolled up", async () => {
+    useSettingsStore.setState({ settings: {} as never })
+    const Wrapper = withAdapter(makeAdapter())
+    const assistant: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "hi" }],
+    }
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[assistant]} status="streaming" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    const scroll = primeScroll(scrollEl)
+    // scrollHeight(1000) - scrollTop(0) - clientHeight(200) = 800 ≥ 32 → not at bottom.
+    await act(async () => {
+      fireEvent.scroll(scrollEl)
+    })
+    // The scroll-to-bottom button proves isAtBottom flipped to false.
+    expect(scrollEl.querySelector('button[type="button"]')).toBeTruthy()
+    fireResize()
+    expect(scroll.scrollTop).toBe(0)
+  })
+
+  it("does not follow on resize when autoScrollOnStream is disabled", () => {
+    useSettingsStore.setState({
+      settings: { composerBehavior: { autoScrollOnStream: false } } as never,
+    })
+    const Wrapper = withAdapter(makeAdapter())
+    const assistant: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "hi" }],
+    }
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[assistant]} status="streaming" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    const scroll = primeScroll(scrollEl)
+    fireResize()
+    expect(scroll.scrollTop).toBe(0)
+  })
+
+  it("does not follow on resize when idle (no active turn)", () => {
+    useSettingsStore.setState({ settings: {} as never })
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hi")]} status="idle" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    const scroll = primeScroll(scrollEl)
+    fireResize()
+    expect(scroll.scrollTop).toBe(0)
   })
 })
 

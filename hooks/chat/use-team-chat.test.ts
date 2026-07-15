@@ -327,7 +327,9 @@ describe("useTeamChat — actions", () => {
     await act(async () => {
       await result.current.send("hi")
     })
-    expect(chatState.setError).toHaveBeenCalledWith("No session selected")
+    expect(chatState.setError).toHaveBeenCalledWith(
+      "No conversation is open. Start a new one to send this."
+    )
   })
 
   it("send() errors when the session is not a team session", async () => {
@@ -1066,7 +1068,9 @@ describe("useTeamChat — store subscription callbacks", () => {
     await act(async () => {
       await result.current.send("hi")
     })
-    expect(chatState.setError).toHaveBeenCalledWith("No session selected")
+    expect(chatState.setError).toHaveBeenCalledWith(
+      "No conversation is open. Start a new one to send this."
+    )
   })
 
   it("settings subscription updates alwaysAllow list", async () => {

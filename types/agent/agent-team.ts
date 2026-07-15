@@ -387,6 +387,14 @@ export interface AgentTeamConfig {
   defaultTimeout?: number
   /** Whether teammates require plan approval before executing */
   requirePlanApproval?: boolean
+  /**
+   * Auto-raise the plan-approval gate when a run is assessed medium/high risk
+   * (ADR-0070). Default true. Only ever raises: an operator-set
+   * `requirePlanApproval` is never lowered by the assessment. Set false to
+   * restore the pre-ADR-0070 behavior where only `requirePlanApproval` gates —
+   * note that this also lets a *headless* risky run proceed unattended.
+   */
+  riskGating?: boolean
   /** Auto-shutdown teammates when all tasks complete */
   autoShutdown?: boolean
   /** Token budget for the entire team */
@@ -624,6 +632,7 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
   defaultMaxSteps: 15,
   defaultTimeout: 600000, // 10 minutes
   requirePlanApproval: false,
+  riskGating: true,
   autoShutdown: true,
   enableMessaging: true,
   enableSharedTaskList: true,

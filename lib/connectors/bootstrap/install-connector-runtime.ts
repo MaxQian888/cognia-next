@@ -695,7 +695,14 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       const unsubscribeChanges = subscribeChanges(runReconcile)
       ac.signal.addEventListener("abort", unsubscribeChanges, { once: true })
     }
-  })()
+  })().catch((err: unknown) => {
+    log(
+      "error",
+      `[connector-bus] runtime bootstrap failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    )
+  })
 
   return () => {
     cancelled = true

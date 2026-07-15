@@ -27,6 +27,7 @@ const emptyInference: VsCodePermissionInference = {
   reasons: [],
   confidence: "high",
   unparsedBundle: false,
+  unsupportedApis: [],
 }
 
 describe("adaptVscodeManifest", () => {
@@ -95,6 +96,91 @@ describe("adaptVscodeManifest", () => {
     expect(result.manifest.id).toBe("publisher-with-symbols.weird-name-with-spaces")
   })
 
+  it("records the resolved targetPlatform so the update check can re-query it", () => {
+    // A `universal` fallback install must keep asking Open VSX for
+    // `universal`. Re-deriving the platform from the asking machine would
+    // silently offer a platform-specific build as an "update".
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "rust-analyzer",
+        publisher: "rust-lang",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+      targetPlatform: "universal",
+    })
+    expect(result.manifest.vscodeExtension?.targetPlatform).toBe("universal")
+  })
+
+  it("omits targetPlatform for a .vsix upload, which has no registry platform", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "local",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "vsix-upload",
+    })
+    // Absent, not `""` / `"universal"` — we must not invent a platform claim.
+    expect(result.manifest.vscodeExtension).not.toHaveProperty("targetPlatform")
+  })
+
+  it("persists unsupportedApis onto the manifest so the card warning survives install", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "dbg",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: "^1.93.0" },
+        main: "./out/extension.js",
+      }),
+      inference: { ...emptyInference, unsupportedApis: ["vscode.debug"] },
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeExtension?.unsupportedApis).toEqual(["vscode.debug"])
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining("uses APIs cognia doesn't implement")
+    )
+  })
+
+  it("omits unsupportedApis entirely when the walk found none", () => {
+    // `[]` would assert "we looked and found none" — a claim the minified
+    // path can't support. Absent means "no evidence recorded".
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "clean",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeExtension).not.toHaveProperty("unsupportedApis")
+  })
+
+  it("an engine range the shim can't satisfy warns but still produces a manifest", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "modern",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: "^1.93.0" },
+        main: "./out/extension.js",
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    // Adaptation succeeded — the range is never a gate.
+    expect(result.manifest.id).toBe("acme.modern")
+    expect(result.manifest.vscodeExtension?.engineVscode).toBe("^1.93.0")
+    expect(result.warnings).toContainEqual(expect.stringContaining("requires VS Code ^1.93.0"))
+  })
+
   it("sets type to vscode-extension and main to vscodeMain", () => {
     const result = adaptVscodeManifest({
       vsix: makeVsixResult({
@@ -150,6 +236,7 @@ describe("adaptVscodeManifest", () => {
         reasons: [],
         confidence: "high",
         unparsedBundle: false,
+        unsupportedApis: [],
       },
       source: "vsix-upload",
     })
@@ -174,6 +261,7 @@ describe("adaptVscodeManifest", () => {
         reasons: [],
         confidence: "high",
         unparsedBundle: false,
+        unsupportedApis: [],
       },
       source: "vsix-upload",
     })

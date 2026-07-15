@@ -66,6 +66,27 @@ beforeEach(() => {
 })
 
 describe("OverviewSection", () => {
+  // ── ADR-0070 Phase 1 — the risk-gating opt-out ─────────────────────────
+  // Lives in THIS section, not Governance, because this is the one that writes
+  // `config.requirePlanApproval` — the field the runtime actually reads.
+  it("defaults risk gating ON and commits an explicit false when switched off", () => {
+    render(<OverviewSection team={makeTeam()} />)
+    // 5th switch: autoShutdown, enableMessaging, streamProgress,
+    // requirePlanApproval, riskGating.
+    const riskGating = screen.getAllByRole("switch")[4]
+    expect(riskGating).toBeChecked()
+    fireEvent.click(riskGating)
+    expect(updateTeamConfigMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({ riskGating: false })
+    )
+  })
+
+  it("reflects an existing riskGating:false opt-out", () => {
+    render(<OverviewSection team={makeTeam({ riskGating: false })} />)
+    expect(screen.getAllByRole("switch")[4]).not.toBeChecked()
+  })
+
   it("renders the team name and description fields", () => {
     render(<OverviewSection team={makeTeam()} />)
     // The overview-name testid is plumbed through EditableSettingRow to the wrapper div.

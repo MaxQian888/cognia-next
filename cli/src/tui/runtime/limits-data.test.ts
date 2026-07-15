@@ -209,8 +209,8 @@ describe("buildCliLimits", () => {
         return JSON.stringify({
           data: {
             limits: [
-              { TOKENS_LIMIT: "five_hour", percentage: 60, nextResetTime: NOW / 1000 + 3600 },
-              { TOKENS_LIMIT: "weekly", percentage: 30, nextResetTime: NOW / 1000 + 86_400 },
+              { unit: 3, percentage: 60, nextResetTime: NOW / 1000 + 3600 },
+              { unit: 6, percentage: 30, nextResetTime: NOW / 1000 + 86_400 },
             ],
           },
         })

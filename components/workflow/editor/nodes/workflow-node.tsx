@@ -12,7 +12,7 @@ import {
   Pin as PinIcon,
 } from "lucide-react"
 import { getNodeIcon } from "@/lib/workflow/editor/node-icons"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
 import type { WorkflowNodeData } from "@/types/workflow/visual"
@@ -118,9 +118,10 @@ function StatusCornerBadge({ status }: { status: NodeRunStatus }) {
 function LastRunFooter({ lastRun }: { lastRun: LastRunSummary }) {
   const t = useTranslations("workflows.node.lastRun")
   const fmt = useFormatter()
+  const now = useNow()
   const ago = (() => {
     try {
-      return fmt.relativeTime(new Date(lastRun.finishedAt))
+      return fmt.relativeTime(new Date(lastRun.finishedAt), now)
     } catch {
       return new Date(lastRun.finishedAt).toLocaleTimeString()
     }
@@ -427,9 +428,9 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       {data.authoredBy === "ai" ? (
         <span
           className="absolute -top-1.5 -left-1.5 z-10 inline-flex items-center justify-center rounded-full bg-violet-500 px-1.5 text-[9px] font-bold tracking-wide text-white shadow ring-2 ring-background"
-          title="Authored by the workflow-AI assistant — Ctrl+Z to revert."
+          title={tNode("aiBadge.title")}
           data-testid="wf-node-ai-badge"
-          aria-label="AI-authored node"
+          aria-label={tNode("aiBadge.label")}
         >
           AI
         </span>

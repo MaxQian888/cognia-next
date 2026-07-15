@@ -1631,3 +1631,51 @@ describe("run-scoped terminal-session cleanup", () => {
     expect(r.status).toBe("succeeded")
   })
 })
+
+// ── ADR-0070 Phase 3 — engine-level risk gate ────────────────────────────
+describe("runWorkflow — risk gate", () => {
+  // `action.connector.send` declares no platform capability, so the ADR-0060
+  // preflight (which runs at t=0, before any step) lets it through and the risk
+  // gate is what we actually exercise. Desktop/terminal kinds are already
+  // preflight-failed off-desktop, so they cannot reach this path here.
+  const riskyNode = (id: string) =>
+    ({
+      id,
+      type: "action.connector.send",
+      typeVersion: 1,
+      position: { x: 0, y: 0 },
+      data: { label: "send", params: { adapterId: "a1", conversationKey: "c1", text: "hi" } },
+    }) as unknown as VisualWorkflow["nodes"][number]
+
+  it("leaves a pre-ADR-0070 workflow (no riskGating field) completely ungated", async () => {
+    // The migration property: shipping this must not pause automations that
+    // already run. buildWorkflow omits riskGating, so this is the real default.
+    const wf = buildWorkflow([setNode("n_a", "v")])
+    expect(wf.settings.riskGating).toBeUndefined()
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("succeeded")
+  })
+
+  it("fails a headless run that hits a risky node, naming the surfaces", async () => {
+    const base = buildWorkflow([riskyNode("n_sh")])
+    const wf = { ...base, settings: { ...base.settings, riskGating: true } }
+    const r = await runWorkflow({
+      workflow: wf,
+      trigger,
+      triggeredBy: { source: "im", adapterId: "a1", conversationKey: "c1" },
+    })
+    expect(r.status).toBe("failed")
+    expect(JSON.stringify(r.error ?? "")).toMatch(/external-send/)
+  })
+
+  it("does not gate a low-risk node even when gating is on", async () => {
+    const base = buildWorkflow([setNode("n_a", "v")])
+    const wf = { ...base, settings: { ...base.settings, riskGating: true } }
+    const r = await runWorkflow({
+      workflow: wf,
+      trigger,
+      triggeredBy: { source: "im", adapterId: "a1", conversationKey: "c1" },
+    })
+    expect(r.status).toBe("succeeded")
+  })
+})

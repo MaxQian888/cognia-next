@@ -36,6 +36,7 @@ const KIND_ICON: Record<GoalEvent["kind"], string> = {
 
 export function GoalActivityTab({ goal }: Props) {
   const t = useTranslations("goal")
+  const tRisk = useTranslations("policy.risk")
   const events = useLiveQuery(() => listGoalEvents(goal.id, 200), [goal.id])
 
   if (!events) {
@@ -67,7 +68,7 @@ export function GoalActivityTab({ goal }: Props) {
               <span className="text-muted-foreground">{new Date(ev.ts).toLocaleTimeString()}</span>
             </div>
             <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {summarisePayload(ev, t)}
+              {summarisePayload(ev, t, tRisk)}
             </p>
           </div>
         </li>
@@ -76,14 +77,27 @@ export function GoalActivityTab({ goal }: Props) {
   )
 }
 
-function summarisePayload(ev: GoalEvent, t: GoalT): string {
+function summarisePayload(ev: GoalEvent, t: GoalT, tRisk: GoalT): string {
   const p = ev.payload
   switch (p.kind) {
-    case "goal_created":
-      return t("activity.goal_created", {
+    case "goal_created": {
+      const base = t("activity.goal_created", {
         turns: p.config.maxTurns,
         tokens: p.config.maxTokens.toLocaleString(),
       })
+      // ADR-0070: when risk auto-raised this goal's ceremony, say which surfaces
+      // did it. The classifier's own `reason` is English-only diagnostic text —
+      // rebuild the summary from the localized surface labels instead.
+      if (!p.risk) return base
+      const surfaces = p.risk.surfaces
+        .map((id) => tRisk(`surfaces.${id}.label`))
+        .filter(Boolean)
+        .join(", ")
+      return `${base} · ${t("activity.riskGate", {
+        tier: tRisk(`tier.${p.risk.tier}`),
+        surfaces,
+      })}`
+    }
     case "objective_updated":
       return t("activity.objective_updated")
     case "turn_started":

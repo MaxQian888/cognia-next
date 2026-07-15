@@ -5,8 +5,19 @@ import {
   type CliToolDeps,
   type ExecuteCliToolContext,
 } from "./execute-cli-tool"
+import {
+  evaluateCliBinary,
+  configureCliBinaryPolicy,
+  __resetCliBinaryPolicyForTesting,
+} from "./cli-binary-policy"
+import {
+  confirmBinarySpawn,
+  configureBinaryConsent,
+  __resetBinaryConsentForTesting,
+} from "@/lib/plugin/security/binary-consent"
+import type { BinaryConsentOutcome } from "@/lib/plugin/security/binary-consent"
 import type { PluginCliToolDef } from "@/types/plugin"
-import type { AutomationAuditLogRow } from "@/lib/db/schema"
+import type { ApprovedBinaryRow, AutomationAuditLogRow } from "@/lib/db/schema"
 
 function makeDeps(overrides: Partial<CliToolDeps> = {}) {
   const audits: AutomationAuditLogRow[] = []
@@ -68,7 +79,6 @@ const CTX: ExecuteCliToolContext = {
   requiresBinaries: [
     { name: "rg", minVersion: "13.0.0", documentation: "https://example.com/install-rg" },
   ],
-  publisherFingerprint: "FP",
 }
 
 afterEach(() => {
@@ -267,5 +277,138 @@ describe("executeCliTool", () => {
     await expect(
       executeCliTool("p", TOOL, null as unknown as Record<string, unknown>, CTX)
     ).rejects.toMatchObject({ code: "template" })
+  })
+})
+
+// The ledger's allow-branch was dead code until the "remember this binary"
+// checkbox landed: nothing wrote `approvedBinaries`, so `evaluateCliBinary`
+// could never reach `allowed: true` and every plugin binary re-prompted on
+// every spawn. These run the REAL policy against a fake ledger to prove the
+// branch is now reachable — and that the hash pin still holds it shut.
+describe("executeCliTool + approvedBinaries ledger (real policy)", () => {
+  const PLUGIN_DIR_TOOL: PluginCliToolDef = {
+    ...TOOL,
+    binary: { kind: "plugin-dir", relPath: "bin/tool.exe" },
+  }
+  const BINARY_PATH = "C:/plugins/ripgrep-tools/bin/tool.exe"
+  const APPROVED_HASH = "a".repeat(64)
+  const CHANGED_HASH = "b".repeat(64)
+
+  let ledger: ApprovedBinaryRow[]
+  let hashes: Map<string, string | null>
+
+  beforeEach(() => {
+    ledger = []
+    hashes = new Map([[BINARY_PATH, APPROVED_HASH]])
+    configureCliBinaryPolicy({
+      findApprovedBinary: async (pluginId, binaryPath) =>
+        ledger.find((r) => r.pluginId === pluginId && r.binaryPath === binaryPath),
+      hashBinary: async (binaryPath) => hashes.get(binaryPath) ?? null,
+      appendAudit: async () => {},
+      now: () => 1000,
+    })
+  })
+
+  afterEach(() => {
+    __resetCliBinaryPolicyForTesting()
+    __resetBinaryConsentForTesting()
+  })
+
+  /** Deps wired to the real policy, with consent routed through the real writer. */
+  function makeLedgerDeps(outcome: BinaryConsentOutcome) {
+    const prompt = jest.fn(async (_input: Record<string, unknown>) => outcome)
+    configureBinaryConsent({
+      prompt,
+      hashBinary: async (path: string) => hashes.get(path) ?? null,
+      recordApproval: async (row) => {
+        ledger.push({ ...row, approvedAt: 1000 })
+        return row
+      },
+    })
+    const { deps, invocations } = makeDeps({
+      evaluatePluginDirBinary: evaluateCliBinary,
+      requestBinaryConsent: (pluginId, reason, binary) =>
+        confirmBinarySpawn({
+          pluginId,
+          permission: "cli:execute",
+          binaryPath: binary.path,
+          relPath: binary.relPath,
+          reason,
+        }),
+    })
+    return { deps, invocations, prompt }
+  }
+
+  it("remembered_binary_skips_the_prompt_on_next_spawn", async () => {
+    // First spawn: no ledger row → prompt, user ticks "remember".
+    const first = makeLedgerDeps({ granted: true, remember: true })
+    __setCliToolDepsForTesting(first.deps)
+    await executeCliTool("ripgrep-tools", PLUGIN_DIR_TOOL, { pattern: "x" }, CTX)
+    expect(first.prompt).toHaveBeenCalledTimes(1)
+    expect(ledger).toEqual([
+      {
+        pluginId: "ripgrep-tools",
+        binaryPath: BINARY_PATH,
+        sha256: APPROVED_HASH,
+        approvedAt: 1000,
+      },
+    ])
+
+    // Second spawn: the row now hash-matches, so the policy allows silently.
+    // This is the branch that was unreachable before the writer existed.
+    const second = makeLedgerDeps({ granted: true, remember: true })
+    __setCliToolDepsForTesting(second.deps)
+    await executeCliTool("ripgrep-tools", PLUGIN_DIR_TOOL, { pattern: "x" }, CTX)
+    expect(second.prompt).not.toHaveBeenCalled()
+    expect(second.invocations[0].program).toBe(BINARY_PATH)
+  })
+
+  it("binary_hash_change_reprompts_even_when_remembered", async () => {
+    const first = makeLedgerDeps({ granted: true, remember: true })
+    __setCliToolDepsForTesting(first.deps)
+    await executeCliTool("ripgrep-tools", PLUGIN_DIR_TOOL, { pattern: "x" }, CTX)
+    expect(ledger).toHaveLength(1)
+
+    // The bytes behind the approved path change — update, rebuild, or swap.
+    // The approval is pinned to the hash, not the path, so it no longer
+    // applies and the user must be asked again.
+    hashes.set(BINARY_PATH, CHANGED_HASH)
+    const second = makeLedgerDeps({ granted: false, remember: false })
+    __setCliToolDepsForTesting(second.deps)
+    await expect(
+      executeCliTool("ripgrep-tools", PLUGIN_DIR_TOOL, { pattern: "x" }, CTX)
+    ).rejects.toMatchObject({ code: "binary-untrusted" })
+    expect(second.prompt).toHaveBeenCalledTimes(1)
+    expect(second.deps.invokeExec).not.toHaveBeenCalled()
+  })
+
+  it("session-only consent leaves the ledger empty and re-prompts next spawn", async () => {
+    // The seam-level twin of binary-consent's regression guard: an unticked
+    // prompt must not make the next spawn silent.
+    const first = makeLedgerDeps({ granted: true, remember: false })
+    __setCliToolDepsForTesting(first.deps)
+    await executeCliTool("ripgrep-tools", PLUGIN_DIR_TOOL, { pattern: "x" }, CTX)
+    expect(ledger).toEqual([])
+
+    const second = makeLedgerDeps({ granted: true, remember: false })
+    __setCliToolDepsForTesting(second.deps)
+    await executeCliTool("ripgrep-tools", PLUGIN_DIR_TOOL, { pattern: "x" }, CTX)
+    expect(second.prompt).toHaveBeenCalledTimes(1)
+  })
+
+  it("an unhashable binary re-prompts even with a matching ledger row", async () => {
+    ledger.push({
+      pluginId: "ripgrep-tools",
+      binaryPath: BINARY_PATH,
+      sha256: APPROVED_HASH,
+      approvedAt: 1000,
+    })
+    hashes.set(BINARY_PATH, null)
+    const { deps, prompt } = makeLedgerDeps({ granted: false, remember: false })
+    __setCliToolDepsForTesting(deps)
+    await expect(
+      executeCliTool("ripgrep-tools", PLUGIN_DIR_TOOL, { pattern: "x" }, CTX)
+    ).rejects.toMatchObject({ code: "binary-untrusted" })
+    expect(prompt).toHaveBeenCalledTimes(1)
   })
 })

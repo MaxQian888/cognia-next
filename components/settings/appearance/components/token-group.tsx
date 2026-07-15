@@ -154,7 +154,11 @@ export function TokenGroup({
         className="px-1 pt-2 pb-1"
         data-testid={`token-group-${groupKey}-content`}
       >
-        <div className="grid grid-cols-1 gap-x-6 gap-y-2 xl:grid-cols-2">
+        {/* Container-driven: the group renders inside the Appearance section's
+            ~700px detail pane, where a viewport `xl:` split would two-column
+            the rows while each half is too narrow for label + swatch + hex.
+            Falls back to one column wherever no named container exists. */}
+        <div className="grid grid-cols-1 gap-x-6 gap-y-2 @3xl/appearance-pane:grid-cols-2">
           {tokens.map((key) => (
             <div key={key} className="flex items-center gap-2">
               <ColorTokenRow

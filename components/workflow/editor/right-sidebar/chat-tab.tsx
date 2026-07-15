@@ -318,9 +318,7 @@ export function WorkflowEditorChatTab({
             onRegenerate={handleRegenerate}
             onEditResend={handleEditResend}
             onCreate={() => void handleCreateSession()}
-            onUseSample={(text) => {
-              void handleSend({ type: "text", text } as never)
-            }}
+            onUseSample={(text) => void handleSend(text)}
             onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
             showHeader={false}
             emptyState={emptyState}

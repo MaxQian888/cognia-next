@@ -3,7 +3,7 @@ import { QuoteCardDialog } from "./quote-card-dialog"
 import type { SharePayload } from "@/lib/share/types"
 
 const mockHtml2canvas = jest.fn()
-jest.mock("html2canvas", () => ({
+jest.mock("html2canvas-pro", () => ({
   __esModule: true,
   default: (...a: unknown[]) => mockHtml2canvas(...a),
 }))

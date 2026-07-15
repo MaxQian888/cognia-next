@@ -24,7 +24,8 @@ import { getDb } from "@/lib/db/schema"
 import { listSessions } from "@/lib/db/sessions"
 import { loggers } from "@cognia/logging"
 import { desktop as automation } from "@/lib/automation/client"
-import { useChatStore } from "@/stores/chat/chat-store"
+import { startNewSession } from "@/lib/chat/start-session"
+import { isMainAppWindow } from "@/lib/pet/window-role"
 import { useUIStore } from "@/stores/ui/ui-store"
 import type { AppLanguage, AppSettings, ChatSession } from "@cognia/agent-config-types"
 
@@ -171,10 +172,23 @@ export const GO_ROUTES: Record<string, string> = {
 // File menu
 // --------------------------------------------------------------------------
 
+/**
+ * Cmd+N / File → New Chat / tray. Starts a real conversation rather than
+ * clearing to the welcome page: `clear()` dropped every open pane and left the
+ * user with no session, so "New Chat" meant something different here than it
+ * did for the in-app "+" and the command palette.
+ *
+ * Main-window only. Rust broadcasts `menu://*` / `tray://*` to EVERY window
+ * (`app.emit`), and the pet overlay / popup / island load this same root
+ * layout, so their subscribers run this too. Creating a session is not
+ * idempotent — without this guard one Cmd+N with the pet overlay open would
+ * create two conversations.
+ */
 export function newChatAction(): void {
+  if (!isMainAppWindow()) return
   log.info("menu action new-chat")
-  useChatStore.getState().clear()
   useUIStore.getState().setSelectedGuild({ kind: "dm" })
+  void startNewSession()
 }
 
 export function newWorkflowAction(router: AppRouterInstance): void {

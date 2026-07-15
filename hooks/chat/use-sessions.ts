@@ -9,7 +9,6 @@ import {
   bulkArchiveSessions,
   bulkDeleteSessions,
   bulkUnarchiveSessions,
-  createSession,
   deleteSession,
   getSession,
   listScopedSessions,
@@ -24,6 +23,7 @@ import {
 } from "@/lib/db/session-folders"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { buildOpeningMessage } from "@/lib/chat/opening-message"
+import { startNewSession, type NewSessionInput } from "@/lib/chat/start-session"
 import { getDb } from "@/lib/db/schema"
 import { closeSession } from "@/lib/claude/ipc"
 import { useChatStore } from "@/stores/chat"
@@ -106,27 +106,7 @@ export function useSessions() {
     [setActiveSession]
   )
 
-  const create = useCallback(
-    async (
-      partial?: Partial<
-        Pick<
-          ChatSession,
-          "title" | "model" | "systemPrompt" | "workingDir" | "kind" | "characterId" | "teamId"
-        >
-      >
-    ) => {
-      const s = await createSession(partial)
-      // Auto-link the new session to the active workspace so it groups under
-      // that project (persisted via `project.sessionIds`). No-op when no
-      // workspace is active.
-      const { activeProjectId, addSessionToProject } = useProjectStore.getState()
-      if (activeProjectId) addSessionToProject(activeProjectId, s.id)
-      setActiveSession(s.id)
-      emitSystemBusEvent(SystemEvents.SESSION_CREATED, { sessionId: s.id })
-      return s
-    },
-    [setActiveSession]
-  )
+  const create = useCallback((partial?: NewSessionInput) => startNewSession(partial), [])
 
   const remove = useCallback(
     async (id: string) => {

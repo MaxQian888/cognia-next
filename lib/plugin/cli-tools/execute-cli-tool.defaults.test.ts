@@ -115,14 +115,18 @@ describe("executeCliTool default deps", () => {
       "ripgrep-tools",
       pluginDirTool,
       { pattern: "x" },
-      { pluginPath: "C:/plugins/rg", requiresBinaries: [], publisherFingerprint: "FP" }
+      {
+        pluginPath: "C:/plugins/rg",
+        requiresBinaries: [],
+      }
     )
-    expect(evaluateCliBinaryMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        pluginId: "ripgrep-tools",
-        binaryPath: "C:/plugins/rg/bin/tool.exe",
-        publisherFingerprint: "FP",
-      })
-    )
+    // v109: the policy is handed only facts we can verify ourselves. No
+    // publisher identity is threaded through — `manifest.author.publicKey`
+    // used to arrive here and buy a silent spawn.
+    expect(evaluateCliBinaryMock).toHaveBeenCalledWith({
+      pluginId: "ripgrep-tools",
+      binaryPath: "C:/plugins/rg/bin/tool.exe",
+      pluginPath: "C:/plugins/rg",
+    })
   })
 })

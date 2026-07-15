@@ -143,4 +143,15 @@ describe("SettingsTab", () => {
     fireEvent.click(screen.getByTestId("wf-onfailure-notify"))
     expect(store.getState().baseWorkflow.settings.onFailure?.notify).toBe(true)
   })
+
+  // ── ADR-0070 Phase 3 — the risk-gating opt-out ──────────────────────────
+  it("toggling risk gating writes through setSettings", () => {
+    // Reachability is the point: the changeset documents `riskGating: false`
+    // as the escape hatch for a gated workflow, so it must be settable here.
+    const store = mount()
+    fireEvent.click(screen.getByTestId("wf-risk-gating"))
+    expect(store.getState().baseWorkflow.settings.riskGating).toBe(true)
+    fireEvent.click(screen.getByTestId("wf-risk-gating"))
+    expect(store.getState().baseWorkflow.settings.riskGating).toBe(false)
+  })
 })

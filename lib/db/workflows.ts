@@ -84,7 +84,13 @@ export async function createWorkflow(draft: WorkflowDraft): Promise<WorkflowRow>
     updatedAt: now,
     nodes: draft.nodes ?? [],
     edges: draft.edges ?? [],
-    settings: draft.settings ?? cloneSettings(DEFAULT_WORKFLOW_SETTINGS),
+    // ADR-0070 Phase 3: new workflows are risk-gated; ones authored before it
+    // have no field and stay ungated, so shipping this pauses nothing that
+    // already runs. Merged over `draft.settings` rather than living in
+    // DEFAULT_WORKFLOW_SETTINGS, so a caller supplying its own settings still
+    // gets the gate — and an IMPORTED workflow (which never goes through here)
+    // keeps its own posture, which is what the migration promises.
+    settings: { ...(draft.settings ?? cloneSettings(DEFAULT_WORKFLOW_SETTINGS)), riskGating: true },
     credentials: draft.credentials,
     viewport: draft.viewport ?? { x: 0, y: 0, zoom: 1 },
   }

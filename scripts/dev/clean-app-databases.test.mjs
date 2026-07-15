@@ -14,7 +14,7 @@ import assert from "node:assert/strict"
 import { appStorageTargets, cleanAppDatabases, readTauriIdentity } from "./clean-app-databases.mjs"
 
 const IDENTITY = {
-  identifier: "com.reactquickstarter.desktop",
+  identifier: "com.cognia.desktop",
   productName: "Cognia",
   binName: "cognia-next",
 }
@@ -31,13 +31,11 @@ test("macOS targets cover every WebKit origin, Caches, and the app-support dir",
   // productName, bundle identifier).
   assert.ok(targets.includes("/Users/test/Library/WebKit/cognia-next"))
   assert.ok(targets.includes("/Users/test/Library/WebKit/Cognia"))
-  assert.ok(targets.includes("/Users/test/Library/WebKit/com.reactquickstarter.desktop"))
+  assert.ok(targets.includes("/Users/test/Library/WebKit/com.cognia.desktop"))
   // WKWebView disk caches.
   assert.ok(targets.includes("/Users/test/Library/Caches/cognia-next"))
   // Native app data (identifier only — the space in the path is intentional).
-  assert.ok(
-    targets.includes("/Users/test/Library/Application Support/com.reactquickstarter.desktop")
-  )
+  assert.ok(targets.includes("/Users/test/Library/Application Support/com.cognia.desktop"))
 })
 
 test("duplicate candidate names collapse to a single WebKit entry", () => {
@@ -65,7 +63,7 @@ test("Windows targets use LOCALAPPDATA/APPDATA and the EBWebView folder", () => 
   })
 
   assert.ok(targets.includes("C:\\Users\\me\\AppData\\Local\\cognia-next\\EBWebView"))
-  assert.ok(targets.includes("C:\\Users\\me\\AppData\\Roaming\\com.reactquickstarter.desktop"))
+  assert.ok(targets.includes("C:\\Users\\me\\AppData\\Roaming\\com.cognia.desktop"))
 })
 
 test("Windows falls back to home-relative dirs when env vars are absent", () => {
@@ -76,7 +74,7 @@ test("Windows falls back to home-relative dirs when env vars are absent", () => 
     ...IDENTITY,
   })
   assert.ok(targets.includes("C:\\Users\\me\\AppData\\Local\\cognia-next\\EBWebView"))
-  assert.ok(targets.includes("C:\\Users\\me\\AppData\\Roaming\\com.reactquickstarter.desktop"))
+  assert.ok(targets.includes("C:\\Users\\me\\AppData\\Roaming\\com.cognia.desktop"))
 })
 
 test("Linux targets honour XDG dirs and cover the WebKitGTK data/cache roots", () => {
@@ -93,7 +91,7 @@ test("Linux targets honour XDG dirs and cover the WebKitGTK data/cache roots", (
   assert.ok(targets.includes("/home/test/.local/share/cognia-next"))
   assert.ok(targets.includes("/home/test/.cache/cognia-next"))
   // Native data dir == identifier under XDG_DATA_HOME.
-  assert.ok(targets.includes("/home/test/.local/share/com.reactquickstarter.desktop"))
+  assert.ok(targets.includes("/home/test/.local/share/com.cognia.desktop"))
 })
 
 test("Linux falls back to ~/.local/share and ~/.cache without XDG vars", () => {
@@ -187,13 +185,13 @@ test("readTauriIdentity falls back to constants on read/parse failure", () => {
   const identity = readTauriIdentity("/repo", () => {
     throw new Error("ENOENT")
   })
-  assert.equal(identity.identifier, "com.reactquickstarter.desktop")
+  assert.equal(identity.identifier, "com.cognia.desktop")
   assert.equal(identity.productName, "Cognia")
 })
 
 test("readTauriIdentity falls back per-field when a field is missing/blank", () => {
   const conf = JSON.stringify({ identifier: "", productName: "OnlyName" })
   const identity = readTauriIdentity("/repo", () => conf)
-  assert.equal(identity.identifier, "com.reactquickstarter.desktop")
+  assert.equal(identity.identifier, "com.cognia.desktop")
   assert.equal(identity.productName, "OnlyName")
 })

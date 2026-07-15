@@ -1,6 +1,12 @@
 import { act, renderHook } from "@testing-library/react"
 
-import { SKELETON_AT_MS, TIPS_AT_MS, TIP_ROTATE_MS, useThinkingPhase } from "./use-thinking-phase"
+import {
+  SKELETON_AT_MS,
+  TIPS_AT_MS,
+  TIP_ROTATE_MS,
+  VERB_ROTATE_MS,
+  useThinkingPhase,
+} from "./use-thinking-phase"
 
 describe("useThinkingPhase", () => {
   beforeEach(() => {
@@ -15,7 +21,12 @@ describe("useThinkingPhase", () => {
 
   it("starts in phase 1 with nothing revealed", () => {
     const { result } = renderHook(() => useThinkingPhase({ tipCount: 3 }))
-    expect(result.current).toEqual({ showSkeleton: false, showTips: false, tipIndex: 0 })
+    expect(result.current).toEqual({
+      showSkeleton: false,
+      showTips: false,
+      tipIndex: 0,
+      verbIndex: 0,
+    })
   })
 
   it("reveals the skeleton at the skeleton threshold", () => {
@@ -93,6 +104,56 @@ describe("useThinkingPhase", () => {
       jest.advanceTimersByTime(300)
     })
     expect(result.current.tipIndex).toBe(1)
+  })
+
+  // Verb rotation is the only motion during a long tool-heavy stretch, so it
+  // runs on its own clock from mount rather than behind a reveal threshold.
+  it("rotates the verb index from mount, with no threshold to wait out", () => {
+    const { result } = renderHook(() => useThinkingPhase({ verbCount: 3 }))
+    expect(result.current.verbIndex).toBe(0)
+    act(() => {
+      jest.advanceTimersByTime(VERB_ROTATE_MS)
+    })
+    expect(result.current.verbIndex).toBe(1)
+    act(() => {
+      jest.advanceTimersByTime(VERB_ROTATE_MS * 2)
+    })
+    // Wrapped back around: 1 → 2 → 0.
+    expect(result.current.verbIndex).toBe(0)
+  })
+
+  it("does not rotate verbs when motion is reduced", () => {
+    const { result } = renderHook(() => useThinkingPhase({ verbCount: 3, reduce: true }))
+    act(() => {
+      jest.advanceTimersByTime(VERB_ROTATE_MS * 4)
+    })
+    expect(result.current.verbIndex).toBe(0)
+  })
+
+  it("does not rotate when there is at most one verb", () => {
+    const { result } = renderHook(() => useThinkingPhase({ verbCount: 1 }))
+    act(() => {
+      jest.advanceTimersByTime(VERB_ROTATE_MS * 3)
+    })
+    expect(result.current.verbIndex).toBe(0)
+  })
+
+  it("honors a custom verb rotation interval", () => {
+    const { result } = renderHook(() => useThinkingPhase({ verbCount: 2, verbRotateMs: 50 }))
+    act(() => {
+      jest.advanceTimersByTime(50)
+    })
+    expect(result.current.verbIndex).toBe(1)
+  })
+
+  it("keeps verb rotation running independent of the tip clock", () => {
+    // tipCount 1 ⇒ no tip rotation; verbs must still cycle.
+    const { result } = renderHook(() => useThinkingPhase({ tipCount: 1, verbCount: 2 }))
+    act(() => {
+      jest.advanceTimersByTime(VERB_ROTATE_MS)
+    })
+    expect(result.current.tipIndex).toBe(0)
+    expect(result.current.verbIndex).toBe(1)
   })
 
   it("clears all timers on unmount (no rotation after teardown)", () => {

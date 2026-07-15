@@ -1,11 +1,13 @@
 import {
   groupAgentParts,
   isGroupableToolType,
+  isToolOnlyFlow,
   isToolPartType,
+  isTransparentPart,
   MIN_GROUP_SIZE,
 } from "./agent-flow-grouping"
 
-type P = { type?: string; id?: string }
+type P = { type?: string; id?: string; text?: string }
 
 describe("isToolPartType / isGroupableToolType", () => {
   it("recognizes tool- prefixed types", () => {
@@ -45,7 +47,7 @@ describe("groupAgentParts", () => {
     const parts: P[] = [
       { type: "tool-Read" },
       { type: "tool-Grep" },
-      { type: "text" },
+      { type: "text", text: "Now let me run it." },
       { type: "tool-Bash" },
     ]
     const segs = groupAgentParts(parts)
@@ -70,13 +72,89 @@ describe("groupAgentParts", () => {
   })
 
   it("preserves original indices on singles", () => {
-    const parts: P[] = [{ type: "text" }, { type: "tool-Read" }]
+    const parts: P[] = [{ type: "text", text: "hi" }, { type: "tool-Read" }]
     const segs = groupAgentParts(parts)
     expect(segs).toHaveLength(2)
     if (segs[1].kind === "single") expect(segs[1].entry.index).toBe(1)
   })
 
+  // A model that emits no prose between two tool calls still produces a
+  // zero-length text part. It renders nothing, so it must not split the run.
+  it.each([
+    ["empty", ""],
+    ["whitespace-only", "  \n "],
+    ["absent", undefined],
+  ])("keeps a run intact across a %s text part", (_label, text) => {
+    const parts: P[] = [{ type: "tool-Read" }, { type: "text", text }, { type: "tool-Grep" }]
+    const segs = groupAgentParts(parts)
+    expect(segs).toHaveLength(1)
+    expect(segs[0].kind).toBe("group")
+    if (segs[0].kind === "group") {
+      expect(segs[0].entries.map((e) => e.index)).toEqual([0, 2])
+    }
+  })
+
+  it("keeps a run intact across step-start / step-finish control parts", () => {
+    const parts: P[] = [
+      { type: "tool-Read" },
+      { type: "step-finish" },
+      { type: "step-start" },
+      { type: "tool-Grep" },
+    ]
+    const segs = groupAgentParts(parts)
+    expect(segs).toHaveLength(1)
+    expect(segs[0].kind).toBe("group")
+  })
+
+  it("emits no segment for a part that renders nothing", () => {
+    expect(groupAgentParts([{ type: "step-start" }, { type: "text", text: "" }])).toEqual([])
+  })
+
   it("returns an empty array for no parts", () => {
     expect(groupAgentParts([])).toEqual([])
+  })
+})
+
+describe("isTransparentPart", () => {
+  it("is transparent for parts that render nothing", () => {
+    expect(isTransparentPart({ type: "subagent" })).toBe(true)
+    expect(isTransparentPart({ type: "step-start" })).toBe(true)
+    expect(isTransparentPart({ type: "step-finish" })).toBe(true)
+    expect(isTransparentPart({ type: "text", text: "" })).toBe(true)
+    expect(isTransparentPart({ type: "text", text: "   " })).toBe(true)
+    expect(isTransparentPart({})).toBe(true)
+  })
+
+  it("is opaque for parts that render content", () => {
+    expect(isTransparentPart({ type: "text", text: "hi" })).toBe(false)
+    expect(isTransparentPart({ type: "tool-Read" })).toBe(false)
+    expect(isTransparentPart({ type: "artifact" })).toBe(false)
+  })
+})
+
+describe("isToolOnlyFlow", () => {
+  it("is true for a turn of only tool calls", () => {
+    expect(isToolOnlyFlow([{ type: "tool-Read" }, { type: "tool-Grep" }])).toBe(true)
+  })
+
+  it("ignores parts that render nothing", () => {
+    expect(
+      isToolOnlyFlow([{ type: "step-start" }, { type: "tool-Read" }, { type: "text", text: "" }])
+    ).toBe(true)
+  })
+
+  it("is false once the turn carries prose", () => {
+    expect(isToolOnlyFlow([{ type: "tool-Read" }, { type: "text", text: "Done." }])).toBe(false)
+  })
+
+  it("is false for non-tool content that is worth acting on", () => {
+    expect(isToolOnlyFlow([{ type: "artifact" }])).toBe(false)
+    expect(isToolOnlyFlow([{ type: "tool-Read" }, { type: "sources" }])).toBe(false)
+  })
+
+  it("is false when there is no tool call at all", () => {
+    expect(isToolOnlyFlow([])).toBe(false)
+    expect(isToolOnlyFlow([{ type: "step-start" }])).toBe(false)
+    expect(isToolOnlyFlow([{ type: "subagent" }])).toBe(false)
   })
 })

@@ -128,6 +128,15 @@ export interface GoalConfig {
    * limits, and timeouts always land directly. Off by default.
    */
   requireAcceptance?: boolean
+  /**
+   * Auto-raise the ceremony this goal owes when its objective + session posture
+   * are assessed medium/high risk (ADR-0070 Phase 2). Default true. Only ever
+   * raises: a flag the user set explicitly is never cleared by the assessment.
+   * Medium → `requireAcceptance`; high → also `manualContinue`, but only for an
+   * interactive origin (a headless goal that holds every turn never advances).
+   * Set false to opt this goal out of risk-driven ceremony entirely.
+   */
+  riskGating?: boolean
 
   // ── Judge customization (ADR-0019 Phase 2) ──────────────────────────────
   /**
@@ -306,8 +315,28 @@ export type GoalEventKind =
  * union via `kind`) — it lets the Activity tab render kind-specific cards
  * without runtime checks beyond the discriminator.
  */
+/**
+ * Where a goal was created from. Anything not "interactive" is headless — no
+ * human is watching, so `manualContinue` must never be risk-raised there (it
+ * would park the goal forever). Mirrors `TeamRunOrigin` in `types/agent/agent-team.ts`.
+ */
+export type GoalRunOrigin = "interactive" | "scheduler" | "remote" | "plugin" | "workflow"
+
+/** Risk assessment recorded on `goal_created` (ADR-0070 Phase 2). */
+export interface GoalCreatedRisk {
+  tier: "low" | "medium" | "high"
+  surfaces: string[]
+  reason: string
+}
+
 export type GoalEventPayload =
-  | { kind: "goal_created"; safeObjective: string; config: GoalConfig }
+  | {
+      kind: "goal_created"
+      safeObjective: string
+      config: GoalConfig
+      /** Present when risk gating ran; explains any auto-raised ceremony. */
+      risk?: GoalCreatedRisk
+    }
   | { kind: "objective_updated"; oldSafeObjective: string; newSafeObjective: string }
   | { kind: "turn_started"; turnNumber: number }
   | {
@@ -424,6 +453,11 @@ export interface GoalDefaults {
    * objective. Wired in ADR-0019 Phase 2 via `gateContinuation`.
    */
   manualContinue?: boolean
+  /**
+   * App-level default for `GoalConfig.riskGating` (ADR-0070 Phase 2). Undefined
+   * → true. Set false to opt every new goal out of risk-driven ceremony.
+   */
+  riskGating?: boolean
 
   // ── Mirrors of the new per-goal knobs (defaults for fresh goals) ─────────
   /** Default judge model id for new goals. */

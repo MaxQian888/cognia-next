@@ -4,13 +4,13 @@
  * Uses the canonical React Flow recipe: compute the bounding box of all nodes
  * (`getNodesBounds`), derive the transform that fits them into the target image
  * (`getViewportForBounds`), then rasterise the `.react-flow__viewport` layer
- * with html2canvas — applying the fit transform on the *cloned* DOM via
+ * with html2canvas-pro — applying the fit transform on the *cloned* DOM via
  * `onclone` so the live canvas is never mutated. Capturing the viewport layer
  * (not the wrapper) naturally excludes the toolbars, minimap, and breadcrumb,
  * which are React Flow panels / sibling overlays.
  */
 
-import html2canvas from "html2canvas"
+import html2canvas from "html2canvas-pro"
 import { getNodesBounds, getViewportForBounds, type Node } from "@xyflow/react"
 
 const MIN_DIMENSION = 512

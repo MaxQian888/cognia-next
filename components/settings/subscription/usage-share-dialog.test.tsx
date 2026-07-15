@@ -4,7 +4,7 @@ import type { SessionUsageRow } from "@/lib/db/session-usage"
 import type { SharePayload } from "@/lib/share/types"
 
 const mockHtml2canvas = jest.fn()
-jest.mock("html2canvas", () => ({
+jest.mock("html2canvas-pro", () => ({
   __esModule: true,
   default: (...a: unknown[]) => mockHtml2canvas(...a),
 }))

@@ -1,0 +1,35 @@
+{
+  "risk": {
+    "surfaces": {
+      "computer-use": {
+        "description": "The run can control the screen, mouse, and keyboard on this machine.",
+        "label": "Computer use"
+      },
+      "credential-auth": {
+        "description": "The run can reach stored credentials, keys, or subscription details.",
+        "label": "Credentials"
+      },
+      "data-destructive": {
+        "description": "The run's objective involves deleting, resetting, or wiping data.",
+        "label": "Destructive data change"
+      },
+      "external-send": {
+        "description": "The run can send messages to a real recipient outside this app.",
+        "label": "External send"
+      },
+      "file-write-broad": {
+        "description": "The run can write files outside a sandbox.",
+        "label": "Unsandboxed file writes"
+      },
+      "native-command": {
+        "description": "The run can execute shell or native operating-system commands.",
+        "label": "Native commands"
+      }
+    },
+    "tier": {
+      "high": "High risk",
+      "low": "Low risk",
+      "medium": "Medium risk"
+    }
+  }
+}

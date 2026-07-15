@@ -30,7 +30,7 @@ import path, { resolve, join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
 /** Hard-coded fallbacks, mirrored from src-tauri/tauri.conf.json. */
-const FALLBACK_IDENTIFIER = "com.reactquickstarter.desktop"
+const FALLBACK_IDENTIFIER = "com.cognia.desktop"
 const FALLBACK_PRODUCT_NAME = "Cognia"
 /** Cargo package/binary name — the folder macOS uses for the unbundled dev app. */
 const DEV_BIN_NAME = "cognia-next"

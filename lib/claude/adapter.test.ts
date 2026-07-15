@@ -1516,4 +1516,57 @@ describe("applySdkEvent — session notices (permission-denied + rate-limit)", (
     msgs = applySdkEvent(msgs, rateEvt("rejected")).messages
     expect(msgs).toHaveLength(2)
   })
+
+  // The notice projects a *live* condition. Once the window resets the SDK
+  // re-emits with `allowed`, which must remove the marker — otherwise a single
+  // past warning stays pinned in the persisted transcript forever, still
+  // reading "limit reached" with a `resetsAt` in the past.
+  it("rate_limit_event with status=allowed clears an existing rate-limit notice", () => {
+    let msgs = applySdkEvent([], rateEvt("rejected")).messages
+    expect(msgs).toHaveLength(1)
+    msgs = applySdkEvent(msgs, rateEvt("allowed")).messages
+    expect(msgs).toEqual([])
+  })
+
+  it("status=allowed clears a rate-limit notice stranded earlier in the transcript", () => {
+    const reply = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "done" }],
+    } as UIMessage
+    let msgs = applySdkEvent([], rateEvt("allowed_warning")).messages
+    msgs = [...msgs, reply]
+    msgs = applySdkEvent(msgs, rateEvt("allowed")).messages
+    expect(msgs).toEqual([reply])
+  })
+
+  // The old collapse only fired when the notice was the *last* message, so any
+  // assistant turn in between left one marker accumulating per turn.
+  it("collapses a rate-limit notice even when an assistant turn follows it", () => {
+    const reply = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "done" }],
+    } as UIMessage
+    let msgs = applySdkEvent([], rateEvt("allowed_warning")).messages
+    msgs = [...msgs, reply]
+    msgs = applySdkEvent(msgs, rateEvt("rejected")).messages
+    const notices = msgs.filter((m) => (m.parts[0] as { type?: string }).type === "session-notice")
+    expect(notices).toHaveLength(1)
+    expect((notices[0].parts[0] as unknown as { status: string }).status).toBe("rejected")
+  })
+
+  it("status=allowed leaves a permission-denied notice alone", () => {
+    let msgs = applySdkEvent([], sysDenied()).messages
+    msgs = applySdkEvent(msgs, rateEvt("allowed")).messages
+    expect(msgs).toHaveLength(1)
+    expect((msgs[0].parts[0] as unknown as { variant: string }).variant).toBe("permission-denied")
+  })
+
+  // Rate-limit events arrive every turn; the persist layer and the chat store
+  // both key off identity, so a no-op must not churn the array.
+  it("status=allowed returns the same array identity when there is no notice", () => {
+    const base = [{ id: "a1", role: "assistant", parts: [] }] as UIMessage[]
+    expect(applySdkEvent(base, rateEvt("allowed")).messages).toBe(base)
+  })
 })

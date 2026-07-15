@@ -120,6 +120,84 @@ describe("PluginConsentBroker", () => {
   })
 })
 
+describe("PluginConsentBroker.requestBinary", () => {
+  let captured: PluginConsentRequestEvent[]
+  let broker: PluginConsentBroker
+
+  const BINARY = { path: "/plugins/acme/bin/tool", relPath: "bin/tool" }
+  const REQ = { pluginId: "acme", permission: "cli:execute" as const, binary: BINARY }
+
+  beforeEach(() => {
+    captured = []
+    broker = new PluginConsentBroker({ timeoutMs: 200, emit: (event) => captured.push(event) })
+  })
+
+  afterEach(() => {
+    broker.rejectAllPending()
+    broker.clearAllSessionGrants()
+  })
+
+  it("carries the binary subject on the emitted event so the overlay can offer the checkbox", async () => {
+    const promise = broker.requestBinary(REQ)
+    expect(captured[0]).toEqual(expect.objectContaining({ binary: BINARY }))
+    broker.respond(captured[0].requestId, { allow: true, persist: false })
+    await expect(promise).resolves.toEqual({ granted: true, remember: false })
+  })
+
+  it("returns remember:true only when the responder says so explicitly", async () => {
+    const promise = broker.requestBinary(REQ)
+    broker.respond(captured[0].requestId, { allow: true, persist: false, remember: true })
+    await expect(promise).resolves.toEqual({ granted: true, remember: true })
+  })
+
+  it("treats an omitted remember field as session-scoped", async () => {
+    // Every responder written before `remember` existed — including the global
+    // test auto-responder — omits it. Omission must never mean "durable".
+    const promise = broker.requestBinary(REQ)
+    broker.respond(captured[0].requestId, { allow: true, persist: false })
+    await expect(promise).resolves.toEqual({ granted: true, remember: false })
+  })
+
+  it("strips remember from a rejection", async () => {
+    const promise = broker.requestBinary(REQ)
+    broker.respond(captured[0].requestId, { allow: false, persist: false, remember: true })
+    await expect(promise).resolves.toEqual({ granted: false, remember: false })
+  })
+
+  it("never infers remember from a session grant — no prompt means no answer", async () => {
+    // A session grant short-circuits the prompt entirely, so the user was never
+    // asked about durability. Inferring it from their earlier "allow this
+    // session" is exactly the silent upgrade the ledger must not permit.
+    const first = broker.requestBinary(REQ)
+    broker.respond(captured[0].requestId, { allow: true, persist: true, remember: true })
+    await expect(first).resolves.toEqual({ granted: true, remember: true })
+
+    captured.length = 0
+    await expect(broker.requestBinary(REQ)).resolves.toEqual({ granted: true, remember: false })
+    expect(captured).toHaveLength(0)
+  })
+
+  it("auto-rejects on timeout without remembering", async () => {
+    await expect(broker.requestBinary(REQ)).resolves.toEqual({ granted: false, remember: false })
+  })
+
+  it("auto-rejects without remembering when the emit fails", async () => {
+    const failing = new PluginConsentBroker({
+      timeoutMs: 5000,
+      emit: () => {
+        throw new Error("emit broken")
+      },
+    })
+    await expect(failing.requestBinary(REQ)).resolves.toEqual({ granted: false, remember: false })
+  })
+
+  it("rejectAllPending denies an outstanding binary request without remembering", async () => {
+    const promise = broker.requestBinary(REQ)
+    broker.rejectAllPending()
+    await expect(promise).resolves.toEqual({ granted: false, remember: false })
+  })
+})
+
 describe("getPluginConsentBroker singleton", () => {
   afterEach(() => {
     resetPluginConsentBroker()

@@ -226,6 +226,7 @@ export function DesktopChatWorkspace() {
       log.info("new-team-conversation", { teamId })
       const s = await create({ title: "New conversation", kind: "team", teamId })
       select(s.id)
+      return s
     },
     [create, select]
   )
@@ -414,13 +415,31 @@ export function DesktopChatWorkspace() {
     [bulkUnarchive]
   )
 
+  // Starter cards / follow-up chips. On the welcome page there is no session
+  // yet, so this has to start one before sending: `send` drops the prompt when
+  // no session is selected, which made the cards read as dead buttons. The new
+  // session is addressed explicitly — the store pointer has not propagated to
+  // this closure yet.
   const handleUseSample = useCallback(
-    (text: string) => {
+    async (text: string) => {
       const active = useChatStore.getState().activeSessionId
-      if (active && isTeamSessionId(active)) void teamChat.send(text)
-      else void directChat.send(text)
+      if (active) {
+        if (isTeamSessionId(active)) await teamChat.send(text, { sessionId: active })
+        else await directChat.send(text, undefined, { sessionId: active })
+        return
+      }
+      // Quick-start respects the selected guild, same as the welcome CTA. A
+      // bare `create()` auto-applies the default preset, so a direct
+      // quick-start needs no character pick.
+      if (selectedGuild.kind === "team") {
+        const s = await handleNewTeamConversation(selectedGuild.teamId)
+        await teamChat.send(text, { sessionId: s.id })
+      } else {
+        const s = await create()
+        await directChat.send(text, undefined, { sessionId: s.id })
+      }
     },
-    [directChat, teamChat, isTeamSessionId]
+    [directChat, teamChat, isTeamSessionId, create, selectedGuild, handleNewTeamConversation]
   )
 
   // The welcome CTA / tab-strip "+" respect the selected guild: a team guild

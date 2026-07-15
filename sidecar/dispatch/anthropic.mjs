@@ -23,6 +23,7 @@ import {
 } from "../builtin-tools/plugin-tools.mjs"
 import { makeInputStream } from "./input-stream.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
+import { createProviderStreamLogger } from "./provider-stream-log.mjs"
 import { foldSystemPrompt, thinkingFromBudget } from "./system-prompt.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
 import { classifyToolCallConfinement, combineVerdict } from "../builtin-tools/confinement.mjs"
@@ -608,9 +609,13 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // Pipe SDK events to the parent. Captures the SDK-issued session id on the
   // first event that carries one (powers resume continuity).
   let sdkSessionIdSeen = false
+  // Separates "the provider never answered" from "the stream broke mid-flight"
+  // when a turn stalls — see `./provider-stream-log.mjs`.
+  const streamLog = createProviderStreamLogger({ sessionId, turnId: sendOptions.turnId, log })
   ;(async () => {
     try {
       for await (const evt of q) {
+        streamLog.onEvent()
         if (!sdkSessionIdSeen && evt && typeof evt.session_id === "string") {
           sdkSessionIdSeen = true
           emit({
@@ -622,8 +627,10 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         mcpAutoReconnect.onEvent(evt)
         emit({ type: "event", sessionId, event: evt })
       }
+      streamLog.onEnd()
       emit({ type: "session_ended", sessionId })
     } catch (err) {
+      streamLog.onError(err)
       emit({
         type: "session_ended",
         sessionId,

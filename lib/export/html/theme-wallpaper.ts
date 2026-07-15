@@ -83,8 +83,8 @@ body { background-color: transparent; }
 /**
  * Card backdrop for the usage card / quote card. Uses the card element's own
  * `background-image` (superseding any preset grid) rather than a `::before`
- * layer — html2canvas 1.4.1 rasterizes element backgrounds reliably but is
- * flaky with pseudo-element background images. Opaque tiles/bubbles keep the
+ * layer — html2canvas rasterizes element backgrounds reliably but is flaky
+ * with pseudo-element background images. Opaque tiles/bubbles keep the
  * numbers and quoted text readable over the scrimmed photo.
  */
 export function buildCardWallpaperCss(dataUrl: string, t: ThemeTokens): string {

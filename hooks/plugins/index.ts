@@ -24,6 +24,14 @@ export {
   __resetPluginMarketplaceClientForTests,
 } from "./use-plugin-marketplace"
 export {
+  useOpenVsxMarketplace,
+  toMarketplaceEntry,
+  OPEN_VSX_SEARCH_DEBOUNCE_MS,
+  type UseOpenVsxMarketplace,
+  type OpenVsxMarketplaceEntry,
+  type OpenVsxMarketplaceState,
+} from "./use-openvsx-marketplace"
+export {
   useBuiltinPluginEntries,
   mapBuiltinRowToEntry,
   type BuiltinMarketplaceEntry,

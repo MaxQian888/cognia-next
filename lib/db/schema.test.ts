@@ -10,6 +10,8 @@ import "fake-indexeddb/auto"
 // Jest collapsed-schema fast path skips — force the full version chain.
 ;(globalThis as { __COGNIA_DB_FULL_SCHEMA__?: boolean }).__COGNIA_DB_FULL_SCHEMA__ = true
 
+import Dexie from "dexie"
+
 import {
   CogniaDB,
   LEGACY_COGNIA_DB_NAME,
@@ -184,6 +186,8 @@ describe("getDb", () => {
     expect(db.inboxTelemetryEvents).toBeDefined()
     // v108 — Local code-adoption tracking.
     expect(db.codeAdoptionTurns).toBeDefined()
+    // v109 — user-consent binary ledger.
+    expect(db.approvedBinaries).toBeDefined()
   })
 
   it("v108 stores a code-adoption turn and resolves its indexes", async () => {
@@ -226,6 +230,171 @@ describe("getDb", () => {
     expect(
       await db.codeAdoptionTurns.where("[sessionId+ts]").between(["s1", 150], ["s1", 300]).count()
     ).toBe(1)
+  })
+
+  // v109 — binary trust-model rebuild. Two guarantees: the new consent ledger
+  // resolves its compound key + indexes, and the upgrade hook retires the v39
+  // placeholder seed from databases that already drank it — WITHOUT touching
+  // rows the user populated themselves.
+  it("v109 approvedBinaries round-trips on its compound key and indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(109)
+
+    await db.approvedBinaries.bulkPut([
+      {
+        pluginId: "acme.ext",
+        binaryPath: "/plugins/acme.ext/server/lsp",
+        sha256: "a".repeat(64),
+        approvedAt: 100,
+      },
+      {
+        pluginId: "acme.ext",
+        binaryPath: "/plugins/acme.ext/bin/fmt",
+        sha256: "b".repeat(64),
+        approvedAt: 200,
+      },
+      {
+        pluginId: "other.ext",
+        binaryPath: "/plugins/other.ext/bin/tool",
+        sha256: "c".repeat(64),
+        approvedAt: 300,
+      },
+    ])
+
+    // Compound primary key resolves an exact (pluginId, binaryPath) pair.
+    expect(await db.approvedBinaries.get(["acme.ext", "/plugins/acme.ext/bin/fmt"])).toEqual(
+      expect.objectContaining({ sha256: "b".repeat(64), approvedAt: 200 })
+    )
+    // Same path under a different plugin is a different row — approvals never
+    // cross plugin boundaries.
+    expect(await db.approvedBinaries.where("pluginId").equals("acme.ext").count()).toBe(2)
+    expect(await db.approvedBinaries.where("sha256").equals("c".repeat(64)).count()).toBe(1)
+    expect(await db.approvedBinaries.where("approvedAt").above(150).count()).toBe(2)
+  })
+
+  it("v109_removes_placeholder_trusted_publishers", async () => {
+    const name = `cognia-v109-placeholder-purge-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(108).stores({
+      trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
+    })
+    await legacy.open()
+    // Exactly the shape the v39 seed wrote — the strings that were checked
+    // into this repo and that any hostile .vsix could self-declare.
+    await legacy.table("trustedPublishers").bulkPut([
+      {
+        publicKey: "placeholder:microsoft.vscode",
+        fingerprint: "placeholder:microsoft.vscode",
+        authorName: "Microsoft",
+        firstTrustedAt: 0,
+        lastSeenAt: 0,
+        installCount: 0,
+      },
+      {
+        publicKey: "placeholder:openvsx.root",
+        fingerprint: "placeholder:openvsx.root",
+        authorName: "Open VSX Registry",
+        firstTrustedAt: 0,
+        lastSeenAt: 0,
+        installCount: 0,
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(109)
+
+    // Hop 1 of the exploit chain is gone: nothing is left to match against.
+    expect(await upgraded.trustedPublishers.count()).toBe(0)
+    expect(
+      await upgraded.trustedPublishers
+        .where("fingerprint")
+        .equals("placeholder:microsoft.vscode")
+        .first()
+    ).toBeUndefined()
+
+    await upgraded.delete()
+    upgraded.close()
+  })
+
+  it("v109_preserves_user_accepted_rows", async () => {
+    const name = `cognia-v109-preserve-user-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(108).stores({
+      trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
+    })
+    await legacy.open()
+    await legacy.table("trustedPublishers").bulkPut([
+      // Seeded placeholder — must go.
+      {
+        publicKey: "placeholder:rust-lang.rust-analyzer",
+        fingerprint: "placeholder:rust-lang.rust-analyzer",
+        authorName: "rust-lang",
+        firstTrustedAt: 0,
+        lastSeenAt: 0,
+        installCount: 0,
+      },
+      // A row the user populated themselves — their data, must survive.
+      {
+        publicKey: "MCowBQYDK2VwAyEA-user-supplied-key",
+        fingerprint: "9f3a1c8e4b7d2f605a1938e7c4b0d6f2938475610badc0ffee1234567890abcd",
+        authorName: "A publisher the user added by hand",
+        firstTrustedAt: 111,
+        lastSeenAt: 222,
+        installCount: 7,
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(await upgraded.trustedPublishers.count()).toBe(1)
+    const survivor = await upgraded.trustedPublishers.get("MCowBQYDK2VwAyEA-user-supplied-key")
+    expect(survivor).toEqual(
+      expect.objectContaining({
+        authorName: "A publisher the user added by hand",
+        firstTrustedAt: 111,
+        lastSeenAt: 222,
+        installCount: 7,
+      })
+    )
+    // The purge is keyed on the fingerprint marker, not on "everything".
+    expect(
+      await upgraded.trustedPublishers
+        .where("publicKey")
+        .equals("placeholder:rust-lang.rust-analyzer")
+        .first()
+    ).toBeUndefined()
+
+    await upgraded.delete()
+    upgraded.close()
+  })
+
+  it("v109 placeholder purge is idempotent on a database with no placeholders", async () => {
+    const name = `cognia-v109-idempotent-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(108).stores({
+      trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
+    })
+    await legacy.open()
+    await legacy.table("trustedPublishers").put({
+      publicKey: "real-key",
+      fingerprint: "deadbeef".repeat(8),
+      authorName: "Real",
+      firstTrustedAt: 1,
+      lastSeenAt: 2,
+      installCount: 0,
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(await upgraded.trustedPublishers.count()).toBe(1)
+    await upgraded.delete()
+    upgraded.close()
   })
 
   // v49 — Inbox optimization pass: messages.platformMessageId index + new

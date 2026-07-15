@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import type { LogtoSession } from "@/lib/logto/client"
+import path from "node:path"
 
 import {
   writeLogtoSessionFile,
@@ -48,7 +49,7 @@ const session: LogtoSession = {
 
 describe("cli logto session file store", () => {
   it("stores at <home>/logto.json", () => {
-    expect(logtoSessionPath(HOME)).toBe("/home/u/.cognia/logto.json")
+    expect(logtoSessionPath(HOME)).toBe(path.join(HOME, "logto.json"))
   })
 
   it("writes the session as JSON, creating the home dir", () => {

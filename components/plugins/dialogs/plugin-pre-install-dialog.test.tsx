@@ -110,6 +110,45 @@ describe("PluginPreInstallDialog", () => {
     expect(screen.getByText("network:fetch")).toBeInTheDocument()
   })
 
+  it("install_dialog_shows_inferred_permissions", () => {
+    // For an Open VSX install, `permission.declared` is the union of what
+    // `inferPermissions` walked out of the real downloaded bundle (see
+    // openvsx-install-flow's aggregateManifest). The dialog's job is to show
+    // every one of them, plus the notice that a VS Code extension is an
+    // ordinary program — the permission list alone reads like a sandbox
+    // manifest, which would imply a confinement cognia does not provide.
+    const target: PreInstallTarget = {
+      ...permissionTarget,
+      permission: {
+        pluginId: "esbenp.prettier-vscode",
+        declared: ["filesystem:read", "filesystem:write", "process:spawn", "network:fetch"],
+        optional: [],
+      },
+    }
+    render(
+      <PluginPreInstallDialog
+        target={target}
+        notice="Extensions run with real filesystem, network, and process access."
+        onContinue={() => {}}
+        onCancel={() => {}}
+      />
+    )
+
+    for (const perm of ["filesystem:read", "filesystem:write", "process:spawn", "network:fetch"]) {
+      expect(screen.getByText(perm)).toBeInTheDocument()
+    }
+    expect(screen.getByTestId("pre-install-permission-notice")).toHaveTextContent(
+      "real filesystem, network, and process access"
+    )
+  })
+
+  it("renders no notice when none is supplied, leaving the cognia chain unchanged", () => {
+    render(
+      <PluginPreInstallDialog target={permissionTarget} onContinue={() => {}} onCancel={() => {}} />
+    )
+    expect(screen.queryByTestId("pre-install-permission-notice")).not.toBeInTheDocument()
+  })
+
   it("surfaces the network egress allowlist + reasoning in the permission step", () => {
     const target: PreInstallTarget = {
       ...permissionTarget,

@@ -75,6 +75,7 @@ export function MessageList({
   const [actionMessage, setActionMessage] = useState<UIMessage | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const scrollParentRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
 
   // `useCharacters()` (useLiveQuery) hands back a fresh array reference on
   // every Dexie write even when the character set is unchanged. Building the
@@ -158,7 +159,8 @@ export function MessageList({
     }
   }, [])
 
-  const showThinking = shouldShowThinking(messages, status)
+  const thinking = thinkingMode(messages, status)
+  const showThinking = thinking !== null
   const totalCount = messages.length + (showThinking ? 1 : 0)
   // Short lists skip virtualization entirely (see VIRTUALIZE_THRESHOLD). The
   // virtualizer hook + measure effects below stay unconditional (Rules of
@@ -237,6 +239,36 @@ export function MessageList({
       if (el) el.scrollTop = el.scrollHeight
     }
   }, [messages, status, isAtBottom, autoScrollOnStream])
+
+  // Latest stick condition, mirrored into a ref so the ResizeObserver below
+  // (registered once) can read current values without re-subscribing per frame.
+  const stickRef = useRef({ atBottom: true, active: false, enabled: true })
+  stickRef.current = {
+    atBottom: isAtBottom,
+    active: status === "streaming" || status === "awaiting_approval",
+    enabled: autoScrollOnStream !== false,
+  }
+
+  // Content-resize follow. The streaming text renders through
+  // `useDeferredValue` (see streaming-text-part) and async syntax highlighting,
+  // so the visible DOM height grows one or more frames AFTER the `messages`
+  // state changes — the effect above pins based on the pre-growth height and
+  // never re-fires for that deferred growth, letting the view drift up off the
+  // bottom. Observing the content box re-pins on the actual height change,
+  // regardless of when React commits it. Setting scrollTop never resizes
+  // content, so this can't loop.
+  useEffect(() => {
+    const content = contentRef.current
+    if (!content) return
+    const ro = new ResizeObserver(() => {
+      const { enabled, active, atBottom } = stickRef.current
+      if (!enabled || !active || !atBottom) return
+      const el = scrollParentRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    })
+    ro.observe(content)
+    return () => ro.disconnect()
+  }, [])
 
   const handleScroll = useCallback(() => {
     const el = scrollParentRef.current
@@ -319,16 +351,47 @@ export function MessageList({
             role="log"
             onScroll={handleScroll}
           >
-            {virtualize ? (
-              <div style={{ height: totalSize, position: "relative" }}>
-                {virtualItems.map((virtualItem) => {
-                  const isThinkingRow = virtualItem.index === messages.length
-                  if (isThinkingRow) {
+            <div ref={contentRef}>
+              {virtualize ? (
+                <div style={{ height: totalSize, position: "relative" }}>
+                  {virtualItems.map((virtualItem) => {
+                    const isThinkingRow = virtualItem.index === messages.length
+                    if (isThinkingRow) {
+                      return (
+                        <div
+                          key="thinking"
+                          data-index={virtualItem.index}
+                          ref={rowVirtualizer.measureElement}
+                          style={{
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            width: "100%",
+                            transform: `translateY(${virtualItem.start}px)`,
+                            padding: "0 1rem",
+                          }}
+                        >
+                          <ChatThinkingIndicator
+                            directCharacter={directCharacter}
+                            onPhaseChange={pinToBottom}
+                            compact={thinking === "compact"}
+                          />
+                        </div>
+                      )
+                    }
+
+                    const m = messages[virtualItem.index]!
+                    const isStreaming =
+                      virtualItem.index === lastIndex &&
+                      m.role === "assistant" &&
+                      (status === "streaming" || status === "awaiting_approval")
+                    const isStreamingMeasureSkip = virtualItem.index === streamingRowIndex
+
                     return (
                       <div
-                        key="thinking"
+                        key={m.id}
                         data-index={virtualItem.index}
-                        ref={rowVirtualizer.measureElement}
+                        ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
                         style={{
                           position: "absolute",
                           top: 0,
@@ -338,66 +401,39 @@ export function MessageList({
                           padding: "0 1rem",
                         }}
                       >
-                        <ChatThinkingIndicator
-                          directCharacter={directCharacter}
-                          onPhaseChange={pinToBottom}
-                        />
+                        {renderRow(m, isStreaming)}
                       </div>
                     )
-                  }
-
-                  const m = messages[virtualItem.index]!
-                  const isStreaming =
-                    virtualItem.index === lastIndex &&
-                    m.role === "assistant" &&
-                    (status === "streaming" || status === "awaiting_approval")
-                  const isStreamingMeasureSkip = virtualItem.index === streamingRowIndex
-
-                  return (
-                    <div
-                      key={m.id}
-                      data-index={virtualItem.index}
-                      ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${virtualItem.start}px)`,
-                        padding: "0 1rem",
-                      }}
-                    >
-                      {renderRow(m, isStreaming)}
+                  })}
+                </div>
+              ) : (
+                // Document-flow path for short lists: intrinsic heights, no
+                // absolute positioning, no measureElement ref (zero ResizeObservers),
+                // no remount-on-scroll.
+                <div>
+                  {messages.map((m, index) => {
+                    const isStreaming =
+                      index === lastIndex &&
+                      m.role === "assistant" &&
+                      (status === "streaming" || status === "awaiting_approval")
+                    return (
+                      <div key={m.id} data-msg-id={m.id} style={{ padding: "0 1rem" }}>
+                        {renderRow(m, isStreaming)}
+                      </div>
+                    )
+                  })}
+                  {showThinking && (
+                    <div key="thinking" style={{ padding: "0 1rem" }}>
+                      <ChatThinkingIndicator
+                        directCharacter={directCharacter}
+                        onPhaseChange={pinToBottom}
+                        compact={thinking === "compact"}
+                      />
                     </div>
-                  )
-                })}
-              </div>
-            ) : (
-              // Document-flow path for short lists: intrinsic heights, no
-              // absolute positioning, no measureElement ref (zero ResizeObservers),
-              // no remount-on-scroll.
-              <div>
-                {messages.map((m, index) => {
-                  const isStreaming =
-                    index === lastIndex &&
-                    m.role === "assistant" &&
-                    (status === "streaming" || status === "awaiting_approval")
-                  return (
-                    <div key={m.id} data-msg-id={m.id} style={{ padding: "0 1rem" }}>
-                      {renderRow(m, isStreaming)}
-                    </div>
-                  )
-                })}
-                {showThinking && (
-                  <div key="thinking" style={{ padding: "0 1rem" }}>
-                    <ChatThinkingIndicator
-                      directCharacter={directCharacter}
-                      onPhaseChange={pinToBottom}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+            </div>
 
             {!isAtBottom && (
               <Button
@@ -489,36 +525,43 @@ function estimateRowSize(index: number, streamingRowIndex: number, messages: UIM
 }
 
 /**
- * True when we should show the "Claude is thinking…" shimmer:
- * we're streaming AND the assistant hasn't produced any visible content yet.
+ * How to render the thinking indicator for the current turn, or `null` to hide
+ * it. We show it for the WHOLE streaming turn — an agentic turn is mostly tool
+ * calls, and going static the moment the first tool block lands left minutes of
+ * a live run with no sign of life (the run bar's timer is a thin, easily-missed
+ * strip). Claude Code keeps its spinner up for the entire turn; so do we.
+ *
+ *   "full"     nothing visible from the assistant yet → pulse + label + dots,
+ *              then the skeleton placeholder and tips as the wait grows.
+ *   "compact"  content is already on screen (text / tool block / file) and the
+ *              turn is still running → same live label, no skeleton.
  *
  * Intentionally excludes `awaiting_approval` since the approval dialog itself
  * is the user feedback for that state.
  */
-function shouldShowThinking(
+export function thinkingMode(
   messages: UIMessage[],
   status: "idle" | "streaming" | "awaiting_approval" | "error"
-): boolean {
-  if (status !== "streaming") return false
-  if (messages.length === 0) return true
+): "full" | "compact" | null {
+  if (status !== "streaming") return null
+  if (messages.length === 0) return "full"
   const last = messages[messages.length - 1]
-  if (last.role !== "assistant") return true
+  if (last.role !== "assistant") return "full"
   // Any non-empty text or finished part means content is already visible.
   for (const part of last.parts) {
     const type = (part as { type?: string }).type
     if (!type) continue
     if (type === "text") {
       const text = (part as { text?: string }).text ?? ""
-      if (text.trim().length > 0) return false
+      if (text.trim().length > 0) return "compact"
     } else if (type === "reasoning") {
       const text = (part as { text?: string }).text ?? ""
-      if (text.trim().length > 0) return false
+      if (text.trim().length > 0) return "compact"
     } else if (typeof type === "string" && type.startsWith("tool-")) {
-      // Tool blocks render their own visible affordance — no shimmer needed.
-      return false
+      return "compact"
     } else if (type === "file") {
-      return false
+      return "compact"
     }
   }
-  return true
+  return "full"
 }

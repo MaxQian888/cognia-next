@@ -1,4 +1,8 @@
 {
+  "aiBadge": {
+    "label": "AI-authored node",
+    "title": "Authored by the workflow-AI assistant — Ctrl+Z to revert."
+  },
   "groupContainer": {
     "dropHint": "Drag nodes here to group them",
     "locked": "Locked",

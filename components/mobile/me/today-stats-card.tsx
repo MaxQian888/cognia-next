@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useState } from "react"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
 import { AlertTriangleIcon, ClockAlertIcon } from "lucide-react"
 
@@ -99,6 +99,7 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
   // Localized "3 minutes ago" via next-intl — the old hand-rolled "3m"/"2d"
   // helper rendered raw English abbreviations for zh-CN users.
   const format = useFormatter()
+  const now = useNow()
   const [stats, setStats] = useState<Stats>(initial)
   const reduce = useReducedMotion()
 
@@ -170,7 +171,7 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
     {
       label: t("backup"),
       value: stats.lastBackupMs
-        ? format.relativeTime(new Date(stats.lastBackupMs))
+        ? format.relativeTime(new Date(stats.lastBackupMs), now)
         : t("backupNever"),
       href: "/me/backup",
       testId: "stat-tile-backup",

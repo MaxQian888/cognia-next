@@ -16,7 +16,7 @@
  */
 
 import { useMemo, useState } from "react"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { CopyIcon, PlayIcon, SearchIcon, TerminalSquareIcon } from "lucide-react"
 
@@ -73,6 +73,7 @@ function groupByProject(rows: TerminalHistoryRow[]): ProjectGroup[] {
 export function MobileCommandHistory() {
   const t = useTranslations("mobile.commandHistory")
   const format = useFormatter()
+  const now = useNow()
   const [query, setQuery] = useState("")
 
   const { data } = useDexieFirstQuery<TerminalHistoryRow[]>({
@@ -194,7 +195,8 @@ export function MobileCommandHistory() {
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="truncate font-mono text-xs">{row.command}</span>
                     <span className="text-[11px] text-muted-foreground">
-                      {t("uses", { count: row.uses })} · {format.relativeTime(new Date(row.ts))}
+                      {t("uses", { count: row.uses })} ·{" "}
+                      {format.relativeTime(new Date(row.ts), now)}
                     </span>
                   </span>
                   <CopyIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />

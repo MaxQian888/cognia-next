@@ -519,6 +519,10 @@ async function captureAssistantReplyCore(
   const timeoutMs = cap?.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const idleTimeoutMs = cap?.idleTimeoutMs ?? 0
   const signal = cap?.signal
+  // Identifies THIS turn on the wire. The sidecar echoes it on every
+  // session-scoped event, so `onEvent` below can drop events left over from a
+  // previous turn of the same session — see the filter for why that matters.
+  const turnId = crypto.randomUUID()
 
   return new Promise<RunAndCaptureResult>((resolve, reject) => {
     let unlisten: (() => void) | null = null
@@ -759,6 +763,21 @@ async function captureAssistantReplyCore(
       // not for us — multiple in-flight runs share the same channel.
       const eventSessionId = (evt as { sessionId?: string }).sessionId
       if (eventSessionId !== sessionId) {
+        return
+      }
+
+      // Same session, but a PREVIOUS turn. A turn that times out fires a
+      // best-effort `interruptSession`; the `session_ended` that interrupt
+      // produces arrives after this capture's predecessor already detached, so
+      // without this the NEXT turn on the reused session id consumed it and
+      // failed instantly with "ended with no assistant text" (no text, no
+      // surfaces, no tool calls) while its own turn was still starting up.
+      // sessionId cannot separate the two — only the turn id can.
+      //
+      // A missing `turnId` means the sidecar didn't stamp it (turn-less send),
+      // so we can't tell and keep the event rather than dropping a real one.
+      const eventTurnId = (evt as { turnId?: string }).turnId
+      if (eventTurnId !== undefined && eventTurnId !== turnId) {
         return
       }
 
@@ -1062,7 +1081,7 @@ async function captureAssistantReplyCore(
         // Now fire the actual send. If it throws synchronously the
         // catch below cleans up; if it rejects async we still clean up
         // via the same path.
-        sendPrompt(sessionId, prompt, options).catch((err: unknown) => {
+        sendPrompt(sessionId, prompt, { ...(options ?? {}), turnId }).catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err)
           finishErr(new RunAndCaptureError(`sendPrompt failed: ${message}`, "send_failed"))
         })

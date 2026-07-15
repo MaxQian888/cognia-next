@@ -17,8 +17,7 @@ export interface PartEntry<P> {
 }
 
 export type AgentFlowSegment<P> =
-  | { kind: "single"; entry: PartEntry<P> }
-  | { kind: "group"; entries: PartEntry<P>[] }
+  { kind: "single"; entry: PartEntry<P> } | { kind: "group"; entries: PartEntry<P>[] }
 
 /** True for any `tool-*` part type. */
 export function isToolPartType(type: string | undefined): boolean {
@@ -30,6 +29,44 @@ export function isGroupableToolType(type: string | undefined): boolean {
   if (!isToolPartType(type)) return false
   // TodoWrite renders as a plan list, not a tool card.
   return type !== "tool-TodoWrite" && type !== "tool-mcp__cognia-tools__TodoWrite"
+}
+
+/** AI SDK structural/control part types the renderer draws nothing for. */
+export const SILENT_CONTROL_PART_TYPES: ReadonlySet<string> = new Set(["step-start", "step-finish"])
+
+/**
+ * True for parts that render nothing inline, so they are transparent to
+ * grouping — they neither emit a segment nor break a run.
+ *
+ * The empty-`text` case is load-bearing: a model that emits no prose between
+ * two tool calls still produces a zero-length text part, which would otherwise
+ * flush the run and split one activity group into two.
+ *
+ * Sub-agent parts render once as a dispatch tree at the message level, never
+ * inline, so they are transparent here too.
+ */
+export function isTransparentPart<P extends { type?: string }>(part: P): boolean {
+  const type = part?.type
+  if (!type) return true
+  if (type === "subagent") return true
+  if (SILENT_CONTROL_PART_TYPES.has(type)) return true
+  if (type === "text") return !((part as { text?: string }).text ?? "").trim()
+  return false
+}
+
+/**
+ * True when a message carries tool calls and nothing a reader could act on —
+ * no prose, no artifact, no sources. Such a turn has nothing to copy, quote,
+ * read aloud or turn into a card, so the renderer gives it no action bar.
+ */
+export function isToolOnlyFlow<P extends { type?: string }>(parts: P[]): boolean {
+  let sawTool = false
+  for (const part of parts) {
+    if (isTransparentPart(part)) continue
+    if (!isToolPartType(part?.type)) return false
+    sawTool = true
+  }
+  return sawTool
 }
 
 export function groupAgentParts<P extends { type?: string }>(parts: P[]): AgentFlowSegment<P>[] {
@@ -46,10 +83,8 @@ export function groupAgentParts<P extends { type?: string }>(parts: P[]): AgentF
   }
 
   parts.forEach((part, index) => {
-    const type = part?.type
-    // Sub-agent parts render separately as a tree — skip without breaking runs.
-    if (type === "subagent") return
-    if (isGroupableToolType(type)) {
+    if (isTransparentPart(part)) return
+    if (isGroupableToolType(part?.type)) {
       run.push({ part, index })
       return
     }

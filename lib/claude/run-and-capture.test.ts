@@ -134,7 +134,9 @@ describe("runAndCaptureAssistantReply", () => {
     expect(result.text).toBe("Hello, world!")
     expect(result.messageId).toBe("uuid-asst-1")
     expect(sendPromptMock).toHaveBeenCalledTimes(1)
-    expect(sendPromptMock).toHaveBeenCalledWith(SESSION, "hi", undefined)
+    // Every send is stamped with a turn id — the sidecar echoes it back so a
+    // capture can tell its own events from a previous turn's leftovers.
+    expect(sendPromptMock).toHaveBeenCalledWith(SESSION, "hi", { turnId: expect.any(String) })
     expect(unlistenMock).toHaveBeenCalledTimes(1)
   })
 
@@ -356,6 +358,49 @@ describe("runAndCaptureAssistantReply", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  // ── Turn correlation (stale-event isolation) ──────────────────────────
+  // Read back the turn id this capture stamped on its own send.
+  const stampedTurnId = (): string => {
+    const opts = sendPromptMock.mock.calls.at(-1)?.[2] as { turnId?: string } | undefined
+    if (!opts?.turnId) throw new Error("send was not stamped with a turnId")
+    return opts.turnId
+  }
+  const withTurn = (evt: ClaudeEvent, turnId: string): ClaudeEvent =>
+    ({ ...evt, turnId }) as unknown as ClaudeEvent
+
+  it("ignores a session_ended left over from a PREVIOUS turn of the same session", async () => {
+    // Regression (Lark connector, 2026-07-15): turn 1 hit its wall clock, and
+    // the best-effort `interruptSession` it fired produced a `session_ended`
+    // that arrived ~0.5s later — by which time turn 2 had subscribed on the
+    // reused session id. Turn 2 consumed it and died 1.3s in with
+    // "ended with no assistant text" while its own session was still booting.
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    const mine = stampedTurnId()
+
+    // The timed-out predecessor's interrupt lands here, stamped with ITS id.
+    fire(withTurn(sessionEnded(), "turn-of-the-timed-out-predecessor"))
+    await flushMicrotasks()
+
+    // Discarded, not mistaken for our result — this turn still runs to its own
+    // events. (Before the fix, `promise` had already rejected by now.)
+    fire(withTurn(assistantEvent("Hello from this turn"), mine))
+    fire(withTurn(sessionEnded(), mine))
+    await expect(promise).resolves.toMatchObject({ text: "Hello from this turn" })
+  })
+
+  it("keeps events with no turnId so an unstamped sidecar still works", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    // Absence means "can't tell which turn" — dropping these would strand every
+    // turn against a sidecar that doesn't echo the id.
+    fire(assistantEvent("unstamped"))
+    fire(sessionEnded())
+    await expect(promise).resolves.toMatchObject({ text: "unstamped" })
   })
 
   it("does not arm the idle watchdog before the first streamed event", async () => {

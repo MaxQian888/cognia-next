@@ -939,6 +939,23 @@ describe("installConnectorRuntime", () => {
     warnSpy.mockRestore()
   })
 
+  it("reports a detached bootstrap failure through the log sink", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const log = jest.fn()
+    install({
+      log,
+      acquireRuntimeLock: async () => {
+        throw new Error("lock failed")
+      },
+    })
+    await waitFor(() =>
+      expect(log).toHaveBeenCalledWith(
+        "error",
+        expect.stringContaining("runtime bootstrap failed: lock failed")
+      )
+    )
+  })
+
   describe("hot-reconciles the enabled-adapter set (no restart)", () => {
     // Drive the runtime with an injected adapter-change watcher so a test can
     // fire "the adapterInstances table changed" on demand, then assert the

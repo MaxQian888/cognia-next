@@ -967,6 +967,8 @@ pub fn run() {
             plugin_api::wasm::installer::plugin_wasm_install_from_git,
             plugin_api::github::installer::plugin_install_from_github,
             plugin_api::vscode::commands::plugin_vscode_install_vsix,
+            plugin_api::vscode::commands::plugin_vscode_install_vsix_from_path,
+            plugin_api::vscode::openvsx_download::plugin_vscode_download_vsix,
             plugin_api::vscode::commands::plugin_load_vscode,
             plugin_api::vscode::commands::plugin_activate_vscode,
             plugin_api::vscode::commands::plugin_deactivate_vscode,

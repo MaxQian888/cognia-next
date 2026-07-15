@@ -2,7 +2,7 @@
 // renders them as a self-contained HTML card (no external requests), styled by
 // the same theme + style-preset system the chat HTML export uses. The card is
 // shared through the zero-knowledge share pipeline as the `usage-card` kind
-// and rasterized to PNG (html2canvas) for quick image sharing.
+// and rasterized to PNG (html2canvas-pro) for quick image sharing.
 
 import type { SessionUsageRow } from "@/lib/db/session-usage"
 import { aggregateByModel, effectiveCostUsd } from "@/lib/usage/session-analytics"

@@ -192,6 +192,16 @@ export async function loadVscodeDefinition(
       `VS Code extension ${manifest.id} is missing the vscodeExtension.identifier block — manifest adapter must populate this at install`
     )
   }
+  // Defense in depth: `adaptVscodeManifest` derives both from the same
+  // publisher/name, so a mismatch means the block did not come from the
+  // adapter — i.e. someone persisted an attacker-supplied manifest. Refuse to
+  // load rather than let an extension present itself as another one.
+  if (manifest.vscodeExtension.identifier !== manifest.id) {
+    throw new Error(
+      `VS Code extension ${manifest.id} declares a mismatched vscodeExtension.identifier ` +
+        `(${manifest.vscodeExtension.identifier}) — refusing to load a manifest the adapter did not produce`
+    )
+  }
 
   if (!isVscodeHostAvailable()) {
     return {

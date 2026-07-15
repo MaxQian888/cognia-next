@@ -257,6 +257,18 @@ export function OverviewSection({ team }: OverviewSectionProps) {
               </div>
             )}
           />
+          <EditableSettingRow<boolean>
+            label={t("riskGating")}
+            value={team.config.riskGating ?? true}
+            onCommit={(v) => patchConfig({ riskGating: v })}
+            debounceMs={0}
+            render={({ value, setValue }) => (
+              <div className="flex items-center justify-between">
+                <span className="sr-only">{t("riskGating")}</span>
+                <Switch checked={value} onCheckedChange={setValue} />
+              </div>
+            )}
+          />
           <EditableSettingRow<string>
             label={t("maxRetries")}
             value={String(team.config.maxRetries ?? 3)}

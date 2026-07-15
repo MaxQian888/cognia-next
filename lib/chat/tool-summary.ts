@@ -33,21 +33,27 @@ export interface ToolSummary {
 }
 
 /**
+ * Strip the `tool-` part-type prefix and any `mcp__<server>__` namespace from a
+ * raw part type / tool name, so `tool-mcp__cognia-tools__bash` and `tool-Bash`
+ * both fold to `bash`/`Bash`. Prefer `normalizeToolName` when you hold a whole
+ * part; this is for callers that only have the type string.
+ */
+export function bareToolName(rawType: string): string {
+  // "tool-<name>" → "<name>"
+  const raw = rawType.startsWith("tool-") ? rawType.slice("tool-".length) : rawType
+  // Fold `mcp__<server>__<tool>` down to `<tool>`.
+  const mcpMatch = /^mcp__[^_]+(?:_[^_]+)*__(.+)$/.exec(raw)
+  return mcpMatch ? mcpMatch[1] : raw
+}
+
+/**
  * Strip the `tool-` part-type prefix and any `mcp__<server>__` namespace so
  * `tool-mcp__cognia-tools__bash` and `tool-Bash` both fold to `bash`/`Bash`.
  */
 export function normalizeToolName(part: ToolPartLike): string {
-  let raw: string
-  if (part.type === "dynamic-tool") {
-    raw = (part as DynamicToolUIPart).toolName ?? "tool"
-  } else {
-    // "tool-<name>" → "<name>"
-    raw = part.type.startsWith("tool-") ? part.type.slice("tool-".length) : part.type
-  }
-  // Fold `mcp__<server>__<tool>` down to `<tool>`.
-  const mcpMatch = /^mcp__[^_]+(?:_[^_]+)*__(.+)$/.exec(raw)
-  if (mcpMatch) return mcpMatch[1]
-  return raw
+  const raw =
+    part.type === "dynamic-tool" ? ((part as DynamicToolUIPart).toolName ?? "tool") : part.type
+  return bareToolName(raw)
 }
 
 function basename(p: string): string {

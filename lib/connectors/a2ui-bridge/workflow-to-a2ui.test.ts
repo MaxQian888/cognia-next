@@ -3,9 +3,12 @@ import {
   WF_APPROVE_PREFIX,
   WF_CANCEL_PREFIX,
   buildApprovalSurface,
+  buildCumulativeStatusSurface,
   buildFinalSurface,
   buildProgressSegment,
   buildWorkflowRunDeepLink,
+  type CumulativeStatusState,
+  type CumulativeStepEntry,
 } from "./workflow-to-a2ui"
 
 describe("buildApprovalSurface", () => {
@@ -230,5 +233,104 @@ describe("buildWorkflowRunDeepLink", () => {
     expect(buildWorkflowRunDeepLink(run)).toBe(
       "cognia://workflow-run/wf%3Aspecial/run%2Fwith%2Fslash"
     )
+  })
+})
+
+describe("buildCumulativeStatusSurface — declared checklist", () => {
+  // `endedAt` is pinned so the header's elapsed time can't read Date.now().
+  function makeState(
+    steps: CumulativeStepEntry[],
+    overrides: Partial<CumulativeStatusState> = {}
+  ): CumulativeStatusState {
+    return {
+      workflowId: "wf",
+      runId: "r1",
+      workflowName: "Demo",
+      steps,
+      status: "running",
+      startedAt: 1_000_000,
+      endedAt: 1_041_000,
+      deepLink: "cognia://workflow-run/wf/r1",
+      ...overrides,
+    }
+  }
+
+  function mirrorOf(state: CumulativeStatusState): string {
+    const surface = buildCumulativeStatusSurface(state)
+    return (surface.widget as { fallbackText: string }).fallbackText
+  }
+
+  function pendingSteps(n: number, prefix = "Todo"): CumulativeStepEntry[] {
+    return Array.from({ length: n }, (_, i) => ({
+      stepId: `p${i}`,
+      label: `${prefix} ${i}`,
+      status: "pending" as const,
+    }))
+  }
+
+  it("renders a not-yet-started step as ◻ with no duration tag", () => {
+    const mirror = mirrorOf(makeState([{ stepId: "a", label: "Implement it", status: "pending" }]))
+    expect(mirror).toContain("◻ Implement it")
+    expect(mirror).not.toContain("(running)")
+  })
+
+  it("declares pending steps next to executed ones, preserving the given order", () => {
+    const mirror = mirrorOf(
+      makeState([
+        {
+          stepId: "a",
+          label: "Research",
+          status: "succeeded",
+          startedAt: 1_000_000,
+          endedAt: 1_012_000,
+        },
+        { stepId: "b", label: "Draft", status: "running", startedAt: 1_012_000 },
+        { stepId: "c", label: "Implement", status: "pending" },
+      ])
+    )
+    const stepLines = mirror.split("\n").filter((l) => /^[✓▶◻✗⊘]/.test(l))
+    expect(stepLines).toHaveLength(3)
+    expect(stepLines[0]).toContain("✓ Research")
+    expect(stepLines[1]).toContain("▶ Draft")
+    expect(stepLines[2]).toBe("◻ Implement")
+  })
+
+  it("caps the declared pending tail but never caps executed steps", () => {
+    const executed: CumulativeStepEntry[] = Array.from({ length: 25 }, (_, i) => ({
+      stepId: `d${i}`,
+      label: `Done ${i}`,
+      status: "succeeded" as const,
+    }))
+    const mirror = mirrorOf(makeState([...executed, ...pendingSteps(25)]))
+
+    // Executed steps are today's behavior — unbounded, all 25 still render.
+    expect(mirror).toContain("✓ Done 0")
+    expect(mirror).toContain("✓ Done 24")
+    // Only the first 20 pending are declared; the rest collapse into one line.
+    expect(mirror).toContain("◻ Todo 19")
+    expect(mirror).not.toContain("◻ Todo 20")
+    expect(mirror).toContain("… and 5 more pending")
+  })
+
+  it("omits the overflow line when the pending tail fits", () => {
+    const mirror = mirrorOf(makeState(pendingSteps(20)))
+    expect(mirror).toContain("◻ Todo 19")
+    expect(mirror).not.toContain("more pending")
+  })
+
+  it("keeps leftover ◻ steps on a failed run — they genuinely never ran", () => {
+    const mirror = mirrorOf(
+      makeState(
+        [
+          { stepId: "a", label: "Research", status: "succeeded" },
+          { stepId: "b", label: "Draft", status: "failed", errorMessage: "rate limited" },
+          { stepId: "c", label: "Implement", status: "pending" },
+        ],
+        { status: "failed" }
+      )
+    )
+    expect(mirror).toContain("✗ Draft")
+    expect(mirror).toContain("rate limited")
+    expect(mirror).toContain("◻ Implement")
   })
 })

@@ -662,6 +662,17 @@ export type WorkflowEdgeKind = "default" | "conditional" | "parallel" | "loop" |
 
 export interface WorkflowSettings {
   errorPolicy: "stop" | "continue" | "branch"
+  /**
+   * Auto-gate medium/high-risk nodes behind an approval wait (ADR-0070 Phase 3).
+   *
+   * Unlike `AgentTeamConfig.riskGating` and `GoalConfig.riskGating`, this is
+   * **opt-in**: `undefined` means OFF. A workflow authored before ADR-0070 has
+   * no field, and turning gating on retroactively would start pausing
+   * (interactive) or failing (headless) automations users already rely on.
+   * `createWorkflow` stamps `true` on newly created workflows, so new work is
+   * gated and existing work is left exactly as it was.
+   */
+  riskGating?: boolean
   /** Hard ceiling on a single run's wall-clock time. */
   timeoutMs: number
   /** How many runs of THIS workflow may execute concurrently. */

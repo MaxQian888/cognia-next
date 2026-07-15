@@ -168,7 +168,7 @@ describe("Phase B integration", () => {
     evaluateLspBinaryMock.mockResolvedValue({
       allowed: false,
       requiresPrompt: true,
-      reason: "fingerprint not in ledger",
+      reason: "no recorded user approval for this binary",
     })
     configureLspRegistry({
       client: a.client,
@@ -186,10 +186,9 @@ describe("Phase B integration", () => {
         command: "rust-analyzer",
       },
       pluginPath: "/plugins/publisher.ext",
-      publisherFingerprint: "fp-untrusted",
     })
     expect(rec.state).toBe("stopped")
-    expect(rec.consentReason).toMatch(/not in ledger/i)
+    expect(rec.consentReason).toMatch(/no recorded user approval/i)
     expect(a.startCalls).toHaveLength(0)
   })
 
@@ -198,7 +197,7 @@ describe("Phase B integration", () => {
     evaluateLspBinaryMock.mockResolvedValue({
       allowed: false,
       requiresPrompt: true,
-      reason: "fingerprint not in ledger",
+      reason: "no recorded user approval for this binary",
     })
     configureLspRegistry({
       client: a.client,
@@ -217,7 +216,6 @@ describe("Phase B integration", () => {
         command: "rust-analyzer",
       },
       pluginPath: "/plugins/publisher.ext",
-      publisherFingerprint: "fp-untrusted",
     })
     expect(denied.state).toBe("stopped")
     // The UI now offers consent; remove the pending record and retry
@@ -232,7 +230,6 @@ describe("Phase B integration", () => {
         command: "rust-analyzer",
       },
       pluginPath: "/plugins/publisher.ext",
-      publisherFingerprint: "fp-untrusted",
       confirmedConsent: true,
     })
     expect(confirmed.state).toBe("running")

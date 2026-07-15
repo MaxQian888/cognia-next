@@ -162,7 +162,8 @@ const HANDLERS: Record<RemoteCommandTarget, RemoteCommandHandler> = {
     // the authoritative `goals` table (mirrors the `workflowRuns` fallback).
     const settle = settleFrom(
       getGoalRuntime()
-        .createGoal({ sessionId, rawObjective })
+        // Headless: no operator to hold turns for (ADR-0070 Phase 2).
+        .createGoal({ sessionId, rawObjective, origin: "remote" })
         .then(async (goal) => {
           const { setRemoteRunCorrelation } = await import("@/lib/db/remote-control-run-status")
           await setRemoteRunCorrelation(runId, goal.id)

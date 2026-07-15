@@ -1,11 +1,12 @@
-// Rasterizes a "beautiful HTML" chat export to a PNG Blob. html2canvas cannot
-// read into a sandboxed preview iframe and the export's stylesheet uses global
-// selectors (body/pre/details) that would leak if injected into the app DOM, so
-// we render the full self-contained document into an OFF-SCREEN, non-sandboxed,
-// same-origin iframe and rasterize its body. Very long chats blow past canvas
-// limits, so a height guard bails with a typed error the caller can surface.
+// Rasterizes a "beautiful HTML" chat export to a PNG Blob. html2canvas-pro
+// cannot read into a sandboxed preview iframe and the export's stylesheet uses
+// global selectors (body/pre/details) that would leak if injected into the app
+// DOM, so we render the full self-contained document into an OFF-SCREEN,
+// non-sandboxed, same-origin iframe and rasterize its body. Very long chats blow
+// past canvas limits, so a height guard bails with a typed error the caller can
+// surface.
 
-import html2canvas from "html2canvas"
+import html2canvas from "html2canvas-pro"
 import { exportToBeautifulHtml, type BeautifulHtmlOptions } from "./beautiful-html"
 import { THEMES } from "./syntax-themes"
 

@@ -17,6 +17,7 @@ jest.mock("next/link", () => {
 const relativeTimeMock = jest.fn((_d: Date) => "now")
 jest.mock("next-intl", () => ({
   useFormatter: () => ({ relativeTime: (d: Date) => relativeTimeMock(d) }),
+  useNow: () => new Date(),
   useTranslations: () => (key: string) => {
     const map: Record<string, string> = {
       sessions: "Chats",

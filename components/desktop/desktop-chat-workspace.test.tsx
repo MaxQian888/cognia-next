@@ -610,6 +610,114 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
   expect(directChatMock.respondToApproval).toHaveBeenCalledWith(directApproval, "deny")
 })
 
+// The welcome page has no session yet, so a starter card must create one before
+// it can send — otherwise the send guard drops the prompt and the click reads as
+// a dead button.
+test("welcome starter card creates a session, then sends the prompt into it", async () => {
+  sessionsRef.current = []
+  activeSessionId = null
+  create.mockResolvedValue({ id: "new-1" } as ChatSession)
+
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  const props = paneGroupPropsLog[paneGroupPropsLog.length - 1] as {
+    onUseSample: (text: string) => void
+  }
+
+  await act(async () => {
+    props.onUseSample("draft a commit message")
+  })
+
+  expect(create).toHaveBeenCalledTimes(1)
+  // Explicit sessionId — the store pointer may not have propagated yet.
+  expect(directChatMock.send).toHaveBeenCalledWith("draft a commit message", undefined, {
+    sessionId: "new-1",
+  })
+})
+
+test("welcome starter card starts a team conversation when a team guild is selected", async () => {
+  sessionsRef.current = []
+  activeSessionId = null
+  selectedGuild = { kind: "team", teamId: "team-x" }
+  selectedGuildEpoch = 6
+  create.mockResolvedValue({ id: "new-t" } as ChatSession)
+
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  const props = paneGroupPropsLog[paneGroupPropsLog.length - 1] as {
+    onUseSample: (text: string) => void
+  }
+
+  await act(async () => {
+    props.onUseSample("plan the sprint")
+  })
+
+  expect(create).toHaveBeenCalledWith(expect.objectContaining({ kind: "team", teamId: "team-x" }))
+  expect(teamChatMock.send).toHaveBeenCalledWith("plan the sprint", { sessionId: "new-t" })
+  expect(directChatMock.send).not.toHaveBeenCalled()
+})
+
+test("starter card sends into the existing session without creating a new one", async () => {
+  sessionsRef.current = [
+    {
+      id: "d-1",
+      title: "dm",
+      kind: "direct",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+  ]
+  activeSessionId = "d-1"
+
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  const props = paneGroupPropsLog[paneGroupPropsLog.length - 1] as {
+    onUseSample: (text: string) => void
+  }
+
+  await act(async () => {
+    props.onUseSample("review this")
+  })
+
+  expect(create).not.toHaveBeenCalled()
+  expect(directChatMock.send).toHaveBeenCalledWith("review this", undefined, { sessionId: "d-1" })
+})
+
+test("starter card routes to the team hook for an active team session", async () => {
+  sessionsRef.current = [
+    {
+      id: "t-1",
+      title: "team chat",
+      kind: "team",
+      teamId: "team-x",
+      createdAt: 0,
+      updatedAt: 0,
+    } as unknown as ChatSession,
+  ]
+  activeSessionId = "t-1"
+  activeSessionEpoch = 5
+  selectedGuild = { kind: "team", teamId: "team-x" }
+  selectedGuildEpoch = 6
+
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  const props = paneGroupPropsLog[paneGroupPropsLog.length - 1] as {
+    onUseSample: (text: string) => void
+  }
+
+  await act(async () => {
+    props.onUseSample("summarize the thread")
+  })
+
+  expect(create).not.toHaveBeenCalled()
+  expect(teamChatMock.send).toHaveBeenCalledWith("summarize the thread", { sessionId: "t-1" })
+  expect(directChatMock.send).not.toHaveBeenCalled()
+})
+
 test("resumeAfterPlanApproval is a guarded no-op for team sessions", async () => {
   sessionsRef.current = [
     {

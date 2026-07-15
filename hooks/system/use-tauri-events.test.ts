@@ -79,6 +79,14 @@ jest.mock("next-intl", () => ({
 
 const setActiveSession = jest.fn()
 const clearChatStore = jest.fn()
+const startNewSessionMock = jest.fn().mockResolvedValue({ id: "s-new" })
+jest.mock("@/lib/chat/start-session", () => ({
+  startNewSession: (...args: unknown[]) => startNewSessionMock(...args),
+}))
+const isMainAppWindowMock = jest.fn(() => true)
+jest.mock("@/lib/pet/window-role", () => ({
+  isMainAppWindow: () => isMainAppWindowMock(),
+}))
 const requestOpenSettings = jest.fn()
 const setSelectedGuild = jest.fn()
 const saveSettings = jest.fn().mockResolvedValue(undefined)
@@ -140,6 +148,8 @@ import { useTauriEvents } from "./use-tauri-events"
 
 beforeEach(() => {
   isTauriMock.mockReturnValue(true)
+  isMainAppWindowMock.mockClear().mockReturnValue(true)
+  startNewSessionMock.mockClear()
   Object.keys(tauriHandlers).forEach((k) => delete tauriHandlers[k])
   Object.keys(listenHandlers).forEach((k) => delete listenHandlers[k])
   tauriUnsub.length = 0
@@ -185,19 +195,35 @@ describe("useTauriEvents", () => {
       expect.any(Function)
     )
     expect(onTauriEventMock).toHaveBeenCalledWith(TAURI_EVENTS.deepLink, expect.any(Function))
-    expect(listenHandlers["menu://new-chat"]).toBeDefined()
     expect(listenHandlers[TAURI_EVENTS.menuOpenLogs]).toBeDefined()
-    // menu://open-workspace is owned by use-menu-event-router, NOT here.
+    // menu://open-workspace and menu://new-chat are owned by
+    // use-menu-event-router, NOT here — a second listener would double-fire
+    // (two folder pickers / two sessions) for one menu click.
     expect(listenHandlers["menu://open-workspace"]).toBeUndefined()
+    expect(listenHandlers["menu://new-chat"]).toBeUndefined()
     expect(listenHandlers["menu://documentation"]).toBeDefined()
   })
 
-  it("tray New Chat clears the active session and reselects DM guild", async () => {
+  it("tray New Chat starts a conversation in the DM guild", async () => {
     renderHook(() => useTauriEvents())
     await flushPromises()
     tauriHandlers[TAURI_EVENTS.trayNewChat]?.(null)
-    expect(clearChatStore).toHaveBeenCalled()
     expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    expect(startNewSessionMock).toHaveBeenCalled()
+    // The old behavior nuked every open pane and created nothing.
+    expect(clearChatStore).not.toHaveBeenCalled()
+  })
+
+  // Rust broadcasts tray://* to every window and the pet overlay / popup /
+  // island load this same root layout — an unguarded handler would create one
+  // conversation per open window.
+  it("tray New Chat is a no-op outside the main window", async () => {
+    isMainAppWindowMock.mockReturnValue(false)
+    renderHook(() => useTauriEvents())
+    await flushPromises()
+    tauriHandlers[TAURI_EVENTS.trayNewChat]?.(null)
+    expect(startNewSessionMock).not.toHaveBeenCalled()
+    expect(setSelectedGuild).not.toHaveBeenCalled()
   })
 
   it("tray Settings opens the settings dialog without a tab", async () => {
@@ -246,12 +272,13 @@ describe("useTauriEvents", () => {
     expect(routerPush).toHaveBeenNthCalledWith(2, "/logs")
   })
 
-  it("menu New Chat clears chat and selects DM", async () => {
+  it("does NOT subscribe to menu://new-chat (owned by the menu router)", async () => {
     renderHook(() => useTauriEvents())
     await flushPromises()
-    listenHandlers["menu://new-chat"]?.({ payload: null })
-    expect(clearChatStore).toHaveBeenCalled()
-    expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    // Subscribing here too would create a second session for one menu click —
+    // the listener was removed in favour of use-menu-event-router → newChatAction.
+    expect(listenHandlers["menu://new-chat"]).toBeUndefined()
+    expect(startNewSessionMock).not.toHaveBeenCalled()
   })
 
   it("does NOT subscribe to menu://open-workspace (owned by the menu router)", async () => {

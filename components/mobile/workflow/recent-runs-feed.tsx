@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useMemo } from "react"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { motion, useReducedMotion } from "motion/react"
 
@@ -32,6 +32,7 @@ export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
   // Localized "3 minutes ago" via next-intl — the old hand-rolled "3m"/"2d"
   // helper rendered raw English abbreviations for zh-CN users.
   const format = useFormatter()
+  const now = useNow()
   const runsRaw = useLiveQuery<WorkflowRunRow[]>(
     () => getDb().workflowRuns.orderBy("startedAt").reverse().limit(limit).toArray(),
     [limit]
@@ -84,7 +85,7 @@ export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
                     <span className="truncate text-sm font-medium">{wf?.name ?? r.workflowId}</span>
                   </span>
                   <span className="shrink-0 text-[11px] text-muted-foreground">
-                    {format.relativeTime(new Date(r.startedAt))}
+                    {format.relativeTime(new Date(r.startedAt), now)}
                   </span>
                 </Link>
               </motion.li>

@@ -37,6 +37,9 @@ import {
 } from "./team/team-run-context"
 import { synthesizeTeamWorkflow } from "./team/synthesize-workflow"
 import { applyGateBehavior, resolveGatePolicy, type TeamRunOrigin } from "./team/gate-policy"
+import { buildTeamRiskInput } from "./team/risk-input"
+import { classifyRisk } from "@/lib/policy/risk/classify-risk"
+import { requiredCeremony } from "@/lib/policy/risk/ceremony"
 import { createDeadlockHandler } from "./team/deadlock-gate"
 import { runTeamWaves } from "./team/team-wave-runner"
 import { createLedgerCheckpoint } from "./team/progress-ledger-checkpoint"
@@ -349,14 +352,35 @@ export async function runTeamLifecycle(
       }
     }
 
+    // ── Pre-run risk assessment (ADR-0070) ──
+    // Deterministic: inspects what the roster can actually reach, never asks a
+    // model. Raises the plan-approval gate for a medium/high-risk run even when
+    // the operator left `requirePlanApproval` off — a run that will drive the
+    // mouse, shell out, or destroy data owes a human a look at the plan first.
+    // Low-risk runs are untouched (no new friction), which is why the classifier
+    // gates on positive evidence rather than on uncertainty. Note this is
+    // origin-blind: an IM-bound run is judged by what its roster can reach, not
+    // by the fact that it will reply into the thread it was summoned from.
+    const riskAssessment = classifyRisk(buildTeamRiskInput({ team, workers, tasks }))
+    const riskRaisedGate =
+      (team.config.riskGating ?? true) && requiredCeremony(riskAssessment).requirePlanApproval
+    const requirePlanApproval = Boolean(team.config.requirePlanApproval) || riskRaisedGate
+    // Only explain the gate by its risk when risk is the SOLE cause. An
+    // operator who set `requirePlanApproval` already knows why the gate is
+    // there; telling them it's the risk assessment would be a lie.
+    const gateIsRiskOnly = riskRaisedGate && !team.config.requirePlanApproval
+
     // ── Plan-approval gate (synthesizer-local; never enters workflow) ──
-    if (team.config.requirePlanApproval) {
+    if (requirePlanApproval) {
       // Headless: fail fast BEFORE running lead planning — approval without a
       // human is meaningless and planning tokens would be wasted on a run
-      // that cannot be approved. `requirePlanApproval=true` was an explicit
-      // operator choice; honor it by failing loudly instead of auto-approving.
+      // that cannot be approved. Whether the gate was an explicit operator
+      // choice or risk-raised, honor it by failing loudly instead of
+      // auto-approving; a risky unattended run is exactly what this refuses.
       if (gatePolicy.planApproval !== "block") {
-        const reason = `requirePlanApproval is enabled but this run is headless (origin=${origin}); approve interactively or disable plan approval`
+        const reason = gateIsRiskOnly
+          ? `This run touches ${riskAssessment.reason} and cannot proceed unattended (origin=${origin}); run it interactively, or set riskGating=false to opt out`
+          : `requirePlanApproval is enabled but this run is headless (origin=${origin}); approve interactively or disable plan approval`
         notifier.notify({
           level: "critical",
           title: "Headless run blocked by plan approval",
@@ -402,7 +426,9 @@ export async function runTeamLifecycle(
         notifier.notify({
           level: "critical",
           title: "Plan awaiting approval",
-          body: "The lead proposed a plan. Approve to start the run, or reject with feedback for another revision.",
+          body: gateIsRiskOnly
+            ? `This run touches ${riskAssessment.reason}, so approval is required. Review the lead's plan, or reject with feedback for another revision.`
+            : "The lead proposed a plan. Approve to start the run, or reject with feedback for another revision.",
           runId,
           teamId,
           openApproval: { scope: "agent-team", id: teamId },

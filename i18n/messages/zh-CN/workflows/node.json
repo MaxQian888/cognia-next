@@ -1,4 +1,8 @@
 {
+  "aiBadge": {
+    "label": "AI 生成的节点",
+    "title": "由工作流 AI 助手生成 — 按 Ctrl+Z 撤销。"
+  },
   "groupContainer": {
     "dropHint": "把节点拖进来分组",
     "locked": "已锁定",

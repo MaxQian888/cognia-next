@@ -282,11 +282,19 @@ describe("installRuntime — ai-run (happy path)", () => {
     const cap = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][3] as {
       onPermissionRequest?: unknown
       timeoutMs?: number
+      idleTimeoutMs?: number
       adapterId?: string
       conversationKey?: string
     }
     expect(typeof cap.onPermissionRequest).toBe("function")
     expect(cap.timeoutMs).toBeGreaterThan(5 * 60 * 1000)
+    // Read watchdog must be wired: `idleTimeoutMs` defaults to 0 in the capture
+    // (armIdle() no-ops), so omitting it left the 15-min wall clock as the only
+    // backstop and a silent provider stream stalled the IM thread that long.
+    // Well under the wall clock, since the watchdog stands down for permission
+    // waits and in-flight tools.
+    expect(cap.idleTimeoutMs).toBeGreaterThan(0)
+    expect(cap.idleTimeoutMs).toBeLessThan(cap.timeoutMs!)
     // Connector context rides on `cap` so the injected PII gate can attribute
     // blocks + usage to the right conversation.
     expect(cap.adapterId).toBe("adapter_1")
@@ -2056,11 +2064,9 @@ describe("installRuntime — ai-run (adapter teardown abort propagation)", () =>
         new Promise((_resolve, reject) => {
           // Mirrors runAndCaptureAssistantReply's abort handling: reject when
           // the threaded signal fires.
-          cap!.signal!.addEventListener(
-            "abort",
-            () => reject(new Error("aborted by signal")),
-            { once: true }
-          )
+          cap!.signal!.addEventListener("abort", () => reject(new Error("aborted by signal")), {
+            once: true,
+          })
           // Teardown fires while the turn is in flight.
           setTimeout(() => adapterAc.abort(), 0)
         })
@@ -2080,9 +2086,7 @@ describe("installRuntime — ai-run (adapter teardown abort propagation)", () =>
     ).toBe(true)
     const jobs = await getDb().outboundQueue.toArray()
     expect(
-      jobs.filter((j) =>
-        String(j.request.metadata?.idempotencyKey ?? "").startsWith("airun:")
-      )
+      jobs.filter((j) => String(j.request.metadata?.idempotencyKey ?? "").startsWith("airun:"))
     ).toHaveLength(0)
   })
 

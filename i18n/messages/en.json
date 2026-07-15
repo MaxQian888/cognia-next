@@ -1276,6 +1276,7 @@
         "title": "PR feedback loop"
       },
       "requirePlanApproval": "Require plan approval",
+      "riskGating": "Risk-based plan approval",
       "save": "Save",
       "saveIndicator": {
         "auditCompleted": "Audit complete · {count} stale id(s)",
@@ -3103,6 +3104,7 @@
     },
     "inlineError": {
       "dismiss": "Dismiss",
+      "noSession": "No conversation is open. Start a new one to send this.",
       "openSettings": "Open settings",
       "retry": "Retry",
       "sidecarExited": "The assistant stopped unexpectedly and the turn was interrupted. Retry to continue.",
@@ -3125,7 +3127,41 @@
         "Bookmark any message to find it again later.",
         "Branch from any reply to explore an alternative.",
         "Edit one of your messages to resend and steer the answer.",
-        "Export the whole conversation to Markdown anytime."
+        "Export the whole conversation to Markdown anytime.",
+        "Keep typing while the agent works — your message is queued for the next turn.",
+        "Queued a message? Hit Send now to interrupt and steer right away.",
+        "Click a queued message in the run panel to edit it before it sends.",
+        "Expand the run panel to see the plan, tools, and subagents behind a turn.",
+        "Paste an image straight into the composer.",
+        "Type @skill: to switch a skill on for this conversation.",
+        "Type @preset: to apply a saved system prompt and model.",
+        "Stack several slash commands in one message — they run in order.",
+        "Regenerate a reply, then flip between versions with the arrows.",
+        "Watch the context ring fill — compact before the window runs out.",
+        "Give /compact a focus hint, like /compact the API changes.",
+        "Save a durable fact with /remember, then review them with /memory."
+      ],
+      "verbs": [
+        "Claude is thinking…",
+        "Working…",
+        "Pondering…",
+        "Brewing…",
+        "Conjuring…",
+        "Crunching…",
+        "Synthesizing…",
+        "Tinkering…",
+        "Percolating…",
+        "Mulling…",
+        "Cogitating…",
+        "Wrangling…",
+        "Assembling…",
+        "Distilling…",
+        "Untangling…",
+        "Spelunking…",
+        "Marinating…",
+        "Orchestrating…",
+        "Calibrating…",
+        "Scheming…"
       ]
     },
     "mcp": {
@@ -5613,6 +5649,7 @@
       "promise_denied": "Promise withheld — denial #{n}, continuing work",
       "promise_denied_overridden": "Promise withheld {n} times — gate overridden, goal completed",
       "promise_requested": "Verification turn requested (turn {n})",
+      "riskGate": "{tier}: approval required for {surfaces}",
       "subgoals_generated": "Generated subgoals",
       "turn_completed": "Turn {n} completed ({tokens} tok)",
       "turn_started": "Turn {n} started",
@@ -5670,6 +5707,8 @@
       "maxTurnsHint": "Hard cap on continuation turns. 1–100.",
       "requireAcceptance": "Require acceptance",
       "requireAcceptanceHint": "A judged completion pauses for your accept / request-changes instead of finishing on its own.",
+      "riskGating": "Risk-based gating",
+      "riskGatingHint": "Automatically require acceptance (and, for high-risk goals you run yourself, a per-turn hold) when the objective or this session's tools look risky. Turning this off never removes a checkpoint you set yourself.",
       "save": "Save changes",
       "saving": "Saving…",
       "timeout": "Timeout (minutes)",
@@ -11246,6 +11285,15 @@
       "summaryEvents": "Total events",
       "summaryKeys": "Distinct keys"
     },
+    "approvedBinaries": {
+      "approvedAt": "Approved {date}",
+      "description": "Binaries you chose to remember. Each approval is pinned to the file's SHA-256 — if the bytes change, you are asked again.",
+      "empty": "No approved binaries. This plugin's executables prompt on every run.",
+      "hash": "sha256 {sha256}…",
+      "revoke": "Revoke",
+      "revokeAria": "Revoke the approval for {path}",
+      "title": "Approved binaries"
+    },
     "audit": {
       "colAction": "Action",
       "colPermission": "Permission",
@@ -11497,8 +11545,13 @@
         "reject": "Reject"
       },
       "ariaLabel": "Plugin consent dialog",
+      "binary": {
+        "rememberHint": "Skips this prompt for these exact bytes only. The approval is pinned to the file's SHA-256, so any change to the binary — an update, a rebuild, or tampering — asks you again. It does not trust the plugin's publisher, and it covers no other binary. Revoke it any time under the plugin's Permissions tab.",
+        "rememberLabel": "Remember this binary"
+      },
       "fields": {
         "autoReject": "Auto-reject in {seconds}s",
+        "binary": "Binary:",
         "defaultReason": "No reason supplied.",
         "morePending": "{count} more pending",
         "permission": "Permission:",
@@ -11943,6 +11996,7 @@
         "popular": "Popular",
         "recent": "Recent",
         "shared": "Shared",
+        "vscode": "VS Code",
         "workspace": "Workspace"
       }
     },
@@ -11986,6 +12040,20 @@
     },
     "modalRoot": {
       "errorFallback": "Plugin modal failed to render. Check the console for details."
+    },
+    "openVsx": {
+      "installNotice": "VS Code extensions are real programs. This one runs with the same access to your files, network, and processes as any other program you install — cognia checks the download's checksum, not what the code does.",
+      "integrityChecked": "Integrity checked",
+      "integrityCheckedTooltip": "The download matched Open VSX's SHA-256 checksum, which confirms the file was not corrupted in transit. This is not a signature: it does not verify the publisher, and it cannot detect a compromised registry — the same server supplies both the file and the checksum.",
+      "publisherVerified": "Publisher verified by Open VSX",
+      "publisherVerifiedTooltip": "Open VSX states that this publisher controls the \"{namespace}\" namespace. That is Open VSX's claim about ownership, not cognia's, and not a claim that the extension is safe.",
+      "searchPlaceholder": "Search Open VSX extensions…",
+      "unsupportedApis": "May not work: {apis}",
+      "unsupportedApisTooltip": "This extension uses APIs cognia doesn't implement ({apis}) — it may not work. Detected by scanning the extension's code, which is best-effort: a minified extension can hide its API use, so this is a hint, not a guarantee.",
+      "vscodeEmpty": "No extensions matched. Try a different search.",
+      "vscodeError": "Open VSX error: {message}",
+      "vscodeLoadMore": "Load more ({shown}/{total})",
+      "vscodeSectionHint": "Extensions from Open VSX — the registry VS Codium and code-server use. Microsoft's marketplace is not available: its terms limit it to Microsoft products."
     },
     "panel": {
       "categoriesButton": "Categories",
@@ -12286,9 +12354,14 @@
       "lspBinaryNote": "These binaries can run on your machine. Review them before granting spawn permission.",
       "parseError": "Couldn’t parse this .vsix package",
       "parsing": "Parsing package…",
+      "permissionsConfidence": "Confidence: {confidence}",
+      "permissionsInferred": "Inferred by scanning this extension’s code — it never declares its own permissions.",
+      "permissionsNone": "No permissions inferred from this extension’s code.",
+      "permissionsUnparsed": "The bundle couldn’t be fully analysed, so this list may be incomplete. The sidecar enforces the real limits at runtime.",
       "publisherLabel": "Publisher",
       "retry": "Try another file",
       "sectionLspBinaries": "{count, plural, =1 {# language-server binary} other {# language-server binaries}}",
+      "sectionNotes": "{count, plural, =1 {# note} other {# notes}}",
       "sectionPermissions": "Requested permissions",
       "sectionThemes": "{count, plural, =1 {# theme} other {# themes}}",
       "title": "Install VSCode extension"
@@ -12365,6 +12438,41 @@
         "trustFirstTime": "Trust this author for future installs.",
         "trustRequiredError": "Trust this author before installing.",
         "unsignedBundle": "Unsigned bundle"
+      }
+    }
+  },
+  "policy": {
+    "risk": {
+      "surfaces": {
+        "computer-use": {
+          "description": "The run can control the screen, mouse, and keyboard on this machine.",
+          "label": "Computer use"
+        },
+        "credential-auth": {
+          "description": "The run can reach stored credentials, keys, or subscription details.",
+          "label": "Credentials"
+        },
+        "data-destructive": {
+          "description": "The run's objective involves deleting, resetting, or wiping data.",
+          "label": "Destructive data change"
+        },
+        "external-send": {
+          "description": "The run can send messages to a real recipient outside this app.",
+          "label": "External send"
+        },
+        "file-write-broad": {
+          "description": "The run can write files outside a sandbox.",
+          "label": "Unsandboxed file writes"
+        },
+        "native-command": {
+          "description": "The run can execute shell or native operating-system commands.",
+          "label": "Native commands"
+        }
+      },
+      "tier": {
+        "high": "High risk",
+        "low": "Low risk",
+        "medium": "Medium risk"
       }
     }
   },
@@ -15890,7 +15998,6 @@
         "namePlaceholder": "Theme name",
         "newButton": "New theme",
         "noSaved": "No custom themes yet.",
-        "previewLabel": "Live preview",
         "rail": {
           "activeBadgeAria": "Active theme",
           "copySuffix": "{name} (copy)",
@@ -16005,6 +16112,65 @@
           "sectionLabel": "Usage display"
         }
       },
+      "library": {
+        "importTitle": "Import from VSCode",
+        "packsTitle": "Theme packs"
+      },
+      "nav": {
+        "groups": {
+          "advancedGroup": "Advanced",
+          "interfaceGroup": "Interface",
+          "themeGroup": "Theme"
+        },
+        "items": {
+          "a11y": {
+            "description": "Contrast, motion, colorblind modes",
+            "label": "Accessibility"
+          },
+          "advanced": {
+            "description": "Inject your own stylesheet",
+            "label": "Custom CSS"
+          },
+          "auto": {
+            "description": "Switch on a schedule or with the system",
+            "label": "Auto light/dark"
+          },
+          "components": {
+            "description": "Per-surface tonality and elevation",
+            "label": "Components"
+          },
+          "custom": {
+            "description": "Edit the color tokens directly",
+            "label": "Custom theme"
+          },
+          "library": {
+            "description": "Theme packs and VSCode import",
+            "label": "Theme library"
+          },
+          "personalization": {
+            "description": "Your name and the welcome page style",
+            "label": "Personalization"
+          },
+          "plugins": {
+            "description": "Appearance panels added by plugins",
+            "label": "Plugins"
+          },
+          "theme": {
+            "description": "Preset palettes and light/dark mode",
+            "label": "Theme & presets"
+          },
+          "typography": {
+            "description": "Fonts, size, spacing, corner radius",
+            "label": "Type & density"
+          },
+          "wallpaper": {
+            "description": "Background image, gradient, or color",
+            "label": "Wallpaper"
+          }
+        },
+        "mobileTrigger": "Sections",
+        "title": "Appearance"
+      },
       "personalization": {
         "description": "How the chat welcome page greets you and how much it shows.",
         "nameLabel": "Your name",
@@ -16038,6 +16204,7 @@
           "row2": "Tokens"
         },
         "title": "Live preview",
+        "tokensLabel": "Other tokens",
         "user": "Looks great!",
         "windowTitle": "Preview"
       },
@@ -16077,6 +16244,10 @@
         "title": "Theme packs"
       },
       "title": "Appearance",
+      "typographyPanel": {
+        "fontsTitle": "Typography",
+        "layoutTitle": "Layout & density"
+      },
       "usageDisplay": {
         "hint": {
           "detailed": "Every section expanded with extra columns, per-session detail, and raw snapshots.",
@@ -16209,6 +16380,13 @@
         "scopeGlobal": "Global",
         "scopeLabel": "Apply to",
         "scopeSidebar": "Sidebar",
+        "tiles": {
+          "dropHint": "Drop an image anywhere here",
+          "gradient": "Gradient",
+          "gradientAria": "Create a gradient wallpaper",
+          "upload": "Upload",
+          "uploadAria": "Upload a wallpaper image"
+        },
         "title": "Wallpaper",
         "tooLarge": "File is too large (max 32 MB).",
         "uploadHint": "Drop an image here or browse",
@@ -24462,6 +24640,10 @@
         "maxMs": "Max (ms)",
         "title": "Retry defaults"
       },
+      "riskGating": {
+        "hint": "Ask before a step sends externally, drives the desktop, runs a shell command, or deletes a message — unless an approval node already covers it. Unattended runs fail instead of waiting.",
+        "label": "Approve risky steps"
+      },
       "runPolicy": {
         "title": "Run policy"
       },
@@ -28083,6 +28265,10 @@
       }
     },
     "node": {
+      "aiBadge": {
+        "label": "AI-authored node",
+        "title": "Authored by the workflow-AI assistant — Ctrl+Z to revert."
+      },
       "groupContainer": {
         "dropHint": "Drag nodes here to group them",
         "locked": "Locked",

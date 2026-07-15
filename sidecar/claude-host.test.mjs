@@ -123,6 +123,75 @@ test("non-lifecycle events are forwarded untouched", () => {
   assert.ok(sessions.has("s1"))
 })
 
+// ---- turnId stamping -------------------------------------------------------
+// The parent can only tell one turn's events from a previous turn's if the
+// sidecar says which turn emitted them: a timed-out turn's interrupt produces a
+// late `session_ended` that the NEXT turn (same session id) would otherwise
+// consume and report as "ended with no assistant text".
+
+test("stamps the current turn id onto forwarded session events", () => {
+  const forwarded = []
+  const sessions = new Map([["s1", { multiTurn: true }]])
+  const turnRef = { id: "turn-1" }
+  const wrapped = makeWrappedEmit((m) => forwarded.push(m), sessions, "s1", undefined, turnRef)
+
+  wrapped({ type: "event", sessionId: "s1", event: { type: "assistant" } })
+  wrapped({ type: "session_ended", sessionId: "s1" })
+  assert.deepEqual(
+    forwarded.map((m) => m.turnId),
+    ["turn-1", "turn-1"]
+  )
+
+  // A later turn on the SAME live loop advances the ref (what `handleSend` does
+  // when it pushes into an existing session).
+  turnRef.id = "turn-2"
+  wrapped({ type: "session_ended", sessionId: "s1" })
+  assert.equal(forwarded.at(-1).turnId, "turn-2")
+})
+
+test("a superseded loop keeps stamping its OWN turn id and cannot evict the replacement", () => {
+  // The exact shape of the incident: turn 1's loop is replaced (close+restart,
+  // or retired by its own session_ended) while its interrupt is still in
+  // flight. Its late event must carry turn 1's id — stamping it with the live
+  // turn's id would put us right back to the parent eating it.
+  const forwarded = []
+  const sessions = new Map()
+
+  const oldSession = { multiTurn: false }
+  const oldTurnRef = { id: "turn-1" }
+  sessions.set("s1", oldSession)
+  const oldEmit = makeWrappedEmit(
+    (m) => forwarded.push(m),
+    sessions,
+    "s1",
+    () => oldSession,
+    oldTurnRef
+  )
+
+  // Turn 2 restarts the session: a NEW loop with its own ref takes the map slot.
+  const newSession = { multiTurn: false }
+  sessions.set("s1", newSession)
+
+  // Now turn 1's interrupt finally lands.
+  oldEmit({ type: "session_ended", sessionId: "s1" })
+
+  assert.equal(forwarded.at(-1).turnId, "turn-1", "late event carries the OLD turn id")
+  assert.equal(sessions.get("s1"), newSession, "the replacement survives the old loop's end")
+})
+
+test("leaves events unstamped when the send carried no turn id", () => {
+  const forwarded = []
+  const sessions = new Map([["s1", { multiTurn: true }]])
+  // `startSession` builds the ref from `sendOptions.turnId`, so an older parent
+  // that doesn't send one yields `{ id: undefined }`.
+  const wrapped = makeWrappedEmit((m) => forwarded.push(m), sessions, "s1", undefined, {
+    id: undefined,
+  })
+
+  wrapped({ type: "session_ended", sessionId: "s1" })
+  assert.equal("turnId" in forwarded.at(-1), false, "no turnId key rather than an undefined one")
+})
+
 // ── Restore (undo compaction) routing ────────────────────────────────────────
 test("routeRestore forwards the snapshot to the session's restoreConversation", () => {
   let received = null

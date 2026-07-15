@@ -85,7 +85,7 @@ pub struct VscodeCommandError {
 }
 
 impl VscodeCommandError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_string(),
             message: message.into(),
@@ -111,6 +111,73 @@ pub async fn plugin_vscode_install_vsix(
     let install_root = state.extension_install_dir.clone();
     let result = install_vsix(&payload, &install_root)?;
     Ok(result)
+}
+
+/// Install a `.vsix` already staged on disk by `plugin_vscode_download_vsix`.
+///
+/// This exists to skip the base64 IPC round-trip the marketplace path would
+/// otherwise pay twice over: base64 inflates the payload by 33% and forces a
+/// full JS string to exist alongside the Rust `Vec` — on an 80 MB extension
+/// that is the difference between installing and OOMing the webview.
+///
+/// The bytes still went through the renderer (that's where permission
+/// inference has to run); this only avoids re-encoding them to hand back.
+#[tauri::command]
+pub async fn plugin_vscode_install_vsix_from_path(
+    temp_path: String,
+    state: State<'_, VscodeExtensionState>,
+) -> Result<InstallResult, VscodeCommandError> {
+    install_staged_vsix(&state.extension_install_dir, Path::new(&temp_path))
+}
+
+/// Body of [`plugin_vscode_install_vsix_from_path`], minus Tauri state.
+///
+/// Ordering here is load-bearing: containment is proved *before* the file is
+/// touched or deleted. `path` comes from the renderer, and a cleanup step that
+/// ran before the check would turn this command into an arbitrary-file-delete
+/// primitive.
+fn install_staged_vsix(
+    install_root: &Path,
+    path: &Path,
+) -> Result<InstallResult, VscodeCommandError> {
+    ensure_staged(install_root, path)?;
+
+    // From here the file is ours: it is single-use either way, so a failed
+    // install must not leave an 80 MB orphan in app data.
+    let outcome = std::fs::read(path)
+        .map_err(|e| VscodeCommandError::new("read_error", e.to_string()))
+        .and_then(|payload| install_vsix(&payload, &install_root.to_path_buf()).map_err(Into::into));
+    let _ = std::fs::remove_file(path);
+    outcome
+}
+
+/// Assert `path` is a file this crate itself staged — a direct child of the
+/// download dir.
+///
+/// Both sides are canonicalized so a symlink planted in the staging dir cannot
+/// point the read somewhere else. Confining the command this way means it can
+/// only ever install bytes that `plugin_vscode_download_vsix` fetched and
+/// checksum-verified.
+fn ensure_staged(install_root: &Path, path: &Path) -> Result<(), VscodeCommandError> {
+    let escaped = |detail: &str| VscodeCommandError::new("path_not_staged", detail.to_string());
+
+    let staging = super::openvsx_download::downloads_dir(install_root)
+        .canonicalize()
+        .map_err(|e| escaped(&format!("no staged downloads directory: {e}")))?;
+    let resolved = path
+        .canonicalize()
+        .map_err(|e| escaped(&format!("{}: {e}", path.display())))?;
+
+    if resolved.parent() != Some(staging.as_path()) {
+        return Err(escaped(&format!(
+            "{} is not a staged download",
+            path.display()
+        )));
+    }
+    if !resolved.is_file() {
+        return Err(escaped(&format!("{} is not a file", path.display())));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -565,6 +632,130 @@ mod tests {
         let c = next_rpc_id();
         assert!(b > a);
         assert!(c > b);
+    }
+
+    /// Minimal valid `.vsix` for the staged-install path.
+    fn make_test_vsix() -> Vec<u8> {
+        use std::io::Write as _;
+        let mut buf = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let options = zip::write::FileOptions::<()>::default();
+            zip.start_file("extension/package.json", options).unwrap();
+            zip.write_all(br#"{ "publisher": "cognia", "name": "hello", "version": "1.0.0" }"#)
+                .unwrap();
+            zip.start_file("extension/out/extension.js", options)
+                .unwrap();
+            zip.write_all(b"module.exports = {}").unwrap();
+            zip.finish().unwrap();
+        }
+        buf
+    }
+
+    /// Stage `bytes` the way `plugin_vscode_download_vsix` would.
+    fn stage(install_root: &Path, bytes: &[u8]) -> PathBuf {
+        let dir = super::super::openvsx_download::downloads_dir(install_root);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("staged.vsix");
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn installs_from_a_staged_path_and_removes_the_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let staged = stage(&root, &make_test_vsix());
+
+        let result = install_staged_vsix(&root, &staged).unwrap();
+
+        assert_eq!(result.extension_id, "cognia.hello");
+        assert!(result.install_path.join("out/extension.js").exists());
+        assert!(
+            !staged.exists(),
+            "the staged .vsix must not survive a successful install"
+        );
+    }
+
+    #[test]
+    fn failed_install_still_removes_the_staged_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let staged = stage(&root, b"not a zip");
+
+        let err = install_staged_vsix(&root, &staged).unwrap_err();
+
+        assert_eq!(err.code, "install_error");
+        assert!(
+            !staged.exists(),
+            "a failed install must not leave the temp file behind"
+        );
+    }
+
+    /// The path is renderer-supplied, so the command must only ever read back
+    /// what this crate itself downloaded and checksum-verified.
+    #[test]
+    fn refuses_a_path_outside_the_download_staging_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("vscode-extensions");
+        std::fs::create_dir_all(super::super::openvsx_download::downloads_dir(&root)).unwrap();
+
+        let elsewhere = dir.path().join("attacker.vsix");
+        std::fs::write(&elsewhere, make_test_vsix()).unwrap();
+
+        let err = install_staged_vsix(&root, &elsewhere).unwrap_err();
+
+        assert_eq!(err.code, "path_not_staged");
+        assert!(
+            elsewhere.exists(),
+            "a rejected path must never be deleted — the check runs before cleanup"
+        );
+    }
+
+    /// A traversing path resolves outside the staging dir and must be refused
+    /// on containment, not on string shape.
+    #[test]
+    fn refuses_a_traversing_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("vscode-extensions");
+        let staging = super::super::openvsx_download::downloads_dir(&root);
+        std::fs::create_dir_all(&staging).unwrap();
+
+        let outside = dir.path().join("secret.vsix");
+        std::fs::write(&outside, make_test_vsix()).unwrap();
+        let traversing = staging.join("..").join("secret.vsix");
+
+        let err = install_staged_vsix(&root, &traversing).unwrap_err();
+
+        assert_eq!(err.code, "path_not_staged");
+        assert!(outside.exists());
+    }
+
+    /// A nested path under the staging dir is not a direct child, and the
+    /// downloader never produces one.
+    #[test]
+    fn refuses_a_nested_path_under_the_staging_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let nested = super::super::openvsx_download::downloads_dir(&root).join("sub");
+        std::fs::create_dir_all(&nested).unwrap();
+        let path = nested.join("x.vsix");
+        std::fs::write(&path, make_test_vsix()).unwrap();
+
+        let err = install_staged_vsix(&root, &path).unwrap_err();
+
+        assert_eq!(err.code, "path_not_staged");
+    }
+
+    #[test]
+    fn refuses_a_missing_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(super::super::openvsx_download::downloads_dir(&root)).unwrap();
+
+        let err = install_staged_vsix(&root, &root.join(".downloads/gone.vsix")).unwrap_err();
+
+        assert_eq!(err.code, "path_not_staged");
     }
 
     #[test]

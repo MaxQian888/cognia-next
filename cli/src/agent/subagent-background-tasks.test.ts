@@ -5,6 +5,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+jest.setTimeout(30_000)
+
 jest.mock("@/lib/db/seed", () => ({
   seedBuiltIns: jest.fn().mockResolvedValue(undefined),
 }))

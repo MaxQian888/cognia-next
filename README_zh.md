@@ -174,7 +174,7 @@ pnpm dlx shadcn@latest add <component>
 - **环境变量** —— `cp .env.example .env.local`。`NEXT_PUBLIC_*` 变量会暴露给浏览器；
   `lib/env.ts` 在首次访问时校验必需值。`.env.local` 切勿提交。
 - **Tauri** —— `src-tauri/tauri.conf.json` 定义产品名（`Cognia`）、identifier
-  （`com.reactquickstarter.desktop`）、Deep link 协议（`cognia://`）、强制 `'self'` CSP、
+  （`com.cognia.desktop`）、Deep link 协议（`cognia://`）、强制 `'self'` CSP、
   自定义标题栏，以及随包的 sidecar 资源。
 - **路径别名** —— `@/components`、`@/lib`、`@/ui`、`@/hooks`、`@/utils`。
 - **样式** —— Tailwind v4 + `@tailwindcss/postcss`、oklch CSS 变量、类策略暗色模式

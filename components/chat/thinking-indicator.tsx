@@ -1,13 +1,23 @@
 "use client"
 
 /**
- * `<ChatThinkingIndicator>` — the "waiting for the assistant's first token"
- * surface. Replaces the bare `Claude is thinking…` shimmer with a phased
- * affordance driven by `useThinkingPhase`:
+ * `<ChatThinkingIndicator>` — the "the assistant is working" surface, pinned at
+ * the tail of the transcript for the whole streaming turn. A phased affordance
+ * driven by `useThinkingPhase`:
  *
  *   phase 1  avatar pulse + shimmer label + bouncing dots
  *   phase 2  (≥3s) skeleton placeholder lines collapse-reveal beneath it
  *   phase 3  (≥4s) a rotating built-in tip appears
+ *
+ * The label cycles localized `verbs` (Claude Code's playful "Pondering…" touch);
+ * the list's first entry is the plain "Claude is thinking…" so the opening frame
+ * reads straight. Missing / malformed `verbs` falls back to the `thinking` key.
+ *
+ * `compact` is for the second half of a turn — once the assistant has produced
+ * visible content (text, a tool block, a file) the indicator keeps running below
+ * it to show the turn is still alive, but drops the skeleton: placeholder lines
+ * under real content read as a second, phantom reply. Tips still surface, since
+ * a tool-heavy stretch is exactly when the wait is long.
  *
  * Named `Chat…` to disambiguate from the generic `ThinkingIndicator` in
  * `components/ui/loading-states.tsx`. All motion routes through
@@ -39,22 +49,29 @@ export interface ChatThinkingIndicatorProps {
   directCharacter?: Character | null
   /** Called when the row's height grows, so the list can re-pin scroll. */
   onPhaseChange?: () => void
+  /** Assistant content is already on screen — drop the skeleton placeholder. */
+  compact?: boolean
   className?: string
 }
 
 export function ChatThinkingIndicator({
   directCharacter,
   onPhaseChange,
+  compact = false,
   className,
 }: ChatThinkingIndicatorProps) {
   const t = useTranslations("chat.list")
   const { reduce } = useFlowMotion()
 
-  const tips = readTips(t)
-  const { showSkeleton, showTips, tipIndex } = useThinkingPhase({
+  const tips = readStringList(t, "tips")
+  const verbs = readStringList(t, "verbs")
+  const { showSkeleton, showTips, tipIndex, verbIndex } = useThinkingPhase({
     tipCount: tips.length,
+    verbCount: verbs.length,
     reduce,
   })
+  const label =
+    verbs.length > 0 ? (verbs[verbIndex % verbs.length] ?? t("thinking")) : t("thinking")
 
   // Re-pin scroll whenever the indicator grows or the tip rotates. This is a
   // plain callback (not setState), so it's clear of the set-state-in-effect rule.
@@ -82,12 +99,12 @@ export function ChatThinkingIndicator({
           {directCharacter ? avatarGlyph(directCharacter) : <SparklesIcon className="size-3.5" />}
         </span>
         <Shimmer as="span" className="text-sm">
-          {t("thinking")}
+          {label}
         </Shimmer>
         <LoadingDots className={cn("ml-0.5", reduce && "opacity-70 [&_*]:animate-none")} />
       </div>
 
-      <MotionCollapse open={showSkeleton}>
+      <MotionCollapse open={showSkeleton && !compact}>
         <div className="space-y-2 pl-8 pt-1" data-testid="thinking-skeleton" aria-hidden>
           <Skeleton className="h-3.5 w-3/4" />
           <Skeleton className="h-3.5 w-5/6" />
@@ -102,10 +119,10 @@ export function ChatThinkingIndicator({
   )
 }
 
-/** Read the curated tip list; tolerate a missing / malformed `tips` key. */
-function readTips(t: ReturnType<typeof useTranslations>): string[] {
+/** Read a curated string list; tolerate a missing / malformed key. */
+function readStringList(t: ReturnType<typeof useTranslations>, key: string): string[] {
   try {
-    const raw = t.raw("tips") as unknown
+    const raw = t.raw(key) as unknown
     if (!Array.isArray(raw)) return []
     return raw.filter((x): x is string => typeof x === "string")
   } catch {

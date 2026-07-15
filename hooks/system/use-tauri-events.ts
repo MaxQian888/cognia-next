@@ -9,6 +9,8 @@ import { TAURI_EVENTS, onTauriEvent } from "@/lib/tauri"
 import { isTauri } from "@/lib/tauri"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useChatStore } from "@/stores/chat"
+import { startNewSession } from "@/lib/chat/start-session"
+import { isMainAppWindow } from "@/lib/pet/window-role"
 import { useUIStore } from "@/stores/ui"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { dispatchTrayClick, dispatchShortcut } from "@/lib/tray/dispatcher"
@@ -125,9 +127,17 @@ export function useTauriEvents(): void {
 
     const subscribe = async () => {
       // Tray actions
+      // Same semantics as the menu's `newChatAction`, inlined rather than
+      // imported: `lib/desktop/menu-actions` pulls in the whole plugin-API
+      // graph, which this hook must not drag into its module load.
+      // Main-window only — Rust broadcasts `tray://*` to EVERY window, and the
+      // pet overlay / popup / island load this same root layout. Creating a
+      // session is not idempotent, so an unguarded handler would create one
+      // conversation per open window.
       const trayNewChat = await onTauriEvent(TAURI_EVENTS.trayNewChat, () => {
-        useChatStore.getState().clear()
+        if (!isMainAppWindow()) return
         useUIStore.getState().setSelectedGuild({ kind: "dm" })
+        void startNewSession()
       })
       const traySettings = await onTauriEvent(TAURI_EVENTS.traySettings, () => {
         useUIStore.getState().requestOpenSettings()
@@ -137,17 +147,13 @@ export function useTauriEvents(): void {
       })
 
       // Menu items — `menu://<id>` for any item not handled natively in Rust.
-      const unlistenNewChat = await listen<null>("menu://new-chat", () => {
-        useChatStore.getState().clear()
-        useUIStore.getState().setSelectedGuild({ kind: "dm" })
-      })
       const unlistenMenuOpenLogs = await listen<null>(TAURI_EVENTS.menuOpenLogs, () =>
         navigateToLogs()
       )
-      // NOTE: `menu://open-workspace` is intentionally NOT handled here. It is
-      // owned solely by `use-menu-event-router` → `openWorkspaceAction` (the
-      // unified create/activate-workspace flow). Subscribing here too would fire
-      // two folder pickers for one menu click.
+      // NOTE: `menu://open-workspace` and `menu://new-chat` are intentionally
+      // NOT handled here. Both are owned solely by `use-menu-event-router` →
+      // `openWorkspaceAction` / `newChatAction`. Subscribing here too would fire
+      // two folder pickers — or create two sessions — for one menu click.
       const unlistenDocs = await listen<null>("menu://documentation", async () => {
         const { openExternal } = await import("@/lib/tauri/opener")
         await openExternal("https://v2.tauri.app")
@@ -239,7 +245,6 @@ export function useTauriEvents(): void {
         safeUnlisten(trayNewChat)
         safeUnlisten(traySettings)
         safeUnlisten(trayOpenLogs)
-        safeUnlisten(unlistenNewChat)
         safeUnlisten(unlistenMenuOpenLogs)
         safeUnlisten(unlistenDocs)
         safeUnlisten(cliMatches)
@@ -260,7 +265,6 @@ export function useTauriEvents(): void {
         trayNewChat,
         traySettings,
         trayOpenLogs,
-        unlistenNewChat,
         unlistenMenuOpenLogs,
         unlistenDocs,
         cliMatches,

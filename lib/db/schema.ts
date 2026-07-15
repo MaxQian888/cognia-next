@@ -109,6 +109,7 @@ import type {
   OpenVsxCacheRow,
   VscodeExtensionRuntimeRow,
 } from "@/types/plugin/vscode-extension-cache"
+import type { ApprovedBinaryRow } from "@/types/plugin/approved-binary"
 import type { AutomationAuditLogRow } from "@/lib/automation/audit"
 import type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport-bookmarks-db"
 import type { EvalCase, EvalDataset } from "@/types/eval/eval"
@@ -2420,6 +2421,48 @@ export class CogniaDB extends Dexie {
       codeAdoptionTurns: "&id, runId, sessionId, workspaceRoot, ts, [sessionId+ts]",
     })
 
+    // v109 — Binary trust model rebuild (Phase 1). Replaces the
+    //   `trustedPublishers` fingerprint model with a user-consent ledger.
+    //
+    //   Why: the old model granted prompt-free `child_process.spawn` when a
+    //   plugin's manifest asserted a `publisherKeyFingerprint` that matched a
+    //   `trustedPublishers` row by **plain string equality, zero crypto**. The
+    //   v39 seed populated that table with nine `"placeholder:*"` fingerprints
+    //   whose literal strings live in the repo source — so any hostile plugin
+    //   could self-declare `"placeholder:microsoft.vscode"` and spawn its own
+    //   bundled binary with no prompt. There was no proof of possession
+    //   anywhere in the chain.
+    //
+    //   Two changes, both required to cut it:
+    //   1. `approvedBinaries` (new) — the only grant surface now. Records that
+    //      THIS user approved THESE exact bytes (`sha256`) at THIS path for
+    //      THIS plugin. Compound PK `[pluginId+binaryPath]`; the readers
+    //      re-hash the file on every spawn, so any byte drift re-prompts. See
+    //      `types/plugin/approved-binary.ts` + `lib/db/approved-binaries.ts`.
+    //   2. The upgrade hook deletes every `trustedPublishers` row whose
+    //      `fingerprint` starts with `"placeholder:"` — retiring the v39 seed
+    //      from databases that already drank it. Rows the user populated
+    //      themselves are preserved: they are the user's data, not the seed's,
+    //      and they are inert under the new policy regardless.
+    //
+    //   Idempotent: re-running finds no placeholder rows and deletes nothing.
+    this.version(109)
+      .stores({
+        approvedBinaries: "&[pluginId+binaryPath], pluginId, sha256, approvedAt",
+      })
+      .upgrade(async (tx) => {
+        const placeholders = await tx
+          .table("trustedPublishers")
+          .filter(
+            (row: { fingerprint?: unknown }) =>
+              typeof row.fingerprint === "string" && row.fingerprint.startsWith("placeholder:")
+          )
+          .toArray()
+        for (const row of placeholders) {
+          await tx.table("trustedPublishers").delete(row.publicKey)
+        }
+      })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -2431,6 +2474,9 @@ export class CogniaDB extends Dexie {
   tts_provider_keys!: Table<TtsProviderKeyRow, string>
   openVsxCache!: Table<OpenVsxCacheRow, string>
   vscodeExtensionRuntime!: Table<VscodeExtensionRuntimeRow, string>
+  // v109 — user-consent ledger for plugin-shipped binaries; the only thing
+  // that can grant a prompt-free spawn. See `lib/db/approved-binaries.ts`.
+  approvedBinaries!: Table<ApprovedBinaryRow, [string, string]>
   // v44 — companion sync cursors (Wave 4 / ADR-0026). See `lib/sync/types.ts`.
   syncCursors!: Table<SyncCursorRow, string>
   // v62 — Workspaces (project model persistence). See `lib/db/projects.ts`.
@@ -2505,6 +2551,7 @@ export type {
   OpenVsxCacheRow,
   VscodeExtensionRuntimeRow,
 } from "@/types/plugin/vscode-extension-cache"
+export type { ApprovedBinaryRow } from "@/types/plugin/approved-binary"
 export type { AutomationAuditLogRow } from "@/lib/automation/audit"
 export type { WorkflowViewportBookmarkRow } from "@/lib/workflow/editor/viewport-bookmarks-db"
 export type { PluginDexieMeta } from "./plugin-types"

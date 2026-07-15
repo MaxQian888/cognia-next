@@ -25,10 +25,15 @@ url = "2"
 base64 = "0.22"
 # Same feature set as src-tauri so the unified build behaves identically
 # (socks is needed for socks5:// proxy URLs, json for the Clash controller
-# probe).
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks"] }
-# `macros` for the detect-stage tokio::join!.
-tokio = { version = "1", features = ["net", "time", "io-util", "rt", "macros"] }
+# probe, stream for http_download's bytes_stream()).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks", "stream"] }
+# `macros` for the detect-stage tokio::join!; `fs` for http_download's
+# streamed writes.
+tokio = { version = "1", features = ["net", "time", "io-util", "rt", "macros", "fs"] }
+# http_download hashes each chunk as it lands rather than buffering the body.
+sha2 = "0.11"
+hex = "0.4"
+thiserror = "2"
 # SOCKS5 CONNECT dialing for the WSS proxy path.
 tokio-socks = "0.5"
 # join_all over the detect-stage probe futures.

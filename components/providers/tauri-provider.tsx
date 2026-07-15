@@ -14,6 +14,7 @@ import { setWindowBackgroundColor } from "@/lib/tauri/shell-window"
 import { getShellColors } from "@/lib/appearance/shell-sync"
 import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
+import { startNewSession } from "@/lib/chat/start-session"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { useTrayStore } from "@/lib/tray/store"
@@ -118,7 +119,7 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
       }
 
       // CLI args from this launch — `cognia <path>` opens that workspace,
-      // `--new-chat` clears the active session.
+      // `--new-chat` starts a fresh conversation.
       try {
         const { workspacePath, newChat } = await getLaunchCli()
         if (workspacePath) {
@@ -128,8 +129,8 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
           toast.success("Workspace from CLI", { description: workspacePath })
         }
         if (newChat) {
-          useChatStore.getState().clear()
           useUIStore.getState().setSelectedGuild({ kind: "dm" })
+          await startNewSession()
         }
       } catch (err) {
         console.warn("getLaunchCli failed", err)

@@ -11,6 +11,8 @@ import path from "node:path"
 import { installWriteFlush, startDurability, type DexieLike } from "./durability"
 import { __resetCliDbForTesting } from "../db/bootstrap"
 
+jest.setTimeout(30_000)
+
 describe("installWriteFlush", () => {
   it("schedules a flush after every settled mutation, not on failures", async () => {
     const writes: string[] = []

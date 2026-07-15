@@ -91,11 +91,11 @@ describe("buildStatusBar", () => {
   })
 
   it("sizes the ctx segment against the per-model window override", () => {
-    // 100k prompt tokens; model "claude-x" → 200k pattern fallback = 50%, but a
+    // 100k prompt tokens; model "claude-x" → 128k pattern fallback = 78%, but a
     // 1M catalog override makes it 10%.
     const ctxUsage: UsageInfo = { inputTokens: 100_000 }
     const fallback = buildStatusBar({ config: base, usage: ctxUsage })
-    expect(Object.fromEntries(fallback.map((s) => [s.id, s])).ctx.text).toBe("50% ctx")
+    expect(Object.fromEntries(fallback.map((s) => [s.id, s])).ctx.text).toBe("78% ctx")
     const overridden = buildStatusBar({
       config: base,
       usage: ctxUsage,

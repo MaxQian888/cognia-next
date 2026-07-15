@@ -278,6 +278,11 @@ fn grant_expired(grant: &PermissionGrant) -> bool {
 
 /// Allow only `[A-Za-z0-9._-]` in path components. Defense-in-depth against
 /// `../`-style traversal in plugin IDs sourced from manifests.
+///
+/// NOTE: this rewrites rather than rejects, and it deliberately preserves `.`
+/// — so it does **not** stop `""` / `"."` from composing into `"."` or `".."`.
+/// Callers that build a filesystem path out of untrusted manifest fields must
+/// use [`sanitize_plugin_id_strict`] instead.
 pub(crate) fn sanitize_plugin_id(plugin_id: &str) -> String {
     plugin_id
         .chars()
@@ -291,6 +296,69 @@ pub(crate) fn sanitize_plugin_id(plugin_id: &str) -> String {
         .collect()
 }
 
+/// Maximum length of a single id component (`publisher` or `name`).
+const MAX_ID_COMPONENT_LEN: usize = 64;
+
+/// Rejection reason from [`sanitize_plugin_id_strict`].
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum PluginIdError {
+    #[error("`{component}` must not be empty")]
+    Empty { component: &'static str },
+    #[error("`{component}` value {value:?} is longer than 64 characters")]
+    TooLong {
+        component: &'static str,
+        value: String,
+    },
+}
+
+/// Safe counterpart of [`sanitize_plugin_id`] for a **single** id component
+/// (`publisher` or `name`), for use wherever an untrusted manifest field
+/// becomes a filesystem path.
+///
+/// This is the Rust twin of `safeIdComponent` in
+/// `lib/plugin/vscode-shim/extension-id.ts`. Both derive the id from the same
+/// untrusted `package.json` fields, and the id is both a Dexie key and a
+/// directory name — if the rules drift, the row and the directory stop
+/// describing the same extension. Keep them in lockstep.
+///
+/// Why this exists: [`sanitize_plugin_id`] rewrites hostile characters to `_`
+/// but **keeps `.`**, and callers only checked that `publisher` / `name` were
+/// JSON *strings* — `""` passes that. So `publisher: ""`, `name: "."` composed
+/// into the id `".."`, and `install_root.join("..")` resolved outside the
+/// extension root ahead of a recursive delete.
+///
+/// The change from [`sanitize_plugin_id`] is deliberately narrow: escape `.`
+/// along with everything else outside `[A-Za-z0-9_-]`, and reject an empty
+/// component. Emptiness must be an error rather than an escape, because
+/// escaping `""` yields `""` and `""` + `""` composes into `"."`. With those
+/// two rules the composition is safe *by construction* — no component can hold
+/// `.`, `/`, or `\`, and none can be empty, so `format!("{publisher}.{name}")`
+/// can never be `"."`, `".."`, or more than one path component.
+pub(crate) fn sanitize_plugin_id_strict(
+    component: &'static str,
+    value: &str,
+) -> std::result::Result<String, PluginIdError> {
+    if value.is_empty() {
+        return Err(PluginIdError::Empty { component });
+    }
+    if value.len() > MAX_ID_COMPONENT_LEN {
+        return Err(PluginIdError::TooLong {
+            component,
+            value: value.to_string(),
+        });
+    }
+    Ok(value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,6 +368,87 @@ mod tests {
         assert_eq!(sanitize_plugin_id("../etc/passwd"), ".._etc_passwd");
         assert_eq!(sanitize_plugin_id("ok.plugin-id_1"), "ok.plugin-id_1");
         assert_eq!(sanitize_plugin_id("a/b\\c"), "a_b_c");
+    }
+
+    #[test]
+    fn strict_accepts_real_publisher_and_name_shapes() {
+        for value in ["ms-python", "python", "rust-lang", "rust_analyzer", "a", "vscode9"] {
+            assert_eq!(
+                sanitize_plugin_id_strict("name", value).unwrap(),
+                value,
+                "{value} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_rejects_empty_publisher_or_name() {
+        assert_eq!(
+            sanitize_plugin_id_strict("publisher", ""),
+            Err(PluginIdError::Empty {
+                component: "publisher"
+            })
+        );
+    }
+
+    #[test]
+    fn strict_escapes_dots_instead_of_preserving_them() {
+        // The one behavioural change from `sanitize_plugin_id`, and the whole
+        // reason the escape exists: these are the inputs that used to survive
+        // untouched and compose into `.` / `..`.
+        assert_eq!(sanitize_plugin_id_strict("name", ".").unwrap(), "-");
+        assert_eq!(sanitize_plugin_id_strict("name", "..").unwrap(), "--");
+        assert_eq!(sanitize_plugin_id_strict("name", "a.b").unwrap(), "a-b");
+    }
+
+    #[test]
+    fn strict_escapes_path_separators() {
+        assert_eq!(
+            sanitize_plugin_id_strict("name", "../etc/passwd").unwrap(),
+            "---etc-passwd"
+        );
+        assert_eq!(sanitize_plugin_id_strict("name", "a\\b").unwrap(), "a-b");
+    }
+
+    #[test]
+    fn strict_rejects_overlong_component() {
+        let long = "a".repeat(65);
+        assert!(sanitize_plugin_id_strict("name", &long).is_err());
+        assert!(sanitize_plugin_id_strict("name", &"a".repeat(64)).is_ok());
+    }
+
+    /// The property the whole fix rests on: whatever a hostile manifest says,
+    /// a component that survives can never make the composed id traverse.
+    #[test]
+    fn strict_composition_can_never_yield_a_relative_path_component() {
+        let hostile = [
+            "", ".", "..", "...", "a.b", "../../etc", "/abs", "a/b", "a\\b", ".hidden",
+        ];
+        for publisher in hostile {
+            for name in hostile {
+                let (Ok(p), Ok(n)) = (
+                    sanitize_plugin_id_strict("publisher", publisher),
+                    sanitize_plugin_id_strict("name", name),
+                ) else {
+                    continue; // rejected outright — also safe
+                };
+                let id = format!("{p}.{n}");
+                assert_ne!(id, ".", "{publisher:?} + {name:?}");
+                assert_ne!(id, "..", "{publisher:?} + {name:?}");
+                assert!(!id.contains('/') && !id.contains('\\'));
+                let path = std::path::Path::new(&id);
+                assert_eq!(path.components().count(), 1, "{id:?} must be one component");
+                assert!(
+                    !matches!(
+                        path.components().next(),
+                        Some(std::path::Component::ParentDir)
+                            | Some(std::path::Component::CurDir)
+                            | Some(std::path::Component::RootDir)
+                    ),
+                    "{id:?} must not be a traversing component"
+                );
+            }
+        }
     }
 
     #[test]

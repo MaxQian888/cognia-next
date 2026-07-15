@@ -15,10 +15,16 @@
  * The output `VsCodePermissionInference` is consumed by
  * `manifest-adapter.ts:adaptVscodeManifest` and surfaced to the user
  * through the existing `lib/plugin/security/permission-guard.ts` prompt.
+ *
+ * The same walk also collects `unsupportedApis` — references to `vscode.*`
+ * namespaces the shim mounts but doesn't implement. That output is a **UX
+ * hint only** (see `engine-compat.ts`); unlike the permission set, nothing
+ * gates on it, precisely because this analysis fails open.
  */
 
 import { parse, type ParserOptions } from "@babel/parser"
 import type { Node } from "@babel/types"
+import { UNIMPLEMENTED_VSCODE_NAMESPACES } from "./engine-compat"
 import type {
   VsCodePermissionInference,
   VsCodePermissionReason,
@@ -122,6 +128,8 @@ export function inferPermissions(input: InferPermissionsInput): VsCodePermission
   const { pkgJson, files, lspBinaryCandidates } = vsix
   const reasons: VsCodePermissionReason[] = []
   const permissions = new Set<PluginPermission>()
+  /** Evidence for `engine-compat.ts`. Advisory — never gates anything. */
+  const unsupportedApis = new Set<string>()
   let unparsedBundle = false
   let uniqueIdentifiers = 0
   let bundleBytes = 0
@@ -279,12 +287,15 @@ export function inferPermissions(input: InferPermissionsInput): VsCodePermission
   // ── 3. Static analysis of the main bundle. ────────────────────────────
   const bundlePath = resolveMainBundlePath(pkgJson, files)
   if (!bundlePath) {
-    // Theme-only or grammar-only extension — nothing to walk.
+    // Theme-only or grammar-only extension — nothing to walk. There is no
+    // bundle to reference an unsupported namespace from, so the empty
+    // `unsupportedApis` here genuinely means "none", matching the "high".
     return {
       permissions: orderedPermissions(permissions),
       reasons,
       confidence: "high",
       unparsedBundle: false,
+      unsupportedApis: [],
     }
   }
   const bundleBytesArr = files.get(bundlePath)
@@ -295,6 +306,7 @@ export function inferPermissions(input: InferPermissionsInput): VsCodePermission
       reasons,
       confidence: "low",
       unparsedBundle: true,
+      unsupportedApis: [],
     }
   }
   bundleBytes = bundleBytesArr.byteLength
@@ -303,24 +315,25 @@ export function inferPermissions(input: InferPermissionsInput): VsCodePermission
   const ast = tryParseBundle(source)
   if (ast) {
     parsedOk = true
-    const stats = walkAst(ast, permissions, reasons)
+    const stats = walkAst(ast, permissions, reasons, unsupportedApis)
     uniqueIdentifiers = stats.uniqueIdentifiers
   } else {
     unparsedBundle = true
-    scanStrings(source, permissions, reasons)
+    scanStrings(source, permissions, reasons, unsupportedApis)
   }
 
   // String-scan complements the AST walk: regex catches what the AST
   // missed (e.g. `require(`fs`)` in a string-literal template) and the
   // AST walks catches what regex over-counts (string occurrences inside
   // comments). We always run both and dedupe via the permissions Set.
-  scanStrings(source, permissions, reasons)
+  scanStrings(source, permissions, reasons, unsupportedApis)
 
   return {
     permissions: orderedPermissions(permissions),
     reasons,
     confidence: gradeConfidence({ parsedOk, bundleBytes, uniqueIdentifiers }),
     unparsedBundle,
+    unsupportedApis: [...unsupportedApis].sort(),
   }
 }
 
@@ -406,7 +419,8 @@ function tryParseBundle(source: string): Node | null {
 function walkAst(
   root: Node,
   permissions: Set<PluginPermission>,
-  reasons: VsCodePermissionReason[]
+  reasons: VsCodePermissionReason[],
+  unsupportedApis: Set<string>
 ): { uniqueIdentifiers: number } {
   const identifiers = new Set<string>()
 
@@ -458,6 +472,9 @@ function walkAst(
       case "MemberExpression": {
         // vscode.secrets.* / vscode.authentication.* / vscode.env.clipboard.*
         const root = walkMemberChain(node)
+        // Unsupported-namespace evidence rides the same chain resolution.
+        // Recorded, not gated: see engine-compat.ts.
+        recordUnsupportedApi(root, unsupportedApis)
         if (root.startsWith("vscode.secrets")) {
           addPermission(
             permissions,
@@ -582,6 +599,22 @@ function walkMemberChain(node: unknown): string {
   return parts.join(".")
 }
 
+/**
+ * Record a `vscode.<ns>` reference when `<ns>` is one the shim doesn't
+ * implement.
+ *
+ * Matches the namespace segment exactly rather than by prefix: `vscode.debug`
+ * is unsupported, but a hypothetical `vscode.debugging` would be a different
+ * API and claiming it as evidence would be a fabricated warning.
+ */
+function recordUnsupportedApi(chain: string, unsupportedApis: Set<string>): void {
+  if (!chain.startsWith("vscode.")) return
+  const namespace = chain.slice("vscode.".length).split(".")[0]
+  if ((UNIMPLEMENTED_VSCODE_NAMESPACES as readonly string[]).includes(namespace)) {
+    unsupportedApis.add(`vscode.${namespace}`)
+  }
+}
+
 function applyModulePermissions(
   moduleName: string,
   permissions: Set<PluginPermission>,
@@ -612,8 +645,21 @@ function applyModulePermissions(
 function scanStrings(
   source: string,
   permissions: Set<PluginPermission>,
-  reasons: VsCodePermissionReason[]
+  reasons: VsCodePermissionReason[],
+  unsupportedApis: Set<string>
 ): void {
+  // Unsupported-namespace scan. Minifiers rename locals but cannot rename
+  // *property* accesses, so `vscode.debug` usually survives minification as
+  // literal text — which is what makes this worth running even when the AST
+  // walk succeeded. It still fails open: a bundle that aliases the namespace
+  // (`const d = vscode.debug`) or builds the key dynamically defeats it, so a
+  // clean scan is not evidence of absence.
+  for (const namespace of UNIMPLEMENTED_VSCODE_NAMESPACES) {
+    if (new RegExp(`\\bvscode\\s*\\.\\s*${namespace}\\b`).test(source)) {
+      unsupportedApis.add(`vscode.${namespace}`)
+    }
+  }
+
   for (const entry of MODULE_PERMISSION_MAP) {
     for (const moduleName of entry.modules) {
       const escaped = moduleName.replace(/[/]/g, "\\/")

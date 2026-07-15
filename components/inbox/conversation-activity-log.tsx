@@ -12,7 +12,7 @@
  */
 
 import { useState } from "react"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import { ActivityIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -83,6 +83,7 @@ interface ActivityRow {
 export function ConversationActivityLog({ conversationKey }: { conversationKey: string }) {
   const t = useTranslations("inbox.activity")
   const format = useFormatter()
+  const now = useNow()
   const reduce = useReducedMotion()
   const [open, setOpen] = useState(false)
   const auditEntries = useConversationActivity(conversationKey)
@@ -145,7 +146,7 @@ export function ConversationActivityLog({ conversationKey }: { conversationKey: 
                   ) : null}
                 </span>
                 <span className="whitespace-nowrap text-[10px] text-muted-foreground">
-                  {format.relativeTime(new Date(entry.at))}
+                  {format.relativeTime(new Date(entry.at), now)}
                 </span>
               </li>
             ))}

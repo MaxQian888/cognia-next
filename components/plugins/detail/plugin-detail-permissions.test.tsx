@@ -15,6 +15,16 @@ let mockPlugin: PluginRow | undefined
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockPlugin,
 }))
+
+// The approved-binaries card runs its own Dexie live query (which this file's
+// blanket `useLiveQuery` stub would answer with a PluginRow) and is covered by
+// its co-located test. Stub it to a marker so this suite stays about the
+// permission table, while still pinning that the card is mounted here.
+jest.mock("./plugin-approved-binaries-card", () => ({
+  PluginApprovedBinariesCard: ({ pluginId }: { pluginId: string }) => (
+    <div>approved-binaries-card:{pluginId}</div>
+  ),
+}))
 jest.mock("@/lib/db/plugins", () => ({
   getPlugin: jest.fn(),
 }))
@@ -95,6 +105,14 @@ describe("PluginDetailPermissions", () => {
     // `getAllByText` returns 2 nodes per permission.
     expect(screen.getAllByText("clipboard:read").length).toBeGreaterThan(0)
     expect(screen.getAllByText("shell:execute").length).toBeGreaterThan(0)
+  })
+
+  it("mounts the approved-binaries card so durable grants are revocable", () => {
+    // A permanent binary grant the user cannot see or withdraw is its own
+    // security problem; the ledger's only reader has to be reachable.
+    mockPlugin = makePlugin(["cli:execute"])
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.getByText("approved-binaries-card:alpha")).toBeInTheDocument()
   })
 
   it("merges declared + granted permissions into one sorted list", () => {

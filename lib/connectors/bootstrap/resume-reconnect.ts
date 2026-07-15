@@ -109,7 +109,11 @@ export function startResumeReconnect(options: ResumeReconnectOptions = {}): Resu
     },
   } = options
 
-  if (!windowTarget && !documentTarget) {
+  if (
+    (!windowTarget && !documentTarget) ||
+    (windowTarget && typeof windowTarget.addEventListener !== "function") ||
+    (documentTarget && typeof documentTarget.addEventListener !== "function")
+  ) {
     return { dispose() {} }
   }
 

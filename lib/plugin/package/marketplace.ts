@@ -472,7 +472,7 @@ function categoryFromMessage(message: string): MarketplaceErrorCategory {
   return "unknown"
 }
 
-function normalizeOperationError(
+export function normalizeOperationError(
   error: unknown,
   fallbackMessage: string,
   status?: number

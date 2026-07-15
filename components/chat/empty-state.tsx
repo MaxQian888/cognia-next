@@ -73,6 +73,10 @@ export interface RecentSessionEntry {
 
 interface Props {
   onCreate: () => void
+  /**
+   * Send `prompt` as a turn. Hosts must tolerate being called with no session
+   * open (the fullscreen welcome) — starting one is the host's job.
+   */
   onUseSample: (prompt: string) => void
   /** When `inline` is true, render without the full-screen frame. */
   variant?: "fullscreen" | "inline"
@@ -312,7 +316,7 @@ export function EmptyChatState({
 
         {/* AI starters — model-suggested opening prompts, surfaced as a
             horizontal row of ai-elements suggestion chips. Clicking a chip
-            loads its prompt into the composer via onUseSample. */}
+            sends its prompt via onUseSample. */}
         {aiPrompts.length > 0 ? (
           <motion.div className="w-full" variants={STAGGER_CHILD} data-testid="ai-starters">
             <h3 className={GROUP_HEADING_CLASS}>{t("sections.aiPrompts")}</h3>

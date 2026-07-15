@@ -579,6 +579,7 @@ function renderGoalExitCard(resultingStatus: GoalStatus, reason: string): string
 export function useClaudeChat() {
   const store = useChatStore
   const tRouting = useTranslations("providers.routingView")
+  const tInlineErr = useTranslations("chat.inlineError")
   // The active session id is captured per-render via a ref so the long-lived
   // event handler always sees the freshest value without resubscribing.
   const activeRef = useRef<string | null>(null)
@@ -796,7 +797,7 @@ export function useClaudeChat() {
     ) => {
       const sessionId = callOptions?.sessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) {
-        useChatStore.getState().setError("No session selected")
+        useChatStore.getState().setError(tInlineErr("noSession"))
         return
       }
       if (typeof content === "string" && !content.trim()) return
@@ -1401,7 +1402,7 @@ export function useClaudeChat() {
         }
       }
     },
-    [store, tRouting, registry, enqueueClaudeEvent]
+    [store, tRouting, tInlineErr, registry, enqueueClaudeEvent]
   )
 
   // Keep the module-scope `handleEvent` pointed at the latest `send` so it can

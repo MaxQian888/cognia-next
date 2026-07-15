@@ -10,6 +10,7 @@ jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string, vals?: Record<string, unknown>) =>
     vals ? `${ns}.${key}:${JSON.stringify(vals)}` : `${ns}.${key}`,
   useFormatter: () => ({ relativeTime: () => "just now" }),
+  useNow: () => new Date(),
 }))
 
 const toastSuccess = jest.fn()

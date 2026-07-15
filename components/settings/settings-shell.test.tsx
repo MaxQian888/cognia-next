@@ -122,8 +122,19 @@ describe("SettingsShell fill-height layout", () => {
     expect(container.innerHTML).not.toMatch(/max-w-5xl/)
   })
 
-  it("keeps a plain section inside the scrollable, width-capped branch", () => {
+  // Appearance moved to a master/detail layout, so it owns its own scroll and
+  // must not be width-capped.
+  it("renders the appearance section in the fixed-frame fill-height branch", () => {
     mockSection = "appearance"
+    const { container } = render(<SettingsShell />)
+    const panel = container.querySelector("[data-settings-panel]")
+    expect(panel).not.toBeNull()
+    expect(panel!.className).toMatch(/\bflex-1\b/)
+    expect(container.innerHTML).not.toMatch(/max-w-5xl/)
+  })
+
+  it("keeps a plain section inside the scrollable, width-capped branch", () => {
+    mockSection = "notifications"
     const { container } = render(<SettingsShell />)
     const panel = container.querySelector("[data-settings-panel]")
     expect(panel).not.toBeNull()

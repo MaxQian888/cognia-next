@@ -3722,14 +3722,18 @@ export class PluginManager {
           registerPluginLspServers: (input: {
             pluginId: string
             pluginPath: string
-            publisherFingerprint?: string
             servers: NonNullable<typeof plugin.manifest.lspServers>
           }) => Promise<unknown>
         }
+        // NOTE: `manifest.vscodeExtension.publisherKeyFingerprint` is
+        // deliberately NOT forwarded. It is a value the extension asserts
+        // about itself; forwarding it once let a hostile `.vsix` name a
+        // seeded `"placeholder:*"` fingerprint and earn a prompt-free spawn.
+        // The policy resolves consent from its own `approvedBinaries` ledger
+        // (v109) using only pluginId + path + the bytes on disk.
         await registerPluginLspServers({
           pluginId,
           pluginPath: plugin.path ?? "",
-          publisherFingerprint: plugin.manifest.vscodeExtension?.publisherKeyFingerprint,
           servers: plugin.manifest.lspServers,
         })
       } catch (err) {
@@ -3825,7 +3829,9 @@ export class PluginManager {
     // `plugin.tools` cleanup loop unregisters them for free.
     if (plugin.manifest.cliTools?.length) {
       const requiresBinaries = plugin.manifest.requires?.binaries ?? []
-      const publisherFingerprint = plugin.manifest.author?.publicKey
+      // NOTE: `manifest.author.publicKey` is deliberately NOT forwarded — see
+      // the LSP registration above. Same self-assertion flaw, same fix: the
+      // CLI binary policy resolves consent from the `approvedBinaries` ledger.
       for (const def of plugin.manifest.cliTools) {
         const cliTool: PluginTool = {
           name: `${pluginId}:${def.name}`,
@@ -3840,7 +3846,6 @@ export class PluginManager {
             return executeCliTool(pluginId, def, toolArgs, {
               pluginPath: plugin.path ?? "",
               requiresBinaries,
-              publisherFingerprint,
             })
           },
         }

@@ -2,12 +2,12 @@
 
 // "Share usage card" dialog: renders the aggregated usage stats as a styled
 // card (Arknights/PRTS style by default), previews it live, and offers the
-// two quick-share paths — download as PNG (html2canvas) and publish through
+// two quick-share paths — download as PNG (html2canvas-pro) and publish through
 // the existing zero-knowledge ShareLinkDialog (`usage-card` kind).
 
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import html2canvas from "html2canvas"
+import html2canvas from "html2canvas-pro"
 import { ImageDownIcon, Link2Icon, Share2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -83,7 +83,7 @@ export function UsageShareDialog({ rows, rangeLabel, trigger, open, onOpenChange
   const onDownloadPng = async () => {
     setDownloading(true)
     setError(null)
-    // Rasterise from a real (off-screen) DOM node — html2canvas cannot see
+    // Rasterise from a real (off-screen) DOM node — html2canvas-pro cannot see
     // into the sandboxed preview iframe.
     const host = document.createElement("div")
     host.style.position = "fixed"

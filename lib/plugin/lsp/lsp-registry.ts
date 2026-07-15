@@ -51,8 +51,6 @@ export interface LspServerRecord {
   config: PluginLspServerDef
   /** Absolute install dir, for the lsp-binary-policy inside-check. */
   pluginPath: string
-  /** Optional Ed25519 fingerprint surfaced from the plugin manifest. */
-  publisherFingerprint?: string
   state: LspServerState
   /** When state transitioned into "running". */
   startedAt?: number
@@ -167,7 +165,6 @@ export async function registerLspServer(input: {
   ownerId: LspServerOwner
   config: PluginLspServerDef
   pluginPath: string
-  publisherFingerprint?: string
   /** When true, skip the binary policy gate (called from the consent UI). */
   confirmedConsent?: boolean
 }): Promise<LspServerRecord> {
@@ -182,7 +179,6 @@ export async function registerLspServer(input: {
     key: k,
     config: input.config,
     pluginPath: input.pluginPath,
-    publisherFingerprint: input.publisherFingerprint,
     state: "stopped",
   }
   records.set(k, record)
@@ -194,7 +190,6 @@ export async function registerLspServer(input: {
       policy = await evaluateLspBinary({
         pluginId: input.ownerId,
         binaryPath: resolveBinaryPath(input.config.command, input.pluginPath),
-        publisherFingerprint: input.publisherFingerprint,
         pluginPath: input.pluginPath,
       })
     } catch (err) {
@@ -307,7 +302,6 @@ export function getLspServerForLanguage(languageId: string): LspServerRecord | u
 export async function registerPluginLspServers(input: {
   pluginId: string
   pluginPath: string
-  publisherFingerprint?: string
   servers: PluginLspServerDef[]
 }): Promise<LspServerRecord[]> {
   const out: LspServerRecord[] = []
@@ -317,7 +311,6 @@ export async function registerPluginLspServers(input: {
         ownerId: input.pluginId,
         config: cfg,
         pluginPath: input.pluginPath,
-        publisherFingerprint: input.publisherFingerprint,
       })
       out.push(rec)
     } catch (err) {

@@ -491,6 +491,104 @@ describe("runTeamLifecycle — plan-approval gate", () => {
   })
 })
 
+describe("runTeamLifecycle — risk-raised plan approval (ADR-0070)", () => {
+  /** A roster that can drive the machine: computer-use → high risk. */
+  const riskyWorker = () =>
+    ({ ...worker("w1"), config: { tools: ["computer_use"] } }) as AgentTeammate
+
+  it("raises the plan-approval gate for a high-risk roster even with requirePlanApproval=false", async () => {
+    expect(baseTeam.config.requirePlanApproval).toBeFalsy()
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
+    const updateTeammate = jest.fn()
+    deps.storeWriter.updateTeammate = updateTeammate
+
+    const runPromise = runTeamLifecycle("team-1", deps)
+    await new Promise((r) => setTimeout(r, 30))
+    // The gate is live: the lead is parked awaiting approval with a plan.
+    expect(deps.runLeadPlanning).toHaveBeenCalled()
+    expect(updateTeammate).toHaveBeenCalledWith(
+      "lead-1",
+      expect.objectContaining({ status: "awaiting_approval" })
+    )
+    reject({ scope: "agent-team", id: "team-1" }, "not today")
+    const result = await runPromise
+    expect(result.status).toBe("failed")
+  })
+
+  it("names the risk surfaces when the same run is headless", async () => {
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
+    const result = await runTeamLifecycle("team-1", { ...deps, origin: "scheduler" })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/computer-use/)
+    expect(result.reason).toMatch(/cannot proceed unattended \(origin=scheduler\)/)
+    // Fail-fast means fail BEFORE burning planning tokens.
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
+
+  it("riskGating=false restores the old unattended behavior", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const optedOut = { ...baseTeam, config: { ...baseTeam.config, riskGating: false } }
+    const deps = buildDeps(optedOut, [task("t1")], [lead, riskyWorker()])
+    const result = await runTeamLifecycle("team-1", { ...deps, origin: "scheduler" })
+    expect(result.status).toBe("completed")
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
+
+  it("leaves a low-risk roster completely alone", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("completed")
+    // No plan, no gate, no new friction — the Quick lane is untouched.
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
+
+  it("does not gate a plain IM-bound run — being connector-bound is not itself a risk", async () => {
+    // Regression guard for the `startTeamRunFromIM` production flow: judging a
+    // run by its origin (rather than by what its roster can reach) would make
+    // every headless IM-bound team run fail-fast. See ADR-0070 §Rejected.
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      origin: "im",
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+    })
+    expect(result.status).toBe("completed")
+  })
+
+  it("DOES gate an IM-bound run whose roster can drive the machine", async () => {
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      origin: "im",
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+    })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/computer-use/)
+  })
+
+  it("still explains an operator-set gate by the operator's choice, not by risk", async () => {
+    const operatorGated = {
+      ...baseTeam,
+      config: { ...baseTeam.config, requirePlanApproval: true },
+    }
+    const deps = buildDeps(operatorGated, [task("t1")], [lead, riskyWorker()])
+    const result = await runTeamLifecycle("team-1", { ...deps, origin: "scheduler" })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/requirePlanApproval is enabled/)
+  })
+})
+
 describe("runTeamLifecycle — ultracode orchestration", () => {
   const fence = (json: unknown) => "```json\n" + JSON.stringify(json) + "\n```"
 

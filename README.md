@@ -179,7 +179,7 @@ pnpm dlx shadcn@latest add <component>
 - **Environment** — `cp .env.example .env.local`. `NEXT_PUBLIC_*` vars are exposed to the browser;
   `lib/env.ts` validates required vars at first access. Never commit `.env.local`.
 - **Tauri** — `src-tauri/tauri.conf.json` defines product name (`Cognia`), identifier
-  (`com.reactquickstarter.desktop`), deep-link scheme (`cognia://`), a hard `'self'` CSP, the
+  (`com.cognia.desktop`), deep-link scheme (`cognia://`), a hard `'self'` CSP, the
   custom title bar, and the bundled sidecar resources.
 - **Path aliases** — `@/components`, `@/lib`, `@/ui`, `@/hooks`, `@/utils`.
 - **Styling** — Tailwind v4 via `@tailwindcss/postcss`, oklch CSS variables, class-based dark

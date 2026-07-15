@@ -34,8 +34,8 @@ Object.defineProperty(window, "localStorage", {
   writable: true,
 })
 
-// Mock html2canvas
-jest.mock("html2canvas", () => ({
+// Mock html2canvas-pro
+jest.mock("html2canvas-pro", () => ({
   __esModule: true,
   default: jest.fn(() =>
     Promise.resolve({

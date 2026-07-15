@@ -58,6 +58,11 @@ const appearance = require("@/lib/appearance") as {
   makeWallpaper: jest.Mock
 }
 
+/** A file the real intake accepts, so drop/pick tests exercise validation. */
+function pngFile(name: string): File {
+  return new File([new Uint8Array([1, 2])], name, { type: "image/png" })
+}
+
 const setBackground = jest.fn()
 const addWallpaper = jest.fn()
 const deleteWallpaper = jest.fn()
@@ -123,12 +128,34 @@ describe("WallpaperTab", () => {
     expect(setActiveWallpaper).toHaveBeenCalledWith("preset-mock")
   })
 
-  it("renders the upload + gradient sections", async () => {
-    await act(async () => {
-      render(<WallpaperTab />)
+  // Upload and gradient are gallery tiles now, not two permanently-expanded
+  // blocks competing with the gallery for vertical space.
+  describe("add tiles", () => {
+    it("offers both add affordances as gallery tiles", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      expect(screen.getByTestId("wallpaper-add-upload")).toBeInTheDocument()
+      expect(screen.getByTestId("wallpaper-add-gradient")).toBeInTheDocument()
     })
-    expect(screen.getByText("dropHint")).toBeInTheDocument()
-    expect(screen.getByText("gradient.title")).toBeInTheDocument()
+
+    it("keeps the upload surface collapsed until its tile is clicked", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      expect(screen.queryByText("dropHint")).not.toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("wallpaper-add-upload"))
+      expect(await screen.findByText("dropHint")).toBeInTheDocument()
+    })
+
+    it("keeps the gradient builder collapsed until its tile is clicked", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      expect(screen.queryByTestId("gradient-preview")).not.toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("wallpaper-add-gradient"))
+      expect(await screen.findByTestId("gradient-preview")).toBeInTheDocument()
+    })
   })
 
   it("renders an OK contrast chip for a color wallpaper at low opacity", async () => {
@@ -183,53 +210,110 @@ describe("WallpaperTab", () => {
     expect(setBackground).toHaveBeenCalledWith({ opacity: 0.4 })
   })
 
-  it("renders 5 scope cards with role=radio", async () => {
-    await act(async () => {
-      render(<WallpaperTab />)
+  describe("scope chips", () => {
+    // Every chip lives inside the adjustments fieldset, which is disabled
+    // until a wallpaper is active. jsdom's fireEvent dispatches straight at
+    // the node and ignores that, so a test without an active wallpaper would
+    // pass here while the chip is unclickable in a real browser. Seed one.
+    beforeEach(() => {
+      storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "preset-mock" }
     })
-    const cards = screen.getAllByRole("radio")
-    expect(cards.length).toBe(5)
+
+    it("renders 5 scope chips with role=radio", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      expect(screen.getAllByRole("radio")).toHaveLength(5)
+    })
+
+    it("clicking a scope chip calls setBackground({ scope })", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      fireEvent.click(screen.getByRole("radio", { name: /scope\.chat\.label/i }))
+      expect(setBackground).toHaveBeenCalledWith(expect.objectContaining({ scope: "chat" }))
+    })
+
+    it("hovering a scope chip sets data-bg-preview on <html>; mouseLeave clears it", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      const chip = screen.getByRole("radio", { name: /scope\.sidebar\.label/i })
+      fireEvent.mouseEnter(chip)
+      expect(document.documentElement.getAttribute("data-bg-preview")).toBe("sidebar")
+      fireEvent.mouseLeave(chip)
+      expect(document.documentElement.getAttribute("data-bg-preview")).toBeNull()
+    })
+
+    it("focus on a scope chip sets data-bg-preview; blur clears it", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      const chip = screen.getByRole("radio", { name: /scope\.canvas\.label/i })
+      fireEvent.focus(chip)
+      expect(document.documentElement.getAttribute("data-bg-preview")).toBe("canvas")
+      fireEvent.blur(chip)
+      expect(document.documentElement.getAttribute("data-bg-preview")).toBeNull()
+    })
+
+    it("marks the active scope chip with aria-checked=true", async () => {
+      storeState.background = {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        activeId: "preset-mock",
+        scope: "global",
+      }
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      expect(screen.getByRole("radio", { name: /scope\.global\.label/i })).toHaveAttribute(
+        "aria-checked",
+        "true"
+      )
+      expect(screen.getByRole("radio", { name: /scope\.chat\.label/i })).toHaveAttribute(
+        "aria-checked",
+        "false"
+      )
+    })
+
+    // The nav unmounts this panel on switch; a pinned attribute would survive
+    // the rest of the session.
+    it("clears data-bg-preview when the panel unmounts mid-hover", async () => {
+      let view: ReturnType<typeof render> | undefined
+      await act(async () => {
+        view = render(<WallpaperTab />)
+      })
+      fireEvent.mouseEnter(screen.getByRole("radio", { name: /scope\.chat\.label/i }))
+      expect(document.documentElement.getAttribute("data-bg-preview")).toBe("chat")
+      view!.unmount()
+      expect(document.documentElement.getAttribute("data-bg-preview")).toBeNull()
+    })
   })
 
-  it("clicking a scope card calls setBackground({ scope })", async () => {
-    await act(async () => {
-      render(<WallpaperTab />)
+  describe("adjustments gating", () => {
+    it("disables every adjustment while no wallpaper is active", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      expect(screen.getByTestId("wallpaper-adjustments")).toBeDisabled()
+      expect(screen.getByText("noActive")).toBeInTheDocument()
+      // fieldset does not disable a Radix slider (it renders role=slider, not
+      // a form control), so the sliders must carry it themselves.
+      for (const slider of screen.getAllByRole("slider")) {
+        expect(slider).toHaveAttribute("data-disabled")
+      }
     })
-    fireEvent.click(screen.getByRole("radio", { name: /scope\.chat\.label/i }))
-    expect(setBackground).toHaveBeenCalledWith(expect.objectContaining({ scope: "chat" }))
-  })
 
-  it("hovering a scope card sets data-bg-preview on <html>; mouseLeave clears it", async () => {
-    await act(async () => {
-      render(<WallpaperTab />)
+    it("enables them once something is selected", async () => {
+      storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "preset-mock" }
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      expect(screen.getByTestId("wallpaper-adjustments")).not.toBeDisabled()
+      expect(screen.queryByText("noActive")).not.toBeInTheDocument()
+      for (const slider of screen.getAllByRole("slider")) {
+        expect(slider).not.toHaveAttribute("data-disabled")
+      }
     })
-    const card = screen.getByRole("radio", { name: /scope\.sidebar\.label/i })
-    fireEvent.mouseEnter(card)
-    expect(document.documentElement.getAttribute("data-bg-preview")).toBe("sidebar")
-    fireEvent.mouseLeave(card)
-    expect(document.documentElement.getAttribute("data-bg-preview")).toBeNull()
-  })
-
-  it("focus on a scope card sets data-bg-preview; blur clears it", async () => {
-    await act(async () => {
-      render(<WallpaperTab />)
-    })
-    const card = screen.getByRole("radio", { name: /scope\.canvas\.label/i })
-    fireEvent.focus(card)
-    expect(document.documentElement.getAttribute("data-bg-preview")).toBe("canvas")
-    fireEvent.blur(card)
-    expect(document.documentElement.getAttribute("data-bg-preview")).toBeNull()
-  })
-
-  it("marks the active scope card with aria-checked=true", async () => {
-    storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, scope: "global" }
-    await act(async () => {
-      render(<WallpaperTab />)
-    })
-    const active = screen.getByRole("radio", { name: /scope\.global\.label/i })
-    expect(active.getAttribute("aria-checked")).toBe("true")
-    const other = screen.getByRole("radio", { name: /scope\.chat\.label/i })
-    expect(other.getAttribute("aria-checked")).toBe("false")
   })
 
   it("merges plugin-contributed wallpapers into the gallery with a Plugin badge", async () => {
@@ -266,28 +350,74 @@ describe("WallpaperTab", () => {
     expect(setActiveWallpaper).toHaveBeenCalledWith("plugin-demo-aurora")
   })
 
-  it("uploads a file: saveImage → addWallpaper → setActiveWallpaper", async () => {
-    appearance.saveImage.mockResolvedValue({
-      source: {
-        kind: "image",
-        storage: "indexeddb",
-        blobKey: "id-x",
-        mime: "image/png",
-        width: 1,
-        height: 1,
-      },
-      previewUrl: "blob:mock",
+  describe("adding a wallpaper", () => {
+    beforeEach(() => {
+      appearance.saveImage.mockResolvedValue({
+        source: {
+          kind: "image",
+          storage: "indexeddb",
+          blobKey: "id-x",
+          mime: "image/png",
+          width: 1,
+          height: 1,
+        },
+        previewUrl: "blob:mock",
+      })
     })
-    await act(async () => {
-      render(<WallpaperTab />)
+
+    it("uploads via the picker: saveImage → addWallpaper → setActiveWallpaper", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      // The picker's input only mounts once the tile's popover opens.
+      fireEvent.click(screen.getByTestId("wallpaper-add-upload"))
+      await screen.findByTestId("wallpaper-uploader")
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [pngFile("name.png")] } })
+      })
+      await waitFor(() => expect(appearance.saveImage).toHaveBeenCalled())
+      await waitFor(() => expect(addWallpaper).toHaveBeenCalled())
+      await waitFor(() => expect(setActiveWallpaper).toHaveBeenCalled())
     })
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement
-    const file = new File([new Uint8Array([1, 2])], "name.png", { type: "image/png" })
-    await act(async () => {
-      fireEvent.change(input, { target: { files: [file] } })
+
+    it("accepts a file dropped anywhere on the gallery", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      await act(async () => {
+        fireEvent.drop(screen.getByTestId("wallpaper-gallery-dropzone"), {
+          dataTransfer: { files: [pngFile("dropped.png")] },
+        })
+      })
+      await waitFor(() => expect(appearance.saveImage).toHaveBeenCalled())
+      await waitFor(() => expect(setActiveWallpaper).toHaveBeenCalled())
     })
-    await waitFor(() => expect(appearance.saveImage).toHaveBeenCalled())
-    await waitFor(() => expect(addWallpaper).toHaveBeenCalled())
-    await waitFor(() => expect(setActiveWallpaper).toHaveBeenCalled())
+
+    it("highlights the gallery while a file is dragged over it", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      const zone = screen.getByTestId("wallpaper-gallery-dropzone")
+      expect(zone).toHaveAttribute("data-drag-over", "false")
+      fireEvent.dragOver(zone)
+      expect(zone).toHaveAttribute("data-drag-over", "true")
+      fireEvent.dragLeave(zone)
+      expect(zone).toHaveAttribute("data-drag-over", "false")
+    })
+
+    it("surfaces a rejection instead of saving an unsupported drop", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      const bad = new File([new Uint8Array([1])], "doc.pdf", { type: "application/pdf" })
+      await act(async () => {
+        fireEvent.drop(screen.getByTestId("wallpaper-gallery-dropzone"), {
+          dataTransfer: { files: [bad] },
+        })
+      })
+      expect(await screen.findByText("invalidType")).toBeInTheDocument()
+      expect(appearance.saveImage).not.toHaveBeenCalled()
+    })
   })
 })

@@ -9,7 +9,7 @@ describe("resolveModelMeta", () => {
   it("returns the pattern-table window when no model id is given", async () => {
     const meta = await resolveModelMeta("anthropic", undefined, catalog({}))
     expect(meta.modelId).toBe("")
-    expect(meta.contextWindow).toBe(200_000)
+    expect(meta.contextWindow).toBe(128_000)
     expect(meta.pricing).toBeUndefined()
   })
 

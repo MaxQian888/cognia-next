@@ -186,6 +186,10 @@
       "maxMs": "Max (ms)",
       "title": "Retry defaults"
     },
+    "riskGating": {
+      "hint": "Ask before a step sends externally, drives the desktop, runs a shell command, or deletes a message — unless an approval node already covers it. Unattended runs fail instead of waiting.",
+      "label": "Approve risky steps"
+    },
     "runPolicy": {
       "title": "Run policy"
     },

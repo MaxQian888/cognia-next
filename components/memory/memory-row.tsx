@@ -1,7 +1,7 @@
 "use client"
 
 import { memo, useState, type KeyboardEvent, type MouseEvent } from "react"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import Link from "next/link"
 import { PinIcon, PinOffIcon, PencilIcon, Trash2Icon, CheckIcon, XIcon } from "lucide-react"
 import type { Memory } from "@/types/memory/memory"
@@ -47,6 +47,7 @@ function MemoryRowImpl({
   const t = useTranslations("memory.panel")
   const tTypes = useTranslations("memory.types")
   const format = useFormatter()
+  const now = useNow()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(memory.text)
 
@@ -116,7 +117,7 @@ function MemoryRowImpl({
           <span data-testid="memory-importance">★ {memory.importance}</span>
           <span>
             {t("accessedRelative", {
-              time: format.relativeTime(new Date(memory.lastAccessedAt)),
+              time: format.relativeTime(new Date(memory.lastAccessedAt), now),
             })}
           </span>
           {memory.sourceSessionId && (

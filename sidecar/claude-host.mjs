@@ -4,13 +4,18 @@
 // Inbound (parent -> sidecar) on stdin:
 //   { type: "send",                sessionId, prompt, options? }
 //     prompt: string | Array<{ type: "text", text } | { type: "image", source }>
+//     options.turnId: per-send turn id. Echoed on every session-scoped outbound
+//       event (see `makeWrappedEmit`), bound to the loop live when the turn
+//       started, so the parent can tell this turn's events apart from a
+//       superseded loop's late ones. Absent ⇒ events go out unstamped.
 //   { type: "interrupt",           sessionId }
 //   { type: "permission_response", sessionId, requestId, decision: "allow"|"allow_always"|"deny" }
 //   { type: "plugin_tool_response", sessionId, toolUseId, result?, error? }
 //   { type: "tool_result_decision", sessionId, reviewId, updatedToolOutput? }
 //   { type: "close",               sessionId }
 //
-// Outbound (sidecar -> parent) on stdout, one JSON object per line:
+// Outbound (sidecar -> parent) on stdout, one JSON object per line. Every
+// session-scoped message below also carries `turnId` when the send supplied one:
 //   { type: "event",              sessionId, event: SDKMessage }
 //   { type: "permission_request", sessionId, requestId, toolName, input, title?, displayName?, description? }
 //   { type: "permission_interrupted", sessionId, requestId, reason }
@@ -105,11 +110,19 @@ const sessions = new Map()
  * deletion policy is the crux of multi-turn context retention, so it lives in
  * one tested place. Exported for the co-located lifecycle test.
  *
+ * Also stamps the parent-bound event with the id of the turn this loop is
+ * serving (`turnRef.id`). The ref is per-LOOP and is only advanced by
+ * `handleSend` for the session object that is still live, so a superseded loop's
+ * late events keep carrying their OWN (old) turn id rather than being stamped
+ * with the replacement's — which is the whole point: the renderer discards them.
+ *
  * @param {(msg: any) => void} emitFn  forward an event to the parent (stdout)
  * @param {Map<string, any>} sessionsMap
  * @param {string} sessionId
+ * @param {(() => any) | undefined} getOwner
+ * @param {{ id?: string } | undefined} turnRef  mutable per-loop current turn id
  */
-export function makeWrappedEmit(emitFn, sessionsMap, sessionId, getOwner) {
+export function makeWrappedEmit(emitFn, sessionsMap, sessionId, getOwner, turnRef) {
   // Retire the map entry only when it still points at THIS session. After a
   // close-and-restart (see `handleSend` / `restartReason`) the OLD loop can emit
   // a late `session_ended` / `session_closed` for the same id — without this
@@ -130,7 +143,12 @@ export function makeWrappedEmit(emitFn, sessionsMap, sessionId, getOwner) {
       if (ownsEntry()) sessionsMap.delete(sessionId)
       return
     }
-    emitFn(msg)
+    // Stamp the turn id this loop is currently serving. Only session-scoped
+    // messages carry one — `ready` / `log` go out through the raw `emit`, never
+    // this wrapper. A turn-less send (older parent) leaves the field absent, and
+    // the renderer treats absence as "can't tell" and keeps the event.
+    const turnId = turnRef?.id
+    emitFn(turnId && msg && typeof msg === "object" ? { ...msg, turnId } : msg)
     if (msg && msg.type === "session_ended" && msg.sessionId === sessionId) {
       // A multi-turn dispatcher (ai-sdk) keeps ONE live loop across turns and
       // accumulates conversation context in-process. A per-turn `session_ended`
@@ -151,7 +169,10 @@ function startSession(sessionId, firstPrompt, sendOptions = {}) {
   // owns the map entry before retiring it (defends against a superseded old
   // loop evicting this replacement — see `makeWrappedEmit`).
   const ownerRef = { session: null }
-  const wrappedEmit = makeWrappedEmit(emit, sessions, sessionId, () => ownerRef.session)
+  // One ref per loop. `handleSend` advances it for later turns on THIS session;
+  // a replacement loop gets its own, so this one keeps stamping its old id.
+  const turnRef = { id: sendOptions?.turnId }
+  const wrappedEmit = makeWrappedEmit(emit, sessions, sessionId, () => ownerRef.session, turnRef)
   const session = dispatch({
     sessionId,
     firstPrompt,
@@ -161,6 +182,7 @@ function startSession(sessionId, firstPrompt, sendOptions = {}) {
   })
   if (!session) return null
   ownerRef.session = session
+  session.turnRef = turnRef
   sessions.set(sessionId, session)
   return session
 }
@@ -244,6 +266,10 @@ function handleSend(msg) {
       startSession(sessionId, prompt, options)
       return
     }
+    // Advance the LIVE loop's turn id so its events are stamped for this turn.
+    // Only reached for a session we're pushing into in place; a restarted one
+    // got a fresh ref above, and the loop it replaced keeps its own.
+    if (existing.turnRef) existing.turnRef.id = options?.turnId
     existing.pushUserMessage(prompt)
   } else {
     startSession(sessionId, prompt, options)

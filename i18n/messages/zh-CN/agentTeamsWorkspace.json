@@ -617,6 +617,7 @@
       "title": "PR 反馈闭环"
     },
     "requirePlanApproval": "需要计划审批",
+    "riskGating": "按风险要求计划审批",
     "save": "保存",
     "saveIndicator": {
       "auditCompleted": "审核完成 · {count} 个失效 id",

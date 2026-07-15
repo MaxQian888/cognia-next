@@ -66,11 +66,21 @@ export interface PreInstallTarget {
 
 interface Props {
   target: PreInstallTarget | null
+  /**
+   * Extra context shown on the permission step, above the permission list.
+   *
+   * Exists for the Open VSX path: a VS Code extension is an ordinary Node
+   * program with real filesystem / network / process access, and the permission
+   * list alone reads like a sandbox manifest — which would imply a confinement
+   * we do not provide. Optional and absent by default, so the cognia-registry
+   * chain renders exactly as before.
+   */
+  notice?: string
   onContinue: (value?: unknown) => void
   onCancel: () => void
 }
 
-export function PluginPreInstallDialog({ target, onContinue, onCancel }: Props) {
+export function PluginPreInstallDialog({ target, notice, onContinue, onCancel }: Props) {
   const t = useTranslations("plugins.preInstall")
   const open = target !== null
 
@@ -102,6 +112,7 @@ export function PluginPreInstallDialog({ target, onContinue, onCancel }: Props) 
             {target.step === "permission" && target.permission && (
               <PermissionStep
                 permission={target.permission}
+                notice={notice}
                 onContinue={() => onContinue()}
                 onCancel={onCancel}
               />
@@ -192,10 +203,12 @@ function ConflictStep({
 
 function PermissionStep({
   permission,
+  notice,
   onContinue,
   onCancel,
 }: {
   permission: PreInstallPermissionPayload
+  notice?: string
   onContinue: () => void
   onCancel: () => void
 }) {
@@ -207,6 +220,15 @@ function PermissionStep({
   return (
     <>
       <p className="text-sm text-muted-foreground">{t("permissionsHint")}</p>
+      {notice && (
+        <Card
+          className="flex flex-row items-start gap-2 p-3"
+          data-testid="pre-install-permission-notice"
+        >
+          <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <p className="text-xs text-muted-foreground">{notice}</p>
+        </Card>
+      )}
       {!hasAny ? (
         <p className="text-sm text-muted-foreground">{t("permissionsNone")}</p>
       ) : (

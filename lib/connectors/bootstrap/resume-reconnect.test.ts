@@ -277,4 +277,13 @@ describe("startResumeReconnect", () => {
     const handle = startResumeReconnect({ windowTarget: undefined, documentTarget: undefined })
     expect(() => handle.dispose()).not.toThrow()
   })
+
+  it("no-ops when the Node window shim has no event-listener method", () => {
+    expect(typeof globalThis.addEventListener).toBe("undefined")
+    const handle = startResumeReconnect({
+      windowTarget: globalThis as never,
+      documentTarget: undefined,
+    })
+    expect(() => handle.dispose()).not.toThrow()
+  })
 })

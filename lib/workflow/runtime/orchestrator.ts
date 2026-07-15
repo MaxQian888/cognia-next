@@ -50,6 +50,7 @@ import {
 import { IdempotencyCache } from "./idempotency"
 import { topoSort, upstream as upstreamOf } from "./topo-sort"
 import { runStep } from "./step-executor"
+import { applyNodeRiskGate } from "./risk-gate"
 import { runLoopContainer } from "./loop-container"
 import { buildErrorOutput, resolveNodeFailure } from "./node-failure"
 import { isJoinCancel, JoinCancelError, losingBranchScope } from "./branch-scope"
@@ -557,6 +558,19 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     return (async () => {
       try {
         getPluginEventHooks().dispatchWorkflowNodeStart(workflow.id, node.id, node.type)
+        // ── Pre-step risk gate (ADR-0070 Phase 3) ──
+        // Ask a human before a risky node runs, unless the workflow already asks
+        // one upstream. Low-risk nodes and non-gated workflows return
+        // immediately; a rejection (or any headless risky node) throws and lands
+        // on the normal step-failure path, so the run fails with a real reason
+        // instead of hanging.
+        await applyNodeRiskGate({
+          workflow: validated as VisualWorkflow,
+          node,
+          runId,
+          ...(input.triggeredBy ? { triggeredBy: input.triggeredBy } : {}),
+          signal: stepAc.signal,
+        })
         // Loop containers (schemaVersion 2) run their body subgraph through
         // the loop runtime; everything else goes through the plain step path.
         const result: { output: unknown; decision?: string | string[]; fromCache: boolean } =

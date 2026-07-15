@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -36,22 +36,36 @@ jest.mock("next/navigation", () => ({
   },
 }))
 
-const mockRows: PluginRow[] = [
-  {
-    id: "plugin_x",
-    name: "Test Plugin",
-    version: "1.2.3",
-    status: "enabled",
-    source: "builtin",
-    type: "frontend",
-    enabled: true,
-    capabilities: ["tools"],
-    path: "builtin://x",
-    manifest: { id: "plugin_x", permissions: ["clipboard:read"] },
-    createdAt: 1,
-    updatedAt: 1,
+const baseRow: PluginRow = {
+  id: "plugin_x",
+  name: "Test Plugin",
+  version: "1.2.3",
+  status: "enabled",
+  source: "builtin",
+  type: "frontend",
+  enabled: true,
+  capabilities: ["tools"],
+  path: "builtin://x",
+  manifest: { id: "plugin_x", permissions: ["clipboard:read"] },
+  createdAt: 1,
+  updatedAt: 1,
+}
+
+/** A VS Code extension row — installed from Open VSX, not cognia's registry. */
+const vscodeRow: PluginRow = {
+  ...baseRow,
+  id: "esbenp.prettier-vscode",
+  name: "Prettier",
+  source: "marketplace",
+  type: "vscode-extension",
+  path: "/ext/esbenp.prettier-vscode",
+  manifest: {
+    id: "esbenp.prettier-vscode",
+    vscodeExtension: { identifier: "esbenp.prettier-vscode", source: "openvsx" },
   },
-]
+}
+
+const mockRows: PluginRow[] = [baseRow]
 
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockRows,
@@ -62,6 +76,14 @@ jest.mock("@/lib/db/plugins", () => ({
   setPluginEnabled: jest.fn(),
   deletePlugin: jest.fn(),
   getPlugin: jest.fn(() => Promise.resolve(mockRows[0])),
+  updatePlugin: jest.fn(async () => undefined),
+}))
+
+// The cognia registry client behind the "Sync Registry" button.
+jest.mock("@/lib/plugin/package/marketplace", () => ({
+  getPluginMarketplace: jest.fn(() => ({
+    checkForUpdates: jest.fn(async () => []),
+  })),
 }))
 
 jest.mock("@/lib/db/schema", () => ({
@@ -104,9 +126,14 @@ jest.mock("@/components/feature-shell/feature-page-shell", () => ({
 }))
 
 import { PluginPanel } from "./plugin-panel"
+import { getPluginMarketplace } from "@/lib/plugin/package/marketplace"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
+const getPluginMarketplaceMock = getPluginMarketplace as unknown as jest.Mock
+
 beforeEach(() => {
+  mockRows.length = 0
+  mockRows.push(baseRow)
   mockSearchString = ""
   mockSearchCacheKey = ""
   mockSearchCacheValue = new URLSearchParams("")
@@ -211,5 +238,29 @@ describe("PluginPanel (3-pane shell)", () => {
     mockSearchString = "section=garbage"
     rerender(<PluginPanel />)
     expect(usePluginsStore.getState().activeSection).toBe("library")
+  })
+
+  it("Sync Registry never sends VS Code extension ids to the cognia registry", async () => {
+    // Same leak as the one fixed in lifecycle/updater.ts, on a second path:
+    // this button hands every installed row to the *marketplace's* own
+    // checkForUpdates, which loops getPlugin(id) against cognia's registry.
+    // An Open VSX id there tells cognia's registry what the user has
+    // installed, and can never return an answer.
+    // The parameter is typed so `mock.calls[0][0]` is reachable — an untyped
+    // `jest.fn(async () => [])` infers a zero-length tuple and won't compile.
+    const checkForUpdates = jest.fn(
+      async (_installed: Array<{ id: string; version: string }>) => []
+    )
+    getPluginMarketplaceMock.mockReturnValue({ checkForUpdates })
+    mockRows.push(vscodeRow)
+
+    render(<PluginPanel />)
+    fireEvent.click(screen.getByLabelText("syncRegistryAria"))
+
+    await waitFor(() => expect(checkForUpdates).toHaveBeenCalled())
+    const sentIds = checkForUpdates.mock.calls[0][0].map((p) => p.id)
+    expect(sentIds).not.toContain("esbenp.prettier-vscode")
+    // ...while ordinary cognia plugins are still checked as before.
+    expect(sentIds).toEqual(["plugin_x"])
   })
 })

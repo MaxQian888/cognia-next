@@ -2,7 +2,7 @@
 // into a self-contained, tweet-like shareable card — role glyph, quoted body,
 // model + timestamp, themed chrome, optional wallpaper. Rendered as a static
 // HTML string (no scripts) so it shares through the zero-knowledge pipeline as
-// the `chat-quote` kind and rasterizes to PNG via html2canvas. Mirrors the
+// the `chat-quote` kind and rasterizes to PNG via html2canvas-pro. Mirrors the
 // structure of `lib/usage/usage-card.ts`.
 
 import { THEMES, type ThemeId, type ThemeTokens } from "./syntax-themes"

@@ -44,15 +44,18 @@ const staticMode = process.env.PLAYWRIGHT_STATIC === "1"
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  // Files run in parallel across workers; tests WITHIN a file stay serial
-  // (fullyParallel: false). Every chromium/mobile spec is parallel-safe: each
-  // test gets a fresh browser context (fresh IndexedDB/Dexie), workflow specs
-  // reset the DB per test, and the shared global-setup mock fleet is only
-  // consumed read-only at its default scenario from these projects. The tauri
-  // project is the exception — its fixture reuses the ONE WebView2 page/context
-  // (tests/e2e/tauri/fixtures.ts) and its chat specs mutate the shared
-  // anthropic mock scenario via /__control — so tauri runs stay single-worker.
-  fullyParallel: false,
+  // Individual tests — not just files — spread across workers. Every
+  // chromium/mobile spec is parallel-safe: each test gets a fresh browser
+  // context (fresh IndexedDB/Dexie), workflow specs reset the DB per test, and
+  // the shared global-setup mock fleet is only consumed read-only at its
+  // default scenario from these projects. File-level parallelism alone pins a
+  // big file to one worker: tests/e2e/plugins/responsive.spec.ts holds 60 tests
+  // in a single file and dominated the suite's wall-clock as a result. The
+  // tauri project opts out (see below) — its fixture reuses the ONE WebView2
+  // page/context (tests/e2e/tauri/fixtures.ts) and its chat specs mutate the
+  // shared anthropic mock scenario via /__control, so its tests must stay
+  // serial.
+  fullyParallel: true,
   // Each test's beforeEach reloads through AccountGate (the dev-unlock marker is
   // sessionStorage, reset per browser context) and waits for the test-globals
   // bridge to mount. Under Turbopack dev that mount races route compilation and
@@ -134,6 +137,12 @@ export default defineConfig({
           {
             name: "tauri",
             testDir: "./tests/e2e/tauri",
+            // Opts out of the global fullyParallel: the CDP fixture reuses one
+            // WebView2 page/context and chat specs mutate the shared mock
+            // scenario, so tests must not interleave. (The tauriEnabled branch
+            // of `workers` above already forces a single worker; this keeps the
+            // constraint explicit at the project level.)
+            fullyParallel: false,
           },
         ]
       : []),

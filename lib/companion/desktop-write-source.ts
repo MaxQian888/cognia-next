@@ -398,6 +398,10 @@ async function goalCreate(payload: Record<string, unknown>): Promise<{ goal: unk
     nameHints: readNameHints(payload),
     startPaused: payload.startPaused === true,
     appSettings,
+    // A paired device drives this — the operator is not at the desktop's
+    // Continue button, so treat it as headless for manual-continue (ADR-0070
+    // Phase 2). The acceptance gate still applies and resolves from either end.
+    origin: "remote",
   })
   return { goal }
 }

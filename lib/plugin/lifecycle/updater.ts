@@ -2,6 +2,32 @@
  * Plugin Updater
  *
  * Handles plugin version management, update checking, and installation.
+ *
+ * ## Two registries, routed by plugin type
+ *
+ * `checkForUpdates` used to call `marketplace.getPlugin(id)` for **every**
+ * installed plugin with no type filter. VS Code extensions are installed from
+ * Open VSX and have ids like `esbenp.prettier-vscode`, so that loop was sending
+ * them to the *cognia* registry: an information leak (cognia's registry learned
+ * which VS Code extensions a user has, for no reason) that also could never
+ * return anything, making "check for updates" silently useless for every
+ * extension. Routing is now by `manifest.type`:
+ *
+ * - `"vscode-extension"` -> Open VSX (`checkOpenVsxUpdates`)
+ * - everything else      -> the cognia registry (unchanged)
+ *
+ * ## Why the Open VSX check is not batched
+ *
+ * Open VSX has **no batch query on the registry API** — verified live rather
+ * than assumed: `GET /api/-/query` and `GET /api/v2/-/query` both reject a
+ * second `extensionId` parameter ("must have the format 'namespace.extension'"),
+ * and `POST /api/-/query` is deprecated, takes a single `QueryParam`, and 301s
+ * back to the GET. A batch form *does* exist at `/vscode/gallery/extensionquery`
+ * (Microsoft's gallery protocol, which does accept multiple `filterType: 7`
+ * criteria — confirmed working), but adopting it would mean a second response
+ * shape, a second set of trust guards, and a dependency on undocumented
+ * protocol constants, all to save a handful of requests that the 24h cache
+ * mostly serves anyway. So: bounded-concurrency singles, cache first.
  */
 
 import { usePluginStore } from "@/stores/plugin-runtime"
@@ -9,6 +35,10 @@ import { getPluginMarketplace } from "../package/marketplace"
 import { loggers } from "../core/logger"
 import { getPluginBackupManager } from "./backup"
 import { getPluginManager } from "../core/manager"
+import type { PluginManifest } from "@/types/plugin"
+// Type-only: erased at compile time, so the Open VSX modules stay behind the
+// dynamic imports in `checkOpenVsxUpdates` and out of the default bundle.
+import type { OpenVsxClient } from "@/lib/plugin/vscode-shim/openvsx-client"
 
 // =============================================================================
 // Types
@@ -63,6 +93,75 @@ export interface UpdaterConfig {
 
 type ProgressHandler = (progress: UpdateProgress) => void
 
+/**
+ * One installed plugin, with everything the routing decision needs.
+ *
+ * `targetPlatform` is the platform the extension was *installed as*, read back
+ * from its manifest. See `resolveOpenVsxLatest` for why re-deriving it from the
+ * current machine would be a bug.
+ */
+interface InstalledPluginRef {
+  id: string
+  version: string
+  /** `manifest.type` — `"vscode-extension"` routes to Open VSX. */
+  type?: string
+  /** Recorded `manifest.vscodeExtension.targetPlatform`. */
+  targetPlatform?: string
+}
+
+/**
+ * How many Open VSX lookups may be in flight at once.
+ *
+ * The old loop was serial and unbounded (N+1 round trips, one at a time). Four
+ * keeps a 30-extension check fast without becoming the reason a user meets the
+ * registry's `x-ratelimit-limit: 10800`.
+ */
+export const OPEN_VSX_CHECK_CONCURRENCY = 4
+
+/**
+ * Run `task` over `items` with at most `limit` concurrent executions,
+ * preserving input order in the result.
+ *
+ * Workers pull from a shared cursor rather than the list being pre-sliced into
+ * `limit` chunks: with chunking, one slow lookup stalls its whole chunk while
+ * other workers sit idle.
+ */
+/**
+ * Read the routing facts off an installed plugin's manifest.
+ *
+ * `targetPlatform` comes from the manifest the *adapter* built, never from an
+ * extension-supplied field: `manifest-adapter.ts` reconstructs the
+ * `vscodeExtension` block from scratch, so an extension cannot self-declare the
+ * platform its updates are checked against.
+ */
+function toInstalledRef(id: string, manifest: PluginManifest): InstalledPluginRef {
+  const targetPlatform = manifest.vscodeExtension?.targetPlatform
+  return {
+    id,
+    version: manifest.version,
+    ...(manifest.type ? { type: manifest.type } : {}),
+    ...(typeof targetPlatform === "string" ? { targetPlatform } : {}),
+  }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  task: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = cursor++
+      if (index >= items.length) return
+      results[index] = await task(items[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
+
 // =============================================================================
 // Plugin Updater
 // =============================================================================
@@ -101,45 +200,161 @@ export class PluginUpdater {
     const updates: UpdateInfo[] = []
 
     try {
-      const marketplace = getPluginMarketplace()
-
-      // Get installed plugins
       const installedPlugins = pluginIds
         ? await this.getPluginVersions(pluginIds)
         : await this.getAllInstalledPlugins()
 
-      // Check each plugin for updates
-      for (const { id, version } of installedPlugins) {
-        this.emitProgress({
-          pluginId: id,
-          stage: "checking",
-          progress: 0,
-          message: `Checking ${id} for updates...`,
-        })
+      // Partition before any lookup. A VS Code extension id must never reach
+      // the cognia registry — see the module doc.
+      const vscodeExtensions = installedPlugins.filter((p) => p.type === "vscode-extension")
+      const cogniaPlugins = installedPlugins.filter((p) => p.type !== "vscode-extension")
 
-        try {
-          const latestInfo = await marketplace.getPlugin(id)
-          if (latestInfo && this.isNewerVersion(version, latestInfo.latestVersion)) {
-            const updateInfo: UpdateInfo = {
-              pluginId: id,
-              currentVersion: version,
-              latestVersion: latestInfo.latestVersion,
-              releaseDate: latestInfo.updatedAt,
-              breaking: this.isMajorUpdate(version, latestInfo.latestVersion),
-            }
-
-            updates.push(updateInfo)
-            this.pendingUpdates.set(id, updateInfo)
-          }
-        } catch (error) {
-          loggers.manager.warn(`[Updater] Failed to check ${id}:`, error)
-        }
-      }
+      updates.push(...(await this.checkCogniaUpdates(cogniaPlugins)))
+      updates.push(...(await this.checkOpenVsxUpdates(vscodeExtensions)))
 
       return updates
     } finally {
       this.isChecking = false
     }
+  }
+
+  /**
+   * Check the cognia registry. Unchanged behaviour, now scoped to plugins that
+   * actually come from it.
+   */
+  private async checkCogniaUpdates(plugins: InstalledPluginRef[]): Promise<UpdateInfo[]> {
+    if (plugins.length === 0) return []
+    const marketplace = getPluginMarketplace()
+    const updates: UpdateInfo[] = []
+
+    for (const { id, version } of plugins) {
+      this.emitProgress({
+        pluginId: id,
+        stage: "checking",
+        progress: 0,
+        message: `Checking ${id} for updates...`,
+      })
+
+      try {
+        const latestInfo = await marketplace.getPlugin(id)
+        if (latestInfo && this.isNewerVersion(version, latestInfo.latestVersion)) {
+          const updateInfo: UpdateInfo = {
+            pluginId: id,
+            currentVersion: version,
+            latestVersion: latestInfo.latestVersion,
+            releaseDate: latestInfo.updatedAt,
+            breaking: this.isMajorUpdate(version, latestInfo.latestVersion),
+          }
+
+          updates.push(updateInfo)
+          this.pendingUpdates.set(id, updateInfo)
+        }
+      } catch (error) {
+        loggers.manager.warn(`[Updater] Failed to check ${id}:`, error)
+      }
+    }
+
+    return updates
+  }
+
+  /**
+   * Check installed VS Code extensions against Open VSX.
+   *
+   * Cache first (24h TTL, owned by `openvsx-cache`), then bounded-concurrency
+   * single queries for whatever is stale. One extension's failure is logged and
+   * skipped rather than failing the whole check — an unreachable registry
+   * shouldn't hide the cognia updates that resolved fine.
+   */
+  private async checkOpenVsxUpdates(extensions: InstalledPluginRef[]): Promise<UpdateInfo[]> {
+    if (extensions.length === 0) return []
+
+    // Lazy: the Open VSX client + cache are desktop-install concerns and have
+    // no business loading for a user who has never installed an extension.
+    const [{ getOpenVsxClient }, cache, { resolveVersion }] = await Promise.all([
+      import("@/lib/plugin/vscode-shim/openvsx-client"),
+      import("@/lib/plugin/vscode-shim/openvsx-cache"),
+      import("@/lib/plugin/vscode-shim/openvsx-version"),
+    ])
+    const client = getOpenVsxClient()
+
+    const resolved = await mapWithConcurrency(
+      extensions,
+      OPEN_VSX_CHECK_CONCURRENCY,
+      async (ref): Promise<UpdateInfo | null> => {
+        this.emitProgress({
+          pluginId: ref.id,
+          stage: "checking",
+          progress: 0,
+          message: `Checking ${ref.id} for updates...`,
+        })
+        try {
+          const latestVersion = await this.resolveOpenVsxLatest(ref, {
+            client,
+            cache,
+            resolveVersion,
+          })
+          if (!latestVersion || !this.isNewerVersion(ref.version, latestVersion)) return null
+
+          const updateInfo: UpdateInfo = {
+            pluginId: ref.id,
+            currentVersion: ref.version,
+            latestVersion,
+            breaking: this.isMajorUpdate(ref.version, latestVersion),
+          }
+          this.pendingUpdates.set(ref.id, updateInfo)
+          return updateInfo
+        } catch (error) {
+          loggers.manager.warn(`[Updater] Failed to check ${ref.id} against Open VSX:`, error)
+          return null
+        }
+      }
+    )
+
+    return resolved.filter((u): u is UpdateInfo => u !== null)
+  }
+
+  /**
+   * Newest **stable** version of one extension, or `null` if the registry has
+   * nothing installable.
+   *
+   * Two things this deliberately does not do:
+   *
+   * 1. **Re-derive the platform from this machine.** The query uses the
+   *    `targetPlatform` recorded at install. An extension installed via the
+   *    `universal` fallback must keep being checked as `universal`; asking for
+   *    the host platform instead would surface a platform-specific build as an
+   *    "update" and swap a working install for one that dies at spawn.
+   * 2. **Trust `versionAlias: ["latest"]`.** Open VSX's `latest` means newest
+   *    *published*, and rust-analyzer's `latest` is literally a pre-release.
+   *    Selection goes through `resolveVersion`, which reads the `preRelease`
+   *    boolean and never the alias, so the check never nags a user to "update"
+   *    onto a pre-release they didn't opt into.
+   */
+  private async resolveOpenVsxLatest(
+    ref: InstalledPluginRef,
+    deps: {
+      client: Pick<OpenVsxClient, "queryExtension">
+      cache: typeof import("@/lib/plugin/vscode-shim/openvsx-cache")
+      resolveVersion: typeof import("@/lib/plugin/vscode-shim/openvsx-version").resolveVersion
+    }
+  ): Promise<string | null> {
+    // `getCached` returns undefined for a row past its 24h TTL, so a stale
+    // entry falls through to a real query without any check here.
+    const cached = await deps.cache.getCached(ref.id)
+    if (cached) return cached.latestVersion
+
+    const response = await deps.client.queryExtension({
+      extensionId: ref.id,
+      ...(ref.targetPlatform ? { targetPlatform: ref.targetPlatform } : {}),
+      includeAllVersions: true,
+    })
+    if (response.extensions.length === 0) return null
+
+    const chosen = deps.resolveVersion(response.extensions, { allowPrerelease: false })
+    // The row records the resolved **stable** entry, which is what makes the
+    // cache safe for the next check to read straight back out of.
+    await deps.cache.putCached([deps.cache.cacheRowFromQueryEntry(chosen)])
+    return chosen.version
   }
 
   async checkPluginUpdate(pluginId: string): Promise<UpdateInfo | null> {
@@ -170,6 +385,29 @@ export class PluginUpdater {
     const startTime = Date.now()
     const marketplace = getPluginMarketplace()
     const updateInfo = this.pendingUpdates.get(pluginId)
+
+    // A VS Code extension cannot be updated headlessly. Not a stub — a
+    // refusal, and the correct one: a new version can request new permissions,
+    // and `update()` has no consent callbacks to surface them with. Applying it
+    // silently (which `runAutoUpdate`'s `autoInstall` would do) means the user
+    // consented to v1's permissions and gets v2's. The marketplace UI drives
+    // the same install through `runMarketplaceInstall`, where consent exists.
+    //
+    // The alternative — falling through — would query the cognia registry for
+    // an Open VSX id and fail with "Version X is not available in marketplace",
+    // which tells the user nothing about what actually happened.
+    if (this.isVscodeExtension(pluginId)) {
+      return {
+        success: false,
+        pluginId,
+        previousVersion: updateInfo?.currentVersion ?? this.getPluginVersion(pluginId) ?? "",
+        newVersion: options.version || updateInfo?.latestVersion || "",
+        duration: Date.now() - startTime,
+        error:
+          `${pluginId} is a VS Code extension. Update it from the marketplace's VS Code section — ` +
+          `a new version may request new permissions, which have to be reviewed before it is installed.`,
+      }
+    }
 
     if (!updateInfo && !options.force) {
       return {
@@ -448,23 +686,21 @@ export class PluginUpdater {
     return latestMajor > currentMajor
   }
 
-  private async getPluginVersions(
-    pluginIds: string[]
-  ): Promise<Array<{ id: string; version: string }>> {
-    const result: Array<{ id: string; version: string }> = []
+  private async getPluginVersions(pluginIds: string[]): Promise<InstalledPluginRef[]> {
+    const result: InstalledPluginRef[] = []
     const plugins = usePluginStore.getState().plugins
 
     for (const id of pluginIds) {
       const plugin = plugins[id]
       if (plugin?.manifest.version) {
-        result.push({ id, version: plugin.manifest.version })
+        result.push(toInstalledRef(id, plugin.manifest))
       }
     }
 
     return result
   }
 
-  private async getAllInstalledPlugins(): Promise<Array<{ id: string; version: string }>> {
+  private async getAllInstalledPlugins(): Promise<InstalledPluginRef[]> {
     const installedStatuses = new Set([
       "installed",
       "loading",
@@ -480,15 +716,17 @@ export class PluginUpdater {
 
     return Object.values(usePluginStore.getState().plugins)
       .filter((plugin) => installedStatuses.has(plugin.status))
-      .map((plugin) => ({
-        id: plugin.manifest.id,
-        version: plugin.manifest.version,
-      }))
+      .map((plugin) => toInstalledRef(plugin.manifest.id, plugin.manifest))
   }
 
   private getPluginVersion(pluginId: string): string | null {
     const plugin = usePluginStore.getState().plugins[pluginId]
     return plugin?.manifest.version || null
+  }
+
+  /** Whether the installed plugin is a VS Code extension (Open VSX-sourced). */
+  private isVscodeExtension(pluginId: string): boolean {
+    return usePluginStore.getState().plugins[pluginId]?.manifest.type === "vscode-extension"
   }
 
   private async refreshRuntimePlugins(): Promise<void> {

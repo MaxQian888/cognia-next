@@ -4,7 +4,7 @@ import { THEMES } from "./syntax-themes"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 const mockHtml2canvas = jest.fn()
-jest.mock("html2canvas", () => ({
+jest.mock("html2canvas-pro", () => ({
   __esModule: true,
   default: (...a: unknown[]) => mockHtml2canvas(...a),
 }))

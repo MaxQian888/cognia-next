@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { UIMessage } from "ai"
 import { applySdkEvent, contentPreview, makeUserMessage } from "@/lib/claude/adapter"
@@ -125,6 +126,7 @@ type ResolverMap = Map<string, SubResolver>
  * (plan mode is a direct-chat surface).
  */
 export function useTeamChat() {
+  const tInlineErr = useTranslations("chat.inlineError")
   const allowListRef = useRef<string[]>([])
   useEffect(() => {
     const unsub = useSettingsStore.subscribe((s) => {
@@ -225,7 +227,7 @@ export function useTeamChat() {
     async (content: SendContent, opts?: TeamSendOptions) => {
       const sessionId = opts?.sessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) {
-        useChatStore.getState().setError("No session selected")
+        useChatStore.getState().setError(tInlineErr("noSession"))
         return
       }
 
@@ -484,7 +486,7 @@ export function useTeamChat() {
         }
       }
     },
-    [coalescing]
+    [coalescing, tInlineErr]
   )
 
   // Keep the steer drain pointed at the latest `send` without closing over it.

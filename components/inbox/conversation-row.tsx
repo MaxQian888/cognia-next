@@ -18,7 +18,7 @@
  * nested-interactive a11y violations.
  */
 
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { PinIcon } from "lucide-react"
 import type { ConversationStatus } from "@/lib/db/conversation-overrides"
 import { Badge } from "@/components/ui/badge"
@@ -66,13 +66,17 @@ export function ConversationRow({
   const t = useTranslations("inbox.conversationRow")
   const tStatus = useTranslations("inbox.lifecycle.status")
   const format = useFormatter()
+  // Anchor relativeTime to a stable render-time "now" so next-intl doesn't fall
+  // back to reading the wall clock at format time (ENVIRONMENT_FALLBACK warning
+  // + non-deterministic SSR/hydration output).
+  const now = useNow()
   const { session, override, unreadCount, lastMessagePreview, lastMessageAt } = item
   const ck = session.platformBinding!.conversationKey
   const platform = session.platformBinding!.platform as PlatformKind
   const adapterId = session.platformBinding!.adapterId
   const name = session.title || ck
   const relative =
-    typeof lastMessageAt === "number" ? format.relativeTime(new Date(lastMessageAt)) : null
+    typeof lastMessageAt === "number" ? format.relativeTime(new Date(lastMessageAt), now) : null
 
   return (
     <div

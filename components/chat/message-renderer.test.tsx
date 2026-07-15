@@ -6,8 +6,13 @@ import * as ReactForMocks from "react"
 jest.mock("@/components/ai-elements/message", () => ({
   Message: ({ children }: { children: ReactForMocks.ReactNode }) =>
     ReactForMocks.createElement("div", { "data-test": "message" }, children),
-  MessageContent: ({ children }: { children: ReactForMocks.ReactNode }) =>
-    ReactForMocks.createElement("div", { "data-test": "message-content" }, children),
+  MessageContent: ({
+    children,
+    className,
+  }: {
+    children: ReactForMocks.ReactNode
+    className?: string
+  }) => ReactForMocks.createElement("div", { "data-test": "message-content", className }, children),
   MessageActions: ({ children }: { children: ReactForMocks.ReactNode }) =>
     ReactForMocks.createElement("div", { "data-test": "message-actions" }, children),
   MessageAction: ({
@@ -825,5 +830,110 @@ describe("agent-flow grouping + mode", () => {
     const group = document.querySelector("[data-test='activity-group']")
     expect(group?.getAttribute("data-mode")).toBe("detailed")
     expect(group?.getAttribute("data-count")).toBe("3")
+  })
+
+  // A model that emits no prose between two tool calls still produces an empty
+  // text part. It must not split the run into two groups.
+  it("keeps one activity group across an empty text part between tool calls", () => {
+    const msg = {
+      id: "g5",
+      role: "assistant",
+      parts: [
+        { type: "tool-A", state: "output-available", input: {} },
+        { type: "text", text: "" },
+        { type: "tool-B", state: "output-available", input: {} },
+      ],
+    } as unknown as UIMessage
+    render(<MessageRenderer message={msg} />)
+    const groups = document.querySelectorAll("[data-test='activity-group']")
+    expect(groups).toHaveLength(1)
+    expect(groups[0].getAttribute("data-count")).toBe("2")
+    expect(document.querySelector("[data-test='tool']")).toBeNull()
+  })
+
+  it("still breaks the run when the model writes prose between tool calls", () => {
+    const msg = {
+      id: "g6",
+      role: "assistant",
+      parts: [
+        { type: "tool-A", state: "output-available", input: {} },
+        { type: "tool-B", state: "output-available", input: {} },
+        { type: "text", text: "Now let me run it." },
+        { type: "tool-C", state: "output-available", input: {} },
+      ],
+    } as unknown as UIMessage
+    render(<MessageRenderer message={msg} />)
+    expect(document.querySelectorAll("[data-test='activity-group']")).toHaveLength(1)
+    expect(screen.getByText("Now let me run it.")).toBeInTheDocument()
+  })
+
+  it("renders nothing for an empty text part", () => {
+    const msg = {
+      id: "g7",
+      role: "assistant",
+      parts: [{ type: "text", text: "   " }],
+    } as unknown as UIMessage
+    render(<MessageRenderer message={msg} />)
+    expect(document.querySelector("[data-test='markdown']")).toBeNull()
+  })
+})
+
+// ── action bar suppression ────────────────────────────────────────────────────
+
+describe("action bar on tool-only turns", () => {
+  function toolOnlyMsg(id: string): UIMessage {
+    return {
+      id,
+      role: "assistant",
+      parts: [
+        { type: "tool-A", state: "output-available", input: {} },
+        { type: "tool-B", state: "output-available", input: {} },
+      ],
+    } as unknown as UIMessage
+  }
+
+  // The bar is opacity-0 until hover but still reserves a ~40px row, which put
+  // a strip of chrome between every pair of consecutive tool calls.
+  it("renders no action bar for a turn that is only tool calls", () => {
+    render(<MessageRenderer message={toolOnlyMsg("t1")} isLastAssistant />)
+    expect(document.querySelector("[data-test='message-actions']")).toBeNull()
+    expect(screen.queryByLabelText("copyTooltip")).toBeNull()
+    expect(screen.queryByLabelText("bookmarkTooltip")).toBeNull()
+  })
+
+  it("keeps the action bar once the turn carries prose", () => {
+    render(<MessageRenderer message={assistantMsg("t2", "Done.")} isLastAssistant />)
+    expect(document.querySelector("[data-test='message-actions']")).toBeTruthy()
+    expect(screen.getByLabelText("copyTooltip")).toBeInTheDocument()
+  })
+
+  it("keeps the action bar on a tool turn that also wrote prose", () => {
+    const msg = {
+      id: "t3",
+      role: "assistant",
+      parts: [
+        { type: "tool-A", state: "output-available", input: {} },
+        { type: "text", text: "All set." },
+      ],
+    } as unknown as UIMessage
+    render(<MessageRenderer message={msg} isLastAssistant />)
+    expect(document.querySelector("[data-test='message-actions']")).toBeTruthy()
+  })
+
+  it("keeps the action bar on user messages", () => {
+    render(<MessageRenderer message={userMsg("t4")} />)
+    expect(document.querySelector("[data-test='message-actions']")).toBeTruthy()
+  })
+})
+
+// ── column width ──────────────────────────────────────────────────────────────
+
+describe("message column width", () => {
+  // `w-fit` lets the column follow its widest mounted child, so collapsing a
+  // tool card (which unmounts its body) snapped the whole column narrow.
+  it("pins the assistant column to the full row so expand/collapse cannot move it", () => {
+    render(<MessageRenderer message={assistantMsg("w1")} />)
+    const content = document.querySelector("[data-test='message-content']")
+    expect(content?.className).toContain("group-[.is-assistant]:w-full")
   })
 })

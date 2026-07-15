@@ -1276,6 +1276,7 @@
         "title": "PR 反馈闭环"
       },
       "requirePlanApproval": "需要计划审批",
+      "riskGating": "按风险要求计划审批",
       "save": "保存",
       "saveIndicator": {
         "auditCompleted": "审核完成 · {count} 个失效 id",
@@ -3103,6 +3104,7 @@
     },
     "inlineError": {
       "dismiss": "忽略",
+      "noSession": "当前没有打开的会话，请先新建一个再发送。",
       "openSettings": "打开设置",
       "retry": "重试",
       "sidecarExited": "AI 进程意外停止，本轮已中断。点击重试可继续。",
@@ -3125,7 +3127,41 @@
         "为任意消息添加书签，方便日后查找。",
         "从任意回复创建分支，探索另一种可能。",
         "编辑你的某条消息并重新发送，引导回答方向。",
-        "随时可将整段对话导出为 Markdown。"
+        "随时可将整段对话导出为 Markdown。",
+        "智能体运行时也能继续输入 —— 消息会排队，下一轮自动发送。",
+        "已排队的消息？点「立即发送」可打断当前轮次，马上引导。",
+        "在运行面板中点击排队的消息，可在发送前修改它。",
+        "展开运行面板，查看本轮背后的计划、工具与子智能体。",
+        "可以直接把图片粘贴进输入框。",
+        "输入 @skill: 为当前对话启用某个技能。",
+        "输入 @preset: 应用已保存的系统提示词与模型。",
+        "一条消息里可叠加多个斜杠命令 —— 它们会按顺序执行。",
+        "重新生成回复后，可用箭头在多个版本之间切换。",
+        "留意上下文圆环 —— 在窗口用尽前及时压缩。",
+        "给 /compact 加个焦点提示，例如 /compact 接口改动。",
+        "用 /remember 保存长期事实，再用 /memory 查看或删除。"
+      ],
+      "verbs": [
+        "Claude 正在思考…",
+        "正在处理…",
+        "正在琢磨…",
+        "正在酝酿…",
+        "正在施法…",
+        "正在计算…",
+        "正在归纳…",
+        "正在打磨…",
+        "正在沉淀…",
+        "正在斟酌…",
+        "正在推演…",
+        "正在驯服…",
+        "正在组装…",
+        "正在提炼…",
+        "正在解构…",
+        "正在深挖…",
+        "正在发酵…",
+        "正在编排…",
+        "正在校准…",
+        "正在筹划…"
       ]
     },
     "mcp": {
@@ -5613,6 +5649,7 @@
       "promise_denied": "未给出承诺 — 第 {n} 次拒绝，继续工作",
       "promise_denied_overridden": "{n} 次未给出承诺 — 承诺门已被覆盖，目标完成",
       "promise_requested": "已发起验证回合（第 {n} 回合）",
+      "riskGate": "{tier}：{surfaces} 需要人工确认",
       "subgoals_generated": "已生成子目标",
       "turn_completed": "第 {n} 回合完成（{tokens} tok）",
       "turn_started": "第 {n} 回合开始",
@@ -5670,6 +5707,8 @@
       "maxTurnsHint": "续跑回合硬上限。1–100。",
       "requireAcceptance": "完成需验收",
       "requireAcceptanceHint": "评审判定完成后将暂停等待你验收或要求修改，而不是自动结束。",
+      "riskGating": "按风险自动把关",
+      "riskGatingHint": "当目标或当前会话的工具被判定为有风险时，自动要求验收（高风险且由你亲自运行时，还会逐回合等待你确认）。关闭它不会撤销你自己设置的任何检查点。",
       "save": "保存修改",
       "saving": "保存中…",
       "timeout": "超时（分钟）",
@@ -11246,6 +11285,15 @@
       "summaryEvents": "事件总数",
       "summaryKeys": "事件类型"
     },
+    "approvedBinaries": {
+      "approvedAt": "于 {date} 批准",
+      "description": "你选择记住的二进制文件。每项批准都与文件的 SHA-256 绑定——字节一旦改变，就会再次询问你。",
+      "empty": "暂无已批准的二进制文件。该插件的可执行文件每次运行都会提示。",
+      "hash": "sha256 {sha256}…",
+      "revoke": "撤销",
+      "revokeAria": "撤销对 {path} 的批准",
+      "title": "已批准的二进制文件"
+    },
     "audit": {
       "colAction": "动作",
       "colPermission": "权限",
@@ -11497,8 +11545,13 @@
         "reject": "拒绝"
       },
       "ariaLabel": "插件授权对话框",
+      "binary": {
+        "rememberHint": "仅对这些确切的字节跳过本提示。该批准与文件的 SHA-256 绑定，因此二进制文件一旦发生任何改动——更新、重新构建或被篡改——都会再次询问你。它不会信任该插件的发布者，也不适用于任何其他二进制文件。你可以随时在该插件的「权限」标签页中撤销。",
+        "rememberLabel": "记住此二进制文件"
+      },
       "fields": {
         "autoReject": "{seconds} 秒后自动拒绝",
+        "binary": "二进制文件：",
         "defaultReason": "未提供理由。",
         "morePending": "还有 {count} 个待处理",
         "permission": "权限：",
@@ -11943,6 +11996,7 @@
         "popular": "热门",
         "recent": "最近上架",
         "shared": "共享",
+        "vscode": "VS Code",
         "workspace": "工作区"
       }
     },
@@ -11986,6 +12040,20 @@
     },
     "modalRoot": {
       "errorFallback": "插件弹窗渲染失败，详细信息请查看控制台。"
+    },
+    "openVsx": {
+      "installNotice": "VS Code 扩展是真正的程序。它拥有与你安装的任何其他程序同等的文件、网络与进程访问权限；cognia 校验的是下载文件的校验和，而不是代码的行为。",
+      "integrityChecked": "完整性已校验",
+      "integrityCheckedTooltip": "下载文件与 Open VSX 提供的 SHA-256 校验和一致，说明文件在传输过程中没有损坏。这不是签名：它不验证发布者，也无法发现被攻陷的注册表——文件和校验和由同一台服务器提供。",
+      "publisherVerified": "发布者由 Open VSX 验证",
+      "publisherVerifiedTooltip": "Open VSX 声明该发布者拥有「{namespace}」命名空间。这是 Open VSX 对归属权的声明，不是 cognia 的声明，也不代表该扩展是安全的。",
+      "searchPlaceholder": "搜索 Open VSX 扩展…",
+      "unsupportedApis": "可能无法工作：{apis}",
+      "unsupportedApisTooltip": "该扩展使用了 cognia 未实现的 API（{apis}），可能无法工作。此结论通过扫描扩展代码得出，属于尽力而为：经过压缩混淆的扩展可能隐藏其 API 调用，因此这只是提示，而非保证。",
+      "vscodeEmpty": "没有匹配的扩展，换个关键词试试。",
+      "vscodeError": "Open VSX 错误：{message}",
+      "vscodeLoadMore": "加载更多 ({shown}/{total})",
+      "vscodeSectionHint": "来自 Open VSX 的扩展——VS Codium 与 code-server 使用的同一个注册表。不支持微软官方市场：其服务条款限定仅可用于微软自家产品。"
     },
     "panel": {
       "categoriesButton": "分类",
@@ -12286,9 +12354,14 @@
       "lspBinaryNote": "这些二进制文件可在你的设备上运行。授予启动权限前请先仔细检查。",
       "parseError": "无法解析该 .vsix 安装包",
       "parsing": "正在解析安装包…",
+      "permissionsConfidence": "置信度：{confidence}",
+      "permissionsInferred": "通过扫描该扩展的代码推断得出——扩展自己声明的权限不作数。",
+      "permissionsNone": "未从该扩展的代码中推断出任何权限。",
+      "permissionsUnparsed": "该 bundle 无法被完整分析，此列表可能不完整。运行时的实际限制由 sidecar 强制执行。",
       "publisherLabel": "发布者",
       "retry": "重新选择文件",
       "sectionLspBinaries": "{count, plural, other {# 个语言服务器二进制文件}}",
+      "sectionNotes": "{count, plural, other {# 条提示}}",
       "sectionPermissions": "请求的权限",
       "sectionThemes": "{count, plural, other {# 个主题}}",
       "title": "安装 VSCode 扩展"
@@ -12365,6 +12438,41 @@
         "trustFirstTime": "信任该作者，用于后续安装。",
         "trustRequiredError": "安装前请先信任该作者。",
         "unsignedBundle": "未签名的包"
+      }
+    }
+  },
+  "policy": {
+    "risk": {
+      "surfaces": {
+        "computer-use": {
+          "description": "该运行可以控制本机的屏幕、鼠标和键盘。",
+          "label": "电脑操作"
+        },
+        "credential-auth": {
+          "description": "该运行可以访问已存储的凭证、密钥或订阅信息。",
+          "label": "凭证访问"
+        },
+        "data-destructive": {
+          "description": "该运行的目标涉及删除、重置或清空数据。",
+          "label": "破坏性数据变更"
+        },
+        "external-send": {
+          "description": "该运行可以向应用外的真实接收者发送消息。",
+          "label": "对外发送"
+        },
+        "file-write-broad": {
+          "description": "该运行可以在沙箱之外写入文件。",
+          "label": "非沙箱文件写入"
+        },
+        "native-command": {
+          "description": "该运行可以执行 Shell 或原生操作系统命令。",
+          "label": "原生命令"
+        }
+      },
+      "tier": {
+        "high": "高风险",
+        "low": "低风险",
+        "medium": "中风险"
       }
     }
   },
@@ -15890,7 +15998,6 @@
         "namePlaceholder": "主题名称",
         "newButton": "新建主题",
         "noSaved": "还没有自定义主题。",
-        "previewLabel": "实时预览",
         "rail": {
           "activeBadgeAria": "当前应用的主题",
           "copySuffix": "{name}（副本）",
@@ -16005,6 +16112,65 @@
           "sectionLabel": "用量展示"
         }
       },
+      "library": {
+        "importTitle": "从 VSCode 导入",
+        "packsTitle": "主题包"
+      },
+      "nav": {
+        "groups": {
+          "advancedGroup": "高级",
+          "interfaceGroup": "界面",
+          "themeGroup": "主题"
+        },
+        "items": {
+          "a11y": {
+            "description": "对比度、动效、色盲模式",
+            "label": "无障碍"
+          },
+          "advanced": {
+            "description": "注入你自己的样式表",
+            "label": "自定义 CSS"
+          },
+          "auto": {
+            "description": "按计划或跟随系统切换",
+            "label": "自动明暗"
+          },
+          "components": {
+            "description": "各表面的色调与投影",
+            "label": "组件"
+          },
+          "custom": {
+            "description": "直接编辑颜色令牌",
+            "label": "自定义主题"
+          },
+          "library": {
+            "description": "主题包与 VSCode 导入",
+            "label": "主题库"
+          },
+          "personalization": {
+            "description": "你的称呼与欢迎页样式",
+            "label": "个性化"
+          },
+          "plugins": {
+            "description": "插件提供的外观面板",
+            "label": "插件"
+          },
+          "theme": {
+            "description": "预设配色与明暗模式",
+            "label": "主题与预设"
+          },
+          "typography": {
+            "description": "字体、字号、间距、圆角",
+            "label": "排版与密度"
+          },
+          "wallpaper": {
+            "description": "背景图片、渐变或纯色",
+            "label": "壁纸"
+          }
+        },
+        "mobileTrigger": "分类",
+        "title": "外观"
+      },
       "personalization": {
         "description": "聊天欢迎页如何称呼你、展示多少内容。",
         "nameLabel": "你的称呼",
@@ -16038,6 +16204,7 @@
           "row2": "Token"
         },
         "title": "实时预览",
+        "tokensLabel": "其他令牌",
         "user": "看起来不错！",
         "windowTitle": "预览"
       },
@@ -16077,6 +16244,10 @@
         "title": "主题包"
       },
       "title": "外观",
+      "typographyPanel": {
+        "fontsTitle": "字体排版",
+        "layoutTitle": "布局与密度"
+      },
       "usageDisplay": {
         "hint": {
           "detailed": "全部区块展开，附带额外列、每会话明细与原始快照。",
@@ -16209,6 +16380,13 @@
         "scopeGlobal": "全局",
         "scopeLabel": "作用范围",
         "scopeSidebar": "侧栏",
+        "tiles": {
+          "dropHint": "把图片拖到这里任意位置",
+          "gradient": "渐变",
+          "gradientAria": "创建渐变壁纸",
+          "upload": "上传",
+          "uploadAria": "上传壁纸图片"
+        },
         "title": "壁纸",
         "tooLarge": "文件过大（不超过 32 MB）。",
         "uploadHint": "把图片拖到这里或点击浏览",
@@ -24462,6 +24640,10 @@
         "maxMs": "上限（毫秒）",
         "title": "默认重试"
       },
+      "riskGating": {
+        "hint": "当某步骤要对外发送、操作桌面、执行 Shell 命令或删除消息时先征求同意——除非上游已有审批节点。无人值守的运行将直接失败而不是等待。",
+        "label": "高风险步骤需审批"
+      },
       "runPolicy": {
         "title": "运行策略"
       },
@@ -28083,6 +28265,10 @@
       }
     },
     "node": {
+      "aiBadge": {
+        "label": "AI 生成的节点",
+        "title": "由工作流 AI 助手生成 — 按 Ctrl+Z 撤销。"
+      },
       "groupContainer": {
         "dropHint": "把节点拖进来分组",
         "locked": "已锁定",

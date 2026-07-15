@@ -105,6 +105,24 @@ describe("vscode-loader — browser stub mode", () => {
       /vscodeExtension\.identifier/i
     )
   })
+
+  it("rejects a manifest whose identifier impersonates another extension", async () => {
+    // The adapter derives `id` and `vscodeExtension.identifier` from the same
+    // publisher/name, so they cannot disagree. A mismatch means the block was
+    // not adapter-produced — i.e. an attacker-supplied manifest was persisted.
+    const { loadVscodeDefinition } = await import("./vscode-loader")
+    const impersonating: PluginManifest = {
+      ...baseManifest,
+      id: "evil.x",
+      vscodeExtension: {
+        ...baseManifest.vscodeExtension!,
+        identifier: "microsoft.vscode",
+      },
+    }
+    await expect(loadVscodeDefinition(impersonating, "/tmp/x")).rejects.toThrow(
+      /mismatched vscodeExtension\.identifier/i
+    )
+  })
 })
 
 describe("vscode-loader — Tauri mode", () => {

@@ -19,7 +19,6 @@
 
 use ::anyhow::{anyhow, Context, Result};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 
@@ -253,34 +252,31 @@ pub async fn ensure_code_server(app: &tauri::AppHandle) -> Result<InstallInfo> {
 
 /// GET `url`, streaming the body into `dest`, and return the lowercase hex
 /// SHA-256 of what was written. Emits per-chunk download progress.
+///
+/// The streaming loop itself lives in `cognia_net::http_download` — it is
+/// shared with the Open VSX `.vsix` fetch. This wrapper supplies only the
+/// code-server policy: the user agent, and where progress is emitted. No byte
+/// ceiling: the asset is a pinned release whose digest is baked in, so its
+/// size is known-good rather than attacker-chosen.
 async fn stream_to_file(app: &tauri::AppHandle, url: &str, dest: &Path) -> Result<String> {
-    use futures_util::StreamExt as _;
-    use tokio::io::AsyncWriteExt as _;
-
     let client = reqwest::Client::builder()
         .user_agent("cognia-desktop")
         .build()
         .context("build http client")?;
-    let resp = client.get(url).send().await?.error_for_status()?;
-    let bytes_total = resp.content_length().unwrap_or(0);
 
-    let mut hasher = Sha256::new();
-    let mut bytes_done: u64 = 0;
-    let mut stream = resp.bytes_stream();
-    let mut file = tokio::fs::File::create(dest)
-        .await
-        .with_context(|| format!("create {}", dest.display()))?;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("read chunk")?;
-        hasher.update(&chunk);
-        file.write_all(&chunk)
-            .await
-            .with_context(|| format!("write {}", dest.display()))?;
-        bytes_done = bytes_done.saturating_add(chunk.len() as u64);
-        emit_progress(app, "downloading", bytes_done, bytes_total, "Downloading…");
-    }
-    file.flush().await.context("flush download")?;
-    Ok(hex::encode(hasher.finalize()))
+    let outcome = cognia_net::http_download::stream_to_file(
+        &client,
+        url,
+        dest,
+        None,
+        &mut |bytes_done, bytes_total| {
+            emit_progress(app, "downloading", bytes_done, bytes_total, "Downloading…");
+        },
+    )
+    .await
+    .with_context(|| format!("stream {url} to {}", dest.display()))?;
+
+    Ok(outcome.sha256_hex)
 }
 
 #[cfg(test)]

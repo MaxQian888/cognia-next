@@ -38,12 +38,14 @@
 import { liveQuery, type Subscription } from "dexie"
 import { getDb } from "@/lib/db/schema"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { topoSort } from "@/lib/workflow/runtime/topo-sort"
 import { listForWorkflow as listFanoutForWorkflow } from "@/lib/db/workflow-fanout-subscriptions"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { getBus } from "@/lib/connectors/bus"
 import type {
   RunStatus,
+  WorkflowNode,
   WorkflowRunEventRow,
   WorkflowRunRow,
   WorkflowTriggeredFrom,
@@ -252,6 +254,59 @@ async function reconcileWatchers(
   }
 }
 
+/**
+ * Pre-declare every step the run will attempt, so the card reads as a plan
+ * that ticks off rather than a log that grows. Ordered topologically — the
+ * orchestrator's own execution order — so the declaration matches the order
+ * things really happen. A cyclic graph (which the orchestrator itself would
+ * reject before running) falls back to the snapshot's node order rather than
+ * leaving the conversation with no card at all.
+ *
+ * `annotation.*` nodes are excluded: they're canvas-only (sticky notes, group
+ * frames) with no registered executor, so a declared annotation would sit at
+ * ◻ forever. `trigger.*` nodes are deliberately KEPT — they have real
+ * executors, are scheduled, and already emit step events onto this card
+ * today; declaring them keeps the topo order honest, so the trigger renders
+ * where it actually runs (first) instead of being appended last when its
+ * event lands.
+ *
+ * `foldEventIntoState` later overwrites these entries by step id, and
+ * `Map.set` on an existing key keeps its original position — so the declared
+ * order stays stable as steps transition.
+ */
+function seedDeclaredSteps(
+  snapshot: WorkflowRunRow["workflowSnapshot"] | undefined,
+  labelByStepId: Map<string, string>
+): Map<string, CumulativeStepEntry> {
+  const steps = new Map<string, CumulativeStepEntry>()
+  if (!snapshot || !Array.isArray(snapshot.nodes)) return steps
+
+  const byId = new Map<string, WorkflowNode>()
+  for (const node of snapshot.nodes) {
+    if (node && typeof node === "object" && typeof node.id === "string") {
+      byId.set(node.id, node)
+    }
+  }
+
+  let order: string[]
+  try {
+    order = topoSort(snapshot).order
+  } catch {
+    order = [...byId.keys()]
+  }
+
+  for (const stepId of order) {
+    const node = byId.get(stepId)
+    if (!node || node.type.startsWith("annotation.")) continue
+    steps.set(stepId, {
+      stepId,
+      label: labelByStepId.get(stepId) ?? stepId,
+      status: "pending",
+    })
+  }
+  return steps
+}
+
 async function createWatcher(
   row: WorkflowRunRow,
   triggeredBy: WorkflowTriggeredFrom,
@@ -313,7 +368,7 @@ async function createWatcher(
     startedAt: row.startedAt,
     labelByStepId,
     lastEmittedTs: 0,
-    steps: new Map(),
+    steps: seedDeclaredSteps(snapshot, labelByStepId),
     status: "running",
     eventsSub: null,
     finalEmitted: false,

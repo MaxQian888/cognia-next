@@ -1,6 +1,10 @@
 /**
  * @jest-environment node
  */
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
 import {
   buildPluginDocument,
   buildConsentSummary,
@@ -371,13 +375,19 @@ describe("pluginUninstall", () => {
   it("uninstalls via the injected seam and notices", async () => {
     const { dispatch, actions } = recorder()
     const removed: string[] = []
-    await pluginUninstall("demo", {
-      ...base,
-      dispatch,
-      uninstall: async (id) => void removed.push(id),
-    })
-    expect(removed).toEqual(["demo"])
-    expect((actions[0] as { message: string }).message).toContain('Uninstalled "demo"')
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-plugin-uninstall-"))
+    try {
+      await pluginUninstall("demo", {
+        ...base,
+        home,
+        dispatch,
+        uninstall: async (id) => void removed.push(id),
+      })
+      expect(removed).toEqual(["demo"])
+      expect((actions[0] as { message: string }).message).toContain('Uninstalled "demo"')
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
   })
 
   it("notices usage when id is empty", async () => {
@@ -831,13 +841,19 @@ describe("pluginUninstall drops provenance", () => {
   it("calls removeOrigin after a successful uninstall", async () => {
     const { dispatch } = recorder()
     const removed: string[] = []
-    await pluginUninstall("demo", {
-      ...base,
-      dispatch,
-      uninstall: async () => {},
-      removeOrigin: (id) => removed.push(id),
-    })
-    expect(removed).toEqual(["demo"])
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-plugin-uninstall-"))
+    try {
+      await pluginUninstall("demo", {
+        ...base,
+        home,
+        dispatch,
+        uninstall: async () => {},
+        removeOrigin: (id) => removed.push(id),
+      })
+      expect(removed).toEqual(["demo"])
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
   })
 })
 

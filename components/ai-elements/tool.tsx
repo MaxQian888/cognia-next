@@ -21,6 +21,7 @@ import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { DiffBlock } from "@/components/chat/renderers/diff-block"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { ErrorParsedView } from "@/components/chat/error-parsed-view"
+import { inferLanguageFromPath, resolveToolOutputRender } from "@/lib/chat/tool-output-format"
 
 export type ToolProps = ComponentProps<typeof Collapsible>
 
@@ -264,52 +265,11 @@ export type ToolReadPreviewProps = {
   output: ToolPart["output"]
 }
 
-const EXT_TO_LANG: Record<string, string> = {
-  ts: "typescript",
-  tsx: "tsx",
-  js: "javascript",
-  jsx: "jsx",
-  py: "python",
-  rs: "rust",
-  go: "go",
-  rb: "ruby",
-  java: "java",
-  c: "c",
-  cpp: "cpp",
-  h: "c",
-  hpp: "cpp",
-  cs: "csharp",
-  swift: "swift",
-  kt: "kotlin",
-  php: "php",
-  sh: "bash",
-  bash: "bash",
-  zsh: "bash",
-  json: "json",
-  yaml: "yaml",
-  yml: "yaml",
-  toml: "toml",
-  xml: "xml",
-  html: "html",
-  css: "css",
-  scss: "scss",
-  md: "markdown",
-  mdx: "markdown",
-  sql: "sql",
-}
-
-function inferLanguage(filePath?: string): string | undefined {
-  if (!filePath) return undefined
-  const ext = filePath.split(".").pop()?.toLowerCase()
-  if (!ext) return undefined
-  return EXT_TO_LANG[ext]
-}
-
 export const ToolReadPreview = ({ input, output }: ToolReadPreviewProps) => {
   if (typeof output !== "string") return null
   const filePath =
     input && typeof input === "object" ? (input as Record<string, unknown>).file_path : undefined
-  const language = inferLanguage(typeof filePath === "string" ? filePath : undefined)
+  const language = inferLanguageFromPath(typeof filePath === "string" ? filePath : undefined)
 
   return (
     <div className="space-y-2">
@@ -328,28 +288,19 @@ export type ToolOutputProps = ComponentProps<"div"> & {
   errorText: ToolPart["errorText"]
   /** Tool type (e.g. `tool-Bash`) used to resolve a tool-specific error preset. */
   toolType?: string
+  /** Tool input — a shell `command` keys the output's highlight language. */
+  input?: ToolPart["input"]
 }
 
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
 const READ_TOOLS = new Set(["Read"])
-
-/**
- * Detect well-formed tool-result strings: JSON objects/arrays.
- */
-function looksLikeJson(s: string): boolean {
-  const trimmed = s.trim()
-  if (!trimmed) return false
-  return (
-    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-    (trimmed.startsWith("[") && trimmed.endsWith("]"))
-  )
-}
 
 export const ToolOutput = ({
   className,
   output,
   errorText,
   toolType,
+  input,
   ...props
 }: ToolOutputProps) => {
   if (!(output || errorText)) {
@@ -359,18 +310,24 @@ export const ToolOutput = ({
   let Output: ReactNode
 
   if (typeof output === "string") {
-    Output = looksLikeJson(output) ? (
-      <CodeBlock code={output} language="json" showLineNumbers={false} />
-    ) : (
-      <MarkdownRenderer
-        content={output}
-        enableMermaid={false}
-        enableMath={false}
-        enableVideoEmbed={false}
-        enableAudioEmbed={false}
-        enableEnhancedImages={false}
-      />
-    )
+    // A terminal stream is not Markdown: rendering it as such reflows lines,
+    // eats `<header.h>` as raw HTML, and promotes indented output to a nested
+    // code block. `resolveToolOutputRender` keeps it preformatted and picks a
+    // highlight language from the dumped file (`cat foo.cpp` → cpp).
+    const render = resolveToolOutputRender(output, toolType, input)
+    Output =
+      render.kind === "code" ? (
+        <CodeBlock code={output} language={render.language} showLineNumbers={false} />
+      ) : (
+        <MarkdownRenderer
+          content={output}
+          enableMermaid={false}
+          enableMath={false}
+          enableVideoEmbed={false}
+          enableAudioEmbed={false}
+          enableEnhancedImages={false}
+        />
+      )
   } else if (typeof output === "object" && !isValidElement(output)) {
     Output = (
       <CodeBlock code={JSON.stringify(output, null, 2)} language="json" showLineNumbers={false} />
@@ -429,7 +386,12 @@ export const ToolBody = ({ part }: ToolBodyProps) => {
           {isReadTool && !part.errorText ? (
             <ToolReadPreview input={part.input} output={part.output} />
           ) : (
-            <ToolOutput output={part.output} errorText={part.errorText} toolType={part.type} />
+            <ToolOutput
+              output={part.output}
+              errorText={part.errorText}
+              toolType={part.type}
+              input={part.input}
+            />
           )}
         </>
       )}

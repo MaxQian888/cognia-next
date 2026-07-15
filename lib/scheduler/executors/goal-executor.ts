@@ -84,6 +84,8 @@ export async function executeGoalTask(
       rawObjective: payload.objective,
       config: payload.config,
       appSettings,
+      // Headless: no operator to hold turns for (ADR-0070 Phase 2).
+      origin: "scheduler",
     })
     goalId = goal.id
   } catch (err) {

@@ -162,6 +162,11 @@ jest.mock("@/stores/chat/chat-store", () => ({
   ),
 }))
 
+const startNewSessionMock = jest.fn().mockResolvedValue({ id: "s-new" })
+jest.mock("@/lib/chat/start-session", () => ({
+  startNewSession: (...args: unknown[]) => startNewSessionMock(...args),
+}))
+
 const setSelectedGuild = jest.fn()
 const toggleSidebar = jest.fn()
 const toggleGuildRail = jest.fn()
@@ -558,7 +563,9 @@ test("command-center caret menu surfaces quick targets", async () => {
   expect(await screen.findByTestId("cc-command-palette")).toBeInTheDocument()
 })
 
-test("File > New Chat clears chat and resets guild", async () => {
+// Delegates to newChatAction so this menu and the native menu bar stay in
+// lockstep — it starts a real conversation rather than clearing to the welcome.
+test("File > New Chat starts a conversation and resets guild", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
   const user = userEvent.setup()
@@ -566,8 +573,10 @@ test("File > New Chat clears chat and resets guild", async () => {
   await waitFor(() => expect(screen.getByText("desktop.menu.file.label")).toBeInTheDocument())
   await user.click(screen.getByText("desktop.menu.file.label"))
   await user.click(await screen.findByText("desktop.menu.file.newChat"))
-  await waitFor(() => expect(chatClear).toHaveBeenCalled())
+  await waitFor(() => expect(startNewSessionMock).toHaveBeenCalled())
   expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+  // The old behavior nuked every open pane; it must not come back.
+  expect(chatClear).not.toHaveBeenCalled()
 })
 
 test("File > Open Workspace creates/activates a workspace via the unified flow", async () => {

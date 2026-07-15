@@ -198,9 +198,15 @@ export function PluginPanel() {
           ) => Promise<{ id: string; latestVersion: string }[]>
         }
       }
+      // VS Code extensions are installed from Open VSX, so their ids must not
+      // be handed to the cognia registry: it can never have an answer for
+      // `esbenp.prettier-vscode`, and asking tells cognia's registry which
+      // extensions this user has. Their updates are checked against Open VSX
+      // by `PluginUpdater.checkForUpdates`, which routes by the same field.
+      const cogniaRows = rows.filter((r) => r.type !== "vscode-extension")
       const updates = await mod
         .getPluginMarketplace()
-        .checkForUpdates(rows.map((r) => ({ id: r.id, version: r.version })))
+        .checkForUpdates(cogniaRows.map((r) => ({ id: r.id, version: r.version })))
       const updateIds = new Set(updates.map((u) => u.id))
       await Promise.all(
         rows.map((row) => {

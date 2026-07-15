@@ -232,6 +232,18 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
               data-testid="wf-onfailure-notify"
             />
           </div>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm">{t("riskGating.label")}</p>
+              <p className="text-[11px] text-muted-foreground">{t("riskGating.hint")}</p>
+            </div>
+            <Switch
+              checked={Boolean(settings.riskGating)}
+              onCheckedChange={(v) => setSettings({ riskGating: v })}
+              aria-label={t("riskGating.label")}
+              data-testid="wf-risk-gating"
+            />
+          </div>
         </section>
 
         <Separator />

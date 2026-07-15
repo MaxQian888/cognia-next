@@ -11,6 +11,14 @@
  * renders the three-button card, and calls back via
  * `getPluginConsentBroker().respond(requestId, {...})`.
  *
+ * When the request carries a `binary` subject (a plugin-shipped executable
+ * about to be spawned), the card also offers a default-off "remember this
+ * binary" checkbox — the sole way a durable `approvedBinaries` row is ever
+ * written. All three buttons are otherwise session-scoped, so the checkbox is
+ * deliberately a separate question: ticking it is the user's only affirmative
+ * for durability, and leaving it alone must mean exactly what it meant before
+ * the ledger existed.
+ *
  * Mounted once near the app root (alongside `<PluginModalRoot />`).
  */
 
@@ -21,6 +29,8 @@ import { ShieldAlertIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import {
   PLUGIN_CONSENT_REQUEST_EVENT,
@@ -37,6 +47,12 @@ export function PluginConsentOverlay() {
   const t = useTranslations("plugins.consent")
   const [queue, setQueue] = useState<PendingPrompt[]>([])
   const [now, setNow] = useState<number>(() => Date.now())
+  // Tied to a requestId rather than held as a bare boolean: the checkbox must
+  // start OFF for *every* prompt, and a stale `true` leaking from the previous
+  // one into the next would silently persist a binary the user never ticked.
+  // Deriving it from the id resets it by construction (and avoids
+  // set-state-in-effect).
+  const [rememberFor, setRememberFor] = useState<{ requestId: string; value: boolean } | null>(null)
   const broker = useMemo(() => getPluginConsentBroker(), [])
 
   useEffect(() => {
@@ -65,10 +81,11 @@ export function PluginConsentOverlay() {
   }, [queue.length])
 
   const respond = useCallback(
-    (prompt: PendingPrompt, allow: boolean, persist: boolean) => {
+    (prompt: PendingPrompt, allow: boolean, persist: boolean, remember = false) => {
       // Pop the prompt immediately so the user can't double-click.
       setQueue((prev) => prev.filter((p) => p.requestId !== prompt.requestId))
-      broker.respond(prompt.requestId, { allow, persist })
+      setRememberFor(null)
+      broker.respond(prompt.requestId, { allow, persist, remember })
     },
     [broker]
   )
@@ -79,6 +96,8 @@ export function PluginConsentOverlay() {
   const remaining = queue.length - 1
   const secondsLeft = Math.max(0, Math.ceil((current.expiresAt - now) / 1000))
   const reasonText = current.reason?.trim() || t("fields.defaultReason")
+  // Off unless the user ticked the box on *this* prompt.
+  const remember = rememberFor?.requestId === current.requestId && rememberFor.value
 
   return (
     <div
@@ -120,6 +139,12 @@ export function PluginConsentOverlay() {
               <span className="text-muted-foreground">{t("fields.reason")}</span>
               <span className="text-[11px]">{reasonText}</span>
             </div>
+            {current.binary && (
+              <div className="flex items-start gap-2">
+                <span className="text-muted-foreground">{t("fields.binary")}</span>
+                <code className="font-mono text-[11px] break-all">{current.binary.relPath}</code>
+              </div>
+            )}
             <div className="pt-1 text-[10px] text-muted-foreground">
               {t("fields.autoReject", { seconds: secondsLeft })}
               {remaining > 0 && (
@@ -128,11 +153,44 @@ export function PluginConsentOverlay() {
             </div>
           </div>
 
+          {/* Binary prompts only: the durable, hash-pinned approval. Off by
+              default and answered separately from allow/reject — a session
+              "yes" must never imply this one. */}
+          {current.binary && (
+            <div className="rounded-md border border-border/60 p-2">
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id={`remember-${current.requestId}`}
+                  checked={remember}
+                  onCheckedChange={(checked) =>
+                    setRememberFor({ requestId: current.requestId, value: checked === true })
+                  }
+                  className="mt-0.5"
+                />
+                <div className="space-y-1">
+                  <Label
+                    htmlFor={`remember-${current.requestId}`}
+                    className="text-xs font-medium leading-none"
+                  >
+                    {t("binary.rememberLabel")}
+                  </Label>
+                  <p className="text-[10px] leading-snug text-muted-foreground">
+                    {t("binary.rememberHint")}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col gap-2">
-            <Button size="sm" onClick={() => respond(current, true, false)}>
+            <Button size="sm" onClick={() => respond(current, true, false, remember)}>
               {t("actions.allowOnce")}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => respond(current, true, true)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => respond(current, true, true, remember)}
+            >
               {t("actions.allowSession")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => respond(current, false, false)}>

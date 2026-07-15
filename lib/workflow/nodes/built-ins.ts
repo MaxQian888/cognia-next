@@ -1120,6 +1120,8 @@ registerNodeExecutor({
       startPaused: params.startPaused,
       config,
       appSettings: useSettingsStore.getState().settings,
+      // Headless: no operator to hold turns for (ADR-0070 Phase 2).
+      origin: "workflow",
     })
     return { output: { goalId: goal.id, goal: toWorkflowGoal(goal) } }
   },

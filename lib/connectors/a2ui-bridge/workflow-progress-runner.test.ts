@@ -627,3 +627,186 @@ describe("workflow-progress-runner — concurrency safety", () => {
     stop()
   })
 })
+
+describe("workflow-progress-runner — declared checklist (pending seeding)", () => {
+  function node(id: string, type: string, label: string): VisualWorkflow["nodes"][number] {
+    return {
+      id,
+      type,
+      typeVersion: 1,
+      position: { x: 0, y: 0 },
+      data: { label, params: {} },
+    } as VisualWorkflow["nodes"][number]
+  }
+
+  function snapshotWith(
+    nodes: VisualWorkflow["nodes"],
+    edges: VisualWorkflow["edges"] = []
+  ): VisualWorkflow {
+    return { ...makeWorkflowSnapshot(), nodes, edges }
+  }
+
+  /** Mirror text of the most recent cumulative card. */
+  function lastMirror(jobs: CapturedJob[]): string {
+    const seg = jobs[jobs.length - 1].segments.find(
+      (s): s is { type: string; plainTextMirror: string } =>
+        Boolean(s) && (s as { type?: unknown }).type === "a2ui"
+    )!
+    return seg.plainTextMirror
+  }
+
+  function stepLines(mirror: string): string[] {
+    return mirror.split("\n").filter((l) => /^[✓▶◻✗⊘]/.test(l))
+  }
+
+  it("declares not-yet-started steps as pending on the very first card", async () => {
+    await putRun({})
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-1",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "step_search", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    const mirror = lastMirror(jobs)
+    expect(mirror).toContain("▶ Search")
+    // Declared up front even though it has emitted no event at all.
+    expect(mirror).toContain("◻ Summarize")
+    stop()
+  })
+
+  it("declares steps in topological order regardless of nodes[] array order", async () => {
+    // nodes[] is deliberately reversed vs the edge direction: a → b.
+    await putRun({
+      workflowSnapshot: snapshotWith(
+        [node("b", "ai.prompt", "Second"), node("a", "ai.prompt", "First")],
+        [{ id: "e1", source: "a", target: "b" } as VisualWorkflow["edges"][number]]
+      ),
+    })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-2",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "a", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    expect(stepLines(lastMirror(jobs))).toEqual(["▶ First (running)", "◻ Second"])
+    stop()
+  })
+
+  it("keeps the declared order stable as steps transition", async () => {
+    await putRun({
+      workflowSnapshot: snapshotWith(
+        [node("b", "ai.prompt", "Second"), node("a", "ai.prompt", "First")],
+        [{ id: "e1", source: "a", target: "b" } as VisualWorkflow["edges"][number]]
+      ),
+    })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry", "oqj_edit"],
+      entryPlatformMessageId: "msg-3",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    // "b" starts BEFORE "a" completes — event order fights declared order.
+    await putEvent({ id: "ev1", stepId: "b", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+    await putEvent({ id: "ev2", stepId: "a", type: "step_started", ts: 1_000_200 })
+    await waitFor(() => jobs.length >= 2)
+
+    // Declared order wins: "First" stays first even though "Second" started first.
+    const lines = stepLines(lastMirror(jobs))
+    expect(lines[0]).toContain("First")
+    expect(lines[1]).toContain("Second")
+    stop()
+  })
+
+  it("never declares annotation nodes — they have no executor and emit nothing", async () => {
+    await putRun({
+      workflowSnapshot: snapshotWith([
+        node("a", "ai.prompt", "Real step"),
+        node("note1", "annotation.note", "A sticky note"),
+      ]),
+    })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-4",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "a", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    const mirror = lastMirror(jobs)
+    expect(mirror).toContain("▶ Real step")
+    expect(mirror).not.toContain("A sticky note")
+    stop()
+  })
+
+  it("declares trigger nodes — they execute and are already on the card today", async () => {
+    await putRun({
+      workflowSnapshot: snapshotWith(
+        [node("t1", "trigger.manual", "Manual"), node("a", "ai.prompt", "Real step")],
+        [{ id: "e1", source: "t1", target: "a" } as VisualWorkflow["edges"][number]]
+      ),
+    })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-5",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "t1", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    // Trigger sorts first (topo order) rather than being appended out of order.
+    expect(stepLines(lastMirror(jobs))[0]).toContain("Manual")
+    stop()
+  })
+
+  it("still renders a card when a hand-written run row carries no workflowSnapshot", async () => {
+    // The runner already treats the snapshot as possibly-absent
+    // (`workflowName: snapshot?.name ?? "workflow"`); seeding must degrade the
+    // same way rather than throwing and costing the conversation its card.
+    await putRun({ workflowSnapshot: undefined as unknown as VisualWorkflow })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-7",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "step_search", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    // Nothing to declare, but the step still folds in and the card ships.
+    expect(stepLines(lastMirror(jobs))).toEqual(["▶ step_search (running)"])
+    stop()
+  })
+
+  it("falls back to nodes[] order when the graph has a cycle instead of killing the card", async () => {
+    await putRun({
+      workflowSnapshot: snapshotWith(
+        [node("a", "ai.prompt", "Alpha"), node("b", "ai.prompt", "Beta")],
+        [
+          { id: "e1", source: "a", target: "b" } as VisualWorkflow["edges"][number],
+          { id: "e2", source: "b", target: "a" } as VisualWorkflow["edges"][number],
+        ]
+      ),
+    })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-6",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "a", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    // topoSort throws on the cycle; the card still renders in nodes[] order.
+    expect(stepLines(lastMirror(jobs))).toEqual(["▶ Alpha (running)", "◻ Beta"])
+    stop()
+  })
+})

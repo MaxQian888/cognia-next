@@ -71,6 +71,24 @@ import { resolveActivityI18n } from "./activity/i18n"
 const CONNECTOR_TURN_TIMEOUT_MS = 15 * 60 * 1000
 
 /**
+ * Read watchdog for connector turns. Until this was wired, connector captures
+ * passed only {@link CONNECTOR_TURN_TIMEOUT_MS}, so `idleTimeoutMs` defaulted to
+ * 0, `armIdle()` no-opped, and a provider stream that simply went quiet burned
+ * the full 15 minutes before failing — with the user waiting in the IM thread.
+ *
+ * Safe to set well below the wall clock because the watchdog stands down for
+ * every legitimate silence: `pauseIdle()` on a pending permission (approval
+ * registry TTL is 10 min) and for the duration of any in-flight tool. What's
+ * left is a genuinely stalled stream.
+ *
+ * NOT a cure for every hang: the watchdog only arms on the FIRST event of a turn
+ * (so a slow cold start stays bounded by the wall clock), and it deliberately
+ * doesn't re-arm while a tool is in flight — a tool that never returns still
+ * runs to {@link CONNECTOR_TURN_TIMEOUT_MS}.
+ */
+const CONNECTOR_TURN_IDLE_TIMEOUT_MS = 2 * 60 * 1000
+
+/**
  * Canned user-facing texts for proactive IM failure notifications
  * (`notifyConversationOverIM`).
  *
@@ -980,6 +998,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           adapterId: event.adapterId,
           conversationKey: event.conversationKey,
           timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
+          idleTimeoutMs: CONNECTOR_TURN_IDLE_TIMEOUT_MS,
           ...(adapterSignal ? { signal: adapterSignal } : {}),
           onPermissionRequest: makeImPermissionResponder({
             sessionId: session.id,
@@ -1175,6 +1194,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
             timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
+            idleTimeoutMs: CONNECTOR_TURN_IDLE_TIMEOUT_MS,
             ...(draftSignal ? { signal: draftSignal } : {}),
             onPermissionRequest: () => ({ decision: "deny" as const }),
           })

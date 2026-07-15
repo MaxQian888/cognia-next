@@ -151,6 +151,129 @@ describe("GoalRuntime.createGoal", () => {
   })
 })
 
+// ── ADR-0070 Phase 2 — risk-driven ceremony ──────────────────────────────
+describe("GoalRuntime.createGoal — risk gating", () => {
+  /** A character that can drive the machine → computer-use → high risk. */
+  const riskyCharacter = async () => {
+    await getDb().characters.put({
+      id: "char_risky",
+      name: "Risky",
+      enableComputerUse: true,
+    } as never)
+    return "char_risky"
+  }
+
+  it("leaves a low-risk goal completely alone", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({ sessionId: "ses_a", rawObjective: "summarize the docs" })
+    expect(goal.config.requireAcceptance).toBeFalsy()
+    expect(goal.config.manualContinue).toBeFalsy()
+    const events = await listGoalEvents(goal.id)
+    const created = events.find((e) => e.kind === "goal_created")
+    expect((created?.payload as { risk?: unknown }).risk).toBeUndefined()
+  })
+
+  it("auto-enables requireAcceptance for a medium-risk objective", async () => {
+    const rt = getGoalRuntime()
+    // credential-auth is `elevated` → medium → acceptance but not manual hold.
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "rotate the api key for staging",
+    })
+    expect(goal.config.requireAcceptance).toBe(true)
+    expect(goal.config.manualContinue).toBeFalsy()
+  })
+
+  it("high risk + interactive also holds each turn", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "clean things up",
+      characterId: await riskyCharacter(),
+    })
+    expect(goal.config.requireAcceptance).toBe(true)
+    expect(goal.config.manualContinue).toBe(true)
+  })
+
+  it.each(["scheduler", "plugin", "remote", "workflow"] as const)(
+    "high risk + %s origin gets acceptance but NEVER manualContinue",
+    async (origin) => {
+      // manualContinue headless would park the goal forever — a hang, not a gate.
+      const rt = getGoalRuntime()
+      const goal = await rt.createGoal({
+        sessionId: "ses_a",
+        rawObjective: "clean things up",
+        characterId: await riskyCharacter(),
+        origin,
+      })
+      expect(goal.config.requireAcceptance).toBe(true)
+      expect(goal.config.manualContinue).toBeFalsy()
+    }
+  )
+
+  it("records the assessment on goal_created so the operator sees WHY", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "x",
+      characterId: await riskyCharacter(),
+    })
+    const events = await listGoalEvents(goal.id)
+    const created = events.find((e) => e.kind === "goal_created")
+    const risk = (
+      created?.payload as { risk?: { tier: string; surfaces: string[]; reason: string } }
+    ).risk
+    expect(risk?.tier).toBe("high")
+    expect(risk?.surfaces).toContain("computer-use")
+    expect(risk?.reason).toMatch(/computer-use/)
+  })
+
+  it("riskGating:false restores the old behavior", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "delete everything",
+      characterId: await riskyCharacter(),
+      config: { riskGating: false },
+    })
+    expect(goal.config.requireAcceptance).toBeFalsy()
+    expect(goal.config.manualContinue).toBeFalsy()
+  })
+
+  it("never lowers a flag the user set explicitly", async () => {
+    // Raise-only: a low assessment must not clear the user's own choice.
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "summarize the docs",
+      config: { requireAcceptance: true, manualContinue: true },
+    })
+    expect(goal.config.requireAcceptance).toBe(true)
+    expect(goal.config.manualContinue).toBe(true)
+  })
+
+  it("never lowers an explicit manualContinue even under a headless origin", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "summarize the docs",
+      config: { manualContinue: true },
+      origin: "scheduler",
+    })
+    expect(goal.config.manualContinue).toBe(true)
+  })
+
+  it("survives a character that no longer resolves", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "x",
+      characterId: "char_missing",
+    })
+    expect(goal.status).toBe("active")
+  })
+})
+
 // ── v49 — /goal × IM guardrail (inbox-optimization plan) ──────────────
 //
 // Goals targeting an IM-bound session must check the conversation

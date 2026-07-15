@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
@@ -466,6 +466,7 @@ function ChannelRow({
   // Localized "3 minutes ago" via next-intl — the old hand-rolled "3m"/"2d"
   // helper rendered raw English abbreviations for zh-CN users.
   const format = useFormatter()
+  const now = useNow()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(session.title)
 
@@ -582,7 +583,7 @@ function ChannelRow({
                 ) : null}
                 {preview ? (
                   <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-                    {format.relativeTime(new Date(session.lastMessageAt ?? session.updatedAt))}
+                    {format.relativeTime(new Date(session.lastMessageAt ?? session.updatedAt), now)}
                   </span>
                 ) : null}
               </span>
@@ -590,7 +591,7 @@ function ChannelRow({
                 className="truncate text-[11px] text-muted-foreground"
                 data-testid={`mobile-channel-subtitle-${session.id}`}
               >
-                {preview ?? format.relativeTime(new Date(session.updatedAt))}
+                {preview ?? format.relativeTime(new Date(session.updatedAt), now)}
               </span>
             </span>
           </Button>

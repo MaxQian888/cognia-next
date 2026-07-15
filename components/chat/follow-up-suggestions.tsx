@@ -1,11 +1,10 @@
 "use client"
 
 // AI follow-up suggestion chips, rendered just above the composer after an
-// assistant reply. Clicking a chip drops the suggested message into the
-// composer (via the existing `onUseSample` path) so the user can edit or send
-// it. Renders nothing while streaming, when disabled, or when the model /
-// PII gate produced no suggestions. Driven entirely by
-// `useFollowUpSuggestions`.
+// assistant reply. Clicking a chip sends the suggested message straight away
+// (via the existing `onUseSample` path). Renders nothing while streaming, when
+// disabled, or when the model / PII gate produced no suggestions. Driven
+// entirely by `useFollowUpSuggestions`.
 
 import { useTranslations } from "next-intl"
 import { SparklesIcon, XIcon } from "lucide-react"

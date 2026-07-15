@@ -107,6 +107,10 @@ const retryPolicySchema = z.object({
 })
 
 const settingsSchema = z.object({
+  // ADR-0070 Phase 3. Must be declared or zod strips it and the engine sees an
+  // ungated workflow — the schema is what the orchestrator actually reads
+  // (`validated`), not the caller's object.
+  riskGating: z.boolean().optional(),
   errorPolicy: z.enum(["stop", "continue", "branch"]),
   timeoutMs: z
     .number()

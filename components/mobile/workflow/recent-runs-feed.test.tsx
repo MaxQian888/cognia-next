@@ -40,6 +40,7 @@ jest.mock("@/lib/db/workflows", () => ({
 
 jest.mock("next-intl", () => ({
   useFormatter: () => ({ relativeTime: () => "now" }),
+  useNow: () => new Date(),
   useTranslations: () => (key: string) => {
     const map: Record<string, string> = { runsHeader: "Recent runs", noRuns: "No runs" }
     return map[key] ?? key
