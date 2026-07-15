@@ -103,13 +103,8 @@
         "label": "Refresh automatically near expiry",
         "title": "Refresh tokens near expiry"
       },
-      "cardDescription": "Auto-refresh behavior and codex-cli reuse for this provider.",
+      "cardDescription": "Auto-refresh behavior for this provider.",
       "cardTitle": "Connection settings",
-      "preferDiscovered": {
-        "description": "When no Codex account is registered in cognia, read `~/.codex/auth.json` on each agent spawn. Kept as a UX hint — the runtime no longer auto-adopts; the Account tab still surfaces the discovered credential.",
-        "label": "Show codex-cli credentials in the Reuse flow",
-        "title": "Reuse codex-cli when our vault is empty"
-      },
       "probe": {
         "cardDescription": "Background polling of your Codex 5-hour and weekly limits.",
         "cardTitle": "Usage tracking",

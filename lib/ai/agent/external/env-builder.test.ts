@@ -27,7 +27,7 @@ const mRefresh = transportMod.codexOauthRefresh as jest.Mock
 const mGetSettings = getSettings as jest.Mock
 
 // Default: no codex settings persisted → env-builder uses the type defaults
-// (preferDiscovered + autoRefreshNearExpiry both true).
+// (autoRefreshNearExpiry true).
 beforeEach(() => {
   mGetSettings.mockResolvedValue({})
   mGetAccount.mockResolvedValue(undefined)
@@ -137,46 +137,57 @@ describe("buildAgentEnv — codex preset", () => {
   })
 })
 
-describe("buildAgentEnv — codex preferDiscovered fallback", () => {
-  function settings(preferDiscovered: boolean, autoRefreshNearExpiry = false) {
-    mGetSettings.mockResolvedValue({
-      codexSubscriptionSettings: { preferDiscovered, autoRefreshNearExpiry },
-    })
-  }
-
-  it("does not probe discovery when preferDiscovered is off", async () => {
-    settings(false)
+describe("buildAgentEnv — codex credentials require explicit adoption", () => {
+  // ADR-0025's stated contract (and this module's own header) is that discovery
+  // is NOT a runtime fallback: a discovered credential is adopted explicitly via
+  // the UI's "Reuse" flow. The code contradicted that — with no active account
+  // it read the live `~/.codex/auth.json` and injected it, unasked, because
+  // `preferDiscovered` defaulted true.
+  //
+  // That is not merely untidy. A codex-cli configured against a third-party
+  // relay (`model_provider = "custom"` + a bare OPENAI_API_KEY in auth.json)
+  // gets an env overlay it never asked for; injecting a *different* key from our
+  // vault's discovery would silently break a working login, and the spawn never
+  // clears env so the overlay reaches the child.
+  it("never probes discovery when there is no active account", async () => {
     mGetActive.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
+
     const env = await buildAgentEnv(codexConfig(), { K: "v" })
+
     expect(env).toEqual({ K: "v" })
     expect(mDiscover).not.toHaveBeenCalled()
   })
 
-  it("falls back to discovered api-key when no active account and preferDiscovered is on", async () => {
-    settings(true)
-    mGetActive.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
-    mDiscover.mockResolvedValueOnce({ source: "file", openaiApiKey: "sk-disc-1" })
-    const env = await buildAgentEnv(codexConfig())
-    expect(env).toEqual({ OPENAI_API_KEY: "sk-disc-1", CODEX_API_KEY: "sk-disc-1" })
-  })
-
-  it("falls back to discovered chatgpt bearer", async () => {
-    settings(true)
-    mGetActive.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
-    mDiscover.mockResolvedValueOnce({
-      source: "file",
-      tokens: { accessToken: "oat-disc", refreshToken: "r", idTokenRaw: "" },
+  it("never probes discovery even with a legacy preferDiscovered:true persisted", async () => {
+    // Old settings rows still carry the flag. It must be inert, not honoured.
+    mGetSettings.mockResolvedValue({
+      codexSubscriptionSettings: { preferDiscovered: true, autoRefreshNearExpiry: false },
     })
-    const env = await buildAgentEnv(codexConfig())
-    expect(env).toEqual({ CODEX_ACCESS_TOKEN: "oat-disc" })
+    mGetActive.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
+
+    const env = await buildAgentEnv(codexConfig(), { K: "v" })
+
+    expect(env).toEqual({ K: "v" })
+    expect(mDiscover).not.toHaveBeenCalled()
   })
 
-  it("returns base env when discovery finds nothing", async () => {
-    settings(true)
+  it("still injects env from an actively adopted account", async () => {
+    mGetActive.mockResolvedValueOnce(snapshot([["OPENAI_API_KEY", "sk-adopted"]]))
+
+    const env = await buildAgentEnv(codexConfig())
+
+    expect(env).toEqual({ OPENAI_API_KEY: "sk-adopted" })
+    expect(mDiscover).not.toHaveBeenCalled()
+  })
+
+  it("leaves a third-party codex login untouched when nothing was adopted", async () => {
+    // The child then inherits its own ~/.codex/auth.json + config.toml natively,
+    // which is the whole point: no overlay, nothing to clobber.
     mGetActive.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
-    mDiscover.mockResolvedValueOnce(null)
-    const env = await buildAgentEnv(codexConfig(), { K: "v" })
-    expect(env).toEqual({ K: "v" })
+
+    const env = await buildAgentEnv(codexConfig())
+
+    expect(env).toEqual({})
   })
 })
 

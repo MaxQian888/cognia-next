@@ -5,23 +5,27 @@
 // `tokio::process::Command::env(...)`. Anything we want the child process to
 // see has to be in that map before the IPC call.
 //
-// Currently the only preset that needs subscription-backed env injection is
-// `codex` — the @zed-industries/codex-acp adapter we spawn reuses the same
-// `OPENAI_API_KEY` / `CODEX_ACCESS_TOKEN` env-var contract as codex-cli, so
-// dropping the bearer into the spawn env lets the user's existing ChatGPT
-// session carry through without forcing them to log in again.
+// The presets that need subscription-backed env injection are `codex` (the
+// @zed-industries/codex-acp shim) and `codex-app-server` (the native
+// app-server) — both reuse codex-cli's `OPENAI_API_KEY` / `CODEX_ACCESS_TOKEN`
+// env contract, so dropping an adopted bearer into the spawn env lets that
+// account carry through without a second login.
 //
-// **ADR-0025 change**: env resolution now goes through the unified
-// subscription module. The Rust side maintains an `ActiveAccountState` cache
-// keyed by provider; we ask it for the currently active codex account's env
-// pairs. Discovery is no longer a runtime fallback — users adopt a
-// discovered credential explicitly through the UI's "Reuse" flow, which
-// writes to the v2 vault and sets the new account active. This makes
-// runtime env injection deterministic (no surprise switches) at the cost of
-// requiring one extra click per new install.
+// **ADR-0025**: env resolution goes through the unified subscription module.
+// The Rust side maintains an `ActiveAccountState` cache keyed by provider; we
+// ask it for the currently active codex account's env pairs. Discovery is NOT a
+// runtime fallback — a discovered credential is adopted explicitly through the
+// UI's "Reuse" flow, which writes the v2 vault and sets the account active.
+//
+// That is a correctness requirement, not just determinism. The spawn never
+// clears the child's environment, and codex resolves its provider and model
+// from `CODEX_HOME`'s config.toml. A codex-cli pointed at a third-party relay
+// authenticates with a bare `OPENAI_API_KEY` in auth.json; injecting a
+// *different* key we happened to discover would silently break a working login
+// the user never asked us to touch. With no adopted account we inject nothing
+// and the child inherits its own config exactly as codex-cli would.
 
 import { getSettings } from "@/lib/db/settings"
-import { discoverCodexAuth, discoveredToCredential } from "@/lib/subscription/codex/discovery"
 import {
   isCodexCredentialFresh,
   refreshCodexToken,
@@ -110,17 +114,10 @@ async function codexEnvOverlay(
     return pairsToRecord(snapshot.env)
   }
 
-  // No active account. When the user opted into `preferDiscovered`, fall back
-  // to the live `~/.codex/auth.json` discovery so an existing codex-cli login
-  // carries through without an explicit Adopt.
-  if (settings.preferDiscovered) {
-    try {
-      const overlay = await discoveredCodexOverlay()
-      if (overlay) return overlay
-    } catch (err) {
-      console.warn("env-builder: codex discovery fallback failed:", err)
-    }
-  }
+  // No active account → no overlay, so the child inherits its own CODEX_HOME
+  // (auth.json + config.toml) exactly as codex-cli would. See the header: a
+  // discovered credential is adopted explicitly, never injected behind the
+  // user's back.
   return null
 }
 
@@ -164,24 +161,4 @@ async function maybeRefreshActiveCodex(accountId: string): Promise<ActiveSnapsho
     console.warn("env-builder: codex auto-refresh failed:", err)
     return null
   }
-}
-
-async function discoveredCodexOverlay(): Promise<Record<string, string> | null> {
-  const discovered = await discoverCodexAuth()
-  if (!discovered) return null
-  const cred = discoveredToCredential(discovered)
-  if (!cred) return null
-  return codexCredentialToEnv(cred)
-}
-
-/**
- * Mirror of the Rust `codex::env_for_sidecar` mapping for the discovery
- * fallback (which never carries a preset). chatgpt mode → CODEX_ACCESS_TOKEN;
- * api_key mode → OPENAI_API_KEY + CODEX_API_KEY.
- */
-function codexCredentialToEnv(cred: CodexCredentialData): Record<string, string> {
-  if (cred.authMode === "api_key") {
-    return { OPENAI_API_KEY: cred.accessToken, CODEX_API_KEY: cred.accessToken }
-  }
-  return { CODEX_ACCESS_TOKEN: cred.accessToken }
 }

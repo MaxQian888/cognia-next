@@ -49,15 +49,14 @@ export const DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS: AnthropicSubscriptionSetti
   warnThresholdPct: 90,
 }
 
-/** Codex-specific subscription settings. */
+/**
+ * Codex-specific subscription settings.
+ *
+ * Note there is no `preferDiscovered`: env injection requires an explicitly
+ * adopted account (ADR-0025). Settings rows persisted before that flag was
+ * removed may still carry it; it is inert, and nothing reads it.
+ */
 export interface CodexSubscriptionSettings {
-  /**
-   * When `true`, env-builder reads the live `~/.codex/auth.json` discovery
-   * whenever our own vault has no active codex account. When `false`,
-   * codex env stays empty until the user explicitly Adopts a discovered
-   * credential.
-   */
-  preferDiscovered: boolean
   /** Refresh the bearer ~5min before expiry instead of waiting for failure. */
   autoRefreshNearExpiry: boolean
   /**
@@ -74,7 +73,6 @@ export interface CodexSubscriptionSettings {
 }
 
 export const DEFAULT_CODEX_SUBSCRIPTION_SETTINGS: CodexSubscriptionSettings = {
-  preferDiscovered: true,
   autoRefreshNearExpiry: true,
   probeEnabled: false,
   visibleIntervalMs: 5 * 60 * 1000,

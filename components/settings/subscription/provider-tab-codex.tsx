@@ -40,11 +40,6 @@ export function ProviderTabCodex() {
   const codexSettings = useSettingsStore((s) => getCodexSettings(s.settings))
   const save = useSettingsStore((s) => s.save)
 
-  const togglePreferDiscovered = async (next: boolean) => {
-    await save({
-      codexSubscriptionSettings: { ...codexSettings, preferDiscovered: next },
-    })
-  }
   const toggleAutoRefresh = async (next: boolean) => {
     await save({
       codexSubscriptionSettings: { ...codexSettings, autoRefreshNearExpiry: next },
@@ -96,13 +91,6 @@ export function ProviderTabCodex() {
         collapsible
         defaultOpen={false}
       >
-        <SettingsToggle
-          id="codex-prefer-discovered"
-          label={tSettings("preferDiscovered.title")}
-          description={tSettings("preferDiscovered.description")}
-          checked={codexSettings.preferDiscovered}
-          onCheckedChange={(v) => void togglePreferDiscovered(v)}
-        />
         <SettingsToggle
           id="codex-auto-refresh"
           label={tSettings("autoRefresh.title")}

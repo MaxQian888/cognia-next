@@ -38,6 +38,5 @@ export const Default: Story = {}
 
 // Probe enabled — the cadence + warning-threshold inputs become editable.
 export const ProbeEnabled: Story = {
-  beforeEach: () =>
-    seedCodex({ probeEnabled: true, preferDiscovered: true, autoRefreshNearExpiry: true }),
+  beforeEach: () => seedCodex({ probeEnabled: true, autoRefreshNearExpiry: true }),
 }

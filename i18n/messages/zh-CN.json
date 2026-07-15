@@ -22965,13 +22965,8 @@
           "label": "自动刷新临近过期的 Token",
           "title": "临近过期时自动刷新"
         },
-        "cardDescription": "服务商相关的自动刷新与 codex-cli 复用偏好。",
+        "cardDescription": "该服务商的自动刷新行为。",
         "cardTitle": "连接设置",
-        "preferDiscovered": {
-          "description": "我们不再在运行时自动复用——若需要使用 codex-cli 凭证，请在「账号」标签里手动复用一次。",
-          "label": "在「复用」流程里展示 codex-cli 发现的凭证",
-          "title": "本地无激活账号时显示 codex-cli 凭证"
-        },
         "probe": {
           "cardDescription": "在后台轮询你的 Codex 5 小时与每周额度。",
           "cardTitle": "用量追踪",

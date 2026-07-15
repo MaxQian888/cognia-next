@@ -27,7 +27,6 @@ jest.mock("./add-account-dialog/codex", () => ({
 
 const saveMock = jest.fn(async (_: unknown) => undefined)
 type MockCodexSettings = {
-  preferDiscovered: boolean
   autoRefreshNearExpiry: boolean
   probeEnabled: boolean
   visibleIntervalMs: number
@@ -35,7 +34,6 @@ type MockCodexSettings = {
   warnThresholdPct: number
 }
 const defaultMockCodexSettings: MockCodexSettings = {
-  preferDiscovered: false,
   autoRefreshNearExpiry: true,
   probeEnabled: false,
   visibleIntervalMs: 5 * 60_000,
@@ -74,31 +72,27 @@ describe("ProviderTabCodex", () => {
     expect(screen.getByText("cardTitle")).toBeInTheDocument()
   })
 
-  it("shows both connection-settings toggles when the card is expanded", () => {
+  it("shows the connection-settings toggle when the card is expanded", () => {
     render(<ProviderTabCodex />)
     // SettingsCard is collapsible defaultOpen=false; clicking the header opens it.
     fireEvent.click(screen.getByText("cardTitle"))
-    expect(screen.getByText("preferDiscovered.title")).toBeInTheDocument()
     expect(screen.getByText("autoRefresh.title")).toBeInTheDocument()
   })
 
-  it("invokes save with patched settings when preferDiscovered toggles", async () => {
+  it("no longer offers a live-discovery toggle", () => {
+    // Codex env injection now requires an explicitly adopted account, so there
+    // is no setting to opt into reading ~/.codex/auth.json behind the scenes.
     render(<ProviderTabCodex />)
     fireEvent.click(screen.getByText("cardTitle"))
-    const switches = screen.getAllByRole("switch")
-    fireEvent.click(switches[0])
-    await waitFor(() => {
-      expect(saveMock).toHaveBeenCalledWith({
-        codexSubscriptionSettings: { ...defaultMockCodexSettings, preferDiscovered: true },
-      })
-    })
+    expect(screen.queryByText("preferDiscovered.title")).not.toBeInTheDocument()
   })
 
   it("invokes save with patched settings when autoRefresh toggles", async () => {
     render(<ProviderTabCodex />)
     fireEvent.click(screen.getByText("cardTitle"))
-    const switches = screen.getAllByRole("switch")
-    fireEvent.click(switches[1])
+    // By id, not by position: this indexed `switches[1]` behind the
+    // since-removed discovery toggle, so removing that silently retargeted it.
+    fireEvent.click(document.getElementById("codex-auto-refresh")!)
     await waitFor(() => {
       expect(saveMock).toHaveBeenCalledWith({
         codexSubscriptionSettings: { ...defaultMockCodexSettings, autoRefreshNearExpiry: false },
