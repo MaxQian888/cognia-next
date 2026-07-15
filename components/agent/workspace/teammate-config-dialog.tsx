@@ -54,6 +54,7 @@ import {
 } from "@/lib/ai/agent/team/teammate-preset-adapter"
 import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
 
 export interface TeammateConfigDialogProps {
   open: boolean
@@ -61,14 +62,6 @@ export interface TeammateConfigDialogProps {
   teammate: AgentTeammate
   team: AgentTeam
 }
-
-const RUNTIME_OPTIONS: ReadonlyArray<TeammateRuntime> = [
-  "claude",
-  "codex",
-  "claude-code",
-  "gemini-cli",
-  "cursor-cli",
-]
 
 /** Sentinel for the "no twin" Select option (Radix reserves the empty string). */
 const TWIN_NONE_VALUE = "__none__"
@@ -80,6 +73,7 @@ export function TeammateConfigDialog({
   team,
 }: TeammateConfigDialogProps) {
   const t = useTranslations("agentTeamsWorkspace.teammateConfig")
+  const tRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
 
   const skillsRaw = useLiveQuery(() => listSkills(), [])
   const mcpRaw = useLiveQuery(() => listMcpServers(), [])
@@ -160,7 +154,7 @@ export function TeammateConfigDialog({
                         <SelectContent>
                           {RUNTIME_OPTIONS.map((r) => (
                             <SelectItem key={r} value={r}>
-                              {r}
+                              {tRuntime(runtimeLabelKey(r))}
                             </SelectItem>
                           ))}
                         </SelectContent>

@@ -38,6 +38,11 @@ jest.mock("@/lib/claude/agents/subagents", () => ({
 jest.mock("@/lib/ai/agent/external/presets", () => ({
   getAvailablePresets: () => [],
   getPresetDisplayInfo: () => null,
+  // The runtime Select derives its options from the real preset catalog (via
+  // `runtime-options`). Keep that export REAL — a hand-listed copy here would
+  // reintroduce exactly the drift `runtime-options` exists to prevent.
+  BUILTIN_EXECUTABLE_PRESET_IDS: jest.requireActual("@/lib/ai/agent/external/presets")
+    .BUILTIN_EXECUTABLE_PRESET_IDS,
 }))
 
 const updateTeammateMock = jest.fn()
