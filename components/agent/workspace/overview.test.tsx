@@ -255,11 +255,26 @@ describe("AgentTeamOverview", () => {
     expect(screen.getByTestId("plan-approval-panel")).toBeInTheDocument()
   })
 
-  it("does not mount the plan-approval panel when requirePlanApproval is off", () => {
+  it("mounts the plan-approval panel for a risk-raised gate, with requirePlanApproval off", () => {
+    // Regression: the panel used to also require `config.requirePlanApproval`,
+    // but the runtime opens the gate on `requirePlanApproval || riskRaisedGate`
+    // (ADR-0070). For a risk-raised gate the operator was asked to approve a
+    // plan no surface rendered — a blind approval. The lead's status is set by
+    // the runtime only while the gate is open, so it is sufficient on its own.
     render(
       <AgentTeamOverview
-        team={baseTeam}
-        teammates={[{ ...lead, status: "awaiting_approval" }, teammate]}
+        team={{ ...baseTeam, config: { ...baseTeam.config, requirePlanApproval: false } }}
+        teammates={[{ ...lead, status: "awaiting_approval", proposedPlan: '{"x":1}' }, teammate]}
+      />
+    )
+    expect(screen.getByTestId("plan-approval-panel")).toBeInTheDocument()
+  })
+
+  it("does not mount the plan-approval panel when the lead is not awaiting approval", () => {
+    render(
+      <AgentTeamOverview
+        team={{ ...baseTeam, config: { ...baseTeam.config, requirePlanApproval: true } }}
+        teammates={[{ ...lead, status: "idle" }, teammate]}
       />
     )
     expect(screen.queryByTestId("plan-approval-panel")).not.toBeInTheDocument()

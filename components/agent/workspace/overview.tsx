@@ -257,10 +257,13 @@ export function AgentTeamOverview({
         </Card>
       )}
 
-      {/* Plan approval */}
-      {team.config.requirePlanApproval && lead?.status === "awaiting_approval" && (
-        <PlanApprovalPanel team={team} lead={lead} />
-      )}
+      {/* Plan approval. Gated on the lead's status ALONE: the runtime opens the
+          gate on `requirePlanApproval || riskRaisedGate` (ADR-0070), so also
+          requiring the config flag hid the plan for a risk-raised gate and
+          asked the operator to approve something they could not see. The
+          runtime parks the lead here only while the gate is open and lifts it
+          on any decision or abort, so the status is sufficient and correct. */}
+      {lead?.status === "awaiting_approval" && <PlanApprovalPanel team={team} lead={lead} />}
 
       {/* Actions */}
       <div className="flex items-center justify-end gap-2">
