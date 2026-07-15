@@ -470,6 +470,22 @@ describe("runTeamLifecycle — plan-approval gate", () => {
     expect(result.reason).toMatch(/runLeadPlanning/)
   })
 
+  it("fails the run (not the process) when lead planning throws", async () => {
+    // Regression: this await was bare, so a lead that could not resolve a
+    // provider — the default state before the provider fix — rejected straight
+    // out of runTeamLifecycle instead of returning a failed run the operator
+    // can see. Every neighbouring failure in this block returns a result.
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    deps.runLeadPlanning = jest.fn(async () => {
+      throw new Error("The team lead has no AI provider to run on: …Settings → Providers…")
+    })
+
+    const result = await runTeamLifecycle("team-1", deps)
+
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/Settings → Providers/)
+  })
+
   it("headless origin fails fast BEFORE running lead planning (no token burn)", async () => {
     const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
     const result = await runTeamLifecycle("team-1", { ...deps, origin: "scheduler" })

@@ -28,6 +28,8 @@ import {
   createResolveTeamRepo,
   createRunPrReview,
 } from "./team/pr-feedback/resolvers"
+import { buildLeadExecutionConfig, readAppSettings } from "./team/lead-execution"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 /** Build the prompt sent to a teammate for a specific task. */
 export function buildTeammatePrompt(
@@ -109,6 +111,12 @@ export interface BuildAgentTeamRuntimeDepsOptions {
    * this round (logged, not enforced). Defaults to {@link defaultLifecycleFirer}.
    */
   firer?: LifecycleHookFirer
+  /**
+   * Read the app settings that decide which provider/model the lead runs on.
+   * Defaults to the live settings store. `executeAgent` reads no store, so
+   * without this the lead has no provider to resolve against at all.
+   */
+  readSettings?: () => Promise<AppSettings | null | undefined>
 }
 
 /**
@@ -127,6 +135,55 @@ export function buildAgentTeamRuntimeDeps(
 > {
   const executeAgent = opts.executeAgent ?? defaultExecuteAgent
   const firer = opts.firer ?? defaultLifecycleFirer
+  const readSettings = opts.readSettings ?? readAppSettings
+
+  /**
+   * Run one lead LLM turn: resolve the lead's provider/model, bracket the call
+   * with lifecycle hooks, and return the raw text.
+   *
+   * Shared by planning and review so the two can never resolve onto different
+   * providers. `phase` keeps them distinguishable to hook consumers (e.g.
+   * planning-spend tracking), which is why it is threaded rather than hardcoded.
+   */
+  const runLeadTurn = async (params: {
+    team: AgentTeam
+    lead: AgentTeammate
+    prompt: string
+    systemPrompt: string
+    phase: "planning" | "review"
+    signal: AbortSignal
+  }): Promise<string> => {
+    const { team, lead, prompt, phase, signal } = params
+    // Resolve BEFORE the pre-hooks fire: an unconfigured provider is a setup
+    // error, not a turn that happened and failed, so it should not open a
+    // hook bracket it will never close meaningfully.
+    const execution = buildLeadExecutionConfig({ lead, settings: await readSettings() })
+
+    const hookCtx: AgentHookContext = { agentId: `team-lead-${phase}`, sessionId: team.id }
+    const pre = await firePreCallHooks(firer, hookCtx, prompt, {
+      phase: `team-${phase}`,
+      teamId: team.id,
+    })
+    const effectiveSystem = pre.additionalContext
+      ? `${params.systemPrompt}\n\n${pre.additionalContext}`
+      : params.systemPrompt
+
+    try {
+      const result = await executeAgent(prompt, {
+        ...execution,
+        systemPrompt: effectiveSystem,
+        abortSignal: signal,
+      })
+      void firePostCallHooks(firer, hookCtx, { success: true })
+      return result.text ?? ""
+    } catch (err) {
+      void firePostCallHooks(firer, hookCtx, {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      throw err
+    }
+  }
 
   const runLeadPlanning: NonNullable<RunTeamLifecycleDeps["runLeadPlanning"]> = async ({
     team,
@@ -138,38 +195,18 @@ export function buildAgentTeamRuntimeDeps(
       .getState()
       .getTeammates(team.id)
       .filter((m) => m.role === "teammate")
-    const prompt = buildLeadPlanningPrompt(team, workers, feedback)
-    const systemPrompt =
-      lead.config?.systemPrompt?.trim() ||
-      team.config?.defaultSystemPrompt?.trim() ||
-      LEAD_SYSTEM_PROMPT
-
-    // Bracket the planning LLM call with lifecycle hooks (ADR-0040 follow-up).
-    // Observable for planning-spend tracking; pre-hook additionalContext is
-    // injected into the planning system prompt (the "context loading" path).
-    const hookCtx: AgentHookContext = { agentId: "team-lead-planning", sessionId: team.id }
-    const pre = await firePreCallHooks(firer, hookCtx, prompt, {
-      phase: "team-planning",
-      teamId: team.id,
+    const planText = await runLeadTurn({
+      team,
+      lead,
+      prompt: buildLeadPlanningPrompt(team, workers, feedback),
+      systemPrompt:
+        lead.config?.systemPrompt?.trim() ||
+        team.config?.defaultSystemPrompt?.trim() ||
+        LEAD_SYSTEM_PROMPT,
+      phase: "planning",
+      signal,
     })
-    const effectiveSystem = pre.additionalContext
-      ? `${systemPrompt}\n\n${pre.additionalContext}`
-      : systemPrompt
-
-    try {
-      const result = await executeAgent(prompt, {
-        systemPrompt: effectiveSystem,
-        abortSignal: signal,
-      })
-      void firePostCallHooks(firer, hookCtx, { success: true })
-      return { planText: result.text ?? "" }
-    } catch (err) {
-      void firePostCallHooks(firer, hookCtx, {
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      throw err
-    }
+    return { planText }
   }
 
   // Default notifierDeps route delivery through the Unified Notification Center

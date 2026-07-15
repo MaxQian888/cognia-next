@@ -27,7 +27,7 @@ import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
   type ProviderSettingsEntry,
-  type CustomProviderDefinition,
+  type RichCustomProviderEntry,
 } from "@/lib/ai/provider-consumption"
 import type { Character } from "@cognia/agent-config-types"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
@@ -87,7 +87,14 @@ export interface ExecuteAgentConfig {
    * caller must pass them in if they want a specific provider.
    */
   providerSettings?: Record<string, ProviderSettingsEntry>
-  customProviders?: CustomProviderDefinition[]
+  /**
+   * Accepts either the lean resolver shape or the rich `AppSettings`
+   * `customProviders` rows — this is forwarded verbatim to
+   * `createProviderSettingsSnapshot`, which takes the rich shape. Declaring the
+   * lean one here was narrower than reality and forced every real caller to
+   * cast its settings across.
+   */
+  customProviders?: RichCustomProviderEntry[]
   defaultProvider?: string
   /**
    * Per-run provider override (cross-provider subagents). When set, this run

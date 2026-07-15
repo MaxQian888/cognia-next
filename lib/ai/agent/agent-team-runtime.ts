@@ -407,12 +407,30 @@ export async function runTeamLifecycle(
       let feedback: string | undefined
       for (let i = 0; i < maxRev; i++) {
         if (ac.signal.aborted) break
-        const planResult = await deps.runLeadPlanning({
-          team,
-          lead,
-          feedback,
-          signal: ac.signal,
-        })
+        // Every other failure in this block returns a `failed` result; planning
+        // was the one that threw straight out of `runTeamLifecycle`, so a
+        // misconfigured provider surfaced as an unhandled rejection instead of
+        // a run the operator can see failed (and why).
+        let planResult: LeadPlanResult
+        try {
+          planResult = await deps.runLeadPlanning({
+            team,
+            lead,
+            feedback,
+            signal: ac.signal,
+          })
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err)
+          notifier.notify({
+            level: "critical",
+            title: "Lead planning failed",
+            body: reason,
+            runId,
+            teamId,
+            dedupeKey: `plan-failed:${runId}`,
+          })
+          return { runId: "", status: "failed", reason }
+        }
         // Publish the plan before waiting: the workspace PlanApprovalPanel
         // renders (and enables Approve/Reject) only while the lead is
         // `awaiting_approval` with a non-empty `proposedPlan`, and the
