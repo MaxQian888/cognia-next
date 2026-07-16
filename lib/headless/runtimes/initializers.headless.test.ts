@@ -17,6 +17,7 @@ const EXPECTED = [
   "automation-policy",
   "audit-retention",
   "storage-retention",
+  "provider-core-runtime",
   "routing-runtime",
   "background-task",
   "provider-cost-mirror",

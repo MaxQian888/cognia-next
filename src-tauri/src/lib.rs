@@ -58,6 +58,10 @@ pub use cognia_mcp_server as mcp_server;
 // ADR-0067 Phase 3 — extracted to `crates/cognia-ocr`; re-aliased so
 // `crate::ocr::{NativeOcrRegistry, install_default_backends, commands::…}` resolve.
 pub use cognia_ocr as ocr;
+// Streaming `/api/pull` progress only. Every other Ollama call is a plain
+// request/response and goes through `proxy_config::commands::proxy_http_request`
+// from the renderer — see the module docs for why this is one command, not eight.
+mod ollama;
 mod parse;
 mod perf;
 mod pet_window;
@@ -839,6 +843,7 @@ pub fn run() {
             proxy_config::commands::proxy_identify_clash,
             proxy_config::commands::proxy_test,
             proxy_config::commands::proxy_http_request,
+            ollama::ollama_pull_model_stream,
             connectors::commands::connectors_register_adapter,
             connectors::commands::connectors_unregister_adapter,
             connectors::commands::connectors_health,

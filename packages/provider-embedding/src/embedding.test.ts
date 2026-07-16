@@ -82,15 +82,22 @@ jest.mock("@ai-sdk/mistral", () => ({
 
 jest.mock("@cognia/provider-core/providers/ollama", () => ({
   generateOllamaEmbedding: jest.fn(),
+  generateOllamaEmbeddings: jest.fn(),
 }))
 
 import { embed, embedMany, cosineSimilarity as aiCosineSimilarity } from "ai"
-import { generateOllamaEmbedding } from "@cognia/provider-core/providers/ollama"
+import {
+  generateOllamaEmbedding,
+  generateOllamaEmbeddings,
+} from "@cognia/provider-core/providers/ollama"
 
 const mockEmbed = embed as jest.MockedFunction<typeof embed>
 const mockEmbedMany = embedMany as jest.MockedFunction<typeof embedMany>
 const mockOllamaEmbed = generateOllamaEmbedding as jest.MockedFunction<
   typeof generateOllamaEmbedding
+>
+const mockOllamaEmbedBatch = generateOllamaEmbeddings as jest.MockedFunction<
+  typeof generateOllamaEmbeddings
 >
 
 describe("embedding", () => {
@@ -573,9 +580,16 @@ describe("embedding", () => {
       expect(result).toEqual({ embeddings: [[0.1], [0.2]], usage: undefined })
     })
 
-    it("uses Ollama defaults for uncached batch embeddings and caches results", async () => {
+    /**
+     * The predecessor asserted `NthCalledWith(1, …, "a")` and `(2, …, "b")` —
+     * it pinned the serial loop as the contract. That loop paid a full HTTP
+     * round-trip per text because the deprecated `/api/embeddings` accepted
+     * only one `prompt`. `/api/embed` takes the array natively, so a batch of
+     * N is now ONE request.
+     */
+    it("sends one batched request for uncached Ollama embeddings and caches each result", async () => {
       const cache = createEmbeddingCache()
-      mockOllamaEmbed.mockResolvedValueOnce([0.1]).mockResolvedValueOnce([0.2])
+      mockOllamaEmbedBatch.mockResolvedValueOnce([[0.1], [0.2]])
 
       const result = await generateEmbeddings(["a", "b"], {
         provider: "ollama",
@@ -583,20 +597,44 @@ describe("embedding", () => {
         cache,
       })
 
-      expect(mockOllamaEmbed).toHaveBeenNthCalledWith(
-        1,
+      expect(mockOllamaEmbedBatch).toHaveBeenCalledTimes(1)
+      expect(mockOllamaEmbedBatch).toHaveBeenCalledWith(
         "http://localhost:11434",
         defaultEmbeddingModels.ollama,
-        "a"
+        ["a", "b"]
       )
-      expect(mockOllamaEmbed).toHaveBeenNthCalledWith(
-        2,
-        "http://localhost:11434",
-        defaultEmbeddingModels.ollama,
-        "b"
-      )
+      // The per-text endpoint must not be touched on the batch path at all.
+      expect(mockOllamaEmbed).not.toHaveBeenCalled()
       expect(result).toEqual({ embeddings: [[0.1], [0.2]], usage: undefined })
       expect(cache.size()).toBe(2)
+    })
+
+    /**
+     * Only the uncached texts go to the server, and each returned vector must
+     * land on the text it was computed for — a cache hit in the middle shifts
+     * the positions, which is exactly where an index-by-position batch write
+     * would silently corrupt results.
+     */
+    it("keeps vectors aligned with their texts when part of the batch is cached", async () => {
+      const cache = createEmbeddingCache()
+      // Seed "b" so only "a" and "c" are requested.
+      mockOllamaEmbedBatch.mockResolvedValueOnce([[0.2]])
+      await generateEmbeddings(["b"], { provider: "ollama", apiKey: "", cache })
+      mockOllamaEmbedBatch.mockClear()
+
+      mockOllamaEmbedBatch.mockResolvedValueOnce([[0.1], [0.3]])
+      const result = await generateEmbeddings(["a", "b", "c"], {
+        provider: "ollama",
+        apiKey: "",
+        cache,
+      })
+
+      expect(mockOllamaEmbedBatch).toHaveBeenCalledWith(
+        "http://localhost:11434",
+        defaultEmbeddingModels.ollama,
+        ["a", "c"]
+      )
+      expect(result.embeddings).toEqual([[0.1], [0.2], [0.3]])
     })
 
     it("should call onError callback on failure", async () => {

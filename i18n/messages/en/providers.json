@@ -52,6 +52,8 @@
   "capabilityChat": "Chat",
   "capabilityEmbed": "Embed",
   "capabilityEmbedding": "Embedding",
+  "capabilityContextHint": "Reported by the server. Context window: {tokens, number} tokens.",
+  "capabilityInferredHint": "Guessed from the model name — this server does not report capabilities.",
   "capabilityImageGen": "Image Generation",
   "capabilityReranking": "Reranking",
   "capabilityStream": "Stream",
@@ -176,6 +178,7 @@
   "confirmSelection": "Confirm",
   "conflictResolution": "Conflict Resolution",
   "connected": "Connected",
+  "connectedSummary": "{version, select, none {Connected} other {Connected v{version}}}{count, plural, =0 {} one { (# model)} other { (# models)}}",
   "connectionFailed": "Connection failed",
   "connectionSuccess": "Connection successful",
   "context": "Context",
@@ -218,6 +221,7 @@
   "delete": "Delete",
   "deleteModel": "Delete Model",
   "deleteModelConfirm": "Are you sure you want to delete {model}? This action cannot be undone.",
+  "deleteUnsupported": "Deleting models is not supported for this provider.",
   "detailPanel": {
     "connected": "Connected",
     "connectionFailed": "Error",
@@ -603,7 +607,11 @@
   "providersSelected": "providers selected",
   "proxyServices": "Proxy",
   "pullModelHint": "Pull a model to get started",
+  "pullFailed": "Could not pull \"{model}\".",
+  "pullStarting": "Starting…",
   "pullModelPlaceholder": "Pull a model (e.g., llama3.2)",
+  "stopShowingPullProgress": "Stop showing progress for {model}",
+  "pullContinuesInBackground": "Stopped showing progress. Ollama cannot cancel a download — it continues in the background.",
   "quickActions": "Quick Actions",
   "quickAdd": {
     "advancedWizard": "Advanced Wizard →",
@@ -871,6 +879,7 @@
     "unknown": "Unknown"
   },
   "stopModel": "Stop model",
+  "stopUnsupported": "Unloading models is not supported for this provider.",
   "strategy": "Strategy",
   "subscriptionReuse": {
     "ccswitchHintAction": "Open CCSwitch",

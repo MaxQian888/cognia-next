@@ -60,6 +60,26 @@ export interface OllamaRunningModel {
 }
 
 /**
+ * The complete set of capability strings `/api/show` can report.
+ *
+ * Verified against the upstream enum in `ollama/types/model/capability.go`,
+ * which is the only place the closed set exists — the published OpenAPI schema
+ * types `capabilities` as a bare `array of string` and enumerates nothing.
+ */
+export const OLLAMA_CAPABILITIES = [
+  "completion",
+  "tools",
+  "insert",
+  "vision",
+  "embedding",
+  "thinking",
+  "image",
+  "audio",
+] as const
+
+export type OllamaCapability = (typeof OLLAMA_CAPABILITIES)[number]
+
+/**
  * Ollama model detailed info (from show endpoint)
  */
 export interface OllamaModelInfo {
@@ -67,7 +87,37 @@ export interface OllamaModelInfo {
   parameters?: string
   template?: string
   details?: OllamaModelDetails
+  /**
+   * Raw GGUF metadata. Keys are NOT fixed: everything outside the `general.`
+   * and `tokenizer.` namespaces is prefixed with the model's architecture, so
+   * context length arrives as `llama.context_length`, `qwen2.context_length`,
+   * `gemma4.context_length`, … Read `general.architecture` first and build the
+   * key — see `getOllamaModelCapabilities`.
+   */
   model_info?: Record<string, unknown>
+  /** Present on modern Ollama; absent on older servers. */
+  capabilities?: OllamaCapability[]
+}
+
+/**
+ * What a model can actually do, probed rather than guessed.
+ */
+export interface OllamaModelCapabilities {
+  supportsVision: boolean
+  supportsTools: boolean
+  supportsEmbedding: boolean
+  supportsThinking: boolean
+  /** Real context window from GGUF metadata; undefined when unreported. */
+  contextLength?: number
+  /** e.g. "llama", "qwen2", "gemma4" — the prefix `model_info` keys carry. */
+  architecture?: string
+  /**
+   * True when this came from a name-matching guess because the server did not
+   * report capabilities (pre-capabilities Ollama, or an unreachable server).
+   * Callers that display capabilities should mark these as uncertain rather
+   * than presenting a guess with the same confidence as a probe.
+   */
+  inferred: boolean
 }
 
 /**

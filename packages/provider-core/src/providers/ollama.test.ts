@@ -2,11 +2,13 @@ import {
   copyOllamaModel,
   deleteOllamaModel,
   generateOllamaEmbedding,
+  generateOllamaEmbeddings,
   getOllamaModelCapabilities,
   getOllamaStatus,
   isOllamaEmbeddingModel,
   listOllamaModels,
   listRunningModels,
+  probeOllamaModelCapabilities,
   pullOllamaModel,
   showOllamaModel,
   stopOllamaModel,
@@ -50,29 +52,34 @@ describe("generateOllamaEmbedding", () => {
     resetProviderCoreRuntimeAdaptersForTesting()
   })
 
-  it("posts JSON to {baseURL}/api/embeddings and returns the embedding array", async () => {
-    proxyFetch.mockResolvedValue(makeResponse({ body: { embedding: [0.1, 0.2, 0.3] } }))
+  /**
+   * Was "posts JSON to {baseURL}/api/embeddings". That endpoint is deprecated
+   * upstream ("superseded by /api/embed") and takes only `prompt: string`,
+   * which is what forced the caller to loop one HTTP request per text.
+   */
+  it("posts JSON to {baseURL}/api/embed and returns the embedding array", async () => {
+    proxyFetch.mockResolvedValue(makeResponse({ body: { embeddings: [[0.1, 0.2, 0.3]] } }))
 
     const out = await generateOllamaEmbedding("http://localhost:11434", "nomic-embed-text", "hello")
 
     expect(out).toEqual([0.1, 0.2, 0.3])
     const call = proxyFetch.mock.calls[0]
-    expect(call[0]).toBe("http://localhost:11434/api/embeddings")
+    expect(call[0]).toBe("http://localhost:11434/api/embed")
     expect(call[1].method).toBe("POST")
     expect(call[1].headers).toEqual({ "Content-Type": "application/json" })
     expect(JSON.parse(call[1].body as string)).toEqual({
       model: "nomic-embed-text",
-      prompt: "hello",
+      input: "hello",
     })
   })
 
   it("strips a trailing slash on baseURL", async () => {
-    proxyFetch.mockResolvedValue(makeResponse({ body: { embedding: [1] } }))
+    proxyFetch.mockResolvedValue(makeResponse({ body: { embeddings: [[1]] } }))
     await generateOllamaEmbedding("http://localhost:11434/", "m", "x")
-    expect(proxyFetch.mock.calls[0][0]).toBe("http://localhost:11434/api/embeddings")
+    expect(proxyFetch.mock.calls[0][0]).toBe("http://localhost:11434/api/embed")
   })
 
-  it("supports the newer embeddings[][] response shape", async () => {
+  it("supports the 2-D embeddings[][] response shape /api/embed always returns", async () => {
     proxyFetch.mockResolvedValue(makeResponse({ body: { embeddings: [[1, 2, 3]] } }))
     const out = await generateOllamaEmbedding("http://localhost:11434", "m", "hello")
     expect(out).toEqual([1, 2, 3])
@@ -124,7 +131,7 @@ describe("generateOllamaEmbedding", () => {
       /ECONNREFUSED/
     )
     await expect(generateOllamaEmbedding("http://localhost:11434", "m", "x")).rejects.toThrow(
-      /url=http:\/\/localhost:11434\/api\/embeddings/
+      /url=http:\/\/localhost:11434\/api\/embed/
     )
   })
 
@@ -161,7 +168,19 @@ describe("generateOllamaEmbedding", () => {
   })
 })
 
-describe("Ollama browser fallback API helpers", () => {
+/**
+ * These exercise the HTTP request/response SHAPES. They reach `global.fetch`
+ * because provider-core's un-injected `defaultProxyFetch` delegates to it; the
+ * transport question — which fetch actually runs on a desktop host — is pinned
+ * separately in "Ollama transport under Tauri" below.
+ *
+ * The name is deliberate: these are no longer a "browser fallback". There used
+ * to be an `invoke("ollama_*")` branch that took priority under Tauri, and
+ * these helpers were only its backup. Those commands never existed in Rust, so
+ * the "fallback" was in truth the only implementation, and the primary path
+ * threw on every desktop run. HTTP is now the single path, on every host.
+ */
+describe("Ollama HTTP API helpers", () => {
   const fetchMock = jest.fn()
 
   beforeEach(() => {
@@ -265,7 +284,7 @@ describe("Ollama browser fallback API helpers", () => {
     })
   })
 
-  it("throws descriptive errors for non-ok browser fallback responses", async () => {
+  it("throws descriptive errors for non-ok responses", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(500, {}))
     await expect(listOllamaModels("http://ollama.local")).rejects.toThrow(
       "Failed to list models: 500"
@@ -336,20 +355,329 @@ describe("Ollama browser fallback API helpers", () => {
     )
   })
 
-  it("detects embedding models and derives model capabilities from names", () => {
+  it("detects embedding models and guesses capabilities from names", () => {
     expect(isOllamaEmbeddingModel("nomic-embed-text")).toBe(true)
     expect(isOllamaEmbeddingModel("bge-large")).toBe(true)
     expect(isOllamaEmbeddingModel("llama3")).toBe(false)
 
+    // `inferred: true` is the load-bearing field: these results come from
+    // substring matching, and callers must be able to tell them apart from a
+    // real /api/show probe rather than trusting both equally.
     expect(getOllamaModelCapabilities("llava:latest")).toEqual({
       supportsVision: true,
       supportsTools: true,
       supportsEmbedding: false,
+      supportsThinking: false,
+      inferred: true,
     })
     expect(getOllamaModelCapabilities("mxbai-embed-large")).toEqual({
       supportsVision: false,
       supportsTools: false,
       supportsEmbedding: true,
+      supportsThinking: false,
+      inferred: true,
     })
+  })
+
+  it("shows why the name guess is a fallback, not a mechanism", () => {
+    // A real vision model the substring heuristic cannot see. This is the gap
+    // probeOllamaModelCapabilities closes by asking the server instead.
+    expect(getOllamaModelCapabilities("qwen2.5-vl:7b").supportsVision).toBe(false)
+    expect(getOllamaModelCapabilities("moondream").supportsVision).toBe(false)
+  })
+})
+
+/**
+ * THE regression that made every other bug in this file invisible.
+ *
+ * This suite never simulated a Tauri host. `defaultIsTauri()` reads
+ * `window.__TAURI_INTERNALS__`, which jsdom does not define, so `isTauri()` was
+ * permanently false and every test took the browser branch. The `invoke`
+ * branches — the ones that ran in the shipped desktop app, and threw there —
+ * had zero coverage. A green suite certified a surface that was 100% broken on
+ * the only host most users have.
+ *
+ * So the assertions below are about the HOST, not the payload: on a desktop
+ * host every call MUST go through the injected proxyFetch (Rust-backed, CSP
+ * exempt) and MUST NOT touch the bare `fetch` the CSP blocks.
+ */
+describe("Ollama transport under Tauri", () => {
+  const proxy = jest.fn()
+  const bareFetch = jest.fn()
+
+  beforeEach(() => {
+    proxy.mockReset()
+    bareFetch.mockReset()
+    global.fetch = bareFetch as unknown as typeof fetch
+    setProviderCoreRuntimeAdapters({ isTauri: () => true, proxyFetch: proxy })
+  })
+
+  afterEach(() => {
+    resetProviderCoreRuntimeAdaptersForTesting()
+  })
+
+  afterAll(() => {
+    global.fetch = originalFetch
+  })
+
+  function ok(body: unknown): Response {
+    return {
+      ok: true,
+      status: 200,
+      statusText: "",
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as unknown as Response
+  }
+
+  it.each([
+    ["getOllamaStatus", () => getOllamaStatus("http://localhost:11434"), { models: [] }],
+    ["listOllamaModels", () => listOllamaModels("http://localhost:11434"), { models: [] }],
+    ["showOllamaModel", () => showOllamaModel("http://localhost:11434", "llama3"), {}],
+    ["deleteOllamaModel", () => deleteOllamaModel("http://localhost:11434", "llama3"), {}],
+    ["listRunningModels", () => listRunningModels("http://localhost:11434"), { models: [] }],
+    ["copyOllamaModel", () => copyOllamaModel("http://localhost:11434", "a", "b"), {}],
+    ["stopOllamaModel", () => stopOllamaModel("http://localhost:11434", "llama3"), {}],
+    [
+      "generateOllamaEmbedding",
+      () => generateOllamaEmbedding("http://localhost:11434", "nomic", "hi"),
+      { embedding: [0.1] },
+    ],
+  ])(
+    "%s routes through the Rust-backed proxy and never the CSP-blocked fetch",
+    async (_name, call, body) => {
+      proxy.mockResolvedValue(ok(body))
+
+      await call()
+
+      expect(proxy).toHaveBeenCalled()
+      expect(bareFetch).not.toHaveBeenCalled()
+    }
+  )
+
+  it("keeps no ollama_* invoke path alive — the Rust commands it called never existed", async () => {
+    proxy.mockResolvedValue(ok({ models: [] }))
+    await listOllamaModels("http://localhost:11434")
+
+    // Every request carries an absolute Ollama URL rather than a command name.
+    for (const [url] of proxy.mock.calls) {
+      expect(String(url)).toMatch(/^http:\/\/localhost:11434\/api\//)
+    }
+  })
+})
+
+describe("probeOllamaModelCapabilities", () => {
+  const proxy = jest.fn()
+
+  beforeEach(() => {
+    proxy.mockReset()
+    setProviderCoreRuntimeAdapters({ proxyFetch: proxy })
+  })
+
+  afterEach(() => {
+    resetProviderCoreRuntimeAdaptersForTesting()
+  })
+
+  function showResponse(body: unknown): Response {
+    return {
+      ok: true,
+      status: 200,
+      statusText: "",
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as unknown as Response
+  }
+
+  it("reads real capabilities off /api/show rather than guessing from the name", async () => {
+    proxy.mockResolvedValue(
+      showResponse({
+        capabilities: ["completion", "tools", "vision", "thinking"],
+        model_info: { "general.architecture": "llama", "llama.context_length": 131072 },
+      })
+    )
+
+    // A name that the substring heuristic would call text-only.
+    const caps = await probeOllamaModelCapabilities("http://localhost:11434", "qwen2.5-vl:7b")
+
+    expect(caps).toMatchObject({
+      supportsVision: true,
+      supportsTools: true,
+      supportsThinking: true,
+      supportsEmbedding: false,
+      inferred: false,
+    })
+  })
+
+  /**
+   * The bug this test exists to prevent: `model_info` keys are prefixed with
+   * the model's ARCHITECTURE, so a hardcoded `llama.context_length` returns
+   * undefined on Gemma/Qwen/DeepSeek — silently, with no error to notice.
+   * Ollama's own GGUF reader builds the key by prepending
+   * `general.architecture`, so we must too.
+   */
+  it.each([
+    ["llama", 131072],
+    ["qwen2", 32768],
+    ["gemma4", 8192],
+    ["deepseek2", 163840],
+  ])("resolves context length for the %s architecture, not just llama", async (arch, expected) => {
+    proxy.mockResolvedValue(
+      showResponse({
+        capabilities: ["completion"],
+        model_info: {
+          "general.architecture": arch,
+          [`${arch}.context_length`]: expected,
+        },
+      })
+    )
+
+    const caps = await probeOllamaModelCapabilities("http://localhost:11434", "some-model")
+
+    expect(caps.architecture).toBe(arch)
+    expect(caps.contextLength).toBe(expected)
+  })
+
+  it("treats vision and image as equivalent input capabilities", async () => {
+    proxy.mockResolvedValue(showResponse({ capabilities: ["completion", "image"] }))
+    const caps = await probeOllamaModelCapabilities("http://localhost:11434", "m")
+    expect(caps.supportsVision).toBe(true)
+  })
+
+  it("reports an embedding model from the server's own answer", async () => {
+    proxy.mockResolvedValue(showResponse({ capabilities: ["embedding"] }))
+    const caps = await probeOllamaModelCapabilities("http://localhost:11434", "some-vector-model")
+    expect(caps).toMatchObject({
+      supportsEmbedding: true,
+      supportsTools: false,
+      inferred: false,
+    })
+  })
+
+  it("distinguishes an empty capabilities array (a real answer) from an absent one (a guess)", async () => {
+    proxy.mockResolvedValue(showResponse({ capabilities: [] }))
+    const answered = await probeOllamaModelCapabilities("http://localhost:11434", "llava")
+    expect(answered.inferred).toBe(false)
+    expect(answered.supportsVision).toBe(false)
+
+    // No capabilities key at all — an older server. Fall back to the name guess
+    // and SAY it is a guess.
+    proxy.mockResolvedValue(showResponse({ model_info: {} }))
+    const guessed = await probeOllamaModelCapabilities("http://localhost:11434", "llava")
+    expect(guessed.inferred).toBe(true)
+    expect(guessed.supportsVision).toBe(true)
+  })
+
+  it("degrades to a flagged guess instead of throwing when the probe fails", async () => {
+    proxy.mockRejectedValue(new Error("connection refused"))
+    const caps = await probeOllamaModelCapabilities("http://localhost:11434", "nomic-embed-text")
+    expect(caps).toMatchObject({ supportsEmbedding: true, inferred: true })
+    expect(caps.contextLength).toBeUndefined()
+  })
+
+  it("omits context length when model_info carries no architecture to key off", async () => {
+    proxy.mockResolvedValue(
+      showResponse({ capabilities: ["completion"], model_info: { "llama.context_length": 4096 } })
+    )
+    const caps = await probeOllamaModelCapabilities("http://localhost:11434", "m")
+    // No `general.architecture` ⇒ no key to build ⇒ report nothing rather than
+    // guess that this happens to be a llama.
+    expect(caps.contextLength).toBeUndefined()
+  })
+})
+
+describe("generateOllamaEmbeddings (batch)", () => {
+  const proxy = jest.fn()
+
+  beforeEach(() => {
+    proxy.mockReset()
+    setProviderCoreRuntimeAdapters({ proxyFetch: proxy })
+  })
+
+  afterEach(() => {
+    resetProviderCoreRuntimeAdaptersForTesting()
+  })
+
+  function embedResponse(body: unknown): Response {
+    return {
+      ok: true,
+      status: 200,
+      statusText: "",
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as unknown as Response
+  }
+
+  /** The whole point of W8: N vectors, ONE round-trip. */
+  it("returns N vectors from a single HTTP request", async () => {
+    proxy.mockResolvedValue(embedResponse({ embeddings: [[0.1], [0.2], [0.3]] }))
+
+    const out = await generateOllamaEmbeddings("http://localhost:11434", "nomic", ["a", "b", "c"])
+
+    expect(out).toEqual([[0.1], [0.2], [0.3]])
+    expect(proxy).toHaveBeenCalledTimes(1)
+    expect(proxy.mock.calls[0][0]).toBe("http://localhost:11434/api/embed")
+    // `input` takes the array natively — the deprecated endpoint's `prompt`
+    // only ever accepted one string, which is why it needed a loop.
+    expect(JSON.parse(proxy.mock.calls[0][1].body)).toEqual({
+      model: "nomic",
+      input: ["a", "b", "c"],
+    })
+  })
+
+  it("uses /api/embed, not the deprecated /api/embeddings, for a single text too", async () => {
+    proxy.mockResolvedValue(embedResponse({ embeddings: [[0.5, 0.6]] }))
+
+    const out = await generateOllamaEmbedding("http://localhost:11434", "nomic", "hello")
+
+    expect(out).toEqual([0.5, 0.6])
+    expect(proxy.mock.calls[0][0]).toBe("http://localhost:11434/api/embed")
+    expect(JSON.parse(proxy.mock.calls[0][1].body)).toEqual({ model: "nomic", input: "hello" })
+  })
+
+  /**
+   * A short response would shift every vector onto the wrong text — the sort of
+   * corruption that surfaces much later as inexplicably bad retrieval. Fail here.
+   */
+  it("refuses to misalign when the server returns fewer vectors than inputs", async () => {
+    proxy.mockResolvedValue(embedResponse({ embeddings: [[0.1]] }))
+
+    await expect(
+      generateOllamaEmbeddings("http://localhost:11434", "nomic", ["a", "b"])
+    ).rejects.toThrow(/refusing to misalign/)
+  })
+
+  it("short-circuits an empty batch without touching the network", async () => {
+    await expect(generateOllamaEmbeddings("http://x", "nomic", [])).resolves.toEqual([])
+    expect(proxy).not.toHaveBeenCalled()
+  })
+
+  it("forwards truncate / dimensions / keep_alive when asked", async () => {
+    proxy.mockResolvedValue(embedResponse({ embeddings: [[0.1]] }))
+
+    await generateOllamaEmbedding("http://localhost:11434", "nomic", "hi", {
+      truncate: false,
+      dimensions: 128,
+      keepAlive: "5m",
+    })
+
+    expect(JSON.parse(proxy.mock.calls[0][1].body)).toEqual({
+      model: "nomic",
+      input: "hi",
+      truncate: false,
+      dimensions: 128,
+      keep_alive: "5m",
+    })
+  })
+
+  it("omits options entirely when unset so the server's defaults apply", async () => {
+    proxy.mockResolvedValue(embedResponse({ embeddings: [[0.1]] }))
+    await generateOllamaEmbedding("http://localhost:11434", "nomic", "hi")
+    expect(JSON.parse(proxy.mock.calls[0][1].body)).toEqual({ model: "nomic", input: "hi" })
+  })
+
+  it("tolerates a legacy 1-D `embedding` response from an older server", async () => {
+    proxy.mockResolvedValue(embedResponse({ embedding: [0.9, 0.8] }))
+    const out = await generateOllamaEmbedding("http://localhost:11434", "nomic", "hi")
+    expect(out).toEqual([0.9, 0.8])
   })
 })

@@ -6,10 +6,23 @@
  * - Model listing and management
  * - Installation detection
  * - Configuration management
+ *
+ * Every request goes through `proxyFetch`, never a bare `fetch`. In the
+ * packaged desktop shell the renderer's CSP (`connect-src 'self' ipc:
+ * http://ipc.localhost ws: wss:`) carries no `http:` scheme, so a direct
+ * `fetch` to a local inference server on `127.0.0.1` is blocked before it
+ * leaves the WebView — loopback is not `'self'`. `proxyFetch` tunnels through
+ * the Rust `proxy_http_request` command, which reqwest serves free of CSP and
+ * CORS. `pnpm dev` has no CSP, which is why this surface looked healthy in
+ * development while being dead in the shipped app.
+ *
+ * The `invoke("ollama_*")` / `invoke("local_provider_*")` branches that used to
+ * front these calls are gone: no such Rust command has ever existed. They were
+ * wrapped in `try/catch`, so instead of failing loudly they fell through to the
+ * HTTP path on every single desktop run — which the CSP then blocked. Two dead
+ * layers stacked into one silent failure.
  */
 
-import { invoke } from "@tauri-apps/api/core"
-import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import type {
   LocalProviderName,
   LocalServerStatus,
@@ -21,7 +34,8 @@ import {
   normalizeBaseUrl,
   type LocalProviderConfig,
 } from "./local-providers"
-import { isTauri } from "./runtime-adapters"
+import { pullOllamaModelStreaming } from "./ollama-pull"
+import { proxyFetch } from "./runtime-adapters"
 
 /**
  * Local provider capabilities
@@ -50,11 +64,19 @@ export interface LocalProviderInstallInfo {
 }
 
 /**
- * Installation check result
+ * Installation check result.
+ *
+ * These come from an HTTP probe, which is strictly weaker than an installation
+ * check. A responding server proves the provider is both installed and running.
+ * SILENCE PROVES NOTHING: "not installed", "installed but not started" and
+ * "started on a different port" are indistinguishable from the outside. So
+ * `installed` is deliberately tri-state — `undefined` means "unknown", never
+ * "absent". Reporting `false` there would be a claim the probe cannot support.
  */
 export interface InstallCheckResult {
   providerId: LocalProviderName
-  installed: boolean
+  /** `true` when the server answered; `undefined` when unreachable (unknown, NOT absent). */
+  installed?: boolean
   running: boolean
   version?: string
   error?: string
@@ -232,43 +254,12 @@ export class LocalProviderService {
   async getStatus(): Promise<LocalServerStatus> {
     const startTime = Date.now()
 
-    // Use Tauri command for Ollama if available
-    if (this.providerId === "ollama" && isTauri()) {
-      try {
-        const status = await invoke<LocalServerStatus>("ollama_get_status", {
-          baseUrl: this.baseUrl,
-        })
-        return {
-          ...status,
-          latency_ms: Date.now() - startTime,
-        }
-      } catch {
-        // Fall through to HTTP check
-      }
-    }
-
-    // Use Tauri command for generic local provider if available
-    if (isTauri()) {
-      try {
-        const status = await invoke<LocalServerStatus>("local_provider_get_status", {
-          providerId: this.providerId,
-          baseUrl: this.baseUrl,
-        })
-        return {
-          ...status,
-          latency_ms: Date.now() - startTime,
-        }
-      } catch {
-        // Fall through to HTTP check
-      }
-    }
-
     // Generic HTTP health check
     try {
       const healthUrl = `${this.baseUrl}${this.config.healthEndpoint}`
-      const response = await fetch(healthUrl, {
+      const response = await proxyFetch(healthUrl, {
         method: "GET",
-        signal: AbortSignal.timeout(5000),
+        timeout: 5000,
       })
 
       if (response.ok) {
@@ -303,45 +294,14 @@ export class LocalProviderService {
       return []
     }
 
-    // Use Tauri command for Ollama if available
-    if (this.providerId === "ollama" && isTauri()) {
-      try {
-        const models = await invoke<Array<{ name: string; model: string; size: number }>>(
-          "ollama_list_models",
-          {
-            baseUrl: this.baseUrl,
-          }
-        )
-        return models.map((m) => ({
-          id: m.name || m.model,
-          object: "model",
-          size: m.size,
-        }))
-      } catch {
-        // Fall through to HTTP
-      }
-    }
-
-    // Use Tauri command for generic local provider if available
-    if (isTauri()) {
-      try {
-        return await invoke<LocalModelInfo[]>("local_provider_list_models", {
-          providerId: this.providerId,
-          baseUrl: this.baseUrl,
-        })
-      } catch {
-        // Fall through to HTTP
-      }
-    }
-
     // Generic HTTP model listing
     try {
       const modelsUrl =
         this.providerId === "ollama" ? `${this.baseUrl}/api/tags` : `${this.baseUrl}/v1/models`
 
-      const response = await fetch(modelsUrl, {
+      const response = await proxyFetch(modelsUrl, {
         method: "GET",
-        signal: AbortSignal.timeout(10000),
+        timeout: 10000,
       })
 
       if (!response.ok) {
@@ -385,108 +345,24 @@ export class LocalProviderService {
       return { success: false, unsubscribe: () => {} }
     }
 
-    let unlisten: UnlistenFn | undefined
-
-    // Use Tauri command for Ollama
-    if (this.providerId === "ollama" && isTauri()) {
-      if (options?.onProgress) {
-        unlisten = await listen<LocalModelPullProgress>("ollama-pull-progress", (event) => {
-          if (event.payload.model === modelName) {
-            options.onProgress!(event.payload)
-          }
-        })
-      }
-
-      try {
-        const success = await invoke<boolean>("ollama_pull_model", {
-          baseUrl: this.baseUrl,
-          modelName,
-        })
-        return {
-          success,
-          unsubscribe: () => unlisten?.(),
-        }
-      } catch (error) {
-        unlisten?.()
-        throw error
-      }
+    // PRE-EXISTING GAP, left as-is deliberately: the capability matrix claims
+    // `canPullModels` for localai and jan, but only Ollama's pull protocol is
+    // implemented — the other two expose their own gallery APIs. The old code
+    // called `invoke("local_provider_pull_model")`, a command that has never
+    // existed in Rust, so this path threw on desktop and silently returned
+    // false in the browser. Returning false is the same outcome minus the
+    // throw. Fixing it properly means implementing two more pull protocols,
+    // which is outside this change; flagged rather than quietly widened.
+    if (this.providerId !== "ollama") {
+      return { success: false, unsubscribe: () => {} }
     }
 
-    // Use Tauri command for generic provider
-    if (isTauri()) {
-      if (options?.onProgress) {
-        unlisten = await listen<LocalModelPullProgress>("local-provider-pull-progress", (event) => {
-          if (event.payload.model === modelName) {
-            options.onProgress!(event.payload)
-          }
-        })
-      }
-
-      try {
-        const success = await invoke<boolean>("local_provider_pull_model", {
-          providerId: this.providerId,
-          baseUrl: this.baseUrl,
-          modelName,
-        })
-        return {
-          success,
-          unsubscribe: () => unlisten?.(),
-        }
-      } catch (error) {
-        unlisten?.()
-        throw error
-      }
-    }
-
-    // HTTP fallback for Ollama
-    if (this.providerId === "ollama") {
-      const response = await fetch(`${this.baseUrl}/api/pull`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: modelName, stream: true }),
-        signal: options?.signal,
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to pull model: ${response.status}`)
-      }
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error("No response body")
-      }
-
-      const decoder = new TextDecoder()
-      let buffer = ""
-
-      const processStream = async () => {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split("\n")
-          buffer = lines.pop() || ""
-
-          for (const line of lines) {
-            if (line.trim()) {
-              try {
-                const progress = JSON.parse(line) as LocalModelPullProgress
-                progress.model = modelName
-                options?.onProgress?.(progress)
-              } catch {
-                // Ignore parse errors
-              }
-            }
-          }
-        }
-      }
-
-      await processStream()
-      return { success: true, unsubscribe: () => {} }
-    }
-
-    return { success: false, unsubscribe: () => {} }
+    return pullOllamaModelStreaming({
+      baseUrl: this.baseUrl,
+      modelName,
+      onProgress: options?.onProgress,
+      signal: options?.signal,
+    })
   }
 
   /**
@@ -497,30 +373,9 @@ export class LocalProviderService {
       return false
     }
 
-    // Use Tauri command for Ollama
-    if (this.providerId === "ollama" && isTauri()) {
-      return invoke<boolean>("ollama_delete_model", {
-        baseUrl: this.baseUrl,
-        modelName,
-      })
-    }
-
-    // Use Tauri command for generic provider
-    if (isTauri()) {
-      try {
-        return await invoke<boolean>("local_provider_delete_model", {
-          providerId: this.providerId,
-          baseUrl: this.baseUrl,
-          modelName,
-        })
-      } catch {
-        // Fall through to HTTP
-      }
-    }
-
     // HTTP fallback for Ollama
     if (this.providerId === "ollama") {
-      const response = await fetch(`${this.baseUrl}/api/delete`, {
+      const response = await proxyFetch(`${this.baseUrl}/api/delete`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: modelName }),
@@ -544,17 +399,9 @@ export class LocalProviderService {
       return false
     }
 
-    // Use Tauri command for Ollama
-    if (this.providerId === "ollama" && isTauri()) {
-      return invoke<boolean>("ollama_stop_model", {
-        baseUrl: this.baseUrl,
-        modelName,
-      })
-    }
-
     // HTTP fallback for Ollama
     if (this.providerId === "ollama") {
-      const response = await fetch(`${this.baseUrl}/api/generate`, {
+      const response = await proxyFetch(`${this.baseUrl}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: modelName, keep_alive: 0 }),
@@ -574,17 +421,8 @@ export class LocalProviderService {
       throw new Error(`${this.providerId} does not support embeddings`)
     }
 
-    // Use Tauri command for Ollama
-    if (this.providerId === "ollama" && isTauri()) {
-      return invoke<number[]>("ollama_generate_embedding", {
-        baseUrl: this.baseUrl,
-        model,
-        input,
-      })
-    }
-
     // OpenAI-compatible embedding endpoint
-    const response = await fetch(`${this.baseUrl}/v1/embeddings`, {
+    const response = await proxyFetch(`${this.baseUrl}/v1/embeddings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model, input }),
@@ -603,25 +441,19 @@ export class LocalProviderService {
  * Check installation status for a local provider
  */
 export async function checkProviderInstallation(
-  providerId: LocalProviderName
+  providerId: LocalProviderName,
+  baseUrl?: string
 ): Promise<InstallCheckResult> {
-  if (isTauri()) {
-    try {
-      return await invoke<InstallCheckResult>("local_provider_check_installation", {
-        providerId,
-      })
-    } catch {
-      // Fall through to basic check
-    }
-  }
-
-  // Basic check via HTTP
-  const service = new LocalProviderService(providerId)
+  // `baseUrl` must be threaded through. Omitting it silently rebuilds the
+  // service on the provider's DEFAULT port, so a user who moved their server
+  // (say Ollama to :11500) got a probe of :11434 and a permanent "offline".
+  const service = new LocalProviderService(providerId, baseUrl)
   const status = await service.getStatus()
 
   return {
     providerId,
-    installed: status.connected,
+    // Reachable ⇒ provably installed. Unreachable ⇒ unknown, not absent.
+    installed: status.connected ? true : undefined,
     running: status.connected,
     version: status.version,
     error: status.error,
@@ -629,9 +461,15 @@ export async function checkProviderInstallation(
 }
 
 /**
- * Check all local providers installation status
+ * Check all local providers installation status.
+ *
+ * `baseUrls` overrides the per-provider probe target; anything absent from the
+ * map falls back to that provider's default. Callers holding user settings
+ * MUST pass it — see the port note in `checkProviderInstallation`.
  */
-export async function checkAllProvidersInstallation(): Promise<InstallCheckResult[]> {
+export async function checkAllProvidersInstallation(
+  baseUrls?: Partial<Record<LocalProviderName, string | undefined>>
+): Promise<InstallCheckResult[]> {
   const providerIds: LocalProviderName[] = [
     "ollama",
     "lmstudio",
@@ -645,7 +483,9 @@ export async function checkAllProvidersInstallation(): Promise<InstallCheckResul
     "tabbyapi",
   ]
 
-  const results = await Promise.all(providerIds.map((id) => checkProviderInstallation(id)))
+  const results = await Promise.all(
+    providerIds.map((id) => checkProviderInstallation(id, baseUrls?.[id]))
+  )
 
   return results
 }

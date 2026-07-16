@@ -3,18 +3,22 @@
 import { AgentTeamRuntimeInitializer } from "./agent-team-runtime-initializer"
 import { SchedulerInitializer } from "@/components/scheduler/scheduler-initializer"
 import { WorkflowRuntimeProvider } from "@/components/providers/workflow-runtime-provider"
+import { ProviderCoreRuntimeInitializer } from "./provider-core-runtime-initializer"
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
 
 /**
- * The deferred boot bundle's SINGLE chunk graph (ADR-0068 C3). All six
+ * The deferred boot bundle's SINGLE chunk graph (ADR-0068 C3). All seven
  * initializers are statically imported here — one `dynamic()` boundary in
  * `deferred-boot-initializers.tsx` loads this module, so the children mount
  * in document order within one commit, exactly like the pre-deferral static
- * layout. That determinism is load-bearing for one pair:
+ * layout. That determinism is load-bearing for two pairs:
  * RoutingRuntimeInitializer must mount BEFORE GatewayProvider (it reconnects
- * the routing-engine adapters the gateway's decide-path reads). Six sibling
+ * the routing-engine adapters the gateway's decide-path reads), and
+ * ProviderCoreRuntimeInitializer must mount BEFORE both (it installs the
+ * proxy-fetch adapter every provider-core network call reads; without it they
+ * fall back to a bare `fetch` the packaged shell's CSP blocks). Seven sibling
  * `dynamic()` calls would commit in chunk-resolution order instead and
  * reintroduce the race.
  *
@@ -28,6 +32,7 @@ export function DeferredBootInitializersImpl() {
       <AgentTeamRuntimeInitializer />
       <SchedulerInitializer />
       <WorkflowRuntimeProvider />
+      <ProviderCoreRuntimeInitializer />
       <RoutingRuntimeInitializer />
       <GatewayProvider />
       <ConnectorBusProvider />

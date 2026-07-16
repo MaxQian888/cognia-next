@@ -16,9 +16,9 @@
  *   A2UI store (T-A4).
  * - `scheduler`, `workflow-runtime`, `agent-team-runtime`,
  *   `automation-policy`, `audit-retention`, `storage-retention`,
- *   `routing-runtime`, `background-task`, `provider-cost-mirror` —
- *   the boot-initializer batch (T-A7..A9; see ./initializers.ts for what
- *   is deliberately excluded and why).
+ *   `provider-core-runtime`, `routing-runtime`, `background-task`,
+ *   `provider-cost-mirror` — the boot-initializer batch (T-A7..A9; see
+ *   ./initializers.ts for what is deliberately excluded and why).
  * - `connector-runtime` — the shared connector bootstrap with the Tauri
  *   command/event seams mapped onto the R12 `connectors_*` RPC arms and
  *   `/ws/v1/events`; webhook-transport channels only (T-A5). Dial-out WS

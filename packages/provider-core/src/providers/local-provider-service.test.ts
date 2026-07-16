@@ -22,6 +22,10 @@ import {
   getInstallInstructions,
   createLocalProviderService,
 } from "./local-provider-service"
+import {
+  resetProviderCoreRuntimeAdaptersForTesting,
+  setProviderCoreRuntimeAdapters,
+} from "./runtime-adapters"
 
 const invokeMock = invoke as unknown as jest.Mock
 const listenMock = listen as unknown as jest.Mock
@@ -55,10 +59,12 @@ beforeEach(() => {
   invokeMock.mockReset()
   listenMock.mockReset()
   fetchSpy.mockReset()
+  resetProviderCoreRuntimeAdaptersForTesting()
   setTauri(false)
 })
 
 afterEach(() => {
+  resetProviderCoreRuntimeAdaptersForTesting()
   setTauri(false)
 })
 
@@ -115,33 +121,41 @@ describe("LocalProviderService constructor + accessors", () => {
 })
 
 describe("LocalProviderService.getStatus", () => {
-  it("uses the Tauri ollama_get_status command when running under Tauri", async () => {
+  /**
+   * The predecessors of these two tests asserted that `getStatus` called
+   * `invoke("ollama_get_status")` / `invoke("local_provider_get_status")`.
+   * Neither command has ever existed in Rust. The tests passed only because
+   * `invoke` was mocked, so the mock happily returned whatever the test asked
+   * for — pinning a fantasy as if it were the contract, and hiding the fact
+   * that every desktop run threw "Command not found" here. That is why the
+   * assertion now targets the transport that actually exists.
+   */
+  it("(Tauri) issues the status probe through the injected proxy fetch, never a bare fetch", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue({ connected: true, version: "0.6.1" })
-    const svc = new LocalProviderService("ollama")
-    const status = await svc.getStatus()
-    expect(invokeMock).toHaveBeenCalledWith(
-      "ollama_get_status",
-      expect.objectContaining({ baseUrl: expect.any(String) })
-    )
+    const proxy = jest.fn().mockResolvedValue(jsonResponse({ version: "0.6.1" }))
+    setProviderCoreRuntimeAdapters({ isTauri: () => true, proxyFetch: proxy })
+
+    const status = await new LocalProviderService("ollama").getStatus()
+
+    expect(proxy).toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
     expect(status.connected).toBe(true)
+    expect(status.version).toBe("0.6.1")
     expect(typeof status.latency_ms).toBe("number")
   })
 
-  it("falls through to local_provider_get_status for a generic Tauri provider", async () => {
+  it("(Tauri) routes a generic (non-ollama) provider through the proxy too", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue({ connected: true })
-    const svc = new LocalProviderService("lmstudio")
-    await svc.getStatus()
-    expect(invokeMock).toHaveBeenCalledWith(
-      "local_provider_get_status",
-      expect.objectContaining({ providerId: "lmstudio" })
-    )
+    const proxy = jest.fn().mockResolvedValue(jsonResponse({ version: "1.0" }))
+    setProviderCoreRuntimeAdapters({ isTauri: () => true, proxyFetch: proxy })
+
+    await new LocalProviderService("lmstudio").getStatus()
+
+    expect(proxy).toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it("falls through to HTTP /api/version when the ollama Tauri command throws", async () => {
-    setTauri(true)
-    invokeMock.mockRejectedValue(new Error("not registered"))
+  it("reads the version off the health endpoint", async () => {
     fetchSpy.mockResolvedValue(jsonResponse({ version: "0.5.0" }))
     const svc = new LocalProviderService("ollama")
     const status = await svc.getStatus()
@@ -208,30 +222,40 @@ describe("LocalProviderService.listModels", () => {
     expect(models).toEqual([])
   })
 
-  it("(Tauri) uses ollama_list_models and maps the size field through", async () => {
+  it("(Tauri) lists models through the injected proxy fetch and maps the size field through", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue([
-      { name: "llama3.2", model: "llama3.2", size: 4096 },
-      { name: "qwen2.5", model: "qwen2.5", size: 7000 },
-    ])
-    const svc = new LocalProviderService("ollama")
-    const models = await svc.listModels()
+    const proxy = jest.fn().mockResolvedValue(
+      jsonResponse({
+        models: [
+          { name: "llama3.2", size: 4096 },
+          { name: "qwen2.5", size: 7000 },
+        ],
+      })
+    )
+    setProviderCoreRuntimeAdapters({ isTauri: () => true, proxyFetch: proxy })
+
+    const models = await new LocalProviderService("ollama").listModels()
+
+    expect(proxy).toHaveBeenCalledWith(
+      "http://localhost:11434/api/tags",
+      expect.objectContaining({ method: "GET" })
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
     expect(models).toEqual([
       { id: "llama3.2", object: "model", size: 4096 },
       { id: "qwen2.5", object: "model", size: 7000 },
     ])
   })
 
-  it("(Tauri) falls through to local_provider_list_models for non-ollama providers", async () => {
+  it("(Tauri) hits the OpenAI-compatible /v1/models path for non-ollama providers", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue([{ id: "phi3" }])
-    const svc = new LocalProviderService("lmstudio")
-    const models = await svc.listModels()
-    expect(invokeMock).toHaveBeenCalledWith(
-      "local_provider_list_models",
-      expect.objectContaining({ providerId: "lmstudio" })
-    )
-    expect(models).toEqual([{ id: "phi3" }])
+    const proxy = jest.fn().mockResolvedValue(jsonResponse({ data: [{ id: "phi3" }] }))
+    setProviderCoreRuntimeAdapters({ isTauri: () => true, proxyFetch: proxy })
+
+    const models = await new LocalProviderService("lmstudio").listModels()
+
+    expect(proxy.mock.calls[0][0]).toContain("/v1/models")
+    expect(models).toEqual([{ id: "phi3", object: "model", created: undefined }])
   })
 
   it("(browser) decodes Ollama's models[] response shape", async () => {
@@ -265,20 +289,6 @@ describe("LocalProviderService.listModels", () => {
     expect(models).toEqual([{ id: "mistral", object: "model", created: 123 }])
   })
 
-  it("(Tauri) falls through to HTTP when model-listing invokes are unavailable", async () => {
-    setTauri(true)
-    invokeMock.mockRejectedValue(new Error("not registered"))
-    fetchSpy.mockResolvedValue(jsonResponse({ models: [{ name: "llama3.2" }] }))
-    await expect(new LocalProviderService("ollama").listModels()).resolves.toEqual([
-      { id: "llama3.2", object: "model", size: undefined },
-    ])
-
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [{ id: "phi3" }] }))
-    await expect(new LocalProviderService("lmstudio").listModels()).resolves.toEqual([
-      { id: "phi3", object: "model", created: undefined },
-    ])
-  })
-
   it("(browser) swallows HTTP errors and returns an empty list", async () => {
     fetchSpy.mockResolvedValue(jsonResponse({}, { status: 500 }))
     const svc = new LocalProviderService("ollama")
@@ -294,93 +304,70 @@ describe("LocalProviderService.pullModel", () => {
     expect(result.success).toBe(false)
   })
 
-  it("(Tauri ollama) registers a progress listener and calls ollama_pull_model", async () => {
+  /**
+   * The four tests this replaces asserted `invoke("ollama_pull_model")` and
+   * `invoke("local_provider_pull_model")`. Neither Rust command exists. With
+   * `invoke` mocked they passed cleanly while the real desktop path threw on
+   * every call — the sharpest example of a mock certifying a fantasy.
+   * `ollama_pull_model_stream` below is different: it is registered in Rust and
+   * covered by `cargo test -p cognia-net`.
+   */
+  it("(Tauri ollama) streams via the Rust command and scopes progress to its own pull id", async () => {
     setTauri(true)
+    setProviderCoreRuntimeAdapters({ isTauri: () => true })
     const unlistenFn = jest.fn()
-    listenMock.mockResolvedValue(unlistenFn)
+    let registeredHandler:
+      ((evt: { payload: { pullId?: string; model?: string; status: string } }) => void) | null =
+      null
+    listenMock.mockImplementation(async (_evt: string, handler: typeof registeredHandler) => {
+      registeredHandler = handler
+      return unlistenFn
+    })
     invokeMock.mockResolvedValue(true)
     const onProgress = jest.fn()
-    const svc = new LocalProviderService("ollama")
-    const result = await svc.pullModel("llama3.2", { onProgress })
+
+    const result = await new LocalProviderService("ollama").pullModel("llama3.2", { onProgress })
+
     expect(listenMock).toHaveBeenCalledWith("ollama-pull-progress", expect.any(Function))
-    expect(invokeMock).toHaveBeenCalledWith(
-      "ollama_pull_model",
-      expect.objectContaining({ modelName: "llama3.2" })
-    )
+    const [command, payload] = invokeMock.mock.calls[0]
+    expect(command).toBe("ollama_pull_model_stream")
+    expect(payload).toMatchObject({ modelName: "llama3.2", pullId: expect.any(String) })
     expect(result.success).toBe(true)
+
+    // A second concurrent pull's events must not leak into this callback.
+    registeredHandler!({ payload: { pullId: "someone-elses-pull", status: "pulling" } })
+    expect(onProgress).not.toHaveBeenCalled()
+
+    registeredHandler!({ payload: { pullId: payload.pullId, status: "pulling" } })
+    expect(onProgress).toHaveBeenCalledTimes(1)
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ model: "llama3.2" }))
+
     result.unsubscribe()
     expect(unlistenFn).toHaveBeenCalled()
   })
 
-  it("(Tauri ollama) progress callbacks fire only for the requested model", async () => {
+  it("(Tauri ollama) detaches the listener when the stream command throws", async () => {
     setTauri(true)
-    let registeredHandler: ((evt: { payload: { model: string; status: string } }) => void) | null =
-      null
-    listenMock.mockImplementation(
-      async (
-        _evt: string,
-        handler: (evt: { payload: { model: string; status: string } }) => void
-      ) => {
-        registeredHandler = handler
-        return jest.fn()
-      }
-    )
-    invokeMock.mockResolvedValue(true)
-    const onProgress = jest.fn()
-    const svc = new LocalProviderService("ollama")
-    await svc.pullModel("llama3.2", { onProgress })
-    registeredHandler!({ payload: { model: "different-model", status: "pulling" } })
-    registeredHandler!({ payload: { model: "llama3.2", status: "pulling" } })
-    expect(onProgress).toHaveBeenCalledTimes(1)
-  })
-
-  it("(Tauri ollama) cleans up the listener when the invoke throws", async () => {
-    setTauri(true)
+    setProviderCoreRuntimeAdapters({ isTauri: () => true })
     const unlistenFn = jest.fn()
     listenMock.mockResolvedValue(unlistenFn)
     invokeMock.mockRejectedValue(new Error("pull failed"))
-    const svc = new LocalProviderService("ollama")
-    await expect(svc.pullModel("llama3.2", { onProgress: jest.fn() })).rejects.toThrow(
-      "pull failed"
-    )
+
+    await expect(
+      new LocalProviderService("ollama").pullModel("llama3.2", { onProgress: jest.fn() })
+    ).rejects.toThrow("pull failed")
     expect(unlistenFn).toHaveBeenCalled()
   })
 
-  it("(Tauri generic) calls local_provider_pull_model when not on ollama", async () => {
+  it("reports failure for providers whose pull protocol is unimplemented (localai/jan)", async () => {
     setTauri(true)
-    listenMock.mockResolvedValue(jest.fn())
-    invokeMock.mockResolvedValue(true)
-    const svc = new LocalProviderService("localai")
-    await svc.pullModel("phi-3")
-    expect(invokeMock).toHaveBeenCalledWith(
-      "local_provider_pull_model",
-      expect.objectContaining({ providerId: "localai", modelName: "phi-3" })
-    )
-  })
-
-  it("(Tauri generic) filters progress and cleans up listeners on invoke failure", async () => {
-    setTauri(true)
-    const unlistenFn = jest.fn()
-    let registeredHandler: ((evt: { payload: { model: string; status: string } }) => void) | null =
-      null
-    listenMock.mockImplementation(
-      async (
-        _evt: string,
-        handler: (evt: { payload: { model: string; status: string } }) => void
-      ) => {
-        registeredHandler = handler
-        return unlistenFn
-      }
-    )
-    invokeMock.mockRejectedValue(new Error("pull failed"))
-    const onProgress = jest.fn()
-    const svc = new LocalProviderService("localai")
-
-    await expect(svc.pullModel("phi-3", { onProgress })).rejects.toThrow("pull failed")
-    registeredHandler!({ payload: { model: "other", status: "pulling" } })
-    registeredHandler!({ payload: { model: "phi-3", status: "pulling" } })
-    expect(onProgress).toHaveBeenCalledTimes(1)
-    expect(unlistenFn).toHaveBeenCalled()
+    setProviderCoreRuntimeAdapters({ isTauri: () => true })
+    // Their capability matrix advertises canPullModels, but only Ollama's pull
+    // protocol exists here — a known gap. It must fail visibly, not invoke a
+    // command that was never written.
+    const result = await new LocalProviderService("localai").pullModel("phi-3")
+    expect(result.success).toBe(false)
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 
   it("(browser ollama) streams JSON lines from /api/pull and forwards progress payloads", async () => {
@@ -446,15 +433,15 @@ describe("LocalProviderService.deleteModel + stopModel + generateEmbedding", () 
     expect(await svc.deleteModel("foo")).toBe(false)
   })
 
-  it("deleteModel uses the ollama Tauri command when on Tauri", async () => {
+  it("deleteModel (Tauri) goes through the injected proxy fetch, never a bare fetch", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue(true)
-    const svc = new LocalProviderService("ollama")
-    expect(await svc.deleteModel("foo")).toBe(true)
-    expect(invokeMock).toHaveBeenCalledWith(
-      "ollama_delete_model",
-      expect.objectContaining({ modelName: "foo" })
-    )
+    const proxy = jest.fn().mockResolvedValue(jsonResponse({}))
+    setProviderCoreRuntimeAdapters({ isTauri: () => true, proxyFetch: proxy })
+
+    expect(await new LocalProviderService("ollama").deleteModel("foo")).toBe(true)
+    expect(proxy.mock.calls[0][0]).toContain("/api/delete")
+    expect(proxy.mock.calls[0][1].method).toBe("DELETE")
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it("deleteModel (browser ollama) DELETEs /api/delete with a JSON body", async () => {
@@ -472,17 +459,14 @@ describe("LocalProviderService.deleteModel + stopModel + generateEmbedding", () 
     await expect(svc.deleteModel("foo")).rejects.toThrow(/500/)
   })
 
-  it("deleteModel uses generic Tauri deletion and falls back when unavailable", async () => {
+  it("deleteModel reports failure for providers whose delete protocol is unimplemented", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValueOnce(true)
-    await expect(new LocalProviderService("localai").deleteModel("foo")).resolves.toBe(true)
-    expect(invokeMock).toHaveBeenCalledWith(
-      "local_provider_delete_model",
-      expect.objectContaining({ providerId: "localai", modelName: "foo" })
-    )
-
-    invokeMock.mockRejectedValueOnce(new Error("not registered"))
+    setProviderCoreRuntimeAdapters({ isTauri: () => true })
+    // Same known gap as pullModel: localai/jan advertise the capability, but
+    // only Ollama's delete protocol is implemented. The old code invoked
+    // `local_provider_delete_model`, which does not exist in Rust.
     await expect(new LocalProviderService("localai").deleteModel("foo")).resolves.toBe(false)
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 
   it("stopModel returns false when the provider lacks stop support", async () => {
@@ -490,15 +474,14 @@ describe("LocalProviderService.deleteModel + stopModel + generateEmbedding", () 
     expect(await svc.stopModel("foo")).toBe(false)
   })
 
-  it("stopModel uses the Tauri command when available", async () => {
+  it("stopModel (Tauri) goes through the injected proxy fetch, never a bare fetch", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue(true)
-    const svc = new LocalProviderService("ollama")
-    expect(await svc.stopModel("foo")).toBe(true)
-    expect(invokeMock).toHaveBeenCalledWith(
-      "ollama_stop_model",
-      expect.objectContaining({ modelName: "foo" })
-    )
+    const proxy = jest.fn().mockResolvedValue(jsonResponse({}))
+    setProviderCoreRuntimeAdapters({ isTauri: () => true, proxyFetch: proxy })
+
+    expect(await new LocalProviderService("ollama").stopModel("foo")).toBe(true)
+    expect(JSON.parse(proxy.mock.calls[0][1].body)).toMatchObject({ model: "foo", keep_alive: 0 })
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it("stopModel (browser ollama) POSTs /api/generate with keep_alive:0", async () => {
@@ -522,12 +505,16 @@ describe("LocalProviderService.deleteModel + stopModel + generateEmbedding", () 
     await expect(svc.generateEmbedding("m", "hello")).rejects.toThrow(/does not support/)
   })
 
-  it("generateEmbedding (Tauri ollama) returns the embedding from the invoke result", async () => {
+  it("generateEmbedding (Tauri ollama) goes through the injected proxy fetch, never a bare fetch", async () => {
     setTauri(true)
-    invokeMock.mockResolvedValue([0.1, 0.2, 0.3])
-    const svc = new LocalProviderService("ollama")
-    const vec = await svc.generateEmbedding("nomic", "hi")
-    expect(vec).toEqual([0.1, 0.2, 0.3])
+    const proxy = jest.fn().mockResolvedValue(jsonResponse({ data: [{ embedding: [0.1, 0.2] }] }))
+    setProviderCoreRuntimeAdapters({ isTauri: () => true, proxyFetch: proxy })
+
+    const vec = await new LocalProviderService("ollama").generateEmbedding("nomic", "hi")
+
+    expect(vec).toEqual([0.1, 0.2])
+    expect(proxy).toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it("generateEmbedding (browser) POSTs to /v1/embeddings and decodes the first vector", async () => {
@@ -552,36 +539,37 @@ describe("LocalProviderService.deleteModel + stopModel + generateEmbedding", () 
 })
 
 describe("checkProviderInstallation", () => {
-  it("delegates to the Tauri command when running under Tauri", async () => {
-    setTauri(true)
-    invokeMock.mockResolvedValue({
-      providerId: "ollama",
-      installed: true,
-      running: true,
-      version: "0.6.1",
-    })
-    const result = await checkProviderInstallation("ollama")
-    expect(invokeMock).toHaveBeenCalledWith(
-      "local_provider_check_installation",
-      expect.objectContaining({ providerId: "ollama" })
-    )
-    expect(result.installed).toBe(true)
-  })
-
-  it("falls back to a HTTP probe when the Tauri command throws", async () => {
-    setTauri(true)
-    invokeMock.mockRejectedValue(new Error("not implemented"))
+  it("reports installed + running when the server answers", async () => {
     fetchSpy.mockResolvedValue(jsonResponse({ version: "0.5.0" }))
     const result = await checkProviderInstallation("ollama")
     expect(result.installed).toBe(true)
+    expect(result.running).toBe(true)
     expect(result.version).toBe("0.5.0")
   })
 
-  it("reports installed=false when the HTTP probe times out / fails (browser)", async () => {
+  /**
+   * Replaces a test literally named "reports installed=false when the HTTP
+   * probe times out". An HTTP probe cannot prove absence: silence is equally
+   * consistent with "not installed", "installed but not started", and "started
+   * on another port". Claiming `false` there was a lie the test enforced.
+   */
+  it("reports installed=unknown (not false) when the probe cannot reach the server", async () => {
     fetchSpy.mockRejectedValue(new Error("ECONNREFUSED"))
     const result = await checkProviderInstallation("ollama")
-    expect(result.installed).toBe(false)
+    expect(result.installed).toBeUndefined()
     expect(result.running).toBe(false)
+  })
+
+  /**
+   * W6c: the probe used to construct the service without the baseUrl, so a
+   * user who moved their server off the default port was told it was offline
+   * while it ran happily elsewhere.
+   */
+  it("probes the caller's baseUrl instead of silently falling back to the default port", async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({ version: "0.5.0" }))
+    await checkProviderInstallation("ollama", "http://127.0.0.1:11500")
+    expect(fetchSpy.mock.calls[0][0]).toContain("127.0.0.1:11500")
+    expect(fetchSpy.mock.calls[0][0]).not.toContain("11434")
   })
 })
 

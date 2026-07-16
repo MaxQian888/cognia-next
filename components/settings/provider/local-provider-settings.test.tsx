@@ -182,7 +182,10 @@ jest.mock("@cognia/provider-core/providers/local-provider-service", () => ({
     supportsVision: false,
     supportsTools: false,
   })),
-  checkAllProvidersInstallation: () => mockCheckAllProvidersInstallation(),
+  // Forwards args on purpose: the baseUrl overrides the component threads
+  // through are the whole point of the moved-port test below, and a
+  // zero-arg shim would silently swallow them.
+  checkAllProvidersInstallation: (...args: unknown[]) => mockCheckAllProvidersInstallation(...args),
   getInstallInstructions: (providerId: string) => ({
     title: `Install ${providerId}`,
     steps: ["step"],
@@ -264,10 +267,15 @@ jest.mock("@/hooks/provider/use-local-provider", () => ({
 describe("LocalProviderSettings", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    // Module-level mutable object shared by every test — clear it, or the
+    // moved-port case below leaks its baseURL into unrelated assertions.
+    for (const key of Object.keys(mockProviderSettings)) delete mockProviderSettings[key]
     mockCheckAllProvidersInstallation.mockResolvedValue([
+      // `installed` is tri-state: true when reachable, undefined when the probe
+      // got nothing back. Never false — silence is not proof of absence.
       { providerId: "ollama", installed: true, running: true, version: "0.1.0" },
-      { providerId: "lmstudio", installed: true, running: false },
-      { providerId: "jan", installed: false, running: false },
+      { providerId: "lmstudio", installed: undefined, running: false },
+      { providerId: "jan", installed: undefined, running: false },
     ])
   })
 
@@ -318,23 +326,40 @@ describe("LocalProviderSettings", () => {
     )
   })
 
-  it("should show installed count", async () => {
+  /**
+   * Replaces "should show installed count". The quick-stats row used to render
+   * an "installed" tally beside the "running" one, both derived from fields the
+   * HTTP probe set to the same value — so they were provably always equal. An
+   * HTTP probe cannot distinguish "not installed" from "installed but stopped",
+   * so the second number implied knowledge we do not have. Only the honest one
+   * is rendered now.
+   */
+  it("does not claim an installed count the HTTP probe cannot know", async () => {
+    await act(async () => {
+      render(<LocalProviderSettings />)
+    })
+    await waitFor(() => expect(mockCheckAllProvidersInstallation).toHaveBeenCalled())
+
+    // "Running" is still reported…
+    await waitFor(() => expect(screen.getAllByText(/running/i).length).toBeGreaterThan(0))
+    // …but the stats row carries no installed tally.
+    expect(screen.queryByText(/\d+\s*installed/i)).toBeNull()
+  })
+
+  /**
+   * W6c: the scan used to construct every probe without the user's baseUrl, so
+   * a server moved off its default port was reported offline while running fine.
+   */
+  it("probes the user's configured baseUrl, not the default port", async () => {
+    mockProviderSettings.ollama = { enabled: true, baseURL: "http://127.0.0.1:11500" }
+
     await act(async () => {
       render(<LocalProviderSettings />)
     })
 
-    // Wait for scan to complete first
-    await waitFor(() => {
-      expect(mockCheckAllProvidersInstallation).toHaveBeenCalled()
-    })
-
-    // Then check for installed text
-    await waitFor(
-      () => {
-        const installedElements = screen.getAllByText(/installed/i)
-        expect(installedElements.length).toBeGreaterThan(0)
-      },
-      { timeout: 3000 }
+    await waitFor(() => expect(mockCheckAllProvidersInstallation).toHaveBeenCalled())
+    expect(mockCheckAllProvidersInstallation).toHaveBeenCalledWith(
+      expect.objectContaining({ ollama: "http://127.0.0.1:11500" })
     )
   })
 

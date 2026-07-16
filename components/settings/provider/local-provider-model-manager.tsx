@@ -7,7 +7,7 @@
  * model management (Ollama, LocalAI, Jan).
  */
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import {
   Download,
   Trash2,
@@ -24,6 +24,7 @@ import {
   Cpu,
   Zap,
   ExternalLink,
+  Info,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
@@ -50,7 +51,12 @@ import type {
 } from "@cognia/provider-types/local-provider"
 import { formatLocalModelSize } from "@cognia/provider-types/local-provider"
 import { getInstallInstructions } from "@cognia/provider-core/providers/local-provider-service"
-import { useLocalProvider } from "@/hooks/provider"
+import {
+  useLocalProvider,
+  useOllamaModelCapabilities,
+  type LocalPullState,
+  type LocalProviderErrorCode,
+} from "@/hooks/provider"
 
 export interface LocalProviderModelManagerProps {
   providerId: LocalProviderName
@@ -96,6 +102,15 @@ export function LocalProviderModelManager({
   const [showSuggestedModels, setShowSuggestedModels] = useState(false)
   const [deletingModel, setDeletingModel] = useState<string | null>(null)
 
+  // Probed from the server, not guessed from the model name. `useMemo` keeps the
+  // id list identity-stable so the probe effect does not re-run every render.
+  const modelIds = useMemo(() => models.map((m) => m.id), [models])
+  const { capabilities: modelCapabilities } = useOllamaModelCapabilities({
+    providerId,
+    baseUrl,
+    modelIds,
+  })
+
   const installInfo = getInstallInstructions(providerId)
 
   const handlePullModel = useCallback(async () => {
@@ -136,6 +151,94 @@ export function LocalProviderModelManager({
     }
   }
 
+  /**
+   * Badges for what a model can actually do, from `/api/show`.
+   *
+   * Renders nothing until the probe answers, and nothing at all for a provider
+   * without `/api/show` — an absent badge means "we did not ask", never "it
+   * cannot". A probe that had to fall back to name-matching is marked
+   * `inferred` and gets a "guess" affordance rather than being presented with
+   * the same confidence as a real answer.
+   */
+  const renderCapabilityBadges = (modelId: string) => {
+    const caps = modelCapabilities.get(modelId)
+    if (!caps) return null
+
+    const badges: Array<{ key: string; label: string }> = []
+    if (caps.supportsVision) badges.push({ key: "vision", label: t("capabilityVision") })
+    if (caps.supportsTools) badges.push({ key: "tools", label: t("capabilityTools") })
+    if (caps.supportsEmbedding) badges.push({ key: "embed", label: t("capabilityEmbedding") })
+    if (caps.supportsThinking)
+      badges.push({ key: "thinking", label: t("modelCapabilityReasoning") })
+    if (badges.length === 0) return null
+
+    return (
+      <span className="flex items-center gap-1">
+        {badges.map((badge) => (
+          <Badge
+            key={badge.key}
+            variant="secondary"
+            className="text-[10px]"
+            title={
+              caps.inferred
+                ? t("capabilityInferredHint")
+                : caps.contextLength
+                  ? t("capabilityContextHint", { tokens: caps.contextLength })
+                  : undefined
+            }
+          >
+            {badge.label}
+            {caps.inferred && "?"}
+          </Badge>
+        ))}
+      </span>
+    )
+  }
+
+  /**
+   * Translate a hook error. The hook has no `t()`, so anything it authors comes
+   * back as a stable code; raw server/exception text falls through unchanged.
+   */
+  const translateError = useCallback(
+    (error: string, modelName?: string): string => {
+      switch (error as LocalProviderErrorCode) {
+        case "pull-failed":
+          return t("pullFailed", { model: modelName ?? "" })
+        case "delete-unsupported":
+          return t("deleteUnsupported")
+        case "stop-unsupported":
+          return t("stopUnsupported")
+        default:
+          return error
+      }
+    },
+    [t]
+  )
+
+  /**
+   * What to render for one pull row.
+   *
+   * `indeterminate` comes from the hook and MUST be honored: Ollama's opening
+   * lines ("pulling manifest") carry no byte counts, so a percentage during
+   * that window would be invented. A determinate 0% bar is a claim; a spinner
+   * is the truth.
+   */
+  const describePull = (state: LocalPullState) => {
+    if (state.status === "cancelled") {
+      // Ollama's server cannot cancel a pull — the bytes keep coming. Saying so
+      // is the whole point; letting the row vanish would imply it stopped.
+      return { kind: "cancelled" as const, text: t("pullContinuesInBackground") }
+    }
+    if (state.error) {
+      return { kind: "error" as const, text: translateError(state.error, state.modelName) }
+    }
+    if (state.indeterminate || !state.progress) {
+      return { kind: "indeterminate" as const, text: t("pullStarting") }
+    }
+    const { percentage, text } = formatPullProgress(state.progress)
+    return { kind: "progress" as const, percentage, text }
+  }
+
   // Render connection status
   const renderStatus = () => (
     <div className="flex items-center gap-2">
@@ -154,7 +257,7 @@ export function LocalProviderModelManager({
       </span>
       {isConnected && (
         <Badge variant="secondary" className="text-xs">
-          {models.length} models
+          {t("modelCount", { count: models.length })}
         </Badge>
       )}
     </div>
@@ -214,7 +317,7 @@ export function LocalProviderModelManager({
         {error && (
           <div className="flex items-center gap-2 text-sm text-destructive">
             <AlertCircle className="h-4 w-4" />
-            {error}
+            {translateError(error)}
           </div>
         )}
 
@@ -316,38 +419,64 @@ export function LocalProviderModelManager({
             {pullStates.size > 0 && (
               <div className="space-y-2">
                 {Array.from(pullStates.entries()).map(([modelName, state]) => {
-                  if (!state.isActive && !state.error) return null
+                  // A cancelled row STAYS: it is the only place the user learns
+                  // the download did not actually stop. Only a completed pull
+                  // leaves quietly — the model list itself is the receipt.
+                  if (state.status === "completed") return null
 
-                  const { percentage, text } = state.progress
-                    ? formatPullProgress(state.progress)
-                    : { percentage: 0, text: "Starting..." }
+                  const detail = describePull(state)
 
                   return (
                     <div key={modelName} className="rounded-lg border p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          {state.error ? (
+                          {detail.kind === "error" ? (
                             <AlertCircle className="h-4 w-4 text-destructive" />
+                          ) : detail.kind === "cancelled" ? (
+                            <Info className="h-4 w-4 text-muted-foreground" />
                           ) : (
                             <Download className="h-4 w-4 animate-pulse text-primary" />
                           )}
                           <span className="text-sm font-medium">{modelName}</span>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={() => cancelPull(modelName)}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
+                        {state.isActive && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            aria-label={t("stopShowingPullProgress", { model: modelName })}
+                            onClick={() => cancelPull(modelName)}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
                       </div>
-                      {state.error ? (
-                        <p className="text-xs text-destructive">{state.error}</p>
+                      {detail.kind === "error" ? (
+                        <p className="text-xs text-destructive">{detail.text}</p>
+                      ) : detail.kind === "cancelled" ? (
+                        <p className="text-xs text-muted-foreground">{detail.text}</p>
+                      ) : detail.kind === "indeterminate" ? (
+                        <>
+                          {/* A spinner, NOT a bar. The server has sent no byte
+                              counts yet, so there is no percentage to draw —
+                              and `components/ui/progress.tsx` cannot express
+                              "unknown" anyway: it never forwards `value` to
+                              Radix and renders `value || 0`, so an omitted
+                              value is pixel-identical to a definite 0%. A bar
+                              here would state a number we do not have. */}
+                          <div
+                            role="status"
+                            aria-live="polite"
+                            className="flex items-center gap-2 text-xs text-muted-foreground"
+                          >
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            {detail.text}
+                          </div>
+                        </>
                       ) : (
                         <>
-                          <Progress value={percentage} className="h-2" />
-                          <p className="text-xs text-muted-foreground">{text}</p>
+                          <Progress value={detail.percentage} className="h-2" />
+                          <p className="text-xs text-muted-foreground">{detail.text}</p>
                         </>
                       )}
                     </div>
@@ -386,6 +515,7 @@ export function LocalProviderModelManager({
                                   {model.quantization}
                                 </Badge>
                               )}
+                              {renderCapabilityBadges(model.id)}
                             </div>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
                               {model.size && (

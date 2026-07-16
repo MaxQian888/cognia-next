@@ -16,7 +16,10 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createCohere } from "@ai-sdk/cohere"
 import { createMistral } from "@ai-sdk/mistral"
 import type { ProviderName } from "@cognia/provider-types"
-import { generateOllamaEmbedding } from "@cognia/provider-core/providers/ollama"
+import {
+  generateOllamaEmbedding,
+  generateOllamaEmbeddings,
+} from "@cognia/provider-core/providers/ollama"
 import {
   DEFAULT_LOCAL_EMBEDDING_MODEL,
   isOpenAICompatibleEmbeddingProvider,
@@ -37,11 +40,7 @@ export const VOYAGE_EMBEDDING_BASE_URL = "https://api.voyageai.com/v1"
  * Includes providers that only support embeddings
  */
 export type EmbeddingProviderName =
-  | ProviderName
-  | "azure"
-  | "amazon-bedrock"
-  | "voyage"
-  | "transformersjs"
+  ProviderName | "azure" | "amazon-bedrock" | "voyage" | "transformersjs"
 
 /**
  * Provider-specific options for embedding models
@@ -352,20 +351,27 @@ export async function generateEmbeddings(
     }
   }
 
-  // Handle Ollama separately - generate embeddings one by one
+  // Handle Ollama separately — one batched request, not one request per text.
+  // This used to loop `generateOllamaEmbedding`, paying a full HTTP round-trip
+  // per chunk; `/api/embed` takes the whole array in a single call.
   if (config.provider === "ollama") {
     const baseURL = config.baseURL || "http://localhost:11434"
     const modelId = config.model || defaultEmbeddingModels.ollama || "nomic-embed-text"
 
-    for (const { index, text } of textsToEmbed) {
-      const embedding = await generateOllamaEmbedding(baseURL, modelId, text)
-      results[index] = embedding
+    const embeddings = await generateOllamaEmbeddings(
+      baseURL,
+      modelId,
+      textsToEmbed.map((t) => t.text)
+    )
 
+    // `generateOllamaEmbeddings` guarantees positional alignment with its input
+    // or throws, so indexing by position here is safe.
+    textsToEmbed.forEach(({ index, text }, i) => {
+      results[index] = embeddings[i]
       if (config.cache) {
-        const cacheKey = getCacheKey(text, config)
-        config.cache.set(cacheKey, embedding)
+        config.cache.set(getCacheKey(text, config), embeddings[i])
       }
-    }
+    })
 
     return {
       embeddings: results as number[][],

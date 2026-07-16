@@ -3,14 +3,20 @@
 /**
  * useLocalProvider — Cognia-compatible local-provider hook.
  *
- * Wraps `lib/ai/providers/local-provider-service` and exposes the same
- * shape Cognia's UI components consume (status, models, pullStates,
- * destructive ops). cognia-next deferred the Tauri commands that drive
- * pull/delete/stop, so the destructive ops surface a "deferred" error
- * rather than performing the work.
+ * Wraps `@cognia/provider-core/providers/local-provider-service` and exposes
+ * the shape Cognia's UI components consume (status, models, pullStates,
+ * destructive ops).
+ *
+ * The destructive ops used to be `deferred()` no-ops that only called
+ * `setError("… requires native bindings")`, on the theory that pull/delete/stop
+ * needed Tauri commands nobody had written. That theory was wrong twice over:
+ * `LocalProviderService` already implemented all three over HTTP, and the Tauri
+ * commands they were supposedly waiting on were never going to exist — the
+ * whole surface reaches Ollama through the Rust HTTP proxy instead. So these
+ * now call the service that was sitting there the entire time.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type {
   LocalProviderName,
   LocalServerStatus,
@@ -20,9 +26,28 @@ import type {
 import {
   createLocalProviderService,
   getProviderCapabilities,
+  checkAllProvidersInstallation,
   type LocalProviderCapabilities,
 } from "@cognia/provider-core/providers/local-provider-service"
 import { LOCAL_PROVIDER_CONFIGS } from "@cognia/provider-core/providers/local-providers"
+
+/**
+ * Stable, translatable reasons an operation failed.
+ *
+ * Codes rather than sentences: this hook has no `t()`, and its `error` is
+ * rendered verbatim by components, so an English string here would ship
+ * untranslatable text to every locale. The component maps the code — the
+ * convention `hooks/connectors/use-history-hydration.ts` and
+ * `hooks/memory/use-external-memory.ts` already follow.
+ *
+ * Server/exception text is passed through as-is, which is the repo's tolerated
+ * pattern; only strings WE author become codes.
+ */
+export type LocalProviderErrorCode = "pull-failed" | "delete-unsupported" | "stop-unsupported"
+
+const PULL_FAILED: LocalProviderErrorCode = "pull-failed"
+const DELETE_UNSUPPORTED: LocalProviderErrorCode = "delete-unsupported"
+const STOP_UNSUPPORTED: LocalProviderErrorCode = "stop-unsupported"
 
 export interface LocalPullState {
   status: "pulling" | "completed" | "error" | "cancelled"
@@ -32,9 +57,16 @@ export interface LocalPullState {
   /** Convenience scalar 0–100. */
   percentage: number
   digest?: string
+  /** A `LocalProviderErrorCode`, or raw server/exception text. */
   error?: string
   /** Cognia's flag — true while a pull is in flight. */
   isActive: boolean
+  /**
+   * True until the server sends byte counts. Ollama's opening lines
+   * ("pulling manifest") carry no totals, so any percentage during that window
+   * would be invented. Render a spinner, not a 0% bar.
+   */
+  indeterminate: boolean
 }
 
 export interface UseLocalProviderArgs {
@@ -64,6 +96,15 @@ export interface UseLocalProviderResult {
   stopModel: (modelName: string) => Promise<void>
 }
 
+/** Derive 0–100 from a progress line, or null while the server sends no totals. */
+function percentageOf(progress: LocalModelPullProgress): number | null {
+  const { completed, total } = progress as { completed?: number; total?: number }
+  if (typeof completed !== "number" || typeof total !== "number" || total <= 0) {
+    return null
+  }
+  return Math.min(100, Math.round((completed / total) * 100))
+}
+
 export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderResult {
   const { providerId, baseUrl, autoRefresh, refreshInterval = 30_000 } = args
 
@@ -76,6 +117,24 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
   const [pullStates, setPullStates] = useState<Map<string, LocalPullState>>(() => new Map())
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  /**
+   * Detach handles for in-flight pulls, keyed by model. Held in a ref, not
+   * state: unsubscribing must not re-render, and a stale closure over a state
+   * Map would drop the handle of a pull started in an earlier render.
+   */
+  const pullHandles = useRef(new Map<string, () => void>())
+
+  useEffect(() => {
+    const handles = pullHandles.current
+    // Detach every listener on unmount. The downloads themselves keep running
+    // server-side — Ollama cannot cancel them — but leaking listeners into a
+    // dead component would fire setState after unmount.
+    return () => {
+      handles.forEach((detach) => detach())
+      handles.clear()
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
     if (!baseUrl) return
@@ -139,20 +198,148 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
     }
   }, [providerId, baseUrl])
 
-  const deferred = useCallback(async (op: string, modelName: string) => {
-    setError(`${op} for "${modelName}" requires native bindings (deferred).`)
+  const pullModel = useCallback(
+    async (modelName: string) => {
+      if (!baseUrl) return
+      setError(null)
+      setPullStates((prev) => {
+        const next = new Map(prev)
+        next.set(modelName, {
+          modelName,
+          status: "pulling",
+          percentage: 0,
+          isActive: true,
+          indeterminate: true,
+        })
+        return next
+      })
+
+      try {
+        const service = createLocalProviderService(providerId, baseUrl)
+        const handle = await service.pullModel(modelName, {
+          onProgress: (progress) => {
+            const pct = percentageOf(progress)
+            setPullStates((prev) => {
+              const next = new Map(prev)
+              const cur = next.get(modelName)
+              // A late event from a pull the user already dismissed must not
+              // resurrect its row.
+              if (!cur?.isActive) return prev
+              next.set(modelName, {
+                ...cur,
+                progress,
+                digest: (progress as { digest?: string }).digest ?? cur.digest,
+                percentage: pct ?? cur.percentage,
+                indeterminate: pct === null,
+              })
+              return next
+            })
+          },
+        })
+        pullHandles.current.set(modelName, handle.unsubscribe)
+
+        setPullStates((prev) => {
+          const next = new Map(prev)
+          const cur = next.get(modelName)
+          if (!cur?.isActive) return prev
+          next.set(modelName, {
+            ...cur,
+            status: handle.success ? "completed" : "error",
+            percentage: handle.success ? 100 : cur.percentage,
+            indeterminate: false,
+            isActive: false,
+            error: handle.success ? undefined : PULL_FAILED,
+          })
+          return next
+        })
+
+        handle.unsubscribe()
+        pullHandles.current.delete(modelName)
+        if (handle.success) await refresh()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setError(message)
+        setPullStates((prev) => {
+          const next = new Map(prev)
+          next.set(modelName, {
+            modelName,
+            status: "error",
+            percentage: 0,
+            error: message,
+            isActive: false,
+            indeterminate: false,
+          })
+          return next
+        })
+        pullHandles.current.get(modelName)?.()
+        pullHandles.current.delete(modelName)
+      }
+    },
+    [providerId, baseUrl, refresh]
+  )
+
+  /**
+   * Stop REPORTING a pull. It does not stop the download.
+   *
+   * Ollama's server has no cancel: aborting the connection leaves the transfer
+   * running to completion (ollama#13142). Callers must surface that to the user
+   * rather than implying the bytes stopped — the UI copy for this state says
+   * the download continues in the background.
+   */
+  const cancelPull = useCallback(async (modelName: string) => {
+    pullHandles.current.get(modelName)?.()
+    pullHandles.current.delete(modelName)
     setPullStates((prev) => {
       const next = new Map(prev)
-      next.set(modelName, {
+      const cur = next.get(modelName) ?? {
         modelName,
-        status: "error",
         percentage: 0,
-        error: "Native bindings deferred",
+        status: "cancelled" as const,
         isActive: false,
-      })
+        indeterminate: false,
+      }
+      next.set(modelName, { ...cur, status: "cancelled", isActive: false, indeterminate: false })
       return next
     })
   }, [])
+
+  const deleteModel = useCallback(
+    async (modelName: string) => {
+      if (!baseUrl) return
+      setError(null)
+      try {
+        const service = createLocalProviderService(providerId, baseUrl)
+        const ok = await service.deleteModel(modelName)
+        if (!ok) {
+          setError(DELETE_UNSUPPORTED)
+          return
+        }
+        await refresh()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [providerId, baseUrl, refresh]
+  )
+
+  const stopModel = useCallback(
+    async (modelName: string) => {
+      if (!baseUrl) return
+      setError(null)
+      try {
+        const service = createLocalProviderService(providerId, baseUrl)
+        const ok = await service.stopModel(modelName)
+        if (!ok) {
+          setError(STOP_UNSUPPORTED)
+          return
+        }
+        await refresh()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [providerId, baseUrl, refresh]
+  )
 
   return {
     config,
@@ -168,44 +355,64 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
     refresh,
     testServer,
     fetchModels,
-    pullModel: async (m) => deferred("Model pull", m),
-    cancelPull: async (m) => {
-      setPullStates((prev) => {
-        const next = new Map(prev)
-        const cur = next.get(m) ?? {
-          modelName: m,
-          percentage: 0,
-          status: "cancelled" as const,
-          isActive: false,
-        }
-        next.set(m, { ...cur, status: "cancelled", isActive: false })
-        return next
-      })
-    },
-    deleteModel: async (m) => deferred("Model delete", m),
-    stopModel: async (m) => deferred("Model stop", m),
+    pullModel,
+    cancelPull,
+    deleteModel,
+    stopModel,
   }
 }
 
 /**
- * Stub for `useLocalProvidersScan` — Cognia's multi-provider auto-detect.
+ * `useLocalProvidersScan` — Cognia's multi-provider auto-detect.
  *
- * The `detected`/`results` maps and the `scan` callback are module-level
- * singletons so their identities stay stable across renders. Consumers thread
- * `scan` through a `useCallback` and then feed that into a mount `useEffect`
- * (see `LocalProviderSettings`); returning a fresh function/Map each render
- * would invalidate those deps and drive an infinite re-scan loop.
+ * Previously a hard-coded stub: an empty Map and a `noopScan` that resolved
+ * without doing anything, which meant the Scan button in `LocalProviderSettings`
+ * — whose only data source this is — did literally nothing.
+ *
+ * The identity discipline the stub relied on still matters and is preserved:
+ * consumers thread `scan` into a mount `useEffect`, so `scan` must keep a
+ * stable identity across renders or that effect re-fires forever. `useCallback`
+ * with an empty dep list gives that; `detected`/`results` are state, so they
+ * only change when a scan actually produces new data.
  */
-const EMPTY_SCAN_RESULTS = new Map<LocalProviderName, LocalServerStatus>()
-const noopScan = async (): Promise<void> => undefined
-
 export function useLocalProvidersScan() {
+  const [results, setResults] = useState<Map<LocalProviderName, LocalServerStatus>>(() => new Map())
+  const [isScanning, setIsScanning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  /** Guards against overlapping scans — 10 providers × N clicks is a lot of probes. */
+  const inFlight = useRef(false)
+
+  const scan = useCallback(async (baseUrls?: Partial<Record<LocalProviderName, string>>) => {
+    if (inFlight.current) return
+    inFlight.current = true
+    setIsScanning(true)
+    setError(null)
+    try {
+      const checks = await checkAllProvidersInstallation(baseUrls)
+      const next = new Map<LocalProviderName, LocalServerStatus>()
+      for (const check of checks) {
+        next.set(check.providerId, {
+          connected: check.running,
+          version: check.version,
+          error: check.error,
+        } as LocalServerStatus)
+      }
+      setResults(next)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      inFlight.current = false
+      setIsScanning(false)
+    }
+  }, [])
+
   return {
-    detected: EMPTY_SCAN_RESULTS,
+    detected: results,
     /** Cognia's components also read this Map under the `results` alias. */
-    results: EMPTY_SCAN_RESULTS,
-    isScanning: false,
-    error: null as string | null,
-    scan: noopScan,
+    results,
+    isScanning,
+    error,
+    scan,
   }
 }

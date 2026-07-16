@@ -52,6 +52,8 @@
   "capabilityChat": "对话",
   "capabilityEmbed": "嵌入",
   "capabilityEmbedding": "嵌入",
+  "capabilityContextHint": "由服务器上报。上下文窗口:{tokens, number} tokens。",
+  "capabilityInferredHint": "根据模型名推测 —— 该服务器不上报能力信息。",
   "capabilityImageGen": "图像生成",
   "capabilityReranking": "重排序",
   "capabilityStream": "流式",
@@ -176,6 +178,7 @@
   "confirmSelection": "确认",
   "conflictResolution": "冲突解决",
   "connected": "已连接",
+  "connectedSummary": "{version, select, none {已连接} other {已连接 v{version}}}{count, plural, =0 {} other { (# 个模型)}}",
   "connectionFailed": "连接失败",
   "connectionSuccess": "连接成功",
   "context": "上下文",
@@ -218,6 +221,7 @@
   "delete": "删除",
   "deleteModel": "删除模型",
   "deleteModelConfirm": "确定要删除 {model} 吗？此操作无法撤销。",
+  "deleteUnsupported": "该 provider 不支持删除模型。",
   "detailPanel": {
     "connected": "已连接",
     "connectionFailed": "错误",
@@ -603,7 +607,11 @@
   "providersSelected": "个服务商已选择",
   "proxyServices": "代理",
   "pullModelHint": "拉取一个模型开始使用",
+  "pullFailed": "无法拉取「{model}」。",
+  "pullStarting": "正在开始…",
   "pullModelPlaceholder": "拉取模型（如 llama3.2）",
+  "stopShowingPullProgress": "停止显示 {model} 的下载进度",
+  "pullContinuesInBackground": "已停止显示进度。Ollama 无法取消下载 —— 它仍在后台继续。",
   "quickActions": "快捷操作",
   "quickAdd": {
     "advancedWizard": "高级添加向导 →",
@@ -871,6 +879,7 @@
     "unknown": "未知"
   },
   "stopModel": "停止模型",
+  "stopUnsupported": "该 provider 不支持卸载模型。",
   "strategy": "策略",
   "subscriptionReuse": {
     "ccswitchHintAction": "打开 CCSwitch",

@@ -1,17 +1,38 @@
 /**
- * Ollama API client - wraps Tauri commands with browser fallback
+ * Ollama API client.
+ *
+ * Every call goes over HTTP through `proxyFetch`. There is deliberately no
+ * `invoke("ollama_*")` path: those commands never existed on the Rust side
+ * (a search for "ollama" across all 543 `.rs` files returns nothing), so the
+ * branches that called them threw "Command not found" on every desktop run.
+ * They were invisible because the tests never simulated a Tauri host, so the
+ * suite only ever exercised the browser fallback.
+ *
+ * `proxyFetch` is what makes the HTTP path work in the packaged shell: the
+ * renderer's CSP (`connect-src 'self' ipc: http://ipc.localhost ws: wss:`)
+ * has no `http:` scheme, so a bare `fetch` to `http://localhost:11434` is
+ * blocked before it leaves the WebView — loopback is not `'self'`. The host
+ * installs a `proxyFetch` that tunnels through the Rust `proxy_http_request`
+ * command, where reqwest is bound by neither CSP nor CORS. Adding eight Rust
+ * commands to re-enable `invoke` would buy nothing `proxy_http_request`
+ * already does, at eight commands' worth of upkeep.
+ *
+ * The one thing the proxy genuinely cannot carry is a stream: it returns a
+ * buffered `body: String`. `/api/pull` is NDJSON, so it has its own transport
+ * — see `pullOllamaModel`.
  */
 
-import { invoke } from "@tauri-apps/api/core"
-import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import type {
   OllamaModel,
   OllamaServerStatus,
   OllamaPullProgress,
   OllamaRunningModel,
   OllamaModelInfo,
+  OllamaModelCapabilities,
+  OllamaCapability,
 } from "@cognia/provider-types/ollama"
-import { isTauri, proxyFetch } from "./runtime-adapters"
+import { pullOllamaModelStreaming } from "./ollama-pull"
+import { proxyFetch } from "./runtime-adapters"
 
 /**
  * Default Ollama base URL
@@ -24,18 +45,13 @@ export const DEFAULT_OLLAMA_URL = "http://localhost:11434"
 export async function getOllamaStatus(
   baseUrl: string = DEFAULT_OLLAMA_URL
 ): Promise<OllamaServerStatus> {
-  if (isTauri()) {
-    return invoke<OllamaServerStatus>("ollama_get_status", { baseUrl })
-  }
-
-  // Browser fallback
   try {
     const url = normalizeBaseUrl(baseUrl)
 
     // Try to get version
     let version: string | undefined
     try {
-      const versionResp = await fetch(`${url}/api/version`)
+      const versionResp = await proxyFetch(`${url}/api/version`)
       if (versionResp.ok) {
         const data = await versionResp.json()
         version = data.version
@@ -45,7 +61,7 @@ export async function getOllamaStatus(
     }
 
     // Get models count
-    const tagsResp = await fetch(`${url}/api/tags`)
+    const tagsResp = await proxyFetch(`${url}/api/tags`)
     if (tagsResp.ok) {
       const data = await tagsResp.json()
       return {
@@ -67,13 +83,8 @@ export async function getOllamaStatus(
 export async function listOllamaModels(
   baseUrl: string = DEFAULT_OLLAMA_URL
 ): Promise<OllamaModel[]> {
-  if (isTauri()) {
-    return invoke<OllamaModel[]>("ollama_list_models", { baseUrl })
-  }
-
-  // Browser fallback
   const url = normalizeBaseUrl(baseUrl)
-  const response = await fetch(`${url}/api/tags`)
+  const response = await proxyFetch(`${url}/api/tags`)
 
   if (!response.ok) {
     throw new Error(`Failed to list models: ${response.status}`)
@@ -90,13 +101,8 @@ export async function showOllamaModel(
   baseUrl: string,
   modelName: string
 ): Promise<OllamaModelInfo> {
-  if (isTauri()) {
-    return invoke<OllamaModelInfo>("ollama_show_model", { baseUrl, modelName })
-  }
-
-  // Browser fallback
   const url = normalizeBaseUrl(baseUrl)
-  const response = await fetch(`${url}/api/show`, {
+  const response = await proxyFetch(`${url}/api/show`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: modelName }),
@@ -110,100 +116,26 @@ export async function showOllamaModel(
 }
 
 /**
- * Pull/download a model from Ollama registry
- * Returns an unsubscribe function to stop listening to progress
+ * Pull/download a model from Ollama registry.
+ *
+ * `/api/pull` is NDJSON, so this is the one call that cannot ride `proxyFetch`
+ * (buffered body) — see `./ollama-pull` for the per-host transport and for why
+ * the returned `unsubscribe` cannot actually stop the download.
  */
 export async function pullOllamaModel(
   baseUrl: string,
   modelName: string,
   onProgress?: (progress: OllamaPullProgress) => void
 ): Promise<{ success: boolean; unsubscribe: () => void }> {
-  let unlisten: UnlistenFn | undefined
-
-  if (isTauri()) {
-    // Listen for progress events
-    if (onProgress) {
-      unlisten = await listen<OllamaPullProgress>("ollama-pull-progress", (event) => {
-        if (event.payload.model === modelName) {
-          onProgress(event.payload)
-        }
-      })
-    }
-
-    try {
-      const success = await invoke<boolean>("ollama_pull_model", { baseUrl, modelName })
-      return {
-        success,
-        unsubscribe: () => unlisten?.(),
-      }
-    } catch (error) {
-      unlisten?.()
-      throw error
-    }
-  }
-
-  // Browser fallback - streaming pull
-  const url = normalizeBaseUrl(baseUrl)
-  const response = await fetch(`${url}/api/pull`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: modelName, stream: true }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to pull model: ${response.status}`)
-  }
-
-  const reader = response.body?.getReader()
-  if (!reader) {
-    throw new Error("No response body")
-  }
-
-  const decoder = new TextDecoder()
-  let buffer = ""
-
-  const processStream = async () => {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split("\n")
-      buffer = lines.pop() || ""
-
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const progress = JSON.parse(line) as OllamaPullProgress
-            progress.model = modelName
-            onProgress?.(progress)
-          } catch {
-            // Ignore parse errors
-          }
-        }
-      }
-    }
-  }
-
-  await processStream()
-
-  return {
-    success: true,
-    unsubscribe: () => {},
-  }
+  return pullOllamaModelStreaming({ baseUrl, modelName, onProgress })
 }
 
 /**
  * Delete a model from Ollama
  */
 export async function deleteOllamaModel(baseUrl: string, modelName: string): Promise<boolean> {
-  if (isTauri()) {
-    return invoke<boolean>("ollama_delete_model", { baseUrl, modelName })
-  }
-
-  // Browser fallback
   const url = normalizeBaseUrl(baseUrl)
-  const response = await fetch(`${url}/api/delete`, {
+  const response = await proxyFetch(`${url}/api/delete`, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: modelName }),
@@ -222,13 +154,8 @@ export async function deleteOllamaModel(baseUrl: string, modelName: string): Pro
 export async function listRunningModels(
   baseUrl: string = DEFAULT_OLLAMA_URL
 ): Promise<OllamaRunningModel[]> {
-  if (isTauri()) {
-    return invoke<OllamaRunningModel[]>("ollama_list_running", { baseUrl })
-  }
-
-  // Browser fallback
   const url = normalizeBaseUrl(baseUrl)
-  const response = await fetch(`${url}/api/ps`)
+  const response = await proxyFetch(`${url}/api/ps`)
 
   if (!response.ok) {
     throw new Error(`Failed to list running models: ${response.status}`)
@@ -246,13 +173,8 @@ export async function copyOllamaModel(
   source: string,
   destination: string
 ): Promise<boolean> {
-  if (isTauri()) {
-    return invoke<boolean>("ollama_copy_model", { baseUrl, source, destination })
-  }
-
-  // Browser fallback
   const url = normalizeBaseUrl(baseUrl)
-  const response = await fetch(`${url}/api/copy`, {
+  const response = await proxyFetch(`${url}/api/copy`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ source, destination }),
@@ -265,28 +187,36 @@ export async function copyOllamaModel(
   return true
 }
 
-/**
- * Generate embeddings using Ollama
- */
-export async function generateOllamaEmbedding(
+/** Options accepted by `/api/embed`. All verified against the upstream `EmbedRequest`. */
+export interface OllamaEmbedOptions {
+  /** Truncate input past the context window instead of erroring. Server default: true. */
+  truncate?: boolean
+  /** Matryoshka truncation — shorten output vectors. Only some models honor it. */
+  dimensions?: number
+  /** How long to keep the model loaded after this call, e.g. "5m". */
+  keepAlive?: string
+}
+
+/** POST `/api/embed` and return its always-2-D `embeddings`. */
+async function postOllamaEmbed(
   baseUrl: string,
   model: string,
-  input: string
-): Promise<number[]> {
-  if (!baseUrl) throw new Error("baseURL is required")
-  if (!model) throw new Error("modelId is required")
+  input: string | string[],
+  options?: OllamaEmbedOptions
+): Promise<number[][]> {
+  const url = `${normalizeBaseUrl(baseUrl)}/api/embed`
 
-  if (isTauri()) {
-    return invoke<number[]>("ollama_generate_embedding", { baseUrl, model, input })
-  }
+  const body: Record<string, unknown> = { model, input }
+  if (options?.truncate !== undefined) body.truncate = options.truncate
+  if (options?.dimensions !== undefined) body.dimensions = options.dimensions
+  if (options?.keepAlive !== undefined) body.keep_alive = options.keepAlive
 
-  const url = `${normalizeBaseUrl(baseUrl)}/api/embeddings`
   let response: Response
   try {
     response = await proxyFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, prompt: input }),
+      body: JSON.stringify(body),
     })
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e)
@@ -313,31 +243,85 @@ export async function generateOllamaEmbedding(
     throw new Error(`Ollama embedding response was not valid JSON: ${detail}`)
   }
 
-  if (Array.isArray(data.embedding) && data.embedding.length > 0) {
-    return data.embedding
-  }
   if (
     Array.isArray(data.embeddings) &&
     data.embeddings.length > 0 &&
-    Array.isArray(data.embeddings[0]) &&
-    data.embeddings[0].length > 0
+    Array.isArray(data.embeddings[0])
   ) {
-    return data.embeddings[0]
+    return data.embeddings
+  }
+  // Tolerate the deprecated 1-D `embedding` shape: a server old enough to lack
+  // /api/embed may route the path to its legacy handler.
+  if (Array.isArray(data.embedding) && data.embedding.length > 0) {
+    return [data.embedding]
   }
   throw new Error("Ollama embedding response is missing an 'embedding' / 'embeddings' field")
+}
+
+/**
+ * Generate an embedding for a single text.
+ *
+ * Uses `/api/embed`, not the deprecated `/api/embeddings`. The two differ in
+ * both directions: request field `input` (string OR array) vs `prompt` (string
+ * only), and response field `embeddings` (always 2-D) vs `embedding` (1-D).
+ * For more than one text use `generateOllamaEmbeddings` — it sends ONE request
+ * instead of N.
+ */
+export async function generateOllamaEmbedding(
+  baseUrl: string,
+  model: string,
+  input: string,
+  options?: OllamaEmbedOptions
+): Promise<number[]> {
+  if (!baseUrl) throw new Error("baseURL is required")
+  if (!model) throw new Error("modelId is required")
+
+  const embeddings = await postOllamaEmbed(baseUrl, model, input, options)
+  if (!embeddings[0]?.length) {
+    throw new Error("Ollama embedding response is missing an 'embedding' / 'embeddings' field")
+  }
+  return embeddings[0]
+}
+
+/**
+ * Generate embeddings for many texts in ONE request.
+ *
+ * `/api/embed`'s `input` takes an array natively. The previous approach looped
+ * the single-text call, paying a full HTTP round-trip per text — on a few
+ * hundred RAG chunks that is the difference between one request and a few
+ * hundred sequential ones.
+ *
+ * Returns vectors positionally aligned with `texts`. An empty `texts` short-
+ * circuits without a request.
+ */
+export async function generateOllamaEmbeddings(
+  baseUrl: string,
+  model: string,
+  texts: string[],
+  options?: OllamaEmbedOptions
+): Promise<number[][]> {
+  if (!baseUrl) throw new Error("baseURL is required")
+  if (!model) throw new Error("modelId is required")
+  if (texts.length === 0) return []
+
+  const embeddings = await postOllamaEmbed(baseUrl, model, texts, options)
+
+  // A short array would silently misalign every downstream vector with the
+  // wrong chunk — fail loudly instead.
+  if (embeddings.length !== texts.length) {
+    throw new Error(
+      `Ollama returned ${embeddings.length} embeddings for ${texts.length} inputs — refusing to misalign them`
+    )
+  }
+  return embeddings
 }
 
 /**
  * Stop/unload a running model
  */
 export async function stopOllamaModel(baseUrl: string, modelName: string): Promise<boolean> {
-  if (isTauri()) {
-    return invoke<boolean>("ollama_stop_model", { baseUrl, modelName })
-  }
-
-  // Browser fallback - send generate with keep_alive: 0
   const url = normalizeBaseUrl(baseUrl)
-  const response = await fetch(`${url}/api/generate`, {
+  const response = await proxyFetch(`${url}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: modelName, keep_alive: 0 }),
@@ -371,18 +355,93 @@ export function isOllamaEmbeddingModel(modelName: string): boolean {
 }
 
 /**
- * Get model capabilities based on name
+ * Guess capabilities from a model's NAME.
+ *
+ * A guess, and named like one. `llava`/`vision` substring matching misses
+ * every vision model not called that (qwen2.5-vl, moondream, minicpm-v, …) and
+ * has no idea about tools or thinking. Prefer `probeOllamaModelCapabilities`,
+ * which asks the server. This remains only as the fallback for a server too old
+ * to report `capabilities`, and its results are marked `inferred: true` so
+ * callers can tell a guess from a fact.
  */
-export function getOllamaModelCapabilities(modelName: string): {
-  supportsVision: boolean
-  supportsTools: boolean
-  supportsEmbedding: boolean
-} {
+export function getOllamaModelCapabilities(modelName: string): OllamaModelCapabilities {
   const lowerName = modelName.toLowerCase()
+  const isEmbedding = isOllamaEmbeddingModel(modelName)
 
   return {
     supportsVision: lowerName.includes("llava") || lowerName.includes("vision"),
-    supportsTools: !isOllamaEmbeddingModel(modelName),
-    supportsEmbedding: isOllamaEmbeddingModel(modelName),
+    supportsTools: !isEmbedding,
+    supportsEmbedding: isEmbedding,
+    supportsThinking: false,
+    inferred: true,
+  }
+}
+
+/**
+ * Read the REAL context length out of `/api/show`'s `model_info`.
+ *
+ * The key is architecture-prefixed — `llama.context_length`,
+ * `qwen2.context_length`, `gemma4.context_length` — because Ollama's own GGUF
+ * reader prepends `general.architecture` to any key outside the `general.` and
+ * `tokenizer.` namespaces. Hardcoding `llama.` therefore returns undefined on
+ * every Gemma/Qwen/DeepSeek model, silently, which is worse than not asking.
+ */
+function readContextLength(modelInfo: Record<string, unknown> | undefined): {
+  contextLength?: number
+  architecture?: string
+} {
+  if (!modelInfo) return {}
+
+  const architecture =
+    typeof modelInfo["general.architecture"] === "string"
+      ? (modelInfo["general.architecture"] as string)
+      : undefined
+  if (!architecture) return {}
+
+  const raw = modelInfo[`${architecture}.context_length`]
+  const contextLength = typeof raw === "number" && raw > 0 ? raw : undefined
+
+  return { contextLength, architecture }
+}
+
+/**
+ * Ask the server what a model can do, instead of guessing from its name.
+ *
+ * Falls back to `getOllamaModelCapabilities` (and flags `inferred: true`) when
+ * the server reports no `capabilities` array — either an older Ollama, or a
+ * failed request. Never throws: capability probing is decoration on top of a
+ * model list, and a failed probe must not take the list down with it.
+ */
+export async function probeOllamaModelCapabilities(
+  baseUrl: string,
+  modelName: string
+): Promise<OllamaModelCapabilities> {
+  let info: OllamaModelInfo
+  try {
+    info = await showOllamaModel(baseUrl, modelName)
+  } catch {
+    return getOllamaModelCapabilities(modelName)
+  }
+
+  const { contextLength, architecture } = readContextLength(info.model_info)
+
+  // An empty array is a real answer ("this model does nothing we track"); only
+  // an absent one means the server cannot tell us and we must guess.
+  if (!Array.isArray(info.capabilities)) {
+    return { ...getOllamaModelCapabilities(modelName), contextLength, architecture }
+  }
+
+  const has = (capability: OllamaCapability) => info.capabilities!.includes(capability)
+
+  return {
+    // `image` and `vision` are distinct upstream capabilities; either means the
+    // model takes images in.
+    supportsVision: has("vision") || has("image"),
+    supportsTools: has("tools"),
+    supportsEmbedding: has("embedding"),
+    supportsThinking: has("thinking"),
+    contextLength,
+    architecture,
+    inferred: false,
   }
 }

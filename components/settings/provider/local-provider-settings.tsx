@@ -9,10 +9,9 @@
  * - Model management for supported providers
  */
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   Server,
-  Check,
   Loader2,
   ChevronDown,
   ChevronUp,
@@ -85,22 +84,37 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
     scan: serverScan,
   } = useLocalProvidersScan()
 
+  /**
+   * The user's configured base URLs, keyed by provider. Threaded into the scan
+   * so a server moved off its default port is probed where it actually lives —
+   * without this the probe silently rebuilds every service on the default and
+   * reports a running server as offline.
+   */
+  const baseUrlOverrides = useMemo(() => {
+    const overrides: Partial<Record<LocalProviderName, string>> = {}
+    for (const providerId of Object.keys(LOCAL_PROVIDER_CONFIGS) as LocalProviderName[]) {
+      const configured = providerSettings[providerId]?.baseURL
+      if (configured) overrides[providerId] = configured
+    }
+    return overrides
+  }, [providerSettings])
+
   // Scan for installed providers
   const scanProviders = useCallback(async () => {
     setIsScanning(true)
     try {
-      const results = await checkAllProvidersInstallation()
+      const results = await checkAllProvidersInstallation(baseUrlOverrides)
       const resultMap = new Map<LocalProviderName, InstallCheckResult>()
       results.forEach((r) => resultMap.set(r.providerId, r))
       setScanResults(resultMap)
       // Also trigger the hook-based server status scan
-      serverScan()
+      serverScan(baseUrlOverrides)
     } catch (error) {
       log.error("Failed to scan providers", error)
     } finally {
       setIsScanning(false)
     }
-  }, [serverScan])
+  }, [serverScan, baseUrlOverrides])
 
   // Initial scan on mount
   useEffect(() => {
@@ -127,9 +141,17 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
     }
   }
 
-  // Count running providers
+  /**
+   * Only "running" is reported, and there used to be an "installed" stat
+   * beside it. The two were computed from fields the probe assigned the SAME
+   * value, so they rendered identical numbers forever. That is not a display
+   * bug to patch — it is what an HTTP probe can honestly tell us: a server that
+   * answers is both installed and running, and silence proves nothing at all
+   * (not installed / installed but stopped / listening on another port are
+   * indistinguishable). Showing two numbers implied a distinction we cannot
+   * make, so the one we can stand behind is the one shown.
+   */
   const runningCount = Array.from(scanResults.values()).filter((r) => r.running).length
-  const installedCount = Array.from(scanResults.values()).filter((r) => r.installed).length
   const isAnyScanning = isScanning || isServerScanning
 
   // Pick the best provider for the "quick start" shortcuts: the first
@@ -166,7 +188,8 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
         const next = new Map(prev)
         next.set(providerId, {
           providerId,
-          installed: status.connected,
+          // Reachable ⇒ provably installed. Unreachable ⇒ unknown, not absent.
+          installed: status.connected ? true : undefined,
           running: status.connected,
           version: status.version,
           error: status.error,
@@ -177,14 +200,21 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
       return {
         success: status.connected,
         message: status.connected
-          ? `Connected${status.version ? ` v${status.version}` : ""}${status.models_count ? ` (${status.models_count} models)` : ""}`
-          : status.error || "Connection failed",
+          ? t("connectedSummary", {
+              // `||`, not `??`: LocalProviderService derives version from
+              // `data.version || data.build?.version`, which yields "" when a
+              // server reports an empty one. `??` would pass "" through to the
+              // `other` branch and render a dangling "Connected v".
+              version: status.version || "none",
+              count: status.models_count ?? 0,
+            })
+          : status.error || t("connectionFailed"),
         latency: status.latency_ms,
       }
     } catch (error) {
       return {
         success: false,
-        message: error instanceof Error ? error.message : "Connection failed",
+        message: error instanceof Error ? error.message : t("connectionFailed"),
       }
     }
   }
@@ -250,8 +280,11 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
                 isConnected={status.isConnected}
                 isLoading={isAnyScanning}
                 version={status.version}
-                modelsCount={undefined}
-                latency={undefined}
+                // W6a: getProviderStatus has computed both of these all along;
+                // they were hard-passed as undefined here, so the card's
+                // latency/model-count branch could never render.
+                modelsCount={status.modelsCount}
+                latency={status.latency}
                 error={status.error}
                 onToggle={(enabled) => handleToggleProvider(providerId, enabled)}
                 onBaseUrlChange={(url) => handleBaseUrlChange(providerId, url)}
@@ -304,10 +337,6 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
         <CardContent className="space-y-1">
           {/* Quick stats */}
           <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
-            <span className="flex items-center gap-1">
-              <Check className="h-3.5 w-3.5 text-green-500" />
-              {installedCount} {t("installed")}
-            </span>
             <span className="flex items-center gap-1">
               <Zap className="h-3.5 w-3.5 text-primary" />
               {runningCount} {t("running")}

@@ -132,6 +132,21 @@ registerHeadlessRuntime({
   },
 })
 
+// ── A9: provider-core runtime adapters ──────────────────────────────────────
+
+registerHeadlessRuntime({
+  name: "provider-core-runtime",
+  hosts: ["brain"],
+  start: async () => {
+    const [{ setProviderCoreRuntimeAdapters }, { buildProviderCoreRuntimeAdapters }] =
+      await Promise.all([
+        import("@cognia/provider-core/providers/runtime-adapters"),
+        import("@/lib/ai/provider-core-runtime-deps"),
+      ])
+    setProviderCoreRuntimeAdapters(buildProviderCoreRuntimeAdapters())
+  },
+})
+
 // ── A9: provider routing runtime adapters ───────────────────────────────────
 
 registerHeadlessRuntime({
