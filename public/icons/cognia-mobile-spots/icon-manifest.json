@@ -1,0 +1,86 @@
+{
+  "style": "cognia-chibi-companion",
+  "grid": 4,
+  "icons": [
+    {
+      "position": 1,
+      "name": "chat",
+      "metaphor": "the companion happily holding one small speech bubble"
+    },
+    {
+      "position": 2,
+      "name": "workflows",
+      "metaphor": "the companion linking three glowing nodes with one finger"
+    },
+    {
+      "position": 3,
+      "name": "discover",
+      "metaphor": "the companion peeking through a small compass ring"
+    },
+    {
+      "position": 4,
+      "name": "profile",
+      "metaphor": "the companion smiling and waving with one hand"
+    },
+    {
+      "position": 5,
+      "name": "agent-teams",
+      "metaphor": "the companion standing with two tiny holographic teammate silhouettes"
+    },
+    {
+      "position": 6,
+      "name": "digital-twin",
+      "metaphor": "the companion facing a small mirrored hologram of herself"
+    },
+    {
+      "position": 7,
+      "name": "skills",
+      "metaphor": "the companion proudly holding a glowing faceted skill gem"
+    },
+    {
+      "position": 8,
+      "name": "browser",
+      "metaphor": "the companion leaning over a tiny browser window with a cursor"
+    },
+    {
+      "position": 9,
+      "name": "canvas",
+      "metaphor": "the companion drawing one cyan curve on a small floating artboard"
+    },
+    {
+      "position": 10,
+      "name": "scheduler",
+      "metaphor": "the companion checking a tiny calendar and clock"
+    },
+    {
+      "position": 11,
+      "name": "goals",
+      "metaphor": "the companion aiming one small arrow at a target"
+    },
+    {
+      "position": 12,
+      "name": "memory",
+      "metaphor": "the companion gently holding a glowing brain-shaped memory cloud"
+    },
+    {
+      "position": 13,
+      "name": "terminal",
+      "metaphor": "the companion typing at a tiny floating terminal window"
+    },
+    {
+      "position": 14,
+      "name": "connectors",
+      "metaphor": "the companion joining two small cable plugs together"
+    },
+    {
+      "position": 15,
+      "name": "device-sync",
+      "metaphor": "the companion standing between a phone and monitor with sync arrows"
+    },
+    {
+      "position": 16,
+      "name": "secure-backup",
+      "metaphor": "the companion hugging a small shield with a cloud emblem"
+    }
+  ]
+}
