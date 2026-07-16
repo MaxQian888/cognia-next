@@ -123,9 +123,12 @@ function validateCwd(root: string, requested?: string): string {
   return canonical
 }
 
-function childEnv(overrides: Record<string, string> | undefined): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { NODE_ENV: process.env.NODE_ENV ?? "production" }
-  for (const [key, value] of Object.entries(process.env)) {
+export function buildExternalAgentChildEnv(
+  ambient: NodeJS.ProcessEnv,
+  overrides: Record<string, string> | undefined
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { NODE_ENV: ambient.NODE_ENV ?? "production" }
+  for (const [key, value] of Object.entries(ambient)) {
     if (!DANGEROUS_ENV.test(key)) env[key] = value
   }
   for (const [key, value] of Object.entries(overrides ?? {})) {
@@ -202,7 +205,7 @@ export class NodeExternalAgentBackend {
     this.emit(CHANNEL.state, { agentId: config.id, state: "Starting" })
     const child = spawn(launch.command, launch.args, {
       cwd,
-      env: childEnv(config.env),
+      env: buildExternalAgentChildEnv(process.env, config.env),
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
     })
@@ -243,14 +246,36 @@ export class NodeExternalAgentBackend {
   private async kill(agentId: string): Promise<void> {
     const record = this.processes.get(agentId)
     if (!record) throw new Error(`agent not running: ${agentId}`)
-    if (record.stopping) return
-    record.stopping = true
-    this.emit(CHANNEL.state, { agentId, state: "Stopping" })
-    if (process.platform !== "win32" && record.child.pid) {
-      process.kill(-record.child.pid, "SIGTERM")
-    } else {
-      record.child.kill("SIGTERM")
-    }
+    await new Promise<void>((resolve) => {
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(escalate)
+        resolve()
+      }
+      const signal = (name: NodeJS.Signals) => {
+        try {
+          if (process.platform !== "win32" && record.child.pid) {
+            process.kill(-record.child.pid, name)
+          } else {
+            record.child.kill(name)
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ESRCH") done()
+          else throw error
+        }
+      }
+      record.child.once("exit", done)
+      const escalate = setTimeout(() => signal("SIGKILL"), 2_000)
+      escalate.unref()
+      if (!record.stopping) {
+        record.stopping = true
+        this.emit(CHANNEL.state, { agentId, state: "Stopping" })
+        signal("SIGTERM")
+      }
+      if (record.child.exitCode !== null || record.child.signalCode !== null) done()
+    })
   }
 }
 

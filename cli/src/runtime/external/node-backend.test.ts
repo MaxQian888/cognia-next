@@ -4,11 +4,37 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { NodeExternalAgentBackend } from "./node-backend"
+import { buildExternalAgentChildEnv, NodeExternalAgentBackend } from "./node-backend"
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 25))
 
 describe("NodeExternalAgentBackend", () => {
+  it("inherits plain credential env, accepts configured agent credentials, and strips loaders", () => {
+    const env = buildExternalAgentChildEnv(
+      {
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "plain-openai",
+        ANTHROPIC_API_KEY: "plain-anthropic",
+        NODE_OPTIONS: "--require bad.js",
+      },
+      {
+        CODEX_ACCESS_TOKEN: "configured-codex",
+        CLAUDE_CODE_OAUTH_TOKEN: "configured-claude",
+        NODE_OPTIONS: "--inspect",
+        PATH: "/untrusted/bin",
+      }
+    )
+
+    expect(env).toMatchObject({
+      OPENAI_API_KEY: "plain-openai",
+      ANTHROPIC_API_KEY: "plain-anthropic",
+      CODEX_ACCESS_TOKEN: "configured-codex",
+      CLAUDE_CODE_OAUTH_TOKEN: "configured-claude",
+    })
+    expect(env.NODE_OPTIONS).toBeUndefined()
+    expect(env.PATH).toBeUndefined()
+  })
+
   it("emits the frozen lifecycle payloads and line-frames stdio", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-agent-backend-"))
     const stub = fileURLToPath(new URL("./stub-acp-agent.mjs", import.meta.url))
@@ -80,5 +106,21 @@ describe("NodeExternalAgentBackend", () => {
     await expect(
       backend.invoke("check_command_exists", { command: "cognia-no-such-command-xyz" })
     ).resolves.toBe(false)
+  })
+
+  it("waits for process-group teardown before allowing the same id to respawn", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-agent-reclaim-"))
+    const stub = fileURLToPath(new URL("./stub-acp-agent.mjs", import.meta.url))
+    const backend = new NodeExternalAgentBackend({
+      workspacesRoot: workspace,
+      allowSmokeAgent: true,
+      resolveLaunch: async (config) => ({ command: config.command, args: config.args ?? [] }),
+    })
+    const config = { id: "reused", command: "node", args: [stub], cwd: workspace }
+    await backend.invoke("spawn_external_agent", { config })
+    await flush()
+    await backend.invoke("kill_external_agent", { agentId: "reused" })
+    await expect(backend.invoke("spawn_external_agent", { config })).resolves.toBe("reused")
+    await backend.invoke("kill_external_agent", { agentId: "reused" })
   })
 })

@@ -15,6 +15,8 @@ describe("external-agent sandbox launcher", () => {
       "/work/repo",
       "--writable",
       "/work/repo",
+      "--writable",
+      "/home/user/.codex",
       "--readable",
       "/home/user",
       "--network",
@@ -22,6 +24,56 @@ describe("external-agent sandbox launcher", () => {
       "codex",
       "app-server",
     ])
+  })
+
+  it("grants only the selected agent's state directory and npx cache", () => {
+    expect(
+      buildSandboxLauncherArgs(
+        {
+          id: "a",
+          command: "npx",
+          args: ["-y", "@zed-industries/claude-code-acp"],
+          cwd: "/work/repo",
+        },
+        "/home/user"
+      )
+    ).toEqual(
+      expect.arrayContaining([
+        "--writable",
+        "/home/user/.claude",
+        "--writable",
+        "/home/user/.claude.json",
+        "--writable",
+        "/home/user/.claude.json.backup",
+        "--writable",
+        "/home/user/.npm",
+      ])
+    )
+    expect(
+      buildSandboxLauncherArgs({ id: "a", command: "opencode", cwd: "/work/repo" }, "/home/user")
+    ).not.toContain("/home/user/.codex")
+  })
+
+  it("only creates writable state directories, never file-shaped roots", async () => {
+    const ensureDir = jest.fn()
+    await resolveSandboxedExternalAgentLaunch(
+      {
+        id: "a",
+        command: "npx",
+        args: ["-y", "@zed-industries/claude-code-acp"],
+        cwd: "/work/repo",
+      },
+      {
+        platform: "darwin",
+        homedir: "/home/user",
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+        ensureDir,
+      }
+    )
+    expect(ensureDir).toHaveBeenCalledWith("/home/user/.claude")
+    expect(ensureDir).toHaveBeenCalledWith("/home/user/.npm")
+    expect(ensureDir).not.toHaveBeenCalledWith(expect.stringMatching(/\.json/))
   })
 
   it("resolves only an executable launcher and never falls back unsandboxed", async () => {

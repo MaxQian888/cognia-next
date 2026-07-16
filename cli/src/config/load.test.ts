@@ -56,6 +56,11 @@ describe("resolveConfig defaults", () => {
     expect(cfg.cwd).toBe(CWD)
     expect(cfg.model).toBeUndefined()
     expect(cfg.streamIdleTimeoutMs).toBe(60_000)
+    expect(cfg.agentBackend).toBe("builtin")
+  })
+
+  it("carries the external-agent backend through the flag layer", () => {
+    expect(run({}, { flags: { agentBackend: "claude-code" } }).agentBackend).toBe("claude-code")
   })
 
   it("field-merges notices and clipboard across user + project layers", () => {

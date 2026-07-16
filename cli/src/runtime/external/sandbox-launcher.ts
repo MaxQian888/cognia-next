@@ -9,6 +9,7 @@ export interface SandboxLauncherRuntime {
   homedir: string
   candidates: string[]
   isExecutable: (candidate: string) => boolean
+  ensureDir?: (candidate: string) => void
 }
 
 const launcherName = (): string =>
@@ -42,11 +43,11 @@ export function buildSandboxLauncherArgs(
   homedir: string
 ): string[] {
   if (!config.cwd) throw new Error("external-agent sandbox requires a working directory")
+  const writable = [config.cwd, ...agentStateWritableRoots(config, homedir)]
   return [
     "--cwd",
     config.cwd,
-    "--writable",
-    config.cwd,
+    ...writable.flatMap((root) => ["--writable", root]),
     "--readable",
     homedir,
     "--network",
@@ -56,6 +57,30 @@ export function buildSandboxLauncherArgs(
   ]
 }
 
+function agentStateWritableRoots(config: NodeExternalAgentSpawnConfig, homedir: string): string[] {
+  const command = config.command.toLowerCase().replace(/\.(?:exe|cmd|bat)$/i, "")
+  const npxPackage =
+    command === "npx" ? (config.args ?? []).find((arg) => !arg.startsWith("-")) : undefined
+  const target = npxPackage ?? command
+  const roots: string[] = []
+  if (/codex/.test(target)) roots.push(path.join(homedir, ".codex"))
+  if (/claude/.test(target)) {
+    roots.push(
+      path.join(homedir, ".claude"),
+      path.join(homedir, ".claude.json"),
+      path.join(homedir, ".claude.json.backup")
+    )
+  }
+  if (command === "npx") roots.push(path.join(homedir, ".npm"))
+  return roots
+}
+
+function agentStateDirectoryRoots(config: NodeExternalAgentSpawnConfig, homedir: string): string[] {
+  return agentStateWritableRoots(config, homedir).filter(
+    (root) => !path.basename(root).startsWith(".claude.json")
+  )
+}
+
 export async function resolveSandboxedExternalAgentLaunch(
   config: NodeExternalAgentSpawnConfig,
   runtime: SandboxLauncherRuntime = {
@@ -63,6 +88,7 @@ export async function resolveSandboxedExternalAgentLaunch(
     homedir: os.homedir(),
     candidates: defaultCandidates(),
     isExecutable,
+    ensureDir: (candidate) => fs.mkdirSync(candidate, { recursive: true }),
   }
 ): Promise<ExternalAgentLaunch> {
   if (runtime.platform !== "darwin" && runtime.platform !== "linux") {
@@ -74,6 +100,7 @@ export async function resolveSandboxedExternalAgentLaunch(
       "external-agent sandbox launcher is unavailable; run `pnpm cli:external-host:build` or set COGNIA_EXTERNAL_AGENT_LAUNCHER"
     )
   }
+  for (const root of agentStateDirectoryRoots(config, runtime.homedir)) runtime.ensureDir?.(root)
   return {
     command: launcher,
     args: buildSandboxLauncherArgs(config, runtime.homedir),

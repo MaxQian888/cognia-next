@@ -88,6 +88,32 @@ function normalizePermissionMode(mode: ResolvedConfig["permissionMode"]): AcpPer
   return mode === "auto" ? "default" : mode
 }
 
+/** Translate secrets already resolved from ~/.cognia/credentials.json into the
+ * environment variables understood by the selected external CLI. */
+export function externalAgentCredentialEnv(
+  config: ResolvedConfig,
+  presetId: string
+): Record<string, string> {
+  if (presetId === "codex" || presetId === "codex-app-server") {
+    const credential = config.providers.codex ?? config.providers.openai
+    return {
+      ...(credential?.authToken ? { CODEX_ACCESS_TOKEN: credential.authToken } : {}),
+      ...(credential?.apiKey
+        ? { OPENAI_API_KEY: credential.apiKey, CODEX_API_KEY: credential.apiKey }
+        : {}),
+    }
+  }
+  if (presetId === "claude-code") {
+    const credential = config.providers.anthropic
+    return {
+      ...(credential?.authToken ? { CLAUDE_CODE_OAUTH_TOKEN: credential.authToken } : {}),
+      ...(credential?.apiKey ? { ANTHROPIC_API_KEY: credential.apiKey } : {}),
+      ...(credential?.baseURL ? { ANTHROPIC_BASE_URL: credential.baseURL } : {}),
+    }
+  }
+  return {}
+}
+
 function usageFromResult(result: ExternalAgentResult) {
   if (!result.tokenUsage) return undefined
   return {
@@ -167,7 +193,16 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       timeout: params.config.streamIdleTimeoutMs || undefined,
     })
     if (!config) throw new Error(`Unknown external-agent backend: ${presetId}`)
-    if (config.process) config.process = { ...config.process, cwd: params.config.cwd }
+    if (config.process) {
+      config.process = {
+        ...config.process,
+        cwd: params.config.cwd,
+        env: {
+          ...config.process.env,
+          ...externalAgentCredentialEnv(params.config, presetId),
+        },
+      }
+    }
     await manager.addAgent(config)
     initialized = true
   }
@@ -191,6 +226,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         ...(params.config.systemPrompt ? { systemPrompt: params.config.systemPrompt } : {}),
         permissionMode,
         ...(params.config.allowedTools ? { allowedTools: params.config.allowedTools } : {}),
+        // ACP session/new requires the field even when no MCP servers are
+        // forwarded. Keep v1 intentionally empty rather than leaking the
+        // built-in sidecar's unrelated MCP configuration into the child.
+        context: { custom: { mcpServers: [] } },
         workingDirectory: params.config.cwd,
         ...(opts.signal ? { signal: opts.signal } : {}),
         ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),

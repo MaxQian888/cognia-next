@@ -334,3 +334,17 @@ seam), ADR-0064 (external-CLI-backed dispatch), and `2026-07-16-tui-parity-and-i
 - No further Tauri/raw-invoke leak appeared during bundle, initialize, thread creation,
   turn streaming, or shutdown. Background Codex MCP status probes logged expected
   best-effort timeouts and did not affect the turn.
+
+## 10. Phase 4 real-agent verification (2026-07-16)
+
+- `codex-cli 0.144.4 app-server` completed a strict-sandbox CLI turn and streamed
+  `PHASE4_CODEX_OK`. The local subscription overlay was unavailable on this machine, so
+  the run also verified the documented native `~/.codex/auth.json` login fallback.
+- `@zed-industries/claude-code-acp@0.16.2` completed a strict-sandbox CLI turn and
+  streamed `PHASE4_CLAUDE_OK`. Claude Code required write access to its exact persisted
+  state paths (`~/.claude`, `~/.claude.json`, `~/.claude.json.backup`) and the npm cache;
+  no broad home-directory write grant was added.
+- Unit coverage verifies both CLI credential-file mappings (`CODEX_ACCESS_TOKEN`,
+  `OPENAI_API_KEY`, `CODEX_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) and
+  inheritance of plain `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` from the parent process.
+  Loader-injection variables such as `NODE_OPTIONS` remain stripped.

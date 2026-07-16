@@ -205,6 +205,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     subagentStreamIdleTimeoutMs:
       layer.subagentStreamIdleTimeoutMs ?? acc.subagentStreamIdleTimeoutMs,
     subagentMaxDepth: layer.subagentMaxDepth ?? acc.subagentMaxDepth,
+    agentBackend: layer.agentBackend ?? acc.agentBackend,
   }
 }
 

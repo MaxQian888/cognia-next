@@ -18,6 +18,7 @@ import {
   acpPermissionRequestToCli,
   captureDecisionToAcp,
   createExternalAgentSession,
+  externalAgentCredentialEnv,
   type ExternalAgentSessionManager,
 } from "./external-agent-session"
 
@@ -118,6 +119,27 @@ describe("external-agent permission adaptation", () => {
 })
 
 describe("createExternalAgentSession", () => {
+  it("maps CLI credential-file providers onto each external CLI's native env contract", () => {
+    const config = {
+      ...DEFAULT_RESOLVED_CONFIG,
+      cwd: "/work",
+      providers: {
+        codex: { authToken: "codex-subscription", apiKey: "sk-codex" },
+        anthropic: { authToken: "claude-subscription", apiKey: "sk-anthropic" },
+      },
+    }
+
+    expect(externalAgentCredentialEnv(config, "codex-app-server")).toEqual({
+      CODEX_ACCESS_TOKEN: "codex-subscription",
+      OPENAI_API_KEY: "sk-codex",
+      CODEX_API_KEY: "sk-codex",
+    })
+    expect(externalAgentCredentialEnv(config, "claude-code")).toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: "claude-subscription",
+      ANTHROPIC_API_KEY: "sk-anthropic",
+    })
+  })
+
   it("integrates a stub permission ask with the existing overlay and completes the turn", async () => {
     const manager = fakeManager().manager
     manager.execute = jest.fn(async (_agentId, _prompt, options) => {
@@ -219,6 +241,12 @@ describe("createExternalAgentSession", () => {
       "cli-external-cli-session",
       "first",
       expect.objectContaining({ workingDirectory: "/work", permissionMode: "default" })
+    )
+    expect(manager.execute).toHaveBeenNthCalledWith(
+      1,
+      "cli-external-cli-session",
+      "first",
+      expect.objectContaining({ context: { custom: { mcpServers: [] } } })
     )
     expect(manager.execute).toHaveBeenNthCalledWith(
       2,
