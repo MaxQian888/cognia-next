@@ -20,6 +20,7 @@ jest.mock("@/lib/ai/agent/external/presets", () => ({
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 
+import { DEFAULT_PERMISSION_CHOICES } from "../tui/components/overlays/PermissionOverlay"
 import { createGateController, runTurn } from "../tui/hooks/turn-engine"
 import { createInitialState } from "../tui/state/initial"
 import { tuiReducer } from "../tui/state/reducer"
@@ -132,10 +133,7 @@ describe("external chat integration", () => {
             overlay: {
               kind: "permission",
               req,
-              choices: [
-                { key: "allow", label: "Allow once" },
-                { key: "deny", label: "Deny" },
-              ],
+              choices: DEFAULT_PERMISSION_CHOICES,
               index: 0,
             },
           })
