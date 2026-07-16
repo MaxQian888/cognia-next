@@ -1570,13 +1570,16 @@
     "designerUnsupportedDescription": "The designer subsystem isn't included in this build of cognia-next. Artifact \"{title}\" is read-only here.",
     "designerUnsupportedTitle": "Designer is unavailable",
     "dock": {
+      "artifactMode": "Artifact",
       "collapse": "Collapse panel",
       "hideHistory": "Hide artifact history",
       "openInNewTab": "Open in new tab",
       "showHistory": "Show artifact history",
       "splitView": "Split",
       "title": "Artifacts",
-      "toggleHint": "Toggle panel (Ctrl/Cmd+J)"
+      "toggleHint": "Toggle panel (Ctrl/Cmd+J)",
+      "workspaceMode": "Workspace",
+      "workspaceUnavailable": "Workspace requires the desktop app or a paired companion filesystem"
     },
     "download": "Download",
     "duplicate": "Duplicate",
@@ -1654,7 +1657,38 @@
     "typeSvg": "SVG",
     "versionHistory": "Version History",
     "versionRestored": "Version restored",
-    "words": "words"
+    "words": "words",
+    "workspace": {
+      "card": {
+        "cancel": "Cancel",
+        "editedFiles": "Edited {count, plural, one {# file} other {# files}}",
+        "review": "Review",
+        "undo": "Undo",
+        "undoConfirm": "Undo all changes",
+        "undoConfirmDescription": "This discards every staged, unstaged, and untracked change currently in this repository, including changes you made manually. This cannot be undone.",
+        "undoConfirmTitle": "Undo all repository changes?",
+        "undoFailed": "Could not undo workspace changes: {error}",
+        "undoSuccess": "Workspace changes undone"
+      },
+      "missingProject": {
+        "description": "Link this conversation to a project before editing workspace files.",
+        "title": "No project linked"
+      },
+      "missingRoot": {
+        "description": "Add a primary root to the linked project to open its files.",
+        "title": "Project has no workspace root"
+      },
+      "missingSession": {
+        "description": "Select a conversation to resolve its project workspace.",
+        "title": "No conversation selected"
+      },
+      "review": "Review",
+      "reviewEmpty": "Select a changed file to review its diff",
+      "unavailable": {
+        "description": "Workspace editing requires the desktop app or a paired companion filesystem.",
+        "title": "Workspace is unavailable"
+      }
+    }
   },
   "attention": {
     "badgeAria": "Attention items: {count}",

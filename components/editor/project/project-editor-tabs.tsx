@@ -8,8 +8,18 @@ import { XIcon, SaveIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import type { OpenFile } from "./use-project-editor"
+import type { ReactNode } from "react"
+
+export interface ProjectEditorFixedTab {
+  id: string
+  label: string
+  icon?: ReactNode
+  active: boolean
+  onSelect: () => void
+}
 
 interface Props {
+  fixedTabs?: ProjectEditorFixedTab[]
   files: OpenFile[]
   activePath: string | null
   dirtyCount: number
@@ -19,6 +29,7 @@ interface Props {
 }
 
 export function ProjectEditorTabs({
+  fixedTabs = [],
   files,
   activePath,
   dirtyCount,
@@ -27,10 +38,27 @@ export function ProjectEditorTabs({
   onSaveAll,
 }: Props) {
   const t = useTranslations("projectEditor")
-  if (files.length === 0) return null
+  if (files.length === 0 && fixedTabs.length === 0) return null
   return (
     <div className="flex items-center border-b" data-testid="project-editor-tabs">
       <div className="flex min-w-0 flex-1 overflow-x-auto">
+        {fixedTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={tab.active}
+            data-testid={`editor-fixed-tab-${tab.id}`}
+            className={cn(
+              "flex shrink-0 items-center gap-1 border-r px-3 py-1.5 text-sm",
+              tab.active ? "bg-background" : "bg-muted/40 hover:bg-muted"
+            )}
+            onClick={tab.onSelect}
+          >
+            {tab.icon}
+            <span>{tab.label}</span>
+          </button>
+        ))}
         {files.map((f) => {
           const dirty = f.draftContent !== f.savedContent
           const name = f.relPath.split("/").pop() ?? f.relPath

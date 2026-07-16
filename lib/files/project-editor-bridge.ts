@@ -34,7 +34,10 @@ export function openInProjectEditor(absolutePath: string, line?: number, column?
   for (const o of openers) {
     const base = trimTrailing(o.root)
     if (absolutePath === base || absolutePath.startsWith(`${base}/`)) {
-      if (!best || base.length > bestBase.length) {
+      // Equal roots intentionally prefer the latest registration. A dormant
+      // dock reveal opener mounts before the live Monaco editor; once Monaco
+      // is present it must receive line/column-aware terminal jumps directly.
+      if (!best || base.length >= bestBase.length) {
         best = o
         bestBase = base
       }

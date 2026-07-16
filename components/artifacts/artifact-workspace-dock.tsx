@@ -31,6 +31,7 @@ import {
 import { useArtifactDockShortcuts } from "@/hooks/artifacts/use-artifact-dock-shortcuts"
 import { ArtifactPanel } from "./artifact-panel"
 import { ArtifactDock } from "./artifact-dock"
+import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
 
 const CHAT_MIN = "50%"
 
@@ -56,6 +57,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const layoutVersion = useArtifactDockLayoutStore((s) => s.layoutVersion)
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
   const setDockCollapsed = useArtifactDockLayoutStore((s) => s.setDockCollapsed)
+  const setDockMode = useArtifactDockLayoutStore((s) => s.setDockMode)
 
   // Auto-expand the dock when a fresh artifact becomes active. Keyed on the id
   // so re-collapsing while the same artifact stays active is respected (we only
@@ -66,9 +68,10 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     const prev = prevActiveIdRef.current
     prevActiveIdRef.current = activeArtifactId
     if (activeArtifactId && activeArtifactId !== prev) {
+      setDockMode("artifact")
       setDockCollapsed(false)
     }
-  }, [activeArtifactId, setDockCollapsed])
+  }, [activeArtifactId, setDockCollapsed, setDockMode])
 
   const collapseTransition = useReducedMotionTransition(mobileTransition("normal"))
 
@@ -77,6 +80,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
       className="flex w-full flex-1 min-h-0 overflow-hidden"
       data-testid="artifact-workspace-dock"
     >
+      <WorkspaceRevealOpener />
       <ResizablePanelGroup
         key={layoutVersion}
         orientation="horizontal"

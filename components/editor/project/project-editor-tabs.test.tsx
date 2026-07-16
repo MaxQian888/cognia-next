@@ -36,6 +36,26 @@ describe("ProjectEditorTabs", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("renders fixed leading tabs even when no files are open", () => {
+    const onSelect = jest.fn()
+    render(
+      <ProjectEditorTabs
+        fixedTabs={[{ id: "review", label: "Review", active: true, onSelect }]}
+        files={[]}
+        activePath={null}
+        dirtyCount={0}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+      />
+    )
+
+    const review = screen.getByTestId("editor-fixed-tab-review")
+    expect(review).toHaveAttribute("aria-selected", "true")
+    fireEvent.click(review)
+    expect(onSelect).toHaveBeenCalledTimes(1)
+  })
+
   it("renders one tab per open file and marks the active one", () => {
     render(
       <ProjectEditorTabs

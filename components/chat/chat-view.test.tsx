@@ -25,6 +25,11 @@ jest.mock("./inline-error", () => ({ InlineError: jest.fn(() => null) }))
 jest.mock("./message-list", () => ({
   MessageList: jest.fn(() => null),
 }))
+jest.mock("./workspace-changes-card", () => ({
+  WorkspaceChangesCard: ({ session }: { session: { id: string } }) => (
+    <div data-testid="workspace-changes-card" data-session={session.id} />
+  ),
+}))
 jest.mock("@/components/agent/external-agent/session-panel", () => ({
   ExternalAgentSessionPanel: () => null,
 }))
@@ -89,7 +94,7 @@ jest.mock("@/hooks/ui/use-mobile", () => ({
   useIsMobile: () => false,
 }))
 
-import { render } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
 import { MessageList } from "./message-list"
@@ -113,6 +118,11 @@ function makeProps() {
 }
 
 describe("ChatPane", () => {
+  it("mounts the workspace changes card for this pane's session", () => {
+    render(<ChatPane {...makeProps()} />)
+    expect(screen.getByTestId("workspace-changes-card")).toHaveAttribute("data-session", "s1")
+  })
+
   it("passes stable onCopy reference across re-renders", () => {
     const MockList = MessageList as jest.Mock
     const props = makeProps()

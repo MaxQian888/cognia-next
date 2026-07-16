@@ -98,6 +98,7 @@ describe("ArtifactWorkspaceDock", () => {
 
   it("auto-expands the dock when a new artifact becomes active", () => {
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+    act(() => useArtifactDockLayoutStore.getState().setDockMode("workspace"))
     const { rerender } = render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
@@ -110,5 +111,6 @@ describe("ArtifactWorkspaceDock", () => {
       </ArtifactWorkspaceDock>
     )
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+    expect(useArtifactDockLayoutStore.getState().dockMode).toBe("artifact")
   })
 })

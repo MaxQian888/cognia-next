@@ -117,6 +117,23 @@ describe("ChangesView", () => {
     expect(screen.getByTestId("change-group-changes")).toBeInTheDocument()
   })
 
+  it("hides the commit box in compact review mode", () => {
+    render(
+      <ChangesView
+        variant="review"
+        rootDir="/r"
+        status={status}
+        actions={makeActions()}
+        committing={false}
+        selectedPath={null}
+        onSelectFile={() => {}}
+      />
+    )
+
+    expect(screen.queryByTestId("commit-box")).not.toBeInTheDocument()
+    expect(screen.getByTestId("change-group-changes")).toBeInTheDocument()
+  })
+
   it("stages all unstaged changes", () => {
     const actions = makeActions()
     render(

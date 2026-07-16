@@ -23,18 +23,20 @@ import { DiscardConfirmDialog } from "./discard-confirm-dialog"
 type PendingDiscard = { kind: "file"; path: string } | { kind: "all"; includeUntracked: boolean }
 
 interface ChangesViewProps {
+  variant?: "panel" | "review"
   rootDir: string
   status: GitStatus
   actions: UseGitActionsResult
   committing: boolean
   selectedPath: string | null
   onSelectFile: (path: string, staged: boolean) => void
-  onViewHistory: (path: string) => void
-  onViewBlame: (path: string) => void
-  onRestore: (path: string) => void
+  onViewHistory?: (path: string) => void
+  onViewBlame?: (path: string) => void
+  onRestore?: (path: string) => void
 }
 
 export function ChangesView({
+  variant = "panel",
   rootDir,
   status,
   actions,
@@ -71,12 +73,14 @@ export function ChangesView({
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="changes-view">
-      <CommitBox
-        rootDir={rootDir}
-        stagedCount={status.staged.length}
-        committing={committing}
-        actions={actions}
-      />
+      {variant === "panel" && (
+        <CommitBox
+          rootDir={rootDir}
+          stagedCount={status.staged.length}
+          committing={committing}
+          actions={actions}
+        />
+      )}
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-1 px-1 pb-4">
           {status.merge.length > 0 && (
@@ -93,8 +97,8 @@ export function ChangesView({
                   selected={selectedPath === c.path}
                   onSelect={() => onSelectFile(c.path, false)}
                   onCopyPath={() => copyPath(c.path)}
-                  onViewHistory={() => onViewHistory(c.path)}
-                  onViewBlame={() => onViewBlame(c.path)}
+                  onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
+                  onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
                 />
               ))}
             </ChangeGroup>
@@ -123,9 +127,9 @@ export function ChangesView({
                   onSelect={() => onSelectFile(c.path, true)}
                   onUnstage={() => void actions.unstage([c.path])}
                   onCopyPath={() => copyPath(c.path)}
-                  onViewHistory={() => onViewHistory(c.path)}
-                  onViewBlame={() => onViewBlame(c.path)}
-                  onRestore={() => onRestore(c.path)}
+                  onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
+                  onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
+                  onRestore={onRestore ? () => onRestore(c.path) : undefined}
                 />
               ))}
             </ChangeGroup>
@@ -162,9 +166,9 @@ export function ChangesView({
                   onStage={() => void actions.stage([c.path])}
                   onDiscard={() => requestDiscard({ kind: "file", path: c.path })}
                   onCopyPath={() => copyPath(c.path)}
-                  onViewHistory={() => onViewHistory(c.path)}
-                  onViewBlame={() => onViewBlame(c.path)}
-                  onRestore={() => onRestore(c.path)}
+                  onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
+                  onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
+                  onRestore={onRestore ? () => onRestore(c.path) : undefined}
                   onAddToGitignore={() => void actions.ignoreAdd(c.path)}
                 />
               ))}

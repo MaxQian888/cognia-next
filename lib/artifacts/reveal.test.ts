@@ -51,6 +51,22 @@ describe("revealArtifactInWorkspace", () => {
 
     revealArtifactInWorkspace(artifact.id)
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+    expect(useArtifactDockLayoutStore.getState().dockMode).toBe("artifact")
     expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true)
+  })
+
+  it("switches a workspace dock back to artifact mode", () => {
+    const artifact = useArtifactStore.getState().createArtifact({
+      sessionId: "s",
+      messageId: "m",
+      type: "code",
+      title: "t",
+      content: "console.log(1)",
+    })
+    useArtifactDockLayoutStore.getState().setDockMode("workspace")
+
+    revealArtifactInWorkspace(artifact.id)
+
+    expect(useArtifactDockLayoutStore.getState().dockMode).toBe("artifact")
   })
 })

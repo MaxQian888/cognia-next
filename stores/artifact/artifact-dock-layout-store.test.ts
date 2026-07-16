@@ -33,6 +33,9 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.dockCollapsed).toBe(true)
       expect(result.current.listRailOpen).toBe(false)
       expect(result.current.mobileSheetOpen).toBe(false)
+      expect(result.current.dockMode).toBe("artifact")
+      expect(result.current.workspaceRevealRequest).toBeNull()
+      expect(result.current.workspaceContext).toBeNull()
     })
   })
 
@@ -85,10 +88,13 @@ describe("useArtifactDockLayoutStore", () => {
   describe("collapse + rail toggles", () => {
     it("toggleDock flips the collapsed flag", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.setDockMode("workspace"))
       act(() => result.current.toggleDock())
       expect(result.current.dockCollapsed).toBe(false)
+      expect(result.current.dockMode).toBe("workspace")
       act(() => result.current.toggleDock())
       expect(result.current.dockCollapsed).toBe(true)
+      expect(result.current.dockMode).toBe("workspace")
     })
 
     it("setDockCollapsed accepts explicit values", () => {
@@ -103,6 +109,68 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.listRailOpen).toBe(true)
       act(() => result.current.setListRailOpen(false))
       expect(result.current.listRailOpen).toBe(false)
+    })
+  })
+
+  describe("dock mode + workspace reveal", () => {
+    it("migrates a v1 snapshot to artifact mode", async () => {
+      window.localStorage.setItem(
+        PERSIST_NAME,
+        JSON.stringify({
+          state: { dockSize: 41, dockCollapsed: false, listRailOpen: true, layoutVersion: 3 },
+          version: 1,
+        })
+      )
+
+      await act(async () => {
+        await useArtifactDockLayoutStore.persist.rehydrate()
+      })
+
+      expect(useArtifactDockLayoutStore.getState().dockMode).toBe("artifact")
+      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(41)
+    })
+
+    it("persists the selected mode but never the runtime reveal request", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => {
+        result.current.setDockMode("workspace")
+        result.current.revealWorkspaceFile({
+          sessionId: "session-1",
+          rootPath: "/repo",
+          relPath: "src/a.ts",
+        })
+      })
+
+      expect(result.current.dockMode).toBe("workspace")
+      expect(result.current.dockCollapsed).toBe(false)
+      expect(result.current.workspaceRevealRequest).toMatchObject({
+        kind: "file",
+        sessionId: "session-1",
+        rootPath: "/repo",
+        relPath: "src/a.ts",
+      })
+      expect(readPersisted()?.state.dockMode).toBe("workspace")
+      expect(readPersisted()?.state).not.toHaveProperty("workspaceRevealRequest")
+      expect(readPersisted()?.state).not.toHaveProperty("workspaceContext")
+    })
+
+    it("queues review reveals and lets the consumer clear only the matching request", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => {
+        result.current.revealWorkspaceReview({ sessionId: "session-2", rootPath: "/repo" })
+      })
+      const request = result.current.workspaceRevealRequest
+      expect(request).toMatchObject({ kind: "review", sessionId: "session-2", rootPath: "/repo" })
+
+      act(() => result.current.clearWorkspaceRevealRequest("stale"))
+      expect(result.current.workspaceRevealRequest).toBe(request)
+      act(() => result.current.clearWorkspaceRevealRequest(request!.id))
+      expect(result.current.workspaceRevealRequest).toBeNull()
+      expect(result.current.workspaceContext).toMatchObject({
+        kind: "review",
+        sessionId: "session-2",
+        rootPath: "/repo",
+      })
     })
   })
 
@@ -141,6 +209,9 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.dockCollapsed).toBe(true)
       expect(result.current.listRailOpen).toBe(false)
       expect(result.current.mobileSheetOpen).toBe(false)
+      expect(result.current.dockMode).toBe("artifact")
+      expect(result.current.workspaceRevealRequest).toBeNull()
+      expect(result.current.workspaceContext).toBeNull()
       expect(result.current.layoutVersion).toBe(before + 1)
     })
   })

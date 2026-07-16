@@ -45,6 +45,18 @@ describe("project-editor-bridge", () => {
     expect(outer).not.toHaveBeenCalled()
   })
 
+  it("prefers the most recently mounted opener for an equal root", () => {
+    const dormant = jest.fn()
+    const mounted = jest.fn()
+    registerProjectEditorOpener({ root: "/repo", open: dormant })
+    registerProjectEditorOpener({ root: "/repo", open: mounted })
+
+    openInProjectEditor("/repo/a.ts", 2, 3)
+
+    expect(mounted).toHaveBeenCalledWith("a.ts", 2, 3)
+    expect(dormant).not.toHaveBeenCalled()
+  })
+
   it("unregister stops routing", () => {
     const open = jest.fn()
     const dispose = registerProjectEditorOpener({ root: "/repo", open })
