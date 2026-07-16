@@ -13,6 +13,33 @@
     "human": "你在操作",
     "lastAction": "最近操作：{action}"
   },
+  "annotation": {
+    "add": "加入队列",
+    "intent": {
+      "approve": "认可",
+      "change": "修改",
+      "fix": "修复",
+      "question": "问题",
+      "label": "标注意图"
+    },
+    "queued": "已加入 {count} 条标注",
+    "remove": "移除标注",
+    "resolve": "解决标注",
+    "send": "发送 {count} 条",
+    "sent": "已向聊天发送 {count} 条标注",
+    "severity": {
+      "blocking": "阻塞",
+      "important": "重要",
+      "suggestion": "建议",
+      "label": "标注严重程度"
+    },
+    "status": {
+      "acknowledged": "已确认",
+      "dismissed": "已忽略",
+      "pending": "待处理",
+      "resolved": "已解决"
+    }
+  },
   "comment": {
     "cancel": "取消",
     "failed": "评论发送失败",
@@ -22,6 +49,13 @@
     "send": "发送到对话",
     "sent": "已发送到对话",
     "title": "对该元素评论"
+  },
+  "detail": {
+    "compact": "精简",
+    "detailed": "详细",
+    "forensic": "取证",
+    "label": "标注详细程度",
+    "standard": "标准"
   },
   "empty": {
     "hint": "输入任意网址或 localhost 地址即可在此渲染，然后选择元素进行评论。",

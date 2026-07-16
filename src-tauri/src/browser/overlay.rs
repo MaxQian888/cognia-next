@@ -3,8 +3,8 @@
 //! The previewed dev-server page is a *remote* context: Tauri injects no IPC
 //! bridge into it and granting app-command access to remote origins via ACL is
 //! brittle. So the overlay signals a selection by navigating to a sentinel URL
-//! (`https://cognia.invalid/__cognia_select?data=<json>`); the webview's
-//! `on_navigation` handler intercepts that host+path, parses the payload, emits
+//! (`https://cognia.invalid/__cognia_select?data=<signal>`); the webview's
+//! `on_navigation` handler intercepts that host+path, parses the small signal, emits
 //! `browser://element-selected`, and cancels the navigation. This needs no
 //! capability grant and works on both WKWebView and WebView2.
 
@@ -78,11 +78,11 @@ mod tests {
     }
 
     #[test]
-    fn parses_a_valid_selection_payload() {
-        let url = sentinel(r##"{"selector":"#go","tagName":"button"}"##);
+    fn parses_a_valid_selection_signal() {
+        let url = sentinel(r##"{"count":1,"generation":7}"##);
         let payload = parse_selection(&url).expect("should parse");
-        assert_eq!(payload["selector"], "#go");
-        assert_eq!(payload["tagName"], "button");
+        assert_eq!(payload["count"], 1);
+        assert_eq!(payload["generation"], 7);
     }
 
     #[test]

@@ -53,10 +53,35 @@ describe("browserClient (embedded pane)", () => {
   })
 
   it("embedCapture returns the screenshot for the rect", async () => {
-    call.mockResolvedValueOnce({ bytes: "AAAA", width: 10, height: 10 })
-    const shot = await browserClient.embedCapture(rect)
+    call
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ bytes: "AAAA", width: 10, height: 10 })
+      .mockResolvedValueOnce(undefined)
+    const pending = browserClient.embedCapture(rect)
+    const shot = await pending
     expect(shot.bytes).toBe("AAAA")
-    expect(call).toHaveBeenCalledWith("browser_embed_capture", rect)
+    expect(call.mock.calls).toEqual([
+      ["browser_embed_set_frozen", { on: true }],
+      ["browser_embed_capture", rect],
+      ["browser_embed_set_frozen", { on: false }],
+    ])
+  })
+
+  it("always unfreezes when capture fails", async () => {
+    call.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("capture failed"))
+    const pending = browserClient.embedCapture(rect)
+    const assertion = expect(pending).rejects.toThrow("capture failed")
+    await assertion
+    expect(call).toHaveBeenLastCalledWith("browser_embed_set_frozen", { on: false })
+  })
+
+  it("attempts to unfreeze when freezing fails", async () => {
+    call.mockRejectedValueOnce(new Error("freeze failed")).mockResolvedValueOnce(undefined)
+    await expect(browserClient.embedCapture(rect)).rejects.toThrow("freeze failed")
+    expect(call.mock.calls).toEqual([
+      ["browser_embed_set_frozen", { on: true }],
+      ["browser_embed_set_frozen", { on: false }],
+    ])
   })
 
   it("embedReload and embedDestroy take no args", async () => {
@@ -68,6 +93,39 @@ describe("browserClient (embedded pane)", () => {
 })
 
 describe("browserClient agent methods", () => {
+  it("embedDrainSelection unwraps the bulk envelope", async () => {
+    const selection = {
+      paneId: "browser-embed",
+      selector: "#go",
+      domPath: "button#go",
+      tagName: "button",
+      id: "go",
+      classes: null,
+      rect: { x: 0, y: 0, width: 10, height: 10 },
+      outerHTML: "<button id=\"go\"></button>",
+      text: "Go",
+      pageUrl: "http://localhost/",
+      pageTitle: "Home",
+    }
+    call.mockResolvedValueOnce(JSON.stringify({ ok: true, error: null, selections: [selection] }))
+    await expect(browserClient.embedDrainSelection()).resolves.toEqual([selection])
+    expect(call).toHaveBeenCalledWith("browser_embed_drain_selection", {})
+  })
+
+  it("embedDrainSelection surfaces an error envelope", async () => {
+    call.mockResolvedValueOnce(JSON.stringify({ ok: false, error: "page gone", selections: [] }))
+    await expect(browserClient.embedDrainSelection()).rejects.toThrow("page gone")
+  })
+
+  it.each([
+    "null",
+    JSON.stringify({ ok: "yes", selections: [] }),
+    JSON.stringify({ ok: true, selections: [{ selector: "#missing-shape" }] }),
+  ])("embedDrainSelection rejects an untrusted runtime payload", async (raw) => {
+    call.mockResolvedValueOnce(raw)
+    await expect(browserClient.embedDrainSelection()).rejects.toThrow(/invalid selection drain/)
+  })
+
   it("embedSnapshot unwraps the ok envelope", async () => {
     call.mockResolvedValueOnce(
       JSON.stringify({

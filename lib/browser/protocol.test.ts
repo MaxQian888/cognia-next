@@ -2,6 +2,7 @@ import {
   BROWSER_EVENTS,
   type BrowserSelection,
   formatSelectionComment,
+  formatSelectionsComment,
   isLocalHostname,
   normalizePreviewUrl,
   resolveTrustTier,
@@ -23,6 +24,62 @@ const SELECTION: BrowserSelection = {
 }
 
 describe("formatSelectionComment", () => {
+  it("supports compact, detailed, and forensic detail levels", () => {
+    const enriched = {
+      ...SELECTION,
+      nearbyText: "Checkout summary",
+      computedStyles: { display: "flex", color: "rgb(0, 0, 0)" },
+      accessibility: { role: "button", name: "Go" },
+      devicePixelRatio: 2,
+      timestamp: "2026-07-16T10:00:00.000Z",
+    }
+    const compact = formatSelectionComment(enriched, "change it", "compact")
+    expect(compact.split("\n")).toHaveLength(1)
+    expect(compact).toContain("change it")
+    expect(compact).not.toContain("HTML:")
+
+    const detailed = formatSelectionComment(enriched, "change it", "detailed")
+    expect(detailed).toContain("Classes: btn primary")
+    expect(detailed).toContain("Bounds: x=10, y=20, width=100, height=40")
+    expect(detailed).toContain("Nearby text: Checkout summary")
+
+    const forensic = formatSelectionComment(enriched, "change it", "forensic")
+    expect(forensic).toContain("Computed styles: display=flex, color=rgb(0, 0, 0)")
+    expect(forensic).toContain("Accessibility: role=button, name=Go")
+    expect(forensic).toContain("Environment: DPR=2, timestamp=2026-07-16T10:00:00.000Z")
+  })
+
+  it("renders a CSS reference frame and parent layout", () => {
+    const out = formatSelectionComment(
+      {
+        ...SELECTION,
+        viewport: { width: 1440, height: 900 },
+        contentArea: { selector: "main", left: 220, right: 1420, width: 1200, centerX: 820 },
+        parentLayout: { display: "flex", flexDirection: "column", gap: "24px", selector: "main" },
+      },
+      "move it"
+    )
+    expect(out).toContain("### Reference Frame")
+    expect(out).toContain("Viewport: `1440×900px`")
+    expect(out).toContain("Content area: `1200px` wide, left edge at `x=220`, right at `x=1420` (`main`)")
+    expect(out).toContain("Horizontal position in container: `element.x - 220`")
+    expect(out).toContain("Width as % of container: `element.width / 1200 × 100`")
+    expect(out).toContain("Parent: `flex`, flex-direction: `column`, gap: `24px` (`main`)")
+  })
+
+  it("uses viewport-relative CSS arithmetic without a content area", () => {
+    const out = formatSelectionComment(
+      { ...SELECTION, viewport: { width: 1024, height: 768 } },
+      "move it"
+    )
+    expect(out).toContain("Horizontal position in viewport: `element.x / 1024 × 100`")
+    expect(out).toContain("Width as % of viewport: `element.width / 1024 × 100`")
+  })
+
+  it("omits the reference frame when spatial context is absent", () => {
+    expect(formatSelectionComment(SELECTION, "x")).not.toContain("### Reference Frame")
+  })
+
   it("leads with the comment then the element context", () => {
     const out = formatSelectionComment(SELECTION, "  make this blue  ")
     expect(out.startsWith("make this blue")).toBe(true)
@@ -81,6 +138,29 @@ describe("formatSelectionComment", () => {
     expect(out).not.toContain("Props:")
     expect(out).not.toContain("Rendered by")
     expect(out).not.toContain("Likely source:")
+  })
+})
+
+describe("formatSelectionsComment", () => {
+  it("formats numbered element, area, and text targets with budget disclosure", () => {
+    const out = formatSelectionsComment(
+      [
+        { ...SELECTION, detailReduced: { selectionCount: 3, outerHTMLLimit: 2000, reason: "multi-selection-budget" } },
+        { ...SELECTION, kind: "area", selector: "", tagName: "", outerHTML: "", text: "" },
+        { ...SELECTION, kind: "text", selectedText: "Buy now" },
+      ],
+      "align these"
+    )
+    expect(out).toContain("Selected targets (in-app browser): 3")
+    expect(out).toContain("### 1. Element")
+    expect(out).toContain("### 2. Area")
+    expect(out).toContain("### 3. Text range")
+    expect(out).toContain("Selected text: Buy now")
+    expect(out).toContain("Detail reduced: outerHTML capped at 2000 characters")
+  })
+
+  it("preserves the scalar formatter for a single selection", () => {
+    expect(formatSelectionsComment([SELECTION], "x")).toBe(formatSelectionComment(SELECTION, "x"))
   })
 })
 

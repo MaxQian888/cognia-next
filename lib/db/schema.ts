@@ -2482,6 +2482,13 @@ export class CogniaDB extends Dexie {
       browserRecordings: "&id, baseUrl, updatedAt, [baseUrl+updatedAt]",
     })
 
+    // v111 — Durable browser annotations and their resolution lifecycle.
+    // Local-only: these target one machine's localhost dev server, so syncing
+    // them would leak meaningless local URLs off-device for no benefit.
+    this.version(111).stores({
+      browserAnnotations: "&id, sessionId, baseUrl, status, createdAt, [baseUrl+status]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -2558,6 +2565,7 @@ export class CogniaDB extends Dexie {
   codeAdoptionTurns!: Table<import("@/lib/code-adoption/types").CodeAdoptionTurnRow, string>
   // v110 — Recorded browser flows (ADR-0072). See `lib/db/browser-recordings.ts`.
   browserRecordings!: Table<import("./browser-recordings").BrowserRecordingRow, string>
+  browserAnnotations!: Table<import("./browser-annotations").BrowserAnnotationRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated

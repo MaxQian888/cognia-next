@@ -10,6 +10,10 @@ const mockClearSelection = jest.fn()
 const mockSendComment = jest.fn().mockResolvedValue(true)
 const mockSendScreenshot = jest.fn().mockResolvedValue(true)
 const mockSendText = jest.fn().mockResolvedValue(true)
+const mockQueueAnnotation = jest.fn()
+const mockSendAnnotations = jest.fn().mockResolvedValue(true)
+const mockTransitionAnnotation = jest.fn().mockResolvedValue(true)
+let mockPendingAnnotations: Array<Record<string, unknown>> = []
 
 // The recorder panel is a separately-tested unit (browser-recorder-panel.test.tsx)
 // and pulls in the Dexie graph; stub it here and assert only that the pane
@@ -56,6 +60,7 @@ jest.mock("@/hooks/browser/use-region-visibility", () => ({
 jest.mock("@/hooks/browser/use-element-selection", () => ({
   useElementSelection: () => ({
     selection: mockSelection,
+    selections: mockSelection ? [mockSelection] : [],
     navigated: mockNavigated,
     selectMode: mockSelectMode,
     setSelectMode: mockSetSelectMode,
@@ -67,7 +72,17 @@ jest.mock("@/hooks/browser/use-selection-to-chat", () => ({
     sendComment: mockSendComment,
     sendScreenshot: mockSendScreenshot,
     sendText: mockSendText,
+    queueAnnotation: mockQueueAnnotation,
+    sendAnnotations: mockSendAnnotations,
   }),
+}))
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => mockPendingAnnotations,
+}))
+jest.mock("@/lib/db/browser-annotations", () => ({
+  deleteExpiredBrowserAnnotations: jest.fn().mockResolvedValue(0),
+  listActionableBrowserAnnotations: jest.fn().mockResolvedValue([]),
+  transitionBrowserAnnotation: (...args: unknown[]) => mockTransitionAnnotation(...args),
 }))
 jest.mock("@/lib/browser/client", () => ({
   browserClient: {
@@ -109,6 +124,7 @@ const commitUrl = (value: string) => {
 }
 
 beforeEach(() => {
+  window.localStorage.clear()
   mockSelection = null
   mockNavigated = null
   mockTauri = true
@@ -123,6 +139,10 @@ beforeEach(() => {
   mockClearSelection.mockClear()
   mockSendComment.mockClear().mockResolvedValue(true)
   mockSendScreenshot.mockClear().mockResolvedValue(true)
+  mockQueueAnnotation.mockReset()
+  mockSendAnnotations.mockReset().mockResolvedValue(true)
+  mockTransitionAnnotation.mockReset().mockResolvedValue(true)
+  mockPendingAnnotations = []
   mockOpenExternal.mockClear().mockResolvedValue(undefined)
   ;(browserClient.embedReload as jest.Mock).mockClear()
   ;(browserClient.embedBack as jest.Mock).mockClear()
@@ -132,6 +152,58 @@ beforeEach(() => {
   ;(browserClient.embedSetPanelLabels as jest.Mock).mockClear()
   ;(toast.success as jest.Mock).mockClear()
   ;(toast.error as jest.Mock).mockClear()
+})
+
+it("persists the selected annotation detail level", () => {
+  renderPane(<BrowserPreviewPane />)
+  const control = screen.getByRole("combobox", { name: "Annotation detail" })
+  expect(control).toHaveValue("standard")
+  fireEvent.change(control, { target: { value: "forensic" } })
+  expect(control).toHaveValue("forensic")
+  expect(window.localStorage.getItem("cognia.browser.output-detail")).toBe("forensic")
+})
+
+it("queues a selected annotation through durable storage", async () => {
+  mockSelection = SELECTION
+  mockQueueAnnotation.mockResolvedValue({ id: "a1", selection: SELECTION })
+  renderPane(<BrowserPreviewPane sessionId="s1" />)
+  fireEvent.change(screen.getByPlaceholderText(/Describe the change/i), {
+    target: { value: "increase contrast" },
+  })
+  fireEvent.change(screen.getByRole("combobox", { name: "Annotation intent" }), {
+    target: { value: "fix" },
+  })
+  fireEvent.change(screen.getByRole("combobox", { name: "Annotation severity" }), {
+    target: { value: "important" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Add to queue" }))
+  await waitFor(() =>
+    expect(mockQueueAnnotation).toHaveBeenCalledWith(SELECTION, "increase contrast", {
+      sessionId: "s1",
+      baseUrl: "http://localhost:3000",
+      intent: "fix",
+      severity: "important",
+    })
+  )
+})
+
+it("sends and triages persisted pending annotations", async () => {
+  const annotation = {
+    id: "a1",
+    comment: "increase contrast",
+    selection: SELECTION,
+    status: "pending",
+    intent: "change",
+    severity: "suggestion",
+  }
+  mockPendingAnnotations = [annotation]
+  renderPane(<BrowserPreviewPane sessionId="s1" />)
+  fireEvent.click(screen.getByRole("button", { name: "Send 1" }))
+  await waitFor(() => expect(mockSendAnnotations).toHaveBeenCalledWith([annotation], expect.any(Object)))
+  fireEvent.click(screen.getByRole("button", { name: "Resolve annotation" }))
+  await waitFor(() => expect(mockTransitionAnnotation).toHaveBeenCalledWith("a1", "resolved", expect.any(Number), "human"))
+  fireEvent.click(screen.getByRole("button", { name: "Remove annotation" }))
+  await waitFor(() => expect(mockTransitionAnnotation).toHaveBeenCalledWith("a1", "dismissed", expect.any(Number), "human"))
 })
 
 it("falls back to the sandboxed WebPreview URL bar + iframe outside Tauri", () => {
@@ -272,9 +344,10 @@ it("sends a selection comment to chat and clears on success", async () => {
   })
   fireEvent.click(screen.getByRole("button", { name: /Send to chat/i }))
   await waitFor(() =>
-    expect(mockSendComment).toHaveBeenCalledWith(SELECTION, "make it blue", {
+    expect(mockSendComment).toHaveBeenCalledWith([SELECTION], "make it blue", {
       sessionId: undefined,
       captureRect: { x: 0, y: 0, width: 100, height: 100 },
+      detailLevel: "standard",
     })
   )
   expect(toast.success).toHaveBeenCalled()

@@ -378,6 +378,44 @@ describe("getDb", () => {
     ).toBe(2)
   })
 
+  it("v111 browserAnnotations round-trips and resolves its compound index", async () => {
+    const db = new CogniaDB()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(111)
+    await db.browserAnnotations.put({
+      id: "a1",
+      sessionId: "s1",
+      baseUrl: "http://localhost:3000",
+      selection: {
+        paneId: "browser-pane",
+        tagName: "BUTTON",
+        selector: "button",
+        domPath: "main > button",
+        id: null,
+        classes: null,
+        rect: { x: 0, y: 0, width: 100, height: 40 },
+        outerHTML: "<button>Save</button>",
+        text: "Save",
+        pageUrl: "http://localhost:3000",
+        pageTitle: "Home",
+      },
+      comment: "Fix contrast",
+      intent: "fix",
+      severity: "important",
+      status: "pending",
+      thread: [],
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect(
+      await db.browserAnnotations
+        .where("[baseUrl+status]")
+        .equals(["http://localhost:3000", "pending"])
+        .count()
+    ).toBe(1)
+    db.close()
+  })
+
   it("v109_preserves_user_accepted_rows", async () => {
     const name = `cognia-v109-preserve-user-${Date.now()}`
     const legacy = new Dexie(name)

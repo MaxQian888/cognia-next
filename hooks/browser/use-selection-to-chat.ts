@@ -4,14 +4,24 @@ import { useCallback } from "react"
 
 import { useClaudeChat } from "@/hooks/chat/use-claude-chat"
 import { browserClient } from "@/lib/browser/client"
+import { formatAnnotationBatch } from "@/lib/browser/annotation-queue"
 import {
   type BrowserSelection,
   type ElementRect,
+  type OutputDetailLevel,
   formatSelectionComment,
+  formatSelectionsComment,
   screenshotToFile,
 } from "@/lib/browser/protocol"
 import { buildSendContent, type SubmittedFile } from "@/lib/chat/attachments/dispatch"
 import { useChatStore } from "@/stores/chat/chat-store"
+import {
+  saveBrowserAnnotation,
+  transitionBrowserAnnotation,
+  type BrowserAnnotationIntent,
+  type BrowserAnnotationRow,
+  type BrowserAnnotationSeverity,
+} from "@/lib/db/browser-annotations"
 
 export interface SendScreenshotOptions {
   /** Target chat session. Defaults to the focused session. */
@@ -27,6 +37,7 @@ export interface SendCommentOptions {
   captureRect?: ElementRect
   /** Target chat session. Defaults to the focused session. */
   sessionId?: string
+  detailLevel?: OutputDetailLevel
 }
 
 /**
@@ -39,7 +50,7 @@ export function useSelectionToChat() {
 
   const sendComment = useCallback(
     async (
-      selection: BrowserSelection,
+      selection: BrowserSelection | BrowserSelection[],
       comment: string,
       options: SendCommentOptions = {}
     ): Promise<boolean> => {
@@ -47,7 +58,9 @@ export function useSelectionToChat() {
       const sessionId = options.sessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) throw new Error("No active chat session for the preview comment")
 
-      const text = formatSelectionComment(selection, comment)
+      const text = Array.isArray(selection)
+        ? formatSelectionsComment(selection, comment, options.detailLevel)
+        : formatSelectionComment(selection, comment, options.detailLevel)
       const files: SubmittedFile[] = []
       if (options.includeScreenshot !== false && options.captureRect) {
         try {
@@ -69,6 +82,81 @@ export function useSelectionToChat() {
       return true
     },
     [send, interruptAndSteer]
+  )
+
+  const sendAnnotations = useCallback(
+    async (
+      annotations: BrowserAnnotationRow[],
+      options: SendCommentOptions = {}
+    ): Promise<boolean> => {
+      if (annotations.length === 0) return false
+      const sessionId = options.sessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return false
+
+      const files: SubmittedFile[] = []
+      // A batch gets one pane-level screenshot at send time. Annotation indexes
+      // in the text are the stable reference; N screenshots would be noisy and
+      // disproportionately expensive.
+      if (options.includeScreenshot !== false && options.captureRect) {
+        try {
+          const shot = await browserClient.embedCapture(options.captureRect)
+          if (shot?.bytes) files.push(screenshotToFile(shot.bytes))
+        } catch {
+          // Selection metadata remains sufficient when capture is unavailable.
+        }
+      }
+      const { content } = await buildSendContent(
+        formatAnnotationBatch(annotations, options.detailLevel),
+        files
+      )
+      const status = useChatStore.getState().sessions[sessionId]?.status
+      if (status === "streaming" || status === "awaiting_approval") {
+        await interruptAndSteer(sessionId)
+      }
+      await send(content, undefined, { sessionId })
+      const now = new Date().getTime()
+      await Promise.all(
+        annotations.map((annotation) =>
+          transitionBrowserAnnotation(annotation.id, "acknowledged", now)
+        )
+      )
+      return true
+    },
+    [send, interruptAndSteer]
+  )
+
+  const queueAnnotation = useCallback(
+    async (
+      selection: BrowserSelection,
+      comment: string,
+      options: {
+        sessionId?: string
+        baseUrl: string
+        intent?: BrowserAnnotationIntent
+        severity?: BrowserAnnotationSeverity
+      }
+    ): Promise<BrowserAnnotationRow | undefined> => {
+      if (!comment.trim()) return undefined
+      const targetSessionId = options.sessionId ?? useChatStore.getState().activeSessionId
+      if (!targetSessionId) return undefined
+      const now = new Date().getTime()
+      const annotation: BrowserAnnotationRow = {
+        id: crypto.randomUUID(),
+        sessionId: targetSessionId,
+        baseUrl: options.baseUrl,
+        selection,
+        comment: comment.trim(),
+        intent: options.intent ?? "change",
+        severity: options.severity ?? "suggestion",
+        status: "pending",
+        thread: [],
+        createdAt: now,
+        updatedAt: now,
+      }
+      await saveBrowserAnnotation(annotation)
+      return annotation
+    },
+    []
   )
 
   /**
@@ -117,5 +205,5 @@ export function useSelectionToChat() {
     [send]
   )
 
-  return { sendComment, sendScreenshot, sendText }
+  return { sendComment, queueAnnotation, sendAnnotations, sendScreenshot, sendText }
 }
