@@ -1,6 +1,11 @@
 # E2E Suite Revival — Remediation Plan (2026-07-16)
 
-**Status:** none of this is implemented. Every finding below is a verified defect in the
+**Status: EXECUTED 2026-07-17.** Waves 0–4 landed as ~14 commits on `dev`; see
+**§7 Execution Record & Baseline** at the bottom for what shipped, the decisions taken
+on the three OPEN questions, the product bugs the new tests surfaced, and the
+first real baseline. The body below is preserved as the original audit.
+
+**Original status (2026-07-16):** none of this is implemented. Every finding below is a verified defect in the
 Playwright E2E suite (`tests/e2e/`, 154 spec files on disk), its CI wiring
 (`.github/workflows/{ci,test}.yml`), or its typecheck configuration.
 
@@ -515,8 +520,8 @@ memory: `browser-e2e-accountgate-and-bridges`). Delete the three mock self-tests
 
 **Problem.** Read end-to-end. Structure: 4 viewports × (7 tabs + 2) + 4 viewports × (4 subtabs
 
-- 2) = 60 tests, **the single largest file in the suite**. 10 are skipped. The 50 that run
-  assert nothing viewport-specific.
+- 2. = 60 tests, **the single largest file in the suite**. 10 are skipped. The 50 that run
+     assert nothing viewport-specific.
 
 Three distinct defects:
 
@@ -934,3 +939,116 @@ type error, `/v1/embeddings` fabricated surface, `master:test.yml` schedule bloc
 - [Element Web — Playwright e2e](https://github.com/element-hq/matrix-react-sdk/blob/develop/docs/playwright.md)
   — testcontainers running a real Synapse rather than mocks; the contrast that makes W3.1's
   unused mock contract so costly.
+
+---
+
+## 7. Execution Record & Baseline (2026-07-17)
+
+Executed in one pass, ~14 commits on `dev` (from `ci: drop write-scope publish step…`
+through `test(e2e): static-mode budget…`). One item = one commit wherever files
+didn't overlap.
+
+### 7.1 Decisions taken on the OPEN questions
+
+| Question                              | Decision                                                                                                                                                                                                                        | Notes                                                                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **[OPEN-1]** CI permission escalation | **(b)** — the `EnricoMi/publish-unit-test-result-action` step and the `pull-requests/checks: write` scopes are deleted. junit stays in artifacts + job summary.                                                                 | Local `actionlint` shows only pre-existing shellcheck style findings; the compile-level proof needs the first push. |
+| **[OPEN-2]** macOS tauri E2E          | **(a)** — tauri project stays Windows-only (CDP is a WebView2 loader feature). global-setup warn-skips the launch off-Windows; cross-platform chat assertions moved to the browser-runnable mobile standalone spec (see 7.3-D). | Documented in `tauri-cdp-launch.ts` header.                                                                         |
+| **[OPEN-3]** 79 uncovered routes      | **Only W4.1 + W4.2 this round** (maintainer call). The blast-radius triage in §5 stands as the backlog order: ① backup/session-import ② inbox/connector sends ③ subscription/keyring ④ /share/view ⑤ agent-teams/memory/twin.   |                                                                                                                     |
+
+### 7.2 What changed beyond the plan's letter
+
+- **W0.2 was already merged** (`20295b83e` reached `dev` before execution), so W0.1 shipped alone.
+- **W1.5 self-heals**: `origin/master`'s `test.yml` (no `schedule:`, dead `--project=tauri-driver`)
+  is simply replaced by `dev`'s corrected copy on the next merge — verified `dev`'s copy is right.
+- **W3.4 was already fixed in the product**: the i18n split-source migration nested
+  `workflows.nodes.*` properly (zero dotted keys remain). The 8 blocked tests were retired
+  with the rest of the responsive sweep rewrite (W2.5) — the settings-workflows audit tab
+  now passes without skips.
+- The typecheck unlock (W0.3) surfaced 11 errors, including two real bugs the plan didn't
+  know about: `getActiveAccountId` reading a nonexistent field (always returned null) and
+  the multi-step orchestration spec reading `run.events` (lives in `workflowRunEvents`).
+
+### 7.3 Product defects the new tests exposed (the actual payoff)
+
+- **A. Workflow run-history crash** _(fixed + changeset)_ — `run-list.tsx` read
+  `runs[0].workflowSnapshot.name` unguarded; any run row without an embedded snapshot
+  (older schema, imports) crashed the whole `/workflows/runs` route. Found the moment the
+  rewritten runs-filter spec drove the real page.
+- **B. Mobile backup restore impossible** _(fixed + changeset)_ — mobile export ALWAYS
+  encrypts, but import fed the envelope straight into `migrateEnvelope`, which throws on
+  encrypted input: a phone could never restore its own backup. Import now decrypts with
+  the passphrase field (+ passphrase-required / wrong-passphrase copy in both locales).
+  The W4.2 round-trip spec (seed → export → wipe → import → data back) is green and
+  failed before the fix.
+- **C. GitHub workflow executors had no mock seam** _(fixed)_ — `configureMockBaseUrls({github})`
+  had NO consumer; runs either phantom-succeeded (trigger fired before the github-delivery
+  plugin registered its executors) or would have called api.github.com. `getOctokitForRepo`
+  now honors the published mock base URL under `NEXT_PUBLIC_E2E=1` (dead-code-eliminated
+  in production), and specs register the fixture repo in the plugin's registry, which also
+  waits out plugin activation.
+- **D. Standalone (BYOK) chat is dormant** _(NOT fixed — out of scope, pinned)_ —
+  `runStandaloneTurn` has zero product callers: the whole BYOK path exists (mode chooser,
+  provider settings, engine, unit tests) but the mobile composer's send was never routed
+  to it. The W4.1 spec is checked in as `test.fixme` and is the acceptance test for the
+  wiring. This also means the primary chat flow STILL has no runnable E2E in a默认 project
+  until either this wiring lands or the tauri nightly is treated as the gate.
+- **E. Pull-to-refresh dies under real touch** _(NOT fixed — candidate)_ — the primitive
+  sets no `touch-action`, so a vertical touch drag becomes a native scroll gesture and the
+  pointer stream is cancelled; on real phones the pull likely rubber-bands a few px and
+  dies. The spec pins the component contract via synthetic pointers and documents this.
+- **F. Boot-time schema-upgrade wedge** _(mitigated in test infra — product candidate)_ —
+  `page.reload()` leaves the old document's IndexedDB connections alive long enough to
+  block the plugin manager's dynamic Dexie bump ("Upgrade 'cognia-claude' blocked by other
+  connection"); test infra now re-boots through `about:blank` (boot-to-ready ~2s, stable).
+  Under parallel workers, plugin activation itself has been measured at 10-45s (solo ~5s) —
+  hence the 60s static / 90s mobile budgets and `test.slow()` on the github specs. A
+  product-side look at the dynamic `version().stores()`-on-every-boot design is warranted.
+
+### 7.4 Baseline (2026-07-17, static export, workers=4, this machine)
+
+Run after all waves landed. **Two consecutive runs** of
+`PLAYWRIGHT_STATIC=1 npx playwright test --project=chromium --project=mobile-pixel-7`:
+
+| Run | passed | failed | skipped | wall-clock |
+| --- | ------ | ------ | ------- | ---------- |
+| 1   | 155    | 71     | 2       | 16.4m      |
+| 2   | 155    | 71     | 2       | 16.3m      |
+
+**Flakes: zero.** The failure SET is byte-identical across both runs (symmetric
+difference = 0, 71 in common) — the suite is fully deterministic on this machine at
+`workers=4`. The 2 skips are the deliberate `fixme` (standalone chat) pair.
+
+Failure taxonomy (run 1, 71 total):
+
+| Class                                       | Count | Reading                                                                                                                                                                                                                               |
+| ------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `toBeVisible` / element not found           | 28    | Mixed: contention-slow mounts + genuinely missing UI in untouched legacy specs                                                                                                                                                        |
+| interaction timeouts (click/fill at 60-90s) | ~18   | Full-suite load profile; these same specs pass solo/2-worker                                                                                                                                                                          |
+| run-status equality (`failed:` runs)        | 13    | Mostly `action-github/*` under load — executor runs exceed activation/HTTP windows                                                                                                                                                    |
+| dead-by-construction legacy specs           | ~7    | `import("@/…")` inside `page.evaluate` (workflows/runs/rerun/run-detail/run-list/event-log-replay), one invalid CSS selector (`[data-step=3]`), one `fill()` on a non-editable — these can never have passed and are now honestly red |
+
+By directory: mobile 28 · workflows 18 · action-github 12 · workflows/editor 7 ·
+workflows/runs 4 · other 2.
+
+Known-red classes going into CI:
+
+- `action-github/*` "manual run" specs flake under 4-worker contention on this machine
+  (plugin-activation latency, 7.3-F) while passing solo/2-worker — treat wall-clock and
+  worker count as the first CI tuning knobs (CI runners have 2 cores; consider `--workers=2`
+  for the e2e job).
+- `standalone-chat.spec.ts` is `fixme` by design (7.3-D).
+- Anything not touched by this epic keeps whatever state the baseline shows; the numbers
+  below are the honest starting line, not a claim of green.
+
+### 7.5 Follow-ups (ordered)
+
+1. Push `dev` → confirm the pipeline compiles (first-ever CI run) and capture the CI-side
+   baseline; tune e2e workers/sharding if the contention class from 7.4 reproduces.
+2. Wire the standalone chat engine (7.3-D) and flip the W4.1 spec from `fixme` to live.
+3. Product fixes for 7.3-E (touch-action) and 7.3-F (plugin Dexie bump design).
+4. Continue the OPEN-3 triage ladder: ② connector sends → ③ subscription/keyring →
+   ④ /share/view → ⑤ agent-teams/memory/twin.
+5. Extend the persist round-trip pattern (fill → save → reopen → read back,
+   `expectInspectorFieldValue`) from the 6 representative node specs to the rest as they
+   are touched; titles were already de-falsified suite-wide.
