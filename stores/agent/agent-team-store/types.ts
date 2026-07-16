@@ -168,12 +168,6 @@ export interface AgentTeamState {
   setWorkspaceFocus: (focus: Partial<AgentTeamWorkspaceFocus>) => void
   setWorkspaceTeamFromRoute: (teamId: string | null | undefined) => void
   closeAgentTeamWorkspaceDetail: () => void
-  /**
-   * Merge a patch into a team's persisted project-Editor session. Session
-   * cleanup on team deletion is handled inline by `cleanupTeam` / `purgeProject`.
-   */
-  setEditorSession: (teamId: string, patch: Partial<AgentTeamEditorSession>) => void
-
   // Selectors
   getTeam: (teamId: string) => AgentTeam | undefined
   getTeammate: (teammateId: string) => AgentTeammate | undefined

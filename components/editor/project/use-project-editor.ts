@@ -3,8 +3,8 @@
 // State engine for the project Editor tab. Owns the selected root, the set of
 // open files (with draft/saved content for dirty tracking), the active file,
 // and the persistence + LSP-root wiring. Kept as a hook (not a store) so each
-// mounted team workspace is independent; the durable slice lives in
-// `agent-team-store.editorSession[teamId]`.
+// mounted editor scope is independent; the durable slice lives in the generic
+// project-editor session store under `scopeKey`.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
@@ -22,7 +22,7 @@ import {
 } from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 import { watchWorkspace } from "@/lib/files/workspace-watch"
 import { languageFromPath, type EditorLanguage } from "@/components/editor/editor-language"
-import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import { loggers } from "@cognia/logging"
 
 const editorLogger = loggers.agent.child("project-editor")
@@ -50,7 +50,8 @@ export interface OpenFile {
 }
 
 export interface UseProjectEditorArgs {
-  teamId: string
+  /** Stable persistence key, e.g. `team:<id>` or `session:<id>`. */
+  scopeKey: string
   /** The team's base working directory (the main repo root). */
   workingDir: string
   /** Injectable deps for testing. */
@@ -89,11 +90,11 @@ export function joinRootRel(root: string, relPath: string): string {
   return relPath ? `${base}/${relPath}` : base
 }
 
-export function useProjectEditor({ teamId, workingDir, deps }: UseProjectEditorArgs) {
+export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEditorArgs) {
   const d = useMemo(() => ({ ...defaultDeps, ...deps }), [deps])
 
-  const persisted = useAgentTeamStore((s) => s.editorSession[teamId])
-  const setEditorSession = useAgentTeamStore((s) => s.setEditorSession)
+  const persisted = useProjectEditorSessionStore((s) => s.sessions[scopeKey])
+  const setEditorSession = useProjectEditorSessionStore((s) => s.setSession)
 
   const [roots, setRoots] = useState<ProjectRoot[]>([
     { key: workingDir, label: "main", path: workingDir, isMain: true },
@@ -150,12 +151,12 @@ export function useProjectEditor({ teamId, workingDir, deps }: UseProjectEditorA
 
   // ── Persist the session (root / open files / active file) ───────────────
   useEffect(() => {
-    setEditorSession(teamId, {
+    setEditorSession(scopeKey, {
       rootKey,
       openPaths: openFiles.map((f) => f.relPath),
       activePath,
     })
-  }, [teamId, rootKey, openFiles, activePath, setEditorSession])
+  }, [scopeKey, rootKey, openFiles, activePath, setEditorSession])
 
   // ── File operations ─────────────────────────────────────────────────────
   const openFile = useCallback(

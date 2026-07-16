@@ -23,9 +23,10 @@ interface DiffPaneProps {
   path: string
   staged: boolean
   actions: Pick<UseGitActionsResult, "stage" | "unstage" | "discard">
+  density?: "compact" | "touch"
 }
 
-export function DiffPane({ rootDir, path, staged, actions }: DiffPaneProps) {
+export function DiffPane({ rootDir, path, staged, actions, density = "compact" }: DiffPaneProps) {
   const t = useTranslations("sourceControl")
   const [fetched, setFetched] = useState<GitDiff | null>(null)
   const cacheDiff = useGitStore((s) => s.cacheDiff)
@@ -107,7 +108,7 @@ export function DiffPane({ rootDir, path, staged, actions }: DiffPaneProps) {
         </div>
       )}
       <div className="min-h-0 flex-1">
-        <DiffViewer diff={diff} staged={staged} hunkActions={hunkActions} />
+        <DiffViewer diff={diff} staged={staged} hunkActions={hunkActions} density={density} />
       </div>
     </div>
   )
@@ -132,6 +133,7 @@ export function DiffPane({ rootDir, path, staged, actions }: DiffPaneProps) {
       onInvalidate={() => invalidateDiff(fileDiffKey(path, staged))}
       collapsed={reviewCollapsed}
       onToggleCollapse={() => setReviewCollapsed((c) => !c)}
+      density={density}
     />
   )
 

@@ -24,28 +24,49 @@ jest.mock("@/lib/tauri", () => ({
 import {
   gitBranches,
   gitCheckoutBranch,
+  gitCherryPick,
   gitCommit,
+  gitCommitFiles,
   gitConflicts,
   gitCreateBranch,
+  gitCreateTag,
   gitDeleteBranch,
+  gitDeleteTag,
+  gitDiffCommit,
   gitDiffFile,
+  gitDiffStagedAll,
+  gitDiffStat,
   gitDiffRefsFile,
   gitDiffRefsFiles,
   gitDiscard,
   gitDiscardAll,
   gitFetch,
   gitFileHistory,
+  gitBlame,
   gitIgnoreAdd,
   gitInit,
   gitIsRepo,
   gitLog,
   gitMerge,
   gitMergeAbort,
+  gitInteractiveRebase,
   gitPull,
   gitPush,
+  gitPushTag,
+  gitRebase,
+  gitRebaseCommits,
+  gitRefs,
+  gitRemoteAdd,
+  gitRemoteRemove,
+  gitRemotes,
   gitRenameBranch,
   gitRepoState,
+  gitReset,
+  gitRestore,
+  gitRevert,
   gitResolveConflict,
+  gitSequencerAbort,
+  gitSequencerContinue,
   gitStage,
   gitStashApply,
   gitStashDrop,
@@ -54,6 +75,7 @@ import {
   gitStashPush,
   gitStatus,
   gitSync,
+  gitTags,
   gitUnstage,
   gitWatchStart,
   gitWatchStop,
@@ -83,6 +105,7 @@ describe("when no git bridge is available (plain unpaired browser)", () => {
     expect(await gitIsRepo("/r")).toBe(false)
     expect(await gitRepoState("/r")).toBe(EMPTY_REPO_STATE)
     expect(await gitStatus("/r")).toBe(EMPTY_STATUS)
+    expect(await gitDiffStat("/r")).toEqual([])
     expect(await gitBranches("/r")).toEqual([])
     expect(await gitStashList("/r")).toEqual([])
     expect(await gitConflicts("/r")).toEqual([])
@@ -102,6 +125,47 @@ describe("when no git bridge is available (plain unpaired browser)", () => {
     await gitWorktreeAdd("/r", "/wt", "agent/x")
     await gitWorktreeRemove("/r", "/wt", true, "agent/x")
     await gitWorktreePrune("/r")
+
+    expect((await gitDiffCommit("/r", "abc", "a.ts")).hunks).toEqual([])
+    expect(await gitCommitFiles("/r", "abc")).toEqual([])
+    expect(await gitDiffRefsFiles("/r", "main", "feature")).toEqual([])
+    expect((await gitDiffRefsFile("/r", "main", "feature", "a.ts")).hunks).toEqual([])
+    expect(await gitDiffStagedAll("/r")).toBe("")
+    expect(await gitRefs("/r")).toEqual([])
+    expect(await gitBlame("/r", "a.ts")).toEqual([])
+    expect(await gitRemotes("/r")).toEqual([])
+    expect(await gitTags("/r")).toEqual([])
+    await gitDiscardAll("/r", true)
+    await gitCheckoutBranch("/r", "feature")
+    await gitCreateBranch("/r", "feature", true)
+    await gitDeleteBranch("/r", "feature", true)
+    await gitRenameBranch("/r", "renamed")
+    await gitFetch("/r")
+    await gitPull("/r")
+    await gitPush("/r")
+    await gitRemoteAdd("/r", "origin", "https://example.test/repo.git")
+    await gitRemoteRemove("/r", "origin")
+    await gitCreateTag("/r", "v1")
+    await gitDeleteTag("/r", "v1")
+    await gitPushTag("/r", "v1")
+    await gitReset("/r", "mixed", "HEAD")
+    await gitRestore("/r", ["a.ts"])
+    await gitStashPush("/r")
+    await gitStashPop("/r", 0)
+    await gitStashApply("/r", 0)
+    await gitStashDrop("/r", 0)
+    await gitIgnoreAdd("/r", "tmp.log")
+    await gitResolveConflict("/r", "a.ts", { side: "ours" })
+    await gitInit("/r")
+    await gitMerge("/r", "feature")
+    await gitMergeAbort("/r")
+    await gitRebase("/r", "main")
+    await gitCherryPick("/r", "abc")
+    await gitRevert("/r", "abc")
+    await gitSequencerContinue("/r")
+    await gitSequencerAbort("/r")
+    expect(await gitRebaseCommits("/r", "main")).toEqual([])
+    await gitInteractiveRebase("/r", "main", [])
     expect(callMock).not.toHaveBeenCalled()
   })
 })
@@ -155,6 +219,12 @@ describe("when in Tauri", () => {
     await gitStatus("/r")
     expect(callMock).toHaveBeenCalledWith("git_status", { repoPath: "/r" })
 
+    callMock.mockResolvedValueOnce([{ path: "src/a.ts", insertions: 2, deletions: 1 }])
+    await expect(gitDiffStat("/r")).resolves.toEqual([
+      { path: "src/a.ts", insertions: 2, deletions: 1 },
+    ])
+    expect(callMock).toHaveBeenCalledWith("git_diff_stat", { repoPath: "/r" })
+
     callMock.mockResolvedValueOnce([])
     await gitLog("/r", 50, 10)
     expect(callMock).toHaveBeenCalledWith("git_log", { repoPath: "/r", maxCount: 50, skip: 10 })
@@ -165,6 +235,63 @@ describe("when in Tauri", () => {
       repoPath: "/r",
       path: "a.ts",
       maxCount: 20,
+    })
+  })
+
+  it("covers the extended read and history command surface", async () => {
+    const diff = { path: "a.ts", oldContent: "", newContent: "", hunks: [], isBinary: false }
+    callMock.mockResolvedValueOnce(diff)
+    expect((await gitDiffCommit("/r", "abc", "a.ts")).language).toBe("typescript")
+    await gitCommitFiles("/r", "abc")
+    await gitDiffStagedAll("/r")
+    await gitRefs("/r")
+    await gitBlame("/r", "a.ts", "HEAD")
+    await gitRemotes("/r")
+    await gitTags("/r")
+    expect(callMock).toHaveBeenCalledWith("git_diff_commit", {
+      repoPath: "/r",
+      sha: "abc",
+      path: "a.ts",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_blame", {
+      repoPath: "/r",
+      path: "a.ts",
+      rev: "HEAD",
+    })
+  })
+
+  it("covers remote, tag, restore, and sequencer command surfaces", async () => {
+    await gitRemoteAdd("/r", "upstream", "https://example.test/repo.git")
+    await gitRemoteRemove("/r", "upstream")
+    await gitCreateTag("/r", "v1", "release", "HEAD")
+    await gitDeleteTag("/r", "v1")
+    await gitPushTag("/r", "v1")
+    await gitReset("/r", "mixed", "HEAD~1")
+    await gitRestore("/r", ["a.ts"], true, "HEAD")
+    await gitRebase("/r", "main")
+    await gitCherryPick("/r", "abc")
+    await gitRevert("/r", "def")
+    await gitSequencerContinue("/r")
+    await gitSequencerAbort("/r")
+    await gitRebaseCommits("/r", "main")
+    await gitInteractiveRebase("/r", "main", [{ action: "pick", sha: "abc" }])
+
+    expect(callMock).toHaveBeenCalledWith("git_create_tag", {
+      repoPath: "/r",
+      name: "v1",
+      message: "release",
+      target: "HEAD",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_restore", {
+      repoPath: "/r",
+      paths: ["a.ts"],
+      staged: true,
+      source: "HEAD",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_interactive_rebase", {
+      repoPath: "/r",
+      base: "main",
+      entries: [{ action: "pick", sha: "abc" }],
     })
   })
 

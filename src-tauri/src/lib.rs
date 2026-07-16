@@ -1110,6 +1110,7 @@ pub fn run() {
             git::commands::git_is_repo,
             git::commands::git_repo_state,
             git::commands::git_status,
+            git::commands::git_diff_stat,
             git::commands::git_diff_file,
             git::commands::git_diff_commit,
             git::commands::git_commit_files,
@@ -1643,4 +1644,17 @@ pub fn run() {
                 crash::sentinel::mark_clean_exit();
             }
         });
+}
+
+#[cfg(test)]
+mod command_registration_tests {
+    #[test]
+    fn git_diff_stat_is_registered_with_the_tauri_invoke_handler() {
+        let source = include_str!("lib.rs");
+        let command = ["git::commands::git_", "diff_stat,"].concat();
+        assert!(
+            source.contains(&command),
+            "git_diff_stat must remain in tauri::generate_handler!"
+        );
+    }
 }

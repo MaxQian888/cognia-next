@@ -1570,13 +1570,16 @@
     "designerUnsupportedDescription": "The designer subsystem isn't included in this build of cognia-next. Artifact \"{title}\" is read-only here.",
     "designerUnsupportedTitle": "Designer is unavailable",
     "dock": {
+      "artifactMode": "Artifact",
       "collapse": "Collapse panel",
       "hideHistory": "Hide artifact history",
       "openInNewTab": "Open in new tab",
       "showHistory": "Show artifact history",
       "splitView": "Split",
       "title": "Artifacts",
-      "toggleHint": "Toggle panel (Ctrl/Cmd+J)"
+      "toggleHint": "Toggle panel (Ctrl/Cmd+J)",
+      "workspaceMode": "Workspace",
+      "workspaceUnavailable": "Workspace requires the desktop app or a paired companion filesystem"
     },
     "download": "Download",
     "duplicate": "Duplicate",
@@ -1654,7 +1657,42 @@
     "typeSvg": "SVG",
     "versionHistory": "Version History",
     "versionRestored": "Version restored",
-    "words": "words"
+    "words": "words",
+    "workspace": {
+      "card": {
+        "cancel": "Cancel",
+        "editedFiles": "Edited {count, plural, one {# file} other {# files}}",
+        "review": "Review",
+        "undo": "Undo",
+        "undoConfirm": "Undo all changes",
+        "undoConfirmDescription": "This discards every staged, unstaged, and untracked change currently in this repository, including changes you made manually. This cannot be undone.",
+        "undoConfirmTitle": "Undo all repository changes?",
+        "undoFailed": "Could not undo workspace changes: {error}",
+        "undoSuccess": "Workspace changes undone"
+      },
+      "close": "Close workspace",
+      "missingProject": {
+        "description": "Link this conversation to a project before editing workspace files.",
+        "title": "No project linked"
+      },
+      "missingRoot": {
+        "description": "Add a primary root to the linked project to open its files.",
+        "title": "Project has no workspace root"
+      },
+      "missingSession": {
+        "description": "Select a conversation to resolve its project workspace.",
+        "title": "No conversation selected"
+      },
+      "mobileTitle": "Workspace",
+      "review": "Review",
+      "reviewChanges": "Changes",
+      "reviewDiff": "Diff",
+      "reviewEmpty": "Select a changed file to review its diff",
+      "unavailable": {
+        "description": "Workspace editing requires the desktop app or a paired companion filesystem.",
+        "title": "Workspace is unavailable"
+      }
+    }
   },
   "attention": {
     "badgeAria": "Attention items: {count}",
@@ -12815,6 +12853,39 @@
       "contentRequired": "System prompt cannot be empty.",
       "nameRequired": "Preset name is required."
     }
+  },
+  "projectEditor": {
+    "action": {
+      "copyPath": "Copy Path",
+      "copyRelativePath": "Copy Relative Path",
+      "format": "Format Document",
+      "save": "Save",
+      "searchProject": "Search in Project"
+    },
+    "cancel": "Cancel",
+    "closeTab": "Close {name}",
+    "delete": "Delete",
+    "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
+    "editorTab": "Editor",
+    "emptyEditor": "Open a file from the tree to start editing.",
+    "externallyChanged": "Changed on disk",
+    "filesTab": "Files",
+    "newFile": "New File",
+    "newFolder": "New Folder",
+    "refresh": "Refresh",
+    "rename": "Rename",
+    "rootLabel": "Project root",
+    "rootMain": "main (repository)",
+    "saveAll": "Save All ({count})",
+    "saveFailed": "Save failed: {error}",
+    "search": "Search",
+    "searchEmpty": "No matches",
+    "searchPlaceholder": "Search in project…",
+    "searchTab": "Search",
+    "treeAria": "Project files",
+    "treeEmpty": "No files",
+    "unavailableDesc": "The project editor needs a desktop app or a paired device to reach the project files.",
+    "unavailableTitle": "Editor unavailable"
   },
   "providerCompare": {
     "compare": "Compare",

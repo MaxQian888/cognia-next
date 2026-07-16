@@ -24,6 +24,11 @@ import {
   clearAgentTeamAccountStorage,
   purgeAgentTeamAccountStorage,
 } from "@/stores/agent/agent-team-store/store"
+import {
+  activateProjectEditorAccountStorage,
+  clearProjectEditorAccountStorage,
+  purgeProjectEditorAccountStorage,
+} from "@/stores/editor/project-editor-session-store"
 
 export interface CreateLocalAccountInput {
   id?: string
@@ -454,11 +459,13 @@ async function dropDexieAccountDatabase(accountId: string): Promise<void> {
 async function purgeLocalStorageForAccount(accountId: string): Promise<void> {
   purgeArtifactAccountStorage(accountId)
   purgeAgentTeamAccountStorage(accountId)
+  purgeProjectEditorAccountStorage(accountId)
   if (typeof window === "undefined") return
   const prefixes = [
     `cognia-account-${accountId}:`,
     `cognia-artifacts:${accountId}:`,
     `cognia-agent-teams:${accountId}:`,
+    `cognia-project-editor-sessions:${accountId}:`,
   ]
   for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
     const key = window.localStorage.key(index)
@@ -471,11 +478,13 @@ async function purgeLocalStorageForAccount(accountId: string): Promise<void> {
 async function activateBrowserAccountLocalState(accountId: string): Promise<void> {
   activateArtifactAccountStorage(accountId)
   activateAgentTeamAccountStorage(accountId)
+  activateProjectEditorAccountStorage(accountId)
 }
 
 function clearBrowserAccountLocalState(): void {
   clearArtifactAccountStorage()
   clearAgentTeamAccountStorage()
+  clearProjectEditorAccountStorage()
 }
 
 function toError(error: unknown): Error {

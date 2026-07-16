@@ -1,0 +1,33 @@
+{
+  "action": {
+    "copyPath": "Copy Path",
+    "copyRelativePath": "Copy Relative Path",
+    "format": "Format Document",
+    "save": "Save",
+    "searchProject": "Search in Project"
+  },
+  "cancel": "Cancel",
+  "closeTab": "Close {name}",
+  "delete": "Delete",
+  "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
+  "editorTab": "Editor",
+  "emptyEditor": "Open a file from the tree to start editing.",
+  "externallyChanged": "Changed on disk",
+  "filesTab": "Files",
+  "newFile": "New File",
+  "newFolder": "New Folder",
+  "refresh": "Refresh",
+  "rename": "Rename",
+  "rootLabel": "Project root",
+  "rootMain": "main (repository)",
+  "saveAll": "Save All ({count})",
+  "saveFailed": "Save failed: {error}",
+  "search": "Search",
+  "searchEmpty": "No matches",
+  "searchPlaceholder": "Search in project…",
+  "searchTab": "Search",
+  "treeAria": "Project files",
+  "treeEmpty": "No files",
+  "unavailableDesc": "The project editor needs a desktop app or a paired device to reach the project files.",
+  "unavailableTitle": "Editor unavailable"
+}

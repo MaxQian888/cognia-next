@@ -32,6 +32,7 @@ export interface ChangeItemProps {
   onRestore?: () => void
   /** Untracked files only: append the path to the repo-root .gitignore. */
   onAddToGitignore?: () => void
+  density?: "compact" | "touch"
 }
 
 export function ChangeItem({
@@ -46,6 +47,7 @@ export function ChangeItem({
   onViewBlame,
   onRestore,
   onAddToGitignore,
+  density = "compact",
 }: ChangeItemProps) {
   const t = useTranslations("sourceControl")
   const deco = statusDecoration(change.status)
@@ -69,6 +71,7 @@ export function ChangeItem({
           data-testid={`change-item-${change.path}`}
           className={cn(
             "group flex h-7 cursor-pointer items-center gap-1.5 rounded px-2 text-xs",
+            density === "touch" && "h-auto min-h-11 py-1",
             "hover:bg-accent",
             selected && "bg-accent"
           )}
@@ -87,12 +90,17 @@ export function ChangeItem({
             {dir && <span className="ml-1.5 text-[10px] text-muted-foreground">{dir}</span>}
           </span>
 
-          <span className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
+          <span
+            className={cn(
+              "flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100",
+              density === "touch" && "opacity-100"
+            )}
+          >
             {onStage && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-5"
+                className={cn("size-5", density === "touch" && "size-11")}
                 aria-label={t("actions.stage")}
                 title={t("actions.stage")}
                 onClick={(e) => {
@@ -108,7 +116,7 @@ export function ChangeItem({
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-5"
+                className={cn("size-5", density === "touch" && "size-11")}
                 aria-label={t("actions.unstage")}
                 title={t("actions.unstage")}
                 onClick={(e) => {
@@ -124,7 +132,7 @@ export function ChangeItem({
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-5"
+                className={cn("size-5", density === "touch" && "size-11")}
                 aria-label={t("actions.discard")}
                 title={t("actions.discard")}
                 onClick={(e) => {

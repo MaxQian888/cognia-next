@@ -4242,6 +4242,58 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/git_diff_stat:
+    post:
+      operationId: rpcGitDiffStat
+      tags: [rpc-git]
+      summary: Per-file insertion and deletion totals across the working tree (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: array,
+                        items:
+                          {
+                            type: object,
+                            required: [path, insertions, deletions],
+                            properties:
+                              {
+                                path: { type: string },
+                                insertions: { type: integer, minimum: 0 },
+                                deletions: { type: integer, minimum: 0 },
+                              },
+                          },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/git_diff_file:
     post:
       operationId: rpcGitDiffFile

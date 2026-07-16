@@ -10,13 +10,13 @@ use tauri::{AppHandle, State};
 use super::error::GitError;
 use super::types::{
     AheadBehind, ConflictSide, GitBlameLine, GitBranch, GitCommit, GitConflict, GitDiff,
-    GitFileChange, GitRef, GitRemote, GitRepoState, GitStashEntry, GitStatus, GitTag, GitWorktree,
-    RebaseTodoEntry,
+    GitFileChange, GitFileDiffStat, GitRef, GitRemote, GitRepoState, GitStashEntry, GitStatus,
+    GitTag, GitWorktree, RebaseTodoEntry,
 };
 use super::watcher::GitWatcherState;
 use super::{
-    blame, branch, commit, diff, history, interactive_rebase, merge, read, remote, repo, reset,
-    restore, sequencer, stage, stash, status, tag, worktree,
+    blame, branch, commit, diff, diff_stat, history, interactive_rebase, merge, read, remote, repo,
+    reset, restore, sequencer, stage, stash, status, tag, worktree,
 };
 
 /// Run a synchronous git2 read on the blocking pool.
@@ -48,6 +48,11 @@ pub async fn git_repo_state(repo_path: String) -> Result<GitRepoState, GitError>
 #[tauri::command]
 pub async fn git_status(repo_path: String) -> Result<GitStatus, GitError> {
     blocking("git_status", move || status::status(&repo_path)).await
+}
+
+#[tauri::command]
+pub async fn git_diff_stat(repo_path: String) -> Result<Vec<GitFileDiffStat>, GitError> {
+    blocking("git_diff_stat", move || diff_stat::diff_stat(&repo_path)).await
 }
 
 #[tauri::command]

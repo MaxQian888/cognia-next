@@ -1,4 +1,10 @@
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
+jest.mock("@/hooks/companion/use-companion-config", () => ({
+  useCompanionConfig: jest.fn(),
+}))
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  hydrateCompanionConfig: jest.fn(),
+}))
 jest.mock("@/lib/git/commands", () => ({
   gitWatchStart: jest.fn(),
   gitWatchStop: jest.fn(),
@@ -11,6 +17,8 @@ jest.mock("@/lib/git/load", () => ({
 
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { isTauri } from "@/lib/tauri"
+import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
+import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
 import { gitWatchStart, gitWatchStop } from "@/lib/git/commands"
 import { subscribeGitStatusChanged } from "@/lib/git/events"
 import { loadGitRepo, refreshGitStatus } from "@/lib/git/load"
@@ -19,6 +27,8 @@ import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
 
 const isTauriMock = isTauri as jest.Mock
+const useCompanionConfigMock = useCompanionConfig as jest.Mock
+const hydrateCompanionConfigMock = hydrateCompanionConfig as jest.Mock
 const watchStartMock = gitWatchStart as jest.Mock
 const watchStopMock = gitWatchStop as jest.Mock
 const subscribeMock = subscribeGitStatusChanged as jest.Mock
@@ -29,6 +39,8 @@ let eventHandler: ((e: { rootDir: string }) => void) | null = null
 
 beforeEach(() => {
   isTauriMock.mockReset().mockReturnValue(true)
+  useCompanionConfigMock.mockReset().mockReturnValue({ paired: true })
+  hydrateCompanionConfigMock.mockReset().mockResolvedValue({ deviceJwt: "jwt" })
   loadGitRepoMock.mockReset().mockResolvedValue(undefined)
   refreshGitStatusMock.mockReset().mockResolvedValue(undefined)
   watchStartMock.mockReset().mockResolvedValue(undefined)
@@ -213,11 +225,50 @@ describe("useGitBranchIndicator", () => {
     expect(result.current.busy).toBe(true)
   })
 
-  it("is inert on web", async () => {
+  it("loads and subscribes over a paired companion without starting a second watcher", async () => {
     isTauriMock.mockReturnValue(false)
     act(() => useGitStore.setState({ rootDir: "/repo" }))
     renderHook(() => useGitBranchIndicator())
-    await Promise.resolve()
+    await waitFor(() => expect(loadGitRepoMock).toHaveBeenCalledWith("/repo"))
+    expect(hydrateCompanionConfigMock).toHaveBeenCalled()
+    expect(hydrateCompanionConfigMock.mock.invocationCallOrder[0]).toBeLessThan(
+      loadGitRepoMock.mock.invocationCallOrder[0]
+    )
     expect(watchStartMock).not.toHaveBeenCalled()
+    expect(subscribeMock).toHaveBeenCalled()
+  })
+
+  it("is inert on an unpaired web client", async () => {
+    isTauriMock.mockReturnValue(false)
+    useCompanionConfigMock.mockReturnValue({ paired: false })
+    act(() => useGitStore.setState({ rootDir: "/repo" }))
+    renderHook(() => useGitBranchIndicator())
+    await Promise.resolve()
+    expect(loadGitRepoMock).not.toHaveBeenCalled()
+    expect(subscribeMock).not.toHaveBeenCalled()
+  })
+
+  it("reacts when Companion config hydration reports a paired backend", async () => {
+    isTauriMock.mockReturnValue(false)
+    useCompanionConfigMock.mockReturnValue({ paired: false })
+    act(() => useGitStore.setState({ rootDir: "/repo" }))
+    const { rerender } = renderHook(() => useGitBranchIndicator())
+    expect(loadGitRepoMock).not.toHaveBeenCalled()
+
+    useCompanionConfigMock.mockReturnValue({ paired: true })
+    rerender()
+
+    await waitFor(() => expect(loadGitRepoMock).toHaveBeenCalledWith("/repo"))
+  })
+
+  it("can observe the shared store without owning a native controller", async () => {
+    act(() => useGitStore.setState({ rootDir: "/repo" }))
+    const { result } = renderHook(() => useGitBranchIndicator({ enabled: false }))
+    await Promise.resolve()
+
+    expect(result.current.available).toBe(false)
+    expect(loadGitRepoMock).not.toHaveBeenCalled()
+    expect(watchStartMock).not.toHaveBeenCalled()
+    expect(subscribeMock).not.toHaveBeenCalled()
   })
 })

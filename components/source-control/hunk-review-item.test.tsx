@@ -75,6 +75,13 @@ describe("HunkReviewItem", () => {
     expect(screen.getByTestId("hunk-reject")).toBeDisabled()
   })
 
+  it("uses touch-sized review controls in touch density", () => {
+    setup({ density: "touch" })
+    expect(screen.getByTestId("hunk-accept")).toHaveClass("h-11", "min-w-11")
+    expect(screen.getByTestId("hunk-reject")).toHaveClass("h-11", "min-w-11")
+    expect(screen.getByTestId("hunk-comment-toggle")).toHaveClass("h-11", "min-w-11")
+  })
+
   it("renders the AI finding banner with severity + note when present", () => {
     setup({ ai: { severity: "critical", note: "possible null deref" } })
     const banner = screen.getByTestId("hunk-ai-finding")

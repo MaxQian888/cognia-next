@@ -310,6 +310,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "git_is_repo",
     "git_repo_state",
     "git_status",
+    "git_diff_stat",
     "git_diff_file",
     "git_diff_commit",
     "git_commit_files",
@@ -542,6 +543,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "git_is_repo",
     "git_repo_state",
     "git_status",
+    "git_diff_stat",
     "git_diff_file",
     "git_diff_commit",
     "git_commit_files",
@@ -2140,6 +2142,13 @@ pub(super) async fn dispatch(
         "git_status" => {
             let repo_path: String = required(&args, "repoPath")?;
             crate::git::commands::git_status(repo_path)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_diff_stat" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            crate::git::commands::git_diff_stat(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -4577,6 +4586,7 @@ mod tests {
     fn wave41_reads_are_read_only_and_writes_are_not() {
         for read in [
             "git_status",
+            "git_diff_stat",
             "git_diff_file",
             "read_text_file",
             "fs_read_workspace_file",
@@ -4650,6 +4660,7 @@ mod tests {
             "twin_source_update",
             "conversation_overrides_update",
             "git_status",
+            "git_diff_stat",
         ] {
             assert!(
                 !is_control_command(ungated),

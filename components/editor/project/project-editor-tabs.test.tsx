@@ -36,6 +36,26 @@ describe("ProjectEditorTabs", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("renders fixed leading tabs even when no files are open", () => {
+    const onSelect = jest.fn()
+    render(
+      <ProjectEditorTabs
+        fixedTabs={[{ id: "review", label: "Review", active: true, onSelect }]}
+        files={[]}
+        activePath={null}
+        dirtyCount={0}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+      />
+    )
+
+    const review = screen.getByTestId("editor-fixed-tab-review")
+    expect(review).toHaveAttribute("aria-selected", "true")
+    fireEvent.click(review)
+    expect(onSelect).toHaveBeenCalledTimes(1)
+  })
+
   it("renders one tab per open file and marks the active one", () => {
     render(
       <ProjectEditorTabs
@@ -67,6 +87,24 @@ describe("ProjectEditorTabs", () => {
     expect(onSelect).toHaveBeenCalledWith("src/a.ts")
   })
 
+  it("exposes tablist semantics with native button tabs", () => {
+    render(
+      <ProjectEditorTabs
+        files={[file("src/a.ts"), file("src/b.ts")]}
+        activePath="src/a.ts"
+        dirtyCount={0}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+      />
+    )
+
+    expect(screen.getByRole("tablist")).toBeInTheDocument()
+    expect(screen.getByTestId("editor-tab-src/a.ts")).toHaveAttribute("tabindex", "0")
+    expect(screen.getByTestId("editor-tab-src/b.ts")).toHaveAttribute("tabindex", "-1")
+    expect(screen.getByTestId("editor-tab-src/a.ts").tagName).toBe("BUTTON")
+  })
+
   it("close button fires onClose without selecting", () => {
     const onSelect = jest.fn()
     const onClose = jest.fn()
@@ -83,6 +121,7 @@ describe("ProjectEditorTabs", () => {
     fireEvent.click(screen.getByLabelText("closeTab"))
     expect(onClose).toHaveBeenCalledWith("src/a.ts")
     expect(onSelect).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("closeTab").closest('[role="tab"]')).toBeNull()
   })
 
   it("shows Save All only when dirtyCount > 0", () => {
@@ -124,5 +163,25 @@ describe("ProjectEditorTabs", () => {
       />
     )
     expect(screen.getByTitle("externallyChanged")).toBeInTheDocument()
+  })
+
+  it("uses touch-sized tab controls in mobile density", () => {
+    render(
+      <ProjectEditorTabs
+        density="touch"
+        fixedTabs={[{ id: "review", label: "Review", active: false, onSelect: jest.fn() }]}
+        files={[file("src/a.ts", true)]}
+        activePath="src/a.ts"
+        dirtyCount={1}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+      />
+    )
+
+    expect(screen.getByTestId("editor-tab-src/a.ts")).toHaveClass("min-h-11")
+    expect(screen.getByTestId("editor-fixed-tab-review")).toHaveClass("min-h-11")
+    expect(screen.getByLabelText("closeTab")).toHaveClass("size-11")
+    expect(screen.getByTestId("editor-save-all")).toHaveClass("h-10")
   })
 })

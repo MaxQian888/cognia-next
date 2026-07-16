@@ -10,6 +10,7 @@ import { SearchIcon, Loader2Icon } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { searchWorkspaceContent } from "@/lib/files/workspace-fs"
 import type { WorkspaceContentMatch } from "@/lib/files/types"
+import { cn } from "@/lib/utils"
 
 export interface ProjectSearchDeps {
   search: typeof searchWorkspaceContent
@@ -19,10 +20,11 @@ interface Props {
   rootPath: string
   onOpenMatch: (relPath: string, line: number, column: number) => void
   deps?: Partial<ProjectSearchDeps>
+  density?: "compact" | "touch"
 }
 
-export function ProjectSearchPanel({ rootPath, onOpenMatch, deps }: Props) {
-  const t = useTranslations("agentTeamsWorkspace.editor")
+export function ProjectSearchPanel({ rootPath, onOpenMatch, deps, density = "compact" }: Props) {
+  const t = useTranslations("projectEditor")
   const search = deps?.search ?? searchWorkspaceContent
   const [query, setQuery] = useState("")
   const [matches, setMatches] = useState<WorkspaceContentMatch[]>([])
@@ -66,7 +68,7 @@ export function ProjectSearchPanel({ rootPath, onOpenMatch, deps }: Props) {
           value={query}
           placeholder={t("searchPlaceholder")}
           aria-label={t("search")}
-          className="h-7 text-sm"
+          className={cn("h-7 text-sm", density === "touch" && "h-11")}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") void run()
@@ -88,7 +90,10 @@ export function ProjectSearchPanel({ rootPath, onOpenMatch, deps }: Props) {
                 key={`${m.line}:${m.column}:${i}`}
                 type="button"
                 data-testid={`search-hit-${relPath}-${m.line}`}
-                className="flex w-full items-center gap-2 px-3 py-0.5 text-left hover:bg-accent/50"
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-0.5 text-left hover:bg-accent/50",
+                  density === "touch" && "min-h-11 py-2"
+                )}
                 onClick={() => onOpenMatch(relPath, m.line, m.column)}
               >
                 <span className="w-8 shrink-0 text-right text-xs text-muted-foreground">

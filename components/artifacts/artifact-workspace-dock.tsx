@@ -3,8 +3,8 @@
 /**
  * ArtifactWorkspaceDock — wraps the chat workspace so a docked, resizable
  * artifacts panel can sit in the right rail on desktop. On tablet/mobile it
- * renders the children plus the existing `<ArtifactPanel />` Sheet fallback —
- * the narrow Sheet is the right affordance where a side dock can't fit.
+ * renders the children plus Artifact and Workspace Sheet fallbacks. Both
+ * sheets reuse the same content components as their desktop dock surfaces.
  *
  * Desktop layout (Codex / Claude-artifacts style):
  *   ┌───────────────────────────┬──────────────┐
@@ -21,6 +21,7 @@ import { useEffect, useRef, type ReactNode } from "react"
 import { motion } from "motion/react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { cn } from "@/lib/utils"
+import { isTauri } from "@/lib/tauri"
 import { useBreakpoint } from "@/hooks/ui"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -29,8 +30,11 @@ import {
   useArtifactDockLayoutStore,
 } from "@/stores/artifact/artifact-dock-layout-store"
 import { useArtifactDockShortcuts } from "@/hooks/artifacts/use-artifact-dock-shortcuts"
+import { useGitBranchIndicator } from "@/hooks/git/use-git-branch-indicator"
 import { ArtifactPanel } from "./artifact-panel"
 import { ArtifactDock } from "./artifact-dock"
+import { MobileWorkspaceSheet } from "./workspace-mode/mobile-workspace-sheet"
+import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
 
 const CHAT_MIN = "50%"
 
@@ -39,15 +43,50 @@ export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
   const breakpoint = useBreakpoint()
 
   if (breakpoint !== "desktop") {
-    return (
-      <div data-testid="artifact-workspace-dock-mobile" className="flex min-h-0 flex-1 flex-col">
-        {children}
-        <ArtifactPanel />
-      </div>
-    )
+    return <ArtifactWorkspaceDockNarrow>{children}</ArtifactWorkspaceDockNarrow>
   }
 
   return <ArtifactWorkspaceDockDesktop>{children}</ArtifactWorkspaceDockDesktop>
+}
+
+function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
+  // DesktopAppShell's StatusBar remains the sole native watcher owner even
+  // when a Tauri window narrows. Paired web/mobile has no StatusBar, so this
+  // narrow host owns the Companion-side binding/subscription there.
+  useGitBranchIndicator({ enabled: !isTauri() })
+  const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
+  const mobileSheetOpen = useArtifactDockLayoutStore((state) => state.mobileSheetOpen)
+  const setDockMode = useArtifactDockLayoutStore((state) => state.setDockMode)
+  const setMobileSheetOpen = useArtifactDockLayoutStore((state) => state.setMobileSheetOpen)
+  const panelOpen = useArtifactStore((state) => state.panelOpen)
+  const panelView = useArtifactStore((state) => state.panelView)
+  const closePanel = useArtifactStore((state) => state.closePanel)
+  const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
+  const previousArtifactId = useRef(activeArtifactId)
+
+  useEffect(() => {
+    if (dockMode === "workspace" && mobileSheetOpen && panelOpen && panelView === "artifact") {
+      closePanel()
+    }
+  }, [closePanel, dockMode, mobileSheetOpen, panelOpen, panelView])
+
+  useEffect(() => {
+    const previous = previousArtifactId.current
+    previousArtifactId.current = activeArtifactId
+    if (activeArtifactId && activeArtifactId !== previous) {
+      setDockMode("artifact")
+      setMobileSheetOpen(false)
+    }
+  }, [activeArtifactId, setDockMode, setMobileSheetOpen])
+
+  return (
+    <div data-testid="artifact-workspace-dock-mobile" className="flex min-h-0 flex-1 flex-col">
+      <WorkspaceRevealOpener />
+      {children}
+      <ArtifactPanel />
+      <MobileWorkspaceSheet />
+    </div>
+  )
 }
 
 function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
@@ -56,6 +95,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const layoutVersion = useArtifactDockLayoutStore((s) => s.layoutVersion)
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
   const setDockCollapsed = useArtifactDockLayoutStore((s) => s.setDockCollapsed)
+  const setDockMode = useArtifactDockLayoutStore((s) => s.setDockMode)
 
   // Auto-expand the dock when a fresh artifact becomes active. Keyed on the id
   // so re-collapsing while the same artifact stays active is respected (we only
@@ -66,9 +106,10 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     const prev = prevActiveIdRef.current
     prevActiveIdRef.current = activeArtifactId
     if (activeArtifactId && activeArtifactId !== prev) {
+      setDockMode("artifact")
       setDockCollapsed(false)
     }
-  }, [activeArtifactId, setDockCollapsed])
+  }, [activeArtifactId, setDockCollapsed, setDockMode])
 
   const collapseTransition = useReducedMotionTransition(mobileTransition("normal"))
 
@@ -77,6 +118,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
       className="flex w-full flex-1 min-h-0 overflow-hidden"
       data-testid="artifact-workspace-dock"
     >
+      <WorkspaceRevealOpener />
       <ResizablePanelGroup
         key={layoutVersion}
         orientation="horizontal"

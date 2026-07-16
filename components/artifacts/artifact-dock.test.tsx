@@ -4,6 +4,8 @@
 
 import { render, screen, fireEvent, act } from "@testing-library/react"
 
+let workspaceAvailable = true
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
@@ -11,6 +13,16 @@ jest.mock("next-intl", () => ({
 jest.mock("./artifact-panel-content", () => ({
   ArtifactPanelContent: ({ panelMode }: { panelMode: string }) => (
     <div data-testid="panel-content" data-mode={panelMode} />
+  ),
+}))
+
+jest.mock("@/lib/files/workspace-backend", () => ({
+  hasWorkspaceFsBackend: () => workspaceAvailable,
+}))
+
+jest.mock("./workspace-mode/dock-workspace", () => ({
+  DockWorkspace: ({ activeSessionId }: { activeSessionId: string | null }) => (
+    <div data-testid="workspace" data-session={activeSessionId ?? ""} />
   ),
 }))
 
@@ -32,6 +44,7 @@ import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layo
 
 beforeEach(() => {
   localStorage.clear()
+  workspaceAvailable = true
   artifactListProps.length = 0
   act(() => useArtifactDockLayoutStore.getState().resetLayout())
 })
@@ -40,6 +53,35 @@ describe("ArtifactDock", () => {
   it("renders the shared content in desktop mode", () => {
     render(<ArtifactDock />)
     expect(screen.getByTestId("panel-content")).toHaveAttribute("data-mode", "desktop")
+  })
+
+  it("switches between artifact and workspace modes", () => {
+    render(<ArtifactDock />)
+    expect(screen.getByTestId("artifact-dock-mode-artifact")).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("artifact-dock-mode-workspace"))
+
+    expect(useArtifactDockLayoutStore.getState().dockMode).toBe("workspace")
+    expect(screen.getByTestId("workspace")).toHaveAttribute("data-session", "sess-1")
+    expect(screen.queryByTestId("panel-content")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("artifact-dock-history-toggle")).not.toBeInTheDocument()
+  })
+
+  it("disables workspace without a backend but preserves a persisted workspace selection", () => {
+    workspaceAvailable = false
+    act(() => useArtifactDockLayoutStore.getState().setDockMode("workspace"))
+
+    render(<ArtifactDock />)
+
+    expect(screen.getByTestId("artifact-dock-mode-workspace")).toBeDisabled()
+    expect(screen.getByTestId("artifact-dock-mode-workspace")).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    expect(screen.getByTestId("workspace")).toBeInTheDocument()
   })
 
   it("hides the history rail by default and shows it when toggled", () => {

@@ -42,6 +42,7 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { mobileTransition } from "@/lib/ui/motion"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
+import { WorkspaceChangesCard } from "./workspace-changes-card"
 
 /**
  * Attach `node` to a (possibly absent) callback or object ref. Defined at
@@ -436,6 +437,7 @@ export function ChatPane({
             {/* Executing/paused plans surface the live tracker in the same slot
                 (statuses are mutually exclusive with awaiting_approval). */}
             {boundId && <PlanTrackerDock sessionId={boundId} />}
+            <WorkspaceChangesCard session={activeSession} />
             {runStatusEl}
             {composerEl}
           </motion.div>

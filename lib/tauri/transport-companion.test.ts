@@ -356,6 +356,7 @@ describe("call() — idempotency key", () => {
       "git_is_repo",
       "git_repo_state",
       "git_status",
+      "git_diff_stat",
       "git_diff_file",
       "git_diff_commit",
       "git_commit_files",

@@ -5,6 +5,7 @@ import {
   normalizeRoots,
   syncDerivedDirFields,
   rootsFromLegacy,
+  resolveSessionProjectRoot,
 } from "./roots"
 import type { Project } from "@/types"
 import type { WorkspaceRoot } from "@/types/workspace"
@@ -43,6 +44,21 @@ describe("roots helpers", () => {
 
   it("primaryRootOf returns undefined when no roots", () => {
     expect(primaryRootOf(project([]))).toBeUndefined()
+  })
+
+  it("resolves a session project and its primary root together", () => {
+    const p = project([root("/a"), root("/b", true)])
+    expect(resolveSessionProjectRoot({ projectId: "p1" }, [p])).toEqual({
+      project: p,
+      root: expect.objectContaining({ path: "/b" }),
+    })
+  })
+
+  it("preserves the missing project and root states", () => {
+    expect(resolveSessionProjectRoot(undefined, [])).toEqual({})
+    expect(resolveSessionProjectRoot({ projectId: "missing" }, [])).toEqual({})
+    const p = project([])
+    expect(resolveSessionProjectRoot({ projectId: "p1" }, [p])).toEqual({ project: p })
   })
 
   it("additionalDirsOf returns non-primary paths in order", () => {
