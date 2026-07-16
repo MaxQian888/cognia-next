@@ -21,6 +21,7 @@ export const HELP = `cognia-agent — standalone Cognia coding agent
 
 Usage:
   cognia-agent chat [--continue | --resume [id]]       interactive terminal agent
+                    [--backend builtin|codex|claude-code|<preset>]
                     [--plugin-tools] [--dev-plugins]
   cognia-agent -p "<prompt>"                            headless one-shot (alias of run)
   cognia-agent run "<prompt>" [--model m] [--provider p] [--cwd dir]
@@ -47,6 +48,7 @@ Flags:
   -y, --yes             approve all tool requests (non-interactive / CI)
   -c, --continue        chat: resume the most recent session at launch
       --resume [id]     chat: resume a session by id (bare → session picker)
+      --backend id      chat: host builtin (default) or an external-agent preset
       --output-format   text (default) | json (one result object) | stream-json (JSONL)
       --json            alias for --output-format stream-json
       --max-turns n     cap the agentic loop for this run

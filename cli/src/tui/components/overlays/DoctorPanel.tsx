@@ -72,6 +72,7 @@ export function DoctorPanel({
 
   const modelStatus = statusIcon(report.modelValid)
   const storeStatus = statusIcon(report.dbSnapshotExists)
+  const backendStatus = statusIcon(report.externalAgentAvailable !== false)
   const hasCrashDir = report.crashReportsDir !== null
   const hasLogsDir = report.logsDir !== null
 
@@ -88,6 +89,15 @@ export function DoctorPanel({
       <Box flexDirection="column" marginTop={1}>
         <Text bold color={theme.muted}>
           Config
+        </Text>
+        <Text>
+          <Text color={theme.muted}>{"Backend".padEnd(13)}</Text>
+          {report.agentBackend}
+          {report.externalAgentCommand && (
+            <Text color={theme[backendStatus.color as keyof typeof theme]}>
+              {` · ${report.externalAgentCommand} ${backendStatus.icon}`}
+            </Text>
+          )}
         </Text>
         <Text>
           <Text color={theme.muted}>{"Provider".padEnd(13)}</Text>

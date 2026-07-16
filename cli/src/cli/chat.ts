@@ -14,6 +14,8 @@ import { stdin, stdout } from "node:process"
 
 import { loadConfig as defaultLoadConfig } from "../config/load"
 import { createAgentSession, type AgentSession } from "../agent/session-runner"
+import { createExternalAgentSession } from "../agent/external-agent-session"
+import type { ResolvedConfig } from "../config/schema"
 import { createPermissionGate } from "../agent/permission-gate"
 import { maybePushHandoff as defaultPushHandoff } from "./handoff-cmd"
 import { runFlagsToOverrides } from "./run-command"
@@ -78,6 +80,7 @@ export interface ChatDeps {
     flags?: Parameters<typeof defaultLoadConfig>[0]
   ) => ReturnType<typeof defaultLoadConfig>
   createSession?: typeof createAgentSession
+  externalCreateSession?: typeof createExternalAgentSession
   pushHandoff?: typeof defaultPushHandoff
   out?: OutputSink
   /** Read one input line; resolves null on EOF (Ctrl-D). */
@@ -95,10 +98,19 @@ export interface ChatDeps {
   }) => Promise<number>
 }
 
+export function selectSessionFactory(
+  config: ResolvedConfig,
+  builtin: typeof createAgentSession,
+  external: typeof createExternalAgentSession
+): typeof createAgentSession {
+  return config.agentBackend && config.agentBackend !== "builtin" ? external : builtin
+}
+
 export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promise<number> {
   const out = deps.out ?? realOutput
   const loadConfig = deps.loadConfig ?? defaultLoadConfig
-  const createSession = deps.createSession ?? createAgentSession
+  const builtinCreateSession = deps.createSession ?? createAgentSession
+  const externalCreateSession = deps.externalCreateSession ?? createExternalAgentSession
   const pushHandoff = deps.pushHandoff ?? defaultPushHandoff
 
   let config: ReturnType<typeof defaultLoadConfig>
@@ -108,6 +120,7 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
     out.error(`config error: ${(err as Error).message}`)
     return 2
   }
+  const createSession = selectSessionFactory(config, builtinCreateSession, externalCreateSession)
 
   // Interactive terminal → the rich Ink TUI. A non-TTY (piped stdin / CI) or a
   // test injecting `readLine` falls through to the readline REPL below. The TUI

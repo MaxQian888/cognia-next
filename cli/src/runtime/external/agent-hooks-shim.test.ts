@@ -21,7 +21,12 @@ describe("CLI external-agent hook shim", () => {
         {
           type: "permission_request",
           timestamp: new Date(),
-          request: { id: "p1", requestId: "p1", options: [] },
+          request: {
+            id: "p1",
+            requestId: "p1",
+            toolInfo: { id: "bash", name: "bash" },
+            options: [],
+          },
         },
         deny
       )

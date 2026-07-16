@@ -37,6 +37,7 @@ const facts: DoctorFacts = {
   cwd: "/work",
   dbSnapshotExists: true,
   dbSnapshotPath: "/home/.cognia/db.json",
+  agentBackend: "builtin",
 }
 
 describe("buildDoctorReport", () => {
@@ -145,6 +146,19 @@ describe("runDoctor", () => {
     if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
       expect(actions[0].overlay.report.version).toBe("9.9.9")
       expect(actions[0].overlay.report.model).toBe("claude-opus-4-8")
+    }
+  })
+
+  it("reports whether the configured external backend command is available", async () => {
+    const checkExternalCommand = jest.fn(async (command: string) => command === "npx")
+    const actions = await run({ agentBackend: "claude-code" }, { checkExternalCommand })
+    expect(checkExternalCommand).toHaveBeenCalledWith("npx")
+    if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
+      expect(actions[0].overlay.report).toMatchObject({
+        agentBackend: "claude-code",
+        externalAgentCommand: "npx",
+        externalAgentAvailable: true,
+      })
     }
   })
 })

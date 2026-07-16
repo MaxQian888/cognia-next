@@ -9,10 +9,15 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { catalogModelIds } from "@/lib/ai/model-options"
+import {
+  getPresetConfig,
+  resolvePreferredCodexExecutablePresetId,
+} from "@/lib/ai/agent/external/presets"
 
 import { listCredentialProviders } from "../../config/credentials"
 import { providerAuthMode } from "../commands/builtins"
 import { resolveActiveModel } from "../../config/active-model"
+import { commandExists } from "../../runtime/external/node-backend"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CrashReportItem, DoctorReport, TuiAction } from "../state/types"
 import {
@@ -25,6 +30,7 @@ import {
 
 export interface DoctorFacts {
   version: string
+  agentBackend: string
   provider: string
   model: string
   auth: string
@@ -43,6 +49,7 @@ export function buildDoctorReport(facts: DoctorFacts): string {
   const modelNote = facts.modelValid ? "" : " (not in this provider's catalog)"
   return [
     `cognia-agent v${facts.version}`,
+    `  Backend:      ${facts.agentBackend}`,
     `  Provider:     ${facts.provider}`,
     `  Model:        ${facts.model} ${ok(facts.modelValid)}${modelNote}`,
     `  Credential:   ${facts.auth}`,
@@ -71,6 +78,7 @@ export interface DoctorReportDeps extends DoctorDeps {
   env: Record<string, string | undefined>
   /** Injected fs shim for crash/log discovery. */
   crashLogFs?: CrashLogFs
+  checkExternalCommand?: (command: string) => Promise<boolean>
 }
 
 /**
@@ -88,6 +96,7 @@ export function collectDoctorFacts(deps: DoctorDeps): DoctorFacts {
   const dbSnapshotPath = path.join(deps.home, "db.json")
   return {
     version: deps.version,
+    agentBackend: cfg.agentBackend ?? "builtin",
     provider: cfg.provider,
     model: activeModel ?? "default",
     auth: providerAuthMode(cfg, cfg.provider),
@@ -145,9 +154,21 @@ export function collectDoctorReport(deps: DoctorReportDeps): DoctorReport {
 }
 
 export async function runDoctor(deps: DoctorReportDeps): Promise<void> {
+  const report = collectDoctorReport(deps)
+  if (report.agentBackend !== "builtin") {
+    const presetId =
+      report.agentBackend === "codex"
+        ? await resolvePreferredCodexExecutablePresetId()
+        : report.agentBackend
+    const command = getPresetConfig(presetId)?.process?.command
+    report.externalAgentCommand = command
+    report.externalAgentAvailable = command
+      ? await (deps.checkExternalCommand ?? commandExists)(command)
+      : false
+  }
   deps.dispatch({
     type: "OVERLAY_OPEN",
-    overlay: { kind: "doctor", report: collectDoctorReport(deps) },
+    overlay: { kind: "doctor", report },
   })
 }
 

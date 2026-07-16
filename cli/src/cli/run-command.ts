@@ -84,6 +84,8 @@ export function runFlagsToOverrides(args: ParsedArgs): Partial<CliConfigFile> {
   if (model) flags.model = model
   const provider = stringFlag(args, "provider")
   if (provider) flags.provider = provider
+  const backend = stringFlag(args, "backend")
+  if (backend) flags.agentBackend = backend
   const cwd = stringFlag(args, "cwd")
   if (cwd) flags.cwd = cwd
   const system = stringFlag(args, "system")

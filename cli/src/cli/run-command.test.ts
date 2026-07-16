@@ -49,11 +49,14 @@ describe("runFlagsToOverrides", () => {
       "openai",
       "--allow",
       "write, bash",
+      "--backend",
+      "claude-code",
     ])
     expect(runFlagsToOverrides(a)).toEqual({
       model: "m",
       provider: "openai",
       allowedTools: ["write", "bash"],
+      agentBackend: "claude-code",
     })
   })
 

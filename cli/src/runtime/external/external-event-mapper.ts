@@ -126,7 +126,7 @@ function errorActions(event: ExternalAgentErrorEvent): TuiAction[] {
       {
         type: "NOTICE",
         message: event.code ? `${event.code}: ${event.error}` : event.error,
-        severity: "warning",
+        severity: "warn",
       },
     ]
   }

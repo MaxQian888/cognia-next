@@ -124,7 +124,7 @@ function validateCwd(root: string, requested?: string): string {
 }
 
 function childEnv(overrides: Record<string, string> | undefined): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {}
+  const env: NodeJS.ProcessEnv = { NODE_ENV: process.env.NODE_ENV ?? "production" }
   for (const [key, value] of Object.entries(process.env)) {
     if (!DANGEROUS_ENV.test(key)) env[key] = value
   }

@@ -827,6 +827,9 @@ export const cliConfigFileSchema = z
      * ⇒ 2. Set `1` to make every subagent a leaf.
      */
     subagentMaxDepth: z.number().int().min(1).optional(),
+    /** Agent runtime hosted by `chat`: built-in sidecar (default) or any
+     * executable external-agent preset id (for example codex/claude-code). */
+    agentBackend: z.string().min(1).optional(),
   })
   .strict()
 
@@ -863,6 +866,9 @@ export type CredentialsFile = z.infer<typeof credentialsFileSchema>
  */
 export interface ResolvedConfig {
   provider: string
+  /** Runtime hosted by interactive chat. `builtin` keeps the Cognia sidecar;
+   * any other value resolves through the external-agent preset registry. */
+  agentBackend?: string
   model?: string
   systemPrompt?: string
   permissionMode: (typeof PERMISSION_MODES)[number]
@@ -1009,6 +1015,7 @@ export const DEFAULT_PROVIDER = "anthropic"
  */
 export const DEFAULT_RESOLVED_CONFIG: Omit<ResolvedConfig, "cwd"> = {
   provider: DEFAULT_PROVIDER,
+  agentBackend: "builtin",
   permissionMode: "default",
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   providers: {},

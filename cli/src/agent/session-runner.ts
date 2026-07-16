@@ -33,6 +33,7 @@ import type { McpServer } from "@cognia/agent-config-types"
 import { buildAttachmentContent, type BuiltAttachmentContent } from "./attachments/build"
 import { resolveHome } from "../config/load"
 import { type ResolvedConfig } from "../config/schema"
+import type { TuiAction } from "../tui/state/types"
 import { toBuildContext } from "../config/to-build-context"
 import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
@@ -169,6 +170,9 @@ export interface AttachmentSummary {
 export interface SendTurnOptions {
   gate: PermissionResponder
   onEvent?: (event: CaptureStreamEvent) => void
+  /** Direct reducer actions for sessions whose native event vocabulary is
+   * richer than CaptureStreamEvent (external ACP/Codex agents). */
+  onAction?: (action: TuiAction) => void
   /** Fired once per session, on the first turn that loads session-enabled
    * skills, with the skill ids that resolved into the prompt. Lets the UI show
    * the user which skills are active. Not fired for plain (skill-less) chat. */

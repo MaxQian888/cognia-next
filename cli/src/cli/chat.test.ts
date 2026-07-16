@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { interpretLine, chatCommand, launchCommandFromFlags } from "./chat"
+import { interpretLine, chatCommand, launchCommandFromFlags, selectSessionFactory } from "./chat"
 import { parseArgv } from "./args"
 import type { OutputSink } from "./output"
 import type { AgentSession } from "../agent/session-runner"
@@ -106,6 +106,29 @@ describe("chatCommand", () => {
     expect(f.sessions[0].send).toHaveBeenCalledWith("hello", expect.any(Object))
     expect(s.stdout()).toMatch(/reply/)
     expect(f.sessions[0].close).toHaveBeenCalled()
+  })
+
+  it("selects the external session factory for --backend and passes it to Ink", async () => {
+    const external = fakeSessionFactory()
+    const builtin = fakeSessionFactory()
+    const renderTui = jest.fn(
+      async (_deps: { config: ResolvedConfig; createSession: unknown; pushHandoff: unknown }) => 0
+    )
+    await chatCommand(parseArgv(["chat", "--backend", "claude-code"]), {
+      loadConfig: (overrides) => ({
+        ...cfg(),
+        ...(overrides?.agentBackend ? { agentBackend: overrides.agentBackend } : {}),
+      }),
+      out: sink().out,
+      createSession: builtin.factory,
+      externalCreateSession: external.factory,
+      isTty: () => true,
+      renderTui,
+    })
+
+    const mounted = renderTui.mock.calls[0][0]
+    expect(mounted.config.agentBackend).toBe("claude-code")
+    expect(mounted.createSession).toBe(external.factory)
   })
 
   it("/handoff pushes the current session", async () => {
@@ -255,5 +278,16 @@ describe("chatCommand", () => {
     expect(code).toBe(0)
     expect(renderTui).not.toHaveBeenCalled()
     expect(s.stdout()).toMatch(/reply/)
+  })
+})
+
+describe("selectSessionFactory", () => {
+  it("uses builtin by default and external for a preset backend", () => {
+    const builtin = fakeSessionFactory().factory
+    const external = fakeSessionFactory().factory
+    expect(selectSessionFactory(cfg(), builtin, external)).toBe(builtin)
+    expect(selectSessionFactory({ ...cfg(), agentBackend: "codex" }, builtin, external)).toBe(
+      external
+    )
   })
 })

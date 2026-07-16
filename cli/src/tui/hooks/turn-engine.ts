@@ -26,6 +26,7 @@ export interface TurnSession {
     prompt: string,
     opts: {
       gate: PermissionResponder
+      onAction?: (action: TuiAction) => void
       onEvent?: (event: CaptureStreamEvent) => void
       onActiveSkills?: (skillIds: string[]) => void
       onAttachments?: (summary: AttachmentSummary) => void
@@ -203,6 +204,10 @@ export async function runTurn(
   try {
     const result = await opts.session.send(opts.prompt, {
       gate: opts.gate,
+      onAction: (action) => {
+        opts.dispatch(action)
+        if (action.type === "TOOL_CALL") opts.onToolCall?.(action.toolName, action.input)
+      },
       onEvent: (event) => {
         for (const action of captureEventToActions(event)) opts.dispatch(action)
         opts.hooks?.onCapture(event)

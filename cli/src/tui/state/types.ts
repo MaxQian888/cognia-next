@@ -318,6 +318,9 @@ export interface CrashReportItem {
 /** Comprehensive diagnostic report shown by the `/doctor` panel. */
 export interface DoctorReport {
   version: string
+  agentBackend: string
+  externalAgentCommand?: string
+  externalAgentAvailable?: boolean
   provider: string
   model: string
   modelValid: boolean

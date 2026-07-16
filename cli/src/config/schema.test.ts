@@ -64,6 +64,12 @@ describe("renderConfigSchema + resolveRenderConfig", () => {
     expect(cliConfigFileSchema.safeParse({ layout: "scrollback" }).success).toBe(true)
     expect(cliConfigFileSchema.safeParse({ layout: "windowed" }).success).toBe(false)
   })
+
+  it("accepts an external-agent backend and defaults to builtin", () => {
+    expect(cliConfigFileSchema.safeParse({ agentBackend: "claude-code" }).success).toBe(true)
+    expect(cliConfigFileSchema.safeParse({ agentBackend: "" }).success).toBe(false)
+    expect(DEFAULT_RESOLVED_CONFIG.agentBackend).toBe("builtin")
+  })
 })
 
 describe("cliConfigFileSchema.streamIdleTimeoutMs", () => {
