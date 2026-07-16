@@ -4,13 +4,7 @@
  */
 
 export type GitFileStatus =
-  | "modified"
-  | "added"
-  | "deleted"
-  | "renamed"
-  | "untracked"
-  | "conflicted"
-  | "typeChanged"
+  "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted" | "typeChanged"
 
 export type GitStatusGroup = "staged" | "changes" | "merge"
 
@@ -34,6 +28,13 @@ export interface GitStatus {
   merge: GitFileChange[]
   isRebasing: boolean
   isMerging: boolean
+}
+
+export interface GitFileDiffStat {
+  /** Final repo-relative path, forward slashes. */
+  path: string
+  insertions: number
+  deletions: number
 }
 
 export interface GitDiffLine {

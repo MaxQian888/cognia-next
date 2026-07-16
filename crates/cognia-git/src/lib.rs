@@ -14,6 +14,7 @@ pub mod branch;
 pub mod commands;
 pub mod commit;
 pub mod diff;
+pub mod diff_stat;
 pub mod error;
 pub mod exec;
 pub mod history;

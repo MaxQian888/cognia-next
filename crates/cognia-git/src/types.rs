@@ -56,6 +56,15 @@ pub struct GitStatus {
     pub is_merging: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileDiffStat {
+    /// Final repo-relative path, normalized to forward slashes.
+    pub path: String,
+    pub insertions: usize,
+    pub deletions: usize,
+}
+
 /// One display line inside a hunk. `content` excludes the leading
 /// origin character (`+`/`-`/space).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -1095,6 +1095,7 @@ pub fn run() {
             git::commands::git_is_repo,
             git::commands::git_repo_state,
             git::commands::git_status,
+            git::commands::git_diff_stat,
             git::commands::git_diff_file,
             git::commands::git_diff_commit,
             git::commands::git_commit_files,

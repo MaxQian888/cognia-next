@@ -29,6 +29,7 @@ import {
   gitCreateBranch,
   gitDeleteBranch,
   gitDiffFile,
+  gitDiffStat,
   gitDiffRefsFile,
   gitDiffRefsFiles,
   gitDiscard,
@@ -83,6 +84,7 @@ describe("when no git bridge is available (plain unpaired browser)", () => {
     expect(await gitIsRepo("/r")).toBe(false)
     expect(await gitRepoState("/r")).toBe(EMPTY_REPO_STATE)
     expect(await gitStatus("/r")).toBe(EMPTY_STATUS)
+    expect(await gitDiffStat("/r")).toEqual([])
     expect(await gitBranches("/r")).toEqual([])
     expect(await gitStashList("/r")).toEqual([])
     expect(await gitConflicts("/r")).toEqual([])
@@ -154,6 +156,12 @@ describe("when in Tauri", () => {
     callMock.mockResolvedValueOnce({ samples: [] })
     await gitStatus("/r")
     expect(callMock).toHaveBeenCalledWith("git_status", { repoPath: "/r" })
+
+    callMock.mockResolvedValueOnce([{ path: "src/a.ts", insertions: 2, deletions: 1 }])
+    await expect(gitDiffStat("/r")).resolves.toEqual([
+      { path: "src/a.ts", insertions: 2, deletions: 1 },
+    ])
+    expect(callMock).toHaveBeenCalledWith("git_diff_stat", { repoPath: "/r" })
 
     callMock.mockResolvedValueOnce([])
     await gitLog("/r", 50, 10)
