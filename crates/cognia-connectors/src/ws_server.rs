@@ -37,10 +37,10 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use subtle::ConstantTimeEq;
-use tauri::{Emitter, EventId, Listener};
+use tauri::{EventId, Listener};
 use tokio::sync::mpsc;
 
-use super::axum_app::AppHandleExt;
+use super::axum_app::{AppHandleExt, EmitterExt, EventEmitter};
 use super::state::ConnectorsState;
 use super::types::OneBotLiveClient;
 
@@ -146,11 +146,13 @@ fn authorize_onebot(expected: Option<&str>, allow_unauthenticated: bool, supplie
 async fn ws_onebot_handler(
     State(_state): State<ConnectorsState>,
     Path(adapter_id): Path<String>,
+    emitter_ext: Option<Extension<EmitterExt>>,
     app_ext: Option<Extension<AppHandleExt>>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
     let app = app_ext.map(|Extension(AppHandleExt(app))| app);
+    let emitter = emitter_ext.map(|Extension(EmitterExt(emitter))| emitter);
 
     // Read the expected bearer from keyring.
     let expected_token = match super::keyring::get(&adapter_id, "onebotBearer") {
@@ -187,13 +189,20 @@ async fn ws_onebot_handler(
         return (StatusCode::UNAUTHORIZED, "invalid or missing bearer token").into_response();
     }
 
-    upgrade(ws, app, adapter_id)
+    upgrade(ws, emitter, app, adapter_id)
 }
 
 /// Complete the upgrade only when a live event sink is installed.
-fn upgrade(ws: WebSocketUpgrade, app: Option<tauri::AppHandle>, adapter_id: String) -> Response {
-    match app {
-        Some(app) => ws.on_upgrade(move |socket| run_bridge(app, adapter_id, socket)),
+fn upgrade(
+    ws: WebSocketUpgrade,
+    emitter: Option<Arc<dyn EventEmitter>>,
+    app: Option<tauri::AppHandle>,
+    adapter_id: String,
+) -> Response {
+    match emitter {
+        Some(emitter) => {
+            ws.on_upgrade(move |socket| run_bridge(emitter, app, adapter_id, socket))
+        }
         None => {
             log::error!(
                 "ws_server: refusing OneBot upgrade for {adapter_id}: no event sink installed; \
@@ -205,7 +214,12 @@ fn upgrade(ws: WebSocketUpgrade, app: Option<tauri::AppHandle>, adapter_id: Stri
 }
 
 /// Bridge an accepted reverse-WS socket to the renderer over Tauri events.
-async fn run_bridge(app: tauri::AppHandle, adapter_id: String, socket: WebSocket) {
+async fn run_bridge(
+    emitter: Arc<dyn EventEmitter>,
+    app: Option<tauri::AppHandle>,
+    adapter_id: String,
+    socket: WebSocket,
+) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::channel::<Message>(64);
 
@@ -214,36 +228,45 @@ async fn run_bridge(app: tauri::AppHandle, adapter_id: String, socket: WebSocket
     // is that JSON-encoded string — decode one level to recover the call JSON
     // before forwarding it as a WS text frame.
     let send_channel = format!("connectors://onebot/{adapter_id}/send");
-    let listener_tx = tx.clone();
-    let listener_id = app.listen(send_channel, move |event| {
-        let raw = event.payload();
-        let call_json = serde_json::from_str::<String>(raw).unwrap_or_else(|_| raw.to_string());
-        // Bounded channel: drop on a full queue rather than block the sync
-        // listener — mirrors the break-on-error back-pressure in ws_client.
-        let _ = listener_tx.try_send(Message::Text(call_json.into()));
+    let listener_id = app.as_ref().map(|app| {
+        let listener_tx = tx.clone();
+        let listener_id = app.listen(send_channel, move |event| {
+            let raw = event.payload();
+            let call_json = serde_json::from_str::<String>(raw).unwrap_or_else(|_| raw.to_string());
+            // Bounded channel: drop on a full queue rather than block the sync
+            // listener — mirrors the break-on-error back-pressure in ws_client.
+            let _ = listener_tx.try_send(Message::Text(call_json.into()));
+        });
+
+        // Reconnect: evict any prior connection's listener for this adapter.
+        let prev = send_listeners()
+            .lock()
+            .unwrap()
+            .insert(adapter_id.clone(), listener_id);
+        if let Some(prev_id) = prev {
+            if prev_id != listener_id {
+                app.unlisten(prev_id);
+            }
+        }
+        listener_id
     });
-    // The listener owns the only sender we need; drop our copy so the outbound
-    // pump terminates once the listener is unlistened.
+    // A desktop listener or the future command path owns all remaining senders.
     drop(tx);
 
-    // Reconnect: evict any prior connection's listener for this adapter.
-    let prev = send_listeners()
-        .lock()
-        .unwrap()
-        .insert(adapter_id.clone(), listener_id);
-    if let Some(prev_id) = prev {
-        if prev_id != listener_id {
-            app.unlisten(prev_id);
-        }
-    }
-
     // Record the live connection so `connectors_onebot_probe` can report it.
-    live_client_map()
-        .lock()
-        .unwrap()
-        .insert(adapter_id.clone(), now_ms());
+    let connected_at_ms = {
+        let mut clients = live_client_map().lock().unwrap();
+        let timestamp = clients
+            .get(&adapter_id)
+            .map_or_else(now_ms, |previous| now_ms().max(previous.saturating_add(1)));
+        clients.insert(adapter_id.clone(), timestamp);
+        timestamp
+    };
 
-    let _ = app.emit(&format!("connectors://onebot/{adapter_id}/open"), ());
+    emitter.emit(
+        &format!("connectors://onebot/{adapter_id}/open"),
+        serde_json::Value::Null,
+    );
 
     // Outbound pump: forward queued frames to the socket.
     let pump = tokio::spawn(async move {
@@ -264,7 +287,7 @@ async fn run_bridge(app: tauri::AppHandle, adapter_id: String, socket: WebSocket
                     FrameRoute::Event => format!("connectors://onebot/{adapter_id}/event"),
                     FrameRoute::Drop => continue,
                 };
-                let _ = app.emit(&topic, text.to_string());
+                emitter.emit(&topic, serde_json::Value::String(text.to_string()));
             }
             Ok(Message::Close(_)) | Err(_) => break,
             // Binary / Ping / Pong — axum auto-responds to pings; ignore.
@@ -275,19 +298,27 @@ async fn run_bridge(app: tauri::AppHandle, adapter_id: String, socket: WebSocket
     // Cleanup — only if we are still the registered connection (a newer
     // reconnect may have replaced and already unlistened us; in that case the
     // spurious `/close` must NOT fire and degrade the live connection).
-    let still_current = {
-        let mut map = send_listeners().lock().unwrap();
-        if map.get(&adapter_id) == Some(&listener_id) {
-            map.remove(&adapter_id);
-            true
-        } else {
-            false
+    let still_current = match listener_id {
+        Some(listener_id) => {
+            let mut map = send_listeners().lock().unwrap();
+            if map.get(&adapter_id) == Some(&listener_id) {
+                map.remove(&adapter_id);
+                if let Some(app) = app.as_ref() {
+                    app.unlisten(listener_id);
+                }
+                true
+            } else {
+                false
+            }
         }
+        None => live_client_map().lock().unwrap().get(&adapter_id) == Some(&connected_at_ms),
     };
     if still_current {
         live_client_map().lock().unwrap().remove(&adapter_id);
-        app.unlisten(listener_id);
-        let _ = app.emit(&format!("connectors://onebot/{adapter_id}/close"), ());
+        emitter.emit(
+            &format!("connectors://onebot/{adapter_id}/close"),
+            serde_json::Value::Null,
+        );
     }
     pump.abort();
 }
@@ -399,22 +430,33 @@ mod tests {
     // and drive a genuine client handshake.
     // -----------------------------------------------------------------------
 
-    struct NoopEmitter;
-    impl crate::axum_app::EventEmitter for NoopEmitter {
-        fn emit_webhook(&self, _adapter_id: &str, _payload: &serde_json::Value) {}
+    #[derive(Default)]
+    struct RecordingEmitter {
+        events: parking_lot::Mutex<Vec<(String, serde_json::Value)>>,
     }
 
-    async fn start_live_server() -> (std::net::SocketAddr, crate::server_lifecycle::ServerHandle) {
+    impl crate::axum_app::EventEmitter for RecordingEmitter {
+        fn emit(&self, topic: &str, payload: serde_json::Value) {
+            self.events.lock().push((topic.to_string(), payload));
+        }
+    }
+
+    async fn start_live_server() -> (
+        std::net::SocketAddr,
+        crate::server_lifecycle::ServerHandle,
+        Arc<RecordingEmitter>,
+    ) {
         let state = ConnectorsState::new();
+        let emitter = Arc::new(RecordingEmitter::default());
         let handle = crate::server_lifecycle::start_server(
             state,
             std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
-            std::sync::Arc::new(NoopEmitter),
+            emitter.clone(),
             None,
         )
         .await
         .unwrap();
-        (handle.bound_addr, handle)
+        (handle.bound_addr, handle, emitter)
     }
 
     /// Drive a client handshake with optional bearer; returns the result.
@@ -454,25 +496,105 @@ mod tests {
         super::super::keyring::delete(adapter, "onebotBearer").unwrap();
         super::super::keyring::delete(adapter, "onebotAllowUnauthenticated").unwrap();
 
-        let (addr, handle) = start_live_server().await;
+        let (addr, handle, _) = start_live_server().await;
         let result = ws_handshake(addr, adapter, None).await;
         assert_http_status(result, StatusCode::UNAUTHORIZED);
         handle.shutdown().await;
     }
 
     #[tokio::test]
-    async fn ws_onebot_headless_without_sink_refuses_upgrade() {
-        // Authentication opt-in must not turn a headless server without a
-        // OneBot event sink into a successful-but-silent frame drain.
+    async fn ws_onebot_headless_emits_open_and_inbound_event() {
+        use futures_util::SinkExt;
+        use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+
+        // Explicit auth opt-in plus a headless event sink must bridge frames
+        // even though no Tauri AppHandle exists.
         let adapter = "ob-optin-test";
         super::super::keyring::delete(adapter, "onebotBearer").unwrap();
         super::super::keyring::set(adapter, "onebotAllowUnauthenticated", "true").unwrap();
 
-        let (addr, handle) = start_live_server().await;
-        let result = ws_handshake(addr, adapter, None).await;
-        assert_http_status(result, StatusCode::SERVICE_UNAVAILABLE);
+        let (addr, handle, emitter) = start_live_server().await;
+        let req = format!("ws://{addr}/ws/onebot/{adapter}")
+            .into_client_request()
+            .unwrap();
+        let (mut socket, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+        socket
+            .send(Message::Text(
+                r#"{"post_type":"message","raw_message":"hi"}"#.into(),
+            ))
+            .await
+            .unwrap();
+        socket
+            .send(Message::Text(
+                r#"{"status":"ok","echo":"request-1"}"#.into(),
+            ))
+            .await
+            .unwrap();
+        socket.close(None).await.unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if emitter.events.lock().len() >= 4 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            emitter.events.lock().as_slice(),
+            &[
+                (
+                    format!("connectors://onebot/{adapter}/open"),
+                    serde_json::Value::Null,
+                ),
+                (
+                    format!("connectors://onebot/{adapter}/event"),
+                    serde_json::Value::String(
+                        r#"{"post_type":"message","raw_message":"hi"}"#.into(),
+                    ),
+                ),
+                (
+                    format!("connectors://onebot/{adapter}/response"),
+                    serde_json::Value::String(
+                        r#"{"status":"ok","echo":"request-1"}"#.into(),
+                    ),
+                ),
+                (
+                    format!("connectors://onebot/{adapter}/close"),
+                    serde_json::Value::Null,
+                ),
+            ]
+        );
         handle.shutdown().await;
 
+        super::super::keyring::delete(adapter, "onebotAllowUnauthenticated").unwrap();
+    }
+
+    #[tokio::test]
+    async fn ws_onebot_without_any_event_sink_returns_503() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let adapter = "ob-no-sink-test";
+        super::super::keyring::delete(adapter, "onebotBearer").unwrap();
+        super::super::keyring::set(adapter, "onebotAllowUnauthenticated", "true").unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = crate::axum_app::build_unresolved_router().with_state(ConnectorsState::new());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let req = format!("ws://{addr}/ws/onebot/{adapter}")
+            .into_client_request()
+            .unwrap();
+        let result = tokio_tungstenite::connect_async(req).await.map(|_| ());
+        assert_http_status(result, StatusCode::SERVICE_UNAVAILABLE);
+
+        server.abort();
         super::super::keyring::delete(adapter, "onebotAllowUnauthenticated").unwrap();
     }
 
@@ -482,14 +604,12 @@ mod tests {
         let adapter = "guarded-ws-adapter";
         super::super::keyring::set(adapter, "onebotBearer", "correct-secret").unwrap();
 
-        let (addr, handle) = start_live_server().await;
+        let (addr, handle, _) = start_live_server().await;
         let result = ws_handshake(addr, adapter, Some("wrong-secret")).await;
         assert_http_status(result, StatusCode::UNAUTHORIZED);
 
-        // Authentication succeeds, but this headless test server has no
-        // OneBot event sink and therefore refuses the upgrade fail-closed.
-        let without_sink = ws_handshake(addr, adapter, Some("correct-secret")).await;
-        assert_http_status(without_sink, StatusCode::SERVICE_UNAVAILABLE);
+        let accepted = ws_handshake(addr, adapter, Some("correct-secret")).await;
+        assert!(accepted.is_ok(), "correct bearer must upgrade, got {accepted:?}");
         handle.shutdown().await;
 
         super::super::keyring::delete(adapter, "onebotBearer").unwrap();

@@ -35,7 +35,6 @@ use std::time::{Duration, Instant};
 use futures_util::{SinkExt, StreamExt};
 use prost::Message as _;
 use serde::Deserialize;
-use tauri::Emitter;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::{client_async_tls, tungstenite::Message};
@@ -43,6 +42,8 @@ use uuid::Uuid;
 
 use cognia_net::proxy_config;
 use cognia_net::proxy_config::wsproxy::{AsyncReadWrite, ProxyStream};
+
+use super::axum_app::EventEmitter;
 
 const ENDPOINT_URL: &str = "https://open.feishu.cn/callback/ws/endpoint";
 
@@ -274,7 +275,10 @@ fn is_live(handle_id: &str) -> bool {
 /// Open a Lark long connection for `adapter_id` (credentials read from the OS
 /// keyring). Returns a stable handle id. The connection self-reconnects with
 /// back-off until `close(id)` is called.
-pub async fn open(app: tauri::AppHandle, adapter_id: String) -> Result<String, String> {
+pub async fn open(
+    emitter: Arc<dyn EventEmitter>,
+    adapter_id: String,
+) -> Result<String, String> {
     let app_id = super::keyring::get(&adapter_id, "appId")?.unwrap_or_default();
     let app_secret = super::keyring::get(&adapter_id, "appSecret")?.unwrap_or_default();
     if app_id.is_empty() || app_secret.is_empty() {
@@ -296,7 +300,7 @@ pub async fn open(app: tauri::AppHandle, adapter_id: String) -> Result<String, S
     tokio::spawn(async move {
         let mut attempts: u32 = 0;
         while is_live(&hid) {
-            match connect_and_run(&app, &hid, &app_id, &app_secret, &cancel).await {
+            match connect_and_run(emitter.as_ref(), &hid, &app_id, &app_secret, &cancel).await {
                 Ok(()) => {
                     // Clean shutdown via cancel — loop guard below stops us.
                     attempts = 0;
@@ -316,7 +320,10 @@ pub async fn open(app: tauri::AppHandle, adapter_id: String) -> Result<String, S
                 _ = sleep => {}
             }
         }
-        let _ = app.emit(&format!("connectors://lark-ws/{hid}/close"), ());
+        emitter.emit(
+            &format!("connectors://lark-ws/{hid}/close"),
+            serde_json::Value::Null,
+        );
         handles().lock().unwrap().remove(&hid);
     });
 
@@ -353,7 +360,7 @@ pub fn close_all() -> usize {
 /// One connect → read-until-close cycle. Returns `Ok(())` on a cancel-driven
 /// shutdown, `Err` on a transport failure (so the caller backs off + retries).
 async fn connect_and_run(
-    app: &tauri::AppHandle,
+    emitter: &dyn EventEmitter,
     handle_id: &str,
     app_id: &str,
     app_secret: &str,
@@ -438,7 +445,7 @@ async fn connect_and_run(
                 match item {
                     Some(Ok(Message::Binary(bytes))) => {
                         match Frame::decode(bytes.as_ref()) {
-                            Ok(frame) => handle_frame(app, handle_id, frame, &mut reasm, &tx).await,
+                            Ok(frame) => handle_frame(emitter, handle_id, frame, &mut reasm, &tx).await,
                             Err(e) => {
                                 // Elevated from debug: a decode failure on a real
                                 // inbound frame is the silent drop we must see. The
@@ -488,7 +495,7 @@ async fn connect_and_run(
 /// Decode + dispatch one inbound frame: control frames update nothing we act
 /// on (server ping); data frames are reassembled, emitted, and acked.
 async fn handle_frame(
-    app: &tauri::AppHandle,
+    emitter: &dyn EventEmitter,
     handle_id: &str,
     frame: Frame,
     reasm: &mut Reassembler,
@@ -543,7 +550,10 @@ async fn handle_frame(
                 log::info!(
                     "[lark-ws] {handle_id} event frame received (type={msg_type}) → emitting"
                 );
-                let _ = app.emit(&format!("connectors://lark-ws/{handle_id}/event"), json);
+                emitter.emit(
+                    &format!("connectors://lark-ws/{handle_id}/event"),
+                    serde_json::Value::String(json),
+                );
             }
         }
         let ack = build_ack(frame, started.elapsed().as_millis() as i64);
@@ -554,6 +564,56 @@ async fn handle_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::axum_app::EventEmitter;
+    use parking_lot::Mutex as ParkingMutex;
+
+    #[derive(Default)]
+    struct RecordingEmitter {
+        events: ParkingMutex<Vec<(String, serde_json::Value)>>,
+    }
+
+    impl EventEmitter for RecordingEmitter {
+        fn emit(&self, topic: &str, payload: serde_json::Value) {
+            self.events.lock().push((topic.to_string(), payload));
+        }
+    }
+
+    #[tokio::test]
+    async fn data_frame_preserves_event_topic_and_string_payload() {
+        let emitter = RecordingEmitter::default();
+        let mut reassembler = Reassembler::default();
+        let (tx, mut rx) = mpsc::channel(1);
+        let frame = Frame {
+            seqid: 1,
+            logid: 2,
+            service: 3,
+            method: METHOD_DATA,
+            headers: vec![
+                Header {
+                    key: H_TYPE.into(),
+                    value: T_EVENT.into(),
+                },
+                Header {
+                    key: H_MESSAGE_ID.into(),
+                    value: "message-1".into(),
+                },
+            ],
+            payload_encoding: String::new(),
+            payload_type: "json".into(),
+            payload: br#"{"event":"message"}"#.to_vec(),
+        };
+
+        handle_frame(&emitter, "handle-1", frame, &mut reassembler, &tx).await;
+
+        assert_eq!(
+            emitter.events.lock().as_slice(),
+            &[(
+                "connectors://lark-ws/handle-1/event".to_string(),
+                serde_json::Value::String(r#"{"event":"message"}"#.to_string()),
+            )]
+        );
+        assert!(rx.recv().await.is_some(), "data frame must still be acknowledged");
+    }
 
     #[test]
     fn frame_roundtrip_preserves_fields() {

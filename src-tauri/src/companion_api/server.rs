@@ -299,11 +299,8 @@ pub fn build_router(state: SharedState) -> Router {
     struct BusEventEmitter(std::sync::Arc<crate::companion_api::event_bus::EventBus>);
 
     impl crate::connectors::axum_app::EventEmitter for BusEventEmitter {
-        fn emit_webhook(&self, adapter_id: &str, payload: &serde_json::Value) {
-            self.0.publish(
-                format!("connectors://webhook/{adapter_id}"),
-                payload.clone(),
-            );
+        fn emit(&self, topic: &str, payload: serde_json::Value) {
+            self.0.publish(topic.to_string(), payload);
         }
     }
 

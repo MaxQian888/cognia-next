@@ -92,7 +92,7 @@ mod tests {
 
     struct NullEmitter;
     impl EventEmitter for NullEmitter {
-        fn emit_webhook(&self, _adapter_id: &str, _payload: &serde_json::Value) {}
+        fn emit(&self, _topic: &str, _payload: serde_json::Value) {}
     }
 
     #[tokio::test]

@@ -23,6 +23,8 @@ use uuid::Uuid;
 use cognia_net::proxy_config;
 use cognia_net::proxy_config::wsproxy::{AsyncReadWrite, ProxyStream};
 
+use super::axum_app::EventEmitter;
+
 // ---------------------------------------------------------------------------
 // Handle registry (global, process-scoped)
 // ---------------------------------------------------------------------------
@@ -45,13 +47,13 @@ fn handles() -> &'static Arc<Mutex<HashMap<String, WsHandle>>> {
 
 /// Open a WebSocket connection. Returns the stable handle id.
 ///
-/// `app` is used to emit Tauri events to the renderer.
+/// `emitter` forwards events to either the desktop renderer or the headless
+/// companion event bus.
 pub async fn open_ws(
-    app: tauri::AppHandle,
+    emitter: Arc<dyn EventEmitter>,
     url: String,
     extra_headers: Option<HashMap<String, String>>,
 ) -> Result<String, String> {
-    use tauri::Emitter;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
     let mut request = url
@@ -118,8 +120,11 @@ pub async fn open_ws(
         .insert(id.clone(), WsHandle { tx });
 
     let id_clone = id.clone();
-    let app_clone = app.clone();
-    let _ = app.emit(&format!("connectors://ws/{id}/open"), ());
+    let emitter_clone = Arc::clone(&emitter);
+    emitter.emit(
+        &format!("connectors://ws/{id}/open"),
+        serde_json::Value::Null,
+    );
 
     // Pump outbound messages from the mpsc channel to the WS sink.
     tokio::spawn(async move {
@@ -135,9 +140,9 @@ pub async fn open_ws(
         while let Some(item) = stream.next().await {
             match item {
                 Ok(Message::Text(text)) => {
-                    let _ = app_clone.emit(
+                    emitter_clone.emit(
                         &format!("connectors://ws/{id_clone}/message"),
-                        text.to_string(),
+                        serde_json::Value::String(text.to_string()),
                     );
                 }
                 Ok(Message::Binary(bytes)) => {
@@ -147,13 +152,13 @@ pub async fn open_ws(
                         "WS {id_clone}: binary frame ({} bytes) → /binary",
                         bytes.len()
                     );
-                    let _ = app_clone.emit(
+                    emitter_clone.emit(
                         &format!("connectors://ws/{id_clone}/binary"),
-                        binary_event_payload(&bytes),
+                        serde_json::Value::String(binary_event_payload(&bytes)),
                     );
                 }
                 Ok(Message::Close(frame)) => {
-                    let _ = app_clone.emit(
+                    emitter_clone.emit(
                         &format!("connectors://ws/{id_clone}/close"),
                         close_event_payload(frame.as_ref()),
                     );
@@ -161,9 +166,11 @@ pub async fn open_ws(
                     break;
                 }
                 Err(e) => {
-                    let _ =
-                        app_clone.emit(&format!("connectors://ws/{id_clone}/error"), e.to_string());
-                    let _ = app_clone.emit(
+                    emitter_clone.emit(
+                        &format!("connectors://ws/{id_clone}/error"),
+                        serde_json::Value::String(e.to_string()),
+                    );
+                    emitter_clone.emit(
                         &format!("connectors://ws/{id_clone}/close"),
                         close_event_payload(None),
                     );
@@ -245,10 +252,23 @@ pub async fn close_all() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::axum_app::EventEmitter;
     use futures_util::StreamExt;
+    use parking_lot::Mutex as ParkingMutex;
     use std::net::SocketAddr;
     use tokio::net::TcpListener;
     use tokio_tungstenite::accept_async;
+
+    #[derive(Default)]
+    struct RecordingEmitter {
+        events: ParkingMutex<Vec<(String, serde_json::Value)>>,
+    }
+
+    impl EventEmitter for RecordingEmitter {
+        fn emit(&self, topic: &str, payload: serde_json::Value) {
+            self.events.lock().push((topic.to_string(), payload));
+        }
+    }
 
     /// Spawn a minimal echo WebSocket server on an ephemeral port.
     async fn spawn_echo_server() -> SocketAddr {
@@ -279,6 +299,66 @@ mod tests {
         ws_stream.send(Message::Text("ping".into())).await.unwrap();
         let msg = ws_stream.next().await.unwrap().unwrap();
         assert_eq!(msg.to_text().unwrap(), "ping");
+    }
+
+    #[tokio::test]
+    async fn open_ws_preserves_event_topics_and_payload_shapes() {
+        use futures_util::SinkExt;
+        use tokio_tungstenite::tungstenite::{
+            protocol::{frame::coding::CloseCode, CloseFrame},
+            Message,
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(tcp).await.unwrap();
+            ws.send(Message::Text("hello".into())).await.unwrap();
+            ws.send(Message::Binary(vec![0, 255].into())).await.unwrap();
+            ws.send(Message::Close(Some(CloseFrame {
+                code: CloseCode::Normal,
+                reason: "done".into(),
+            })))
+            .await
+            .unwrap();
+        });
+
+        let emitter = Arc::new(RecordingEmitter::default());
+        let handle_id = open_ws(emitter.clone(), format!("ws://{addr}"), None)
+            .await
+            .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if emitter.events.lock().len() >= 4 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let events = emitter.events.lock();
+        assert_eq!(
+            events.as_slice(),
+            &[
+                (format!("connectors://ws/{handle_id}/open"), serde_json::Value::Null),
+                (
+                    format!("connectors://ws/{handle_id}/message"),
+                    serde_json::Value::String("hello".into()),
+                ),
+                (
+                    format!("connectors://ws/{handle_id}/binary"),
+                    serde_json::Value::String("AP8=".into()),
+                ),
+                (
+                    format!("connectors://ws/{handle_id}/close"),
+                    serde_json::json!({ "code": 1000, "reason": "done" }),
+                ),
+            ]
+        );
     }
 
     #[test]

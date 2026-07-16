@@ -191,7 +191,8 @@ pub async fn connectors_ws_open(
     url: String,
     headers: Option<std::collections::HashMap<String, String>>,
 ) -> Result<String, String> {
-    super::ws_client::open_ws(app, url, headers).await
+    let emitter = std::sync::Arc::new(super::axum_app::AppHandleEmitter(app));
+    super::ws_client::open_ws(emitter, url, headers).await
 }
 
 #[tauri::command]
@@ -217,7 +218,8 @@ pub async fn connectors_lark_ws_open(
     app: tauri::AppHandle,
     adapter_id: String,
 ) -> Result<String, String> {
-    super::lark_ws::open(app, adapter_id).await
+    let emitter = std::sync::Arc::new(super::axum_app::AppHandleEmitter(app));
+    super::lark_ws::open(emitter, adapter_id).await
 }
 
 #[tauri::command]

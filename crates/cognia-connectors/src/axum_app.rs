@@ -34,21 +34,26 @@ use std::sync::Arc;
 use super::state::ConnectorsState;
 use super::ws_server;
 
-/// Sink for `connectors://webhook/<adapter_id>` events. The live impl wraps a
-/// `tauri::AppHandle`; tests substitute a recording mock.
+/// Sink for connector events. The live impl wraps a `tauri::AppHandle`;
+/// headless installs publish through the companion event bus.
 pub trait EventEmitter: Send + Sync + 'static {
-    fn emit_webhook(&self, adapter_id: &str, payload: &serde_json::Value);
+    fn emit(&self, topic: &str, payload: serde_json::Value);
+
+    fn emit_webhook(&self, adapter_id: &str, payload: &serde_json::Value) {
+        self.emit(
+            &format!("connectors://webhook/{adapter_id}"),
+            payload.clone(),
+        );
+    }
 }
 
 /// Production emitter — forwards to the renderer via Tauri events.
 pub struct AppHandleEmitter(pub tauri::AppHandle);
 
 impl EventEmitter for AppHandleEmitter {
-    fn emit_webhook(&self, adapter_id: &str, payload: &serde_json::Value) {
+    fn emit(&self, topic: &str, payload: serde_json::Value) {
         use tauri::Emitter;
-        let _ = self
-            .0
-            .emit(&format!("connectors://webhook/{adapter_id}"), payload);
+        let _ = self.0.emit(topic, payload);
     }
 }
 
@@ -849,11 +854,25 @@ mod tests {
     }
 
     impl EventEmitter for RecordingEmitter {
-        fn emit_webhook(&self, adapter_id: &str, payload: &serde_json::Value) {
+        fn emit(&self, topic: &str, payload: serde_json::Value) {
             self.events
                 .lock()
-                .push((adapter_id.to_string(), payload.clone()));
+                .push((topic.to_string(), payload));
         }
+    }
+
+    #[test]
+    fn webhook_events_use_the_canonical_topic() {
+        let emitter = RecordingEmitter::default();
+        emitter.emit_webhook("adapter-a", &serde_json::json!({ "ok": true }));
+
+        assert_eq!(
+            emitter.events.lock().as_slice(),
+            &[(
+                "connectors://webhook/adapter-a".to_string(),
+                serde_json::json!({ "ok": true }),
+            )]
+        );
     }
 
     fn test_router_with(state: ConnectorsState) -> (Router, Arc<RecordingEmitter>) {
@@ -1393,7 +1412,7 @@ mod tests {
 
         let events = emitter.events.lock();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].0, adapter_id);
+        assert_eq!(events[0].0, format!("connectors://webhook/{adapter_id}"));
         assert_eq!(events[0].1["type"], "event_callback");
 
         super::super::keyring::delete(adapter_id, "signingSecret").unwrap();
@@ -1887,7 +1906,7 @@ mod tests {
 
         let events = emitter.events.lock();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].0, adapter_id);
+        assert_eq!(events[0].0, format!("connectors://webhook/{adapter_id}"));
         // The RAW envelope is forwarded (TS re-parses via parseQQDispatch).
         assert_eq!(events[0].1["t"], "C2C_MESSAGE_CREATE");
         assert_eq!(events[0].1["d"]["id"], "msg-1");
