@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 let backendAvailable = true
 let session: { id: string; projectId?: string } | undefined
@@ -12,6 +12,15 @@ let gitState: Record<string, unknown> = {}
 
 const openFile = jest.fn().mockResolvedValue(undefined)
 const clearReveal = jest.fn()
+const selectRoot = jest.fn()
+const closeFile = jest.fn()
+const setActivePath = jest.fn()
+const setDraft = jest.fn()
+const saveFile = jest.fn().mockResolvedValue(undefined)
+const saveAll = jest.fn().mockResolvedValue(undefined)
+let activePath: string | null = null
+let activeFile: { absolutePath: string; relPath: string; content: string } | null = null
+let openFiles: Array<{ absolutePath: string; relPath: string; content: string }> = []
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -43,37 +52,93 @@ jest.mock("@/components/editor/project/use-project-editor", () => ({
     roots: [{ key: "/repo", label: "main", path: "/repo", isMain: true }],
     rootKey: "/repo",
     rootPath: "/repo",
-    openFiles: [],
-    activePath: null,
-    activeFile: null,
+    openFiles,
+    activePath,
+    activeFile,
     dirtyCount: 0,
     treeRefreshToken: 0,
-    selectRoot: jest.fn(),
+    selectRoot,
     openFile,
-    closeFile: jest.fn(),
-    setActivePath: jest.fn(),
-    setDraft: jest.fn(),
-    saveFile: jest.fn(),
-    saveAll: jest.fn(),
+    closeFile,
+    setActivePath,
+    setDraft,
+    saveFile,
+    saveAll,
   }),
 }))
 
 jest.mock("@/components/editor/project/project-root-switcher", () => ({
-  ProjectRootSwitcher: () => <div data-testid="root-switcher" />,
+  ProjectRootSwitcher: ({ onSelect }: { onSelect: (key: string) => void }) => (
+    <button data-testid="root-switcher" onClick={() => onSelect("/other")}>
+      root
+    </button>
+  ),
 }))
 jest.mock("@/components/editor/project/project-editor-tabs", () => ({
-  ProjectEditorTabs: ({ fixedTabs = [] }: { fixedTabs?: Array<{ id: string }> }) => (
-    <div data-testid="editor-tabs" data-fixed={fixedTabs.map((tab) => tab.id).join(",")} />
+  ProjectEditorTabs: ({
+    fixedTabs = [],
+    onSelect,
+    onClose,
+    onSaveAll,
+  }: {
+    fixedTabs?: Array<{ id: string; onSelect: () => void }>
+    onSelect: (path: string) => void
+    onClose: (path: string) => void
+    onSaveAll: () => void
+  }) => (
+    <div data-testid="editor-tabs" data-fixed={fixedTabs.map((tab) => tab.id).join(",")}>
+      {fixedTabs.map((tab) => (
+        <button key={tab.id} data-testid={`fixed-${tab.id}`} onClick={tab.onSelect}>
+          {tab.id}
+        </button>
+      ))}
+      <button data-testid="select-file" onClick={() => onSelect("src/a.ts")}>
+        file
+      </button>
+      <button data-testid="close-file" onClick={() => onClose("src/a.ts")}>
+        close
+      </button>
+      <button data-testid="save-all" onClick={onSaveAll}>
+        save all
+      </button>
+    </div>
   ),
 }))
 jest.mock("@/components/editor/project/project-file-tree", () => ({
-  ProjectFileTree: () => <div data-testid="file-tree" />,
+  ProjectFileTree: ({ onOpenFile }: { onOpenFile: (path: string) => void }) => (
+    <button data-testid="file-tree" onClick={() => onOpenFile("src/tree.ts")}>
+      tree
+    </button>
+  ),
 }))
 jest.mock("@/components/editor/project/project-search-panel", () => ({
-  ProjectSearchPanel: () => <div data-testid="search-panel" />,
+  ProjectSearchPanel: ({
+    onOpenMatch,
+  }: {
+    onOpenMatch: (path: string, line: number, column: number) => void
+  }) => (
+    <button data-testid="search-panel" onClick={() => onOpenMatch("src/search.ts", 3, 4)}>
+      search
+    </button>
+  ),
 }))
 jest.mock("@/components/editor/project/project-monaco", () => ({
-  ProjectMonaco: () => <div data-testid="monaco" />,
+  ProjectMonaco: ({
+    onChange,
+    actions,
+  }: {
+    onChange: (value: string) => void
+    actions: Array<{ id: string; run?: () => void }>
+  }) => (
+    <div data-testid="monaco">
+      <button onClick={() => onChange("updated")}>change</button>
+      {actions.map((action) => (
+        <button key={action.id} data-testid={`action-${action.id}`} onClick={action.run}>
+          {action.id}
+        </button>
+      ))}
+    </div>
+  ),
 }))
 
 jest.mock("@/stores/git/git-store", () => ({
@@ -110,6 +175,15 @@ beforeEach(() => {
   }
   openFile.mockClear()
   clearReveal.mockClear()
+  selectRoot.mockClear()
+  closeFile.mockClear()
+  setActivePath.mockClear()
+  setDraft.mockClear()
+  saveFile.mockClear().mockResolvedValue(undefined)
+  saveAll.mockClear().mockResolvedValue(undefined)
+  activePath = null
+  activeFile = null
+  openFiles = []
   act(() => useArtifactDockLayoutStore.getState().resetLayout())
   useArtifactDockLayoutStore.setState({ clearWorkspaceRevealRequest: clearReveal })
 })
@@ -176,5 +250,52 @@ describe("DockWorkspace", () => {
     expect(screen.getByTestId("editor-tabs")).toHaveAttribute("data-fixed", "")
     expect(screen.getByTestId("workspace-file-layout")).toBeInTheDocument()
     expect(screen.queryByTestId("workspace-review-layout")).not.toBeInTheDocument()
+  })
+
+  it("wires editor tabs, sidebar, file actions, and keyboard saves", async () => {
+    activePath = "src/a.ts"
+    activeFile = { absolutePath: "/repo/src/a.ts", relPath: "src/a.ts", content: "old" }
+    openFiles = [activeFile]
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: jest.fn() },
+    })
+
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    fireEvent.click(screen.getByTestId("root-switcher"))
+    fireEvent.click(screen.getByTestId("fixed-review"))
+    fireEvent.click(screen.getByTestId("select-file"))
+    fireEvent.click(screen.getByTestId("close-file"))
+    fireEvent.click(screen.getByTestId("save-all"))
+    expect(selectRoot).toHaveBeenCalledWith("/other")
+    expect(setActivePath).toHaveBeenCalledWith("src/a.ts")
+    expect(closeFile).toHaveBeenCalledWith("src/a.ts")
+
+    fireEvent.click(screen.getByTestId("file-tree"))
+    expect(openFile).toHaveBeenCalledWith("src/tree.ts")
+    fireEvent.click(screen.getByText("searchTab"))
+    fireEvent.click(screen.getByTestId("search-panel"))
+    expect(openFile).toHaveBeenCalledWith("src/search.ts")
+
+    fireEvent.click(screen.getByTestId("action-file.save"))
+    fireEvent.click(screen.getByTestId("action-file.copyPath"))
+    fireEvent.click(screen.getByTestId("action-file.copyRelativePath"))
+    fireEvent.click(screen.getByTestId("action-file.searchProject"))
+    fireEvent.click(screen.getByText("filesTab"))
+    fireEvent.click(screen.getByText("searchTab"))
+
+    fireEvent.click(screen.getByText("change"))
+    expect(setDraft).toHaveBeenCalledWith("src/a.ts", "updated")
+    fireEvent.keyDown(screen.getByTestId("dock-workspace"), { key: "s", metaKey: true })
+    fireEvent.keyDown(screen.getByTestId("dock-workspace"), {
+      key: "s",
+      ctrlKey: true,
+      shiftKey: true,
+    })
+    await waitFor(() => {
+      expect(saveFile).toHaveBeenCalledWith("src/a.ts")
+      expect(saveAll).toHaveBeenCalled()
+    })
   })
 })

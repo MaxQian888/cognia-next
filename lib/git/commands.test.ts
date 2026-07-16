@@ -24,11 +24,17 @@ jest.mock("@/lib/tauri", () => ({
 import {
   gitBranches,
   gitCheckoutBranch,
+  gitCherryPick,
   gitCommit,
+  gitCommitFiles,
   gitConflicts,
   gitCreateBranch,
+  gitCreateTag,
   gitDeleteBranch,
+  gitDeleteTag,
+  gitDiffCommit,
   gitDiffFile,
+  gitDiffStagedAll,
   gitDiffStat,
   gitDiffRefsFile,
   gitDiffRefsFiles,
@@ -36,17 +42,31 @@ import {
   gitDiscardAll,
   gitFetch,
   gitFileHistory,
+  gitBlame,
   gitIgnoreAdd,
   gitInit,
   gitIsRepo,
   gitLog,
   gitMerge,
   gitMergeAbort,
+  gitInteractiveRebase,
   gitPull,
   gitPush,
+  gitPushTag,
+  gitRebase,
+  gitRebaseCommits,
+  gitRefs,
+  gitRemoteAdd,
+  gitRemoteRemove,
+  gitRemotes,
   gitRenameBranch,
   gitRepoState,
+  gitReset,
+  gitRestore,
+  gitRevert,
   gitResolveConflict,
+  gitSequencerAbort,
+  gitSequencerContinue,
   gitStage,
   gitStashApply,
   gitStashDrop,
@@ -55,6 +75,7 @@ import {
   gitStashPush,
   gitStatus,
   gitSync,
+  gitTags,
   gitUnstage,
   gitWatchStart,
   gitWatchStop,
@@ -173,6 +194,63 @@ describe("when in Tauri", () => {
       repoPath: "/r",
       path: "a.ts",
       maxCount: 20,
+    })
+  })
+
+  it("covers the extended read and history command surface", async () => {
+    const diff = { path: "a.ts", oldContent: "", newContent: "", hunks: [], isBinary: false }
+    callMock.mockResolvedValueOnce(diff)
+    expect((await gitDiffCommit("/r", "abc", "a.ts")).language).toBe("typescript")
+    await gitCommitFiles("/r", "abc")
+    await gitDiffStagedAll("/r")
+    await gitRefs("/r")
+    await gitBlame("/r", "a.ts", "HEAD")
+    await gitRemotes("/r")
+    await gitTags("/r")
+    expect(callMock).toHaveBeenCalledWith("git_diff_commit", {
+      repoPath: "/r",
+      sha: "abc",
+      path: "a.ts",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_blame", {
+      repoPath: "/r",
+      path: "a.ts",
+      rev: "HEAD",
+    })
+  })
+
+  it("covers remote, tag, restore, and sequencer command surfaces", async () => {
+    await gitRemoteAdd("/r", "upstream", "https://example.test/repo.git")
+    await gitRemoteRemove("/r", "upstream")
+    await gitCreateTag("/r", "v1", "release", "HEAD")
+    await gitDeleteTag("/r", "v1")
+    await gitPushTag("/r", "v1")
+    await gitReset("/r", "mixed", "HEAD~1")
+    await gitRestore("/r", ["a.ts"], true, "HEAD")
+    await gitRebase("/r", "main")
+    await gitCherryPick("/r", "abc")
+    await gitRevert("/r", "def")
+    await gitSequencerContinue("/r")
+    await gitSequencerAbort("/r")
+    await gitRebaseCommits("/r", "main")
+    await gitInteractiveRebase("/r", "main", [{ action: "pick", sha: "abc" }])
+
+    expect(callMock).toHaveBeenCalledWith("git_create_tag", {
+      repoPath: "/r",
+      name: "v1",
+      message: "release",
+      target: "HEAD",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_restore", {
+      repoPath: "/r",
+      paths: ["a.ts"],
+      staged: true,
+      source: "HEAD",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_interactive_rebase", {
+      repoPath: "/r",
+      base: "main",
+      entries: [{ action: "pick", sha: "abc" }],
     })
   })
 

@@ -247,4 +247,63 @@ describe("ChangesView", () => {
     expect(actions.discard).toHaveBeenCalledWith(["work.ts"])
     expect(screen.queryByTestId("discard-confirm")).not.toBeInTheDocument()
   })
+
+  it("wires every group and file action", async () => {
+    setConfirmDiscard(false)
+    const actions = makeActions()
+    const onSelectFile = jest.fn()
+    const onViewHistory = jest.fn()
+    const onViewBlame = jest.fn()
+    const onRestore = jest.fn()
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+
+    render(
+      <ChangesView
+        rootDir="/r"
+        status={status}
+        actions={actions}
+        committing={false}
+        selectedPath="conf.ts"
+        onSelectFile={onSelectFile}
+        onViewHistory={onViewHistory}
+        onViewBlame={onViewBlame}
+        onRestore={onRestore}
+      />
+    )
+
+    for (const group of ["merge", "staged", "changes"]) {
+      fireEvent.click(screen.getByTestId(`group-toggle-${group}`))
+      fireEvent.click(screen.getByTestId(`group-toggle-${group}`))
+    }
+    fireEvent.click(screen.getByTestId("group-action-staged-unstage-all"))
+    fireEvent.click(screen.getByTestId("unstage-staged.ts"))
+    fireEvent.click(screen.getByTestId("stage-work.ts"))
+    fireEvent.click(screen.getByTestId("change-item-conf.ts"))
+
+    const chooseMenuAction = async (path: string, name: string) => {
+      fireEvent.contextMenu(screen.getByTestId(`change-item-${path}`))
+      fireEvent.click(await screen.findByRole("menuitem", { name }))
+    }
+
+    for (const path of ["conf.ts", "staged.ts", "work.ts"]) {
+      await chooseMenuAction(path, "Copy Path")
+      await chooseMenuAction(path, "View File History")
+      await chooseMenuAction(path, "View Blame")
+    }
+    await chooseMenuAction("staged.ts", "Restore (to HEAD)")
+    fireEvent.keyDown(document, { key: "Escape" })
+    await chooseMenuAction("work.ts", "Restore (to HEAD)")
+
+    expect(actions.unstage).toHaveBeenCalledWith(["staged.ts"])
+    expect(actions.stage).toHaveBeenCalledWith(["work.ts"])
+    expect(onSelectFile).toHaveBeenCalledWith("conf.ts", false)
+    expect(writeText).toHaveBeenCalledTimes(3)
+    expect(onViewHistory).toHaveBeenCalledTimes(3)
+    expect(onViewBlame).toHaveBeenCalledTimes(3)
+    expect(onRestore).toHaveBeenCalledTimes(2)
+  })
 })
