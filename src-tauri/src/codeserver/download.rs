@@ -49,7 +49,13 @@ struct ProgressEvent {
     message: String,
 }
 
-fn emit_progress(app: &tauri::AppHandle, stage: &str, bytes_done: u64, bytes_total: u64, msg: &str) {
+fn emit_progress(
+    app: &tauri::AppHandle,
+    stage: &str,
+    bytes_done: u64,
+    bytes_total: u64,
+    msg: &str,
+) {
     // Best-effort — never fail the install because a listener detached.
     let _ = app.emit(
         "codeserver://download-progress",
@@ -207,7 +213,13 @@ pub async fn ensure_code_server(app: &tauri::AppHandle) -> Result<InstallInfo> {
     let partial = root.join(format!("{CODE_SERVER_VERSION}-{os}-{arch}.tar.gz.partial"));
 
     // 1. Stream to the .partial file, hashing as we go.
-    emit_progress(app, "downloading", 0, 0, "Downloading VS Code (code-server)…");
+    emit_progress(
+        app,
+        "downloading",
+        0,
+        0,
+        "Downloading VS Code (code-server)…",
+    );
     let actual = stream_to_file(app, &url, &partial)
         .await
         .with_context(|| format!("download {url}"))?;
@@ -230,9 +242,7 @@ pub async fn ensure_code_server(app: &tauri::AppHandle) -> Result<InstallInfo> {
     let _ = std::fs::remove_file(&partial);
 
     if !binary.exists() {
-        return Err(anyhow!(
-            "extracted archive did not contain bin/code-server"
-        ));
+        return Err(anyhow!("extracted archive did not contain bin/code-server"));
     }
     #[cfg(unix)]
     {
@@ -349,7 +359,10 @@ mod tests {
         assert_eq!(safe_stripped_path(Path::new("wrapper")), None);
         // Traversal attempt surviving the strip → skip.
         assert_eq!(safe_stripped_path(Path::new("wrapper/../../evil")), None);
-        assert_eq!(safe_stripped_path(Path::new("w/a/../../../etc/passwd")), None);
+        assert_eq!(
+            safe_stripped_path(Path::new("w/a/../../../etc/passwd")),
+            None
+        );
     }
 
     #[test]
@@ -363,7 +376,10 @@ mod tests {
         {
             let mut builder = tar::Builder::new(&mut tar_buf);
             for (name, payload) in [
-                ("code-server-4.128.0-macos-arm64/bin/code-server", &b"#!/bin/sh\necho hi\n"[..]),
+                (
+                    "code-server-4.128.0-macos-arm64/bin/code-server",
+                    &b"#!/bin/sh\necho hi\n"[..],
+                ),
                 ("code-server-4.128.0-macos-arm64/lib/node", &b"NODE"[..]),
             ] {
                 let mut header = tar::Header::new_gnu();

@@ -125,8 +125,16 @@ fn response_error(body: &Value) -> Option<(String, String)> {
         .get("ResponseMetadata")
         .and_then(|m| m.get("Error"))
         .or_else(|| body.get("Error"))?;
-    let code = err.get("Code").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let msg = err.get("Message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let code = err
+        .get("Code")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let msg = err
+        .get("Message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if code.is_empty() && msg.is_empty() {
         None
     } else {
@@ -146,23 +154,34 @@ fn parse_f64(v: &Value) -> Option<f64> {
 fn extract_reset(v: &Value) -> Option<String> {
     if let Some(s) = v.as_str() {
         let t = s.trim();
-        return if t.is_empty() { None } else { Some(t.to_string()) };
+        return if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        };
     }
     let n = parse_f64(v)?;
     if !n.is_finite() || n <= 0.0 {
         return None;
     }
     // < 1e12 can't be epoch-ms → treat as seconds.
-    let ms = if n < 1e12 { (n * 1000.0) as i64 } else { n as i64 };
-    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms).map(|dt| {
-        dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
-    })
+    let ms = if n < 1e12 {
+        (n * 1000.0) as i64
+    } else {
+        n as i64
+    };
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
 }
 
 /// Canonical query: key-sorted, per-segment URI-encoded. The SAME string is used
 /// for signing AND the request URL so they match byte-for-byte.
 fn canonical_query(action: &str, region: &str) -> String {
-    let mut pairs = [("Action", action), ("Region", region), ("Version", API_VERSION)];
+    let mut pairs = [
+        ("Action", action),
+        ("Region", region),
+        ("Version", API_VERSION),
+    ];
     pairs.sort_by(|a, b| a.0.cmp(b.0));
     pairs
         .iter()
@@ -229,8 +248,14 @@ async fn openapi_call(
         Err(e) => return VolcCall::Transient(e),
     };
     let body: &[u8] = b"";
-    let (authorization, x_date, x_content_sha256) =
-        sign(access_key_id, secret_access_key, region, &cq, body, chrono::Utc::now());
+    let (authorization, x_date, x_content_sha256) = sign(
+        access_key_id,
+        secret_access_key,
+        region,
+        &cq,
+        body,
+        chrono::Utc::now(),
+    );
 
     let resp = client
         .post(&url)
@@ -250,7 +275,9 @@ async fn openapi_call(
 
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return VolcCall::Auth(format!("Authentication failed (HTTP {status}). {AKSK_HINT}"));
+        return VolcCall::Auth(format!(
+            "Authentication failed (HTTP {status}). {AKSK_HINT}"
+        ));
     }
     if !status.is_success() {
         // The gateway often returns 4xx (usually 400) for signature/credential
@@ -281,7 +308,9 @@ async fn openapi_call(
     // Business errors often arrive as 200 + ResponseMetadata.Error.
     if let Some((code, msg)) = response_error(&body) {
         if is_auth_error_code(&code) {
-            return VolcCall::Auth(format!("Authentication failed ({code}): {msg}. {AKSK_HINT}"));
+            return VolcCall::Auth(format!(
+                "Authentication failed ({code}): {msg}. {AKSK_HINT}"
+            ));
         }
         return VolcCall::Soft(format!("API error ({code}): {msg}"));
     }
@@ -343,7 +372,9 @@ fn parse_coding_plan_tiers(result: &Value) -> Vec<VolcengineUsageTier> {
             .or_else(|| item.get("Label").and_then(|v| v.as_str()))
             .or_else(|| item.get("Window").and_then(|v| v.as_str()))
             .unwrap_or("");
-        let Some(name) = coding_window(label) else { continue };
+        let Some(name) = coding_window(label) else {
+            continue;
+        };
         let utilization = item
             .get("Percent")
             .and_then(parse_f64)
@@ -364,15 +395,33 @@ fn parse_coding_plan_tiers(result: &Value) -> Vec<VolcengineUsageTier> {
 }
 
 fn ok(tiers: Vec<VolcengineUsageTier>, plan: Option<String>) -> VolcengineUsage {
-    VolcengineUsage { ok: true, plan, tiers, error: None, auth_error: false }
+    VolcengineUsage {
+        ok: true,
+        plan,
+        tiers,
+        error: None,
+        auth_error: false,
+    }
 }
 
 fn auth_err(detail: String) -> VolcengineUsage {
-    VolcengineUsage { ok: false, plan: None, tiers: vec![], error: Some(detail), auth_error: true }
+    VolcengineUsage {
+        ok: false,
+        plan: None,
+        tiers: vec![],
+        error: Some(detail),
+        auth_error: true,
+    }
 }
 
 fn soft_err(detail: String) -> VolcengineUsage {
-    VolcengineUsage { ok: false, plan: None, tiers: vec![], error: Some(detail), auth_error: false }
+    VolcengineUsage {
+        ok: false,
+        plan: None,
+        tiers: vec![],
+        error: Some(detail),
+        auth_error: false,
+    }
 }
 
 /// Query Volcengine Agent/Coding Plan usage. Returns `Err` only on transient
@@ -408,7 +457,14 @@ pub async fn query_usage(
     }
 
     // 2) Coding Plan.
-    match openapi_call(&region, access_key_id, secret_access_key, "GetCodingPlanUsage").await {
+    match openapi_call(
+        &region,
+        access_key_id,
+        secret_access_key,
+        "GetCodingPlanUsage",
+    )
+    .await
+    {
         VolcCall::Auth(detail) => return Ok(auth_err(detail)),
         VolcCall::Transient(detail) => return Err(format!("GetCodingPlanUsage: {detail}")),
         VolcCall::Soft(detail) => soft_errors.push(format!("GetCodingPlanUsage: {detail}")),
@@ -424,7 +480,9 @@ pub async fn query_usage(
     if !soft_errors.is_empty() {
         Ok(soft_err(soft_errors.join("; ")))
     } else {
-        Ok(soft_err("No active Volcengine subscription found (signature OK).".to_string()))
+        Ok(soft_err(
+            "No active Volcengine subscription found (signature OK).".to_string(),
+        ))
     }
 }
 
@@ -436,7 +494,9 @@ pub async fn subscription_volcengine_usage(
     base_url: String,
 ) -> Result<VolcengineUsage, String> {
     if access_key_id.trim().is_empty() || secret_access_key.trim().is_empty() {
-        return Ok(soft_err("Missing Volcengine AccessKey ID / Secret.".to_string()));
+        return Ok(soft_err(
+            "Missing Volcengine AccessKey ID / Secret.".to_string(),
+        ));
     }
     query_usage(access_key_id.trim(), secret_access_key.trim(), &base_url).await
 }
@@ -451,15 +511,24 @@ mod tests {
 
     #[test]
     fn region_is_derived_from_base_url() {
-        assert_eq!(region_of("https://ark.cn-beijing.volces.com/api/coding"), "cn-beijing");
-        assert_eq!(region_of("https://ark.ap-southeast.bytepluses.com/api/coding"), "ap-southeast");
+        assert_eq!(
+            region_of("https://ark.cn-beijing.volces.com/api/coding"),
+            "cn-beijing"
+        );
+        assert_eq!(
+            region_of("https://ark.ap-southeast.bytepluses.com/api/coding"),
+            "ap-southeast"
+        );
         assert_eq!(region_of("https://example.com"), "cn-beijing"); // fallback
     }
 
     #[test]
     fn canonical_query_is_key_sorted_and_encoded() {
         let cq = canonical_query("GetAFPUsage", "cn-beijing");
-        assert_eq!(cq, "Action=GetAFPUsage&Region=cn-beijing&Version=2024-01-01");
+        assert_eq!(
+            cq,
+            "Action=GetAFPUsage&Region=cn-beijing&Version=2024-01-01"
+        );
     }
 
     #[test]

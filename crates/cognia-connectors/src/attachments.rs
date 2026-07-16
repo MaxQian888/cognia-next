@@ -379,12 +379,16 @@ mod tests {
         let unique_ref = format!("test-img-{}", uuid::Uuid::new_v4());
         let url = format!("{}/img.png", mock_server.uri());
 
-        let ref1 = fetch_into(dir.path(), &unique_ref, &url, None).await.unwrap();
+        let ref1 = fetch_into(dir.path(), &unique_ref, &url, None)
+            .await
+            .unwrap();
         assert_eq!(ref1.remote_ref, unique_ref);
         assert!(!ref1.local_url.is_empty());
 
         // Second call — mock expects only 1 hit, so this must be a cache hit.
-        let ref2 = fetch_into(dir.path(), &unique_ref, &url, None).await.unwrap();
+        let ref2 = fetch_into(dir.path(), &unique_ref, &url, None)
+            .await
+            .unwrap();
         assert_eq!(ref2.local_url, ref1.local_url);
 
         // Verify the mock was only contacted once.
@@ -460,12 +464,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let unique_ref = format!("test-read-img-{}", uuid::Uuid::new_v4());
         let url = format!("{}/read.png", mock_server.uri());
-        fetch_into(dir.path(), &unique_ref, &url, None).await.unwrap();
+        fetch_into(dir.path(), &unique_ref, &url, None)
+            .await
+            .unwrap();
 
         // Missing ref → None.
         assert_eq!(
-            read_attachment_base64_from(dir.path(), "test-adapter", "never-fetched", 1024)
-                .unwrap(),
+            read_attachment_base64_from(dir.path(), "test-adapter", "never-fetched", 1024).unwrap(),
             None
         );
         // Cached and under cap → decrypted bytes.
@@ -546,13 +551,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let unique_ref = format!("test-re-{}", uuid::Uuid::new_v4());
         let url = format!("{}/re.png", mock_server.uri());
-        let fetched = fetch_into(dir.path(), &unique_ref, &url, None).await.unwrap();
+        let fetched = fetch_into(dir.path(), &unique_ref, &url, None)
+            .await
+            .unwrap();
 
         cleanup_raw_files_in(dir.path()).unwrap();
         assert!(!std::path::Path::new(&fetched.local_url).exists());
 
         // Cache hit (no second network fetch) restores the raw copy.
-        let again = fetch_into(dir.path(), &unique_ref, &url, None).await.unwrap();
+        let again = fetch_into(dir.path(), &unique_ref, &url, None)
+            .await
+            .unwrap();
         assert_eq!(again.local_url, fetched.local_url);
         assert_eq!(
             std::fs::read(&again.local_url).unwrap(),

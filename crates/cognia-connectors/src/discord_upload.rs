@@ -234,14 +234,17 @@ mod tests {
 
     #[test]
     fn extract_message_id_reads_id() {
-        let v: serde_json::Value = serde_json::from_str(r#"{"id":"123","channel_id":"c"}"#).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"id":"123","channel_id":"c"}"#).unwrap();
         assert_eq!(extract_message_id(&v).unwrap(), "123");
     }
 
     #[test]
     fn extract_message_id_errors_when_missing() {
         let v: serde_json::Value = serde_json::from_str(r#"{"channel_id":"c"}"#).unwrap();
-        assert!(extract_message_id(&v).unwrap_err().contains("missing message id"));
+        assert!(extract_message_id(&v)
+            .unwrap_err()
+            .contains("missing message id"));
     }
 
     #[tokio::test]
@@ -252,7 +255,9 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![9, 8, 7]))
             .mount(&server)
             .await;
-        let bytes = fetch_bytes(&format!("{}/a.png", server.uri())).await.unwrap();
+        let bytes = fetch_bytes(&format!("{}/a.png", server.uri()))
+            .await
+            .unwrap();
         assert_eq!(&bytes[..], &[9u8, 8, 7]);
     }
 

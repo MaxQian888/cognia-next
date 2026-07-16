@@ -7,7 +7,9 @@
 //! the other native backends (ocrs, paddle) use, which requires probing the
 //! image dimensions from the encoded bytes first.
 
-use crate::{NativeBackend, NativeBoundingBox, NativeOcrError, NativeOcrInvokePayload, NativeOcrResult};
+use crate::{
+    NativeBackend, NativeBoundingBox, NativeOcrError, NativeOcrInvokePayload, NativeOcrResult,
+};
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;

@@ -161,10 +161,8 @@ pub async fn open_ws(
                     break;
                 }
                 Err(e) => {
-                    let _ = app_clone.emit(
-                        &format!("connectors://ws/{id_clone}/error"),
-                        e.to_string(),
-                    );
+                    let _ =
+                        app_clone.emit(&format!("connectors://ws/{id_clone}/error"), e.to_string());
                     let _ = app_clone.emit(
                         &format!("connectors://ws/{id_clone}/close"),
                         close_event_payload(None),

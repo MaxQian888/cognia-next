@@ -255,8 +255,7 @@ pub mod kube_api {
     #[async_trait]
     impl ContainerApi for KubeContainerApi {
         async fn run(&self, spec: RunnerSpec) -> Result<RunningRunner, RunnerRunError> {
-            let manifest =
-                runner_pod_manifest(&spec, &self.opts).map_err(RunnerRunError::Other)?;
+            let manifest = runner_pod_manifest(&spec, &self.opts).map_err(RunnerRunError::Other)?;
             let pod: Pod = serde_json::from_value(manifest)
                 .map_err(|e| RunnerRunError::Other(format!("pod manifest invalid: {e}")))?;
             let name = pod
@@ -403,7 +402,11 @@ pub mod kube_api {
         }
 
         async fn remove(&self, container_id: &str) -> Result<(), String> {
-            match self.pods().delete(container_id, &DeleteParams::default()).await {
+            match self
+                .pods()
+                .delete(container_id, &DeleteParams::default())
+                .await
+            {
                 Ok(_) => Ok(()),
                 // Idempotent: an already-gone pod is success.
                 Err(kube::Error::Api(status)) if status.code == 404 => Ok(()),

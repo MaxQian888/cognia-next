@@ -302,7 +302,10 @@ mod tests {
         // dirs::config_dir() would wrongly land in Application Support.
         let path = spec_for("zed").expect("zed spec").path.expect("zed path");
         let shown = path.to_string_lossy();
-        assert!(shown.contains(".config/zed"), "unexpected zed path: {shown}");
+        assert!(
+            shown.contains(".config/zed"),
+            "unexpected zed path: {shown}"
+        );
         assert!(!shown.contains("Application Support"));
     }
 

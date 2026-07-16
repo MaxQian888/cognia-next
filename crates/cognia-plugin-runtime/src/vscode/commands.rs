@@ -146,7 +146,9 @@ fn install_staged_vsix(
     // install must not leave an 80 MB orphan in app data.
     let outcome = std::fs::read(path)
         .map_err(|e| VscodeCommandError::new("read_error", e.to_string()))
-        .and_then(|payload| install_vsix(&payload, &install_root.to_path_buf()).map_err(Into::into));
+        .and_then(|payload| {
+            install_vsix(&payload, &install_root.to_path_buf()).map_err(Into::into)
+        });
     let _ = std::fs::remove_file(path);
     outcome
 }

@@ -443,7 +443,9 @@ fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String
         if !Path::new("/usr/bin/sandbox-exec").exists() {
             return Err("sandboxed terminal requested but /usr/bin/sandbox-exec is missing".into());
         }
-        Ok(Some(cognia_automation::sandbox::launcher::sandbox_exec_prefix(&scope)))
+        Ok(Some(
+            cognia_automation::sandbox::launcher::sandbox_exec_prefix(&scope),
+        ))
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {

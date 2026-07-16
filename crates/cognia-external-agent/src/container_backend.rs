@@ -701,7 +701,11 @@ pub mod bollard_api {
                         spec.image
                     )))
                 }
-                Err(e) => return Err(RunnerRunError::Other(format!("create_container failed: {e}"))),
+                Err(e) => {
+                    return Err(RunnerRunError::Other(format!(
+                        "create_container failed: {e}"
+                    )))
+                }
             };
             let container_id = created.id;
 
@@ -779,7 +783,9 @@ pub mod bollard_api {
         }
 
         async fn pull_image(&self, image: &str) -> Result<(), String> {
-            let options = CreateImageOptionsBuilder::default().from_image(image).build();
+            let options = CreateImageOptionsBuilder::default()
+                .from_image(image)
+                .build();
             // Drain the progress stream to completion; any frame-level error
             // aborts the pull (no partial-success semantics).
             let mut stream = self.docker.create_image(Some(options), None, None);
@@ -1057,9 +1063,7 @@ mod tests {
         let backend = ContainerBackend::new(api, test_config(Some("v")));
         let mut config = spawn_config("evil");
         config.cwd = Some("/etc".into());
-        let sink = crate::exec_backend::EmitterEventSink::new(
-            RecordingAgentEmitter::new(),
-        );
+        let sink = crate::exec_backend::EmitterEventSink::new(RecordingAgentEmitter::new());
         let err = backend.spawn(config, sink).await.unwrap_err();
         assert!(err.contains("outside the workspace root"), "{err}");
     }
@@ -1070,9 +1074,7 @@ mod tests {
         let backend = ContainerBackend::new(api, test_config(Some("v")));
         let mut config = spawn_config("no-cwd");
         config.cwd = None;
-        let sink = crate::exec_backend::EmitterEventSink::new(
-            RecordingAgentEmitter::new(),
-        );
+        let sink = crate::exec_backend::EmitterEventSink::new(RecordingAgentEmitter::new());
         let err = backend.spawn(config, sink).await.unwrap_err();
         assert!(err.contains("requires a workspace cwd"), "{err}");
     }
@@ -1293,9 +1295,7 @@ mod tests {
     async fn set_running_and_set_failed_transition_state() {
         let api = FakeContainerApi::new();
         let backend = ContainerBackend::new(api, test_config(Some("v")));
-        let sink = crate::exec_backend::EmitterEventSink::new(
-            RecordingAgentEmitter::new(),
-        );
+        let sink = crate::exec_backend::EmitterEventSink::new(RecordingAgentEmitter::new());
         backend.spawn(spawn_config("s1"), sink).await.unwrap();
         assert_eq!(
             backend.status("s1").await,

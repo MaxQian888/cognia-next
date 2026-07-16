@@ -481,9 +481,11 @@ mod tests {
         }
 
         // V1 entry untouched (90-day rollback).
-        assert!(cognia_secrets::secret_store::get(V1_ANTHROPIC_SERVICE, V1_ACCOUNT)
-            .unwrap()
-            .is_some());
+        assert!(
+            cognia_secrets::secret_store::get(V1_ANTHROPIC_SERVICE, V1_ACCOUNT)
+                .unwrap()
+                .is_some()
+        );
 
         // Cleanup.
         clear_v1(V1_ANTHROPIC_SERVICE);

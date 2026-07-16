@@ -52,11 +52,7 @@ pub fn verify_ed25519(
 }
 
 /// Sign the op-13 URL-validation challenge: `hex(sign(event_ts ++ plain_token))`.
-pub fn sign_challenge(
-    secret: &str,
-    event_ts: &str,
-    plain_token: &str,
-) -> Result<String, SigError> {
+pub fn sign_challenge(secret: &str, event_ts: &str, plain_token: &str) -> Result<String, SigError> {
     let key = signing_key(secret)?;
     let mut msg = event_ts.as_bytes().to_vec();
     msg.extend_from_slice(plain_token.as_bytes());
@@ -91,7 +87,10 @@ mod tests {
 
     #[test]
     fn empty_secret_is_rejected() {
-        assert!(matches!(seed_from_secret("").unwrap_err(), SigError::Missing));
+        assert!(matches!(
+            seed_from_secret("").unwrap_err(),
+            SigError::Missing
+        ));
         assert!(matches!(
             sign_challenge("", "ts", "tok").unwrap_err(),
             SigError::Missing

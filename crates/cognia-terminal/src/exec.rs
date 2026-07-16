@@ -43,11 +43,17 @@ pub struct TerminalExecResult {
 pub fn shell_wrap(line: &str) -> (String, Vec<String>) {
     #[cfg(target_os = "windows")]
     {
-        ("cmd.exe".to_string(), vec!["/C".to_string(), line.to_string()])
+        (
+            "cmd.exe".to_string(),
+            vec!["/C".to_string(), line.to_string()],
+        )
     }
     #[cfg(not(target_os = "windows"))]
     {
-        ("/bin/sh".to_string(), vec!["-c".to_string(), line.to_string()])
+        (
+            "/bin/sh".to_string(),
+            vec!["-c".to_string(), line.to_string()],
+        )
     }
 }
 
@@ -236,10 +242,16 @@ mod tests {
         let (cmd, args) = shell_wrap("echo hi && echo bye");
         if cfg!(windows) {
             assert_eq!(cmd, "cmd.exe");
-            assert_eq!(args, vec!["/C".to_string(), "echo hi && echo bye".to_string()]);
+            assert_eq!(
+                args,
+                vec!["/C".to_string(), "echo hi && echo bye".to_string()]
+            );
         } else {
             assert_eq!(cmd, "/bin/sh");
-            assert_eq!(args, vec!["-c".to_string(), "echo hi && echo bye".to_string()]);
+            assert_eq!(
+                args,
+                vec!["-c".to_string(), "echo hi && echo bye".to_string()]
+            );
         }
     }
 
@@ -250,8 +262,8 @@ mod tests {
         assert_eq!(cmd, "git");
         assert_eq!(args, vec!["status".to_string()]);
 
-        let err = resolve_shell_mode("git status".to_string(), vec!["-v".to_string()], true)
-            .unwrap_err();
+        let err =
+            resolve_shell_mode("git status".to_string(), vec!["-v".to_string()], true).unwrap_err();
         assert!(err.contains("args must be empty"));
 
         let (cmd, args) = resolve_shell_mode("git status".to_string(), vec![], true).unwrap();
@@ -261,8 +273,8 @@ mod tests {
 
     #[tokio::test]
     async fn shell_mode_runs_a_full_command_line() {
-        let (cmd, args) = resolve_shell_mode("echo shell-mode-ok".to_string(), vec![], true)
-            .expect("resolve");
+        let (cmd, args) =
+            resolve_shell_mode("echo shell-mode-ok".to_string(), vec![], true).expect("resolve");
         let res = terminal_exec_inner(None, cmd, args, None, None, None)
             .await
             .expect("exec ok");

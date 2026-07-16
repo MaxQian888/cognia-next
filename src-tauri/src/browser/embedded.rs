@@ -706,8 +706,8 @@ fn build_set_frozen_call(on: bool) -> String {
 #[cfg(desktop)]
 fn parse_set_frozen_result(raw: String) -> Result<(), String> {
     let envelope = unwrap_js_string(raw);
-    let value: serde_json::Value = serde_json::from_str(&envelope)
-        .map_err(|e| format!("invalid freeze response: {e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&envelope).map_err(|e| format!("invalid freeze response: {e}"))?;
     if value.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
         Ok(())
     } else {
@@ -870,15 +870,22 @@ mod tests {
     #[cfg(desktop)]
     #[test]
     fn set_frozen_call_marshals_the_boolean_literal() {
-        assert_eq!(build_set_frozen_call(true), "window.__cogniaSetFrozen(true)");
-        assert_eq!(build_set_frozen_call(false), "window.__cogniaSetFrozen(false)");
+        assert_eq!(
+            build_set_frozen_call(true),
+            "window.__cogniaSetFrozen(true)"
+        );
+        assert_eq!(
+            build_set_frozen_call(false),
+            "window.__cogniaSetFrozen(false)"
+        );
     }
 
     #[cfg(desktop)]
     #[test]
     fn set_frozen_result_parses_success_and_page_errors() {
         let success = serde_json::to_string(r#"{"ok":true,"error":null,"frozen":true}"#).unwrap();
-        let failure = serde_json::to_string(r#"{"ok":false,"error":"paint failed","frozen":true}"#).unwrap();
+        let failure =
+            serde_json::to_string(r#"{"ok":false,"error":"paint failed","frozen":true}"#).unwrap();
         assert_eq!(parse_set_frozen_result(success), Ok(()));
         assert_eq!(
             parse_set_frozen_result(failure),

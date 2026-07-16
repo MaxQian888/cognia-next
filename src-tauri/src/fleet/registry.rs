@@ -998,13 +998,18 @@ pub fn build_ask_user_answer_input(
                 .unwrap_or(false);
             let labels: Vec<String> = selected
                 .iter()
-                .filter_map(|&idx| opts.and_then(|o| o.get(idx as usize)).and_then(option_label))
+                .filter_map(|&idx| {
+                    opts.and_then(|o| o.get(idx as usize))
+                        .and_then(option_label)
+                })
                 .collect();
             if labels.is_empty() {
                 continue;
             }
             let value = if multi {
-                serde_json::Value::Array(labels.into_iter().map(serde_json::Value::String).collect())
+                serde_json::Value::Array(
+                    labels.into_iter().map(serde_json::Value::String).collect(),
+                )
             } else {
                 // Single-select: the first (and only expected) label.
                 serde_json::Value::String(labels.into_iter().next().unwrap_or_default())
@@ -1408,17 +1413,21 @@ mod tests {
             };
             let s = only_session(&reg);
             assert_eq!(s.status, FleetStatus::PlanPending, "{tool}");
-            assert_eq!(s.pending_plan.as_deref(), Some("## Steps\n1. Do X"), "{tool}");
-            let pending = s.pending_permission.as_ref().expect("answerable permission");
+            assert_eq!(
+                s.pending_plan.as_deref(),
+                Some("## Steps\n1. Do X"),
+                "{tool}"
+            );
+            let pending = s
+                .pending_permission
+                .as_ref()
+                .expect("answerable permission");
             assert_eq!(pending.request_id, request_id, "{tool}");
             assert_eq!(pending.tool_name.as_deref(), Some(tool), "{tool}");
             assert!(s.capabilities.approve_permission, "{tool}");
             // Answering releases the permission the standard way.
             assert!(reg.resolve_permission(&request_id));
-            assert!(
-                only_session(&reg).pending_permission.is_none(),
-                "{tool}"
-            );
+            assert!(only_session(&reg).pending_permission.is_none(), "{tool}");
         }
     }
 
@@ -1657,14 +1666,22 @@ mod tests {
             pre["tool_name"] = serde_json::json!("ExitPlanMode");
             pre["tool_input"] = serde_json::json!({"plan": "## Steps\n1. Do X"});
             reg.apply(&claude_ev("PreToolUse", pre), 0);
-            assert_eq!(only_session(&reg).status, FleetStatus::PlanPending, "{notif}");
+            assert_eq!(
+                only_session(&reg).status,
+                FleetStatus::PlanPending,
+                "{notif}"
+            );
 
             let mut hint = base_payload();
             hint["notification_type"] = serde_json::json!(notif);
             reg.apply(&claude_ev("Notification", hint), 1);
             let s = only_session(&reg);
             assert_eq!(s.status, FleetStatus::PlanPending, "{notif}");
-            assert_eq!(s.pending_plan.as_deref(), Some("## Steps\n1. Do X"), "{notif}");
+            assert_eq!(
+                s.pending_plan.as_deref(),
+                Some("## Steps\n1. Do X"),
+                "{notif}"
+            );
             assert!(s.pending_permission.is_none(), "{notif}");
         }
     }

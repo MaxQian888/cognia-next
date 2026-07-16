@@ -347,7 +347,9 @@ async fn qq_official_webhook_handler(
 ) -> Response {
     let secret = match super::keyring::get(adapter_id, "clientSecret") {
         Ok(Some(s)) => s,
-        Ok(None) => return error_response(StatusCode::UNAUTHORIZED, "client secret not configured"),
+        Ok(None) => {
+            return error_response(StatusCode::UNAUTHORIZED, "client secret not configured")
+        }
         Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed"),
     };
 
@@ -392,7 +394,10 @@ async fn qq_official_webhook_handler(
                     &serde_json::json!({ "plain_token": plain_token, "signature": signature }),
                 ),
                 // Unreachable with a non-empty secret; guard anyway.
-                Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "challenge signing failed"),
+                Err(_) => error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "challenge signing failed",
+                ),
             }
         }
         // DISPATCH — forward the raw envelope to the renderer.
@@ -451,7 +456,10 @@ async fn discord_webhook_handler(
     if should_emit {
         emitter.emit_webhook(adapter_id, &payload);
     }
-    json_response(StatusCode::OK, &serde_json::json!({ "type": response_type }))
+    json_response(
+        StatusCode::OK,
+        &serde_json::json!({ "type": response_type }),
+    )
 }
 
 /// 200 OK with a JSON body (`application/json`).
@@ -1405,8 +1413,7 @@ mod tests {
             "type": "block_actions",
             "actions": [{ "action_id": "approve", "value": "yes" }],
         });
-        let form_body =
-            serde_urlencoded::to_string([("payload", inner.to_string())]).unwrap();
+        let form_body = serde_urlencoded::to_string([("payload", inner.to_string())]).unwrap();
         let resp = post_webhook(
             app,
             &format!("/webhook/slack/{adapter_id}"),
@@ -1676,9 +1683,8 @@ mod tests {
         let nonce = "pn0nce";
         let sig = wechat_sig(&mut ["wtok-p", ts, nonce]);
         let xml = "<xml><Content><![CDATA[hi]]></Content></xml>";
-        let uri = format!(
-            "/webhook/wechat-oa/{adapter_id}?signature={sig}&timestamp={ts}&nonce={nonce}"
-        );
+        let uri =
+            format!("/webhook/wechat-oa/{adapter_id}?signature={sig}&timestamp={ts}&nonce={nonce}");
         let resp = post_webhook(app, &uri, vec![], xml.to_string()).await;
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(body_string(resp).await, "success");
@@ -1791,11 +1797,7 @@ mod tests {
 
     /// Sign `timestamp ++ body` the way the QQ platform does (same seeded key
     /// on both ends) and return the two signature headers.
-    fn qq_sig_headers(
-        secret: &str,
-        timestamp: &str,
-        body: &[u8],
-    ) -> Vec<(&'static str, String)> {
+    fn qq_sig_headers(secret: &str, timestamp: &str, body: &[u8]) -> Vec<(&'static str, String)> {
         use ed25519_dalek::{Signer, SigningKey};
         let seed = crate::sigverify::qq::seed_from_secret(secret).unwrap();
         let key = SigningKey::from_bytes(&seed);
@@ -1803,7 +1805,10 @@ mod tests {
         msg.extend_from_slice(body);
         vec![
             ("X-Signature-Timestamp", timestamp.to_string()),
-            ("X-Signature-Ed25519", hex::encode(key.sign(&msg).to_bytes())),
+            (
+                "X-Signature-Ed25519",
+                hex::encode(key.sign(&msg).to_bytes()),
+            ),
         ]
     }
 
@@ -1838,8 +1843,7 @@ mod tests {
         // The returned signature must verify against the seed-derived public
         // key over event_ts ++ plain_token (deterministic Ed25519).
         let sig_hex = json["signature"].as_str().expect("signature present");
-        let sig_bytes =
-            <[u8; 64]>::try_from(hex::decode(sig_hex).unwrap().as_slice()).unwrap();
+        let sig_bytes = <[u8; 64]>::try_from(hex::decode(sig_hex).unwrap().as_slice()).unwrap();
         let seed = crate::sigverify::qq::seed_from_secret(QQ_TEST_SECRET).unwrap();
         let vk = SigningKey::from_bytes(&seed).verifying_key();
         assert!(vk
@@ -1990,9 +1994,8 @@ mod tests {
         register(&state, adapter_id, "wechat-oa");
         let (app, emitter) = test_router_with(state);
 
-        let uri = format!(
-            "/webhook/wechat-oa/{adapter_id}?signature=x&timestamp=1&nonce=n&echostr=e"
-        );
+        let uri =
+            format!("/webhook/wechat-oa/{adapter_id}?signature=x&timestamp=1&nonce=n&echostr=e");
         let resp = app
             .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
             .await

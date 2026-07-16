@@ -814,7 +814,10 @@ mod tests {
             err.downcast_ref::<crate::cmd_lint::LintError>().is_some(),
             "expected a downcastable LintError, got: {err}"
         );
-        assert!(err.to_string().contains("manifest lint failed"), "got: {err}");
+        assert!(
+            err.to_string().contains("manifest lint failed"),
+            "got: {err}"
+        );
     }
 
     #[test]

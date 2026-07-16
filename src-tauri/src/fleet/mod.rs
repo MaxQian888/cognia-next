@@ -342,9 +342,10 @@ impl FleetRuntime {
         wait_ms: u64,
     ) -> Option<serde_json::Value> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.question_pending
-            .lock()
-            .insert(request_id.to_string(), PendingQuestionPoll { tx, raw_questions });
+        self.question_pending.lock().insert(
+            request_id.to_string(),
+            PendingQuestionPoll { tx, raw_questions },
+        );
 
         let answer = match tokio::time::timeout(std::time::Duration::from_millis(wait_ms), rx).await
         {

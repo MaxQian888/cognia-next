@@ -46,8 +46,8 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use tauri::AppHandle;
 
-use cognia_automation::automation::dispatcher::Enforcement;
 use automation_proxy::AutomationProxy;
+use cognia_automation::automation::dispatcher::Enforcement;
 use http_server::{spawn_server, ServerHandle};
 use orchestration_proxy::{OrchestrationProxy, OrchestrationReply};
 use sidecar::SidecarProcess;

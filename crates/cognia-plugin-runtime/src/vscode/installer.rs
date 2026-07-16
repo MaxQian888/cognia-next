@@ -432,9 +432,11 @@ mod tests {
     #[test]
     fn absolute_looking_zip_entry_stays_inside_root() {
         let dir = tempfile::tempdir().unwrap();
-        let result =
-            install_vsix(&make_vsix_with_entry("extension//etc/passwd"), &dir.path().to_path_buf())
-                .unwrap();
+        let result = install_vsix(
+            &make_vsix_with_entry("extension//etc/passwd"),
+            &dir.path().to_path_buf(),
+        )
+        .unwrap();
         assert!(
             result.install_path.join("etc/passwd").exists(),
             "entry must land under the install path"

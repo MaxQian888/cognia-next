@@ -244,7 +244,8 @@ mod tests {
 
     #[tokio::test]
     async fn error_status_is_surfaced_not_written_to_disk() {
-        let addr = serve_once(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec()).await;
+        let addr =
+            serve_once(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec()).await;
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("out.bin");
 

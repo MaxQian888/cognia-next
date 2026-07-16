@@ -375,7 +375,10 @@ pub fn parse_sha256_digest(body: &str) -> Result<String, DigestParseError> {
     };
     // `sha256sum` format is "<digest>  <filename>"; the digest is the first
     // whitespace-separated token either way.
-    let token = line.split_whitespace().next().ok_or(DigestParseError::Empty)?;
+    let token = line
+        .split_whitespace()
+        .next()
+        .ok_or(DigestParseError::Empty)?;
     if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(DigestParseError::Malformed(token.to_string()));
     }
@@ -473,11 +476,7 @@ mod tests {
                     let mut buf = [0u8; 2048];
                     let n = sock.read(&mut buf).await.unwrap_or(0);
                     let head = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let path = head
-                        .split_whitespace()
-                        .nth(1)
-                        .unwrap_or("/")
-                        .to_string();
+                    let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
                     let response = routes
                         .iter()
                         .find(|(p, _)| *p == path)
@@ -506,15 +505,20 @@ mod tests {
     fn parses_bare_digest() {
         let digest = "d959f4bbd157fa7d37092476d41b35aca2f7df83b99df6b9546c9435fc85cac7";
         assert_eq!(parse_sha256_digest(digest).unwrap(), digest);
-        assert_eq!(parse_sha256_digest(&format!("  {digest}\n")).unwrap(), digest);
+        assert_eq!(
+            parse_sha256_digest(&format!("  {digest}\n")).unwrap(),
+            digest
+        );
     }
 
     #[test]
     fn parses_sha256sum_two_column_format() {
         let digest = "d959f4bbd157fa7d37092476d41b35aca2f7df83b99df6b9546c9435fc85cac7";
         assert_eq!(
-            parse_sha256_digest(&format!("{digest}  rust-lang.rust-analyzer-0.4.2973.vsix\n"))
-                .unwrap(),
+            parse_sha256_digest(&format!(
+                "{digest}  rust-lang.rust-analyzer-0.4.2973.vsix\n"
+            ))
+            .unwrap(),
             digest
         );
     }
@@ -530,7 +534,10 @@ mod tests {
     #[test]
     fn empty_digest_body_is_an_error_not_an_empty_digest() {
         assert_eq!(parse_sha256_digest(""), Err(DigestParseError::Empty));
-        assert_eq!(parse_sha256_digest("   \n\n  "), Err(DigestParseError::Empty));
+        assert_eq!(
+            parse_sha256_digest("   \n\n  "),
+            Err(DigestParseError::Empty)
+        );
     }
 
     #[test]
@@ -579,7 +586,10 @@ mod tests {
             // Host comparison is case-insensitive.
             "https://OPEN-VSX.ORG/api/x/y/file/z.vsix",
         ] {
-            assert!(check_url(url, &OPENVSX_POLICY).is_ok(), "should allow {url}");
+            assert!(
+                check_url(url, &OPENVSX_POLICY).is_ok(),
+                "should allow {url}"
+            );
         }
     }
 
@@ -955,7 +965,10 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(matches!(err, DownloadError::DisallowedUrl(_)), "got {err:?}");
+        assert!(
+            matches!(err, DownloadError::DisallowedUrl(_)),
+            "got {err:?}"
+        );
         assert_eq!(err.code(), "disallowed_url");
         assert!(!staging.exists());
     }
@@ -967,11 +980,7 @@ mod tests {
         assert_eq!(dir, root.join(".downloads"));
         // Dot-prefixed, so no `publisher.name` id can ever collide with it —
         // the strict id sanitizer escapes `.` in both components.
-        assert!(dir
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with('.'));
+        assert!(dir.file_name().unwrap().to_string_lossy().starts_with('.'));
     }
 
     #[test]

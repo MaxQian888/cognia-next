@@ -427,10 +427,8 @@ mod tests {
             .into_client_request()
             .unwrap();
         if let Some(token) = bearer {
-            req.headers_mut().insert(
-                "Authorization",
-                format!("Bearer {token}").parse().unwrap(),
-            );
+            req.headers_mut()
+                .insert("Authorization", format!("Bearer {token}").parse().unwrap());
         }
         tokio_tungstenite::connect_async(req).await.map(|_| ())
     }
@@ -470,7 +468,10 @@ mod tests {
 
         let (addr, handle) = start_live_server().await;
         let result = ws_handshake(addr, adapter, None).await;
-        assert!(result.is_ok(), "opt-in upgrade must succeed, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "opt-in upgrade must succeed, got {result:?}"
+        );
         handle.shutdown().await;
 
         super::super::keyring::delete(adapter, "onebotAllowUnauthenticated").unwrap();

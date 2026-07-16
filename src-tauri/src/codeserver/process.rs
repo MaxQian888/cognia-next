@@ -168,7 +168,12 @@ fn state_subdir(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
 /// Build the code-server argv. Pure so the flag set is unit-tested. Loopback
 /// bind + `--auth none` keep it reachable only from this machine; workspace
 /// trust and telemetry are disabled so the agent isn't blocked by prompts.
-fn code_server_args(root: &str, port: u16, user_data_dir: &Path, extensions_dir: &Path) -> Vec<String> {
+fn code_server_args(
+    root: &str,
+    port: u16,
+    user_data_dir: &Path,
+    extensions_dir: &Path,
+) -> Vec<String> {
     vec![
         "--bind-addr".to_string(),
         format!("127.0.0.1:{port}"),
@@ -212,9 +217,7 @@ fn spawn_child(binary: &str, args: &[String]) -> Result<Child, String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("spawn code-server: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("spawn code-server: {e}"))?;
 
     // Drain stdout/stderr so a full pipe buffer can't block code-server. These
     // tasks end when the child dies (pipes close → next_line yields None).

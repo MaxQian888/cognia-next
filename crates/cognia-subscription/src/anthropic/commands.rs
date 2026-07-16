@@ -9,9 +9,7 @@
 use super::discovery::{self, DiscoveredAnthropicAuth};
 use super::AnthropicProvider;
 use crate::provider::{ProviderId, SubscriptionProvider};
-use crate::vault::{
-    self, Account, AnthropicCredentialData, ProviderCredential, ProviderVault,
-};
+use crate::vault::{self, Account, AnthropicCredentialData, ProviderCredential, ProviderVault};
 
 /// Read-only probe for an existing Claude Code CLI subscription login
 /// (`~/.claude/.credentials.json` or the `"Claude Code-credentials"` keyring

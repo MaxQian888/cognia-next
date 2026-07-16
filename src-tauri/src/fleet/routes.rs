@@ -395,7 +395,10 @@ mod tests {
             .oneshot(hook_request(loopback_peer(), Some(&token), body))
             .await
             .unwrap();
-        assert!(responder.await.unwrap(), "responder saw the parked question");
+        assert!(
+            responder.await.unwrap(),
+            "responder saw the parked question"
+        );
         assert_eq!(resp.status(), StatusCode::OK);
 
         let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
@@ -403,9 +406,15 @@ mod tests {
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let decision = &json["hookSpecificOutput"]["decision"];
-        assert_eq!(json["hookSpecificOutput"]["hookEventName"], "PermissionRequest");
+        assert_eq!(
+            json["hookSpecificOutput"]["hookEventName"],
+            "PermissionRequest"
+        );
         assert_eq!(decision["behavior"], "allow");
-        assert_eq!(decision["updatedInput"]["answers"]["Which auth method?"], "OAuth");
+        assert_eq!(
+            decision["updatedInput"]["answers"]["Which auth method?"],
+            "OAuth"
+        );
         // Original questions pass through for the tool to process.
         assert!(decision["updatedInput"]["questions"].is_array());
     }

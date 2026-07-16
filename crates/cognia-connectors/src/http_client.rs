@@ -108,7 +108,10 @@ pub async fn http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, St
     // the link-local metadata endpoint is blocked; localhost must stay
     // reachable (OneBot forward-WS, local dev flows).
     if host == "169.254.169.254" {
-        return Err("requests to the link-local metadata endpoint (169.254.169.254) are not allowed".to_string());
+        return Err(
+            "requests to the link-local metadata endpoint (169.254.169.254) are not allowed"
+                .to_string(),
+        );
     }
 
     if let Err(retry_after) = check_rate_limit(&host) {
@@ -190,7 +193,10 @@ mod tests {
         // 31st acquire fails with a retry-after hint no larger than one
         // token period (200ms at 5 tokens/sec).
         let retry_after = bucket.try_acquire().unwrap_err();
-        assert!(retry_after <= Duration::from_millis(200), "got {retry_after:?}");
+        assert!(
+            retry_after <= Duration::from_millis(200),
+            "got {retry_after:?}"
+        );
     }
 
     #[test]

@@ -372,7 +372,14 @@ mod tests {
 
     #[test]
     fn strict_accepts_real_publisher_and_name_shapes() {
-        for value in ["ms-python", "python", "rust-lang", "rust_analyzer", "a", "vscode9"] {
+        for value in [
+            "ms-python",
+            "python",
+            "rust-lang",
+            "rust_analyzer",
+            "a",
+            "vscode9",
+        ] {
             assert_eq!(
                 sanitize_plugin_id_strict("name", value).unwrap(),
                 value,
@@ -422,7 +429,16 @@ mod tests {
     #[test]
     fn strict_composition_can_never_yield_a_relative_path_component() {
         let hostile = [
-            "", ".", "..", "...", "a.b", "../../etc", "/abs", "a/b", "a\\b", ".hidden",
+            "",
+            ".",
+            "..",
+            "...",
+            "a.b",
+            "../../etc",
+            "/abs",
+            "a/b",
+            "a\\b",
+            ".hidden",
         ];
         for publisher in hostile {
             for name in hostile {

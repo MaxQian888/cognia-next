@@ -62,9 +62,7 @@ pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
     // target, no feature flag (nothing to download, no extra toolchain).
     #[cfg(target_os = "macos")]
     {
-        registry
-            .register(Box::new(apple::AppleVisionBackend))
-            .await;
+        registry.register(Box::new(apple::AppleVisionBackend)).await;
     }
     #[cfg(not(target_os = "macos"))]
     {
