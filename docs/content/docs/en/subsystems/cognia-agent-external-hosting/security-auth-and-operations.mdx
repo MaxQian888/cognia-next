@@ -1,0 +1,112 @@
+---
+title: Security, auth, and operations
+description: Strict process isolation, allowlists, credential injection and native login fallback, doctor diagnostics, and platform constraints.
+---
+
+# Security, Auth, and Operations
+
+## Fail-closed process boundary
+
+Every external backend is validated before spawn:
+
+- command must be a bare allowlisted executable, or `npx` with an allowlisted package;
+- cwd is realpath-canonicalized and must remain under `COGNIA_WORKSPACES_DIR` (the launch cwd by
+  default);
+- configured environment entries are limited to proxy/locale keys and agent/provider prefixes;
+- ambient environment inheritance is limited to runtime essentials plus the same provider prefixes;
+- loader-injection variables such as `NODE_OPTIONS`, `LD_*`, and `DYLD_*` are removed;
+- Unix children use a detached process group; shutdown sends `SIGTERM`, escalates to `SIGKILL` after
+  two seconds, and waits for exit before the id can be reused.
+
+The Node backend never invokes a shell. Validated argv is handed to the native launcher unchanged.
+
+## Sandbox scope
+
+| Platform | Mechanism | Requirement |
+| --- | --- | --- |
+| macOS | `/usr/bin/sandbox-exec` (Seatbelt) | system launcher must exist |
+| Linux | bubblewrap | `bwrap` must be on `PATH` |
+| Windows/other | unsupported | launch fails closed |
+
+The workspace is writable, home is mounted/readable, and network access is enabled. The shared
+protected-path policy then hides credential stores, including `~/.ssh`, cloud credentials,
+`~/.npmrc`, and `~/.cognia`; VCS and shell control files remain readable but not writable. macOS
+uses final deny rules; Linux shadows secrets with empty read-only binds.
+
+Only the selected agent receives additional state writes:
+
+| Target | Extra writable paths |
+| --- | --- |
+| Codex | `~/.codex` |
+| Claude Code | `~/.claude`, `~/.claude.json`, `~/.claude.json.backup` |
+| an npx adapter | `~/.npm` |
+
+These exceptions are the native-login trust boundary: the selected external CLI can read and update
+its own auth state. It cannot read Cognia's credential file directly. The launcher layer provides
+filesystem and network confinement; unlike one-shot sandbox tools, it does not add seccomp or
+rlimits.
+
+If the launcher is absent, build it with:
+
+```bash
+pnpm cli:external-host:build
+```
+
+Development may point `COGNIA_EXTERNAL_AGENT_LAUNCHER` to an explicit executable. There is no
+unsandboxed fallback.
+
+## Authentication precedence
+
+The CLI loads defaults → user config → credentials → project config → environment → flags. Secrets
+normally live in `~/.cognia/credentials.json` with mode `0600`.
+
+```bash
+# API keys
+cognia-agent auth login --provider codex --api-key "$OPENAI_API_KEY"
+cognia-agent auth login --provider anthropic --api-key "$ANTHROPIC_API_KEY"
+
+# Subscription tokens
+cognia-agent auth login --provider codex --subscription "$CODEX_ACCESS_TOKEN"
+cognia-agent auth login --provider anthropic --subscription "$CLAUDE_CODE_OAUTH_TOKEN"
+```
+
+Before spawn, resolved credentials map to native contracts:
+
+| Credential | Child environment |
+| --- | --- |
+| Codex `authToken` | `CODEX_ACCESS_TOKEN` |
+| Codex/OpenAI `apiKey` | `OPENAI_API_KEY`, `CODEX_API_KEY` |
+| Anthropic `authToken` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| Anthropic `apiKey` | `ANTHROPIC_API_KEY` |
+| Anthropic `baseURL` | `ANTHROPIC_BASE_URL` |
+
+Plain `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the parent process are also allowed. For Codex,
+the shared env builder may add an explicitly adopted active Cognia subscription account; an explicit
+CLI credential wins on conflicts.
+
+If no credential is injected, the child uses its native login (`~/.codex/auth.json` or Claude Code
+login state). This fallback requires no Cognia account adoption.
+
+## Diagnostics
+
+Run `/doctor` in the TUI. It reports the selected backend, resolves the `codex` alias, and checks that
+the preset's command exists. A successful command check is not an auth check: for Claude Code it
+only proves that `npx` exists, not that the ACP package is cached or Claude is logged in.
+
+Common failures:
+
+| Message/symptom | Action |
+| --- | --- |
+| sandbox launcher unavailable | run `pnpm cli:external-host:build` or set `COGNIA_EXTERNAL_AGENT_LAUNCHER` |
+| bubblewrap required | install `bwrap` and ensure it is on `PATH` |
+| cwd escapes workspaces root | start in the intended root or set `COGNIA_WORKSPACES_DIR` deliberately |
+| preset command unavailable | install/login to the external CLI; check `/doctor` |
+| first Claude launch is slow | allow `npx` to fetch the ACP adapter; subsequent launches reuse the npm cache |
+
+## Operational limits
+
+- v1 verifies local Codex and Claude Code executable hosting; it does not port container or
+  Kubernetes external-agent backends.
+- Network access is enabled for hosted agents and is not yet configurable per preset.
+- Cross-built archives must contain a native launcher for their target; otherwise hosting fails
+  closed while built-in chat continues to work.

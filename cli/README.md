@@ -2,7 +2,7 @@
 
 A standalone, desktop-independent Cognia coding agent for the terminal.
 
-It runs the **same** agent loop and option assembly as the Cognia desktop app
+With the default `builtin` backend, it runs the **same** agent loop and option assembly as the Cognia desktop app
 (`resolveSendOptions` + `runAndCaptureAssistantReply`), driven through a
 `StdioTransport` that spawns the Node sidecar (`sidecar/claude-host.mjs`)
 directly. Config comes from `~/.cognia/` + env + flags — never the desktop's
@@ -88,3 +88,20 @@ rebindable editing chords). It reuses the same agent loop and option assembly as
 the desktop app. See the subsystem docs:
 [Agent CLI TUI](../docs/content/docs/en/subsystems/cognia-agent-tui.mdx) and
 [ADR-0050](../docs/content/docs/en/adr/0050-cli-tui-operation-experience.md).
+
+The TUI can also host executable external agents directly, without a running
+desktop app. This path reuses the desktop external-agent presets, manager, ACP /
+Codex adapters, permissions, and event contracts, while a CLI-native Node host
+launches the selected process through a strict native sandbox:
+
+```bash
+cognia-agent chat --backend codex
+cognia-agent chat --backend claude-code
+cognia-agent config set agentBackend codex   # persist the default
+```
+
+macOS uses Seatbelt and Linux requires bubblewrap; unsupported platforms or a
+missing launcher fail closed, with no unsandboxed fallback. Cognia credentials,
+plain provider environment variables, and the external CLI's own native login
+are supported. See [Agent CLI External Hosting](../docs/content/docs/en/subsystems/cognia-agent-external-hosting/)
+and [ADR-0077](../docs/content/docs/en/adr/0077-tui-external-agent-hosting.md).

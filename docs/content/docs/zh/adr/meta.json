@@ -37,6 +37,7 @@
     "0072-browser-action-recording",
     "0073-chromium-cookie-import",
     "0074-otel-native-telemetry",
-    "0076-local-provider-management-transport"
+    "0076-local-provider-management-transport",
+    "0077-tui-external-agent-hosting"
   ]
 }

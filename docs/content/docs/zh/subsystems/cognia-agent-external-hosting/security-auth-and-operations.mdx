@@ -1,0 +1,109 @@
+---
+title: 安全、认证与运维
+description: 严格进程隔离、白名单、凭据注入与原生登录回退、doctor 诊断和平台约束。
+---
+
+# 安全、认证与运维
+
+## 失败即拒绝的进程边界
+
+每个外部 backend 在 spawn 前都会验证：
+
+- command 必须是白名单 bare executable，或携带白名单 package 的 `npx`；
+- cwd 经过 realpath canonicalize，并且必须位于 `COGNIA_WORKSPACES_DIR` 下（默认是启动 cwd）；
+- 配置提供的 environment 仅允许 proxy/locale key 与 agent/provider prefix；
+- ambient environment 仅继承 runtime 必需项和相同 provider prefix；
+- `NODE_OPTIONS`、`LD_*`、`DYLD_*` 等 loader injection variable 会被移除；
+- Unix child 使用独立 process group；关闭时先发 `SIGTERM`，两秒后升级为 `SIGKILL`，并等待
+  exit 后才允许复用 id。
+
+Node backend 不调用 shell，验证后的 argv 会原样交给 native launcher。
+
+## 沙箱范围
+
+| 平台 | 机制 | 要求 |
+| --- | --- | --- |
+| macOS | `/usr/bin/sandbox-exec`（Seatbelt） | 系统 launcher 必须存在 |
+| Linux | bubblewrap | `bwrap` 必须位于 `PATH` |
+| Windows/其他 | 不支持 | 启动失败即拒绝 |
+
+workspace 可写，home 会挂载为可读，network access 开启。共享 protected-path policy 随后隐藏
+credential store，包括 `~/.ssh`、cloud credential、`~/.npmrc` 和 `~/.cognia`；VCS 与 shell
+control file 可读但不可写。macOS 使用最终 deny rule，Linux 使用空的只读 bind 遮蔽 secret。
+
+只有被选择的 Agent 会得到额外 state write：
+
+| 目标 | 额外可写路径 |
+| --- | --- |
+| Codex | `~/.codex` |
+| Claude Code | `~/.claude`、`~/.claude.json`、`~/.claude.json.backup` |
+| npx adapter | `~/.npm` |
+
+这些例外构成 native-login trust boundary：所选外部 CLI 可以读写自己的 auth state，但不能
+直接读取 Cognia credential file。launcher 层提供 filesystem 与 network confinement；不同于
+one-shot sandbox tool，它不增加 seccomp 或 rlimit。
+
+若 launcher 缺失，运行：
+
+```bash
+pnpm cli:external-host:build
+```
+
+开发环境可让 `COGNIA_EXTERNAL_AGENT_LAUNCHER` 指向明确的 executable。不存在 unsandboxed
+fallback。
+
+## 认证优先级
+
+CLI 按 defaults → user config → credentials → project config → environment → flags 加载。secret
+通常存放在权限为 `0600` 的 `~/.cognia/credentials.json`。
+
+```bash
+# API key
+cognia-agent auth login --provider codex --api-key "$OPENAI_API_KEY"
+cognia-agent auth login --provider anthropic --api-key "$ANTHROPIC_API_KEY"
+
+# Subscription token
+cognia-agent auth login --provider codex --subscription "$CODEX_ACCESS_TOKEN"
+cognia-agent auth login --provider anthropic --subscription "$CLAUDE_CODE_OAUTH_TOKEN"
+```
+
+spawn 前，已解析 credential 会映射到原生契约：
+
+| Credential | 子进程 environment |
+| --- | --- |
+| Codex `authToken` | `CODEX_ACCESS_TOKEN` |
+| Codex/OpenAI `apiKey` | `OPENAI_API_KEY`、`CODEX_API_KEY` |
+| Anthropic `authToken` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| Anthropic `apiKey` | `ANTHROPIC_API_KEY` |
+| Anthropic `baseURL` | `ANTHROPIC_BASE_URL` |
+
+父进程中的普通 `OPENAI_API_KEY` 和 `ANTHROPIC_API_KEY` 也会被允许。对于 Codex，共享 env
+builder 还可加入用户显式 adopt 的 Cognia active subscription account；冲突时显式 CLI
+credential 优先。
+
+若没有注入 credential，child 会使用 native login（`~/.codex/auth.json` 或 Claude Code
+login state）。这个 fallback 不需要 Cognia account adoption。
+
+## 诊断
+
+在 TUI 中运行 `/doctor`。它会报告 selected backend、解析 `codex` alias，并检查 preset command
+是否存在。command check 成功不代表 auth 成功：对 Claude Code，它只证明 `npx` 存在，不证明
+ACP package 已缓存或 Claude 已登录。
+
+常见故障：
+
+| 信息/现象 | 处理 |
+| --- | --- |
+| sandbox launcher unavailable | 运行 `pnpm cli:external-host:build` 或设置 `COGNIA_EXTERNAL_AGENT_LAUNCHER` |
+| bubblewrap required | 安装 `bwrap` 并确保它位于 `PATH` |
+| cwd escapes workspaces root | 从目标 root 启动，或谨慎设置 `COGNIA_WORKSPACES_DIR` |
+| preset command unavailable | 安装/登录外部 CLI，并检查 `/doctor` |
+| Claude 首次启动较慢 | 允许 `npx` 下载 ACP adapter；后续启动复用 npm cache |
+
+## 运维限制
+
+- v1 验证本地 Codex 与 Claude Code executable hosting；不移植 container 或 Kubernetes
+  external-agent backend。
+- hosted agent 的 network access 已开启，目前不能按 preset 配置。
+- cross-built archive 必须包含目标平台的 native launcher；否则 external hosting 失败即拒绝，
+  built-in chat 仍可工作。
