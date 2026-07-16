@@ -9,6 +9,12 @@
   "copyDebug": "复制调试信息",
   "copyDebugFailed": "复制失败：{error}",
   "copyDebugSuccess": "已复制调试信息到剪贴板。",
+  "cookieImport": {
+    "description": "经你明确同意后，允许内嵌浏览器读取所选本机 Chromium 配置中的 Cookie。Cookie 值始终留在本机。",
+    "platformHint": "仅支持 macOS；不会绕过 Windows App-Bound Encryption，也不会读取 Linux 凭据存储。",
+    "title": "复用 Chromium 登录态",
+    "toggle": "切换 Chromium Cookie 导入"
+  },
   "dataDir": "数据目录",
   "family": "家族",
   "launchAtLogin": "登录时启动",

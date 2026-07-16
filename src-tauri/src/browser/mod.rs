@@ -7,5 +7,6 @@
 //! API. The page->Rust channel is documented in `overlay.rs`.
 
 pub mod commands;
+pub mod cookie_import;
 pub mod embedded;
 pub mod overlay;

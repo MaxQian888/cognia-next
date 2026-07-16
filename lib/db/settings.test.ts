@@ -25,6 +25,7 @@ describe("getSettings", () => {
     expect(s.searchEnabled).toBe(false)
     expect(s.searchProviders).toBeDefined()
     expect(s.updates).toEqual({ autoCheck: true })
+    expect(s.browserCookieImportEnabled).toBe(false)
   })
 
   it("keeps a user's update preference over the default", async () => {

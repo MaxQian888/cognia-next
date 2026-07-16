@@ -17,6 +17,7 @@ import { getOsInfo, type OsInfo } from "@/lib/tauri/os"
 import { getCloseBehavior, setCloseBehavior, type CloseBehavior } from "@/lib/tauri/close-behavior"
 import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "@cognia/logging"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { TraySection } from "./tray-section"
 
 /**
@@ -33,6 +34,10 @@ export function DesktopSection() {
   const [closeBehavior, setCloseBehaviorState] = useState<CloseBehavior>("ask")
   const [loaded, setLoaded] = useState(false)
   const [appDataDir, setAppDataDir] = useState<string | null>(null)
+  const cookieImportEnabled = useSettingsStore(
+    (state) => state.settings?.browserCookieImportEnabled ?? false
+  )
+  const saveSettings = useSettingsStore((state) => state.save)
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
@@ -225,6 +230,24 @@ export function DesktopSection() {
               {t("closeBehaviorQuit")}
             </Label>
           </RadioGroup>
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-md border p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <Label className="text-sm">{t("cookieImport.title")}</Label>
+            <p className="text-xs text-muted-foreground">{t("cookieImport.description")}</p>
+            <p className="text-xs text-muted-foreground">{t("cookieImport.platformHint")}</p>
+          </div>
+          <Switch
+            checked={cookieImportEnabled}
+            onCheckedChange={(checked) =>
+              void saveSettings({ browserCookieImportEnabled: checked })
+            }
+            aria-label={t("cookieImport.toggle")}
+            data-testid="browser-cookie-import-toggle"
+          />
         </div>
       </section>
 

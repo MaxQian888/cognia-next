@@ -267,6 +267,8 @@ url = "2"
 aes-gcm = { version = "0.10", features = ["aes"] }
 aes = "0.9"
 cbc = { version = "0.2", features = ["alloc"] }
+pbkdf2 = "0.13"
+psl = "2.1"
 rand = "0.8"
 jsonwebtoken = "9"
 serde_urlencoded = "0.7"
@@ -412,6 +414,7 @@ windows = { version = "0.62.2", features = [
 ] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
+block2 = "0.6"
 # Real OS credential store (macOS/iOS Keychain) — see the keyring note in
 # [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "3", features = ["apple-native"] }
@@ -439,6 +442,20 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.
 # new versions.
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSScreen"] }
+objc2-foundation = { version = "0.3.2", features = [
+  "NSArray",
+  "NSDate",
+  "NSDictionary",
+  "NSHTTPCookie",
+  "NSString",
+] }
+objc2-web-kit = { version = "0.3.2", features = [
+  "WKHTTPCookieStore",
+  "WKWebView",
+  "WKWebViewConfiguration",
+  "WKWebsiteDataStore",
+  "block2",
+] }
 # macOS Accessibility (AX) element tree — backs the bounded `read_tree` / `find`
 # Computer Use surface (ADR-0020 cross-platform subset, ax/mod.rs + ax/raw.rs).
 # The high-level `accessibility` crate covers reading role/title/children; the

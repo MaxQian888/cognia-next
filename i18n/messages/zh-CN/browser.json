@@ -50,6 +50,46 @@
     "sent": "已发送到对话",
     "title": "对该元素评论"
   },
+  "cookieImport": {
+    "action": "复用 Chromium 登录态",
+    "browser": {
+      "brave": "Brave",
+      "chrome": "Google Chrome",
+      "chromium": "Chromium",
+      "edge": "Microsoft Edge"
+    },
+    "browserLabel": "浏览器",
+    "cancel": "取消",
+    "consent": {
+      "continue": "我已了解，继续",
+      "description": "Cognia 将从所选 Chromium 配置中读取当前站点保存的登录 Cookie，并注入此预览。",
+      "localOnly": "Cookie 值不会跨越 Cognia 的 IPC 边界，也不会进入其渲染进程、日志或上传到 Cognia；目标站点仍会正常收到自己的 Cookie。",
+      "title": "允许读取本机 Cookie？"
+    },
+    "description": "选择要为当前站点复用登录态的本机浏览器配置。",
+    "import": "导入并刷新",
+    "importing": "正在导入…",
+    "keychainHint": "macOS 可能请求访问钥匙串；拒绝后预览不会发生变化。",
+    "profileLabel": "配置",
+    "reason": {
+      "checking": "正在检查本机 Chromium 配置…",
+      "checkFailed": "无法检查本机 Chromium 配置，请重启桌面 App 后重试。",
+      "featureDisabled": "请先在「设置 → 桌面」中启用 Chromium Cookie 导入。",
+      "noProfiles": "这台 Mac 上未找到兼容的 Chromium 配置。",
+      "openPage": "请先打开一个公网网页，再导入 Cookie。",
+      "unsupported": "当前平台不支持 Cookie 导入。不会绕过 Windows App-Bound Encryption；请改用独立浏览器配置。"
+    },
+    "result": {
+      "failed": "Cookie 导入失败，Cookie 值未被暴露。",
+      "featureDisabled": "设置中未启用 Chromium Cookie 导入。",
+      "noMatchingCookies": "所选配置中没有当前站点的 Cookie。",
+      "noProfile": "所选浏览器配置已不可用。",
+      "ok": "已导入 {count} 条 Cookie 并刷新预览。",
+      "permissionDenied": "钥匙串访问被拒绝，未导入任何 Cookie。",
+      "unsupported": "当前平台不支持 Cookie 导入。"
+    },
+    "title": "复用 Chromium 登录态"
+  },
   "detail": {
     "compact": "精简",
     "detailed": "详细",

@@ -50,6 +50,46 @@
     "sent": "Sent to chat",
     "title": "Comment on this element"
   },
+  "cookieImport": {
+    "action": "Reuse Chromium sign-in",
+    "browser": {
+      "brave": "Brave",
+      "chrome": "Google Chrome",
+      "chromium": "Chromium",
+      "edge": "Microsoft Edge"
+    },
+    "browserLabel": "Browser",
+    "cancel": "Cancel",
+    "consent": {
+      "continue": "I understand, continue",
+      "description": "Cognia will read saved sign-in cookies for the current site from the selected Chromium profile and inject them into this preview.",
+      "localOnly": "Cookie values never cross Cognia's IPC boundary, enter its renderer or logs, or upload to Cognia. The target site receives its own cookies normally.",
+      "title": "Allow local cookie access?"
+    },
+    "description": "Choose the local browser profile whose sign-in should be reused for this site.",
+    "import": "Import and reload",
+    "importing": "Importing…",
+    "keychainHint": "macOS may ask for Keychain access. Denying the prompt leaves the preview unchanged.",
+    "profileLabel": "Profile",
+    "reason": {
+      "checking": "Checking local Chromium profiles…",
+      "checkFailed": "Could not check local Chromium profiles. Restart the desktop app and try again.",
+      "featureDisabled": "Enable Chromium cookie import in Settings → Desktop first.",
+      "noProfiles": "No compatible Chromium profiles were found on this Mac.",
+      "openPage": "Open a public web page before importing cookies.",
+      "unsupported": "Cookie import is unavailable on this platform. Windows App-Bound Encryption is not bypassed; use a separate browser profile instead."
+    },
+    "result": {
+      "failed": "Cookie import failed without exposing cookie values.",
+      "featureDisabled": "Chromium cookie import is disabled in Settings.",
+      "noMatchingCookies": "The selected profile has no cookies for this site.",
+      "noProfile": "The selected browser profile is no longer available.",
+      "ok": "Imported {count, plural, one {# cookie} other {# cookies}} and reloaded the preview.",
+      "permissionDenied": "Keychain access was denied. No cookies were imported.",
+      "unsupported": "Cookie import is unavailable on this platform."
+    },
+    "title": "Reuse Chromium sign-in"
+  },
   "detail": {
     "compact": "Compact",
     "detailed": "Detailed",

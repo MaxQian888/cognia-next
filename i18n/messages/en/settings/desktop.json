@@ -9,6 +9,12 @@
   "copyDebug": "Copy debug info",
   "copyDebugFailed": "Copy failed: {error}",
   "copyDebugSuccess": "Debug info copied to clipboard.",
+  "cookieImport": {
+    "description": "Allow the embedded browser to read cookies from a selected local Chromium profile after explicit consent. Cookie values stay on this device.",
+    "platformHint": "Available on macOS only. Windows App-Bound Encryption and Linux credential stores are not accessed.",
+    "title": "Reuse Chromium sign-in",
+    "toggle": "Toggle Chromium cookie import"
+  },
   "dataDir": "Data dir",
   "family": "Family",
   "launchAtLogin": "Launch at login",

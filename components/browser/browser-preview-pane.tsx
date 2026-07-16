@@ -23,6 +23,7 @@ import {
   BrowserAgentIndicator,
   useBrowserAgentActivity,
 } from "@/components/browser/browser-agent-indicator"
+import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
 import { BrowserRecorderPanel } from "@/components/browser/browser-recorder-panel"
 import {
   WebPreview,
@@ -358,6 +359,11 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
     setCommittedUrl(url)
   }, [])
 
+  const reloadAfterCookieImport = useCallback(async () => {
+    beginLoad()
+    await browserClient.embedReload()
+  }, [beginLoad])
+
   // Outside Tauri (web / Capacitor) there is no native webview to track a
   // reserved region, so element-selection is unavailable. Fall back to the
   // ai-elements WebPreview: a sandboxed iframe with a URL bar so web users can
@@ -458,6 +464,7 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
           </div>
         </form>
         <div className="flex items-center">
+          <BrowserCookieImportAction currentUrl={currentUrl} onReload={reloadAfterCookieImport} />
           <TooltipIconButton
             tooltip={t("actions.screenshot")}
             aria-label={t("actions.screenshot")}

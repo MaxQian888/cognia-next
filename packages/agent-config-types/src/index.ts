@@ -1829,6 +1829,8 @@ export interface SandboxResourcePolicy {
 
 export interface AppSettings {
   id: "singleton"
+  /** Opt-in local Chromium-cookie import for the embedded desktop browser. */
+  browserCookieImportEnabled?: boolean
   /**
    * Epoch ms of the last write, bumped by `lib/db/settings.ts:saveSettings`.
    * Drives the companion sync cursor for the settings singleton: the desktop

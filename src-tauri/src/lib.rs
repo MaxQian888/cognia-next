@@ -1050,6 +1050,8 @@ pub fn run() {
             browser::embedded::browser_embed_set_frozen,
             browser::embedded::browser_embed_capture,
             browser::embedded::browser_embed_destroy,
+            browser::cookie_import::browser_cookie_import_available,
+            browser::cookie_import::browser_cookie_import,
             // Optional desktop "Pro IDE" mode — on-demand embedded code-server.
             codeserver::commands::codeserver_supported,
             codeserver::commands::codeserver_ensure,

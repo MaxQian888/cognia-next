@@ -23,6 +23,11 @@ jest.mock("@/components/browser/browser-recorder-panel", () => ({
     <div data-testid="recorder-panel" data-page-url={pageUrl ?? ""} />
   ),
 }))
+jest.mock("@/components/browser/browser-cookie-import-action", () => ({
+  BrowserCookieImportAction: ({ currentUrl }: { currentUrl: string | null }) => (
+    <div data-testid="cookie-import-action" data-current-url={currentUrl ?? ""} />
+  ),
+}))
 const mockOpenExternal = jest.fn().mockResolvedValue(undefined)
 let mockSelection: BrowserSelection | null = null
 let mockNavigated: BrowserNavigated | null = null
@@ -319,6 +324,16 @@ it("opens the current page in the external browser", () => {
   commitUrl("http://localhost:3000/")
   fireEvent.click(screen.getByRole("button", { name: "Open in external browser" }))
   expect(mockOpenExternal).toHaveBeenCalledWith("http://localhost:3000/")
+})
+
+it("wires the current page into the Chromium cookie import action", () => {
+  renderPane(<BrowserPreviewPane />)
+  expect(screen.getByTestId("cookie-import-action")).toHaveAttribute("data-current-url", "")
+  commitUrl("https://www.github.com/settings")
+  expect(screen.getByTestId("cookie-import-action")).toHaveAttribute(
+    "data-current-url",
+    "https://www.github.com/settings"
+  )
 })
 
 it("sends a screenshot of the preview to chat", async () => {

@@ -72,6 +72,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   ],
   ccswitch: ["ccswitchSync"],
   about: ["updates"],
+  desktop: ["browserCookieImportEnabled"],
   data: ["telemetryEnabled", "storageRetention"],
   appearance: [
     "theme",

@@ -53,6 +53,7 @@ export const DEFAULTS: AppSettings = {
   },
   lastUpdateCheckAt: undefined,
   updates: { autoCheck: true },
+  browserCookieImportEnabled: false,
   cliBridge: { autoSync: false },
   webTools: { enabled: true },
   onboardingDismissedAt: undefined,
