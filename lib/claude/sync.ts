@@ -102,6 +102,20 @@ export async function syncToAgent(
   if (cfg.path === null) {
     return { ok: false, skipped: true, reason: "no-path-on-os" }
   }
+  // Refuse to project onto an existing-but-unparseable config. On a parse
+  // failure the Rust reader returns `parsed: null`, which `adapter.project`
+  // collapses to `{}` (`asRoot(null) ?? {}`) — so the write would drop every
+  // unmanaged top-level key (plugins, marketplaces, projects, auth, history),
+  // leaving only `mcpServers`. Surface a hard error so the user repairs the
+  // file instead of silently losing it. Mirrors the `write_claude_settings_env`
+  // "refusing to overwrite" guard on the Rust side.
+  if (cfg.exists && cfg.parseError) {
+    return {
+      ok: false,
+      skipped: false,
+      error: `${cfg.path} exists but could not be parsed — refusing to overwrite (${cfg.parseError})`,
+    }
+  }
   // If the file's parent directory doesn't exist, `write_agent_config` will
   // refuse to create it (we don't want to manifest a fake `~/.codex/` for
   // someone who doesn't use Codex). We surface this as "agent not installed".

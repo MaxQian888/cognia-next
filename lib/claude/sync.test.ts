@@ -120,6 +120,30 @@ describe("syncToAgent — gating", () => {
     const r = await syncToAgent("claude-code")
     expect(r).toEqual({ ok: false, skipped: true, reason: "no-path-on-os" })
   })
+
+  it("refuses to overwrite an existing-but-unparseable file instead of wiping unmanaged keys", async () => {
+    mList.mockResolvedValueOnce([makeServer({ name: "fs", appsEnabled: { "claude-code": true } })])
+    const cfg: AgentReadResult = {
+      path: "/home/u/.claude.json",
+      exists: true,
+      writable: true,
+      format: "json",
+      raw: "{ broken",
+      parsed: null,
+      parseError: "json parse: expected value at line 1 column 3",
+    }
+    mRead.mockResolvedValueOnce(cfg)
+
+    const r = await syncToAgent("claude-code")
+    expect(r).toEqual({
+      ok: false,
+      skipped: false,
+      error: expect.stringContaining("refusing to overwrite"),
+    })
+    // Must NOT write — projecting onto a null tree would collapse to `{}` and
+    // silently drop plugins / marketplaces / projects / auth.
+    expect(mWrite).not.toHaveBeenCalled()
+  })
 })
 
 describe("syncToAgent — happy paths", () => {
