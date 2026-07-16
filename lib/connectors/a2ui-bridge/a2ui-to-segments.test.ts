@@ -1,5 +1,8 @@
 import { assistantReplyToSegments, buildA2UISegment } from "./a2ui-to-segments"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
+import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
+
+jest.mock("@/lib/telemetry/inbox-events", () => ({ trackInboxEvent: jest.fn() }))
 
 const SURFACE: A2UISegmentContent = {
   components: {
@@ -29,6 +32,17 @@ describe("buildA2UISegment", () => {
   it("ignores whitespace-only widget.fallbackText", () => {
     const seg = buildA2UISegment("s1", { ...SURFACE, widget: { fallbackText: "   " } })
     expect(seg.plainTextMirror).toBe("Hi")
+  })
+
+  it("records generated plain-text mirror downgrades when adapter context is known", () => {
+    buildA2UISegment("s1", SURFACE, { adapterId: "adapter-1", platform: "slack" })
+    expect(trackInboxEvent).toHaveBeenCalledWith(
+      "a2ui.downgrade",
+      expect.objectContaining({
+        adapterId: "adapter-1",
+        fields: expect.objectContaining({ platform: "slack", reason: "missing_fallback_text" }),
+      })
+    )
   })
 })
 

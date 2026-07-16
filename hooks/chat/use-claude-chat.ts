@@ -99,8 +99,10 @@ import {
 } from "@/lib/db/sessions"
 import { recordResultUsage } from "@/lib/db/session-usage"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { useInFlightStore } from "@/stores/settings/in-flight-store"
 import { endSpan, startSpan } from "@cognia/agent-trace/emitter"
+import { toTraceparent } from "@/lib/agent-trace/trace-context"
 import {
   clearToolSpansForSession,
   handleSdkEventForToolSpans,
@@ -1327,7 +1329,24 @@ export function useClaudeChat() {
             metadata: sendOptions.provider ? { provider: sendOptions.provider } : undefined,
             inputPreview: effectiveText || undefined,
           })
-          sendOptions = { ...sendOptions, traceId: handle.traceId, spanId: handle.spanId }
+          sendOptions = {
+            ...sendOptions,
+            traceId: handle.traceId,
+            spanId: handle.spanId,
+            traceparent: toTraceparent({
+              traceId: handle.traceId,
+              rootSpanId: handle.spanId,
+            }),
+          }
+        }
+        if (!sendOptions.traceparent && sendOptions.traceId && sendOptions.spanId) {
+          sendOptions = {
+            ...sendOptions,
+            traceparent: toTraceparent({
+              traceId: sendOptions.traceId,
+              rootSpanId: sendOptions.spanId,
+            }),
+          }
         }
         if (isStandaloneChatMode()) {
           // Standalone (BYOK): run the turn in-renderer against the user's own
@@ -2512,6 +2531,11 @@ async function handleEvent(
             // the resolved tokens + cost into the trace.
             traceId: lastSendForSpan?.options.traceId,
             parentSpanId: lastSendForSpan?.options.spanId,
+            surface: "chat",
+          })
+          void trackEvent("chat.message.sent", {
+            sessionId,
+            provider: telemetryProvider,
             surface: "chat",
           })
         }

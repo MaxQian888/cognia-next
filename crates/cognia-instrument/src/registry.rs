@@ -14,6 +14,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 /// Number of log-scale buckets. Bucket `i` covers `[2^i, 2^(i+1))` micro-
@@ -23,6 +24,15 @@ pub const HIST_BUCKETS: usize = 25;
 
 /// Process-global span registry. Lazy because `HashMap::new()` is not `const`.
 pub static REGISTRY: Lazy<MetricsRegistry> = Lazy::new(MetricsRegistry::default);
+
+/// Optional zero-dependency bridge for exporting each real observation. The
+/// desktop shell installs it only when its `otel-export` feature is enabled.
+pub type MetricsObserver = fn(&'static str, Duration, bool);
+static METRICS_OBSERVER: OnceLock<MetricsObserver> = OnceLock::new();
+
+pub fn set_metrics_observer(observer: MetricsObserver) -> Result<(), MetricsObserver> {
+    METRICS_OBSERVER.set(observer)
+}
 
 /// Fixed-size log-bucket histogram over microsecond durations.
 #[derive(Debug, Clone)]
@@ -187,6 +197,10 @@ impl MetricsRegistry {
         let now = super::now_ms();
         let mut map = self.inner.lock();
         map.entry(name).or_default().observe(ns, ok, now);
+        drop(map);
+        if let Some(observer) = METRICS_OBSERVER.get() {
+            observer(name, elapsed, ok);
+        }
     }
 
     /// Snapshot every span, sorted by total time descending (heaviest first) so

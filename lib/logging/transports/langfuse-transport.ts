@@ -10,8 +10,10 @@ import type { Transport, StructuredLogEntry, LogLevel } from "@cognia/logging/ty
 export interface LangfuseTransportOptions {
   /** Langfuse public key */
   publicKey?: string
-  /** Langfuse secret key */
-  secretKey?: string
+  /** Resolve a securely stored key just-in-time. Plaintext options are forbidden. */
+  resolveSecretKey?: () => Promise<string | null>
+  /** Desktop native export path; keeps the secret and HTTP request out of WebView. */
+  nativeExport?: (entries: StructuredLogEntry[]) => Promise<void>
   /** Langfuse host URL */
   host?: string
   /** Minimum log level to send to Langfuse */
@@ -109,14 +111,26 @@ export class LangfuseTransport implements Transport {
     const entries = [...this.buffer]
     this.buffer = []
 
+    if (this.options.nativeExport) {
+      try {
+        await this.options.nativeExport(entries)
+      } catch {
+        if (this.buffer.length < 100) this.buffer.unshift(...entries)
+      }
+      return
+    }
+
     const hasModule = await this.ensureInitialized()
     if (!hasModule || !this.langfuseModule) return
 
     try {
       const { getLangfuse, createChatTrace, createSpan } = this.langfuseModule
+      const secretKey = this.options.resolveSecretKey
+        ? await this.options.resolveSecretKey()
+        : undefined
       const langfuse = await getLangfuse({
         publicKey: this.options.publicKey,
-        secretKey: this.options.secretKey,
+        secretKey: secretKey || undefined,
         host: this.options.host,
         enabled: true,
         flushInterval: this.options.flushInterval,

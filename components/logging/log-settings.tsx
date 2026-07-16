@@ -53,6 +53,15 @@ import {
   type LoggingTransportSettings,
   type UnifiedLoggerConfig,
 } from "@/lib/logging"
+import { clearTelemetrySecret, persistTelemetrySecret } from "@/lib/logging/telemetry-secrets"
+import { configureTauriSidecarTelemetry } from "@/lib/logging/transports/tauri-fetch-shim"
+import { isTauri } from "@/lib/platform/detect"
+import {
+  isBehaviorTelemetryEnabled,
+  setBehaviorTelemetryEnabled,
+} from "@/lib/telemetry/events/settings"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
+import { clearBehaviorEvents, exportBehaviorEvents } from "@/lib/db/behavior-events"
 
 export interface LogSettingsProps {
   className?: string
@@ -77,7 +86,15 @@ function parseHeaders(value: string): Record<string, string> {
     if (colon <= 0) continue
     const k = chunk.slice(0, colon).trim()
     const v = chunk.slice(colon + 1).trim()
-    if (k.length > 0) out[k] = v
+    const normalized = k.toLowerCase()
+    if (
+      k.length > 0 &&
+      !["authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"].includes(
+        normalized
+      )
+    ) {
+      out[k] = v
+    }
   }
   return out
 }
@@ -176,6 +193,11 @@ export function LogSettings({ className }: LogSettingsProps) {
 
   const [hasChanges, setHasChanges] = useState(false)
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [langfuseSecretDraft, setLangfuseSecretDraft] = useState("")
+  const [grafanaTokenDraft, setGrafanaTokenDraft] = useState("")
+  const [behaviorTelemetryEnabled, setBehaviorTelemetryEnabledState] = useState(() =>
+    isBehaviorTelemetryEnabled()
+  )
 
   // Transport settings (stored separately)
   const [transports, setTransports] = useState<LoggingTransportSettings>(() => ({
@@ -190,26 +212,12 @@ export function LogSettings({ className }: LogSettingsProps) {
     langfuseConfig: {
       ...bootstrapState.transports.langfuseConfig,
       publicKey: bootstrapState.transports.langfuseConfig.publicKey || "",
-      secretKey: bootstrapState.transports.langfuseConfig.secretKey || "",
       host: bootstrapState.transports.langfuseConfig.host || "https://cloud.langfuse.com",
-    },
-    opentelemetryConfig: {
-      ...bootstrapState.transports.opentelemetryConfig,
-      endpoint:
-        bootstrapState.transports.opentelemetryConfig.endpoint || "http://localhost:4318/v1/traces",
-      serviceName: bootstrapState.transports.opentelemetryConfig.serviceName || "cognia-ai",
     },
   }))
   const [transportExpanded, setTransportExpanded] = useState<
     Record<
-      | "console"
-      | "indexedDB"
-      | "native"
-      | "remote"
-      | "langfuse"
-      | "opentelemetry"
-      | "agentTrace"
-      | "agentTraceOtlp",
+      "console" | "indexedDB" | "native" | "remote" | "langfuse" | "agentTrace" | "agentTraceOtlp",
       boolean
     >
   >({
@@ -218,7 +226,6 @@ export function LogSettings({ className }: LogSettingsProps) {
     native: bootstrapState.transports.native,
     remote: bootstrapState.transports.remote,
     langfuse: bootstrapState.transports.langfuse,
-    opentelemetry: bootstrapState.transports.opentelemetry,
     agentTrace: bootstrapState.transports.agentTrace,
     agentTraceOtlp: bootstrapState.transports.agentTraceOtlp,
   })
@@ -260,7 +267,6 @@ export function LogSettings({ className }: LogSettingsProps) {
       | "nativeConfig"
       | "remoteConfig"
       | "langfuseConfig"
-      | "opentelemetryConfig"
       | "agentTraceConfig"
       | "agentTraceOtlpConfig",
     TKey extends keyof LoggingTransportSettings[TTransport],
@@ -284,6 +290,34 @@ export function LogSettings({ className }: LogSettingsProps) {
     setHasChanges(true)
   }
 
+  const handleClearStoredSecret = async (kind: "langfuseSecretKey" | "grafanaCloudApiToken") => {
+    try {
+      await clearTelemetrySecret(kind)
+      if (kind === "langfuseSecretKey") {
+        setLangfuseSecretDraft("")
+        setTransports((prev) => ({
+          ...prev,
+          langfuseConfig: { ...prev.langfuseConfig, secretKeyConfigured: false },
+        }))
+      } else {
+        setGrafanaTokenDraft("")
+        setTransports((prev) => ({
+          ...prev,
+          agentTraceOtlpConfig: {
+            ...prev.agentTraceOtlpConfig,
+            grafanaCloud: {
+              ...prev.agentTraceOtlpConfig.grafanaCloud,
+              apiTokenConfigured: false,
+            },
+          },
+        }))
+      }
+      setHasChanges(true)
+    } catch {
+      setSaveStatus("error")
+    }
+  }
+
   const handleRedactionChange = <K extends keyof NonNullable<UnifiedLoggerConfig["redaction"]>>(
     key: K,
     value: NonNullable<UnifiedLoggerConfig["redaction"]>[K]
@@ -299,17 +333,62 @@ export function LogSettings({ className }: LogSettingsProps) {
     setHasChanges(true)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaveStatus("saving")
 
     try {
+      const behaviorPreferenceChanged = behaviorTelemetryEnabled !== isBehaviorTelemetryEnabled()
+      if (behaviorPreferenceChanged && !behaviorTelemetryEnabled) {
+        await trackEvent("telemetry.preference.changed", { enabled: behaviorTelemetryEnabled })
+      }
+      setBehaviorTelemetryEnabled(behaviorTelemetryEnabled)
+      if (behaviorPreferenceChanged && behaviorTelemetryEnabled) {
+        await trackEvent("telemetry.preference.changed", { enabled: behaviorTelemetryEnabled })
+      }
+      if (langfuseSecretDraft) {
+        await persistTelemetrySecret("langfuseSecretKey", langfuseSecretDraft)
+      }
+      if (grafanaTokenDraft) {
+        await persistTelemetrySecret("grafanaCloudApiToken", grafanaTokenDraft)
+      }
+      const securedTransports: LoggingTransportSettings = {
+        ...transports,
+        langfuseConfig: {
+          ...transports.langfuseConfig,
+          secretKeyConfigured:
+            transports.langfuseConfig.secretKeyConfigured || Boolean(langfuseSecretDraft),
+        },
+        agentTraceOtlpConfig: {
+          ...transports.agentTraceOtlpConfig,
+          grafanaCloud: {
+            ...transports.agentTraceOtlpConfig.grafanaCloud,
+            apiTokenConfigured:
+              transports.agentTraceOtlpConfig.grafanaCloud.apiTokenConfigured ||
+              Boolean(grafanaTokenDraft),
+          },
+        },
+      }
       const nextConfig = {
         ...config,
-        remoteEndpoint: transports.remoteConfig.endpoint,
+        remoteEndpoint: securedTransports.remoteConfig.endpoint,
+      }
+      if (isTauri()) {
+        const otlp = securedTransports.agentTraceOtlpConfig
+        await configureTauriSidecarTelemetry({
+          enabled: securedTransports.agentTraceOtlp,
+          endpoint: otlp.endpoint || "http://localhost",
+          headers: otlp.headers,
+          serviceName: "cognia-sidecar",
+          environment: otlp.environment,
+          credential:
+            otlp.preset === "grafana-cloud"
+              ? { kind: "grafanaCloud", instanceId: otlp.grafanaCloud.instanceId }
+              : { kind: "none" },
+        })
       }
       const next = applyLoggingSettings({
         config: nextConfig,
-        transports,
+        transports: securedTransports,
         retention,
         persist: true,
       })
@@ -333,6 +412,8 @@ export function LogSettings({ className }: LogSettingsProps) {
         },
       })
       setTransports(next.transports)
+      setLangfuseSecretDraft("")
+      setGrafanaTokenDraft("")
 
       setHasChanges(false)
       setSaveStatus("saved")
@@ -342,6 +423,16 @@ export function LogSettings({ className }: LogSettingsProps) {
       setSaveStatus("error")
       setTimeout(() => setSaveStatus("idle"), 3000)
     }
+  }
+
+  const handleExportBehaviorEvents = async () => {
+    const contents = await exportBehaviorEvents()
+    const url = URL.createObjectURL(new Blob([contents], { type: "application/json" }))
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = `cognia-behavior-events-${new Date().toISOString()}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
   }
 
   const handleReset = () => {
@@ -368,7 +459,6 @@ export function LogSettings({ className }: LogSettingsProps) {
       native: true,
       remote: false,
       langfuse: false,
-      opentelemetry: false,
       agentTrace: true,
       agentTraceOtlp: false,
       nativeConfig: {
@@ -385,14 +475,9 @@ export function LogSettings({ className }: LogSettingsProps) {
       },
       langfuseConfig: {
         publicKey: "",
-        secretKey: "",
+        secretKeyConfigured: false,
         host: "https://cloud.langfuse.com",
         minLevel: "warn",
-      },
-      opentelemetryConfig: {
-        endpoint: "http://localhost:4318/v1/traces",
-        serviceName: "cognia-ai",
-        addAsSpanEvents: true,
       },
       agentTraceConfig: {
         captureContent: false,
@@ -405,7 +490,7 @@ export function LogSettings({ className }: LogSettingsProps) {
         headers: {},
         serviceName: "cognia-ai",
         environment: "",
-        grafanaCloud: { instanceId: "", apiToken: "" },
+        grafanaCloud: { instanceId: "", apiTokenConfigured: false },
       },
     })
     setTransportExpanded({
@@ -414,7 +499,6 @@ export function LogSettings({ className }: LogSettingsProps) {
       native: true,
       remote: false,
       langfuse: false,
-      opentelemetry: false,
       agentTrace: true,
       agentTraceOtlp: false,
     })
@@ -884,12 +968,6 @@ export function LogSettings({ className }: LogSettingsProps) {
                     description: t("settings.transports.langfuseDesc"),
                   },
                   {
-                    key: "opentelemetry",
-                    icon: Cloud,
-                    title: t("settings.transports.opentelemetry"),
-                    description: t("settings.transports.opentelemetryDesc"),
-                  },
-                  {
                     key: "agentTrace",
                     icon: Database,
                     title: t("settings.transports.agentTrace"),
@@ -1149,16 +1227,27 @@ export function LogSettings({ className }: LogSettingsProps) {
                               </Label>
                               <Input
                                 type="password"
-                                value={transports.langfuseConfig.secretKey}
-                                onChange={(event) =>
-                                  handleTransportDetailChange(
-                                    "langfuseConfig",
-                                    "secretKey",
-                                    event.target.value
-                                  )
-                                }
-                                placeholder={t("settings.transports.langfuseSecretKeyPlaceholder")}
+                                value={langfuseSecretDraft}
+                                onChange={(event) => {
+                                  setLangfuseSecretDraft(event.target.value)
+                                  setHasChanges(true)
+                                }}
+                                placeholder={t(
+                                  transports.langfuseConfig.secretKeyConfigured
+                                    ? "settings.transports.secretConfiguredPlaceholder"
+                                    : "settings.transports.langfuseSecretKeyPlaceholder"
+                                )}
                               />
+                              {transports.langfuseConfig.secretKeyConfigured && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => void handleClearStoredSecret("langfuseSecretKey")}
+                                >
+                                  {t("settings.transports.clearStoredSecret")}
+                                </Button>
+                              )}
                             </div>
                             <div className="space-y-2 sm:col-span-2">
                               <Label className="text-sm">
@@ -1201,64 +1290,6 @@ export function LogSettings({ className }: LogSettingsProps) {
                                   ))}
                                 </SelectContent>
                               </Select>
-                            </div>
-                          </div>
-                        )}
-                        {transportDef.key === "opentelemetry" && (
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            <div className="space-y-2 sm:col-span-2">
-                              <Label className="text-sm">
-                                {t("settings.transports.otelEndpoint")}
-                              </Label>
-                              <Input
-                                value={transports.opentelemetryConfig.endpoint}
-                                onChange={(event) =>
-                                  handleTransportDetailChange(
-                                    "opentelemetryConfig",
-                                    "endpoint",
-                                    event.target.value
-                                  )
-                                }
-                                placeholder={t("settings.transports.otelEndpointPlaceholder")}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-sm">
-                                {t("settings.transports.otelServiceName")}
-                              </Label>
-                              <Input
-                                value={transports.opentelemetryConfig.serviceName}
-                                onChange={(event) =>
-                                  handleTransportDetailChange(
-                                    "opentelemetryConfig",
-                                    "serviceName",
-                                    event.target.value
-                                  )
-                                }
-                                placeholder={t("settings.transports.otelServiceNamePlaceholder")}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <div className="flex items-start justify-between gap-3 rounded-md border p-3">
-                                <div>
-                                  <Label className="text-sm">
-                                    {t("settings.transports.otelAddAsSpanEvents")}
-                                  </Label>
-                                  <p className="text-xs text-muted-foreground">
-                                    {t("settings.transports.otelAddAsSpanEventsDesc")}
-                                  </p>
-                                </div>
-                                <Switch
-                                  checked={transports.opentelemetryConfig.addAsSpanEvents}
-                                  onCheckedChange={(checked) =>
-                                    handleTransportDetailChange(
-                                      "opentelemetryConfig",
-                                      "addAsSpanEvents",
-                                      checked
-                                    )
-                                  }
-                                />
-                              </div>
                             </div>
                           </div>
                         )}
@@ -1366,7 +1397,7 @@ export function LogSettings({ className }: LogSettingsProps) {
                                     event.target.value
                                   )
                                 }
-                                placeholder="cognia-ai"
+                                placeholder={t("panel.agentTraceOtlp.serviceNamePlaceholder")}
                               />
                             </div>
                             <div className="space-y-2 sm:col-span-2">
@@ -1423,21 +1454,31 @@ export function LogSettings({ className }: LogSettingsProps) {
                                   <Input
                                     data-testid="agent-trace-otlp-grafana-api-token"
                                     type="password"
-                                    value={transports.agentTraceOtlpConfig.grafanaCloud.apiToken}
-                                    onChange={(event) =>
-                                      handleTransportDetailChange(
-                                        "agentTraceOtlpConfig",
-                                        "grafanaCloud",
-                                        {
-                                          ...transports.agentTraceOtlpConfig.grafanaCloud,
-                                          apiToken: event.target.value,
-                                        }
-                                      )
-                                    }
+                                    value={grafanaTokenDraft}
+                                    onChange={(event) => {
+                                      setGrafanaTokenDraft(event.target.value)
+                                      setHasChanges(true)
+                                    }}
                                     placeholder={t(
-                                      "panel.agentTraceOtlp.grafanaApiTokenPlaceholder"
+                                      transports.agentTraceOtlpConfig.grafanaCloud
+                                        .apiTokenConfigured
+                                        ? "settings.transports.secretConfiguredPlaceholder"
+                                        : "panel.agentTraceOtlp.grafanaApiTokenPlaceholder"
                                     )}
                                   />
+                                  {transports.agentTraceOtlpConfig.grafanaCloud
+                                    .apiTokenConfigured && (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() =>
+                                        void handleClearStoredSecret("grafanaCloudApiToken")
+                                      }
+                                    >
+                                      {t("settings.transports.clearStoredSecret")}
+                                    </Button>
+                                  )}
                                 </div>
                                 <p className="text-xs text-muted-foreground sm:col-span-2">
                                   {t("panel.agentTraceOtlp.grafanaCloudHint")}
@@ -1478,7 +1519,7 @@ export function LogSettings({ className }: LogSettingsProps) {
                                     event.target.value
                                   )
                                 }
-                                placeholder="production"
+                                placeholder={t("panel.agentTraceOtlp.environmentPlaceholder")}
                               />
                             </div>
                           </div>
@@ -1498,6 +1539,43 @@ export function LogSettings({ className }: LogSettingsProps) {
           forceMount
           className="mt-0 space-y-4 data-[state=inactive]:hidden"
         >
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t("settings.behaviorTelemetry.title")}</CardTitle>
+              <CardDescription>{t("settings.behaviorTelemetry.disclosure")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <Label>{t("settings.behaviorTelemetry.optIn")}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.behaviorTelemetry.optInDesc")}
+                  </p>
+                </div>
+                <Switch
+                  data-testid="behavior-telemetry-switch"
+                  checked={behaviorTelemetryEnabled}
+                  onCheckedChange={(checked) => {
+                    setBehaviorTelemetryEnabledState(checked)
+                    setHasChanges(true)
+                  }}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={handleExportBehaviorEvents}>
+                  {t("settings.behaviorTelemetry.export")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => void clearBehaviorEvents()}
+                >
+                  {t("settings.behaviorTelemetry.clear")}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">

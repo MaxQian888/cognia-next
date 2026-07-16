@@ -416,6 +416,23 @@ describe("getDb", () => {
     db.close()
   })
 
+  it("v112 behaviorEvents round-trips and resolves its compound index", async () => {
+    const db = new CogniaDB()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(112)
+    await db.behaviorEvents.put({
+      id: "event-1",
+      eventName: "chat.message.sent",
+      at: 1,
+      sessionId: "session-1",
+      attributes: { provider: "anthropic" },
+    })
+    expect(
+      await db.behaviorEvents.where("[eventName+at]").equals(["chat.message.sent", 1]).first()
+    ).toEqual(expect.objectContaining({ id: "event-1" }))
+    db.close()
+  })
+
   it("v109_preserves_user_accepted_rows", async () => {
     const name = `cognia-v109-preserve-user-${Date.now()}`
     const legacy = new Dexie(name)

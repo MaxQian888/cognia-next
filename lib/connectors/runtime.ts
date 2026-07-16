@@ -1100,6 +1100,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           text: captured.text,
           a2uiSurfaces: captured.a2uiSurfaces,
           a2uiSurfaceOrder: captured.a2uiSurfaceOrder,
+          telemetry: {
+            adapterId: outboundTarget.adapterId,
+            platform: parseConversationKey(outboundTarget.conversationKey).platform,
+          },
         })
         const idempotencyKey = `airun:${captured.messageId}`
         // Deliver through the respond-via target resolved above (falls back to
@@ -1227,6 +1231,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           text: draftCapture.text,
           a2uiSurfaces: draftCapture.a2uiSurfaces,
           a2uiSurfaceOrder: draftCapture.a2uiSurfaceOrder,
+          telemetry: { adapterId: event.adapterId, platform: event.platform },
         })
         const draftSegments: MessageSegment[] = projected.length
           ? projected

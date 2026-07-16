@@ -49,6 +49,7 @@ import { routeInbound, type RouteDecision } from "./mode-router"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { findMatchingWorkflows } from "@/lib/workflow/runtime/trigger-subscriptions"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { maybeHandleHelpCommand, maybeSendWelcome } from "./help/help-dispatch"
 import { maybeHandleControlCommand } from "./commands/dispatch"
 import { parseConversationKey } from "@/types/connectors/event"
@@ -362,6 +363,10 @@ export class ConnectorBus {
       conversationKey: event.conversationKey,
       fields: { platform: event.platform },
       at: now,
+    })
+    void trackEvent("connector.message.received", {
+      adapterId: event.adapterId,
+      platform: event.platform,
     })
 
     // ── Step 1.5: eager OCR of inbound images (ADR-0024) ─────────────────────

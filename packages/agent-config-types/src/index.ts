@@ -789,6 +789,8 @@ export interface SendOptions {
    */
   traceId?: string
   spanId?: string
+  /** W3C propagation header derived from traceId/spanId for Rust and sidecar consumers. */
+  traceparent?: string
 }
 
 /**

@@ -33,6 +33,10 @@
 // event for every response on `api.anthropic.com`, which the renderer's
 // usage-collector subscribes to (Phase 4a of the Claude subscription ADR).
 import "./fetch-interceptor.mjs"
+import { initializeTelemetry, shutdownTelemetry } from "./telemetry.mjs"
+
+initializeTelemetry()
+process.once("beforeExit", () => void shutdownTelemetry())
 
 import readline from "node:readline"
 import { createRequire } from "node:module"

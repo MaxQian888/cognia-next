@@ -1150,6 +1150,9 @@ export function dispatchAiSdk({
         const perLegCap = Math.max(1, Math.min(STEP_CHUNK, maxStepsBudget - stepsUsed))
 
         const result = await protocolAdapter.start({
+          sessionId,
+          traceId: sendOptions.traceId,
+          traceparent: sendOptions.traceparent,
           model,
           messages: messagesForSend,
           modelParams,

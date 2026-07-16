@@ -4069,6 +4069,7 @@ describe("resolveSendOptions — agent-trace root span minting", () => {
     })
     expect(opts.traceId).toMatch(HEX32)
     expect(opts.spanId).toMatch(HEX16)
+    expect(opts.traceparent).toBe(`00-${opts.traceId}-${opts.spanId}-01`)
   })
 
   it("stamps the root span surface from traceSurface and carries session/provider metadata", async () => {
@@ -4103,6 +4104,7 @@ describe("resolveSendOptions — agent-trace root span minting", () => {
     // no new span was minted.
     expect(opts.traceId).toBe(parentTrace.traceId)
     expect(opts.spanId).toBe(parentTrace.rootSpanId)
+    expect(opts.traceparent).toBe(`00-${parentTrace.traceId}-${parentTrace.rootSpanId}-01`)
     expect(__getActiveSpanForTesting(parentTrace.rootSpanId)).toBeUndefined()
   })
 })

@@ -1570,6 +1570,7 @@ describe("useClaudeChat — agent-trace wiring (Phase B4)", () => {
     expect(typeof options.spanId).toBe("string")
     expect(String(options.traceId)).toMatch(/^[0-9a-f]{32}$/)
     expect(String(options.spanId)).toMatch(/^[0-9a-f]{16}$/)
+    expect(options.traceparent).toBe(`00-${options.traceId}-${options.spanId}-01`)
   })
 
   it("setLastSend caches the trace identifiers so session_ended can finalise the span", async () => {
@@ -1599,6 +1600,7 @@ describe("useClaudeChat — agent-trace wiring (Phase B4)", () => {
     const call = sendPromptMock.mock.calls.at(-1) as [string, unknown, Record<string, unknown>]
     expect(call[2].spanId).toBe("1111222233334444")
     expect(call[2].traceId).toBe("deadbeefdeadbeefdeadbeefdeadbeef")
+    expect(call[2].traceparent).toBe("00-deadbeefdeadbeefdeadbeefdeadbeef-1111222233334444-01")
   })
 
   it("ends the span with errorType when send() throws before the sidecar gets the call", async () => {

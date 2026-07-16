@@ -10,6 +10,7 @@
 // / session_ended).
 
 import { query } from "@anthropic-ai/claude-agent-sdk"
+import { traceAsyncIterable } from "../telemetry.mjs"
 import { randomUUID } from "node:crypto"
 import {
   buildCogniaToolsServer,
@@ -547,7 +548,17 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     if (options[k] === undefined || options[k] === null) delete options[k]
   }
 
-  const q = query({ prompt: inputStream.iterable, options })
+  const rawQuery = query({ prompt: inputStream.iterable, options })
+  const q = traceAsyncIterable(
+    "gen_ai.invoke_agent",
+    sendOptions.traceparent,
+    {
+      "gen_ai.system": "anthropic",
+      "gen_ai.request.model": sendOptions.model ?? "unknown",
+      "cognia.session.id": sessionId,
+    },
+    rawQuery
+  )
 
   // First-connection self-healing: the SDK's `system/init` event reports each
   // MCP server's connect status; a server that failed its FIRST connect (cold

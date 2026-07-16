@@ -24,17 +24,27 @@ jest.mock("@/lib/native/native-logging", () => ({
 }))
 
 describe("bootstrapLogger persistence + transport attach/detach", () => {
+  it("derives the OTLP Logs endpoint from trace and collector base URLs", async () => {
+    const { otlpLogsEndpoint } = await import("./bootstrap")
+    expect(otlpLogsEndpoint("http://localhost:4318/v1/traces")).toBe(
+      "http://localhost:4318/v1/logs"
+    )
+    expect(otlpLogsEndpoint("https://collector.example/otlp/")).toBe(
+      "https://collector.example/otlp/v1/logs"
+    )
+    expect(otlpLogsEndpoint(" ")).toBe("")
+  })
+
   it("registers the default transports on first run", async () => {
     const mod = await import("./bootstrap")
     const state = mod.bootstrapLogger()
     expect(state.transports.console).toBe(true)
     expect(state.transports.indexedDB).toBe(true)
     expect(state.transports.native).toBe(true)
-    // Per Phase-6 decision: remote / langfuse / OTel default-on; they
+    // Remote / Langfuse remain default-on; the dead OtelTransport was removed.
     // short-circuit silently until credentials/endpoints are filled in.
     expect(state.transports.remote).toBe(true)
     expect(state.transports.langfuse).toBe(true)
-    expect(state.transports.opentelemetry).toBe(true)
     const names = mod.listRegisteredTransports()
     expect(names).toEqual(expect.arrayContaining(["console", "indexeddb"]))
     // Remote stays detached without a configured endpoint, even when its
@@ -58,6 +68,27 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     expect(transports.langfuse).toBe(false)
     expect(retention).toMatchObject({ maxEntries: 500, maxAgeDays: 1 })
     expect(config.minLevel).toBe("warn")
+  })
+
+  it("preserves legacy plaintext for retry when secure persistence fails", async () => {
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        langfuseConfig: { publicKey: "pk", secretKey: "sk-legacy" },
+        agentTraceOtlpConfig: {
+          grafanaCloud: { instanceId: "123", apiToken: "glc_legacy" },
+        },
+      })
+    )
+    const mod = await import("./bootstrap")
+    const state = mod.bootstrapLogger()
+    expect(localStorage.getItem(mod.LOGGING_TRANSPORTS_STORAGE_KEY)).toContain("sk-legacy")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const persisted = localStorage.getItem(mod.LOGGING_TRANSPORTS_STORAGE_KEY) ?? ""
+    expect(persisted).toContain("sk-legacy")
+    expect(persisted).toContain("glc_legacy")
+    expect(state.transports.langfuseConfig.secretKeyConfigured).toBe(true)
+    expect(state.transports.agentTraceOtlpConfig.grafanaCloud.apiTokenConfigured).toBe(true)
   })
 
   it("re-reads persisted toggle state on a fresh module load", async () => {

@@ -10,6 +10,9 @@ const mockConfigureSampling = jest.fn()
 const mockGetBootstrap = jest.fn()
 const mockUseTransportHealth = jest.fn()
 const mockGetRegisteredModules = jest.fn<string[], []>()
+const mockPersistTelemetrySecret = jest.fn().mockResolvedValue(undefined)
+const mockClearTelemetrySecret = jest.fn().mockResolvedValue(undefined)
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
 
 jest.mock("@/lib/logging", () => ({
   applyLoggingSettings: (...args: unknown[]) => mockApplyLoggingSettings(...args),
@@ -21,6 +24,18 @@ jest.mock("@/lib/logging", () => ({
 
 jest.mock("@/hooks/logging", () => ({
   useTransportHealth: (...args: unknown[]) => mockUseTransportHealth(...args),
+}))
+
+jest.mock("@/lib/logging/telemetry-secrets", () => ({
+  persistTelemetrySecret: (...args: unknown[]) => mockPersistTelemetrySecret(...args),
+  clearTelemetrySecret: (...args: unknown[]) => mockClearTelemetrySecret(...args),
+}))
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
+jest.mock("@/lib/db/behavior-events", () => ({
+  clearBehaviorEvents: jest.fn().mockResolvedValue(undefined),
+  exportBehaviorEvents: jest.fn().mockResolvedValue("[]"),
 }))
 
 import { LogSettings } from "./log-settings"
@@ -45,7 +60,6 @@ function defaultBootstrap() {
       native: true,
       remote: false,
       langfuse: false,
-      opentelemetry: false,
       nativeConfig: { minLevel: "warn", batchSize: 10, flushInterval: 2000 },
       remoteConfig: {
         endpoint: "",
@@ -56,11 +70,10 @@ function defaultBootstrap() {
       },
       langfuseConfig: {
         publicKey: "",
-        secretKey: "",
+        secretKeyConfigured: false,
         host: "https://cloud.langfuse.com",
         minLevel: "warn",
       },
-      opentelemetryConfig: { endpoint: "", serviceName: "cognia-ai", addAsSpanEvents: true },
       agentTrace: true,
       agentTraceOtlp: false,
       agentTraceConfig: { captureContent: false, maxPreviewBytes: 4096, retentionDays: 7 },
@@ -70,7 +83,7 @@ function defaultBootstrap() {
         headers: {},
         serviceName: "cognia-ai",
         environment: "",
-        grafanaCloud: { instanceId: "", apiToken: "" },
+        grafanaCloud: { instanceId: "", apiTokenConfigured: false },
       },
     },
     retention: { maxEntries: 10000, maxAgeDays: 7 },
@@ -97,6 +110,9 @@ beforeEach(() => {
   mockGetBootstrap.mockReset()
   mockUseTransportHealth.mockReset()
   mockGetRegisteredModules.mockReset()
+  mockPersistTelemetrySecret.mockClear()
+  mockClearTelemetrySecret.mockClear()
+  mockTrackEvent.mockClear()
   mockGetBootstrap.mockReturnValue(defaultBootstrap())
   mockUseTransportHealth.mockReturnValue({ nativeLogging: defaultNativeLogging() })
   mockGetRegisteredModules.mockReturnValue(["ai", "network", "network:lark"])
@@ -326,7 +342,7 @@ describe("LogSettings — Bootstrap loading from localStorage", () => {
 })
 
 describe("LogSettings — Transports tab", () => {
-  it("renders all six transport cards", () => {
+  it("renders all configured transport cards", () => {
     render(<LogSettings />)
     fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
     expect(screen.getByText("Console Output")).toBeInTheDocument()
@@ -334,7 +350,6 @@ describe("LogSettings — Transports tab", () => {
     expect(screen.getByText("Platform Logging")).toBeInTheDocument()
     expect(screen.getByText("Remote Transport")).toBeInTheDocument()
     expect(screen.getByText("Langfuse Integration")).toBeInTheDocument()
-    expect(screen.getByText("OpenTelemetry")).toBeInTheDocument()
   })
 
   it("renders transports tab content with at least one disabled Switch", () => {
@@ -368,6 +383,27 @@ describe("LogSettings — Retention tab", () => {
 })
 
 describe("LogSettings — Advanced tab redaction & queue", () => {
+  it("keeps behavior telemetry off until explicit opt-in is saved", async () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+    const toggle = screen.getByTestId("behavior-telemetry-switch")
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    fireEvent.click(toggle)
+    await act(async () => fireEvent.click(screen.getByText("Save")))
+    expect(localStorage.getItem("cognia-behavior-telemetry-enabled")).toBe("true")
+    expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: true })
+  })
+
+  it("records opt-out before disabling behavior telemetry", async () => {
+    localStorage.setItem("cognia-behavior-telemetry-enabled", "true")
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-switch"))
+    await act(async () => fireEvent.click(screen.getByText("Save")))
+    expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: false })
+    expect(localStorage.getItem("cognia-behavior-telemetry-enabled")).toBe("false")
+  })
+
   it("toggles the redaction switch", () => {
     render(<LogSettings />)
     fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
@@ -433,17 +469,6 @@ describe("LogSettings — Transport per-config inputs", () => {
     expect(screen.getByPlaceholderText("sk-live-...")).toBeInTheDocument()
   })
 
-  it("renders OTel endpoint and service name fields when opentelemetry enabled", () => {
-    mockGetBootstrap.mockReturnValue({
-      ...defaultBootstrap(),
-      transports: { ...defaultBootstrap().transports, opentelemetry: true },
-    })
-    render(<LogSettings />)
-    fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
-    expect(screen.getByPlaceholderText("http://localhost:4318/v1/traces")).toBeInTheDocument()
-    expect(screen.getByPlaceholderText("cognia-ai")).toBeInTheDocument()
-  })
-
   it("changing the Langfuse host input triggers Unsaved", () => {
     mockGetBootstrap.mockReturnValue({
       ...defaultBootstrap(),
@@ -505,7 +530,7 @@ describe("LogSettings — Transport per-config inputs", () => {
     expect(screen.getAllByText("Unsaved changes").length).toBeGreaterThan(0)
   })
 
-  it("typing into the OTLP headers field parses into a key/value record on save", () => {
+  it("drops sensitive OTLP headers and keeps non-sensitive pairs on save", async () => {
     mockGetBootstrap.mockReturnValue({
       ...defaultBootstrap(),
       transports: { ...defaultBootstrap().transports, agentTraceOtlp: true },
@@ -516,13 +541,12 @@ describe("LogSettings — Transport per-config inputs", () => {
     fireEvent.change(headersInput, {
       target: { value: "Authorization: Basic abc==, X-Tenant: prod" },
     })
-    fireEvent.click(screen.getByText("Save"))
+    await act(async () => fireEvent.click(screen.getByText("Save")))
     expect(mockApplyLoggingSettings).toHaveBeenCalled()
     const call = mockApplyLoggingSettings.mock.calls.at(-1) as [
       { transports?: { agentTraceOtlpConfig?: { headers: Record<string, string> } } },
     ]
     expect(call[0].transports?.agentTraceOtlpConfig?.headers).toEqual({
-      Authorization: "Basic abc==",
       "X-Tenant": "prod",
     })
   })
@@ -546,7 +570,7 @@ describe("LogSettings — Transport per-config inputs", () => {
     expect(screen.queryByTestId("agent-trace-otlp-headers")).not.toBeInTheDocument()
   })
 
-  it("persists Grafana credentials separately from headers on save", () => {
+  it("persists Grafana credentials through the write-only secret seam", async () => {
     mockGetBootstrap.mockReturnValue({
       ...defaultBootstrap(),
       transports: {
@@ -566,12 +590,13 @@ describe("LogSettings — Transport per-config inputs", () => {
     fireEvent.change(screen.getByTestId("agent-trace-otlp-grafana-api-token"), {
       target: { value: "glc_secret" },
     })
-    fireEvent.click(screen.getByText("Save"))
+    await act(async () => fireEvent.click(screen.getByText("Save")))
+    expect(mockPersistTelemetrySecret).toHaveBeenCalledWith("grafanaCloudApiToken", "glc_secret")
     const call = mockApplyLoggingSettings.mock.calls.at(-1) as [
       {
         transports?: {
           agentTraceOtlpConfig?: {
-            grafanaCloud?: { instanceId: string; apiToken: string }
+            grafanaCloud?: { instanceId: string; apiTokenConfigured: boolean }
             headers: Record<string, string>
           }
         }
@@ -579,9 +604,9 @@ describe("LogSettings — Transport per-config inputs", () => {
     ]
     expect(call[0].transports?.agentTraceOtlpConfig?.grafanaCloud).toEqual({
       instanceId: "1234567",
-      apiToken: "glc_secret",
+      apiTokenConfigured: true,
     })
-    // Raw `headers` stays empty — bootstrap.ts builds Authorization at apply time.
+    // Raw headers stay empty — Rust reads the token from the secret store.
     expect(call[0].transports?.agentTraceOtlpConfig?.headers).toEqual({})
   })
 })

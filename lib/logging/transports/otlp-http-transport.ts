@@ -284,19 +284,3 @@ function defaultSleep(ms: number): Promise<void> {
 export function createOtlpHttpTransport(options: OtlpHttpTransportOptions): OtlpHttpTransport {
   return new OtlpHttpTransport(options)
 }
-
-/**
- * Helper for the Settings UI: build the headers map for a Grafana Cloud
- * OTLP endpoint. Stack instance id + API token are encoded as HTTP Basic
- * auth (`<instanceId>:<token>`). Returns an empty object when either
- * field is empty so the transport can degrade cleanly.
- */
-export function grafanaCloudHeaders(args: {
-  instanceId: string
-  apiToken: string
-}): Record<string, string> {
-  if (!args.instanceId || !args.apiToken) return {}
-  const raw = `${args.instanceId}:${args.apiToken}`
-  const encoded = globalThis.btoa(raw)
-  return { Authorization: `Basic ${encoded}` }
-}

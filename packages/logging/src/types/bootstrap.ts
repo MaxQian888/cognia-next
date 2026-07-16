@@ -15,15 +15,10 @@ export interface RemoteTransportDetailSettings {
 
 export interface LangfuseTransportDetailSettings {
   publicKey: string
-  secretKey: string
+  /** Write-only secret lives in the platform secret store. */
+  secretKeyConfigured: boolean
   host: string
   minLevel: LogLevel
-}
-
-export interface OpenTelemetryTransportDetailSettings {
-  endpoint: string
-  serviceName: string
-  addAsSpanEvents: boolean
 }
 
 export interface NativeTransportDetailSettings {
@@ -76,7 +71,8 @@ export interface AgentTraceOtlpSettings {
    */
   grafanaCloud: {
     instanceId: string
-    apiToken: string
+    /** Write-only token lives in the platform secret store. */
+    apiTokenConfigured: boolean
   }
 }
 
@@ -86,13 +82,11 @@ export interface LoggingTransportSettings {
   native: boolean
   remote: boolean
   langfuse: boolean
-  opentelemetry: boolean
   agentTrace: boolean
   agentTraceOtlp: boolean
   nativeConfig: NativeTransportDetailSettings
   remoteConfig: RemoteTransportDetailSettings
   langfuseConfig: LangfuseTransportDetailSettings
-  opentelemetryConfig: OpenTelemetryTransportDetailSettings
   agentTraceConfig: AgentTraceTransportDetailSettings
   agentTraceOtlpConfig: AgentTraceOtlpSettings
 }

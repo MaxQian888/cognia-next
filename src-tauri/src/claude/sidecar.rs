@@ -381,6 +381,15 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
     // rationale.
     host.inject_env(&mut cmd).await;
 
+    match crate::telemetry::sidecar_env() {
+        Ok(env) => {
+            for (key, value) in env {
+                cmd.env(key, value);
+            }
+        }
+        Err(error) => log::warn!("sidecar telemetry configuration unavailable: {error}"),
+    }
+
     // Inject the user's network proxy config so the Node sidecar's outbound
     // HTTP (Anthropic SDK + any provider relays) routes through the same
     // proxy as the rest of the app. The interceptor at

@@ -15,6 +15,7 @@ import {
   decideOpenAiEndpointFlavor,
   RESPONSES_ONLY_PROVIDERS,
 } from "./provider-protocol.mjs"
+import { aiSdkTelemetry, withTraceparent } from "../../telemetry.mjs"
 
 export { isGenuineOpenAiEndpoint, isResponsesOnlyEndpoint }
 
@@ -303,6 +304,16 @@ export function makeAiSdkAdapter(protocol) {
         messages: req.messages,
         ...(req.modelParams ?? {}),
       }
+      const experimentalTelemetry = aiSdkTelemetry({
+        sessionId: req.sessionId,
+        traceId: req.traceId,
+        provider: providerId ?? protocol,
+        traceparent: req.traceparent,
+      })
+      if (experimentalTelemetry) {
+        const { traceparent: _traceparent, ...publicTelemetry } = experimentalTelemetry
+        streamArgs.experimental_telemetry = publicTelemetry
+      }
       // Enable reasoning per provider (thinking budget / reasoning effort),
       // deep-merged onto any providerOptions the modelParams already carried
       // (e.g. the anthropic cacheControl breakpoint) so neither clobbers the
@@ -351,7 +362,7 @@ export function makeAiSdkAdapter(protocol) {
       }
       // streamText's result already matches AdapterResult (fullStream /
       // response / usage) — return it directly.
-      return streamTextFn(streamArgs)
+      return withTraceparent(req.traceparent, () => streamTextFn(streamArgs))
     },
   }
 }

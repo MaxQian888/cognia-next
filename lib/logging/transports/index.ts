@@ -29,6 +29,5 @@ export {
 export {
   OtlpHttpTransport,
   createOtlpHttpTransport,
-  grafanaCloudHeaders,
   type OtlpHttpTransportOptions,
 } from "./otlp-http-transport"

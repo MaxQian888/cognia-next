@@ -95,6 +95,7 @@ mod shell;
 pub use cognia_skills as skills;
 mod subscription;
 mod supervision_backoff;
+mod telemetry;
 // ADR-0067 Tier B — extracted to `crates/cognia-terminal`; re-aliased so
 // `crate::terminal::…` (companion_api rpc/ws_terminal, plugin_api cli_exec,
 // generate_handler! + .manage()) resolves unchanged.
@@ -680,6 +681,11 @@ pub fn run() {
             keyring_secrets::keyring_secret_get,
             keyring_secrets::keyring_secret_set,
             keyring_secrets::keyring_secret_clear,
+            telemetry::telemetry_secret_set,
+            telemetry::telemetry_secret_has,
+            telemetry::telemetry_secret_clear,
+            telemetry::telemetry_otlp_export,
+            telemetry::telemetry_configure_sidecar,
             cli_bridge::cli_bridge_status,
             cli_bridge::cli_bridge_renderer_response,
             cli_bridge::resolve_cli_home,

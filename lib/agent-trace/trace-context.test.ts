@@ -3,7 +3,7 @@ import {
   __resetAgentTraceEmitterForTesting,
 } from "@cognia/agent-trace/emitter"
 import type { TraceContext } from "@/types/agent-trace/trace-context"
-import { childSpanInput, startRootTrace } from "./trace-context"
+import { childSpanInput, parseTraceparent, startRootTrace, toTraceparent } from "./trace-context"
 
 const HEX32 = /^[0-9a-f]{32}$/
 const HEX16 = /^[0-9a-f]{16}$/
@@ -98,5 +98,28 @@ describe("childSpanInput", () => {
 
     expect(input.traceId).toBe(ctx.traceId)
     expect(input.parentSpanId).toBe(ctx.rootSpanId)
+  })
+})
+
+describe("W3C traceparent", () => {
+  it("formats a sampled TraceContext using version 00", () => {
+    expect(toTraceparent({ traceId: "a".repeat(32), rootSpanId: "b".repeat(16) })).toBe(
+      `00-${"a".repeat(32)}-${"b".repeat(16)}-01`
+    )
+  })
+
+  it("parses valid sampled and unsampled values", () => {
+    expect(parseTraceparent(`00-${"a".repeat(32)}-${"b".repeat(16)}-01`)).toEqual({
+      traceId: "a".repeat(32),
+      rootSpanId: "b".repeat(16),
+      sampled: true,
+    })
+    expect(parseTraceparent(`00-${"c".repeat(32)}-${"d".repeat(16)}-00`)?.sampled).toBe(false)
+  })
+
+  it("rejects malformed and all-zero identifiers", () => {
+    expect(parseTraceparent("not-a-traceparent")).toBeNull()
+    expect(parseTraceparent(`00-${"0".repeat(32)}-${"b".repeat(16)}-01`)).toBeNull()
+    expect(parseTraceparent(`00-${"a".repeat(32)}-${"0".repeat(16)}-01`)).toBeNull()
   })
 })

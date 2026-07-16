@@ -1,0 +1,35 @@
+[[set]]
+identifier = "telemetry"
+description = "Allows the main window to configure telemetry, export JSON payloads, and manage write-only telemetry secrets."
+permissions = [
+  "allow-telemetry-otlp-export",
+  "allow-telemetry-secret-set",
+  "allow-telemetry-secret-has",
+  "allow-telemetry-secret-clear",
+  "allow-telemetry-configure-sidecar",
+]
+
+[[permission]]
+identifier = "allow-telemetry-otlp-export"
+description = "Allows exporting a validated JSON telemetry payload through the native HTTP client."
+commands.allow = ["telemetry_otlp_export"]
+
+[[permission]]
+identifier = "allow-telemetry-secret-set"
+description = "Allows storing a telemetry credential in the operating-system secret store."
+commands.allow = ["telemetry_secret_set"]
+
+[[permission]]
+identifier = "allow-telemetry-secret-has"
+description = "Allows checking whether a telemetry credential is configured without reading it."
+commands.allow = ["telemetry_secret_has"]
+
+[[permission]]
+identifier = "allow-telemetry-secret-clear"
+description = "Allows deleting a telemetry credential from the operating-system secret store."
+commands.allow = ["telemetry_secret_clear"]
+
+[[permission]]
+identifier = "allow-telemetry-configure-sidecar"
+description = "Allows configuring the sidecar telemetry environment without exposing credentials."
+commands.allow = ["telemetry_configure_sidecar"]

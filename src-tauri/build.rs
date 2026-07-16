@@ -30,6 +30,14 @@ fn main() {
         embed_windows_manifest();
     }
 
+    attributes = attributes.app_manifest(tauri_build::AppManifest::new().commands(&[
+        "telemetry_otlp_export",
+        "telemetry_secret_set",
+        "telemetry_secret_has",
+        "telemetry_secret_clear",
+        "telemetry_configure_sidecar",
+    ]));
+
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 
     #[cfg(feature = "parse-liteparse")]

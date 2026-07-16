@@ -5,7 +5,7 @@
 import type { StructuredLogEntry } from "@/types/logging"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import { AGENT_TRACE_SPAN_KIND } from "@/types/agent-trace/span"
-import { OtlpHttpTransport, grafanaCloudHeaders } from "./otlp-http-transport"
+import { OtlpHttpTransport } from "./otlp-http-transport"
 
 function makeSpan(over: Partial<AgentTraceSpan> = {}): AgentTraceSpan {
   return {
@@ -369,19 +369,5 @@ describe("OtlpHttpTransport options + resource", () => {
     expect(url).toBe("http://b.local/v1/traces")
     expect((init?.headers as Record<string, string>)["X-Tenant"]).toBe("v2")
     await t.close()
-  })
-})
-
-describe("grafanaCloudHeaders", () => {
-  it("returns Authorization header from base64(instanceId:apiToken)", () => {
-    const out = grafanaCloudHeaders({ instanceId: "12345", apiToken: "glc_secret" })
-    expect(out.Authorization).toMatch(/^Basic [A-Za-z0-9+/=]+$/)
-    const encoded = out.Authorization.slice("Basic ".length)
-    expect(globalThis.atob(encoded)).toBe("12345:glc_secret")
-  })
-
-  it("returns an empty object when either field is empty", () => {
-    expect(grafanaCloudHeaders({ instanceId: "", apiToken: "x" })).toEqual({})
-    expect(grafanaCloudHeaders({ instanceId: "x", apiToken: "" })).toEqual({})
   })
 })

@@ -215,6 +215,10 @@ fontdb = "0.18"
 regex = "1"
 toml_edit = { version = "0.22", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
+opentelemetry = { version = "0.32", optional = true, features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.32", optional = true, features = ["trace", "metrics", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", optional = true, default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-rustls"] }
+tracing-opentelemetry = { version = "0.33", optional = true }
 tokio-socks = "0.5"
 tokio-rustls = "0.26"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
@@ -509,6 +513,14 @@ urlencoding = "2"
 # feature flag links a real binding for one platform.
 [features]
 default = []
+# ADR-0073 — native OTLP trace/metric export is deliberately opt-in so the
+# OpenTelemetry dependency graph does not slow normal desktop development.
+otel-export = [
+  "dep:opentelemetry",
+  "dep:opentelemetry_sdk",
+  "dep:opentelemetry-otlp",
+  "dep:tracing-opentelemetry",
+]
 # Cross-platform Tesseract via the local `tesseract` CLI. The feature links
 # no native library; runtime availability depends on the executable being
 # installed on PATH or packaged by the app shell.

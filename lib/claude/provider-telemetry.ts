@@ -83,6 +83,12 @@ export interface ProviderOutcome {
   surface?: SpanSurface
 }
 
+let missingTraceContextCount = 0
+
+export function getMissingProviderTraceContextCount(): number {
+  return missingTraceContextCount
+}
+
 export function recordProviderOutcome(outcome: ProviderOutcome): void {
   const {
     providerId,
@@ -204,5 +210,19 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
     } catch {
       // Span emission is best-effort — never break a send.
     }
+  } else if (sessionId && !outcome.traceId) {
+    missingTraceContextCount += 1
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("provider telemetry dropped a span because traceId was not threaded", {
+        providerId,
+        sessionId,
+      })
+    }
   }
+}
+
+export const __TESTING__ = {
+  resetMissingTraceContextCount(): void {
+    missingTraceContextCount = 0
+  },
 }

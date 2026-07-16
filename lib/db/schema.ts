@@ -97,6 +97,7 @@ import type { PetModelRow, PetModelFileRow } from "./pet-models"
 import type { TerminalHistoryRow } from "./terminal-history"
 import type { ProviderCostDailyRow } from "./provider-cost-daily"
 import type { UnattendedExecAuditRow } from "./terminal-audit"
+import type { BehaviorEventRow } from "./behavior-event-types"
 // Row types relocated out of this file but still wired into the table
 // declarations below and re-exported at the bottom for `@/lib/db/schema`
 // import-site stability. See `lib/db/CONVENTIONS.md`.
@@ -2489,6 +2490,13 @@ export class CogniaDB extends Dexie {
       browserAnnotations: "&id, sessionId, baseUrl, status, createdAt, [baseUrl+status]",
     })
 
+    // v112 — Explicitly opted-in product behavior events. Local storage and
+    // OTLP Logs export are independent; clearing this table never changes the
+    // user's consent preference.
+    this.version(112).stores({
+      behaviorEvents: "&id, eventName, at, sessionId, [eventName+at]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -2516,6 +2524,7 @@ export class CogniaDB extends Dexie {
   syncTombstones!: Table<SyncTombstoneRow, [SyncableTable, string]>
   // v49 — Inbox telemetry ring buffer (cap 3000). See `lib/db/inbox-telemetry.ts`.
   inboxTelemetryEvents!: Table<InboxTelemetryEventRow, string>
+  behaviorEvents!: Table<BehaviorEventRow, string>
   // v57 — Computer-Use sandbox connections. See `lib/db/sandbox-connections.ts`.
   sandboxConnections!: Table<SandboxConnectionRow, string>
   // v59 — GitHub marketplace-repo sources. See `lib/db/plugin-marketplace-sources.ts`.

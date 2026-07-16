@@ -1,4 +1,8 @@
-import { recordProviderOutcome } from "./provider-telemetry"
+import {
+  __TESTING__,
+  getMissingProviderTraceContextCount,
+  recordProviderOutcome,
+} from "./provider-telemetry"
 import {
   __resetForTesting as resetAffinity,
   getSessionDeployment,
@@ -36,6 +40,25 @@ async function flushAsync() {
 }
 
 describe("recordProviderOutcome", () => {
+  it("counts and warns when a session outcome has no trace id", () => {
+    __TESTING__.resetMissingTraceContextCount()
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    recordProviderOutcome({
+      providerId: "anthropic",
+      ok: true,
+      latencyMs: 10,
+      sessionId: "session-without-trace",
+    })
+
+    expect(getMissingProviderTraceContextCount()).toBe(1)
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("traceId"),
+      expect.objectContaining({ providerId: "anthropic" })
+    )
+    warn.mockRestore()
+  })
+
   beforeEach(() => {
     useHealthMetricsStore.getState().resetAll()
     useCircuitBreakerStore.getState().resetAll()

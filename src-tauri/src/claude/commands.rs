@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, State};
+use tracing::Instrument as _;
 
 use super::host::{SidecarHost, TauriSidecarHost};
 use super::sidecar::{emit_hook_fire, spawn as spawn_sidecar, SidecarState};
@@ -18,6 +19,9 @@ use crate::hooks;
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendOptions {
+    /// W3C parent context for renderer → Rust → sidecar trace continuity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub traceparent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -204,6 +208,14 @@ pub async fn claude_send(
     prompt: Value,
     options: Option<SendOptions>,
 ) -> Result<(), String> {
+    let span = tracing::info_span!("claude.send", session_id = %session_id);
+    #[cfg(feature = "otel-export")]
+    crate::telemetry::set_parent(
+        &span,
+        options
+            .as_ref()
+            .and_then(|value| value.traceparent.as_deref()),
+    );
     claude_send_with_host(
         Arc::new(TauriSidecarHost(app)),
         state.inner().clone(),
@@ -211,6 +223,7 @@ pub async fn claude_send(
         prompt,
         options,
     )
+    .instrument(span)
     .await
 }
 

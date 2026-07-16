@@ -26,6 +26,13 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
 
+#[cfg(feature = "otel-export")]
+use opentelemetry_sdk::trace::SdkTracer;
+#[cfg(feature = "otel-export")]
+use tracing_subscriber::registry::Registry;
+#[cfg(feature = "otel-export")]
+use tracing_subscriber::reload;
+
 use crate::logging::native_bootstrap;
 
 const STRUCTURED_LOG_FILE: &str = "cognia-structured.log";
@@ -66,6 +73,26 @@ static TRACING_STATE: Lazy<Mutex<TracingState>> = Lazy::new(|| {
 });
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(feature = "otel-export")]
+type OtelLayer = tracing_opentelemetry::OpenTelemetryLayer<Registry, SdkTracer>;
+#[cfg(feature = "otel-export")]
+type OtelReloadHandle = reload::Handle<Option<OtelLayer>, Registry>;
+#[cfg(feature = "otel-export")]
+static OTEL_RELOAD_HANDLE: Lazy<Mutex<Option<OtelReloadHandle>>> = Lazy::new(|| Mutex::new(None));
+
+#[cfg(feature = "otel-export")]
+pub fn configure_otel_tracer(tracer: Option<SdkTracer>) -> Result<(), String> {
+    let mut handle = OTEL_RELOAD_HANDLE
+        .lock()
+        .map_err(|_| "native OTLP reload handle lock poisoned".to_string())?;
+    let handle = handle
+        .as_mut()
+        .ok_or_else(|| "structured tracing subscriber is not initialized".to_string())?;
+    handle
+        .reload(tracer.map(|tracer| tracing_opentelemetry::layer().with_tracer(tracer)))
+        .map_err(|error| format!("native OTLP layer reload failed: {error}"))
+}
 
 /// Parse a level name into a `tracing::Level`. Unknown values fall back to
 /// `INFO`; the frontend's `fatal` collapses to `error` (tracing has 5 levels).
@@ -169,17 +196,48 @@ pub fn init() -> bool {
     };
 
     let writer = SharedFileWriter(Arc::new(Mutex::new(file)));
-    let file_layer = tracing_subscriber::fmt::layer()
-        .json()
-        .with_ansi(false)
-        .with_writer(writer)
-        .with_filter(filter_fn(event_enabled));
 
-    if tracing_subscriber::registry()
-        .with(file_layer)
-        .try_init()
-        .is_err()
-    {
+    #[cfg(feature = "otel-export")]
+    let installed = {
+        let file_layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_ansi(false)
+            .with_writer(writer.clone())
+            .with_filter(filter_fn(event_enabled));
+        let (otel_layer, otel_handle) = reload::Layer::new(None::<OtelLayer>);
+        let installed = tracing_subscriber::registry()
+            .with(otel_layer)
+            .with(file_layer)
+            .try_init()
+            .is_ok();
+        if installed {
+            if let Ok(mut handle) = OTEL_RELOAD_HANDLE.lock() {
+                *handle = Some(otel_handle);
+            }
+            match crate::telemetry::init_tracer() {
+                Ok(tracer) => {
+                    if let Err(error) = configure_otel_tracer(Some(tracer)) {
+                        log::warn!("native OTLP exporter disabled: {error}");
+                    }
+                }
+                Err(error) => log::warn!("native OTLP exporter disabled: {error}"),
+            }
+        }
+        installed
+    };
+    #[cfg(not(feature = "otel-export"))]
+    let installed = {
+        let file_layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_ansi(false)
+            .with_writer(writer)
+            .with_filter(filter_fn(event_enabled));
+        tracing_subscriber::registry()
+            .with(file_layer)
+            .try_init()
+            .is_ok()
+    };
+    if !installed {
         return false;
     }
 

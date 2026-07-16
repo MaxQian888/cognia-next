@@ -45,6 +45,5 @@ export {
   type AgentTraceTransportOptions,
   OtlpHttpTransport,
   createOtlpHttpTransport,
-  grafanaCloudHeaders,
   type OtlpHttpTransportOptions,
 } from "./transports"

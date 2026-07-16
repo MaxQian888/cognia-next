@@ -87,6 +87,8 @@
     "log:default",
     "log:allow-log",
 
+    "telemetry",
+
     "upload:default",
     "upload:allow-upload",
     "upload:allow-download",

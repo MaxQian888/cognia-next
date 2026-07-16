@@ -51,7 +51,7 @@ import {
 } from "@/lib/claude/compact-instructions"
 import { getCompactionStrategy } from "@/lib/plugin/registries/compaction-strategy-registry"
 import { loggers } from "@cognia/logging"
-import { startRootTrace } from "@/lib/agent-trace/trace-context"
+import { startRootTrace, toTraceparent } from "@/lib/agent-trace/trace-context"
 import type { SpanSurface } from "@/types/agent-trace/span"
 import type { TraceContext } from "@/types/agent-trace/trace-context"
 import type {
@@ -3220,6 +3220,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (ctx.parentTrace) {
       opts.traceId = ctx.parentTrace.traceId
       opts.spanId = ctx.parentTrace.rootSpanId
+      opts.traceparent = toTraceparent(ctx.parentTrace)
     } else {
       const promptPreview = ctx.routingContextHint?.promptText
       const { ctx: traceCtx } = startRootTrace({
@@ -3241,6 +3242,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       })
       opts.traceId = traceCtx.traceId
       opts.spanId = traceCtx.rootSpanId
+      opts.traceparent = toTraceparent(traceCtx)
     }
   }
 

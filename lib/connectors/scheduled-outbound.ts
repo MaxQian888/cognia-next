@@ -305,18 +305,18 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
   }
 
   // ── Step 5: project text + A2UI surfaces into outbound segments ─────
+  const { platform } = parseConversationKey(conversationKey)
   const outboundSegments: MessageSegment[] = assistantReplyToSegments({
     text: captured.text,
     a2uiSurfaces: captured.a2uiSurfaces,
     a2uiSurfaceOrder: captured.a2uiSurfaceOrder,
+    telemetry: { adapterId, platform },
   })
   const idempotencyKey = `airun:${captured.messageId}`
 
   // Re-derive the platform from the conversationKey rather than trusting
   // a payload field — the conversationKey format is the single source of
   // truth (it round-trips through `buildConversationKey`).
-  const { platform } = parseConversationKey(conversationKey)
-
   try {
     const job = await enqueueOutbound({
       adapterId,
