@@ -24,6 +24,28 @@ const COGNIA_UA = "cognia-github-delivery/1.0"
 const ThrottledRetriedOctokit = Octokit.plugin(retry, throttling)
 type ConfiguredOctokit = InstanceType<typeof ThrottledRetriedOctokit>
 
+/**
+ * E2E seam: in a bundle built with NEXT_PUBLIC_E2E=1 (the flag is inlined at
+ * build time, so this whole branch is dead-code-eliminated from production
+ * builds) specs can point every Octokit at the mock GitHub server by
+ * publishing `{ github: "<url>" }` through `window.__cogniaSetMockBaseUrls`,
+ * which persists to this localStorage key. Without it the workflow github
+ * executors always target api.github.com and no E2E assertion can ever see
+ * their requests. Exported for the co-located test only.
+ */
+export function _e2eGithubBaseUrl(): string | undefined {
+  if (process.env.NEXT_PUBLIC_E2E !== "1") return undefined
+  if (typeof window === "undefined") return undefined
+  try {
+    const raw = window.localStorage.getItem("cognia.e2e.mockBaseUrls.v1")
+    const parsed = raw ? (JSON.parse(raw) as { github?: string }) : undefined
+    const url = parsed?.github
+    return typeof url === "string" && url.length > 0 ? url.replace(/\/$/, "") : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export interface OctokitForRepoOptions {
   repoFullName: string
   /** Credential strategy. */
@@ -75,6 +97,7 @@ export const _throttleHandlers = (
  * returned instance per repo if desired — this function does not memoize.
  */
 export async function getOctokitForRepo(opts: OctokitForRepoOptions): Promise<ConfiguredOctokit> {
+  const baseUrl = _e2eGithubBaseUrl()
   if (opts.mode === "pat") {
     if (!opts.pat?.token) {
       throw new Error(`PAT mode requires opts.pat.token (repo "${opts.repoFullName}")`)
@@ -84,6 +107,7 @@ export async function getOctokitForRepo(opts: OctokitForRepoOptions): Promise<Co
       authStrategy: createTokenAuth,
       userAgent: COGNIA_UA,
       throttle: _throttleHandlers(opts.onWarning),
+      ...(baseUrl ? { baseUrl } : {}),
     })
   }
 
@@ -102,5 +126,6 @@ export async function getOctokitForRepo(opts: OctokitForRepoOptions): Promise<Co
     authStrategy: createTokenAuth,
     userAgent: COGNIA_UA,
     throttle: _throttleHandlers(opts.onWarning),
+    ...(baseUrl ? { baseUrl } : {}),
   })
 }

@@ -1,7 +1,42 @@
 import { clearInstallationTokenCache } from "./auth-app"
-import { _throttleHandlers, getOctokitForRepo } from "./octokit-factory"
+import { _e2eGithubBaseUrl, _throttleHandlers, getOctokitForRepo } from "./octokit-factory"
 
 beforeEach(() => clearInstallationTokenCache())
+
+describe("_e2eGithubBaseUrl", () => {
+  const originalEnv = process.env.NEXT_PUBLIC_E2E
+  afterEach(() => {
+    process.env.NEXT_PUBLIC_E2E = originalEnv
+    delete (globalThis as Record<string, unknown>).window
+  })
+
+  const stubWindow = (raw: string | null) => {
+    ;(globalThis as Record<string, unknown>).window = {
+      localStorage: { getItem: () => raw },
+    }
+  }
+
+  it("is undefined outside NEXT_PUBLIC_E2E=1 builds even with a URL published", () => {
+    process.env.NEXT_PUBLIC_E2E = "0"
+    stubWindow(JSON.stringify({ github: "http://127.0.0.1:7893" }))
+    expect(_e2eGithubBaseUrl()).toBeUndefined()
+  })
+
+  it("reads the github mock base URL published by the test-globals bridge", () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    stubWindow(JSON.stringify({ github: "http://127.0.0.1:7893/" }))
+    expect(_e2eGithubBaseUrl()).toBe("http://127.0.0.1:7893")
+  })
+
+  it("is undefined without a window or with malformed storage", () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    expect(_e2eGithubBaseUrl()).toBeUndefined()
+    stubWindow("{not json")
+    expect(_e2eGithubBaseUrl()).toBeUndefined()
+    stubWindow(JSON.stringify({ github: "" }))
+    expect(_e2eGithubBaseUrl()).toBeUndefined()
+  })
+})
 
 describe("getOctokitForRepo", () => {
   it("builds a PAT-mode Octokit when opts.mode === 'pat'", async () => {
