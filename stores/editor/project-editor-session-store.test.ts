@@ -21,10 +21,14 @@ describe("useProjectEditorSessionStore", () => {
 
   it("stores editor sessions by generic scope key", () => {
     useProjectEditorSessionStore.getState().setSession("session:chat-1", legacySession)
+    useProjectEditorSessionStore.getState().setSession("session:chat-1", {
+      activePath: "src/next.ts",
+    })
 
-    expect(useProjectEditorSessionStore.getState().sessions["session:chat-1"]).toEqual(
-      legacySession
-    )
+    expect(useProjectEditorSessionStore.getState().sessions["session:chat-1"]).toEqual({
+      ...legacySession,
+      activePath: "src/next.ts",
+    })
   })
 
   it("imports legacy team editor sessions on first account activation", () => {
@@ -83,5 +87,33 @@ describe("useProjectEditorSessionStore", () => {
     expect(useProjectEditorSessionStore.getState().sessions).toEqual({})
     expect(window.localStorage.getItem("cognia-project-editor-sessions:acct-a")).toBeNull()
     expect(window.localStorage.getItem("cognia-project-editor-sessions:acct-b")).not.toBeNull()
+  })
+
+  it("treats malformed or non-object account snapshots as empty", () => {
+    window.localStorage.setItem("cognia-project-editor-sessions:invalid-json", "{")
+    activateProjectEditorAccountStorage("invalid-json")
+    expect(useProjectEditorSessionStore.getState().sessions).toEqual({})
+
+    window.localStorage.setItem("cognia-project-editor-sessions:null-json", "null")
+    activateProjectEditorAccountStorage("null-json")
+    expect(useProjectEditorSessionStore.getState().sessions).toEqual({})
+
+    window.localStorage.setItem(
+      "cognia-project-editor-sessions:no-sessions",
+      JSON.stringify({ state: {} })
+    )
+    activateProjectEditorAccountStorage("no-sessions")
+    expect(useProjectEditorSessionStore.getState().sessions).toEqual({})
+  })
+
+  it("ignores a malformed legacy editor session map", () => {
+    window.localStorage.setItem(
+      "cognia-agent-teams:bad-legacy",
+      JSON.stringify({ state: { editorSession: "invalid" } })
+    )
+
+    activateProjectEditorAccountStorage("bad-legacy")
+
+    expect(useProjectEditorSessionStore.getState().sessions).toEqual({})
   })
 })
