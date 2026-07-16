@@ -22,7 +22,18 @@
  *   POST   /repos/:owner/:repo/dispatches            — workflow_dispatch
  *
  * Specs flip the credential store baseUrl to `server.baseUrl` and assert on
- * `capturedCalls` after the executor runs.
+ * the captured calls after the executor runs — over HTTP via
+ * `GET /__control/calls`, because the shared instance is booted in the
+ * Playwright globalSetup process and worker-side specs can't touch the
+ * object directly. There is intentionally NO reset control: the instance is
+ * shared by fullyParallel workers, so a per-test reset would wipe another
+ * worker's captures mid-assertion — specs must match on their own
+ * method/path/body instead.
+ *
+ * Required request fields are VALIDATED (422 on absence) wherever the real
+ * GitHub API validates them. The previous behavior echoed `?? ""` fallbacks
+ * for everything — an executor that dropped `event` from a review submit
+ * got a 201 and a green run, i.e. the mock actively laundered the defect.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -118,6 +129,25 @@ export function createMockGithubServer(): MockGithubServer {
     }
   }
 
+  // 422 when a required body field is missing/empty — mirrors GitHub's own
+  // validation instead of defaulting the defect away.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const requireFields = (req: any, res: any, fields: string[]): boolean => {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const missing = fields.filter((f) => {
+      const v = body[f]
+      if (v === undefined || v === null || v === "") return true
+      if (Array.isArray(v) && v.length === 0) return true
+      return false
+    })
+    if (missing.length === 0) return false
+    res.status(422).json({
+      message: `Validation Failed: missing required field(s) ${missing.join(", ")}`,
+      errors: missing.map((field) => ({ resource: req.path, field, code: "missing_field" })),
+    })
+    return true
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const guard = (res: any): boolean => {
     switch (scenario.kind) {
@@ -171,15 +201,16 @@ export function createMockGithubServer(): MockGithubServer {
   app.post("/repos/:owner/:repo/pulls", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    if (requireFields(req, res, ["title", "head", "base"])) return
     const n = pullRequests.size + 1
     const pr = {
       number: n,
       id: n,
       state: "open",
-      title: (req.body as { title?: string }).title ?? "",
+      title: (req.body as { title: string }).title,
       body: (req.body as { body?: string }).body ?? "",
-      head: { ref: (req.body as { head?: string }).head ?? "" },
-      base: { ref: (req.body as { base?: string }).base ?? "main" },
+      head: { ref: (req.body as { head: string }).head },
+      base: { ref: (req.body as { base: string }).base },
       html_url: `https://github.com/${req.params.owner}/${req.params.repo}/pull/${n}`,
     }
     pullRequests.set(prKey(req.params.owner, req.params.repo, n), pr)
@@ -197,6 +228,10 @@ export function createMockGithubServer(): MockGithubServer {
   app.patch("/repos/:owner/:repo/pulls/:n", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    if (Object.keys((req.body ?? {}) as Record<string, unknown>).length === 0) {
+      res.status(422).json({ message: "Validation Failed: empty patch" })
+      return
+    }
     const key = prKey(req.params.owner, req.params.repo, Number(req.params.n))
     const prev = pullRequests.get(key) ?? { number: Number(req.params.n) }
     const next = { ...prev, ...(req.body as Record<string, unknown>) }
@@ -213,9 +248,13 @@ export function createMockGithubServer(): MockGithubServer {
   app.post("/repos/:owner/:repo/pulls/:n/reviews", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    // GitHub treats an omitted `event` as saving a PENDING review — the
+    // executors promise APPROVE/REQUEST_CHANGES/COMMENT semantics, so an
+    // absent event is a defect, not a default.
+    if (requireFields(req, res, ["event"])) return
     res.status(201).json({
       id: capturedCalls.length,
-      state: (req.body as { event?: string }).event ?? "COMMENTED",
+      state: (req.body as { event: string }).event,
       body: (req.body as { body?: string }).body ?? "",
     })
   })
@@ -223,6 +262,7 @@ export function createMockGithubServer(): MockGithubServer {
   app.post("/repos/:owner/:repo/pulls/:n/comments", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    if (requireFields(req, res, ["body"])) return
     res.status(201).json({ id: capturedCalls.length, ...(req.body as Record<string, unknown>) })
   })
 
@@ -231,12 +271,13 @@ export function createMockGithubServer(): MockGithubServer {
   app.post("/repos/:owner/:repo/issues", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    if (requireFields(req, res, ["title"])) return
     const n = issues.size + 1
     const issue = {
       number: n,
       id: n,
       state: "open",
-      title: (req.body as { title?: string }).title ?? "",
+      title: (req.body as { title: string }).title,
       body: (req.body as { body?: string }).body ?? "",
       html_url: `https://github.com/${req.params.owner}/${req.params.repo}/issues/${n}`,
     }
@@ -247,19 +288,25 @@ export function createMockGithubServer(): MockGithubServer {
   app.post("/repos/:owner/:repo/issues/:n/comments", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    if (requireFields(req, res, ["body"])) return
     res.status(201).json({ id: capturedCalls.length, ...(req.body as Record<string, unknown>) })
   })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.post("/repos/:owner/:repo/issues/:n/labels", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
-    const labels = (req.body as { labels?: string[] }).labels ?? []
+    if (requireFields(req, res, ["labels"])) return
+    const labels = (req.body as { labels: string[] }).labels
     res.json(labels.map((name) => ({ id: capturedCalls.length, name })))
   })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.patch("/repos/:owner/:repo/issues/:n", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    if (Object.keys((req.body ?? {}) as Record<string, unknown>).length === 0) {
+      res.status(422).json({ message: "Validation Failed: empty patch" })
+      return
+    }
     const key = prKey(req.params.owner, req.params.repo, Number(req.params.n))
     const prev = issues.get(key) ?? { number: Number(req.params.n) }
     const next = { ...prev, ...(req.body as Record<string, unknown>) }
@@ -272,21 +319,50 @@ export function createMockGithubServer(): MockGithubServer {
   app.post("/repos/:owner/:repo/releases", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    if (requireFields(req, res, ["tag_name"])) return
     res.status(201).json({
       id: capturedCalls.length,
-      tag_name: (req.body as { tag_name?: string }).tag_name ?? "",
+      tag_name: (req.body as { tag_name: string }).tag_name,
       name: (req.body as { name?: string }).name ?? "",
       body: (req.body as { body?: string }).body ?? "",
-      html_url: `https://github.com/${req.params.owner}/${req.params.repo}/releases/tag/${(req.body as { tag_name?: string }).tag_name ?? ""}`,
+      html_url: `https://github.com/${req.params.owner}/${req.params.repo}/releases/tag/${(req.body as { tag_name: string }).tag_name}`,
     })
   })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.post("/repos/:owner/:repo/releases/generate-notes", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    if (requireFields(req, res, ["tag_name"])) return
     res.json({
-      name: `Release ${(req.body as { tag_name?: string }).tag_name ?? ""}`,
+      name: `Release ${(req.body as { tag_name: string }).tag_name}`,
       body: "## Changes\n- mock changelog entry",
+    })
+  })
+
+  // ── Compare (generateChangelog reads the commit range) ──────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.get("/repos/:owner/:repo/compare/:basehead", (req: any, res: any) => {
+    capture(req)
+    if (guard(res)) return
+    // Conventional-commit messages so the changelog parser produces entries
+    // and a version bump (feat → minor).
+    res.json({
+      commits: [
+        {
+          sha: "sha_feat_1",
+          commit: {
+            message: "feat: add fixture feature",
+            author: { name: "Mock Author", email: "mock@example.com" },
+          },
+        },
+        {
+          sha: "sha_fix_1",
+          commit: {
+            message: "fix: correct fixture bug",
+            author: { name: "Mock Author", email: "mock@example.com" },
+          },
+        },
+      ],
     })
   })
 
@@ -295,9 +371,10 @@ export function createMockGithubServer(): MockGithubServer {
   app.post("/repos/:owner/:repo/git/refs", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    if (requireFields(req, res, ["ref", "sha"])) return
     res.status(201).json({
-      ref: (req.body as { ref?: string }).ref ?? "",
-      object: { sha: (req.body as { sha?: string }).sha ?? "" },
+      ref: (req.body as { ref: string }).ref,
+      object: { sha: (req.body as { sha: string }).sha },
     })
   })
 
@@ -306,7 +383,14 @@ export function createMockGithubServer(): MockGithubServer {
   app.post("/repos/:owner/:repo/dispatches", (req: any, res: any) => {
     capture(req)
     if (guard(res)) return
+    if (requireFields(req, res, ["event_type"])) return
     res.status(204).end()
+  })
+
+  // ── Spec-side control plane ──────────────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.get("/__control/calls", (_req: unknown, res: any) => {
+    res.json(capturedCalls)
   })
 
   return {

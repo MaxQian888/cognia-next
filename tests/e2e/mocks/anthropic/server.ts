@@ -160,6 +160,21 @@ export function createMockAnthropicServer(): MockAnthropicServer {
   const app = createExpressApp() as any
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const express = require("express") as typeof import("express")
+  // Permissive CORS: the standalone (BYOK) chat path calls this mock straight
+  // from the browser page (localhost:3000 → 127.0.0.1:<port>) with
+  // x-api-key/anthropic-version headers, which triggers a preflight the mock
+  // must answer. Native clients (sidecar, Tauri) never preflight.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.use((req: any, res: any, next: any) => {
+    res.setHeader("Access-Control-Allow-Origin", "*")
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    res.setHeader("Access-Control-Allow-Headers", "*")
+    if (req.method === "OPTIONS") {
+      res.status(204).end()
+      return
+    }
+    next()
+  })
   app.use(express.json({ limit: "8mb" }))
   // OAuth token endpoint speaks application/x-www-form-urlencoded — the
   // anthropic OAuth module posts the body as form-encoded per the upstream
