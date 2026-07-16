@@ -15,6 +15,8 @@ describe("NodeExternalAgentBackend", () => {
         NODE_ENV: "test",
         OPENAI_API_KEY: "plain-openai",
         ANTHROPIC_API_KEY: "plain-anthropic",
+        DISABLE_AUTO_UPDATE: "1",
+        PWD: "/work",
         AWS_SECRET_ACCESS_KEY: "must-not-leak",
         NODE_OPTIONS: "--require bad.js",
       },
@@ -31,6 +33,8 @@ describe("NodeExternalAgentBackend", () => {
       ANTHROPIC_API_KEY: "plain-anthropic",
       CODEX_ACCESS_TOKEN: "configured-codex",
       CLAUDE_CODE_OAUTH_TOKEN: "configured-claude",
+      DISABLE_AUTO_UPDATE: "1",
+      PWD: "/work",
     })
     expect(env.NODE_OPTIONS).toBeUndefined()
     expect(env.PATH).toBeUndefined()

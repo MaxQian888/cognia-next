@@ -64,6 +64,7 @@ const CONFIG_ENV_KEYS = new Set([
 ])
 const RUNTIME_ENV_KEYS = new Set([
   "PATH",
+  "PWD",
   "HOME",
   "USER",
   "LOGNAME",
@@ -77,6 +78,25 @@ const RUNTIME_ENV_KEYS = new Set([
   "SSL_CERT_FILE",
   "SSL_CERT_DIR",
   "NODE_EXTRA_CA_CERTS",
+  "COLORTERM",
+  "NO_COLOR",
+  "FORCE_COLOR",
+  "LC_CTYPE",
+  "NVM_BIN",
+  "NVM_DIR",
+  "NVM_INC",
+  "PNPM_HOME",
+  "BUN_INSTALL",
+  "__CF_USER_TEXT_ENCODING",
+  "__CFBundleIdentifier",
+  "XPC_FLAGS",
+  "XPC_SERVICE_NAME",
+  "MallocNanoZone",
+  "OSLogRateLimit",
+  // External CLIs perform their own update checks unless their launcher sets
+  // this conventional switch. Preserve the parent's explicit opt-out so an
+  // ACP session/new cannot stall behind an updater inside the sandbox.
+  "DISABLE_AUTO_UPDATE",
 ])
 const CONFIG_ENV_PREFIXES = [
   "ANTHROPIC_",
