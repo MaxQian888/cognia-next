@@ -56,13 +56,13 @@ export default defineConfig({
   // shared anthropic mock scenario via /__control, so its tests must stay
   // serial.
   fullyParallel: true,
-  // Each test's beforeEach reloads through AccountGate (the dev-unlock marker is
-  // sessionStorage, reset per browser context) and waits for the test-globals
-  // bridge to mount. Under Turbopack dev that mount races route compilation and
-  // can approach 30s on the first hit of a route, so the default 30s test budget
-  // is too tight. The static export (PLAYWRIGHT_STATIC=1) has no route
-  // compilation, mounts fast, and keeps the default 30s budget.
-  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? (staticMode ? 30_000 : 60_000)),
+  // Each test's beforeEach re-boots the full app through AccountGate (fresh
+  // browser context per test), and boot includes the plugin manager's dynamic
+  // Dexie table registration — measured at 10-25s under parallel-worker
+  // contention even on the static export. The historical 30s static budget
+  // assumed "mounts fast" and made every heavyweight spec fail in its
+  // beforeEach the moment workers competed; 60s reflects the measured cost.
+  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 60_000),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: tauriEnabled ? 1 : process.env.CI ? 4 : "50%",
