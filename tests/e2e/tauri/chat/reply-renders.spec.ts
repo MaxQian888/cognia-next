@@ -19,8 +19,11 @@
  * never produce — so its presence proves the turn round-tripped through the
  * real sidecar AND the mock, not the network.
  *
- * Runs only under the `tauri` Playwright project (PLAYWRIGHT_TAURI=1), verified
- * by the nightly Windows CI job.
+ * Runs only under the `tauri` Playwright project (PLAYWRIGHT_TAURI=1) — the
+ * Windows-only `e2e-tauri` CI job (schedule/dispatch). Note: between
+ * 2026-05-19 and 2026-07-16 this suite never actually executed anywhere — a
+ * fixture-scope bug made the project collect 0 tests (see
+ * tests/e2e/tauri/fixtures.ts).
  */
 
 import { expect, test } from "../fixtures"

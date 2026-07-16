@@ -25,10 +25,17 @@ import {
 
 type TauriWorkerFixtures = {
   browser: Browser
-  context: BrowserContext
+  // The ONE WebView2 context, shared across the worker's tests. Deliberately
+  // NOT named `context`: Playwright's built-in `context` fixture is
+  // test-scoped, and re-registering that name at worker scope is a
+  // collection-time error ("Fixture "context" has already been registered as
+  // a { scope: 'test' } fixture") that made the whole tauri project collect
+  // 0 tests. The test-scoped `context` override below delegates here.
+  tauriContext: BrowserContext
 }
 
 type TauriTestFixtures = {
+  context: BrowserContext
   page: Page
 }
 
@@ -53,13 +60,19 @@ export const test = base.extend<TauriTestFixtures, TauriWorkerFixtures>({
     },
     { scope: "worker" },
   ],
-  context: [
+  tauriContext: [
     async ({ browser }, provide) => {
       const ctx = browser.contexts()[0] ?? (await browser.newContext())
       await provide(ctx)
     },
     { scope: "worker" },
   ],
+  // Test-scoped like the built-in it shadows — hands every test the shared
+  // WebView2 context instead of a fresh incognito one (Tauri only ever has
+  // one renderer context per window).
+  context: async ({ tauriContext }, provide) => {
+    await provide(tauriContext)
+  },
   page: async ({ context }, provide) => {
     const page = context.pages()[0] ?? (await context.newPage())
     await provide(page)
