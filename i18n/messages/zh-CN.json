@@ -2020,6 +2020,46 @@
       "sent": "已发送到对话",
       "title": "对该元素评论"
     },
+    "cookieImport": {
+      "action": "复用 Chromium 登录态",
+      "browser": {
+        "brave": "Brave",
+        "chrome": "Google Chrome",
+        "chromium": "Chromium",
+        "edge": "Microsoft Edge"
+      },
+      "browserLabel": "浏览器",
+      "cancel": "取消",
+      "consent": {
+        "continue": "我已了解，继续",
+        "description": "Cognia 将从所选 Chromium 配置中读取当前站点保存的登录 Cookie，并注入此预览。",
+        "localOnly": "Cookie 值不会跨越 Cognia 的 IPC 边界，也不会进入其渲染进程、日志或上传到 Cognia；目标站点仍会正常收到自己的 Cookie。",
+        "title": "允许读取本机 Cookie？"
+      },
+      "description": "选择要为当前站点复用登录态的本机浏览器配置。",
+      "import": "导入并刷新",
+      "importing": "正在导入…",
+      "keychainHint": "macOS 可能请求访问钥匙串；拒绝后预览不会发生变化。",
+      "profileLabel": "配置",
+      "reason": {
+        "checkFailed": "无法检查本机 Chromium 配置，请重启桌面 App 后重试。",
+        "checking": "正在检查本机 Chromium 配置…",
+        "featureDisabled": "请先在「设置 → 桌面」中启用 Chromium Cookie 导入。",
+        "noProfiles": "这台 Mac 上未找到兼容的 Chromium 配置。",
+        "openPage": "请先打开一个公网网页，再导入 Cookie。",
+        "unsupported": "当前平台不支持 Cookie 导入。不会绕过 Windows App-Bound Encryption；请改用独立浏览器配置。"
+      },
+      "result": {
+        "failed": "Cookie 导入失败，Cookie 值未被暴露。",
+        "featureDisabled": "设置中未启用 Chromium Cookie 导入。",
+        "noMatchingCookies": "所选配置中没有当前站点的 Cookie。",
+        "noProfile": "所选浏览器配置已不可用。",
+        "ok": "已导入 {count} 条 Cookie 并刷新预览。",
+        "permissionDenied": "钥匙串访问被拒绝，未导入任何 Cookie。",
+        "unsupported": "当前平台不支持 Cookie 导入。"
+      },
+      "title": "复用 Chromium 登录态"
+    },
     "detail": {
       "compact": "精简",
       "detailed": "详细",
@@ -3578,6 +3618,15 @@
       "waitingApproval": "等待审批",
       "working": "运行中"
     },
+    "search": {
+      "close": "关闭搜索",
+      "label": "在会话中查找",
+      "next": "下一个匹配",
+      "noResults": "无匹配",
+      "placeholder": "在会话中查找…",
+      "position": "{current}/{total}",
+      "previous": "上一个匹配"
+    },
     "sessionCost": {
       "byModelTitle": "按模型拆分",
       "cache": "缓存",
@@ -3670,7 +3719,10 @@
       "collapse": "收起时间线",
       "expand": "展开对话时间线",
       "jumpTo": "跳转到：{label}",
+      "noBookmarks": "还没有收藏的轮次。给消息加星标即可固定到这里。",
       "replyCount": "{count} 条回复",
+      "showAll": "显示全部轮次",
+      "showBookmarked": "只看已收藏的对话轮次",
       "title": "时间线",
       "yesterday": "昨天"
     },
@@ -6861,14 +6913,15 @@
           "selfHosted": "http://localhost:4318/v1/traces"
         },
         "environment": "环境名",
+        "environmentPlaceholder": "production",
         "grafanaApiToken": "Grafana access policy token",
         "grafanaApiTokenPlaceholder": "glc_eyJ…",
-        "grafanaCloudHint": "两项均必填。系统会自动构造 `Authorization: Basic base64(instanceId:token)` —— 请勿在此处粘贴已编码的字符串。",
+        "grafanaCloudHint": "API token 存储在操作系统密钥库中。Authorization 由原生导出器注入，不会持久化到浏览器存储。",
         "grafanaInstanceId": "Grafana instance ID",
         "grafanaInstanceIdPlaceholder": "1234567",
         "headers": "请求头",
-        "headersHint": "用逗号分隔的 `Name: Value` 列表。Grafana Cloud 用 `Authorization: Basic base64(instanceId:token)`。",
-        "headersPlaceholder": "Authorization: Basic ABC=, X-Tenant: prod",
+        "headersHint": "用逗号分隔的非敏感 `Name: Value` 列表。Authorization、Cookie 和 API key header 会被拒绝。",
+        "headersPlaceholder": "X-Tenant: prod",
         "preset": "预设",
         "presetOptions": {
           "custom": "自定义 OTLP/HTTP",
@@ -6876,7 +6929,8 @@
           "off": "关闭",
           "selfHosted": "自部署 Tempo / Collector"
         },
-        "serviceName": "Service 名称"
+        "serviceName": "Service 名称",
+        "serviceNamePlaceholder": "cognia-ai"
       },
       "allLevels": "所有级别",
       "allLevelsTab": "全部",
@@ -7082,6 +7136,14 @@
         "remoteQueueEntriesDesc": "远程重试队列允许缓存的最大日志条目数",
         "title": "高级控制"
       },
+      "behaviorTelemetry": {
+        "clear": "清除本地事件",
+        "disclosure": "开启后，Cognia 会在本地保存已注册的交互事件，并可发送到你配置的 OTLP 端点。不会采集消息内容、提示词、响应内容或密钥。",
+        "export": "导出本地事件",
+        "optIn": "共享行为事件",
+        "optInDesc": "默认关闭。工程链路追踪与行为事件使用相互独立的开关。",
+        "title": "行为遥测"
+      },
       "logLevel": {
         "debug": "调试",
         "debugDesc": "开发调试信息",
@@ -7180,6 +7242,7 @@
         "agentTraceDesc": "每个聊天回合、工具调用、队友派发记一条 span，写入本地 Dexie。驱动 /logs 的 Agent 追踪标签页。",
         "agentTraceOtlp": "OTLP 导出（Grafana）",
         "agentTraceOtlpDesc": "把 Agent 追踪 span 推到 OTel 兼容后端（Grafana Cloud、Tempo、Honeycomb、Datadog 或自部署 collector）。",
+        "clearStoredSecret": "清除已保存密钥",
         "console": "控制台输出",
         "consoleDesc": "将日志输出到浏览器控制台",
         "consoleDetail": "始终把日志同步输出到当前运行时控制台。",
@@ -7201,14 +7264,6 @@
         "nativeDesc": "把 warn/error/fatal 级别日志转发到操作系统原生诊断系统。",
         "nativeFlushInterval": "刷新间隔",
         "nativeMinLevel": "最低级别",
-        "opentelemetry": "OpenTelemetry",
-        "opentelemetryDesc": "将日志与 OpenTelemetry 追踪集成",
-        "otelAddAsSpanEvents": "作为 Span 事件追加",
-        "otelAddAsSpanEventsDesc": "把日志条目附加到当前活跃 Span 上。",
-        "otelEndpoint": "OTLP 端点",
-        "otelEndpointPlaceholder": "http://localhost:4318/v1/traces",
-        "otelServiceName": "服务名称",
-        "otelServiceNamePlaceholder": "cognia-ai",
         "remote": "远程传输",
         "remoteBatchSize": "批量大小",
         "remoteDesc": "通过批量和重试队列把日志发送到远程端点。",
@@ -7217,6 +7272,7 @@
         "remoteFlushInterval": "刷新间隔",
         "remoteMaxRetries": "最大重试次数",
         "remoteRetryDelay": "重试延迟",
+        "secretConfiguredPlaceholder": "已安全保存——输入新值可替换",
         "title": "日志传输"
       },
       "unsavedChanges": "有未保存的修改"
@@ -13011,9 +13067,11 @@
     "cancel": "取消",
     "capabilityAudio": "音频",
     "capabilityChat": "对话",
+    "capabilityContextHint": "由服务器上报。上下文窗口:{tokens, number} tokens。",
     "capabilityEmbed": "嵌入",
     "capabilityEmbedding": "嵌入",
     "capabilityImageGen": "图像生成",
+    "capabilityInferredHint": "根据模型名推测 —— 该服务器不上报能力信息。",
     "capabilityReranking": "重排序",
     "capabilityStream": "流式",
     "capabilityTools": "工具",
@@ -13137,6 +13195,7 @@
     "confirmSelection": "确认",
     "conflictResolution": "冲突解决",
     "connected": "已连接",
+    "connectedSummary": "{version, select, none {已连接} other {已连接 v{version}}}{count, plural, =0 {} other { (# 个模型)}}",
     "connectionFailed": "连接失败",
     "connectionSuccess": "连接成功",
     "context": "上下文",
@@ -13179,6 +13238,7 @@
     "delete": "删除",
     "deleteModel": "删除模型",
     "deleteModelConfirm": "确定要删除 {model} 吗？此操作无法撤销。",
+    "deleteUnsupported": "该 provider 不支持删除模型。",
     "detailPanel": {
       "connected": "已连接",
       "connectionFailed": "错误",
@@ -13562,8 +13622,11 @@
     "providersConfigured": "{count} 个服务商已配置",
     "providersSelected": "个服务商已选择",
     "proxyServices": "代理",
+    "pullContinuesInBackground": "已停止显示进度。Ollama 无法取消下载 —— 它仍在后台继续。",
+    "pullFailed": "无法拉取「{model}」。",
     "pullModelHint": "拉取一个模型开始使用",
     "pullModelPlaceholder": "拉取模型（如 llama3.2）",
+    "pullStarting": "正在开始…",
     "quickActions": "快捷操作",
     "quickAdd": {
       "advancedWizard": "高级添加向导 →",
@@ -13832,6 +13895,8 @@
       "unknown": "未知"
     },
     "stopModel": "停止模型",
+    "stopShowingPullProgress": "停止显示 {model} 的下载进度",
+    "stopUnsupported": "该 provider 不支持卸载模型。",
     "strategy": "策略",
     "subscriptionReuse": {
       "ccswitchHintAction": "打开 CCSwitch",
@@ -19237,6 +19302,12 @@
       "closeBehaviorHint": "选择点击窗口关闭按钮时的行为。托盘菜单的「退出」始终直接退出。",
       "closeBehaviorQuit": "退出 Cognia",
       "closeBehaviorTray": "最小化到托盘",
+      "cookieImport": {
+        "description": "经你明确同意后，允许内嵌浏览器读取所选本机 Chromium 配置中的 Cookie。Cookie 值始终留在本机。",
+        "platformHint": "仅支持 macOS；不会绕过 Windows App-Bound Encryption，也不会读取 Linux 凭据存储。",
+        "title": "复用 Chromium 登录态",
+        "toggle": "切换 Chromium Cookie 导入"
+      },
       "copyDebug": "复制调试信息",
       "copyDebugFailed": "复制失败：{error}",
       "copyDebugSuccess": "已复制调试信息到剪贴板。",
@@ -21026,6 +21097,9 @@
         "artifactsToggleDock": "切换工件面板",
         "canvasToggleLeft": "切换左侧栏",
         "canvasToggleRight": "切换右侧栏",
+        "chatNextAnchor": "跳到下一个消息锚点",
+        "chatPrevAnchor": "跳到上一个消息锚点",
+        "chatSearchToggle": "在会话中查找",
         "observabilityFocusFilter": "聚焦筛选栏",
         "observabilityOpenSettings": "打开设置",
         "observabilityRefresh": "刷新",
@@ -21044,6 +21118,7 @@
       "categories": {
         "a2ui": "A2UI 工作区",
         "canvasLayout": "Canvas 布局",
+        "chat": "聊天",
         "navigation": "导航",
         "observability": "可观测",
         "panels": "面板",

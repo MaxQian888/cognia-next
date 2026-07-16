@@ -2020,6 +2020,46 @@
       "sent": "Sent to chat",
       "title": "Comment on this element"
     },
+    "cookieImport": {
+      "action": "Reuse Chromium sign-in",
+      "browser": {
+        "brave": "Brave",
+        "chrome": "Google Chrome",
+        "chromium": "Chromium",
+        "edge": "Microsoft Edge"
+      },
+      "browserLabel": "Browser",
+      "cancel": "Cancel",
+      "consent": {
+        "continue": "I understand, continue",
+        "description": "Cognia will read saved sign-in cookies for the current site from the selected Chromium profile and inject them into this preview.",
+        "localOnly": "Cookie values never cross Cognia's IPC boundary, enter its renderer or logs, or upload to Cognia. The target site receives its own cookies normally.",
+        "title": "Allow local cookie access?"
+      },
+      "description": "Choose the local browser profile whose sign-in should be reused for this site.",
+      "import": "Import and reload",
+      "importing": "Importing…",
+      "keychainHint": "macOS may ask for Keychain access. Denying the prompt leaves the preview unchanged.",
+      "profileLabel": "Profile",
+      "reason": {
+        "checkFailed": "Could not check local Chromium profiles. Restart the desktop app and try again.",
+        "checking": "Checking local Chromium profiles…",
+        "featureDisabled": "Enable Chromium cookie import in Settings → Desktop first.",
+        "noProfiles": "No compatible Chromium profiles were found on this Mac.",
+        "openPage": "Open a public web page before importing cookies.",
+        "unsupported": "Cookie import is unavailable on this platform. Windows App-Bound Encryption is not bypassed; use a separate browser profile instead."
+      },
+      "result": {
+        "failed": "Cookie import failed without exposing cookie values.",
+        "featureDisabled": "Chromium cookie import is disabled in Settings.",
+        "noMatchingCookies": "The selected profile has no cookies for this site.",
+        "noProfile": "The selected browser profile is no longer available.",
+        "ok": "Imported {count, plural, one {# cookie} other {# cookies}} and reloaded the preview.",
+        "permissionDenied": "Keychain access was denied. No cookies were imported.",
+        "unsupported": "Cookie import is unavailable on this platform."
+      },
+      "title": "Reuse Chromium sign-in"
+    },
     "detail": {
       "compact": "Compact",
       "detailed": "Detailed",
@@ -3578,6 +3618,15 @@
       "waitingApproval": "Waiting for approval",
       "working": "Working"
     },
+    "search": {
+      "close": "Close search",
+      "label": "Find in conversation",
+      "next": "Next match",
+      "noResults": "No matches",
+      "placeholder": "Find in conversation…",
+      "position": "{current}/{total}",
+      "previous": "Previous match"
+    },
     "sessionCost": {
       "byModelTitle": "By model",
       "cache": "Cache",
@@ -3670,7 +3719,10 @@
       "collapse": "Collapse timeline",
       "expand": "Expand conversation timeline",
       "jumpTo": "Jump to: {label}",
+      "noBookmarks": "No bookmarked turns yet. Star a message to pin it here.",
       "replyCount": "{count} replies",
+      "showAll": "Show all turns",
+      "showBookmarked": "Show only bookmarked turns",
       "title": "Timeline",
       "yesterday": "Yesterday"
     },
@@ -6861,14 +6913,15 @@
           "selfHosted": "http://localhost:4318/v1/traces"
         },
         "environment": "Environment",
+        "environmentPlaceholder": "production",
         "grafanaApiToken": "Grafana access policy token",
         "grafanaApiTokenPlaceholder": "glc_eyJ…",
-        "grafanaCloudHint": "Both fields are required. We build `Authorization: Basic base64(instanceId:token)` automatically — never paste the encoded form here.",
+        "grafanaCloudHint": "The API token is stored in the OS secret store. Authorization is injected by the native exporter and is never persisted in browser storage.",
         "grafanaInstanceId": "Grafana instance ID",
         "grafanaInstanceIdPlaceholder": "1234567",
         "headers": "Headers",
-        "headersHint": "Comma-separated `Name: Value` pairs. For Grafana Cloud paste `Authorization: Basic base64(instanceId:token)`.",
-        "headersPlaceholder": "Authorization: Basic ABC=, X-Tenant: prod",
+        "headersHint": "Comma-separated non-sensitive `Name: Value` pairs. Authorization, cookies, and API-key headers are rejected.",
+        "headersPlaceholder": "X-Tenant: prod",
         "preset": "Preset",
         "presetOptions": {
           "custom": "Custom OTLP/HTTP",
@@ -6876,7 +6929,8 @@
           "off": "Off",
           "selfHosted": "Self-hosted Tempo / Collector"
         },
-        "serviceName": "Service name"
+        "serviceName": "Service name",
+        "serviceNamePlaceholder": "cognia-ai"
       },
       "allLevels": "All Levels",
       "allLevelsTab": "All",
@@ -7082,6 +7136,14 @@
         "remoteQueueEntriesDesc": "Maximum queued log entries for remote retry",
         "title": "Advanced Controls"
       },
+      "behaviorTelemetry": {
+        "clear": "Clear local events",
+        "disclosure": "When enabled, Cognia stores registered interaction events locally and can send them to your configured OTLP endpoint. Message content, prompts, responses, and secrets are not collected.",
+        "export": "Export local events",
+        "optIn": "Share behavior events",
+        "optInDesc": "Off by default. Engineering traces and behavior events use separate switches.",
+        "title": "Behavior telemetry"
+      },
       "logLevel": {
         "debug": "Debug",
         "debugDesc": "Development debugging information",
@@ -7180,6 +7242,7 @@
         "agentTraceDesc": "Persist one span per chat turn, tool call, and teammate handoff to local Dexie. Powers the /logs Agent Trace tab.",
         "agentTraceOtlp": "OTLP exporter (Grafana)",
         "agentTraceOtlpDesc": "Push agent-trace spans to an OTel-compatible backend (Grafana Cloud, Tempo, Honeycomb, Datadog, or a self-hosted collector).",
+        "clearStoredSecret": "Clear stored secret",
         "console": "Console Output",
         "consoleDesc": "Output logs to browser console",
         "consoleDetail": "Always mirrors logs to the current runtime console.",
@@ -7201,14 +7264,6 @@
         "nativeDesc": "Forward warn/error/fatal entries to OS-native diagnostics.",
         "nativeFlushInterval": "Flush Interval",
         "nativeMinLevel": "Minimum Level",
-        "opentelemetry": "OpenTelemetry",
-        "opentelemetryDesc": "Integrate logs with OpenTelemetry tracing",
-        "otelAddAsSpanEvents": "Add As Span Events",
-        "otelAddAsSpanEventsDesc": "Attach log entries to the active span as events.",
-        "otelEndpoint": "OTLP Endpoint",
-        "otelEndpointPlaceholder": "http://localhost:4318/v1/traces",
-        "otelServiceName": "Service Name",
-        "otelServiceNamePlaceholder": "cognia-ai",
         "remote": "Remote Transport",
         "remoteBatchSize": "Batch Size",
         "remoteDesc": "Ship logs to a remote endpoint with retry batching.",
@@ -7217,6 +7272,7 @@
         "remoteFlushInterval": "Flush Interval",
         "remoteMaxRetries": "Max Retries",
         "remoteRetryDelay": "Retry Delay",
+        "secretConfiguredPlaceholder": "Stored securely — enter a new value to replace",
         "title": "Log Transports"
       },
       "unsavedChanges": "Unsaved changes"
@@ -13011,9 +13067,11 @@
     "cancel": "Cancel",
     "capabilityAudio": "Audio",
     "capabilityChat": "Chat",
+    "capabilityContextHint": "Reported by the server. Context window: {tokens, number} tokens.",
     "capabilityEmbed": "Embed",
     "capabilityEmbedding": "Embedding",
     "capabilityImageGen": "Image Generation",
+    "capabilityInferredHint": "Guessed from the model name — this server does not report capabilities.",
     "capabilityReranking": "Reranking",
     "capabilityStream": "Stream",
     "capabilityTools": "Tools",
@@ -13137,6 +13195,7 @@
     "confirmSelection": "Confirm",
     "conflictResolution": "Conflict Resolution",
     "connected": "Connected",
+    "connectedSummary": "{version, select, none {Connected} other {Connected v{version}}}{count, plural, =0 {} one { (# model)} other { (# models)}}",
     "connectionFailed": "Connection failed",
     "connectionSuccess": "Connection successful",
     "context": "Context",
@@ -13179,6 +13238,7 @@
     "delete": "Delete",
     "deleteModel": "Delete Model",
     "deleteModelConfirm": "Are you sure you want to delete {model}? This action cannot be undone.",
+    "deleteUnsupported": "Deleting models is not supported for this provider.",
     "detailPanel": {
       "connected": "Connected",
       "connectionFailed": "Error",
@@ -13562,8 +13622,11 @@
     "providersConfigured": "{count} providers configured",
     "providersSelected": "providers selected",
     "proxyServices": "Proxy",
+    "pullContinuesInBackground": "Stopped showing progress. Ollama cannot cancel a download — it continues in the background.",
+    "pullFailed": "Could not pull \"{model}\".",
     "pullModelHint": "Pull a model to get started",
     "pullModelPlaceholder": "Pull a model (e.g., llama3.2)",
+    "pullStarting": "Starting…",
     "quickActions": "Quick Actions",
     "quickAdd": {
       "advancedWizard": "Advanced Wizard →",
@@ -13832,6 +13895,8 @@
       "unknown": "Unknown"
     },
     "stopModel": "Stop model",
+    "stopShowingPullProgress": "Stop showing progress for {model}",
+    "stopUnsupported": "Unloading models is not supported for this provider.",
     "strategy": "Strategy",
     "subscriptionReuse": {
       "ccswitchHintAction": "Open CCSwitch",
@@ -19237,6 +19302,12 @@
       "closeBehaviorHint": "Choose what happens when you click the window's close button. The tray menu's Quit always exits.",
       "closeBehaviorQuit": "Quit Cognia",
       "closeBehaviorTray": "Minimize to tray",
+      "cookieImport": {
+        "description": "Allow the embedded browser to read cookies from a selected local Chromium profile after explicit consent. Cookie values stay on this device.",
+        "platformHint": "Available on macOS only. Windows App-Bound Encryption and Linux credential stores are not accessed.",
+        "title": "Reuse Chromium sign-in",
+        "toggle": "Toggle Chromium cookie import"
+      },
       "copyDebug": "Copy debug info",
       "copyDebugFailed": "Copy failed: {error}",
       "copyDebugSuccess": "Debug info copied to clipboard.",
@@ -21026,6 +21097,9 @@
         "artifactsToggleDock": "Toggle artifacts dock",
         "canvasToggleLeft": "Toggle left rail",
         "canvasToggleRight": "Toggle right rail",
+        "chatNextAnchor": "Jump to next message anchor",
+        "chatPrevAnchor": "Jump to previous message anchor",
+        "chatSearchToggle": "Find in conversation",
         "observabilityFocusFilter": "Focus filter",
         "observabilityOpenSettings": "Open settings",
         "observabilityRefresh": "Refresh",
@@ -21044,6 +21118,7 @@
       "categories": {
         "a2ui": "A2UI workspace",
         "canvasLayout": "Canvas layout",
+        "chat": "Chat",
         "navigation": "Navigation",
         "observability": "Observability",
         "panels": "Panels",
