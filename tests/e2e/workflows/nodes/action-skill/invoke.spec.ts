@@ -20,7 +20,9 @@ test.describe("workflow node — action.skill.invoke", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded skill invoke renders + skillId + input persist", async ({ page }) => {
+  test("seeded skill invoke renders + skillId + input fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-skill-invoke")
     await assertNodeOnCanvas(page, { kind: "action.skill.invoke", label: "Invoke" })
     await openNodeInspector(page, "action.skill.invoke")

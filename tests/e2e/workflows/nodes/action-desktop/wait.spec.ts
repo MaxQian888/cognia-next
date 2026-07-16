@@ -18,7 +18,9 @@ test.describe("workflow node — action.desktop.wait", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded wait renders + conditionExpr + timeoutMs persist", async ({ page }) => {
+  test("seeded wait renders + conditionExpr + timeoutMs fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-wait")
     await assertNodeOnCanvas(page, { kind: "action.desktop.wait", label: "Wait" })
     await openNodeInspector(page, "action.desktop.wait")

@@ -20,7 +20,9 @@ test.describe("workflow node — io.webhook.respond", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded io.webhook.respond renders + statusCode + body persist", async ({ page }) => {
+  test("seeded io.webhook.respond renders + statusCode + body fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "io-webhook-respond")
     await assertNodeOnCanvas(page, { kind: "io.webhook.respond", label: "Respond" })
     await openNodeInspector(page, "io.webhook.respond")

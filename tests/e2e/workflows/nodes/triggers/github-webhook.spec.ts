@@ -18,7 +18,7 @@ test.describe("workflow node — trigger.github.webhook", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded github webhook trigger renders + repo + events + secret persist", async ({
+  test("seeded github webhook trigger renders + repo + events + secret fields render; node survives reload", async ({
     page,
   }) => {
     const wfId = await seedAndOpenWorkflow(page, "trigger-github-webhook")

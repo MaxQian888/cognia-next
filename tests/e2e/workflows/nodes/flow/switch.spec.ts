@@ -20,7 +20,9 @@ test.describe("workflow node — flow.switch", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded flow.switch renders + cases + defaultLabel persist", async ({ page }) => {
+  test("seeded flow.switch renders + cases + defaultLabel fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "flow-switch")
     await assertNodeOnCanvas(page, { kind: "flow.switch", label: "Switch" })
     await openNodeInspector(page, "flow.switch")

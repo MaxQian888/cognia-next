@@ -18,7 +18,7 @@ test.describe("workflow node — action.desktop.keys", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded keys renders + sequence persists", async ({ page }) => {
+  test("seeded keys renders + sequence fields render; node survives reload", async ({ page }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-keys")
     await assertNodeOnCanvas(page, { kind: "action.desktop.keys", label: "Keys" })
     await openNodeInspector(page, "action.desktop.keys")

@@ -18,7 +18,9 @@ test.describe("workflow node — action.desktop.windowResize", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded windowResize renders + width + height persist", async ({ page }) => {
+  test("seeded windowResize renders + width + height fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-window-resize")
     await assertNodeOnCanvas(page, { kind: "action.desktop.windowResize", label: "Resize" })
     await openNodeInspector(page, "action.desktop.windowResize")

@@ -18,7 +18,9 @@ test.describe("workflow node — action.desktop.readTree", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded readTree renders + rootHandle + maxDepth persist", async ({ page }) => {
+  test("seeded readTree renders + rootHandle + maxDepth fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-read-tree")
     await assertNodeOnCanvas(page, { kind: "action.desktop.readTree", label: "Tree" })
     await openNodeInspector(page, "action.desktop.readTree")

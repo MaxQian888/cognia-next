@@ -18,7 +18,9 @@ test.describe("workflow node — action.mcp.invokeTool (stub)", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded mcp invoke renders + serverId + tool + args persist", async ({ page }) => {
+  test("seeded mcp invoke renders + serverId + tool + args fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-mcp-invoke")
     await assertNodeOnCanvas(page, { kind: "action.mcp.invokeTool", label: "MCP" })
     await openNodeInspector(page, "action.mcp.invokeTool")

@@ -20,7 +20,9 @@ test.describe("workflow node — action.character.create", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded create node renders + name + systemPrompt persist", async ({ page }) => {
+  test("seeded create node renders + name + systemPrompt fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-character-create")
     await assertNodeOnCanvas(page, { kind: "action.character.create", label: "Create" })
     await openNodeInspector(page, "action.character.create")

@@ -19,7 +19,9 @@ test.describe("workflow node — action.twin.rag (stub)", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded twin rag renders + twinId + query persist", async ({ page }) => {
+  test("seeded twin rag renders + twinId + query fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-twin-rag")
     await assertNodeOnCanvas(page, { kind: "action.twin.rag", label: "RAG" })
     await openNodeInspector(page, "action.twin.rag")

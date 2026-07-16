@@ -18,7 +18,9 @@ test.describe("workflow node — action.desktop.invokePattern", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded invokePattern renders + elementHandle + pattern persist", async ({ page }) => {
+  test("seeded invokePattern renders + elementHandle + pattern fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-invoke-pattern")
     await assertNodeOnCanvas(page, { kind: "action.desktop.invokePattern", label: "Invoke" })
     await openNodeInspector(page, "action.desktop.invokePattern")

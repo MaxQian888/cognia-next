@@ -20,7 +20,9 @@ test.describe("workflow node — action.team.create", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded team create renders + name + description persist", async ({ page }) => {
+  test("seeded team create renders + name + description fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-team-create")
     await assertNodeOnCanvas(page, { kind: "action.team.create", label: "Create" })
     await openNodeInspector(page, "action.team.create")

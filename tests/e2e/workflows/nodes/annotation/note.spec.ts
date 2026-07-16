@@ -18,7 +18,9 @@ test.describe("workflow node — annotation.note", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded note renders + text + color persist", async ({ page }) => {
+  test("seeded note renders + text + color fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "annotation-note")
     await assertNodeOnCanvas(page, { kind: "annotation.note", label: "Note" })
     await openNodeInspector(page, "annotation.note")

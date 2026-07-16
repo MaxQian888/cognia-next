@@ -18,7 +18,9 @@ test.describe("workflow node — action.character.send (stub)", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded character send renders + characterId + content persist", async ({ page }) => {
+  test("seeded character send renders + characterId + content fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-character-send")
     await assertNodeOnCanvas(page, { kind: "action.character.send", label: "Send" })
     await openNodeInspector(page, "action.character.send")

@@ -20,7 +20,9 @@ test.describe("workflow node — flow.branch", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded flow.branch renders + condition is editable + persists", async ({ page }) => {
+  test("seeded flow.branch renders + condition is editable + fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "branch")
     await assertNodeOnCanvas(page, { kind: "flow.branch", label: "Branch" })
     await openNodeInspector(page, "flow.branch")

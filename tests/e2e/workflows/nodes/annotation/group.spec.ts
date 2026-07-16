@@ -18,7 +18,9 @@ test.describe("workflow node — annotation.group", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded group renders + title + color + dimensions persist", async ({ page }) => {
+  test("seeded group renders + title + color + dimensions fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "annotation-group")
     await assertNodeOnCanvas(page, { kind: "annotation.group", label: "Group" })
     await openNodeInspector(page, "annotation.group")

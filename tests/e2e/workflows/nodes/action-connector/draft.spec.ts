@@ -20,7 +20,9 @@ test.describe("workflow node — action.connector.draft", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded connector draft renders + sessionId + content persist", async ({ page }) => {
+  test("seeded connector draft renders + sessionId + content fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-connector-draft")
     await assertNodeOnCanvas(page, { kind: "action.connector.draft", label: "Draft" })
     await openNodeInspector(page, "action.connector.draft")

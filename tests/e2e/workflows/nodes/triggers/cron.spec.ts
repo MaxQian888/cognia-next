@@ -18,7 +18,9 @@ test.describe("workflow node — trigger.cron", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded cron trigger renders + schedule + timezone persist", async ({ page }) => {
+  test("seeded cron trigger renders + schedule + timezone fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "trigger-cron")
     await assertNodeOnCanvas(page, { kind: "trigger.cron", label: "Cron" })
     await openNodeInspector(page, "trigger.cron")

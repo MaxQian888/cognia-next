@@ -18,7 +18,9 @@ test.describe("workflow node — action.plugin.invoke (stub)", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded plugin invoke renders + pluginId + capability + args persist", async ({ page }) => {
+  test("seeded plugin invoke renders + pluginId + capability + args fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-plugin-invoke")
     await assertNodeOnCanvas(page, { kind: "action.plugin.invoke", label: "Plugin" })
     await openNodeInspector(page, "action.plugin.invoke")

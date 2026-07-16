@@ -18,7 +18,9 @@ test.describe("workflow node — action.team.update", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded team update renders + teamId persists", async ({ page }) => {
+  test("seeded team update renders + teamId fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-team-update")
     await assertNodeOnCanvas(page, { kind: "action.team.update", label: "Update" })
     await openNodeInspector(page, "action.team.update")

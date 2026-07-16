@@ -18,7 +18,9 @@ test.describe("workflow node — trigger.connector.inbound", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded connector inbound trigger renders + adapter + filter persist", async ({ page }) => {
+  test("seeded connector inbound trigger renders + adapter + filter fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "trigger-connector-inbound")
     await assertNodeOnCanvas(page, {
       kind: "trigger.connector.inbound",

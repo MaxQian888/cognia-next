@@ -19,7 +19,9 @@ test.describe("workflow node — data.code", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded data.code node renders + language + body persist", async ({ page }) => {
+  test("seeded data.code node renders + language + body fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "data-code")
     await assertNodeOnCanvas(page, { kind: "data.code", label: "Code" })
     await openNodeInspector(page, "data.code")

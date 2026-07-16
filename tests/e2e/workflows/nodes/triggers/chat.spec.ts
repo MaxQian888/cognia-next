@@ -18,7 +18,9 @@ test.describe("workflow node — trigger.chat.message", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded chat trigger renders + filter fields persist", async ({ page }) => {
+  test("seeded chat trigger renders + filter fields fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "trigger-chat")
     await assertNodeOnCanvas(page, { kind: "trigger.chat.message", label: "Chat" })
     await openNodeInspector(page, "trigger.chat.message")

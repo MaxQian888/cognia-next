@@ -18,7 +18,9 @@ test.describe("workflow node — action.desktop.windowClose", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded windowClose renders + windowTitle persists", async ({ page }) => {
+  test("seeded windowClose renders + windowTitle fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-window-close")
     await assertNodeOnCanvas(page, { kind: "action.desktop.windowClose", label: "Close" })
     await openNodeInspector(page, "action.desktop.windowClose")

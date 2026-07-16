@@ -18,7 +18,9 @@ test.describe("workflow node — trigger.webhook", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded webhook trigger renders + path + method + secret persist", async ({ page }) => {
+  test("seeded webhook trigger renders + path + method + secret fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "trigger-webhook")
     await assertNodeOnCanvas(page, { kind: "trigger.webhook", label: "Webhook" })
     await openNodeInspector(page, "trigger.webhook")

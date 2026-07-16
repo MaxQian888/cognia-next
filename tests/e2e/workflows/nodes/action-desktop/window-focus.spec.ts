@@ -18,7 +18,9 @@ test.describe("workflow node — action.desktop.windowFocus", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded windowFocus renders + windowTitle persists", async ({ page }) => {
+  test("seeded windowFocus renders + windowTitle fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-window-focus")
     await assertNodeOnCanvas(page, { kind: "action.desktop.windowFocus", label: "Focus" })
     await openNodeInspector(page, "action.desktop.windowFocus")

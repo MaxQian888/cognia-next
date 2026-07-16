@@ -18,7 +18,9 @@ test.describe("workflow node — action.desktop.findElement", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded findElement renders + strategy + value persist", async ({ page }) => {
+  test("seeded findElement renders + strategy + value fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-find-element")
     await assertNodeOnCanvas(page, { kind: "action.desktop.findElement", label: "Find" })
     await openNodeInspector(page, "action.desktop.findElement")

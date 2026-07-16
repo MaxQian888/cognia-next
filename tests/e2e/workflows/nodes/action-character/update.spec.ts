@@ -18,7 +18,9 @@ test.describe("workflow node — action.character.update", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded update node renders + characterId + patch persist", async ({ page }) => {
+  test("seeded update node renders + characterId + patch fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-character-update")
     await assertNodeOnCanvas(page, { kind: "action.character.update", label: "Update" })
     await openNodeInspector(page, "action.character.update")

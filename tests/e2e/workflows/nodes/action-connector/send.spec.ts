@@ -22,7 +22,7 @@ test.describe("workflow node — action.connector.send", () => {
     await configureMockBaseUrls(page, { lark: process.env.E2E_LARK_BASE_URL! })
   })
 
-  test("seeded connector send renders + adapter + conversation + content persist", async ({
+  test("seeded connector send renders + adapter + conversation + content fields render; node survives reload", async ({
     page,
   }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-connector-send")

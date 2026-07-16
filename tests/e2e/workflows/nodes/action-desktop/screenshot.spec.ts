@@ -19,7 +19,9 @@ test.describe("workflow node — action.desktop.screenshot", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded screenshot renders + region persists", async ({ page }) => {
+  test("seeded screenshot renders + region fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-desktop-screenshot")
     await assertNodeOnCanvas(page, { kind: "action.desktop.screenshot", label: "Screenshot" })
     await openNodeInspector(page, "action.desktop.screenshot")
