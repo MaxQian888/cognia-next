@@ -61,7 +61,7 @@ describe("computeTimelineGeometry", () => {
 })
 
 function turn(id: string, index: number): TimelineTurn {
-  return { id, index, label: id, preview: id, replyCount: 0 }
+  return { id, index, label: id, preview: id, replyCount: 0, messageIds: [id] }
 }
 
 describe("useTimelineScrollSync — virtualized fallback divisor", () => {
