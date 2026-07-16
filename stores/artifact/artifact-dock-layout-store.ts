@@ -17,7 +17,7 @@ import { persist } from "zustand/middleware"
 
 export type DockMode = "artifact" | "workspace"
 
-export type WorkspaceRevealRequest = {
+type WorkspaceRevealFileRequest = {
   id: string
   sessionId: string
   rootPath: string
@@ -25,15 +25,17 @@ export type WorkspaceRevealRequest = {
   relPath: string
 }
 
+type WorkspaceRevealReviewRequest = {
+  id: string
+  sessionId: string
+  rootPath: string
+  kind: "review"
+}
+
+export type WorkspaceRevealRequest = WorkspaceRevealFileRequest | WorkspaceRevealReviewRequest
+
 export type WorkspaceDockContext =
-  | Omit<Extract<WorkspaceRevealRequest, { kind: "file" }>, "id">
-  | Omit<Extract<WorkspaceRevealRequest, { kind: "review" }>, "id">
-  | {
-      id: string
-      sessionId: string
-      rootPath: string
-      kind: "review"
-    }
+  Omit<WorkspaceRevealFileRequest, "id"> | Omit<WorkspaceRevealReviewRequest, "id">
 
 export const ARTIFACT_DOCK_BOUNDS = {
   min: 24,
