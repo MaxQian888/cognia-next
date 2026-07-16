@@ -26,7 +26,7 @@ export function ProjectEditorTabs({
   onClose,
   onSaveAll,
 }: Props) {
-  const t = useTranslations("agentTeamsWorkspace.editor")
+  const t = useTranslations("projectEditor")
   if (files.length === 0) return null
   return (
     <div className="flex items-center border-b" data-testid="project-editor-tabs">

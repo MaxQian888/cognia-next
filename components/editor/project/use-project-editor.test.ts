@@ -20,15 +20,15 @@ jest.mock("@cognia/logging", () => {
   }
 })
 
-// Minimal in-memory agent-team-store stub.
+// Minimal in-memory project-editor-session-store stub.
 const sessionStore: Record<string, unknown> = {}
-const setEditorSession = jest.fn((teamId: string, patch: Record<string, unknown>) => {
-  sessionStore[teamId] = { ...(sessionStore[teamId] as object), ...patch }
+const setEditorSession = jest.fn((scopeKey: string, patch: Record<string, unknown>) => {
+  sessionStore[scopeKey] = { ...(sessionStore[scopeKey] as object), ...patch }
 })
 let mockPersisted: unknown = undefined
-jest.mock("@/stores/agent/agent-team-store", () => ({
-  useAgentTeamStore: (selector: (s: unknown) => unknown) =>
-    selector({ editorSession: { team1: mockPersisted }, setEditorSession }),
+jest.mock("@/stores/editor/project-editor-session-store", () => ({
+  useProjectEditorSessionStore: (selector: (s: unknown) => unknown) =>
+    selector({ sessions: { "team:team1": mockPersisted }, setSession: setEditorSession }),
 }))
 
 function makeDeps(overrides: Partial<ProjectEditorDeps> = {}): Partial<ProjectEditorDeps> {
@@ -73,7 +73,7 @@ describe("useProjectEditor", () => {
   it("registers the LSP root and discovers worktrees", async () => {
     const deps = makeDeps()
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await waitFor(() => expect(result.current.roots.length).toBe(2))
     expect(result.current.roots.map((r) => r.label)).toEqual(["main", "feature/x"])
@@ -83,7 +83,7 @@ describe("useProjectEditor", () => {
   it("opens a file, tracks dirty on edit, and saves", async () => {
     const deps = makeDeps()
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await act(async () => {
       await result.current.openFile("src/a.ts")
@@ -105,7 +105,7 @@ describe("useProjectEditor", () => {
   it("does not re-read an already-open file, just re-activates it", async () => {
     const deps = makeDeps()
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await act(async () => {
       await result.current.openFile("src/a.ts")
@@ -122,7 +122,7 @@ describe("useProjectEditor", () => {
   it("closing the active tab falls back to a neighbour", async () => {
     const deps = makeDeps()
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await act(async () => {
       await result.current.openFile("src/a.ts")
@@ -137,7 +137,7 @@ describe("useProjectEditor", () => {
   it("saveAll writes every dirty file", async () => {
     const deps = makeDeps()
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await act(async () => {
       await result.current.openFile("src/a.ts")
@@ -158,7 +158,7 @@ describe("useProjectEditor", () => {
   it("switching root clears open files and re-registers LSP", async () => {
     const deps = makeDeps()
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await act(async () => {
       await result.current.openFile("src/a.ts")
@@ -173,13 +173,13 @@ describe("useProjectEditor", () => {
   it("persists the session on change", async () => {
     const deps = makeDeps()
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await act(async () => {
       await result.current.openFile("src/a.ts")
     })
     expect(setEditorSession).toHaveBeenCalledWith(
-      "team1",
+      "team:team1",
       expect.objectContaining({ rootKey: "/repo", openPaths: ["src/a.ts"], activePath: "src/a.ts" })
     )
   })
@@ -188,7 +188,7 @@ describe("useProjectEditor", () => {
     mockPersisted = { rootKey: "/repo", openPaths: ["src/b.ts"], activePath: "src/b.ts" }
     const deps = makeDeps()
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await waitFor(() => expect(result.current.openFiles).toHaveLength(1))
     expect(result.current.openFiles[0]?.relPath).toBe("src/b.ts")
@@ -202,7 +202,7 @@ describe("useProjectEditor", () => {
       }),
     })
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await act(async () => {
       await result.current.openFile("src/a.ts")
@@ -217,7 +217,7 @@ describe("useProjectEditor", () => {
   it("saveFile is a no-op for an unopened file", async () => {
     const deps = makeDeps()
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await act(async () => {
       await result.current.saveFile("ghost.ts")
@@ -232,7 +232,7 @@ describe("useProjectEditor", () => {
       .mockRejectedValueOnce(new Error("gone"))
     const deps = makeDeps({ readFile })
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await act(async () => {
       await result.current.openFile("src/a.ts")
@@ -250,7 +250,7 @@ describe("useProjectEditor", () => {
       }),
     })
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await waitFor(() => expect(deps.listWorktrees).toHaveBeenCalled())
     expect(result.current.roots).toEqual([
@@ -262,7 +262,7 @@ describe("useProjectEditor", () => {
     mockPersisted = { rootKey: "/other-root", openPaths: ["src/a.ts"], activePath: "src/a.ts" }
     const deps = makeDeps()
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await waitFor(() => expect(deps.listWorktrees).toHaveBeenCalled())
     expect(result.current.openFiles).toHaveLength(0)
@@ -277,7 +277,7 @@ describe("useProjectEditor", () => {
       }),
     })
     const { result } = renderHook(() =>
-      useProjectEditor({ teamId: "team1", workingDir: "/repo", deps })
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
     await act(async () => {
       await result.current.openFile("src/a.ts")

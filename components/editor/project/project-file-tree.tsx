@@ -72,7 +72,7 @@ const parentOf = (rel: string) => rel.split("/").slice(0, -1).join("/")
 const joinRel = (parent: string, name: string) => (parent ? `${parent}/${name}` : name)
 
 export function ProjectFileTree({ rootPath, refreshToken, activePath, onOpenFile, deps }: Props) {
-  const t = useTranslations("agentTeamsWorkspace.editor")
+  const t = useTranslations("projectEditor")
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]))
   const [childrenByDir, setChildrenByDir] = useState<Record<string, WorkspaceEntry[]>>({})
   const [pendingCreate, setPendingCreate] = useState<{

@@ -16,6 +16,7 @@ import type { ProviderName } from "@cognia/provider-types/provider"
 import type { SubAgentTokenUsage, SubAgentPriority } from "./sub-agent"
 import type { TwinSettings } from "@/types/twin"
 import type { ExternalAgentPresetId } from "@/lib/ai/agent/external/presets"
+import type { ProjectEditorSession } from "@/types/editor/project-editor"
 
 // ============================================================================
 // Team Core Types
@@ -93,16 +94,7 @@ export type AgentTeamWorkspaceTab =
  * three-pane layout when the tab is reopened. Unsaved draft content is NOT
  * persisted — the on-disk file is the source of truth.
  */
-export interface AgentTeamEditorSession {
-  /** Absolute path of the selected root (team workingDir or a worktree path). */
-  rootKey: string
-  /** Open files, as paths relative to `rootKey`, in tab order. */
-  openPaths: string[]
-  /** Relative path of the active file, or null when no file is open. */
-  activePath: string | null
-  /** Persisted `ResizablePanelGroup` sizes: [tree, editor, side]. */
-  layout?: number[]
-}
+export type AgentTeamEditorSession = ProjectEditorSession
 
 /**
  * Current operator focus inside the Agent Team workspace

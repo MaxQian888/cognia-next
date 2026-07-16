@@ -22,7 +22,7 @@ interface Props {
 }
 
 export function ProjectSearchPanel({ rootPath, onOpenMatch, deps }: Props) {
-  const t = useTranslations("agentTeamsWorkspace.editor")
+  const t = useTranslations("projectEditor")
   const search = deps?.search ?? searchWorkspaceContent
   const [query, setQuery] = useState("")
   const [matches, setMatches] = useState<WorkspaceContentMatch[]>([])

@@ -9,7 +9,7 @@ jest.mock("next-intl", () => ({
 
 // Flatten Radix Select into a native <select> so jsdom can drive it.
 jest.mock("@/components/ui/select", () => {
-  const React = require("react")
+  const React = jest.requireActual<typeof import("react")>("react")
   const Ctx = React.createContext(() => {})
   return {
     Select: ({

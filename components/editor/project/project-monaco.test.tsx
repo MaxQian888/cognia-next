@@ -45,7 +45,7 @@ const setPosition = jest.fn()
 const focus = jest.fn()
 let capturedOnChange: ((v: string) => void) | null = null
 jest.mock("@monaco-editor/react", () => {
-  const React = require("react")
+  const React = jest.requireActual<typeof import("react")>("react")
   const MockEditor = ({
     onMount,
     onChange,

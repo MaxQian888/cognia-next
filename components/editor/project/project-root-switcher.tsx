@@ -21,7 +21,7 @@ interface Props {
 }
 
 export function ProjectRootSwitcher({ roots, rootKey, onSelect }: Props) {
-  const t = useTranslations("agentTeamsWorkspace.editor")
+  const t = useTranslations("projectEditor")
   if (roots.length <= 1) return null
   return (
     <Select value={rootKey} onValueChange={onSelect}>

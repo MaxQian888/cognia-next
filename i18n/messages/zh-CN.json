@@ -12723,6 +12723,51 @@
       "nameRequired": "预设名称不能为空。"
     }
   },
+  "projectEditor": {
+    "action": {
+      "copyPath": "复制路径",
+      "copyRelativePath": "复制相对路径",
+      "format": "格式化文档",
+      "save": "保存",
+      "searchProject": "在项目中搜索"
+    },
+    "cancel": "取消",
+    "closeTab": "关闭 {name}",
+    "delete": "删除",
+    "deleteConfirm": "删除“{name}”？此操作无法撤销。",
+    "emptyEditor": "从文件树打开一个文件开始编辑。",
+    "externallyChanged": "磁盘已变更",
+    "filesTab": "文件",
+    "newFile": "新建文件",
+    "newFolder": "新建文件夹",
+    "noWorkingDir": "该团队未设置工作目录。",
+    "proIde": {
+      "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
+      "downloading": "正在下载 VS Code… {percent}%",
+      "errorTitle": "无法启动 VS Code",
+      "retry": "重试",
+      "starting": "正在启动 VS Code…",
+      "switchLabel": "编辑器引擎",
+      "toggleMonaco": "Monaco",
+      "toggleVsCode": "VS Code",
+      "unsupportedDesc": "code-server 没有适配你操作系统的版本，请改用本机 VS Code。",
+      "unsupportedTitle": "此平台不支持 Pro IDE"
+    },
+    "refresh": "刷新",
+    "rename": "重命名",
+    "rootLabel": "项目根目录",
+    "rootMain": "main（主仓库）",
+    "saveAll": "全部保存（{count}）",
+    "saveFailed": "保存失败：{error}",
+    "search": "搜索",
+    "searchEmpty": "无匹配",
+    "searchPlaceholder": "在项目中搜索…",
+    "searchTab": "搜索",
+    "treeAria": "项目文件",
+    "treeEmpty": "暂无文件",
+    "unavailableDesc": "项目编辑器需要桌面应用或已配对的设备才能访问项目文件。",
+    "unavailableTitle": "编辑器不可用"
+  },
   "providerCompare": {
     "compare": "对比",
     "description": "对同一查询并行调用两个 Provider 进行对比。",

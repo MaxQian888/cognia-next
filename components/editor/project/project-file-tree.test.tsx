@@ -10,7 +10,7 @@ jest.mock("next-intl", () => ({
 // Flatten Radix ContextMenu: trigger renders its child; content + items render
 // inline so tests can click them without a real pointer-driven menu.
 jest.mock("@/components/ui/context-menu", () => {
-  const React = require("react")
+  const React = jest.requireActual<typeof import("react")>("react")
   return {
     ContextMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     ContextMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -32,7 +32,7 @@ jest.mock("@/components/ui/context-menu", () => {
 
 // Flatten AlertDialog to render children when open.
 jest.mock("@/components/ui/alert-dialog", () => {
-  const React = require("react")
+  const React = jest.requireActual<typeof import("react")>("react")
   return {
     AlertDialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
       open ? <div role="alertdialog">{children}</div> : null,

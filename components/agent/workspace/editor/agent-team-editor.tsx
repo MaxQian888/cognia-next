@@ -10,8 +10,8 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { CodeIcon, FilesIcon, SearchIcon, SquareCodeIcon } from "lucide-react"
 import { isTauri } from "@/lib/tauri"
-import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import { registerProjectEditorOpener } from "@/lib/files/project-editor-bridge"
+import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { codeServerClient } from "@/lib/codeserver/client"
 import { cn } from "@/lib/utils"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
@@ -20,28 +20,23 @@ import { useKeybindingStore } from "@/stores/canvas/keybinding-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { EditorActionDef } from "@/lib/editor-workbench/register-editor-actions"
 import { CodeServerPane } from "./code-server-pane"
-import { useProjectEditor } from "./use-project-editor"
-import { ProjectFileTree } from "./project-file-tree"
-import { ProjectEditorTabs } from "./project-editor-tabs"
-import { ProjectMonaco } from "./project-monaco"
-import { ProjectRootSwitcher } from "./project-root-switcher"
-import { ProjectSearchPanel } from "./project-search-panel"
-import { PROJECT_EDITOR_GOTO_EVENT } from "./editor-events"
+import { useProjectEditor } from "@/components/editor/project/use-project-editor"
+import { ProjectFileTree } from "@/components/editor/project/project-file-tree"
+import { ProjectEditorTabs } from "@/components/editor/project/project-editor-tabs"
+import { ProjectMonaco } from "@/components/editor/project/project-monaco"
+import { ProjectRootSwitcher } from "@/components/editor/project/project-root-switcher"
+import { ProjectSearchPanel } from "@/components/editor/project/project-search-panel"
+import { PROJECT_EDITOR_GOTO_EVENT } from "@/components/editor/project/editor-events"
 
 interface Props {
   team: AgentTeam
 }
 
-/** True when a real filesystem backend is reachable (desktop or paired web). */
-export function hasFsBackend(): boolean {
-  return isTauri() || loadCompanionConfig() != null
-}
-
 export function AgentTeamEditor({ team }: Props) {
-  const t = useTranslations("agentTeamsWorkspace.editor")
+  const t = useTranslations("projectEditor")
   const workingDir = team.config.workingDir
 
-  if (!hasFsBackend() || !workingDir) {
+  if (!hasWorkspaceFsBackend() || !workingDir) {
     return (
       <Empty data-testid="editor-unavailable">
         <EmptyHeader>
@@ -58,7 +53,7 @@ export function AgentTeamEditor({ team }: Props) {
 }
 
 function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: string }) {
-  const t = useTranslations("agentTeamsWorkspace.editor")
+  const t = useTranslations("projectEditor")
   const bindings = useKeybindingStore((s) => s.bindings)
   const [leftTab, setLeftTab] = useState<"files" | "search">("files")
   // Optional "Pro IDE" mode — the embedded code-server webview (desktop only).
@@ -78,7 +73,7 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
     }
   }, [])
 
-  const editor = useProjectEditor({ teamId: team.id, workingDir })
+  const editor = useProjectEditor({ scopeKey: `team:${team.id}`, workingDir })
   const {
     roots,
     rootKey,

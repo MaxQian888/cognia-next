@@ -35,36 +35,36 @@ const editorState = {
   saveAll: jest.fn(async () => {}),
   reloadFile: jest.fn(async () => {}),
 }
-jest.mock("./use-project-editor", () => ({
+jest.mock("@/components/editor/project/use-project-editor", () => ({
   useProjectEditor: () => editorState,
 }))
 // Capture the props passed to each child so tests can drive its callbacks.
 const captured: Record<string, unknown> = {}
-jest.mock("./project-file-tree", () => ({
+jest.mock("@/components/editor/project/project-file-tree", () => ({
   ProjectFileTree: (p: Record<string, unknown>) => {
     captured.tree = p
     return <div data-testid="mock-tree" />
   },
 }))
-jest.mock("./project-search-panel", () => ({
+jest.mock("@/components/editor/project/project-search-panel", () => ({
   ProjectSearchPanel: (p: Record<string, unknown>) => {
     captured.search = p
     return <div data-testid="mock-search" />
   },
 }))
-jest.mock("./project-monaco", () => ({
+jest.mock("@/components/editor/project/project-monaco", () => ({
   ProjectMonaco: (p: Record<string, unknown>) => {
     captured.monaco = p
     return <div data-testid="mock-monaco" />
   },
 }))
-jest.mock("./project-editor-tabs", () => ({
+jest.mock("@/components/editor/project/project-editor-tabs", () => ({
   ProjectEditorTabs: (p: Record<string, unknown>) => {
     captured.tabs = p
     return <div data-testid="mock-tabs" />
   },
 }))
-jest.mock("./project-root-switcher", () => ({
+jest.mock("@/components/editor/project/project-root-switcher", () => ({
   ProjectRootSwitcher: () => <div data-testid="mock-switcher" />,
 }))
 const supportedMock = jest.fn(async () => true)
@@ -77,7 +77,7 @@ jest.mock("./code-server-pane", () => ({
   ),
 }))
 
-import { AgentTeamEditor, hasFsBackend } from "./agent-team-editor"
+import { AgentTeamEditor } from "./agent-team-editor"
 import type { AgentTeam } from "@/types/agent/agent-team"
 
 function team(workingDir?: string): AgentTeam {
@@ -96,18 +96,6 @@ beforeEach(() => {
   supportedMock.mockReset().mockImplementation(() => new Promise(() => {}))
   editorState.activeFile = null
   editorState.dirtyCount = 0
-})
-
-describe("hasFsBackend", () => {
-  it("is true on desktop and false on unpaired web", () => {
-    isTauriMock.mockReturnValue(true)
-    expect(hasFsBackend()).toBe(true)
-    isTauriMock.mockReturnValue(false)
-    loadCompanionConfigMock.mockReturnValue(null)
-    expect(hasFsBackend()).toBe(false)
-    loadCompanionConfigMock.mockReturnValue({ ip: "x" } as never)
-    expect(hasFsBackend()).toBe(true)
-  })
 })
 
 describe("AgentTeamEditor", () => {
