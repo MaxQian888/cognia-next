@@ -158,6 +158,8 @@ describe("runDoctor", () => {
         agentBackend: "claude-code",
         externalAgentCommand: "npx",
         externalAgentAvailable: true,
+        externalAgentHooksActive: false,
+        externalAgentTerminalActive: false,
       })
     }
   })

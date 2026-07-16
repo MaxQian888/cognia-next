@@ -90,6 +90,14 @@ describe("isTransportSupportedOnCurrentPlatform", () => {
   it("returns false for stdio when runtimeIsTauri=false", () => {
     expect(isTransportSupportedOnCurrentPlatform("stdio", false)).toBe(false)
   })
+  it("uses headless-host capability when no runtime override is supplied", () => {
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    try {
+      expect(isTransportSupportedOnCurrentPlatform("stdio")).toBe(true)
+    } finally {
+      delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+    }
+  })
 })
 
 describe("getExternalAgentExecutionBlock", () => {

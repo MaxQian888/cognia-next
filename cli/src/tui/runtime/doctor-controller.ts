@@ -156,6 +156,11 @@ export function collectDoctorReport(deps: DoctorReportDeps): DoctorReport {
 export async function runDoctor(deps: DoctorReportDeps): Promise<void> {
   const report = collectDoctorReport(deps)
   if (report.agentBackend !== "builtin") {
+    // CLI v1 deliberately leaves desktop hook state and ACP terminal methods
+    // inactive. Keep the diagnostic report explicit so dormant compatibility
+    // shims cannot be mistaken for live capabilities.
+    report.externalAgentHooksActive = false
+    report.externalAgentTerminalActive = false
     const presetId =
       report.agentBackend === "codex"
         ? await resolvePreferredCodexExecutablePresetId()

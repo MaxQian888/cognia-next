@@ -16,6 +16,8 @@ const report: DoctorReport = {
   dbSnapshotExists: true,
   dbSnapshotPath: "/home/.cognia/db.json",
   agentBackend: "claude-code",
+  externalAgentHooksActive: false,
+  externalAgentTerminalActive: false,
   externalAgentCommand: "npx",
   externalAgentAvailable: true,
   crashReportsDir: "/data/Cognia/crash-reports",
@@ -55,6 +57,8 @@ describe("DoctorPanel", () => {
     expect(text).toContain("claude-opus-4-8")
     expect(text).toContain("claude-code")
     expect(text).toContain("npx ✓")
+    expect(text).toContain("Hooks inert")
+    expect(text).toContain("ACP terminal unavailable")
     expect(text).toContain("/data/Cognia/crash-reports")
     expect(text).toContain("crash-2026-05-25_14-30-00-panic")
   })

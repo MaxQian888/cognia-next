@@ -99,6 +99,20 @@ export function DoctorPanel({
             </Text>
           )}
         </Text>
+        {(report.externalAgentHooksActive === false ||
+          report.externalAgentTerminalActive === false) && (
+          <Text>
+            <Text color={theme.muted}>{"Capabilities".padEnd(13)}</Text>
+            {report.externalAgentHooksActive === false && (
+              <Text color={theme.warning}>Hooks inert</Text>
+            )}
+            {report.externalAgentHooksActive === false &&
+              report.externalAgentTerminalActive === false && <Text color={theme.muted}> · </Text>}
+            {report.externalAgentTerminalActive === false && (
+              <Text color={theme.warning}>ACP terminal unavailable</Text>
+            )}
+          </Text>
+        )}
         <Text>
           <Text color={theme.muted}>{"Provider".padEnd(13)}</Text>
           {report.provider}

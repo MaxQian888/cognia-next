@@ -319,6 +319,10 @@ export interface CrashReportItem {
 export interface DoctorReport {
   version: string
   agentBackend: string
+  /** CLI v1 external hosts intentionally do not execute desktop hook state. */
+  externalAgentHooksActive?: boolean
+  /** ACP terminal methods remain desktop-only and are unavailable in the CLI host. */
+  externalAgentTerminalActive?: boolean
   externalAgentCommand?: string
   externalAgentAvailable?: boolean
   provider: string

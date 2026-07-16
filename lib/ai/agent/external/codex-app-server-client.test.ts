@@ -22,9 +22,11 @@ function autoRespond(agentId: string, message: string): void {
   }
 }
 
+const mockIsTauri = jest.fn(() => true)
+
 jest.mock("@/lib/utils", () => ({
   ...jest.requireActual("@/lib/utils"),
-  isTauri: () => true,
+  isTauri: () => mockIsTauri(),
 }))
 
 jest.mock("./env-builder", () => ({
@@ -90,6 +92,8 @@ const config: ExternalAgentConfig = {
 }
 
 function resetHarness() {
+  mockIsTauri.mockReturnValue(true)
+  delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
   stdoutCb = undefined
   stderrCb = undefined
   exitCb = undefined
@@ -151,6 +155,18 @@ function iterator(
 beforeEach(resetHarness)
 
 describe("CodexAppServerAdapter", () => {
+  it("rejects process hosting when neither desktop nor headless runtime is available", async () => {
+    mockIsTauri.mockReturnValue(false)
+    const native = jest.requireMock("@/lib/native/external-agent") as {
+      spawnExternalAgent: jest.Mock
+    }
+
+    await expect(new CodexAppServerAdapter().connect(config)).rejects.toThrow(
+      "requires an external-agent process host"
+    )
+    expect(native.spawnExternalAgent).not.toHaveBeenCalled()
+  })
+
   describe("connect / process reclaim", () => {
     // The Rust process manager keys running agents by the persisted config id
     // and outlives the JS realm. After a webview reload (or a dev Fast Refresh,
