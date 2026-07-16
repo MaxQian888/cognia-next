@@ -20,6 +20,7 @@ const saveFile = jest.fn().mockResolvedValue(undefined)
 const saveAll = jest.fn().mockResolvedValue(undefined)
 const mockUseProjectEditor = jest.fn()
 let activePath: string | null = null
+let editorRootKey = "/repo"
 let editorRootPath = "/repo"
 let activeFile: { absolutePath: string; relPath: string; content: string } | null = null
 let openFiles: Array<{ absolutePath: string; relPath: string; content: string }> = []
@@ -54,7 +55,7 @@ jest.mock("@/components/editor/project/use-project-editor", () => ({
     return {
       deps: {},
       roots: [{ key: "/repo", label: "main", path: "/repo", isMain: true }],
-      rootKey: "/repo",
+      rootKey: editorRootKey,
       rootPath: editorRootPath,
       openFiles,
       activePath,
@@ -152,10 +153,24 @@ jest.mock("@/stores/git/git-store", () => ({
 jest.mock("@/hooks/git/use-git-actions", () => ({ useGitActions: () => ({}) }))
 jest.mock("@/lib/git/load", () => ({ refreshGitStatus: jest.fn() }))
 jest.mock("@/components/source-control/changes-view", () => ({
-  ChangesView: () => <div data-testid="review-changes" />,
+  ChangesView: ({
+    onSelectFile,
+    density,
+  }: {
+    onSelectFile: (path: string, staged: boolean) => void
+    density?: string
+  }) => (
+    <button
+      data-testid="review-changes"
+      data-density={density}
+      onClick={() => onSelectFile("src/a.ts", false)}
+    />
+  ),
 }))
 jest.mock("@/components/source-control/diff-pane", () => ({
-  DiffPane: () => <div data-testid="review-diff" />,
+  DiffPane: ({ density }: { density?: string }) => (
+    <div data-testid="review-diff" data-density={density} />
+  ),
 }))
 
 import { DockWorkspace } from "./dock-workspace"
@@ -188,6 +203,7 @@ beforeEach(() => {
   saveAll.mockClear().mockResolvedValue(undefined)
   mockUseProjectEditor.mockClear()
   activePath = null
+  editorRootKey = "/repo"
   editorRootPath = "/repo"
   activeFile = null
   openFiles = []
@@ -273,6 +289,26 @@ describe("DockWorkspace", () => {
     await waitFor(() => expect(openFile).toHaveBeenCalledWith("src/a.ts"))
   })
 
+  it("waits for persisted worktree discovery before consuming a primary-root reveal", async () => {
+    editorRootKey = "/repo-wt"
+    editorRootPath = "/repo"
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceFile({
+        sessionId: "session-1",
+        rootPath: "/repo",
+        relPath: "src/a.ts",
+      })
+    })
+
+    const { rerender } = render(<DockWorkspace activeSessionId="session-1" />)
+    expect(selectRoot).toHaveBeenCalledWith("/repo")
+    expect(openFile).not.toHaveBeenCalled()
+
+    editorRootKey = "/repo"
+    rerender(<DockWorkspace activeSessionId="session-1" />)
+    await waitFor(() => expect(openFile).toHaveBeenCalledWith("src/a.ts"))
+  })
+
   it("does not expose the review tab for a non-Git root", () => {
     gitState = { ...gitState, repoState: { isRepo: false } }
     render(<DockWorkspace activeSessionId="session-1" />)
@@ -296,6 +332,28 @@ describe("DockWorkspace", () => {
     expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
     expect(screen.queryByTestId("workspace-file-layout")).not.toBeInTheDocument()
     expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
+  })
+
+  it("uses a single-column Changes/Diff review flow on mobile", async () => {
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+        sessionId: "session-1",
+        rootPath: "/repo",
+      })
+    })
+
+    render(<DockWorkspace activeSessionId="session-1" layout="mobile" />)
+
+    expect(await screen.findByTestId("workspace-mobile-review-tabs")).toBeInTheDocument()
+    expect(screen.getByTestId("review-changes")).toHaveAttribute("data-density", "touch")
+    expect(screen.queryByTestId("review-diff")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("review-changes"))
+    expect(screen.getByTestId("review-diff")).toHaveAttribute("data-density", "touch")
+    fireEvent.click(screen.getByTestId("workspace-mobile-review-diff"))
+    expect(screen.getByTestId("review-diff")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("workspace-mobile-review-changes"))
+    expect(screen.getByTestId("review-changes")).toBeInTheDocument()
   })
 
   it("wires editor tabs, sidebar, file actions, and keyboard saves", async () => {

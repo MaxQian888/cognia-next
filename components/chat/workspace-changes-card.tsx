@@ -57,7 +57,6 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
 
   useEffect(() => {
     if (
-      breakpoint !== "desktop" ||
       !rootPath ||
       gitRootDir !== rootPath ||
       !repoState?.isRepo ||
@@ -77,16 +76,9 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
     return () => {
       alive = false
     }
-  }, [breakpoint, files.length, gitRootDir, repoState?.isRepo, rootPath, status])
+  }, [files.length, gitRootDir, repoState?.isRepo, rootPath, status])
 
-  if (
-    breakpoint !== "desktop" ||
-    !rootPath ||
-    gitRootDir !== rootPath ||
-    !repoState?.isRepo ||
-    !status ||
-    files.length === 0
-  ) {
+  if (!rootPath || gitRootDir !== rootPath || !repoState?.isRepo || !status || files.length === 0) {
     return null
   }
 
@@ -134,10 +126,11 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
     <div
       className="mx-3 mb-1 overflow-hidden rounded-md border bg-muted/20"
       data-testid="workspace-changes-card"
+      data-breakpoint={breakpoint}
     >
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50"
+        className="flex min-h-10 w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50 md:min-h-0"
         aria-expanded={expanded}
         data-testid="workspace-changes-toggle"
         onClick={() => setExpanded((value) => !value)}
@@ -163,14 +156,14 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
 
       {expanded && (
         <div className="border-t" data-testid="workspace-changes-list">
-          <div className="max-h-48 overflow-y-auto py-1">
+          <div className="max-h-[36dvh] overflow-y-auto py-1 md:max-h-48">
             {files.map((file) => {
               const stat = statsByPath.get(file.path)
               return (
                 <button
                   key={file.path}
                   type="button"
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted/60"
+                  className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/60 md:min-h-0 md:py-1.5"
                   data-testid={`workspace-change-${file.path}`}
                   onClick={() => revealFile(file.path)}
                 >
@@ -190,11 +183,11 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
               )
             })}
           </div>
-          <div className="flex items-center justify-end gap-1 border-t px-2 py-1.5">
+          <div className="grid grid-cols-2 gap-2 border-t px-2 py-2 md:flex md:items-center md:justify-end md:gap-1 md:py-1.5">
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 gap-1 text-xs"
+              className="h-10 gap-1 text-xs md:h-7"
               data-testid="workspace-changes-undo"
               disabled={undoing}
               onClick={() => setConfirmUndo(true)}
@@ -205,7 +198,7 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
             <Button
               variant="secondary"
               size="sm"
-              className="h-7 gap-1 text-xs"
+              className="h-10 gap-1 text-xs md:h-7"
               data-testid="workspace-changes-review"
               onClick={revealReview}
             >

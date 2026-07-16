@@ -140,6 +140,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         set({
           dockMode: "workspace",
           dockCollapsed: false,
+          mobileSheetOpen: true,
           workspaceContext: { kind: "file", ...request },
           workspaceRevealRequest: {
             id: nextRevealId(),
@@ -151,6 +152,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         set({
           dockMode: "workspace",
           dockCollapsed: false,
+          mobileSheetOpen: true,
           workspaceContext: { kind: "review", ...request },
           workspaceRevealRequest: {
             id: nextRevealId(),
@@ -163,7 +165,16 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           state.workspaceRevealRequest?.id === id ? { workspaceRevealRequest: null } : state
         ),
       clearWorkspaceContext: () => set({ workspaceContext: null }),
-      setMobileSheetOpen: (open) => set({ mobileSheetOpen: open }),
+      setMobileSheetOpen: (open) =>
+        set(
+          open
+            ? { mobileSheetOpen: true }
+            : {
+                mobileSheetOpen: false,
+                workspaceRevealRequest: null,
+                workspaceContext: null,
+              }
+        ),
       resetLayout: () =>
         set((state) => ({
           ...DEFAULTS,

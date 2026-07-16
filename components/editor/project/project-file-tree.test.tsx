@@ -1,10 +1,39 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+function mockIconThemeSubscribers(): Array<() => void> {
+  const state = globalThis as typeof globalThis & {
+    __projectIconThemeSubscribers?: Array<() => void>
+  }
+  return (state.__projectIconThemeSubscribers ??= [])
+}
+let mockActiveIconTheme: {
+  id: string
+  baseDir: string
+  jsonPath: string
+} | null = null
+const mockResolveFileIcon = jest.fn((_id: string, _filename: string) => ({
+  iconPath: "icons/typescript.svg",
+}))
+const mockConvertFileSrc = jest.fn((path: string) => `asset://${path}`)
+
+jest.mock("@/lib/plugin/bridge/icons-bridge", () => ({
+  getActiveIconTheme: () => mockActiveIconTheme,
+  resolveFileIcon: (id: string, filename: string) => mockResolveFileIcon(id, filename),
+  subscribeIconThemes: (callback: () => void) => {
+    mockIconThemeSubscribers().push(callback)
+    return jest.fn()
+  },
+}))
+
+jest.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string) => mockConvertFileSrc(path),
 }))
 
 // Flatten Radix ContextMenu: trigger renders its child; content + items render
@@ -79,6 +108,22 @@ function makeDeps(): ProjectFileTreeDeps & { fs: Record<string, WorkspaceEntry[]
 }
 
 describe("ProjectFileTree", () => {
+  it("uses touch-sized rows and toolbar actions in touch density", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={deps}
+        density="touch"
+      />
+    )
+
+    await waitFor(() => expect(screen.getByTestId("tree-row-readme.md")).toHaveClass("min-h-11"))
+    expect(screen.getByLabelText("newFile")).toHaveClass("size-11")
+  })
+
   it("lazily lists the root and opens a file on click", async () => {
     const deps = makeDeps()
     const onOpenFile = jest.fn()
@@ -138,6 +183,7 @@ describe("ProjectFileTree", () => {
     // The flattened context menu renders a "rename" button per row.
     fireEvent.click(screen.getAllByText("rename")[1]) // readme.md's rename (src has one too)
     const input = await screen.findByLabelText("rename")
+    fireEvent.click(input)
     fireEvent.change(input, { target: { value: "README2.md" } })
     fireEvent.keyDown(input, { key: "Enter" })
     await waitFor(() =>
@@ -277,5 +323,32 @@ describe("ProjectFileTree", () => {
     await waitFor(() =>
       expect((deps.listDir as jest.Mock).mock.calls.length).toBeGreaterThan(before)
     )
+
+    const beforeManualRefresh = (deps.listDir as jest.Mock).mock.calls.length
+    fireEvent.click(screen.getByLabelText("refresh"))
+    await waitFor(() =>
+      expect((deps.listDir as jest.Mock).mock.calls.length).toBeGreaterThan(beforeManualRefresh)
+    )
+  })
+
+  it("uses a contributed file icon and reacts to icon theme changes", async () => {
+    mockActiveIconTheme = {
+      id: "theme",
+      baseDir: "/plugins/theme",
+      jsonPath: "icons/theme.json",
+    }
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+
+    await waitFor(() => expect(document.querySelector("img")).not.toBeNull())
+    const icon = document.querySelector("img")
+    expect(icon).toHaveAttribute("src", "asset:///plugins/theme/icons/icons/typescript.svg")
+    expect(mockResolveFileIcon).toHaveBeenCalledWith("theme", "readme.md")
+
+    act(() => mockIconThemeSubscribers().forEach((notify) => notify()))
+    expect(mockConvertFileSrc).toHaveBeenCalled()
+    mockActiveIconTheme = null
   })
 })

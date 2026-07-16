@@ -127,6 +127,7 @@
       "undoFailed": "无法撤销工作区改动：{error}",
       "undoSuccess": "已撤销工作区改动"
     },
+    "close": "关闭工作区",
     "missingProject": {
       "description": "请先将当前对话关联到项目，再编辑工作区文件。",
       "title": "未关联项目"
@@ -139,7 +140,10 @@
       "description": "请选择一个对话，以解析它关联的项目工作区。",
       "title": "未选择对话"
     },
+    "mobileTitle": "工作区",
     "review": "审阅",
+    "reviewChanges": "改动",
+    "reviewDiff": "差异",
     "reviewEmpty": "请选择一个改动文件以审阅差异",
     "unavailable": {
       "description": "工作区编辑需要桌面应用或已配对的 Companion 文件系统。",

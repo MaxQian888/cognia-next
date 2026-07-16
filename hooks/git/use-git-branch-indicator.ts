@@ -13,6 +13,8 @@ import { isTauri } from "@/lib/tauri"
 import { gitWatchStart, gitWatchStop } from "@/lib/git/commands"
 import { subscribeGitStatusChanged } from "@/lib/git/events"
 import { loadGitRepo, refreshGitStatus } from "@/lib/git/load"
+import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
+import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 import { useProjectStore } from "@/stores/project/project-store"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { useGitBranchInfo, useGitBusy, useGitStore } from "@/stores/git/git-store"
@@ -37,8 +39,17 @@ export function __resetGitIndicatorBinding(): void {
   lastBoundProjectRoot = null
 }
 
-export function useGitBranchIndicator(): BranchIndicator {
-  const available = isTauri()
+export interface UseGitBranchIndicatorOptions {
+  /** Disable controller ownership while still observing the shared store. */
+  enabled?: boolean
+}
+
+export function useGitBranchIndicator({
+  enabled = true,
+}: UseGitBranchIndicatorOptions = {}): BranchIndicator {
+  const ownsNativeWatcher = isTauri()
+  const { paired } = useCompanionConfig()
+  const available = enabled && (ownsNativeWatcher || paired)
   const rootDir = useGitStore((s) => s.rootDir)
   const setRootDir = useGitStore((s) => s.setRootDir)
   const branchInfo = useGitBranchInfo()
@@ -71,9 +82,12 @@ export function useGitBranchIndicator(): BranchIndicator {
     let cancelled = false
 
     void (async () => {
+      // Prime the synchronous transport cache before the first Companion RPC.
+      if (!ownsNativeWatcher) await hydrateCompanionConfig()
+      if (cancelled) return
       await loadGitRepo(rootDir)
       if (cancelled) return
-      await gitWatchStart(rootDir)
+      if (ownsNativeWatcher) await gitWatchStart(rootDir)
     })()
 
     const unsubscribe = subscribeGitStatusChanged((event) => {
@@ -83,9 +97,9 @@ export function useGitBranchIndicator(): BranchIndicator {
     return () => {
       cancelled = true
       unsubscribe()
-      void gitWatchStop(rootDir)
+      if (ownsNativeWatcher) void gitWatchStop(rootDir)
     }
-  }, [available, rootDir])
+  }, [available, ownsNativeWatcher, rootDir])
 
   return {
     available,

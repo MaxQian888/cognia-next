@@ -73,12 +73,15 @@ beforeEach(() => {
 })
 
 describe("WorkspaceChangesCard", () => {
-  it("does not render or load stats outside the desktop dock layout", () => {
-    breakpoint = "tablet"
+  it("renders and loads stats in the mobile Sheet layout", async () => {
+    breakpoint = "mobile"
     render(<WorkspaceChangesCard session={session} />)
 
-    expect(screen.queryByTestId("workspace-changes-card")).not.toBeInTheDocument()
-    expect(gitDiffStat).not.toHaveBeenCalled()
+    expect(screen.getByTestId("workspace-changes-card")).toHaveAttribute(
+      "data-breakpoint",
+      "mobile"
+    )
+    await waitFor(() => expect(gitDiffStat).toHaveBeenCalledWith("/repo"))
   })
 
   it("does not render outside the active Git root or with no changes", () => {
@@ -127,6 +130,7 @@ describe("WorkspaceChangesCard", () => {
       rootPath: "/repo",
       relPath: "src/a.ts",
     })
+    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true)
 
     fireEvent.click(screen.getByTestId("workspace-changes-review"))
     expect(useArtifactDockLayoutStore.getState().workspaceRevealRequest).toMatchObject({

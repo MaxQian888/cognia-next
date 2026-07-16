@@ -31,7 +31,9 @@ jest.mock("@/components/ui/select", () => {
         </select>
       </Ctx.Provider>
     ),
-    SelectTrigger: () => null,
+    SelectTrigger: ({ className }: { className?: string }) => (
+      <option hidden value="__trigger" data-testid="root-trigger" className={className} />
+    ),
     SelectValue: () => null,
     SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => (
@@ -62,5 +64,13 @@ describe("ProjectRootSwitcher", () => {
     const select = screen.getByTestId("native-root-select")
     fireEvent.change(select, { target: { value: "/repo-wt" } })
     expect(onSelect).toHaveBeenCalledWith("/repo-wt")
+  })
+
+  it("uses a full-width touch target in mobile density", () => {
+    render(
+      <ProjectRootSwitcher roots={roots} rootKey="/repo" onSelect={jest.fn()} density="touch" />
+    )
+
+    expect(screen.getByTestId("root-trigger")).toHaveClass("h-10", "w-full")
   })
 })

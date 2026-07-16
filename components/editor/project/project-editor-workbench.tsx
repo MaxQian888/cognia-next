@@ -1,9 +1,11 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react"
-import { FilesIcon, SearchIcon } from "lucide-react"
+import { CodeIcon, FilesIcon, SaveIcon, SearchIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
+import { LightCodeEditor } from "@/components/editor/light-code-editor"
+import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import type { EditorActionDef } from "@/lib/editor-workbench/register-editor-actions"
 import { registerProjectEditorOpener } from "@/lib/files/project-editor-bridge"
@@ -29,12 +31,14 @@ export function useProjectEditorWorkbench({
   const t = useTranslations("projectEditor")
   const bindings = useKeybindingStore((state) => state.bindings)
   const [sideTab, setSideTab] = useState<"files" | "search">("files")
+  const [mobilePane, setMobilePane] = useState<"files" | "search" | "editor">("files")
   const editor = useProjectEditor({ scopeKey, workingDir, deps })
   const { activeFile, activePath, openFile, rootPath, saveAll, saveFile } = editor
 
   const gotoLine = useCallback(
     (relPath: string, line?: number, column?: number) => {
       beforeOpen?.()
+      setMobilePane("editor")
       void openFile(relPath).then(() => {
         if (line === undefined) return
         setTimeout(() => {
@@ -123,7 +127,10 @@ export function useProjectEditorWorkbench({
         label: actionLabels["file.searchProject"],
         contextMenuGroupId: "z_search",
         alwaysAvailable: true,
-        run: () => setSideTab("search"),
+        run: () => {
+          setSideTab("search")
+          setMobilePane("search")
+        },
       },
     ],
     [actionLabels, activeFile, saveActive]
@@ -144,6 +151,8 @@ export function useProjectEditorWorkbench({
     bindings,
     sideTab,
     setSideTab,
+    mobilePane,
+    setMobilePane,
     gotoLine,
     saveActive,
     saveAll: saveEveryFile,
@@ -161,6 +170,7 @@ interface ProjectEditorFileWorkbenchProps {
   panelIdPrefix: string
   showTabs?: boolean
   emptyTestId?: string
+  layout?: "split" | "mobile"
 }
 
 export function ProjectEditorFileWorkbench({
@@ -169,10 +179,22 @@ export function ProjectEditorFileWorkbench({
   panelIdPrefix,
   showTabs = false,
   emptyTestId = "editor-empty",
+  layout = "split",
 }: ProjectEditorFileWorkbenchProps) {
   const t = useTranslations("projectEditor")
-  const { actions, actionLabels, bindings, editor, gotoLine, saveAll, sideTab, setSideTab } =
-    workbench
+  const {
+    actions,
+    actionLabels,
+    bindings,
+    editor,
+    gotoLine,
+    mobilePane,
+    saveActive,
+    saveAll,
+    setMobilePane,
+    sideTab,
+    setSideTab,
+  } = workbench
   const {
     activeFile,
     activePath,
@@ -185,6 +207,114 @@ export function ProjectEditorFileWorkbench({
     setDraft,
     treeRefreshToken,
   } = editor
+
+  const fileTree = (
+    <ProjectFileTree
+      rootPath={rootPath}
+      refreshToken={treeRefreshToken}
+      activePath={activePath}
+      onOpenFile={gotoLine}
+      deps={deps}
+      density={layout === "mobile" ? "touch" : "compact"}
+    />
+  )
+  const searchPanel = (
+    <ProjectSearchPanel
+      rootPath={rootPath}
+      onOpenMatch={gotoLine}
+      density={layout === "mobile" ? "touch" : "compact"}
+    />
+  )
+
+  if (layout === "mobile") {
+    const mobileContent =
+      mobilePane === "files" ? (
+        fileTree
+      ) : mobilePane === "search" ? (
+        searchPanel
+      ) : activeFile ? (
+        <LightCodeEditor
+          key={activeFile.absolutePath}
+          value={activeFile.draftContent}
+          language={activeFile.language}
+          onChange={(value) => setDraft(activeFile.relPath, value)}
+          aria-label={activeFile.relPath}
+        />
+      ) : (
+        <div
+          className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground"
+          data-testid={emptyTestId}
+        >
+          {t("emptyEditor")}
+        </div>
+      )
+
+    return (
+      <div className="flex h-full min-h-0 flex-col" data-testid="project-editor-mobile-layout">
+        <div className="grid shrink-0 grid-cols-3 border-b bg-background/95 p-1">
+          <button
+            type="button"
+            data-testid="project-editor-mobile-files"
+            aria-pressed={mobilePane === "files"}
+            className={cn(
+              "flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm",
+              mobilePane === "files" ? "bg-accent" : "text-muted-foreground"
+            )}
+            onClick={() => {
+              setSideTab("files")
+              setMobilePane("files")
+            }}
+          >
+            <FilesIcon className="size-4" />
+            {t("filesTab")}
+          </button>
+          <button
+            type="button"
+            data-testid="project-editor-mobile-search"
+            aria-pressed={mobilePane === "search"}
+            className={cn(
+              "flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm",
+              mobilePane === "search" ? "bg-accent" : "text-muted-foreground"
+            )}
+            onClick={() => {
+              setSideTab("search")
+              setMobilePane("search")
+            }}
+          >
+            <SearchIcon className="size-4" />
+            {t("searchTab")}
+          </button>
+          <button
+            type="button"
+            data-testid="project-editor-mobile-editor"
+            aria-pressed={mobilePane === "editor"}
+            className={cn(
+              "flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm",
+              mobilePane === "editor" ? "bg-accent" : "text-muted-foreground"
+            )}
+            onClick={() => setMobilePane("editor")}
+          >
+            <CodeIcon className="size-4" />
+            {t("editorTab")}
+          </button>
+        </div>
+        <div className="min-h-0 flex-1">{mobileContent}</div>
+        {mobilePane === "editor" && activeFile ? (
+          <div className="shrink-0 border-t p-2">
+            <Button
+              type="button"
+              className="h-11 w-full gap-2"
+              onClick={saveActive}
+              data-testid="project-editor-mobile-save"
+            >
+              <SaveIcon className="size-4" />
+              {t("action.save")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    )
+  }
 
   const sidebar = (
     <ResizablePanel
@@ -220,19 +350,7 @@ export function ProjectEditorFileWorkbench({
             {t("searchTab")}
           </button>
         </div>
-        <div className="min-h-0 flex-1">
-          {sideTab === "files" ? (
-            <ProjectFileTree
-              rootPath={rootPath}
-              refreshToken={treeRefreshToken}
-              activePath={activePath}
-              onOpenFile={gotoLine}
-              deps={deps}
-            />
-          ) : (
-            <ProjectSearchPanel rootPath={rootPath} onOpenMatch={gotoLine} />
-          )}
-        </div>
+        <div className="min-h-0 flex-1">{sideTab === "files" ? fileTree : searchPanel}</div>
       </div>
     </ResizablePanel>
   )

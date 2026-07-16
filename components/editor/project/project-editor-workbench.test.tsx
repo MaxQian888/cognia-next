@@ -1,9 +1,10 @@
 /** @jest-environment jsdom */
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
-jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
 const disposeOpener = jest.fn()
 const registerOpener = jest.fn((_args: unknown) => disposeOpener)
 jest.mock("@/lib/files/project-editor-bridge", () => ({
@@ -63,10 +64,25 @@ jest.mock("./project-monaco", () => ({
     </div>
   ),
 }))
+jest.mock("@/components/editor/light-code-editor", () => ({
+  LightCodeEditor: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
+    <textarea
+      data-testid="light-editor"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  ),
+}))
 
 import { ProjectEditorFileWorkbench, useProjectEditorWorkbench } from "./project-editor-workbench"
 
-function Harness({ beforeOpen }: { beforeOpen?: () => void }) {
+function Harness({
+  beforeOpen,
+  sidebarPosition = "right",
+}: {
+  beforeOpen?: () => void
+  sidebarPosition?: "left" | "right"
+}) {
   const workbench = useProjectEditorWorkbench({
     scopeKey: "session:s1",
     workingDir: "/repo",
@@ -76,11 +92,23 @@ function Harness({ beforeOpen }: { beforeOpen?: () => void }) {
     <div onKeyDown={workbench.onKeyDown}>
       <ProjectEditorFileWorkbench
         workbench={workbench}
-        sidebarPosition="right"
+        sidebarPosition={sidebarPosition}
         showTabs
         panelIdPrefix="test"
       />
     </div>
+  )
+}
+
+function MobileHarness() {
+  const workbench = useProjectEditorWorkbench({ scopeKey: "session:s1", workingDir: "/repo" })
+  return (
+    <ProjectEditorFileWorkbench
+      workbench={workbench}
+      sidebarPosition="right"
+      panelIdPrefix="mobile-test"
+      layout="mobile"
+    />
   )
 }
 
@@ -119,6 +147,13 @@ it("registers the root opener and removes it on unmount", () => {
   expect(disposeOpener).toHaveBeenCalled()
 })
 
+it("supports the shared left-sidebar composition used by Agent Team", () => {
+  render(<Harness sidebarPosition="left" />)
+
+  expect(screen.getByTestId("tree")).toBeInTheDocument()
+  expect(screen.getByTestId("monaco")).toBeInTheDocument()
+})
+
 it("copies absolute and relative paths through shared Monaco actions", () => {
   const writeText = jest.fn()
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
@@ -132,6 +167,52 @@ it("copies absolute and relative paths through shared Monaco actions", () => {
 
 it("renders the shared empty editor state", () => {
   editor.activeFile = null
+  editor.activePath = null
   render(<Harness />)
   expect(screen.getByTestId("editor-empty")).toHaveTextContent("emptyEditor")
+  fireEvent.keyDown(screen.getByTestId("tabs"), { key: "s", metaKey: true })
+  expect(editor.saveFile).not.toHaveBeenCalled()
+})
+
+it("reports active and save-all failures through the shared toast path", async () => {
+  editor.saveFile.mockRejectedValueOnce(new Error("save active"))
+  editor.saveAll.mockRejectedValueOnce(new Error("save all"))
+  render(<Harness />)
+
+  fireEvent.click(screen.getByTestId("file.save"))
+  fireEvent.keyDown(screen.getByTestId("tabs"), { key: "s", ctrlKey: true, shiftKey: true })
+
+  await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(2))
+})
+
+it("reuses the workbench as a touch-friendly mobile Files/Search/Editor flow", () => {
+  render(<MobileHarness />)
+
+  expect(screen.getByTestId("project-editor-mobile-files")).toHaveAttribute("aria-pressed", "true")
+  fireEvent.click(screen.getByTestId("tree"))
+  expect(editor.openFile).toHaveBeenCalledWith("src/tree.ts")
+  expect(screen.getByTestId("light-editor")).toBeInTheDocument()
+
+  fireEvent.change(screen.getByTestId("light-editor"), { target: { value: "mobile edit" } })
+  expect(editor.setDraft).toHaveBeenCalledWith("src/a.ts", "mobile edit")
+  fireEvent.click(screen.getByTestId("project-editor-mobile-save"))
+  expect(editor.saveFile).toHaveBeenCalledWith("src/a.ts")
+
+  fireEvent.click(screen.getByTestId("project-editor-mobile-search"))
+  expect(screen.getByTestId("search")).toBeInTheDocument()
+  fireEvent.click(screen.getByTestId("project-editor-mobile-files"))
+  expect(screen.getByTestId("tree")).toBeInTheDocument()
+  fireEvent.click(screen.getByTestId("project-editor-mobile-editor"))
+  expect(screen.getByTestId("light-editor")).toBeInTheDocument()
+})
+
+it("shows the shared empty editor state in the mobile Editor pane", () => {
+  editor.activePath = null
+  editor.activeFile = null
+  render(<MobileHarness />)
+
+  fireEvent.click(screen.getByTestId("project-editor-mobile-editor"))
+
+  expect(screen.getByTestId("editor-empty")).toHaveTextContent("emptyEditor")
+  expect(screen.queryByTestId("project-editor-mobile-save")).not.toBeInTheDocument()
 })

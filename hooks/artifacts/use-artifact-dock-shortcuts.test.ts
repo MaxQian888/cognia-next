@@ -6,20 +6,27 @@ import { renderHook, act } from "@testing-library/react"
 import { useArtifactDockShortcuts } from "./use-artifact-dock-shortcuts"
 import { useAppShortcutDispatcher } from "@/hooks/shortcuts/use-app-shortcut-dispatcher"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { getAppRegistration, __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
 import { __resetAppKeybindingStoreForTesting } from "@/stores/shortcuts/app-keybinding-store"
 import { __resetContextKeysForTesting } from "@/lib/plugin/context-keys/context-key-store"
 
 jest.mock("@/hooks/ui", () => ({
-  useIsMobile: jest.fn(() => false),
+  useBreakpoint: jest.fn(() => "desktop"),
 }))
 jest.mock("@/lib/plugin", () => ({
-  getPluginEventHooks: () => ({ dispatchShortcut: jest.fn() }),
+  getPluginEventHooks: () => ({
+    dispatchShortcut: jest.fn(),
+    dispatchArtifactOpen: jest.fn(),
+    dispatchArtifactClose: jest.fn(),
+    dispatchPanelOpen: jest.fn(),
+    dispatchPanelClose: jest.fn(),
+  }),
 }))
 
-import { useIsMobile } from "@/hooks/ui"
+import { useBreakpoint } from "@/hooks/ui"
 
-const useIsMobileMock = useIsMobile as jest.MockedFunction<typeof useIsMobile>
+const useBreakpointMock = useBreakpoint as jest.MockedFunction<typeof useBreakpoint>
 
 // `!view.canvas` is true with no context keys set, so the dock shortcut is live.
 // Mount the dispatcher + the feature hook together (no JSX ⇒ .test.ts stays valid).
@@ -45,12 +52,13 @@ function pressMod(target: EventTarget, key: string, options: Partial<KeyboardEve
 describe("useArtifactDockShortcuts", () => {
   beforeEach(() => {
     window.localStorage.clear()
-    useIsMobileMock.mockReturnValue(false)
+    useBreakpointMock.mockReturnValue("desktop")
     __resetAppRuntimeForTesting()
     __resetAppKeybindingStoreForTesting()
     __resetContextKeysForTesting()
     act(() => {
       useArtifactDockLayoutStore.getState().resetLayout()
+      useArtifactStore.setState({ panelOpen: false, panelView: "artifact" })
     })
   })
 
@@ -102,14 +110,49 @@ describe("useArtifactDockShortcuts", () => {
     }
   })
 
-  it("on mobile: Cmd+J toggles the mobile Sheet instead of the collapsed flag", () => {
-    useIsMobileMock.mockReturnValue(true)
+  it("on mobile: Cmd+J toggles the current Workspace Sheet", () => {
+    useBreakpointMock.mockReturnValue("mobile")
+    act(() => useArtifactDockLayoutStore.getState().setDockMode("workspace"))
     mount()
     act(() => pressMod(document.body, "j"))
     expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true)
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+    act(() => {
+      useArtifactDockLayoutStore.setState({
+        workspaceContext: {
+          kind: "file",
+          sessionId: "session-1",
+          rootPath: "/repo",
+          relPath: "src/a.ts",
+        },
+      })
+    })
     act(() => pressMod(document.body, "j"))
     expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false)
+    expect(useArtifactDockLayoutStore.getState().workspaceContext).toBeNull()
+  })
+
+  it("on tablet: Cmd+J toggles the Workspace Sheet instead of the desktop dock", () => {
+    useBreakpointMock.mockReturnValue("tablet")
+    act(() => useArtifactDockLayoutStore.getState().setDockMode("workspace"))
+    mount()
+
+    act(() => pressMod(document.body, "j"))
+
+    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true)
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+  })
+
+  it("on narrow Artifact mode: Cmd+J opens and closes the Artifact Sheet", () => {
+    useBreakpointMock.mockReturnValue("mobile")
+    mount()
+
+    act(() => pressMod(document.body, "j"))
+    expect(useArtifactStore.getState().panelOpen).toBe(true)
+    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false)
+
+    act(() => pressMod(document.body, "j"))
+    expect(useArtifactStore.getState().panelOpen).toBe(false)
   })
 
   it("preventDefault only when matched", () => {

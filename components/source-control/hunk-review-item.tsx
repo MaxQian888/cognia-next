@@ -28,6 +28,7 @@ interface Props {
   onDecision: (index: number, decision: HunkDecision) => void
   onComment: (index: number, comment: string) => void
   disabled?: boolean
+  density?: "compact" | "touch"
 }
 
 const LINE_CLASS: Record<string, string> = {
@@ -54,6 +55,7 @@ export const HunkReviewItem = memo(function HunkReviewItem({
   onDecision,
   onComment,
   disabled,
+  density = "compact",
 }: Props) {
   const t = useTranslations("sourceControl.review")
   const [open, setOpen] = useState(false)
@@ -84,6 +86,7 @@ export const HunkReviewItem = memo(function HunkReviewItem({
             aria-pressed={decision === "accepted"}
             aria-label={t("accept")}
             disabled={disabled}
+            className={cn(density === "touch" && "h-11 min-w-11")}
             onClick={() => toggle("accepted")}
             data-testid="hunk-accept"
           >
@@ -96,6 +99,7 @@ export const HunkReviewItem = memo(function HunkReviewItem({
             aria-pressed={decision === "rejected"}
             aria-label={t("reject")}
             disabled={disabled}
+            className={cn(density === "touch" && "h-11 min-w-11")}
             onClick={() => toggle("rejected")}
             data-testid="hunk-reject"
           >
@@ -107,6 +111,7 @@ export const HunkReviewItem = memo(function HunkReviewItem({
             variant="ghost"
             aria-label={t("addComment")}
             disabled={disabled}
+            className={cn(density === "touch" && "h-11 min-w-11")}
             onClick={() => setCommenting((v) => !v)}
             data-testid="hunk-comment-toggle"
           >
@@ -136,7 +141,10 @@ export const HunkReviewItem = memo(function HunkReviewItem({
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+            className={cn(
+              "flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground",
+              density === "touch" && "min-h-11 px-2"
+            )}
           >
             <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
             {t("viewChanges")}

@@ -20,6 +20,7 @@ export interface ProjectEditorFixedTab {
 
 interface Props {
   fixedTabs?: ProjectEditorFixedTab[]
+  density?: "compact" | "touch"
   files: OpenFile[]
   activePath: string | null
   dirtyCount: number
@@ -30,6 +31,7 @@ interface Props {
 
 export function ProjectEditorTabs({
   fixedTabs = [],
+  density = "compact",
   files,
   activePath,
   dirtyCount,
@@ -40,7 +42,7 @@ export function ProjectEditorTabs({
   const t = useTranslations("projectEditor")
   if (files.length === 0 && fixedTabs.length === 0) return null
   return (
-    <div className="flex items-center border-b" data-testid="project-editor-tabs">
+    <div className="flex items-center border-b" data-testid="project-editor-tabs" role="tablist">
       <div className="flex min-w-0 flex-1 overflow-x-auto">
         {fixedTabs.map((tab) => (
           <button
@@ -51,6 +53,7 @@ export function ProjectEditorTabs({
             data-testid={`editor-fixed-tab-${tab.id}`}
             className={cn(
               "flex shrink-0 items-center gap-1 border-r px-3 py-1.5 text-sm",
+              density === "touch" && "min-h-11 py-2",
               tab.active ? "bg-background" : "bg-muted/40 hover:bg-muted"
             )}
             onClick={tab.onSelect}
@@ -65,27 +68,38 @@ export function ProjectEditorTabs({
           return (
             <div
               key={f.relPath}
-              role="tab"
-              aria-selected={activePath === f.relPath}
-              data-testid={`editor-tab-${f.relPath}`}
+              role="presentation"
               className={cn(
-                "group flex cursor-pointer items-center gap-1 border-r px-3 py-1.5 text-sm",
+                "group flex shrink-0 items-center border-r text-sm",
                 activePath === f.relPath ? "bg-background" : "bg-muted/40 hover:bg-muted"
               )}
-              onClick={() => onSelect(f.relPath)}
-              title={f.relPath}
             >
-              <span className="max-w-[12rem] truncate">{name}</span>
-              {f.externallyChanged ? (
-                <span className="text-[10px] text-amber-500" title={t("externallyChanged")}>
-                  ●
-                </span>
-              ) : null}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activePath === f.relPath}
+                tabIndex={activePath === f.relPath ? 0 : -1}
+                data-testid={`editor-tab-${f.relPath}`}
+                className={cn(
+                  "flex cursor-pointer items-center gap-1 py-1.5 pl-3",
+                  density === "touch" && "min-h-11 py-2"
+                )}
+                onClick={() => onSelect(f.relPath)}
+                title={f.relPath}
+              >
+                <span className="max-w-[12rem] truncate">{name}</span>
+                {f.externallyChanged ? (
+                  <span className="text-[10px] text-amber-500" title={t("externallyChanged")}>
+                    ●
+                  </span>
+                ) : null}
+              </button>
               <button
                 type="button"
                 aria-label={t("closeTab", { name })}
                 className={cn(
-                  "ml-1 rounded p-0.5 hover:bg-accent",
+                  "mx-1 rounded p-0.5 hover:bg-accent",
+                  density === "touch" && "flex size-11 items-center justify-center",
                   dirty ? "text-amber-500" : "opacity-60 group-hover:opacity-100"
                 )}
                 onClick={(e) => {
@@ -103,7 +117,7 @@ export function ProjectEditorTabs({
         <Button
           variant="ghost"
           size="sm"
-          className="mx-1 h-7 shrink-0 gap-1"
+          className={cn("mx-1 h-7 shrink-0 gap-1", density === "touch" && "h-10")}
           onClick={onSaveAll}
           data-testid="editor-save-all"
         >

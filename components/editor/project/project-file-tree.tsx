@@ -66,12 +66,20 @@ interface Props {
   activePath: string | null
   onOpenFile: (relPath: string) => void
   deps: ProjectFileTreeDeps
+  density?: "compact" | "touch"
 }
 
 const parentOf = (rel: string) => rel.split("/").slice(0, -1).join("/")
 const joinRel = (parent: string, name: string) => (parent ? `${parent}/${name}` : name)
 
-export function ProjectFileTree({ rootPath, refreshToken, activePath, onOpenFile, deps }: Props) {
+export function ProjectFileTree({
+  rootPath,
+  refreshToken,
+  activePath,
+  onOpenFile,
+  deps,
+  density = "compact",
+}: Props) {
   const t = useTranslations("projectEditor")
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]))
   const [childrenByDir, setChildrenByDir] = useState<Record<string, WorkspaceEntry[]>>({})
@@ -212,6 +220,7 @@ export function ProjectFileTree({ rootPath, refreshToken, activePath, onOpenFile
           setRenameTarget(entry.relPath)
         }}
         onDelete={() => setDeleteTarget(entry)}
+        density={density}
       >
         {entry.isDir && expanded.has(entry.relPath) ? (
           <>
@@ -243,7 +252,7 @@ export function ProjectFileTree({ rootPath, refreshToken, activePath, onOpenFile
         <Button
           variant="ghost"
           size="icon"
-          className="size-6"
+          className={cn("size-6", density === "touch" && "size-11")}
           aria-label={t("newFile")}
           onClick={() => setPendingCreate({ parent: "", kind: "file" })}
         >
@@ -252,7 +261,7 @@ export function ProjectFileTree({ rootPath, refreshToken, activePath, onOpenFile
         <Button
           variant="ghost"
           size="icon"
-          className="size-6"
+          className={cn("size-6", density === "touch" && "size-11")}
           aria-label={t("newFolder")}
           onClick={() => setPendingCreate({ parent: "", kind: "folder" })}
         >
@@ -261,7 +270,7 @@ export function ProjectFileTree({ rootPath, refreshToken, activePath, onOpenFile
         <Button
           variant="ghost"
           size="icon"
-          className="size-6"
+          className={cn("size-6", density === "touch" && "size-11")}
           aria-label={t("refresh")}
           onClick={() => void loadDir("")}
         >
@@ -322,6 +331,7 @@ interface TreeRowProps {
   onNewFolder: () => void
   onRename: () => void
   onDelete: () => void
+  density: "compact" | "touch"
   children?: React.ReactNode
 }
 
@@ -342,6 +352,7 @@ function TreeRow({
   onNewFolder,
   onRename,
   onDelete,
+  density,
   children,
 }: TreeRowProps) {
   const name = entry.relPath.split("/").pop() ?? entry.relPath
@@ -355,6 +366,7 @@ function TreeRow({
             aria-expanded={entry.isDir ? expanded : undefined}
             className={cn(
               "flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 hover:bg-accent/50",
+              density === "touch" && "min-h-11 py-2",
               isActive && "bg-accent"
             )}
             style={{ paddingLeft: `${depth * 12 + 6}px` }}

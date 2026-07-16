@@ -143,6 +143,7 @@ describe("useArtifactDockLayoutStore", () => {
 
       expect(result.current.dockMode).toBe("workspace")
       expect(result.current.dockCollapsed).toBe(false)
+      expect(result.current.mobileSheetOpen).toBe(true)
       expect(result.current.workspaceRevealRequest).toMatchObject({
         kind: "file",
         sessionId: "session-1",
@@ -161,6 +162,7 @@ describe("useArtifactDockLayoutStore", () => {
       })
       const request = result.current.workspaceRevealRequest
       expect(request).toMatchObject({ kind: "review", sessionId: "session-2", rootPath: "/repo" })
+      expect(result.current.mobileSheetOpen).toBe(true)
 
       act(() => result.current.clearWorkspaceRevealRequest("stale"))
       expect(result.current.workspaceRevealRequest).toBe(request)
@@ -179,6 +181,22 @@ describe("useArtifactDockLayoutStore", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => result.current.setMobileSheetOpen(true))
       expect(result.current.mobileSheetOpen).toBe(true)
+    })
+
+    it("atomically clears the Workspace target when closing", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => {
+        result.current.revealWorkspaceFile({
+          sessionId: "session-1",
+          rootPath: "/repo",
+          relPath: "src/a.ts",
+        })
+        result.current.setMobileSheetOpen(false)
+      })
+
+      expect(result.current.mobileSheetOpen).toBe(false)
+      expect(result.current.workspaceRevealRequest).toBeNull()
+      expect(result.current.workspaceContext).toBeNull()
     })
 
     it("is excluded from the persisted snapshot", () => {

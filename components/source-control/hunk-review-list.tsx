@@ -24,6 +24,7 @@ import {
 } from "@/lib/git/hunk-review"
 import { useAiDiffReview } from "@/hooks/git/use-ai-diff-review"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { cn } from "@/lib/utils"
 import type { GitDiff, GitFileChange } from "@/types/git"
 import { HunkReviewItem } from "./hunk-review-item"
 
@@ -39,6 +40,7 @@ interface Props {
   collapsed?: boolean
   /** Toggle the collapsed/expanded state (owned by the parent DiffPane). */
   onToggleCollapse?: () => void
+  density?: "compact" | "touch"
 }
 
 export function HunkReviewList({
@@ -49,6 +51,7 @@ export function HunkReviewList({
   onInvalidate,
   collapsed = false,
   onToggleCollapse,
+  density = "compact",
 }: Props) {
   const t = useTranslations("sourceControl.review")
   const [applying, setApplying] = useState(false)
@@ -115,7 +118,10 @@ export function HunkReviewList({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-5 text-muted-foreground hover:text-foreground"
+            className={cn(
+              "size-5 text-muted-foreground hover:text-foreground",
+              density === "touch" && "size-11"
+            )}
             aria-label={collapsed ? t("expand") : t("collapse")}
             aria-expanded={!collapsed}
             onClick={onToggleCollapse}
@@ -137,7 +143,7 @@ export function HunkReviewList({
               type="button"
               variant="outline"
               size="sm"
-              className="h-6 gap-1 px-1.5 text-[11px]"
+              className={cn("h-6 gap-1 px-1.5 text-[11px]", density === "touch" && "h-11 px-3")}
               disabled={reviewing}
               onClick={() => void review()}
               data-testid="ai-review-run"
@@ -150,7 +156,10 @@ export function HunkReviewList({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-6 text-muted-foreground hover:text-foreground"
+                className={cn(
+                  "size-6 text-muted-foreground hover:text-foreground",
+                  density === "touch" && "size-11"
+                )}
                 aria-label={t("ai.clear")}
                 disabled={reviewing}
                 onClick={() => clearAiFindings(rootDir, reviewKey)}
@@ -202,6 +211,7 @@ export function HunkReviewList({
               onDecision={handleDecision}
               onComment={handleComment}
               disabled={applying}
+              density={density}
             />
           )
         })}
@@ -217,7 +227,7 @@ export function HunkReviewList({
         <Button
           type="button"
           size="sm"
-          className="w-full"
+          className={cn("w-full", density === "touch" && "h-11")}
           disabled={applying || acceptedCount === 0}
           onClick={() => void applyAccepted()}
           data-testid="apply-accepted"

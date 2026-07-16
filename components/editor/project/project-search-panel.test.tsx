@@ -47,6 +47,23 @@ describe("ProjectSearchPanel", () => {
     expect(onOpenMatch).toHaveBeenCalledWith("src/b.ts", 4, 3)
   })
 
+  it("uses touch-sized search controls in touch density", async () => {
+    const search = jest.fn(async () => matches)
+    render(
+      <ProjectSearchPanel
+        rootPath="/repo"
+        onOpenMatch={jest.fn()}
+        deps={{ search }}
+        density="touch"
+      />
+    )
+    const input = screen.getByLabelText("search")
+    expect(input).toHaveClass("h-11")
+    fireEvent.change(input, { target: { value: "needle" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(screen.getByTestId("search-hit-src/a.ts-2")).toHaveClass("min-h-11"))
+  })
+
   it("does not search for an empty query", async () => {
     const search = jest.fn(async () => [])
     render(<ProjectSearchPanel rootPath="/repo" onOpenMatch={jest.fn()} deps={{ search }} />)

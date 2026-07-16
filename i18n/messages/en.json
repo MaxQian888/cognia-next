@@ -1670,6 +1670,7 @@
         "undoFailed": "Could not undo workspace changes: {error}",
         "undoSuccess": "Workspace changes undone"
       },
+      "close": "Close workspace",
       "missingProject": {
         "description": "Link this conversation to a project before editing workspace files.",
         "title": "No project linked"
@@ -1682,7 +1683,10 @@
         "description": "Select a conversation to resolve its project workspace.",
         "title": "No conversation selected"
       },
+      "mobileTitle": "Workspace",
       "review": "Review",
+      "reviewChanges": "Changes",
+      "reviewDiff": "Diff",
       "reviewEmpty": "Select a changed file to review its diff",
       "unavailable": {
         "description": "Workspace editing requires the desktop app or a paired companion filesystem.",
@@ -12769,6 +12773,7 @@
     "closeTab": "Close {name}",
     "delete": "Delete",
     "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
+    "editorTab": "Editor",
     "emptyEditor": "Open a file from the tree to start editing.",
     "externallyChanged": "Changed on disk",
     "filesTab": "Files",

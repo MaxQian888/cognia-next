@@ -10,6 +10,7 @@
   "closeTab": "关闭 {name}",
   "delete": "删除",
   "deleteConfirm": "删除“{name}”？此操作无法撤销。",
+  "editorTab": "编辑器",
   "emptyEditor": "从文件树打开一个文件开始编辑。",
   "externallyChanged": "磁盘已变更",
   "filesTab": "文件",

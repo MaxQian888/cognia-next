@@ -24,6 +24,7 @@ type PendingDiscard = { kind: "file"; path: string } | { kind: "all"; includeUnt
 
 interface ChangesViewProps {
   variant?: "panel" | "review"
+  density?: "compact" | "touch"
   rootDir: string
   status: GitStatus
   actions: UseGitActionsResult
@@ -37,6 +38,7 @@ interface ChangesViewProps {
 
 export function ChangesView({
   variant = "panel",
+  density = "compact",
   rootDir,
   status,
   actions,
@@ -89,6 +91,7 @@ export function ChangesView({
               count={status.merge.length}
               expanded={isExpanded("merge")}
               onToggle={() => toggleGroup("merge")}
+              density={density}
             >
               {status.merge.map((c) => (
                 <ChangeItem
@@ -99,6 +102,7 @@ export function ChangesView({
                   onCopyPath={() => copyPath(c.path)}
                   onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
                   onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
+                  density={density}
                 />
               ))}
             </ChangeGroup>
@@ -110,6 +114,7 @@ export function ChangesView({
               count={status.staged.length}
               expanded={isExpanded("staged")}
               onToggle={() => toggleGroup("staged")}
+              density={density}
               actions={[
                 {
                   key: "unstage-all",
@@ -130,6 +135,7 @@ export function ChangesView({
                   onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
                   onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
                   onRestore={onRestore ? () => onRestore(c.path) : undefined}
+                  density={density}
                 />
               ))}
             </ChangeGroup>
@@ -141,6 +147,7 @@ export function ChangesView({
               count={status.changes.length}
               expanded={isExpanded("changes")}
               onToggle={() => toggleGroup("changes")}
+              density={density}
               actions={[
                 {
                   key: "stage-all",
@@ -170,6 +177,7 @@ export function ChangesView({
                   onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
                   onRestore={onRestore ? () => onRestore(c.path) : undefined}
                   onAddToGitignore={() => void actions.ignoreAdd(c.path)}
+                  density={density}
                 />
               ))}
             </ChangeGroup>

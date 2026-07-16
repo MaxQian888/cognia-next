@@ -18,15 +18,18 @@ interface Props {
   roots: ProjectRoot[]
   rootKey: string
   onSelect: (key: string) => void
+  density?: "compact" | "touch"
 }
 
-export function ProjectRootSwitcher({ roots, rootKey, onSelect }: Props) {
+export function ProjectRootSwitcher({ roots, rootKey, onSelect, density = "compact" }: Props) {
   const t = useTranslations("projectEditor")
   if (roots.length <= 1) return null
   return (
     <Select value={rootKey} onValueChange={onSelect}>
       <SelectTrigger
-        className="h-7 w-[12rem] gap-1 text-xs"
+        className={
+          density === "touch" ? "h-10 w-full gap-2 text-sm" : "h-7 w-[12rem] gap-1 text-xs"
+        }
         aria-label={t("rootLabel")}
         data-testid="project-root-switcher"
       >

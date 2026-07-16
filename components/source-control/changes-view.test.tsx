@@ -98,6 +98,23 @@ beforeEach(() => {
 })
 
 describe("ChangesView", () => {
+  it("propagates touch density to changed-file actions", () => {
+    render(
+      <ChangesView
+        density="touch"
+        rootDir="/r"
+        status={status}
+        actions={makeActions()}
+        committing={false}
+        selectedPath={null}
+        onSelectFile={jest.fn()}
+      />
+    )
+
+    expect(screen.getByTestId("stage-work.ts")).toHaveClass("size-11")
+    expect(screen.getByTestId("group-toggle-changes")).toHaveClass("min-h-11")
+  })
+
   it("renders all three groups", () => {
     render(
       <ChangesView

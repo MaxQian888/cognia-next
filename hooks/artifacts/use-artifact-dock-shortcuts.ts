@@ -7,23 +7,41 @@
  * from contending with the Canvas right-rail (which also defaults to Cmd+J).
  */
 
-import { useIsMobile } from "@/hooks/ui"
+import { useBreakpoint } from "@/hooks/ui"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 
 export function useArtifactDockShortcuts(): void {
-  const isMobile = useIsMobile()
+  const breakpoint = useBreakpoint()
   const toggleDock = useArtifactDockLayoutStore((s) => s.toggleDock)
   const setMobileSheetOpen = useArtifactDockLayoutStore((s) => s.setMobileSheetOpen)
+  const openArtifactPanel = useArtifactStore((s) => s.openPanel)
+  const closeArtifactPanel = useArtifactStore((s) => s.closePanel)
 
   useAppShortcut(
     "artifacts.toggleDock",
     () => {
-      if (isMobile) {
-        setMobileSheetOpen(!useArtifactDockLayoutStore.getState().mobileSheetOpen)
-      } else {
+      if (breakpoint === "desktop") {
         toggleDock()
+        return
       }
+
+      const dock = useArtifactDockLayoutStore.getState()
+      if (dock.dockMode === "workspace") {
+        const nextOpen = !dock.mobileSheetOpen
+        const artifact = useArtifactStore.getState()
+        if (nextOpen && artifact.panelOpen && artifact.panelView === "artifact") {
+          artifact.closePanel()
+        }
+        setMobileSheetOpen(nextOpen)
+        return
+      }
+
+      setMobileSheetOpen(false)
+      const artifact = useArtifactStore.getState()
+      if (artifact.panelOpen && artifact.panelView === "artifact") closeArtifactPanel()
+      else openArtifactPanel("artifact")
     },
     { preventDefault: true, editorSelectors: [".monaco-editor"] }
   )
