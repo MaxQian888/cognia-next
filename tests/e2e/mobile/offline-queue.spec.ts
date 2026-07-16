@@ -32,7 +32,7 @@ test.describe("mobile — offline banner + outbound queue", () => {
     // Flip network offline.
     await page.evaluate(() => {
       ;(
-        window as {
+        window as unknown as {
           __cogniaCapMock: { setNetwork: (n: { connected: boolean }) => void }
         }
       ).__cogniaCapMock.setNetwork({ connected: false })
@@ -44,7 +44,7 @@ test.describe("mobile — offline banner + outbound queue", () => {
     // Flip back online.
     await page.evaluate(() => {
       ;(
-        window as {
+        window as unknown as {
           __cogniaCapMock: { setNetwork: (n: { connected: boolean }) => void }
         }
       ).__cogniaCapMock.setNetwork({ connected: true })
@@ -63,7 +63,9 @@ test.describe("mobile — offline banner + outbound queue", () => {
       const { getDb } = await import("@/lib/db/schema")
       await getDb().mobileOutboundQueue.put({
         id: "q_test_pending_1",
-        command: "rpc_generic",
+        // Must be a live MOBILE_OUTBOUND_COMMANDS member — "rpc_generic" was
+        // trimmed from the command surface in the 2026-05-17 audit.
+        command: "app_settings_update",
         payload: {},
         idempotencyKey: "test-idem",
         status: "pending",

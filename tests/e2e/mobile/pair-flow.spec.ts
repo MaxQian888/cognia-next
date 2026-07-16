@@ -156,7 +156,7 @@ test.describe("mobile pair flow — V2 server round-trip", () => {
     // sets it via QR scan. Drive it via the Capacitor mock instead.
     await page.evaluate((fp) => {
       ;(
-        window as { __cogniaCapMock: { setBarcodeResult: (s: string) => void } }
+        window as unknown as { __cogniaCapMock: { setBarcodeResult: (s: string) => void } }
       ).__cogniaCapMock.setBarcodeResult(
         JSON.stringify({ b: window.location.origin, j: "aaa", f: fp })
       )

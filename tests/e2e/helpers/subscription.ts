@@ -46,9 +46,9 @@ export async function listAccountsForProvider(
   return await page.evaluate(async (p) => {
     const { listAccounts } = await import("@/lib/subscription/core/transport")
     const summaries = await listAccounts(p)
-    return summaries.map((s: { id: string; label: string | null }) => ({
+    return summaries.map((s) => ({
       id: s.id,
-      label: s.label,
+      label: s.label ?? null,
     }))
   }, provider)
 }
@@ -60,7 +60,7 @@ export async function getActiveAccountId(
   return await page.evaluate(async (p) => {
     const { getActiveAccount } = await import("@/lib/subscription/core/transport")
     const snap = await getActiveAccount(p)
-    return snap?.accountId ?? null
+    return snap?.activeAccountId ?? null
   }, provider)
 }
 

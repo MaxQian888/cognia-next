@@ -100,13 +100,18 @@ test.describe("workflow editor — multi-step orchestration", () => {
     // Steps executed: assert at least the trigger + seed + transform + branch + chosen branch arm.
     const stepIds = await page.evaluate(async (workflowId: string) => {
       const { getDb } = await import("@/lib/db/schema")
-      const rows = await getDb()
-        .workflowRuns.where("workflowId")
+      const db = getDb()
+      const rows = await db.workflowRuns
+        .where("workflowId")
         .equals(workflowId)
         .reverse()
         .sortBy("startedAt")
       const last = rows[0]
-      return last?.events?.map((e) => e.stepId) ?? []
+      if (!last) return []
+      // The per-step timeline lives in the separate `workflowRunEvents` table
+      // (keyed by runId), not embedded on the run row.
+      const events = await db.workflowRunEvents.where("runId").equals(last.id).sortBy("ts")
+      return events.map((e) => (e as { stepId?: string }).stepId).filter(Boolean)
     }, id!)
     expect(stepIds).toEqual(
       expect.arrayContaining(["n_trigger", "n_seed", "n_transform", "n_branch"])

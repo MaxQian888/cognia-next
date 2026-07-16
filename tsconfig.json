@@ -81,8 +81,6 @@
     "services/share-server",
     "out",
     ".next",
-    "tests/e2e",
-    "playwright.config.ts",
     "packages/*/tsup.config.ts"
   ]
 }

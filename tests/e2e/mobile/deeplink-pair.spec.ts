@@ -68,7 +68,7 @@ test.describe("mobile — deep-link routing", () => {
     })
     await page.evaluate(() => {
       ;(
-        window as { __cogniaCapMock: { pushAppUrlOpen: (u: string) => void } }
+        window as unknown as { __cogniaCapMock: { pushAppUrlOpen: (u: string) => void } }
       ).__cogniaCapMock.pushAppUrlOpen("cognia://share?text=test")
     })
     await page.waitForTimeout(200)

@@ -100,7 +100,7 @@ test.describe("mobile — paired step + connection state", () => {
     // Flip biometric to unavailable so verifyIdentity rejects.
     await page.evaluate(() => {
       ;(
-        window as { __cogniaCapMock: { setBiometricAvailable: (v: boolean) => void } }
+        window as unknown as { __cogniaCapMock: { setBiometricAvailable: (v: boolean) => void } }
       ).__cogniaCapMock.setBiometricAvailable(false)
     })
     await page.goto("/pair")

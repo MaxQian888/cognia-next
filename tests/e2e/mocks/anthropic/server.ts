@@ -24,6 +24,8 @@ export interface MessagesRequestPayload {
   temperature?: number
   stop_sequences?: string[]
   metadata?: Record<string, unknown>
+  /** The Claude Agent SDK always streams; workflow executors call non-streaming. */
+  stream?: boolean
 }
 
 export interface MessagesResponse {
