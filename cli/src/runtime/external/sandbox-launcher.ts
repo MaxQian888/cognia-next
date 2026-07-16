@@ -10,6 +10,7 @@ export interface SandboxLauncherRuntime {
   candidates: string[]
   isExecutable: (candidate: string) => boolean
   ensureDir?: (candidate: string) => void
+  ensureFile?: (candidate: string) => void
 }
 
 const launcherName = (): string =>
@@ -81,6 +82,12 @@ function agentStateDirectoryRoots(config: NodeExternalAgentSpawnConfig, homedir:
   )
 }
 
+function agentStateFileRoots(config: NodeExternalAgentSpawnConfig, homedir: string): string[] {
+  return agentStateWritableRoots(config, homedir).filter((root) =>
+    path.basename(root).startsWith(".claude.json")
+  )
+}
+
 export async function resolveSandboxedExternalAgentLaunch(
   config: NodeExternalAgentSpawnConfig,
   runtime: SandboxLauncherRuntime = {
@@ -89,6 +96,7 @@ export async function resolveSandboxedExternalAgentLaunch(
     candidates: defaultCandidates(),
     isExecutable,
     ensureDir: (candidate) => fs.mkdirSync(candidate, { recursive: true }),
+    ensureFile: (candidate) => fs.closeSync(fs.openSync(candidate, "a", 0o600)),
   }
 ): Promise<ExternalAgentLaunch> {
   if (runtime.platform !== "darwin" && runtime.platform !== "linux") {
@@ -101,6 +109,7 @@ export async function resolveSandboxedExternalAgentLaunch(
     )
   }
   for (const root of agentStateDirectoryRoots(config, runtime.homedir)) runtime.ensureDir?.(root)
+  for (const root of agentStateFileRoots(config, runtime.homedir)) runtime.ensureFile?.(root)
   return {
     command: launcher,
     args: buildSandboxLauncherArgs(config, runtime.homedir),

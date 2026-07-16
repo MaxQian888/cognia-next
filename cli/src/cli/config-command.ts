@@ -52,13 +52,17 @@ export async function configCommand(args: ParsedArgs, deps: ConfigDeps = {}): Pr
         out.error(`config error: ${(err as Error).message}`)
         return 2
       }
-      // Never print secrets — redact provider api keys.
+      // Never print secrets — redact provider API keys and subscription tokens.
       const redacted = {
         ...config,
         providers: Object.fromEntries(
           Object.entries(config.providers).map(([id, p]) => [
             id,
-            { ...p, apiKey: p.apiKey ? "***" : undefined },
+            {
+              ...p,
+              apiKey: p.apiKey ? "***" : undefined,
+              authToken: p.authToken ? "***" : undefined,
+            },
           ])
         ),
       }

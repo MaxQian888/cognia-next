@@ -62,6 +62,22 @@ const CONFIG_ENV_KEYS = new Set([
   "LANG",
   "LC_ALL",
 ])
+const RUNTIME_ENV_KEYS = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "XDG_CONFIG_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_DATA_HOME",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+])
 const CONFIG_ENV_PREFIXES = [
   "ANTHROPIC_",
   "CLAUDE_",
@@ -129,7 +145,14 @@ export function buildExternalAgentChildEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { NODE_ENV: ambient.NODE_ENV ?? "production" }
   for (const [key, value] of Object.entries(ambient)) {
-    if (!DANGEROUS_ENV.test(key)) env[key] = value
+    if (
+      !DANGEROUS_ENV.test(key) &&
+      (RUNTIME_ENV_KEYS.has(key) ||
+        CONFIG_ENV_KEYS.has(key) ||
+        CONFIG_ENV_PREFIXES.some((prefix) => key.startsWith(prefix)))
+    ) {
+      env[key] = value
+    }
   }
   for (const [key, value] of Object.entries(overrides ?? {})) {
     if (

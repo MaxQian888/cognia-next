@@ -46,11 +46,19 @@ describe("configCommand", () => {
     const code = await configCommand(parseArgv(["config", "get"]), {
       out: s.out,
       home: "/h",
-      loadConfig: () => cfg({ providers: { anthropic: { apiKey: "sk-secret" } } }),
+      loadConfig: () =>
+        cfg({
+          providers: {
+            anthropic: { apiKey: "sk-secret", authToken: "oauth-secret" },
+          },
+        }),
     })
     expect(code).toBe(0)
-    const printed = s.jsonl[0] as { providers: Record<string, { apiKey?: string }> }
+    const printed = s.jsonl[0] as {
+      providers: Record<string, { apiKey?: string; authToken?: string }>
+    }
     expect(printed.providers.anthropic.apiKey).toBe("***") // never leak the key
+    expect(printed.providers.anthropic.authToken).toBe("***")
   })
 
   it("get <key> prints a single value", async () => {

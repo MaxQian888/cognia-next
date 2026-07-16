@@ -47,6 +47,14 @@ describe("setConfigValue", () => {
     expect(JSON.parse(m.files.get(target)!)).toEqual({ provider: "openai" })
   })
 
+  it("persists the external-agent backend", () => {
+    const m = memFs()
+    setConfigValue(HOME, "agentBackend", "claude-code", m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      agentBackend: "claude-code",
+    })
+  })
+
   it("merges with existing config, preserving other keys", () => {
     const m = memFs({
       [userConfigPath(HOME)]: JSON.stringify({ provider: "openai", model: "old" }),

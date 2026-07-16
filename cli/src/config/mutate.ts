@@ -44,6 +44,7 @@ export const realConfigMutateFs: ConfigMutateFs = {
 /** Top-level scalar keys editable via `config set`. */
 export const SETTABLE_KEYS = [
   "provider",
+  "agentBackend",
   "model",
   "systemPrompt",
   "permissionMode",

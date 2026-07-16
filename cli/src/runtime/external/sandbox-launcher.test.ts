@@ -56,6 +56,7 @@ describe("external-agent sandbox launcher", () => {
 
   it("only creates writable state directories, never file-shaped roots", async () => {
     const ensureDir = jest.fn()
+    const ensureFile = jest.fn()
     await resolveSandboxedExternalAgentLaunch(
       {
         id: "a",
@@ -69,11 +70,14 @@ describe("external-agent sandbox launcher", () => {
         candidates: ["/launcher"],
         isExecutable: () => true,
         ensureDir,
+        ensureFile,
       }
     )
     expect(ensureDir).toHaveBeenCalledWith("/home/user/.claude")
     expect(ensureDir).toHaveBeenCalledWith("/home/user/.npm")
     expect(ensureDir).not.toHaveBeenCalledWith(expect.stringMatching(/\.json/))
+    expect(ensureFile).toHaveBeenCalledWith("/home/user/.claude.json")
+    expect(ensureFile).toHaveBeenCalledWith("/home/user/.claude.json.backup")
   })
 
   it("resolves only an executable launcher and never falls back unsandboxed", async () => {

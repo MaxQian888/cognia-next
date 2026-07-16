@@ -176,6 +176,11 @@ pub const PROTECTED: &[Protected] = &[
     // an ancestor (e.g. the user's home). The configurable writable-root
     // ceiling is the primary defence; this is belt-and-suspenders.
     Protected {
+        rel: ".cognia",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
         rel: ".local/share/cognia",
         kind: ProtKind::Dir,
         secret: true,
@@ -372,6 +377,7 @@ mod tests {
     fn protected_list_is_non_empty_and_includes_git_and_ssh() {
         assert!(PROTECTED.iter().any(|p| p.rel == ".git" && !p.secret));
         assert!(PROTECTED.iter().any(|p| p.rel == ".ssh" && p.secret));
+        assert!(PROTECTED.iter().any(|p| p.rel == ".cognia" && p.secret));
         // `.env` is intentionally NOT protected (project files get edited).
         assert!(!PROTECTED.iter().any(|p| p.rel == ".env"));
     }

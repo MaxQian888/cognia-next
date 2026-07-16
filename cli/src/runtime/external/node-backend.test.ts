@@ -15,6 +15,7 @@ describe("NodeExternalAgentBackend", () => {
         NODE_ENV: "test",
         OPENAI_API_KEY: "plain-openai",
         ANTHROPIC_API_KEY: "plain-anthropic",
+        AWS_SECRET_ACCESS_KEY: "must-not-leak",
         NODE_OPTIONS: "--require bad.js",
       },
       {
@@ -33,6 +34,7 @@ describe("NodeExternalAgentBackend", () => {
     })
     expect(env.NODE_OPTIONS).toBeUndefined()
     expect(env.PATH).toBeUndefined()
+    expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined()
   })
 
   it("emits the frozen lifecycle payloads and line-frames stdio", async () => {

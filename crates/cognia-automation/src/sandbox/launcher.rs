@@ -457,7 +457,7 @@ mod tests {
     fn bwrap_prefix_hides_secrets_reachable_through_readable_home() {
         // Regression: the launcher used to iterate writable roots ONLY, so a
         // secret under the readable `$HOME` (`~/.ssh`, `~/.aws`, cognia's own
-        // `~/.config/cognia` credential store) was fully readable.
+        // `~/.cognia` CLI credential store) was fully readable.
         let p = bwrap_prefix("bwrap", &scope(), &empty());
         let home_ssh = std::path::Path::new("/home/u")
             .join(".ssh")
@@ -479,6 +479,15 @@ mod tests {
             ro_bind_src_for(&p, &home_cognia).as_deref(),
             Some("/run/cognia-empty"),
             "cognia's own credential store under $HOME must be hidden"
+        );
+        let cli_home = std::path::Path::new("/home/u")
+            .join(".cognia")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            ro_bind_src_for(&p, &cli_home).as_deref(),
+            Some("/run/cognia-empty"),
+            "cognia-agent credentials under $HOME must be hidden"
         );
     }
 
