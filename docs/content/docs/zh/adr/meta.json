@@ -38,6 +38,7 @@
     "0073-chromium-cookie-import",
     "0074-otel-native-telemetry",
     "0076-local-provider-management-transport",
-    "0077-tui-external-agent-hosting"
+    "0077-tui-external-agent-hosting",
+    "0078-cli-app-bridge"
   ]
 }

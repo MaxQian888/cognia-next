@@ -28,7 +28,7 @@ description: The cognia plugin-author CLI — a standalone Rust binary for scaff
   <Stat label="Plugin commands" value="14" hint="PluginCommand enum — crates/cognia-cli/src/main.rs" />
   <Stat label="Lint codes" value="60" hint="distinct diagnostic codes — cmd_lint::validate_manifest" />
   <Stat label="Permissions / capabilities" value="45 / 45" hint="hard-coded whitelists, parity-tested against TS — cmd_lint.rs" />
-  <Stat label="Bridge routes" value="7" hint="health · installed · install · install-directory · uninstall · reload · handoff — server.rs:57-80" />
+  <Stat label="Bridge routes / cognia routes" value="12 / 7" hint="shared server total / Rust CLI consumer set — health overlaps cognia-agent" />
   <Stat label="Rust source" value="~8.5k lines" hint="crates/cognia-cli/src (28 files) + src-tauri/src/cli_bridge (6 files)" />
   <Stat label="Renderer surface" value="4 + 4" hint="lib/cli-bridge (4 modules) + DevTools status card / install dialog / launcher / status chip" />
 </StatGrid>
@@ -51,7 +51,7 @@ flowchart TB
 
   subgraph BRIDGE["2 · loopback bridge — src-tauri/src/cli_bridge"]
     AX[axum 127.0.0.1:ephemeral<br/>server.rs:28] --> AUTH[auth_middleware<br/>loopback + constant-time token]
-    AUTH --> H[handlers.rs<br/>health / installed / install / install-directory<br/>uninstall / reload / handoff]
+    AUTH --> H[handlers.rs<br/>12 shared routes<br/>plugins · ACP · handoff · twin · teams]
   end
 
   subgraph RENDER["3 · renderer — lib/cli-bridge + hooks"]
@@ -101,7 +101,7 @@ crates/cognia-plugin-template-vscode-extension/   # VS Code-extension scaffold s
 src-tauri/src/cli_bridge/           # desktop side
   mod.rs                            # init() / shutdown(), dev-token gen, endpoint-file write
   server.rs                         # axum router + auth middleware + 4 MiB body limit
-  handlers.rs                       # health/installed/install/install-directory/uninstall/reload/handoff + Tauri event emission
+  handlers.rs                       # 12 shared routes: plugins/ACP/handoff/twin/teams + renderer bridging
   detect.rs · download.rs · release_key.rs   # binary detection + managed download + key mirror
 
 lib/cli-bridge/                     # renderer TS

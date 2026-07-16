@@ -7,6 +7,7 @@
     "cognia-cli",
     "cognia-agent-tui",
     "cognia-agent-external-hosting",
+    "cli-app-bridge",
     "visual-workflows",
     "platform-connectors",
     "external-bridge",

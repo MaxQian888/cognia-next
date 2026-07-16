@@ -1,6 +1,6 @@
 //! Axum server bootstrap for the CLI bridge.
 //!
-//! Binds to `127.0.0.1:0` (ephemeral port), wires the four routes behind
+//! Binds to `127.0.0.1:0` (ephemeral port), wires the twelve routes behind
 //! the loopback + dev-token middleware, and returns
 //! `(bound_port, shutdown_tx)` so the caller can shut us down later.
 
@@ -161,6 +161,21 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 mod tests {
     use super::*;
 
+    const DOCUMENTED_DEV_ROUTES: [&str; 12] = [
+        "/api/v1/dev/health",
+        "/api/v1/dev/plugins/installed",
+        "/api/v1/dev/plugins/install",
+        "/api/v1/dev/plugins/install-directory",
+        "/api/v1/dev/plugins/uninstall",
+        "/api/v1/dev/plugins/reload",
+        "/api/v1/dev/acp/token",
+        "/api/v1/dev/sessions/handoff",
+        "/api/v1/dev/twin/context",
+        "/api/v1/dev/teams/list",
+        "/api/v1/dev/teams/run",
+        "/api/v1/dev/teams/run-status",
+    ];
+
     #[test]
     fn constant_time_eq_basic() {
         assert!(constant_time_eq(b"abc", b"abc"));
@@ -174,5 +189,25 @@ mod tests {
         // 4 MiB is enough for any plausible plugin manifest + path string
         // but small enough to refuse pathological payloads.
         assert_eq!(BODY_LIMIT_BYTES, 4 * 1024 * 1024);
+    }
+
+    #[test]
+    fn documented_dev_route_catalog_matches_router() {
+        let source = include_str!("server.rs");
+        let router_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("router source precedes tests");
+        assert_eq!(
+            router_source.matches(".route(").count(),
+            DOCUMENTED_DEV_ROUTES.len()
+        );
+        for route in DOCUMENTED_DEV_ROUTES {
+            assert_eq!(
+                router_source.matches(&format!("\"{route}\"")).count(),
+                1,
+                "route catalog drifted for {route}"
+            );
+        }
     }
 }

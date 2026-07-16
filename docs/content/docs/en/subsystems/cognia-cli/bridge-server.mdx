@@ -1,6 +1,6 @@
 ---
 title: Bridge server
-description: The desktop side of the loopback bridge — axum on an ephemeral 127.0.0.1 port, per-launch 64-hex dev token with constant-time comparison, the seven routes, zip-slip-safe bundle install, symlink-skipping directory install, session handoff, and fire-and-forget Tauri events into the renderer.
+description: The desktop side of the shared loopback bridge — axum on an ephemeral 127.0.0.1 port, per-launch authentication, 12 routes for both local CLIs, plugin operations, session events, and renderer-backed twin/team requests.
 ---
 
 # Bridge server — `src-tauri/src/cli_bridge`
@@ -10,10 +10,12 @@ description: The desktop side of the loopback bridge — axum on an ephemeral 12
   generate a 32-byte / 64-hex dev token, `server::spawn()` an axum router bound to
   **`127.0.0.1:0`** (OS-assigned ephemeral port), write `cli-endpoint.json` (`0o600` on Unix),
   and stash `RunningBridge {bound_port, shutdown}` in managed state for graceful shutdown on app
-  exit (`lib.rs:1249-1251`). Every request passes one middleware (`server.rs:88-115`):
+  exit. Every request passes one middleware:
   non-loopback peers get 403 `remote_blocked`; a wrong/missing `X-Cognia-Dev-Token` gets 401
   `bad_dev_token` after a constant-time comparison. Plugin handlers mutate `PluginRuntimeState`
-  directly; plugin and session handlers notify the renderer via fire-and-forget Tauri events.
+  directly; plugin/session handlers emit events, while twin/team handlers use a pending renderer
+  request/response bridge. This page focuses on the plugin-author CLI subset; the full shared
+  topology is documented in [CLI ↔ App Bridge](../cli-app-bridge).
 </TLDR>
 
 ## Lifecycle
@@ -31,8 +33,8 @@ flowchart LR
 Startup is **best-effort**: an endpoint-file write failure is logged, not fatal, and a bridge
 start failure logs `cli_bridge auto-start failed` without blocking the app. The token rotates
 every launch; the file is rewritten each boot, so a stale file from a crashed session simply
-carries a dead port + token. The bridge is desktop-only — on mobile it never spawns and
-`cli_bridge_status` reports `running: false`.
+carries a dead port + token. The current native startup block has no explicit mobile compile-time
+guard; renderer listeners and sync controls are desktop/Tauri-gated.
 
 ## Auth middleware
 
@@ -67,7 +69,12 @@ Router::new()
     .route("/api/v1/dev/plugins/install-directory", post(handlers::install_directory))
     .route("/api/v1/dev/plugins/uninstall", post(handlers::uninstall))
     .route("/api/v1/dev/plugins/reload",    post(handlers::reload))
+    .route("/api/v1/dev/acp/token",         post(handlers::acp_token))
     .route("/api/v1/dev/sessions/handoff",  post(handlers::handoff))
+    .route("/api/v1/dev/twin/context",      post(handlers::twin_context))
+    .route("/api/v1/dev/teams/list",        post(handlers::teams_list))
+    .route("/api/v1/dev/teams/run",         post(handlers::teams_run))
+    .route("/api/v1/dev/teams/run-status",  post(handlers::teams_run_status))
 ```
 
 All responses share the envelope `{"ok": true, "pluginId"?, "warnings"?: []}` /
@@ -127,8 +134,11 @@ single-flight guard, matching the single-developer-loopback threat model.
 
 ## Renderer round-trip
 
-Events are **fire-and-forget** — no pending-request map, no response events, no timeouts. The
-renderer's `use-cli-bridge-events` hook subscribes once and reacts:
+Plugin and session notifications are **fire-and-forget**. Twin context and the three team routes
+instead allocate a Rust pending oneshot, emit `cli-bridge://renderer-request`, and resolve through
+the `cli_bridge_renderer_response` Tauri command. Rust expires these requests after 30 seconds;
+the agent CLI aborts its fetch after 10 seconds. The renderer's event hooks handle the asynchronous
+plugin/session channels:
 
 | Event | Payload | Renderer action |
 | --- | --- | --- |
