@@ -13,6 +13,7 @@ const mockSaveExport = jest.fn()
 const mockNotify = jest.fn()
 const mockBuildBackupPackage = jest.fn()
 const mockEncryptBackupPackage = jest.fn()
+const mockDecryptBackupPackage = jest.fn()
 const mockApplyBackupPackage = jest.fn()
 const mockMigrateEnvelope = jest.fn()
 
@@ -37,6 +38,7 @@ jest.mock("@/lib/data/build-package", () => ({
 
 jest.mock("@/lib/data/crypto", () => ({
   encryptBackupPackage: (...args: unknown[]) => mockEncryptBackupPackage(...args),
+  decryptBackupPackage: (...args: unknown[]) => mockDecryptBackupPackage(...args),
 }))
 
 jest.mock("@/lib/data/apply-package", () => ({
@@ -45,6 +47,19 @@ jest.mock("@/lib/data/apply-package", () => ({
 
 jest.mock("@/lib/data/migrate", () => ({
   migrateEnvelope: (...args: unknown[]) => mockMigrateEnvelope(...args),
+  // Mirror the real structural sniff (lib/data/migrate.ts:isEncryptedEnvelope)
+  // — the import path branches on it. Inlined rather than requireActual'd:
+  // spreading the actual module's interop exports proved unreliable here.
+  isEncryptedEnvelope: (input: unknown) => {
+    if (!input || typeof input !== "object") return false
+    const obj = input as { version?: unknown; ciphertext?: unknown; kdf?: unknown }
+    return (
+      obj.version === "enc-v1" &&
+      typeof obj.ciphertext === "string" &&
+      !!obj.kdf &&
+      typeof obj.kdf === "object"
+    )
+  },
 }))
 
 jest.mock("@/lib/db/backup-history", () => ({
@@ -112,6 +127,8 @@ jest.mock("next-intl", () => ({
       importing: "Restoring…",
       importSuccess: "Restore complete",
       importFailed: `Restore failed: ${(vars?.message as string) ?? ""}`,
+      importPassphraseRequired: "Enter the backup passphrase before importing",
+      importWrongPassphrase: "Wrong passphrase",
       autoBackup: "Auto backup",
       autoBackupHint: "Back up automatically.",
       autoBackupInterval: "Interval (days)",
@@ -299,6 +316,69 @@ describe("<MobileBackupSection />", () => {
           "Restore failed: Corrupted file"
         )
       })
+    })
+
+    // jsdom's File/Blob text() is unreliable in this environment (it returns
+    // constant content regardless of the blob parts), so the encrypted-import
+    // tests dispatch the change event with a minimal file stub exposing the
+    // one member the handler reads: text().
+    const uploadStub = (content: string) => {
+      const input = screen.getByTestId("backup-import-input")
+      fireEvent.change(input, {
+        target: { files: [{ text: async () => content }] },
+      })
+    }
+    const encryptedEnvelopeJson = JSON.stringify({
+      version: "enc-v1",
+      ciphertext: "abc",
+      kdf: { salt: "s" },
+    })
+
+    it("decrypts an encrypted envelope with the passphrase field before applying", async () => {
+      // Mobile exports are always encrypted; the import path must round-trip
+      // them (this exact flow used to throw IsEncryptedError unconditionally).
+      mockDecryptBackupPackage.mockResolvedValue(JSON.stringify({ decrypted: true }))
+      mockMigrateEnvelope.mockResolvedValue({})
+      mockApplyBackupPackage.mockResolvedValue(undefined)
+
+      render(<MobileBackupSection />)
+      await userEvent.type(screen.getByTestId("backup-passphrase"), "hunter2-passphrase")
+      uploadStub(encryptedEnvelopeJson)
+
+      await waitFor(() => {
+        expect(mockToastSuccess).toHaveBeenCalledWith("Restore complete")
+      })
+      expect(mockDecryptBackupPackage).toHaveBeenCalledWith(
+        expect.objectContaining({ version: "enc-v1" }),
+        "hunter2-passphrase"
+      )
+      expect(mockMigrateEnvelope).toHaveBeenCalledWith({ decrypted: true })
+    })
+
+    it("refuses to import an encrypted envelope without a valid passphrase", async () => {
+      render(<MobileBackupSection />)
+      uploadStub(encryptedEnvelopeJson)
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith("Enter the backup passphrase before importing")
+      })
+      expect(mockDecryptBackupPackage).not.toHaveBeenCalled()
+      expect(mockApplyBackupPackage).not.toHaveBeenCalled()
+    })
+
+    it("maps a wrong-passphrase OperationError to actionable copy", async () => {
+      const opError = new Error("The operation failed")
+      opError.name = "OperationError"
+      mockDecryptBackupPackage.mockRejectedValue(opError)
+
+      render(<MobileBackupSection />)
+      await userEvent.type(screen.getByTestId("backup-passphrase"), "wrong-passphrase")
+      uploadStub(encryptedEnvelopeJson)
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith("Wrong passphrase")
+      })
+      expect(mockApplyBackupPackage).not.toHaveBeenCalled()
     })
 
     it("shows error toast with stringified non-Error throw", async () => {

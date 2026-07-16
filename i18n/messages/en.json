@@ -4512,14 +4512,12 @@
       "actionsMenu": "Session actions",
       "archive": "Archive",
       "branchedFrom": "Branched conversation — open parent",
-      "cogniaAgentChecking": "Checking for cognia-agent…",
-      "cogniaAgentNotInstalled": "Install cognia-agent to open sessions automatically",
       "delete": "Delete",
       "dragHandle": "Drag to reorder or move to a folder",
       "moveToFolder": "Move to folder",
       "openInTerminal": "Open in terminal",
-      "openInTerminalFailed": "Could not open this session in the terminal",
-      "openedInTerminal": "Opened session in terminal",
+      "openInTerminalFailed": "Could not export this session for the terminal",
+      "openedInTerminal": "Run in your terminal: {command}",
       "pin": "Pin",
       "pinned": "Pinned",
       "removeFromFolder": "Remove from folder",
@@ -7965,9 +7963,11 @@
       "historyFailedLabel": "Failed",
       "historyHeader": "History",
       "importFailed": "Restore failed: {message}",
+      "importPassphraseRequired": "Enter the backup passphrase (min 8 characters) before importing — mobile backups are always encrypted.",
       "importPick": "Import backup file",
       "importStrategy": "Merge strategy",
       "importSuccess": "Restore complete",
+      "importWrongPassphrase": "Wrong passphrase — the backup could not be decrypted.",
       "importing": "Restoring…",
       "passphraseLabel": "Optional passphrase (blank uses auto key)",
       "passphraseRequiredHint": "Required so the encrypted archive can be opened later.",
@@ -17142,8 +17142,7 @@
         "hint": "Push config and credentials to the CLI each time the desktop app starts. Credentials are written to an owner-only (0600) file in the CLI home.",
         "label": "Auto-sync on launch"
       },
-      "codexChatGptHint": "Codex API keys can sync. ChatGPT-login credentials stay in the desktop vault; sign in or configure an API key separately in the CLI.",
-      "description": "Push this app's agent config and portable provider credentials to the standalone cognia-agent CLI so it runs with the same setup.",
+      "description": "Push this app's agent config and provider credentials to the standalone cognia-agent CLI so it runs with the same setup — no second login.",
       "mcpHint": "MCP servers sync per-server from the MCP settings page — Cognia CLI is one of the agent targets there.",
       "status": {
         "checking": "Checking…",
@@ -19350,6 +19349,7 @@
       "profile": "Your local display name, avatar and bio — synced to companion devices and included in backups.",
       "providers": "AI provider API keys, models, and connection settings.",
       "remoteControl": "Local HTTP listener for inbound triggers, plus webhook signing and custom headers for outbound calls.",
+      "remoteHosts": "Drive a remote Cognia host — its terminal, files, and git — from this desktop.",
       "sandbox": "OS / microVM sandbox health and tool execution policy",
       "scheduledTasks": "Configure cron-style automation, agent permissions, and resource limits",
       "search": "Web search providers (Tavily, Brave, Bing, Google, Perplexity, Exa…), defaults, cache, safety and source verification.",
@@ -20991,6 +20991,51 @@
       },
       "title": "Remote Control"
     },
+    "remoteHosts": {
+      "add": {
+        "baseUrlHint": "The remote cognia-server address. Use its public URL (cloudflared or reverse proxy) to reach it across networks.",
+        "baseUrlLabel": "Server URL",
+        "baseUrlPlaceholder": "https://your-host:27890",
+        "connectAfter": "Connect after pairing",
+        "errBaseUrl": "Enter a URL like https://your-host:27890.",
+        "errGeneric": "Pairing failed. Please try again.",
+        "errHttp": "Pairing failed (HTTP {status}). Generate a fresh pair token on the host and try again.",
+        "errMissing": "Paste a pair payload or a pair JWT.",
+        "errNetwork": "Could not reach the host. Check the URL and that its companion server is running.",
+        "errPayload": "That doesn't look like a pair payload or JWT.",
+        "labelLabel": "Name (optional)",
+        "labelPlaceholder": "My dev box",
+        "payloadHint": "On the host run `cognia-server pair` and paste what it prints. A full payload fills in the URL for you.",
+        "payloadLabel": "Pair payload or JWT",
+        "payloadPlaceholder": "Paste the cgnp2 payload from `cognia-server pair`, or a raw pair JWT",
+        "submit": "Pair host",
+        "submitting": "Pairing…",
+        "success": "Paired {label}."
+      },
+      "description": "Drive a remote Cognia host — its terminal, files, and git — from this desktop. Files and git read with pairing; writes need the host to grant this device control.",
+      "list": {
+        "activeBadge": "Connected",
+        "activeBanner": "Driving {label} — new terminals, file, and git operations target this host.",
+        "cancel": "Cancel",
+        "capabilityNote": "Reads (open files, git status, diff, log) work once paired. Writing files, commits, and pushes need the host to grant this device control in its allow-list.",
+        "connect": "Connect",
+        "disconnect": "Disconnect",
+        "emptyBody": "Pair a remote Cognia server to drive its terminal, files, and git from here. Add one on the Add host tab.",
+        "emptyTitle": "No remote hosts yet",
+        "neverConnected": "Never connected",
+        "remove": "Remove",
+        "removeA11y": "Remove {label}",
+        "rename": "Rename",
+        "renameLabel": "Host name",
+        "save": "Save",
+        "serverVersion": "cognia {version}"
+      },
+      "tabs": {
+        "add": "Add host",
+        "hosts": "Hosts"
+      },
+      "title": "Remote hosts"
+    },
     "sandbox": {
       "automationPolicy": {
         "add": "Add row",
@@ -21711,6 +21756,7 @@
       "profile": "Profile",
       "providers": "Providers",
       "remoteControl": "Remote Control",
+      "remoteHosts": "Remote hosts",
       "sandbox": "Sandbox",
       "scheduledTasks": "Scheduled Tasks",
       "search": "Web search",
@@ -25133,7 +25179,8 @@
       "filterErrors": "Errors",
       "filterWarnings": "Warnings",
       "flowOutsideLoop": "{kind} must live inside a loop body.",
-      "graphCycle": "Part of a cycle ({nodes}). Add a Loop or Wait node to make the back-edge explicit.",
+      "graphCycle": "Part of a cycle ({nodes}). Back-edges never re-execute — move the nodes that should repeat inside a Loop container instead.",
+      "joinPolicyInLoop": "Join policy \"{policy}\" is ignored inside a loop body — loop subgraphs always wait for ALL branches. Move the join to the top level for any/race semantics.",
       "missingParent": "Belongs to a container ({parentId}) that no longer exists.",
       "missingTrigger": "No trigger node — this workflow can only be started manually.",
       "orphanNode": "Not reachable from any trigger; it will never run.",
@@ -27726,6 +27773,10 @@
           "hint": "Forwarded as the subworkflow's trigger payload.",
           "label": "Input (JSON)"
         },
+        "typedInput": {
+          "hint": "Fields generated from the published target's declared input schema. Values are validated against it at run time.",
+          "label": "Typed input"
+        },
         "workflowId": {
           "label": "Sub workflow"
         }
@@ -28181,7 +28232,8 @@
             "map": "Map",
             "reduce": "Reduce",
             "sort": "Sort"
-          }
+          },
+          "reduceHint": "Reduce here is a NUMERIC SUM over the item expression only. For general folds (collect, group-by, dedupe, merge, custom reducer) use the data.aggregate node."
         }
       },
       "twinIngest": {
@@ -28244,12 +28296,21 @@
             "sec": "seconds"
           }
         },
+        "eventKey": {
+          "hint": "Wake key an external source fires (e.g. the wf_emit_workflow_event agent tool). Empty = a private key scoped to this run and step.",
+          "label": "Event key (optional)",
+          "placeholder": "deploy-approved"
+        },
         "mode": {
           "label": "Wait mode",
           "options": {
             "duration": "Fixed duration",
             "event": "Wait for event (Phase 4+)"
           }
+        },
+        "timeoutMs": {
+          "hint": "Give up waiting after this long. 0 = wait until the run is cancelled or times out.",
+          "label": "Wait timeout"
         }
       },
       "webClone": {
@@ -28366,6 +28427,21 @@
           "hint": "Optional. Defaults to the workflow run id.",
           "label": "Response body template",
           "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
+        }
+      },
+      "workflowCompletedTrigger": {
+        "status": {
+          "hint": "Only fire for one outcome. \"Any\" fires on both success and failure.",
+          "label": "Outcome filter",
+          "options": {
+            "any": "Any",
+            "failed": "Failed",
+            "succeeded": "Succeeded"
+          }
+        },
+        "workflowId": {
+          "hint": "The source workflow to watch. Empty fires for every workflow that finishes (this workflow itself is always excluded).",
+          "label": "Source workflow (optional)"
         }
       }
     },
@@ -29215,7 +29291,7 @@
           "label": "Set variable"
         },
         "split": {
-          "description": "Fans out to multiple branches that run concurrently.",
+          "description": "Fans out to multiple branches that run concurrently. Pure passthrough — every branch receives the SAME input; it does not partition or copy-slice data (use flow.loop or data.aggregate group-by for that).",
           "label": "Split (parallel)"
         },
         "subworkflow": {
@@ -29315,6 +29391,12 @@
         "webhook": {
           "description": "Fires when an HTTP request hits the workflow's webhook path.",
           "label": "On webhook"
+        },
+        "workflow": {
+          "completed": {
+            "description": "Fires when another workflow's run finishes (succeeded or failed), receiving its output as the trigger payload.",
+            "label": "On workflow completed"
+          }
         }
       }
     },

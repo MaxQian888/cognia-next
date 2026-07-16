@@ -4512,14 +4512,12 @@
       "actionsMenu": "会话操作",
       "archive": "归档",
       "branchedFrom": "分支会话——打开父会话",
-      "cogniaAgentChecking": "正在检查 cognia-agent…",
-      "cogniaAgentNotInstalled": "安装 cognia-agent 后即可自动打开会话",
       "delete": "删除",
       "dragHandle": "拖拽以重新排序或移动到文件夹",
       "moveToFolder": "移动到文件夹",
       "openInTerminal": "在终端打开",
-      "openInTerminalFailed": "无法在终端中打开此会话",
-      "openedInTerminal": "已在终端中打开会话",
+      "openInTerminalFailed": "无法导出此会话到终端",
+      "openedInTerminal": "在终端运行：{command}",
       "pin": "置顶",
       "pinned": "已置顶",
       "removeFromFolder": "移出文件夹",
@@ -7965,9 +7963,11 @@
       "historyFailedLabel": "失败",
       "historyHeader": "历史",
       "importFailed": "恢复失败：{message}",
+      "importPassphraseRequired": "导入前请先输入备份口令（至少 8 位）——移动端备份始终是加密的。",
       "importPick": "导入备份文件",
       "importStrategy": "合并策略",
       "importSuccess": "恢复完成",
+      "importWrongPassphrase": "口令错误——无法解密该备份。",
       "importing": "正在恢复…",
       "passphraseLabel": "可选密码（留空则使用自动密钥）",
       "passphraseRequiredHint": "需要密码短语才能在以后解开加密备份。",
@@ -17142,8 +17142,7 @@
         "hint": "每次桌面应用启动时把配置与凭据推送到 CLI。凭据会写入 CLI 主目录下仅所有者可读写（0600）的文件。",
         "label": "启动时自动同步"
       },
-      "codexChatGptHint": "Codex API Key 可以同步。ChatGPT 登录凭据仅保留在桌面端凭据库中；请在 CLI 中单独登录或配置 API Key。",
-      "description": "把本应用的智能体配置与可迁移的服务商凭据推送到独立的 cognia-agent CLI，使其使用相同设置。",
+      "description": "把本应用的智能体配置与服务商凭据推送到独立的 cognia-agent CLI，使其无需二次登录即可使用相同设置。",
       "mcpHint": "MCP 服务器在 MCP 设置页按服务器逐个同步——Cognia CLI 是其中一个 agent 目标。",
       "status": {
         "checking": "检测中…",
@@ -19350,6 +19349,7 @@
       "profile": "本地显示名称、头像与简介 — 同步到伴侣设备并包含在备份中。",
       "providers": "AI 提供商的 API 密钥、模型与连接设置。",
       "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",
+      "remoteHosts": "从这台桌面驱动一台远程 Cognia 主机——它的终端、文件与 git。",
       "sandbox": "操作系统 / 微虚拟机沙箱的健康状态与工具执行策略",
       "scheduledTasks": "配置定时调度、代理创建权限与资源上限",
       "search": "联网搜索 provider（Tavily、Brave、Bing、Google、Perplexity、Exa…）、默认参数、缓存、安全与来源验证。",
@@ -20991,6 +20991,51 @@
       },
       "title": "远程控制"
     },
+    "remoteHosts": {
+      "add": {
+        "baseUrlHint": "远程 cognia-server 地址。跨网络访问时请使用其公网 URL(cloudflared 或反向代理)。",
+        "baseUrlLabel": "服务器 URL",
+        "baseUrlPlaceholder": "https://your-host:27890",
+        "connectAfter": "配对后立即连接",
+        "errBaseUrl": "请输入形如 https://your-host:27890 的 URL。",
+        "errGeneric": "配对失败,请重试。",
+        "errHttp": "配对失败(HTTP {status})。请在主机上生成新的 pair token 后重试。",
+        "errMissing": "请粘贴配对载荷或 pair JWT。",
+        "errNetwork": "无法到达主机。请检查 URL,以及其 companion 服务器是否在运行。",
+        "errPayload": "这看起来不像配对载荷或 JWT。",
+        "labelLabel": "名称(可选)",
+        "labelPlaceholder": "我的 dev box",
+        "payloadHint": "在主机上运行 `cognia-server pair` 并粘贴其打印内容。完整载荷会自动填好 URL。",
+        "payloadLabel": "配对载荷或 JWT",
+        "payloadPlaceholder": "粘贴 `cognia-server pair` 打印的 cgnp2 载荷,或一段裸 pair JWT",
+        "submit": "配对主机",
+        "submitting": "配对中…",
+        "success": "已配对 {label}。"
+      },
+      "description": "从这台桌面驱动一台远程 Cognia 主机——它的终端、文件与 git。配对后即可读取文件与 git;写入需要主机授权本设备控制。",
+      "list": {
+        "activeBadge": "已连接",
+        "activeBanner": "正在驱动 {label}——新的终端、文件与 git 操作都指向该主机。",
+        "cancel": "取消",
+        "capabilityNote": "读取(打开文件、git status、diff、log)在配对后即可用。写入文件、commit 与 push 需要主机在其 allow-list 中授权本设备控制。",
+        "connect": "连接",
+        "disconnect": "断开",
+        "emptyBody": "配对一台远程 Cognia 服务器,即可从这里驱动它的终端、文件与 git。在「添加主机」标签页添加一台。",
+        "emptyTitle": "还没有远程主机",
+        "neverConnected": "从未连接",
+        "remove": "移除",
+        "removeA11y": "移除 {label}",
+        "rename": "重命名",
+        "renameLabel": "主机名称",
+        "save": "保存",
+        "serverVersion": "cognia {version}"
+      },
+      "tabs": {
+        "add": "添加主机",
+        "hosts": "主机"
+      },
+      "title": "远程主机"
+    },
     "sandbox": {
       "automationPolicy": {
         "add": "添加一行",
@@ -21711,6 +21756,7 @@
       "profile": "个人资料",
       "providers": "提供商",
       "remoteControl": "远程控制",
+      "remoteHosts": "远程主机",
       "sandbox": "沙箱",
       "scheduledTasks": "定时任务",
       "search": "联网搜索",
@@ -25133,7 +25179,8 @@
       "filterErrors": "错误",
       "filterWarnings": "警告",
       "flowOutsideLoop": "{kind} 必须位于循环体内部。",
-      "graphCycle": "处于环路中（{nodes}）。请添加 Loop 或 Wait 节点以显式声明回边。",
+      "graphCycle": "处于环路中（{nodes}）。回边不会重复执行——请把需要循环的节点放进 Loop 容器内。",
+      "joinPolicyInLoop": "循环体内的 Join 策略「{policy}」会被忽略——循环子图始终等待所有分支。需要 any/race 语义请把 Join 移到顶层。",
       "missingParent": "所属容器（{parentId}）已不存在。",
       "missingTrigger": "没有触发器节点——该工作流只能手动启动。",
       "orphanNode": "无法从任何触发器到达，将永远不会运行。",
@@ -27726,6 +27773,10 @@
           "hint": "作为子工作流的触发负载转发。",
           "label": "输入（JSON）"
         },
+        "typedInput": {
+          "hint": "根据已发布目标声明的输入 schema 生成的字段。运行时会按该 schema 校验。",
+          "label": "类型化输入"
+        },
         "workflowId": {
           "label": "子工作流"
         }
@@ -28181,7 +28232,8 @@
             "map": "Map（映射）",
             "reduce": "Reduce（归约）",
             "sort": "Sort（排序）"
-          }
+          },
+          "reduceHint": "此处的 reduce 仅对条目表达式做数值求和。需要通用折叠（collect / group-by / dedupe / merge / 自定义 reducer）请使用 data.aggregate 节点。"
         }
       },
       "twinIngest": {
@@ -28244,12 +28296,21 @@
             "sec": "秒"
           }
         },
+        "eventKey": {
+          "hint": "外部来源触发的唤醒键（例如 wf_emit_workflow_event 工具）。留空表示仅限本次运行与本节点的私有键。",
+          "label": "事件键（可选）",
+          "placeholder": "deploy-approved"
+        },
         "mode": {
           "label": "等待方式",
           "options": {
             "duration": "固定时长",
             "event": "等待事件（Phase 4+）"
           }
+        },
+        "timeoutMs": {
+          "hint": "等待超过该时长后放弃。0 表示一直等到运行被取消或超时。",
+          "label": "等待超时"
         }
       },
       "webClone": {
@@ -28366,6 +28427,21 @@
           "hint": "可选。默认为工作流运行 ID。",
           "label": "响应正文模板",
           "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
+        }
+      },
+      "workflowCompletedTrigger": {
+        "status": {
+          "hint": "仅在指定结果时触发。“任意”表示成功与失败都会触发。",
+          "label": "结果过滤",
+          "options": {
+            "any": "任意",
+            "failed": "失败",
+            "succeeded": "成功"
+          }
+        },
+        "workflowId": {
+          "hint": "要监听的来源工作流。留空表示任何工作流完成都会触发（始终排除本工作流自身）。",
+          "label": "来源工作流（可选）"
         }
       }
     },
@@ -29215,7 +29291,7 @@
           "label": "设置变量"
         },
         "split": {
-          "description": "把执行扇出到多个并行分支。",
+          "description": "把执行扇出到多个并行分支。纯透传——每个分支收到相同输入；不做数据切分或分片（需要切分请用 flow.loop 或 data.aggregate 的 group-by）。",
           "label": "并行分发"
         },
         "subworkflow": {
@@ -29315,6 +29391,12 @@
         "webhook": {
           "description": "当 HTTP 请求命中工作流的 Webhook 路径时触发。",
           "label": "Webhook 触发"
+        },
+        "workflow": {
+          "completed": {
+            "description": "当另一个工作流的运行结束（成功或失败）时触发，并把其输出作为触发载荷。",
+            "label": "工作流完成时"
+          }
         }
       }
     },

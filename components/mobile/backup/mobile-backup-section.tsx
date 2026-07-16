@@ -51,8 +51,8 @@ import {
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { applyBackupPackage } from "@/lib/data/apply-package"
 import { buildBackupPackage } from "@/lib/data/build-package"
-import { encryptBackupPackage } from "@/lib/data/crypto"
-import { migrateEnvelope } from "@/lib/data/migrate"
+import { decryptBackupPackage, encryptBackupPackage } from "@/lib/data/crypto"
+import { isEncryptedEnvelope, migrateEnvelope } from "@/lib/data/migrate"
 import type { ImportMergeStrategy } from "@/lib/data/types"
 import { listBackupHistory } from "@/lib/db/backup-history"
 import type { BackupHistoryRow } from "@/lib/db/backup-history"
@@ -207,7 +207,29 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
     setImporting(true)
     try {
       const text = await file.text()
-      const parsed = JSON.parse(text) as unknown
+      let parsed = JSON.parse(text) as unknown
+      // Mobile exports are ALWAYS encrypted (only the encryption path is
+      // exposed here), so the import path must decrypt with the passphrase
+      // field — previously the encrypted envelope went straight into
+      // migrateEnvelope, which throws IsEncryptedError, making a phone
+      // permanently unable to restore its own backups.
+      if (isEncryptedEnvelope(parsed)) {
+        if (!passphraseValid) {
+          toast.error(t("importPassphraseRequired"))
+          return
+        }
+        try {
+          parsed = JSON.parse(await decryptBackupPackage(parsed, passphrase)) as unknown
+        } catch (err) {
+          // A wrong passphrase surfaces as WebCrypto's OperationError; map it
+          // to actionable copy instead of a bare "operation failed".
+          if (err instanceof Error && err.name === "OperationError") {
+            toast.error(t("importWrongPassphrase"))
+            return
+          }
+          throw err
+        }
+      }
       const pkg = await migrateEnvelope(parsed)
       await applyBackupPackage(pkg, {
         mergeStrategy: strategy,
