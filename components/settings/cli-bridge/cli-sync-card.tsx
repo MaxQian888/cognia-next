@@ -38,6 +38,7 @@ export function CliSyncCard() {
   const [syncing, setSyncing] = useState(false)
 
   useEffect(() => {
+    if (!isTauri()) return
     let alive = true
     void (async () => {
       const resolved = await resolveCliHome()
@@ -127,6 +128,7 @@ export function CliSyncCard() {
         onCheckedChange={(next) => void onToggleAutoSync(next)}
       />
 
+      <p className="text-[11px] text-muted-foreground">{t("codexChatGptHint")}</p>
       <p className="text-[11px] text-muted-foreground">{t("mcpHint")}</p>
     </SettingsCard>
   )

@@ -4,9 +4,11 @@
  * Projects the desktop's configured provider secrets into the cognia CLI's
  * `~/.cognia/credentials.json` (shape `{ providers: { [id]: { apiKey?,
  * authToken? } } }`, written 0600) so the standalone `cognia-agent` CLI runs
- * with the same auth without a second login. Provider API keys come straight
- * from `AppSettings.providerSettings`; the Anthropic subscription bearer is
- * read from the active subscription account (the same value the sidecar uses).
+ * with the same portable auth. Provider API keys come straight from
+ * `AppSettings.providerSettings`; the Anthropic subscription bearer and Codex
+ * API-key credential are read from their active vault accounts. ChatGPT-login
+ * Codex credentials remain desktop-only because the CLI file cannot represent
+ * their account headers and refresh lifecycle.
  *
  * The CredentialsFile shape is intentionally re-declared here (not imported
  * from `cli/`) so the app bundle never depends on the standalone CLI package.
@@ -16,6 +18,10 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 import { getAccount, getActiveAccount } from "@/lib/subscription/core/transport"
+import {
+  resolveCodexVaultCredential,
+  type CodexVaultCredential,
+} from "@/lib/subscription/codex/chat-bridge"
 
 import { writeCliHomeFile } from "./home"
 
@@ -53,12 +59,14 @@ export function buildCredentialsFile(
 export interface GatherCredentialsDeps {
   /** Read the active Anthropic subscription bearer (→ `authToken`), or null. */
   readAnthropicAuthToken?: () => Promise<string | null>
+  /** Read the active Codex vault credential; ChatGPT-login mode is not portable. */
+  readCodexVaultCredential?: () => Promise<CodexVaultCredential | null>
 }
 
 /**
  * Collect provider secrets from `AppSettings.providerSettings` (each provider's
- * stored `apiKey`) plus the active Anthropic subscription bearer when one is
- * connected.
+ * stored `apiKey`) plus the active Anthropic subscription bearer and a portable
+ * Codex API-key vault credential when connected.
  */
 export async function gatherCredentials(
   settings: Pick<AppSettings, "providerSettings">,
@@ -73,6 +81,18 @@ export async function gatherCredentials(
   const readToken = deps.readAnthropicAuthToken ?? defaultReadAnthropicAuthToken
   const authToken = await readToken()
   if (authToken) out.anthropic = { ...(out.anthropic ?? {}), authToken }
+
+  if (!out.codex?.apiKey) {
+    const readCodexCredential =
+      deps.readCodexVaultCredential ?? (() => resolveCodexVaultCredential("codex"))
+    const credential = await readCodexCredential()
+    // ChatGPT-login credentials require account-scoped headers and refresh
+    // semantics that credentials.json cannot represent. Only the portable
+    // standard API-key mode (identified by the absence of those headers) is
+    // projected into the standalone CLI.
+    const codexApiKey = credential && !credential.headers ? credential.apiKey.trim() : ""
+    if (codexApiKey) out.codex = { apiKey: codexApiKey }
+  }
   return out
 }
 

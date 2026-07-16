@@ -69,6 +69,45 @@ describe("gatherCredentials", () => {
     )
     expect(secrets.anthropic).toBeUndefined()
   })
+
+  it("uses an API-key Codex vault credential when provider settings have none", async () => {
+    const secrets = await gatherCredentials(
+      { providerSettings: ps({}) },
+      {
+        readAnthropicAuthToken: async () => null,
+        readCodexVaultCredential: async () => ({
+          apiKey: "  sk-codex-vault  ",
+          baseURL: "https://api.openai.com/v1",
+        }),
+      }
+    )
+    expect(secrets.codex).toEqual({ apiKey: "sk-codex-vault" })
+  })
+
+  it("does not serialize ChatGPT-login Codex credentials", async () => {
+    const secrets = await gatherCredentials(
+      { providerSettings: ps({}) },
+      {
+        readAnthropicAuthToken: async () => null,
+        readCodexVaultCredential: async () => ({
+          apiKey: "chatgpt-access-token",
+          baseURL: "https://chatgpt.com/backend-api/codex",
+          headers: { "ChatGPT-Account-Id": "acct-1" },
+        }),
+      }
+    )
+    expect(secrets.codex).toBeUndefined()
+  })
+
+  it("keeps the configured Codex API key without probing the vault", async () => {
+    const readCodexVaultCredential = jest.fn()
+    const secrets = await gatherCredentials(
+      { providerSettings: ps({ codex: { apiKey: "sk-settings" } }) },
+      { readAnthropicAuthToken: async () => null, readCodexVaultCredential }
+    )
+    expect(secrets.codex).toEqual({ apiKey: "sk-settings" })
+    expect(readCodexVaultCredential).not.toHaveBeenCalled()
+  })
 })
 
 describe("pushCredentialsToCli", () => {

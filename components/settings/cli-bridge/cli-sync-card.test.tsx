@@ -22,9 +22,9 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 const resolveCliHome = jest.fn(async (): Promise<string | null> => "/home/.cognia")
 jest.mock("@/lib/cli-bridge/home", () => ({ resolveCliHome: () => resolveCliHome() }))
 
-const pushToCli = jest.fn(
-  async (_s: unknown): Promise<{ home: string | null }> => ({ home: "/home/.cognia" })
-)
+const pushToCli = jest.fn(async (_s: unknown): Promise<{ home: string | null }> => ({
+  home: "/home/.cognia",
+}))
 const countPushSuccesses = jest.fn(() => 3)
 const countPushErrors = jest.fn(() => 0)
 jest.mock("@/lib/cli-bridge/push-to-cli", () => ({
@@ -33,9 +33,9 @@ jest.mock("@/lib/cli-bridge/push-to-cli", () => ({
   countPushErrors: () => countPushErrors(),
 }))
 
-const maybeAutoPushToCli = jest.fn(
-  async (_s: unknown): Promise<{ home: string | null }> => ({ home: "/home/.cognia" })
-)
+const maybeAutoPushToCli = jest.fn(async (_s: unknown): Promise<{ home: string | null }> => ({
+  home: "/home/.cognia",
+}))
 jest.mock("@/lib/cli-bridge/auto-push", () => ({
   maybeAutoPushToCli: (settings: unknown) => maybeAutoPushToCli(settings),
 }))
@@ -64,6 +64,7 @@ describe("CliSyncCard", () => {
     isTauriMock.mockReturnValue(false)
     const { container } = render(<CliSyncCard />)
     expect(container).toBeEmptyDOMElement()
+    expect(resolveCliHome).not.toHaveBeenCalled()
   })
 
   it("detects the CLI home and enables the sync button", async () => {
@@ -71,6 +72,7 @@ describe("CliSyncCard", () => {
     const button = screen.getByRole("button", { name: "syncNow" })
     await waitFor(() => expect(button).not.toBeDisabled())
     expect(resolveCliHome).toHaveBeenCalled()
+    expect(screen.getByText("codexChatGptHint")).toBeInTheDocument()
   })
 
   it("Sync now pushes everything and toasts success", async () => {
