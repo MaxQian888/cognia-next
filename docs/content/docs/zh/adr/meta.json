@@ -34,6 +34,9 @@
     "0052-cli-tui-fixed-region-layout",
     "0053-cli-tui-rendering-and-tool-invocation",
     "0055-agent-browser-loop",
-    "0072-browser-action-recording"
+    "0072-browser-action-recording",
+    "0073-chromium-cookie-import",
+    "0074-otel-native-telemetry",
+    "0076-local-provider-management-transport"
   ]
 }

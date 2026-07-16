@@ -1,5 +1,6 @@
 # Default owners — every PR requests review from these accounts.
 * @AstroAir @MaxQian888
+/lib/telemetry/events/catalog.ts @AstroAir @MaxQian888
 
 # Example: scope-specific owners (uncomment + edit when growing the team).
 # /src-tauri/  @AstroAir @MaxQian888
