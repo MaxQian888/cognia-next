@@ -59,6 +59,65 @@ describe("exportHandoffToCli", () => {
     expect(lines).toHaveLength(1)
   })
 
+  it("preserves rich parts as ordered, bounded transcript markers", async () => {
+    const d = deps()
+    await exportHandoffToCli(
+      {
+        sessionId: "s_rich",
+        messages: [
+          {
+            id: "m_rich",
+            role: "assistant",
+            parts: [
+              { type: "text", text: "I inspected the project." },
+              { type: "reasoning", text: "Need to inspect the failing test." },
+              {
+                type: "tool-Bash",
+                state: "output-available",
+                input: { command: "pnpm test " + "x".repeat(400) },
+                output: "1 test passed",
+              },
+              { type: "code", language: "ts", code: "const ok = true" },
+              {
+                type: "file",
+                filename: "report.pdf",
+                mediaType: "application/pdf",
+                url: "/uploads/report.pdf",
+              },
+              { type: "image", alt: "terminal screenshot" },
+              { type: "future-part", payload: { useful: true } },
+            ],
+          } as unknown as UIMessage,
+        ],
+      },
+      d
+    )
+
+    const { content } = JSON.parse(d.writes[0].content.trim()) as { content: string }
+    expect(content).toContain("I inspected the project.")
+    expect(content).toContain("[reasoning] Need to inspect the failing test.")
+    expect(content).toContain("[tool: Bash]")
+    expect(content).toContain("1 test passed")
+    expect(content).toContain("```ts\nconst ok = true\n```")
+    expect(content).toContain("[attachment: report.pdf]")
+    expect(content).toContain("[image: terminal screenshot]")
+    expect(content).toContain("[part: future-part]")
+
+    const ordered = [
+      "I inspected the project.",
+      "[reasoning]",
+      "[tool: Bash]",
+      "```ts",
+      "[attachment: report.pdf]",
+      "[image: terminal screenshot]",
+      "[part: future-part]",
+    ].map((marker) => content.indexOf(marker))
+    expect(ordered).toEqual([...ordered].sort((a, b) => a - b))
+    expect(
+      content.split("\n").find((line) => line.startsWith("[tool: Bash]"))?.length
+    ).toBeLessThanOrEqual(240)
+  })
+
   it("throws when there is nothing to hand off", async () => {
     const d = deps()
     await expect(exportHandoffToCli({ sessionId: "s_3", messages: [] }, d)).rejects.toThrow(

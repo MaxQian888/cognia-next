@@ -16,8 +16,106 @@
 
 import type { UIMessage } from "ai"
 
-import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { resolveCliHome } from "@/lib/cli-bridge/home"
+
+const HANDOFF_MARKER_MAX_LENGTH = 240
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : ""
+}
+
+function oneLine(value: unknown): string {
+  if (typeof value === "string") return value.replace(/\s+/g, " ").trim()
+  try {
+    return JSON.stringify(value).replace(/\s+/g, " ").trim()
+  } catch {
+    return String(value).replace(/\s+/g, " ").trim()
+  }
+}
+
+function boundedMarker(prefix: string, detail?: unknown): string {
+  const suffix = detail === undefined ? "" : ` ${oneLine(detail)}`
+  const marker = `${prefix}${suffix}`
+  return marker.length <= HANDOFF_MARKER_MAX_LENGTH
+    ? marker
+    : `${marker.slice(0, HANDOFF_MARKER_MAX_LENGTH - 1)}…`
+}
+
+function boundedDetail(value: unknown, max = 96): string {
+  const detail = oneLine(value)
+  return detail.length <= max ? detail : `${detail.slice(0, max - 1)}…`
+}
+
+function toolMarker(part: Record<string, unknown>, type: string): string {
+  const name =
+    type === "dynamic-tool"
+      ? stringValue(part.toolName) || "tool"
+      : type.startsWith("tool-")
+        ? type.slice("tool-".length)
+        : stringValue(part.name) || "tool"
+  const details: string[] = []
+  if (part.input !== undefined) details.push(`input: ${boundedDetail(part.input)}`)
+  if (part.output !== undefined) details.push(`result: ${boundedDetail(part.output)}`)
+  if (typeof part.errorText === "string" && part.errorText) {
+    details.push(`error: ${boundedDetail(part.errorText)}`)
+  }
+  return boundedMarker(`[tool: ${name}]`, details.join("; ") || part.state)
+}
+
+/**
+ * Render rich UI message parts into the text preamble consumed by
+ * `cognia-agent resume`. Known rich parts receive concise markers and unknown
+ * future parts receive a type marker, so handoff never loses their existence
+ * silently. Tool/reasoning markers are bounded; code remains fenced verbatim.
+ */
+export function serializeHandoffParts(parts: unknown): string {
+  if (!Array.isArray(parts)) return ""
+  const rendered: string[] = []
+  for (const raw of parts) {
+    if (!isRecord(raw)) {
+      rendered.push("[part: invalid]")
+      continue
+    }
+    const type = stringValue(raw.type) || "unknown"
+    if (type === "text") {
+      const text = stringValue(raw.text).trim()
+      if (text) rendered.push(text)
+    } else if (type === "markdown") {
+      const markdown = stringValue(raw.md) || stringValue(raw.text)
+      if (markdown.trim()) rendered.push(markdown.trim())
+    } else if (type === "code") {
+      const code = stringValue(raw.code) || stringValue(raw.text)
+      if (code) rendered.push(`\`\`\`${stringValue(raw.language)}\n${code}\n\`\`\``)
+    } else if (type === "reasoning" || type === "thinking") {
+      const reasoning = stringValue(raw.text) || stringValue(raw.thinking)
+      rendered.push(boundedMarker("[reasoning]", reasoning || undefined))
+    } else if (type.startsWith("tool-") || type === "dynamic-tool" || type === "tool_use") {
+      rendered.push(toolMarker(raw, type))
+    } else if (type === "tool_result") {
+      rendered.push(boundedMarker("[tool result]", raw.content ?? raw.output))
+    } else if (type === "file") {
+      const filename =
+        stringValue(raw.filename) ||
+        stringValue(raw.fileName) ||
+        stringValue(raw.mediaType) ||
+        "file"
+      rendered.push(boundedMarker(`[attachment: ${filename}]`))
+    } else if (type === "image") {
+      const alt = stringValue(raw.alt)
+      rendered.push(boundedMarker(alt ? `[image: ${alt}]` : "[image]"))
+    } else if (type === "a2ui") {
+      const mirror = stringValue(raw.plainTextMirror) || stringValue(raw.text)
+      rendered.push(boundedMarker("[a2ui]", mirror || undefined))
+    } else {
+      rendered.push(boundedMarker(`[part: ${type}]`))
+    }
+  }
+  return rendered.join("\n").trim()
+}
 
 export interface ExportHandoffDeps {
   /**
@@ -49,7 +147,7 @@ export interface ExportHandoffResult {
 
 /** Render a UIMessage to a transcript JSONL line (matches the CLI's reader). */
 function toLine(message: UIMessage, ts: number): string | null {
-  const content = extractPlainText(message.parts)
+  const content = serializeHandoffParts(message.parts)
   if (!content) return null
   const role = message.role === "assistant" || message.role === "system" ? message.role : "user"
   return JSON.stringify({ ts, role, content })
