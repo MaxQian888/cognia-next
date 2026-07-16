@@ -99,10 +99,14 @@ jobs:
     needs: test
     if: always()
 
+    # Read-only on purpose: this workflow is `workflow_call`ed from ci.yml,
+    # which holds only the repo-default read token (and Dependabot PRs get a
+    # read-only token that `permissions:` cannot escalate). Requesting
+    # `pull-requests: write` / `checks: write` here made GitHub refuse to
+    # compile the whole pipeline — 22/22 startup_failure. Test results are
+    # published via artifacts + the job summary instead.
     permissions:
       contents: read
-      pull-requests: write
-      checks: write
 
     steps:
       - name: Checkout code
@@ -177,16 +181,6 @@ jobs:
           name: coverage-report
           path: coverage/
           retention-days: 30
-
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: always() && github.event_name == 'pull_request'
-        with:
-          files: |
-            shards/jest-shard-*/junit-shard-*.xml
-          check_name: Test Results
-          comment_title: Test Results
-        continue-on-error: true
 
   sidecar:
     name: Sidecar Tests
