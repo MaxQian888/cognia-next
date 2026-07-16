@@ -36,7 +36,15 @@ describe("useProjectEditorSessionStore", () => {
     activateProjectEditorAccountStorage("acct-a")
 
     expect(useProjectEditorSessionStore.getState().sessions["team:team1"]).toEqual(legacySession)
+    expect(
+      JSON.parse(window.localStorage.getItem("cognia-project-editor-sessions:acct-a") ?? "{}").state
+        ?.sessions?.["team:team1"]
+    ).toEqual(legacySession)
     expect(window.localStorage.getItem("cognia-agent-teams:acct-a")).not.toBeNull()
+
+    clearProjectEditorAccountStorage()
+    activateProjectEditorAccountStorage("acct-a")
+    expect(useProjectEditorSessionStore.getState().sessions["team:team1"]).toEqual(legacySession)
   })
 
   it("keeps account snapshots isolated and never overwrites a new snapshot with legacy data", () => {

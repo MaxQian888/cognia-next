@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { Button } from "@/components/ui/button"
+import { useBreakpoint } from "@/hooks/ui"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,6 +42,7 @@ interface StatResult {
 
 export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
   const t = useTranslations("artifacts.workspace.card")
+  const breakpoint = useBreakpoint()
   const [expanded, setExpanded] = useState(false)
   const [confirmUndo, setConfirmUndo] = useState(false)
   const [undoing, setUndoing] = useState(false)
@@ -58,6 +60,7 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
 
   useEffect(() => {
     if (
+      breakpoint !== "desktop" ||
       !rootPath ||
       gitRootDir !== rootPath ||
       !repoState?.isRepo ||
@@ -77,9 +80,16 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
     return () => {
       alive = false
     }
-  }, [files.length, gitRootDir, repoState?.isRepo, rootPath, status])
+  }, [breakpoint, files.length, gitRootDir, repoState?.isRepo, rootPath, status])
 
-  if (!rootPath || gitRootDir !== rootPath || !repoState?.isRepo || !status || files.length === 0) {
+  if (
+    breakpoint !== "desktop" ||
+    !rootPath ||
+    gitRootDir !== rootPath ||
+    !repoState?.isRepo ||
+    !status ||
+    files.length === 0
+  ) {
     return null
   }
 

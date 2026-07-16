@@ -34,6 +34,7 @@ interface Props {
 
 export function AgentTeamEditor({ team }: Props) {
   const t = useTranslations("projectEditor")
+  const tTeam = useTranslations("agentTeamsWorkspace.editor")
   const workingDir = team.config.workingDir
 
   if (!hasWorkspaceFsBackend() || !workingDir) {
@@ -42,7 +43,7 @@ export function AgentTeamEditor({ team }: Props) {
         <EmptyHeader>
           <EmptyTitle>{t("unavailableTitle")}</EmptyTitle>
           <EmptyDescription>
-            {workingDir ? t("unavailableDesc") : t("noWorkingDir")}
+            {workingDir ? t("unavailableDesc") : tTeam("noWorkingDir")}
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -54,6 +55,7 @@ export function AgentTeamEditor({ team }: Props) {
 
 function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: string }) {
   const t = useTranslations("projectEditor")
+  const tTeam = useTranslations("agentTeamsWorkspace.editor")
   const bindings = useKeybindingStore((s) => s.bindings)
   const [leftTab, setLeftTab] = useState<"files" | "search">("files")
   // Optional "Pro IDE" mode — the embedded code-server webview (desktop only).
@@ -156,7 +158,7 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
     () => [
       {
         id: "file.save",
-        label: "Save",
+        label: actionLabels["file.save"],
         contextMenuGroupId: "1_modification",
         contextMenuOrder: 1,
         alwaysAvailable: true,
@@ -164,7 +166,7 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
       },
       {
         id: "file.format",
-        label: "Format Document",
+        label: actionLabels["file.format"],
         monacoCommand: "editor.action.formatDocument",
         contextMenuGroupId: "1_modification",
         contextMenuOrder: 2,
@@ -172,7 +174,7 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
       },
       {
         id: "file.copyPath",
-        label: "Copy Path",
+        label: actionLabels["file.copyPath"],
         contextMenuGroupId: "9_cutcopypaste",
         contextMenuOrder: 1,
         alwaysAvailable: true,
@@ -182,7 +184,7 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
       },
       {
         id: "file.copyRelativePath",
-        label: "Copy Relative Path",
+        label: actionLabels["file.copyRelativePath"],
         contextMenuGroupId: "9_cutcopypaste",
         contextMenuOrder: 2,
         alwaysAvailable: true,
@@ -192,13 +194,13 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
       },
       {
         id: "file.searchProject",
-        label: "Search in Project",
+        label: actionLabels["file.searchProject"],
         contextMenuGroupId: "z_search",
         alwaysAvailable: true,
         run: () => setLeftTab("search"),
       },
     ],
-    [activeFile, handleSaveActive]
+    [actionLabels, activeFile, handleSaveActive]
   )
 
   return (
@@ -214,7 +216,7 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
           <div
             className="flex items-center gap-0.5 rounded-md border p-0.5"
             role="group"
-            aria-label={t("proIde.switchLabel")}
+            aria-label={tTeam("proIde.switchLabel")}
           >
             <button
               type="button"
@@ -227,14 +229,14 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
               onClick={() => setMode("monaco")}
             >
               <CodeIcon className="size-3.5" />
-              {t("proIde.toggleMonaco")}
+              {tTeam("proIde.toggleMonaco")}
             </button>
             <button
               type="button"
               data-testid="editor-mode-codeserver"
               aria-pressed={mode === "codeserver"}
               disabled={!proIdeSupported}
-              title={proIdeSupported ? undefined : t("proIde.disabledTooltip")}
+              title={proIdeSupported ? undefined : tTeam("proIde.disabledTooltip")}
               className={cn(
                 "flex items-center gap-1 rounded px-2 py-0.5 text-xs disabled:cursor-not-allowed disabled:opacity-50",
                 mode === "codeserver" ? "bg-accent" : "text-muted-foreground hover:bg-accent/50"
@@ -242,7 +244,7 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
               onClick={() => setMode("codeserver")}
             >
               <SquareCodeIcon className="size-3.5" />
-              {t("proIde.toggleVsCode")}
+              {tTeam("proIde.toggleVsCode")}
             </button>
           </div>
         )}

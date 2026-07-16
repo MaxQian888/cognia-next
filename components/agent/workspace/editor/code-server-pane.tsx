@@ -17,7 +17,7 @@ interface Props {
 }
 
 export function CodeServerPane({ root }: Props) {
-  const t = useTranslations("projectEditor")
+  const t = useTranslations("agentTeamsWorkspace.editor")
   const ref = useRef<HTMLDivElement>(null)
   const { phase, progress, error, retry } = useCodeServerPane(ref, { root, active: true })
   const percent = progress != null ? Math.round(progress * 100) : null

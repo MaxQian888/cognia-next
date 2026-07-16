@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use git2::{DiffFindOptions, DiffOptions, Patch, Repository};
+use git2::{DiffFindOptions, DiffOptions, ErrorCode, Patch, Repository};
 
 use super::error::Result;
 use super::read::open_repo;
@@ -21,7 +21,11 @@ pub fn diff_stat(repo_path: &str) -> Result<Vec<GitFileDiffStat>> {
 }
 
 fn diff_stat_for(repo: &Repository) -> Result<Vec<GitFileDiffStat>> {
-    let head_tree = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
+    let head_tree = match repo.head() {
+        Ok(head) => Some(head.peel_to_tree()?),
+        Err(error) if error.code() == ErrorCode::UnbornBranch => None,
+        Err(error) => return Err(error.into()),
+    };
     let mut options = DiffOptions::new();
     options
         .include_untracked(true)
@@ -145,5 +149,15 @@ mod tests {
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].path, "first.txt");
         assert_eq!((stats[0].insertions, stats[0].deletions), (2, 0));
+    }
+
+    #[test]
+    fn malformed_head_is_reported_instead_of_treated_as_unborn() {
+        let (tmp, _repo) = init_repo(false);
+        fs::write(tmp.path().join(".git/HEAD"), "not-a-valid-head\n").unwrap();
+        fs::write(tmp.path().join("first.txt"), "hello\n").unwrap();
+
+        let error = diff_stat(tmp.path().to_str().unwrap()).unwrap_err();
+        assert!(error.to_string().contains("libgit2 error"));
     }
 }

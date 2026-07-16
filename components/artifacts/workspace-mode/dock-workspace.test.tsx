@@ -18,7 +18,9 @@ const setActivePath = jest.fn()
 const setDraft = jest.fn()
 const saveFile = jest.fn().mockResolvedValue(undefined)
 const saveAll = jest.fn().mockResolvedValue(undefined)
+const mockUseProjectEditor = jest.fn()
 let activePath: string | null = null
+let editorRootPath = "/repo"
 let activeFile: { absolutePath: string; relPath: string; content: string } | null = null
 let openFiles: Array<{ absolutePath: string; relPath: string; content: string }> = []
 
@@ -47,24 +49,27 @@ jest.mock("@/stores/canvas/keybinding-store", () => ({
 }))
 
 jest.mock("@/components/editor/project/use-project-editor", () => ({
-  useProjectEditor: () => ({
-    deps: {},
-    roots: [{ key: "/repo", label: "main", path: "/repo", isMain: true }],
-    rootKey: "/repo",
-    rootPath: "/repo",
-    openFiles,
-    activePath,
-    activeFile,
-    dirtyCount: 0,
-    treeRefreshToken: 0,
-    selectRoot,
-    openFile,
-    closeFile,
-    setActivePath,
-    setDraft,
-    saveFile,
-    saveAll,
-  }),
+  useProjectEditor: (args: unknown) => {
+    mockUseProjectEditor(args)
+    return {
+      deps: {},
+      roots: [{ key: "/repo", label: "main", path: "/repo", isMain: true }],
+      rootKey: "/repo",
+      rootPath: editorRootPath,
+      openFiles,
+      activePath,
+      activeFile,
+      dirtyCount: 0,
+      treeRefreshToken: 0,
+      selectRoot,
+      openFile,
+      closeFile,
+      setActivePath,
+      setDraft,
+      saveFile,
+      saveAll,
+    }
+  },
 }))
 
 jest.mock("@/components/editor/project/project-root-switcher", () => ({
@@ -181,7 +186,9 @@ beforeEach(() => {
   setDraft.mockClear()
   saveFile.mockClear().mockResolvedValue(undefined)
   saveAll.mockClear().mockResolvedValue(undefined)
+  mockUseProjectEditor.mockClear()
   activePath = null
+  editorRootPath = "/repo"
   activeFile = null
   openFiles = []
   act(() => useArtifactDockLayoutStore.getState().resetLayout())
@@ -224,6 +231,10 @@ describe("DockWorkspace", () => {
     expect(clearReveal).toHaveBeenCalledWith(expect.stringMatching(/^workspace-reveal-/))
     expect(screen.getByTestId("workspace-file-layout")).toBeInTheDocument()
     expect(screen.getByTestId("file-tree")).toBeInTheDocument()
+    expect(mockUseProjectEditor).toHaveBeenCalledWith({
+      scopeKey: "session:split-session",
+      workingDir: "/repo",
+    })
   })
 
   it("opens the fixed review surface only for the bound Git repository", async () => {
@@ -241,6 +252,25 @@ describe("DockWorkspace", () => {
     expect(screen.getByTestId("review-changes")).toBeInTheDocument()
     expect(screen.getByTestId("review-diff")).toBeInTheDocument()
     expect(screen.queryByTestId("file-tree")).not.toBeInTheDocument()
+  })
+
+  it("selects the requested root before consuming a reveal", async () => {
+    editorRootPath = "/repo-wt"
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceFile({
+        sessionId: "session-1",
+        rootPath: "/repo",
+        relPath: "src/a.ts",
+      })
+    })
+
+    const { rerender } = render(<DockWorkspace activeSessionId="session-1" />)
+    expect(selectRoot).toHaveBeenCalledWith("/repo")
+    expect(openFile).not.toHaveBeenCalled()
+
+    editorRootPath = "/repo"
+    rerender(<DockWorkspace activeSessionId="session-1" />)
+    await waitFor(() => expect(openFile).toHaveBeenCalledWith("src/a.ts"))
   })
 
   it("does not expose the review tab for a non-Git root", () => {

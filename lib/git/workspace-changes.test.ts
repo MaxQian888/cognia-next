@@ -88,4 +88,42 @@ describe("undoWorkspaceChanges", () => {
     expect(discard).not.toHaveBeenCalled()
     expect(refresh).toHaveBeenCalledWith("/repo")
   })
+
+  it("stops when discard fails and still refreshes current status", async () => {
+    const error = new Error("discard failed")
+    const unstage = jest.fn().mockResolvedValue(undefined)
+    const discard = jest.fn().mockRejectedValue(error)
+    const refresh = jest.fn().mockResolvedValue(undefined)
+
+    await expect(undoWorkspaceChanges("/repo", status, { unstage, discard, refresh })).rejects.toBe(
+      error
+    )
+
+    expect(unstage).toHaveBeenCalledTimes(1)
+    expect(discard).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledWith("/repo")
+  })
+
+  it("rejects when the final refresh fails after successful operations", async () => {
+    const error = new Error("refresh failed")
+    const unstage = jest.fn().mockResolvedValue(undefined)
+    const discard = jest.fn().mockResolvedValue(undefined)
+    const refresh = jest.fn().mockRejectedValue(error)
+
+    await expect(undoWorkspaceChanges("/repo", status, { unstage, discard, refresh })).rejects.toBe(
+      error
+    )
+  })
+
+  it("preserves the operation error when refresh also fails", async () => {
+    const operationError = new Error("discard failed")
+    const refreshError = new Error("refresh failed")
+    const unstage = jest.fn().mockResolvedValue(undefined)
+    const discard = jest.fn().mockRejectedValue(operationError)
+    const refresh = jest.fn().mockRejectedValue(refreshError)
+
+    await expect(undoWorkspaceChanges("/repo", status, { unstage, discard, refresh })).rejects.toBe(
+      operationError
+    )
+  })
 })

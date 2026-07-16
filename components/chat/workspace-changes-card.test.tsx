@@ -7,6 +7,7 @@ let projects: Array<{
   roots: Array<{ id: string; path: string; isPrimary?: boolean }>
 }> = []
 let gitState: Record<string, unknown> = {}
+let breakpoint: "mobile" | "tablet" | "desktop" = "desktop"
 const gitDiffStat = jest.fn()
 const undoWorkspaceChanges = jest.fn()
 const toastError = jest.fn()
@@ -18,6 +19,7 @@ jest.mock("next-intl", () => ({
 jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: (...args: unknown[]) => toastError(...args) },
 }))
+jest.mock("@/hooks/ui", () => ({ useBreakpoint: () => breakpoint }))
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (selector: (state: { projects: typeof projects }) => unknown) =>
     selector({ projects }),
@@ -58,6 +60,7 @@ const status = {
 }
 
 beforeEach(() => {
+  breakpoint = "desktop"
   projects = [{ id: "project-1", roots: [{ id: "root-1", path: "/repo", isPrimary: true }] }]
   gitState = { rootDir: "/repo", repoState: { isRepo: true }, status }
   gitDiffStat.mockReset().mockResolvedValue([
@@ -70,6 +73,14 @@ beforeEach(() => {
 })
 
 describe("WorkspaceChangesCard", () => {
+  it("does not render or load stats outside the desktop dock layout", () => {
+    breakpoint = "tablet"
+    render(<WorkspaceChangesCard session={session} />)
+
+    expect(screen.queryByTestId("workspace-changes-card")).not.toBeInTheDocument()
+    expect(gitDiffStat).not.toHaveBeenCalled()
+  })
+
   it("does not render outside the active Git root or with no changes", () => {
     gitState = { ...gitState, rootDir: "/other" }
     const { rerender } = render(<WorkspaceChangesCard session={session} />)

@@ -198,6 +198,10 @@ function WorkspaceEditorBody({ sessionId, workingDir }: { sessionId: string; wor
   useEffect(() => {
     if (!request || request.id === processedRequest.current) return
     if (request.sessionId !== sessionId || request.rootPath !== workingDir) return
+    if (rootPath !== workingDir) {
+      selectRoot(workingDir)
+      return
+    }
     processedRequest.current = request.id
     if (request.kind === "review") {
       queueMicrotask(() => {
@@ -212,7 +216,7 @@ function WorkspaceEditorBody({ sessionId, workingDir }: { sessionId: string; wor
       if (processedRequest.current === request.id) setSurface("file")
       clearRequest(request.id)
     })
-  }, [request, sessionId, workingDir, hasReview, openFile, clearRequest])
+  }, [request, sessionId, workingDir, rootPath, selectRoot, hasReview, openFile, clearRequest])
 
   const visibleSurface = hasReview ? surface : "file"
 
@@ -242,21 +246,21 @@ function WorkspaceEditorBody({ sessionId, workingDir }: { sessionId: string; wor
     () => [
       {
         id: "file.save",
-        label: "Save",
+        label: actionLabels["file.save"],
         contextMenuGroupId: "1_modification",
         alwaysAvailable: true,
         run: handleSaveActive,
       },
       {
         id: "file.format",
-        label: "Format Document",
+        label: actionLabels["file.format"],
         monacoCommand: "editor.action.formatDocument",
         contextMenuGroupId: "1_modification",
         alwaysAvailable: true,
       },
       {
         id: "file.copyPath",
-        label: "Copy Path",
+        label: actionLabels["file.copyPath"],
         contextMenuGroupId: "9_cutcopypaste",
         alwaysAvailable: true,
         run: () => {
@@ -265,7 +269,7 @@ function WorkspaceEditorBody({ sessionId, workingDir }: { sessionId: string; wor
       },
       {
         id: "file.copyRelativePath",
-        label: "Copy Relative Path",
+        label: actionLabels["file.copyRelativePath"],
         contextMenuGroupId: "9_cutcopypaste",
         alwaysAvailable: true,
         run: () => {
@@ -274,13 +278,13 @@ function WorkspaceEditorBody({ sessionId, workingDir }: { sessionId: string; wor
       },
       {
         id: "file.searchProject",
-        label: "Search in Project",
+        label: actionLabels["file.searchProject"],
         contextMenuGroupId: "z_search",
         alwaysAvailable: true,
         run: () => setSideTab("search"),
       },
     ],
-    [activeFile, handleSaveActive]
+    [actionLabels, activeFile, handleSaveActive]
   )
 
   const onKeyDown = useCallback(

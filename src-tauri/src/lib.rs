@@ -1630,3 +1630,16 @@ pub fn run() {
             }
         });
 }
+
+#[cfg(test)]
+mod command_registration_tests {
+    #[test]
+    fn git_diff_stat_is_registered_with_the_tauri_invoke_handler() {
+        let source = include_str!("lib.rs");
+        let command = ["git::commands::git_", "diff_stat,"].concat();
+        assert!(
+            source.contains(&command),
+            "git_diff_stat must remain in tauri::generate_handler!"
+        );
+    }
+}

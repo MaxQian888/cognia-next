@@ -35,8 +35,9 @@ const editorState = {
   saveAll: jest.fn(async () => {}),
   reloadFile: jest.fn(async () => {}),
 }
+const mockUseProjectEditor = jest.fn(() => editorState)
 jest.mock("@/components/editor/project/use-project-editor", () => ({
-  useProjectEditor: () => editorState,
+  useProjectEditor: (args: unknown) => mockUseProjectEditor(args),
 }))
 // Capture the props passed to each child so tests can drive its callbacks.
 const captured: Record<string, unknown> = {}
@@ -96,6 +97,7 @@ beforeEach(() => {
   supportedMock.mockReset().mockImplementation(() => new Promise(() => {}))
   editorState.activeFile = null
   editorState.dirtyCount = 0
+  mockUseProjectEditor.mockClear()
 })
 
 describe("AgentTeamEditor", () => {
@@ -116,6 +118,10 @@ describe("AgentTeamEditor", () => {
     expect(screen.getByTestId("agent-team-editor")).toBeInTheDocument()
     expect(screen.getByTestId("mock-tree")).toBeInTheDocument()
     expect(screen.getByTestId("editor-empty")).toBeInTheDocument()
+    expect(mockUseProjectEditor).toHaveBeenCalledWith({
+      scopeKey: "team:t1",
+      workingDir: "/repo",
+    })
   })
 
   it("shows the editor-engine toggle on desktop", () => {

@@ -1166,20 +1166,6 @@ export const createAgentTeamActionsSlice = (
   setWorkspaceTab: (tab) => set({ workspaceTab: tab }),
 
   setTasksView: (view) => set({ tasksView: view }),
-  setEditorSession: (teamId, patch) =>
-    set((state) => {
-      const prev = state.editorSession[teamId] ?? {
-        rootKey: "",
-        openPaths: [],
-        activePath: null,
-      }
-      return {
-        editorSession: {
-          ...state.editorSession,
-          [teamId]: { ...prev, ...patch },
-        },
-      }
-    }),
   setWorkspaceFocus: (focus) =>
     set((state) => ({
       workspaceFocus: {
