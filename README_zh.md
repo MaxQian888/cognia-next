@@ -1,14 +1,12 @@
-<h1 align="center">Cognia</h1>
-
 <p align="center">
-  面向 Claude Code 的 AI 桌面客户端 —— 内置插件运行时、可视化工作流、员工数字分身、
-  IM 连接器、Computer Use 自动化、OCR 与广域网级移动伴侣。
+  <img src="./assets/readme/hero.svg" width="100%"
+       alt="Cognia —— 面向 Claude Code 的 AI 桌面客户端。同一份 Next.js 代码同时交付浏览器、Tauri 桌面与 Capacitor 移动端，底层由 Rust 核心与 Node agent sidecar 支撑。">
 </p>
 
 <p align="center">
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
   <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white">
-  <img alt="pnpm" src="https://img.shields.io/badge/pnpm-10.30-F69220?logo=pnpm&logoColor=white">
+  <img alt="pnpm" src="https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white">
   <img alt="Next.js" src="https://img.shields.io/badge/Next.js-16-black?logo=next.js">
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white">
   <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.11-FFC131?logo=tauri&logoColor=black">
@@ -17,61 +15,56 @@
 
 <p align="center">
   <a href="./README.md">English</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#架构">架构</a> ·
   <a href="./docs/content/docs/zh/adr/">架构决策记录</a> ·
   <a href="./CLAUDE.md">工作规则</a>
 </p>
 
----
+**Cognia** 是一个桌面优先的 **Claude Code** AI 客户端。它把 Claude Agent SDK 包进原生应用，并在其上
+扩展出插件运行时、可视化工作流、员工数字分身、IM 连接器、Computer Use 自动化与 OCR —— 再用**同一份**
+Next.js 代码把**同一套**界面交付给浏览器、桌面与移动端。
 
 > [!WARNING]
 > **当前项目正在经历重大重构。** API、数据结构与各项功能随时可能变更或损坏，现阶段**不保障可用性**。
 > 如有依赖，请固定到一个已知可用的提交。
 
-## 总览
+## 能力总览
 
-Cognia 用同一份 Next.js 16 静态导出驱动三种外壳 —— 浏览器、Tauri 2 桌面与 Capacitor 8 移动端 ——
-共享同一套 UI、同一份 i18n 词条、同一套业务逻辑。Rust 核心承载常驻服务（HTTP、调度器、向量存储、
-自动化、OCR、MCP 服务器），随包的 Node sidecar 托管 Claude Agent SDK。
+<p align="center">
+  <img src="./assets/readme/capabilities.svg" width="100%"
+       alt="八个能力面：Claude Code 客户端、插件运行时、可视化工作流、员工数字分身、IM 连接器、Computer Use、OCR 流水线，以及移动端 + 广域网。">
+</p>
 
-## 特性
-
-- **Claude Code 桌面化** —— 聊天界面、斜杠命令、Agents、Skills、MCP、Hooks 全套就位。
-- **插件运行时** —— 20+ 一等公民插件（Computer Use、OCR、GitHub Delivery、剪贴板、截图、
-  Stagehand/Playwright MCP、e2b 沙盒、Prompt 模板、知乎流水线 …）背靠 WASM 宿主
-  （`wasmtime` + WIT 绑定）。
+- **Claude Code 客户端** —— 聊天界面、斜杠命令、Agents、Skills、MCP、Hooks 全套就位。
+- **插件运行时** —— 20+ 一等公民插件背靠 WASM 宿主（`wasmtime` + WIT 绑定）：Computer Use、OCR、
+  GitHub Delivery、剪贴板、截图、Stagehand/Playwright MCP、e2b 沙盒、Prompt 模板等。
 - **可视化工作流** —— React Flow 编辑器配 TS/Rust 混合运行时；支持 cron、webhook、连接器、聊天与
   `/goal` 完成等触发器。
 - **员工数字分身** —— 分阶段摄取、多 Agent 蒸馏、运行时 RAG + 风格 few-shot，统一经过共享的
   PII 脱敏器。
-- **IM 连接器** —— Telegram、Discord、Slack、Lark、OneBot、企业微信与个人微信统一接入
-  `ConnectorBus`，自带静默时段、熔断、以及按平台降级富内容的 A2UI ⇄ IM 桥。
+- **IM 连接器** —— 11 个平台（Telegram、Discord、Slack、Lark、OneBot、企业微信、钉钉、Matrix、QQ、
+  微信公众号与个人微信）统一接入 `ConnectorBus`，自带静默时段、熔断，以及按平台降级富内容的
+  A2UI ⇄ IM 桥。
 - **Computer Use** —— 把 Anthropic 原生工具调用分派到各 OS 自动化后端（Windows UIA、macOS AX、
   Linux AT-SPI），配套三级权限模型与 HITL 确认遮罩。
-- **OCR** —— 17 个提供商（云文档、LLM 视觉、专用、Lark、5 个本地后端）汇聚到一个
-  `extract()` API，带 Dexie 结果缓存。
+- **OCR** —— 17 个提供商（云文档、LLM 视觉、专用、Lark 与本地后端）汇聚到一个 `extract()` API，
+  带 Dexie 结果缓存。
 - **移动 + 广域网** —— Capacitor 客户端通过 LAN/HTTPS 加 mDNS 发现 + JWT 配对接入，可选启用
   WebRTC 层，搭配独立信令服务器。
 - **零知识公共分享链** —— Cloudflare Worker + R2/KV，密钥放在 URL fragment，仅在查看器中解密。
 
 ## 架构
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Next.js 16（App Router，静态导出 → out/）                    │
-│  app/  components/  hooks/  lib/  plugins/  i18n/            │
-└──────────────────────────────────────────────────────────────┘
-        │                   │                   │
-        ▼                   ▼                   ▼
-   浏览器 dev           Tauri 2 桌面         Capacitor 8 移动端
-   (pnpm dev)          (src-tauri/, Rust    (mobile/, 包裹
-                        核心 + axum HTTP     ../out, headless
-                        + 调度器 + agents    服务器的 LAN /
-                        + 自动化 + OCR)      WAN 客户端)
-                            │
-                            ▼
-                    Node sidecar (sidecar/)
-                    Claude Agent SDK + A2UI MCP
-```
+<p align="center">
+  <img src="./assets/readme/architecture.svg" width="100%"
+       alt="同一份 Next.js 静态导出驱动三种外壳 —— 浏览器、Tauri 桌面与 Capacitor 移动端。桌面外壳内嵌 Rust 核心（axum HTTP、调度器、向量存储、自动化、OCR、MCP 服务器）与 Node agent sidecar；移动外壳是该核心的 LAN/WAN 客户端。两个独立服务各自独立部署。">
+</p>
+
+同一份 Next.js 16 **静态导出**（`out/`）是 UI、i18n 与业务逻辑的唯一来源。浏览器直接托管它；
+**Tauri 2** 把它包进桌面窗口，底层是 Rust 核心（axum HTTP、调度器、`sqlite-vec` 向量存储、自动化、
+OCR、MCP 服务器）加托管 Claude Agent SDK 的 **Node sidecar**；**Capacitor 8** 在移动端包裹同一份
+`out/`，并通过 LAN/WAN 接入该 Rust 核心。
 
 `services/` 下有两个独立服务，各自是独立的部署产物（自带 `Cargo.lock`、Dockerfile、Fly.io 配置）：
 
@@ -82,6 +75,11 @@ Cognia 用同一份 Next.js 16 静态导出驱动三种外壳 —— 浏览器�
 [`docs/content/docs/zh/adr/`](./docs/content/docs/zh/adr/)。
 
 ## 快速开始
+
+<p align="center">
+  <img src="./assets/readme/section-quickstart.svg" width="100%"
+       alt="快速开始 —— 三条命令完成克隆、安装并启动开发服务器。">
+</p>
 
 ```bash
 git clone https://github.com/MaxQian888/cognia-next
@@ -100,7 +98,7 @@ pnpm build && pnpm mobile:sync # 移动端（再用 mobile:open:ios / :android �
 
 > Husky 钩子由根 `prepare` 脚本自动接管，无需额外配置。
 
-## 前置要求
+**前置要求**
 
 | 目标   | 要求                                                                                              |
 | ------ | ------------------------------------------------------------------------------------------------- |
@@ -111,7 +109,57 @@ pnpm build && pnpm mobile:sync # 移动端（再用 mobile:open:ios / :android �
 可选：`cloudflared`（GitHub Delivery webhook 自动派生）、自托管 WebRTC 时的 TURN 凭据、
 构建 `ocr-tesseract` Cargo 特性时的 CMake/C++ 工具链。
 
-## 项目结构
+## 开发
+
+<p align="center">
+  <img src="./assets/readme/section-development.svg" width="100%"
+       alt="开发 —— 脚本、测试、覆盖率，以及桌面与移动端构建。">
+</p>
+
+```bash
+# 应用
+pnpm dev | build | start | lint | format | typecheck
+pnpm test | test:watch | test:coverage
+
+# 桌面 / 移动端（先跑 pnpm build —— Capacitor 包裹 out/）
+pnpm tauri dev | build | info
+pnpm mobile:sync | mobile:open:ios | mobile:open:android
+
+# 文档站（Fumadocs，端口 3001）· sidecars · E2E
+pnpm docs:dev | docs:build
+pnpm sidecar:install | sidecar:start | sidecar:test | sidecars:build
+pnpm test:e2e | test:e2e:workflows | test:e2e:mobile | test:e2e:tauri
+
+# 仓库闸口
+pnpm audit:slots            # 插件 slot 清单
+pnpm lint:i18n              # next-intl 键平衡（改键后跑 lint:i18n:baseline 重建基线）
+pnpm webrtc:smoke           # signaling-server 协议烟雾测试
+```
+
+完整脚本清单见 [`package.json`](./package.json)。
+
+**测试** —— `*.test.ts(x)` 与源码同位放置（不用 `__tests__/` 目录）；覆盖率维持在
+≥ 90 % 行 / 分支 / 函数（`pnpm test:coverage`，Jest 30 + RTL）。Rust 用 in-file `#[cfg(test)]`
+模块，集成测试放 `src-tauri/tests/`；sidecar 用 Node 内置运行器（`pnpm sidecar:test`）。E2E 是
+Playwright，配置专门的 `mobile-*` 与 `tauri` 项目 —— Tauri 项目跑真实 debug 包。
+
+**提交钩子** —— `pre-commit` 跑 `lint-staged`（`eslint --fix` + `prettier --write`）；
+`commit-msg` 用 `commitlint` 强制 Conventional Commits。绝不要用 `--no-verify` 绕过；钩子失败时，
+修根因、重新暂存、创建**新提交**。
+
+**构建** —— `pnpm build` 产出静态导出（`out/`，由 Tauri 和 Capacitor 消费）；`pnpm tauri build`
+产出桌面安装包；`pnpm mobile:sync` 之后到 Xcode / Android Studio 签名归档。可选 OCR 后端由 Cargo
+feature 控制（`ocr-tesseract`、`ocr-windows`、`ocr-ocrs`、`ocr-paddle`）；默认构建保留占位后端，
+唯一例外是 `apple-vision`，它在 macOS 上始终为真实实现。
+
+## 参考
+
+<p align="center">
+  <img src="./assets/readme/section-reference.svg" width="100%"
+       alt="参考 —— 配置、项目结构、技术栈与关键说明。">
+</p>
+
+### 项目结构
 
 ```
 cognia-next/
@@ -132,110 +180,18 @@ cognia-next/
 └── scripts/               构建、审计、迁移辅助
 ```
 
-## 脚本
-
-```bash
-# 应用
-pnpm dev | build | start | lint | format | typecheck
-pnpm test | test:watch | test:coverage
-
-# 桌面
-pnpm tauri dev | build | info
-
-# 移动端（先跑 pnpm build —— Capacitor 包裹 out/）
-pnpm mobile:sync
-pnpm mobile:open:ios | mobile:open:android
-
-# 文档站（Fumadocs，端口 3001）
-pnpm docs:dev | docs:build | docs:start
-
-# Sidecars
-pnpm sidecar:install | sidecar:start | sidecar:smoke | sidecar:test
-pnpm sidecars:build                       # 全部 sidecar
-
-# E2E（Playwright）
-pnpm test:e2e                             # 全部 project
-pnpm test:e2e:workflows | :mobile | :tauri
-pnpm test:e2e:install | :report
-
-# 仓库闸口
-pnpm audit:slots                          # 插件 slot 清单
-pnpm audit:silent-flags                   # 静默失败代码路径
-pnpm lint:i18n | lint:i18n:baseline       # next-intl 键平衡
-pnpm lint:plugin-sdk-wit                  # 插件 SDK WIT 绑定
-
-# 其他
-pnpm webrtc:smoke                         # signaling-server 协议烟雾测试
-pnpm dlx shadcn@latest add <component>
-```
-
-## 配置
+### 配置
 
 - **环境变量** —— `cp .env.example .env.local`。`NEXT_PUBLIC_*` 变量会暴露给浏览器；
   `lib/env.ts` 在首次访问时校验必需值。`.env.local` 切勿提交。
 - **Tauri** —— `src-tauri/tauri.conf.json` 定义产品名（`Cognia`）、identifier
-  （`com.cognia.desktop`）、Deep link 协议（`cognia://`）、强制 `'self'` CSP、
-  自定义标题栏，以及随包的 sidecar 资源。
+  （`com.cognia.desktop`）、Deep link 协议（`cognia://`）、强制 `'self'` CSP、自定义标题栏，
+  以及随包的 sidecar 资源。
 - **路径别名** —— `@/components`、`@/lib`、`@/ui`、`@/hooks`、`@/utils`。
 - **样式** —— Tailwind v4 + `@tailwindcss/postcss`、oklch CSS 变量、类策略暗色模式
   （`@custom-variant dark (&:is(.dark *))`）。
 
-## 约定
-
-这是项目级硬性规则 —— 完整版见 [`CLAUDE.md`](./CLAUDE.md)。
-
-1. **先研究，再实现。** 写新工具/Hook/组件前，先在 `lib/`、`components/`、`hooks/`、
-   `src-tauri/` 与对应 ADR 中搜索已有实现，优先复用。
-2. **不允许悄悄简化。** 完整实现需求，或明确暴露阻塞 —— 不许 stub、mock 或 `// TODO later`
-   形式的生产路径。
-3. **测试不可选。** `components/**`、`hooks/**`、`lib/**`、`src-tauri/src/**` 下的新文件
-   （除 `components/ui/` 与 `components/ai-elements/` 外）必须附带同位测试。
-   覆盖率维持在 ≥ 90 % 行 / 分支 / 函数。
-4. **i18n 是硬性要求。** `.tsx` 中禁止硬编码用户可见字符串。同步把键加到
-   `i18n/messages/en.json` 与 `i18n/messages/zh-CN.json`，再跑 `pnpm lint:i18n`。
-5. **复用共享 Hook。** PII 脱敏（`packages/redact/src/index.ts`）、静默时段
-   （`lib/connectors/outbound-runner`）、构建选项管道（`lib/claude/build-options.ts`）以及
-   A2UI ⇄ IM 桥（`lib/connectors/a2ui-bridge/`）都是共享入口 —— 修改它们，而不是开分叉。
-
-## 测试
-
-- **同位放置** —— `*.test.ts(x)` 与源码并排；单元测试不使用 `__tests__/` 或 `tests/` 目录。
-- **覆盖率** —— `pnpm test:coverage`（Jest 30 + RTL）。
-- **Rust** —— in-file `#[cfg(test)] mod tests { … }`；集成测试放 `src-tauri/tests/`。
-- **Sidecar** —— `pnpm sidecar:test`（Node 内置 `node --test`，不是 Jest）。
-- **E2E** —— Playwright 配置专门的 `mobile-pixel-7`、`mobile-iphone-13`、`tauri` 项目。
-  Tauri 项目跑真实 debug 包（`pretest:e2e:tauri` 先构建）。
-
-## 提交钩子
-
-- `pre-commit` → `lint-staged`（对暂存文件执行 `eslint --fix` + `prettier --write`）。
-- `commit-msg` → `commitlint`（`@commitlint/config-conventional`）—— 强制 Conventional Commits。
-
-**绝不要用 `--no-verify` 绕过。** 钩子失败时，修根因，重新暂存，创建**新提交** ——
-失败那次提交从未真正生成，`--amend` 会改到上一次错的提交上。
-
-## 构建
-
-```bash
-# Web / 静态导出 → out/  （由 Tauri 和 Capacitor 同时消费）
-pnpm build
-
-# 桌面 → target/release/bundle/{msi,nsis,dmg,app,appimage,deb,rpm}/
-pnpm tauri build
-
-# 移动端 —— 先同步，再到 Xcode / Android Studio 签名归档
-pnpm mobile:sync
-pnpm mobile:open:ios | mobile:open:android
-
-# 文档站（Next.js 服务端应用）→ docs/.next/
-pnpm docs:build
-```
-
-可选 OCR 后端由 Cargo feature 控制 —— 见 `src-tauri/Cargo.toml` 中的 `ocr-tesseract`、
-`ocr-windows`、`ocr-apple`、`ocr-ocrs`、`ocr-paddle`。默认构建保留占位后端，保证派发表在任何
-平台都能编译。
-
-## 技术栈
+### 技术栈
 
 | 分层            | 主要技术                                                                                                                           |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -248,19 +204,33 @@ pnpm docs:build
 | Sidecar         | Node 20+ ESM、Claude Agent SDK、AI SDK 提供商                                                                                      |
 | 质量            | Jest 30 + RTL、Playwright、ESLint 9、Prettier 3、Husky + lint-staged + commitlint                                                  |
 
-## 关键说明
+### 关键说明
 
 - **仅支持 pnpm** —— 在仓库根目录安装。lockfile 为 pnpm 格式。
 - **不要删 `next.config.ts` 中的 `output: "export"`** —— Tauri 和 Capacitor 都消费 `out/`。
   `docs/next.config.ts` 是完整服务端应用；两者必须保持分开。
 - **运行时不存在 `app/api/`。** 任何需要 HTTP 服务器的能力（MCP HTTP、webhook 接收、
   headless V2 API）都活在 Tauri Rust（axum）里，而非 Next.js 路由。
-- **服务端独有依赖** —— 向量数据库 SDK 与 `simple-git` 被别名到
-  `lib/browser-stubs/empty.js`。新增服务端独有依赖时要**同时**加到
-  `SERVER_ONLY_PACKAGES` 和 `serverExternalPackages`；真正 Node 独有的内置模块加到
-  `NODE_ONLY_MODULES`。
+- **服务端独有依赖** —— 向量数据库 SDK 与 `simple-git` 被别名到 `lib/browser-stubs/empty.js`。
+  新增服务端独有依赖时要**同时**加到 `SERVER_ONLY_PACKAGES` 和 `serverExternalPackages`；真正
+  Node 独有的内置模块加到 `NODE_ONLY_MODULES`。
 
-## 故障排除
+### 约定
+
+项目级硬性规则 —— 完整版见 [`CLAUDE.md`](./CLAUDE.md)。
+
+1. **先研究，再实现。** 写新工具/Hook/组件前，先在 `lib/`、`components/`、`hooks/`、`src-tauri/`
+   与对应 ADR 中搜索已有实现，优先复用。
+2. **不允许悄悄简化。** 完整实现需求，或明确暴露阻塞。
+3. **测试不可选。** `components/**`、`hooks/**`、`lib/**`、`src-tauri/src/**` 下的新文件
+   （除 `components/ui/` 与 `components/ai-elements/` 外）必须附带同位测试，覆盖率维持在 ≥ 90 %。
+4. **i18n 是硬性要求。** `.tsx` 中禁止硬编码用户可见字符串。同步把键加到
+   `i18n/messages/en.json` 与 `i18n/messages/zh-CN.json`，再跑 `pnpm lint:i18n`。
+5. **复用共享 Hook。** PII 脱敏（`packages/redact/src/index.ts`）、静默时段
+   （`lib/connectors/outbound-runner`）、构建选项管道（`lib/claude/build-options.ts`）以及
+   A2UI ⇄ IM 桥（`lib/connectors/a2ui-bridge/`）都是共享入口 —— 修改它们，而不是开分叉。
+
+### 故障排除
 
 | 现象                                             | 处理                                                                                                                                              |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
