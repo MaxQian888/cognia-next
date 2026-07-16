@@ -210,14 +210,22 @@ fn guard_path(path: &str, confine: &SandboxConfine, for_write: bool) -> Result<P
     let canon = safe_canonicalize(std::path::Path::new(path))
         .map_err(|e| internal(format!("sandbox: invalid path {path:?}: {e}")))?;
 
-    let mut roots = writable.clone();
+    // Compare the target and every policy root in the same canonical namespace.
+    // On macOS `/var` resolves to `/private/var`; mixing the canonical target
+    // with the original tempdir root would pass containment but miss the later
+    // protected-path checks for `.git`, `.ssh`, and Cognia credentials.
+    let canonical_writable: Vec<PathBuf> = writable
+        .iter()
+        .map(|root| safe_canonicalize(root).unwrap_or_else(|_| root.clone()))
+        .collect();
+    let mut roots = canonical_writable.clone();
     if !for_write {
-        roots.extend(confine.readable.iter().map(PathBuf::from));
+        roots.extend(confine.readable.iter().map(|root| {
+            let root = PathBuf::from(root);
+            safe_canonicalize(&root).unwrap_or(root)
+        }));
     }
-    let under = roots.iter().any(|root| {
-        let rc = safe_canonicalize(root).unwrap_or_else(|_| root.clone());
-        canon.starts_with(&rc)
-    });
+    let under = roots.iter().any(|root| canon.starts_with(root));
     if !under {
         return Err(internal(format!(
             "sandbox: path outside the confined roots denied: {}",
@@ -230,7 +238,7 @@ fn guard_path(path: &str, confine: &SandboxConfine, for_write: bool) -> Result<P
             canon.display()
         )));
     }
-    if for_write && crate::sandbox::protected::is_protected(&canon, &writable) {
+    if for_write && crate::sandbox::protected::is_protected(&canon, &canonical_writable) {
         return Err(internal(format!(
             "sandbox: write to protected path denied: {}",
             canon.display()
