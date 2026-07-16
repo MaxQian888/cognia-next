@@ -9,6 +9,12 @@
  *   GET  /api/v1/status           — connection health probe
  *   GET  /api/v1/events           — SSE stream for connection-state pushes
  *   POST /api/v1/sidecar/call     — generic RPC (idempotency-aware)
+ *   POST /api/v1/_rpc/:command    — outbound-queue drain target (CompanionTransport.call);
+ *                                   mirrors the Rust dispatcher's 404 on commands outside
+ *                                   MOBILE_OUTBOUND_COMMANDS, captures every call
+ *   GET  /__control/rpc-calls     — captured _rpc calls, for spec assertions over HTTP
+ *                                   (the shared instance lives in the globalSetup process,
+ *                                   so worker-side specs can't touch the object directly)
  *
  * Lifecycle mirrors `tests/e2e/connectors/telegram-mock-server.ts`. Each
  * test starts the server, configures failure modes / canned responses,
@@ -24,6 +30,13 @@
 const createExpressApp = () => require("express")() as import("express").Application
 
 import type { Server } from "http"
+import { MOBILE_OUTBOUND_COMMANDS } from "../../../lib/db/mobile-outbound-types"
+
+export interface RpcCapture {
+  command: string
+  body: unknown
+  idempotencyKey: string | null
+}
 
 export interface PairResponseBody {
   device_id: string
@@ -75,6 +88,8 @@ export interface MockV2Server {
   waitForPair(timeoutMs?: number): Promise<PairRequestPayload>
   /** All pair attempts captured so far. */
   readonly pairAttempts: PairRequestPayload[]
+  /** All /api/v1/_rpc/<command> calls captured so far (also served at GET /__control/rpc-calls). */
+  readonly rpcCalls: RpcCapture[]
   /** Reset state so a fresh test starts clean (keeps the HTTP server up). */
   reset(): void
 }
@@ -85,6 +100,23 @@ export function createMockV2Server(): MockV2Server {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const express = require("express") as typeof import("express")
   app.use(express.json({ limit: "1mb" }))
+
+  // Permissive CORS: in browser-based E2E the app origin is
+  // http://localhost:3000 while this mock binds 127.0.0.1:<port>, and
+  // CompanionTransport sends Authorization/Idempotency-Key headers — the
+  // preflight would otherwise kill every call with "Failed to fetch".
+  // (Real clients — Capacitor native HTTP, Tauri reqwest — never preflight.)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.use((req: any, res: any, next: any) => {
+    res.setHeader("Access-Control-Allow-Origin", "*")
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+    res.setHeader("Access-Control-Allow-Headers", "*")
+    if (req.method === "OPTIONS") {
+      res.status(204).end()
+      return
+    }
+    next()
+  })
 
   let server: Server | null = null
   let _port = 0
@@ -99,6 +131,8 @@ export function createMockV2Server(): MockV2Server {
   let statusResponse: "ok" | "expired" | "offline" = "ok"
   const pairAttempts: PairRequestPayload[] = []
   const pairResolvers: Array<(payload: PairRequestPayload) => void> = []
+  const rpcCalls: RpcCapture[] = []
+  const knownRpcCommands = new Set<string>(MOBILE_OUTBOUND_COMMANDS)
   const sseClients = new Set<{
     write: (chunk: string) => void
     close: () => void
@@ -226,6 +260,40 @@ export function createMockV2Server(): MockV2Server {
     s.json({ ok: true, result: { echo: { method, params } } })
   })
 
+  // ── POST /api/v1/_rpc/:command ─────────────────────────────────────────
+  // The endpoint `CompanionTransport.call()` drains outbound-queue rows to.
+  // Mirrors the real dispatcher's contract (src-tauri/src/companion_api/rpc.rs):
+  // commands outside MOBILE_OUTBOUND_COMMANDS get a 404 unknown_command, so a
+  // spec that enqueues a rotten command goes red instead of green.
+  app.post("/api/v1/_rpc/:command", (req: unknown, res: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = req as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = res as any
+    const command = String(r.params.command)
+    rpcCalls.push({
+      command,
+      body: r.body,
+      idempotencyKey: r.header?.("Idempotency-Key") ?? null,
+    })
+    if (!knownRpcCommands.has(command)) {
+      s.status(404).json({ error: "unknown_command", message: `Unknown command: ${command}` })
+      return
+    }
+    s.status(200).json({ ok: true, result: {} })
+  })
+
+  // ── GET /__control/rpc-calls ───────────────────────────────────────────
+  // Spec-side read of the capture array. The shared instance is booted in
+  // the Playwright globalSetup process; worker-side specs can only reach it
+  // over HTTP. Intentionally NO reset route: the instance is shared by
+  // fullyParallel workers, so a per-test reset would wipe another worker's
+  // captures mid-assertion — specs must filter by their own command/payload.
+  app.get("/__control/rpc-calls", (_req: unknown, res: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(res as any).json(rpcCalls)
+  })
+
   return {
     async start(port = 0): Promise<void> {
       await new Promise<void>((resolve) => {
@@ -294,6 +362,9 @@ export function createMockV2Server(): MockV2Server {
     get pairAttempts() {
       return pairAttempts
     },
+    get rpcCalls() {
+      return rpcCalls
+    },
     reset() {
       pairScenario = {
         kind: "ok",
@@ -303,6 +374,7 @@ export function createMockV2Server(): MockV2Server {
       statusResponse = "ok"
       pairAttempts.length = 0
       pairResolvers.length = 0
+      rpcCalls.length = 0
     },
   }
 }

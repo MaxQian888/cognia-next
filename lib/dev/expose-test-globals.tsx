@@ -98,6 +98,16 @@ declare global {
       serverFingerprint?: string
     }) => Promise<void>
     __cogniaClearCompanionConfig?: () => Promise<void>
+    /**
+     * Patch the AppSettings singleton through the settings store (memory +
+     * Dexie). Specs need this because `__cogniaResetDb` wipes the settings
+     * row, and on the Capacitor shell an unset `mobileRuntimeMode` makes
+     * CompanionBootProvider bounce every route to /welcome — mobile specs
+     * seed `{ mobileRuntimeMode: "standalone" }` (or "paired") right after
+     * a reset. Also the only way specs can flip policy toggles like
+     * `biometricRequiredFor` that have no dedicated onboarding UI hook.
+     */
+    __cogniaSetSettings?: (patch: Record<string, unknown>) => Promise<void>
     __cogniaTestGlobalsReady?: boolean
   }
 }
@@ -112,11 +122,16 @@ export function ExposeTestGlobals(): null {
     void (async () => {
       const [
         { __resetDbForTesting, getDb, whenSeeded, activateAccountDatabase },
-        { companionStorage },
+        // Route through the transport module, NOT companionStorage() directly:
+        // the transport's hot path reads a module-level in-memory cache that
+        // only saveCompanionConfig/clearCompanionConfig update. A raw storage
+        // write leaves that cache null and every transport.call() rejects
+        // with not_paired even though storage holds the config.
+        { saveCompanionConfig, clearCompanionConfig },
         { buildWorkflowFixture },
       ] = await Promise.all([
         import("@/lib/db/schema"),
-        import("@/lib/tauri/companion-storage"),
+        import("@/lib/tauri/transport-companion"),
         import("./workflow-fixtures"),
       ])
 
@@ -310,10 +325,15 @@ export function ExposeTestGlobals(): null {
       }
 
       window.__cogniaSaveCompanionConfig = async (config) => {
-        await companionStorage().save(config)
+        await saveCompanionConfig(config)
       }
       window.__cogniaClearCompanionConfig = async () => {
-        await companionStorage().clear()
+        await clearCompanionConfig()
+      }
+      window.__cogniaSetSettings = async (patch) => {
+        const { useSettingsStore } = await import("@/stores/settings")
+        type SavePatch = Parameters<ReturnType<typeof useSettingsStore.getState>["save"]>[0]
+        await useSettingsStore.getState().save(patch as SavePatch)
       }
 
       // Subscription cleanup helper — wipes every per-provider account in the
@@ -379,6 +399,7 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaMockBaseUrls
       delete window.__cogniaSaveCompanionConfig
       delete window.__cogniaClearCompanionConfig
+      delete window.__cogniaSetSettings
       delete window.__cogniaE2EOpenUrl
       delete window.__cogniaE2EOpenUrlCalls
       delete window.__cogniaResetSubscriptionState

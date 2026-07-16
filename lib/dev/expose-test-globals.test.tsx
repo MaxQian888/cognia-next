@@ -16,6 +16,7 @@ const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaMockBaseUrls",
   "__cogniaSaveCompanionConfig",
   "__cogniaClearCompanionConfig",
+  "__cogniaSetSettings",
   "__cogniaTestGlobalsReady",
 ] as Array<keyof Window>
 
@@ -51,6 +52,7 @@ describe("ExposeTestGlobals", () => {
     expect(window.__cogniaSeedRun).toBeUndefined()
     expect(window.__cogniaSetMockBaseUrls).toBeUndefined()
     expect(window.__cogniaSaveCompanionConfig).toBeUndefined()
+    expect(window.__cogniaSetSettings).toBeUndefined()
     expect(window.__cogniaTestGlobalsReady).toBeUndefined()
   })
 
@@ -70,6 +72,7 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaSetMockBaseUrls).toBe("function")
     expect(typeof window.__cogniaSaveCompanionConfig).toBe("function")
     expect(typeof window.__cogniaClearCompanionConfig).toBe("function")
+    expect(typeof window.__cogniaSetSettings).toBe("function")
   })
 
   it("removes every global on unmount", async () => {

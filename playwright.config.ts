@@ -112,9 +112,15 @@ export default defineConfig({
     },
     // Mobile-viewport e2e suite. Pixel 7 covers the Android Chromium path; the
     // iPhone 13 project is opt-in (webkit must be installed separately).
+    // 60s budget even in static mode: with the Capacitor mock injected the
+    // full app boots (plugin manager included, whose dynamic Dexie table
+    // registration briefly self-blocks the 'cognia-claude' upgrade), and
+    // resetCogniaDb pays that boot twice per test (initial goto + the
+    // post-account-seed reload) — ~15-25s under worker contention.
     {
       name: "mobile-pixel-7",
       testDir: "./tests/e2e/mobile",
+      timeout: 90_000,
       use: { ...devices["Pixel 7"] },
     },
     ...(iosEnabled
@@ -122,6 +128,7 @@ export default defineConfig({
           {
             name: "mobile-iphone-13",
             testDir: "./tests/e2e/mobile",
+            timeout: 90_000,
             use: { ...devices["iPhone 13"] },
           },
         ]

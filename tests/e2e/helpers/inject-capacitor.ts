@@ -69,6 +69,11 @@ export interface InjectCapacitorOptions {
   network?: { connected: boolean; connectionType: string }
   barcodeResult?: { rawValue: string } | null
   biometricAvailable?: boolean
+  /** When false, isAvailable stays true but verifyIdentity rejects — the
+   * "enrolled but verification failed" case a guard must BLOCK on
+   * (unavailability alone falls through on gates with
+   * fallthroughWhenUnavailable). Defaults to true. */
+  biometricVerifyOk?: boolean
   cameraResult?: CameraPhoto | null
   voiceRecording?: VoiceRecording | null
   geolocation?: GeolocationPosition | null
@@ -88,6 +93,7 @@ export async function injectCapacitor(
     network: options.network ?? { connected: true, connectionType: "wifi" },
     barcodeResult: options.barcodeResult ?? null,
     biometricAvailable: options.biometricAvailable ?? true,
+    biometricVerifyOk: options.biometricVerifyOk ?? true,
     cameraResult: options.cameraResult ?? null,
     voiceRecording: options.voiceRecording ?? null,
     geolocation: options.geolocation ?? null,
@@ -105,6 +111,7 @@ export async function injectCapacitor(
       network: { connected: boolean; connectionType: string }
       barcodeResult: { rawValue: string } | null
       biometricAvailable: boolean
+      biometricVerifyOk: boolean
       cameraResult: CameraPhoto | null
       voiceRecording: VoiceRecording | null
       geolocation: GeolocationPosition | null
@@ -122,6 +129,7 @@ export async function injectCapacitor(
       pushNotificationListeners: Listener[]
       localNotificationActionListeners: Listener[]
       orientationListeners: Listener[]
+      mdnsListeners: Listener[]
       secureStore: Record<string, string>
       fsRoot: Record<string, string>
       lockedOrientation: string | null
@@ -157,6 +165,7 @@ export async function injectCapacitor(
       network: { ...init.network },
       barcodeResult: init.barcodeResult ? { ...init.barcodeResult } : null,
       biometricAvailable: init.biometricAvailable,
+      biometricVerifyOk: init.biometricVerifyOk,
       cameraResult: init.cameraResult ? { ...(init.cameraResult as CameraPhoto) } : null,
       voiceRecording: init.voiceRecording ? { ...(init.voiceRecording as VoiceRecording) } : null,
       geolocation: init.geolocation ? { ...(init.geolocation as GeolocationPosition) } : null,
@@ -174,6 +183,7 @@ export async function injectCapacitor(
       pushNotificationListeners: [],
       localNotificationActionListeners: [],
       orientationListeners: [],
+      mdnsListeners: [],
       secureStore: {},
       fsRoot: {},
       lockedOrientation: null,
@@ -260,7 +270,7 @@ export async function injectCapacitor(
           biometryType: 1,
         }),
         verifyIdentity: async () => {
-          if (!state.biometricAvailable) {
+          if (!state.biometricAvailable || !state.biometricVerifyOk) {
             throw new Error("Biometric verification failed")
           }
           return undefined
@@ -515,6 +525,30 @@ export async function injectCapacitor(
         setColor: async () => undefined,
         setNavigationBarColor: async () => undefined,
       },
+      // capacitor-zeroconf — consumed by lib/connectivity/mdns-discovery.ts
+      // (pair page "nearby devices"). Replays `state.mdnsResults` as resolved
+      // services to every "discover" listener; setMdnsResults pushes live.
+      ZeroConf: {
+        watch: async () => undefined,
+        unwatch: async () => undefined,
+        addListener: async (event: string, cb: Listener) => {
+          if (event !== "discover") return { remove: () => {} }
+          const sub = addListener(state.mdnsListeners, cb)
+          for (const r of state.mdnsResults) {
+            cb({
+              action: "resolved",
+              service: {
+                name: "cognia",
+                hostname: r.host,
+                ipv4Addresses: [r.host],
+                port: r.port,
+                txtRecord: r.fingerprint ? { fp: r.fingerprint } : {},
+              },
+            })
+          }
+          return sub
+        },
+      },
     }
 
     const Capacitor = {
@@ -546,6 +580,9 @@ export async function injectCapacitor(
       },
       setBiometricAvailable(available: boolean) {
         state.biometricAvailable = available
+      },
+      setBiometricVerify(ok: boolean) {
+        state.biometricVerifyOk = ok
       },
       pushAppUrlOpen(url: string) {
         for (const cb of state.appUrlOpenListeners.slice()) {
@@ -651,6 +688,24 @@ export async function injectCapacitor(
       },
       setMdnsResults(results: Array<{ host: string; port: number; fingerprint?: string }>) {
         state.mdnsResults = [...results]
+        for (const r of results) {
+          for (const cb of state.mdnsListeners.slice()) {
+            try {
+              cb({
+                action: "resolved",
+                service: {
+                  name: "cognia",
+                  hostname: r.host,
+                  ipv4Addresses: [r.host],
+                  port: r.port,
+                  txtRecord: r.fingerprint ? { fp: r.fingerprint } : {},
+                },
+              })
+            } catch {
+              // ignore listener errors
+            }
+          }
+        }
       },
       mdnsResults() {
         return [...state.mdnsResults]
