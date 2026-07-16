@@ -55,6 +55,36 @@ export async function fillInspectorField(
   await locator.fill(value)
 }
 
+/** Assert an inspector field currently holds `value` (same locator strategy
+ *  as {@link fillInspectorField}). The read-back half of a persist
+ *  round-trip: fill → save → reopen → expectInspectorFieldValue.
+ *
+ *  Input/textarea fields are read with toHaveValue; several inspector params
+ *  (expression-capable ones like `tag`) render as a CodeMirror
+ *  contenteditable instead, where value semantics don't exist — those are
+ *  read as text content. */
+export async function expectInspectorFieldValue(
+  page: Page,
+  paramId: string,
+  value: string
+): Promise<void> {
+  const directInput = page.locator(`input#ins-${paramId}, textarea#ins-${paramId}`).first()
+  const wrapper = page.locator(`[data-field="${paramId}"]`)
+  const scopedInput = wrapper.locator("input, textarea").first()
+  const scopedEditable = wrapper.locator("[contenteditable='true']").first()
+
+  if (await directInput.count()) {
+    await expect(directInput).toHaveValue(value)
+    return
+  }
+  if (await scopedInput.count()) {
+    await expect(scopedInput).toHaveValue(value)
+    return
+  }
+  await expect(scopedEditable).toBeVisible()
+  await expect(scopedEditable).toContainText(value)
+}
+
 /** Click the toolbar Save button and wait for the saved badge to flash. */
 export async function saveWorkflow(page: Page): Promise<void> {
   const saveBtn = page.getByTestId("workflow-save")
@@ -135,8 +165,21 @@ export async function assertLatestRunStatus(
   // Reads the actual latest run row from the account-scoped Dexie db via the
   // bridge — no dependency on navigating to (and cold-compiling) the runs page,
   // and binds to the real run status rather than "some pill is visible".
+  // On a terminal mismatch the poll surfaces the run's error so a failure
+  // reads as "failed: <executor error>" instead of a bare status diff.
   await expect
-    .poll(async () => (await readLatestRun(page, workflowId))?.status, { timeout: 30_000 })
+    .poll(
+      async () => {
+        const run = await readLatestRun(page, workflowId)
+        if (!run) return undefined
+        if (run.status === status) return status
+        const terminal = run.status === "succeeded" || run.status === "failed"
+        return terminal && run.error
+          ? `${run.status}: ${JSON.stringify(run.error).slice(0, 400)}`
+          : run.status
+      },
+      { timeout: 30_000 }
+    )
     .toBe(status)
 }
 

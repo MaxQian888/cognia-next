@@ -13,6 +13,12 @@ import {
 } from "../../../helpers/workflow-spec-helpers"
 
 test.describe("workflow node — action.github.runIssueLoop", () => {
+  // 3x budget: each test re-boots the full app AND waits out the
+  // github-delivery plugin's dynamic Dexie table registration, which
+  // under parallel-worker contention has been measured north of 45s
+  // (solo: ~5s). See the e2e-suite-revival plan §7 for the underlying
+  // schema-upgrade race.
+  test.slow()
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
     await resetCogniaDb(page)
@@ -22,7 +28,9 @@ test.describe("workflow node — action.github.runIssueLoop", () => {
     })
   })
 
-  test("seeded runIssueLoop renders + repo + number + maxIterations persist", async ({ page }) => {
+  test("seeded runIssueLoop renders + repo + number + maxIterations fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-github-run-issue-loop")
     await assertNodeOnCanvas(page, { kind: "action.github.runIssueLoop", label: "Issue Loop" })
     await openNodeInspector(page, "action.github.runIssueLoop")

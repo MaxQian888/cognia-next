@@ -1104,14 +1104,17 @@ const FIXTURES = {
       id: "n_cpr",
       type: "action.github.commentPr",
       label: "Comment PR",
-      params: { repoFullName: REPO_FULL_NAME, prNumber: 1, body: "note" },
+      // Distinct from the comment-issue fixture's body: both nodes POST to
+      // /issues/1/comments on the SHARED github mock, and parallel spec
+      // workers must be able to tell their own capture apart.
+      params: { repoFullName: REPO_FULL_NAME, prNumber: 1, body: "note (pr)" },
     }),
   "action-github-comment-issue": () =>
     single("E2E GH Comment Issue", {
       id: "n_ci",
       type: "action.github.commentIssue",
       label: "Comment Issue",
-      params: { repoFullName: REPO_FULL_NAME, issueNumber: 1, body: "note" },
+      params: { repoFullName: REPO_FULL_NAME, issueNumber: 1, body: "note (issue)" },
     }),
   "action-github-label-issue": () =>
     single("E2E GH Label Issue", {
