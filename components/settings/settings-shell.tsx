@@ -289,6 +289,7 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   "agents",
   "search",
   "appearance",
+  "subscription",
 ])
 
 function isSection(value: string | null): value is SettingsSectionId {

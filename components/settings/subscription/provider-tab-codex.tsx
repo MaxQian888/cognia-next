@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
 
 import { PROBE_CADENCE_FLOOR_MS, clampCadence } from "@/lib/subscription/anthropic/scheduler"
+import { useAccounts } from "@/lib/subscription/core/hooks"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { AccountList } from "./account-list"
@@ -23,6 +24,7 @@ import { ProviderQuotaPanel } from "./provider-quota-panel"
 
 import {
   DEFAULT_CODEX_SUBSCRIPTION_SETTINGS,
+  type AccountSummary,
   type CodexSubscriptionSettings,
 } from "@/types/subscription"
 
@@ -32,6 +34,22 @@ function getCodexSettings(
   return appSettings?.codexSubscriptionSettings ?? DEFAULT_CODEX_SUBSCRIPTION_SETTINGS
 }
 
+/**
+ * Is the active Codex account an api-key login? `AccountSummary.expiresAtMs` is
+ * documented as `0 when not applicable (api_key / opencode-zen)`, and a ChatGPT
+ * login always carries a real expiry — so for a `codex`-variant account a zero
+ * expiry means api-key mode.
+ *
+ * It matters because rate-limit windows are a ChatGPT-*subscription* concept:
+ * upstream answers "chatgpt authentication required to read rate limits" for an
+ * api key, so there is no quota to fetch and the panel is legitimately empty.
+ * Say that, rather than leaving a blank gap that reads as a bug.
+ */
+function usesApiKeyOnly(accounts: AccountSummary[], activeAccountId: string | null): boolean {
+  const active = accounts.find((a) => a.id === activeAccountId)
+  return !!active && active.variant === "codex" && active.expiresAtMs === 0
+}
+
 export function ProviderTabCodex() {
   const t = useTranslations("subscription.codex")
   const tSettings = useTranslations("subscription.codex.settings")
@@ -39,6 +57,8 @@ export function ProviderTabCodex() {
 
   const codexSettings = useSettingsStore((s) => getCodexSettings(s.settings))
   const save = useSettingsStore((s) => s.save)
+  const { accounts, activeAccountId } = useAccounts("codex")
+  const apiKeyOnly = usesApiKeyOnly(accounts, activeAccountId)
 
   const toggleAutoRefresh = async (next: boolean) => {
     await save({
@@ -83,6 +103,16 @@ export function ProviderTabCodex() {
 
       <AccountList provider="codex" onAdd={() => setAddOpen(true)} />
       <ProviderQuotaPanel provider="codex" />
+
+      {/* Rate-limit windows require a ChatGPT login — an API key has no usage
+          endpoint upstream. Explain the empty panel instead of leaving a gap
+          that reads as a broken fetch. */}
+      {apiKeyOnly && (
+        <p className="text-xs text-muted-foreground" data-testid="codex-quota-api-key-only">
+          {t("quotaApiKeyOnly")}
+        </p>
+      )}
+
       <PresetPicker provider="codex" />
 
       <SettingsCard

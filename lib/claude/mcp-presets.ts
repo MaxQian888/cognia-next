@@ -68,26 +68,29 @@ export const MCP_PRESETS: McpPreset[] = [
     tags: ["files"],
   },
   {
+    // GitHub's own remote server. Replaces @modelcontextprotocol/server-github,
+    // which npm now marks "no longer supported".
     id: "github",
     name: "GitHub",
-    description: "Read repos, files, issues, and PRs through the GitHub API.",
+    description: "Read repos, files, issues, and PRs through GitHub's official remote server.",
     icon: "🐙",
-    transport: "stdio",
+    transport: "http",
     config: {
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-github"],
-      env: { GITHUB_PERSONAL_ACCESS_TOKEN: "" },
+      url: "https://api.githubcopilot.com/mcp/",
+      headers: {} as Record<string, string>,
     },
     fields: [
       {
-        key: "GITHUB_PERSONAL_ACCESS_TOKEN",
-        label: "Personal access token",
-        placement: "env",
+        key: "Authorization",
+        label: "Authorization header",
+        placement: "header",
         secret: true,
-        description: "Create at github.com/settings/tokens. Needs at least 'repo' scope.",
+        placeholder: "Bearer ghp_…",
+        description:
+          "Create a token at github.com/settings/tokens and prefix it with 'Bearer '. Needs at least 'repo' scope.",
       },
     ],
-    docsUrl: "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
+    docsUrl: "https://github.com/github/github-mcp-server",
     tags: ["dev"],
   },
   {
@@ -98,7 +101,7 @@ export const MCP_PRESETS: McpPreset[] = [
     transport: "stdio",
     config: {
       command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-gitlab"],
+      args: ["-y", "@zereight/mcp-gitlab"],
       env: { GITLAB_PERSONAL_ACCESS_TOKEN: "", GITLAB_API_URL: "https://gitlab.com/api/v4" },
     },
     fields: [
@@ -115,10 +118,11 @@ export const MCP_PRESETS: McpPreset[] = [
         description: "Override only for self-hosted GitLab.",
       },
     ],
-    docsUrl: "https://github.com/modelcontextprotocol/servers/tree/main/src/gitlab",
+    docsUrl: "https://github.com/zereight/gitlab-mcp",
     tags: ["dev"],
   },
   {
+    // Brave's first-party package. Transport defaults to stdio, so no args.
     id: "brave-search",
     name: "Brave Search",
     description: "Web search via the Brave Search API.",
@@ -126,7 +130,7 @@ export const MCP_PRESETS: McpPreset[] = [
     transport: "stdio",
     config: {
       command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-brave-search"],
+      args: ["-y", "@brave/brave-search-mcp-server"],
       env: { BRAVE_API_KEY: "" },
     },
     fields: [
@@ -135,24 +139,25 @@ export const MCP_PRESETS: McpPreset[] = [
         label: "Brave API key",
         placement: "env",
         secret: true,
-        description: "Get one free at api.search.brave.com.",
+        description: "Get one free at api-dashboard.search.brave.com/app/keys.",
       },
     ],
-    docsUrl: "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
+    docsUrl: "https://github.com/brave/brave-search-mcp-server",
     tags: ["search"],
   },
   {
-    id: "puppeteer",
-    name: "Puppeteer",
-    description: "Browse and scrape the web with a headless browser.",
+    // Replaces the deprecated @modelcontextprotocol/server-puppeteer.
+    id: "playwright",
+    name: "Playwright",
+    description: "Browse, click, and scrape the web with a real browser.",
     icon: "🎭",
     transport: "stdio",
     config: {
       command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-puppeteer"],
+      args: ["-y", "@playwright/mcp@latest"],
     },
     fields: [],
-    docsUrl: "https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer",
+    docsUrl: "https://github.com/microsoft/playwright-mcp",
     tags: ["web"],
   },
   {
@@ -206,29 +211,34 @@ export const MCP_PRESETS: McpPreset[] = [
     tags: ["data"],
   },
   {
+    // Replaces the deprecated @modelcontextprotocol/server-postgres.
+    // `restricted` keeps the connection read-only + transaction-scoped.
     id: "postgres",
     name: "Postgres",
-    description: "Read-only access to a Postgres database.",
+    description: "Read-only access to a Postgres database, plus index/health analysis.",
     icon: "🐘",
     transport: "stdio",
     config: {
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-postgres", "<DATABASE_URL>"],
+      command: "uvx",
+      args: ["postgres-mcp", "--access-mode=restricted"],
+      env: { DATABASE_URI: "" },
     },
     fields: [
       {
-        key: "DATABASE_URL",
+        key: "DATABASE_URI",
         label: "Database URL",
-        placement: "arg-replace",
-        token: "<DATABASE_URL>",
+        placement: "env",
         placeholder: "postgresql://user:pass@localhost:5432/db",
         secret: true,
       },
     ],
-    docsUrl: "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres",
+    docsUrl: "https://github.com/crystaldba/postgres-mcp",
     tags: ["data"],
   },
   {
+    // Replaces the deprecated @modelcontextprotocol/server-slack. Community-
+    // maintained (not an official Slack product); xoxb bot token is the
+    // supported path that matches the old preset's auth model.
     id: "slack",
     name: "Slack",
     description: "Read channels, search messages, post replies.",
@@ -236,25 +246,20 @@ export const MCP_PRESETS: McpPreset[] = [
     transport: "stdio",
     config: {
       command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-slack"],
-      env: { SLACK_BOT_TOKEN: "", SLACK_TEAM_ID: "" },
+      args: ["-y", "slack-mcp-server@latest", "--transport", "stdio"],
+      env: { SLACK_MCP_XOXB_TOKEN: "" },
     },
     fields: [
       {
-        key: "SLACK_BOT_TOKEN",
+        key: "SLACK_MCP_XOXB_TOKEN",
         label: "Bot token",
         placement: "env",
         secret: true,
         placeholder: "xoxb-…",
-      },
-      {
-        key: "SLACK_TEAM_ID",
-        label: "Team ID",
-        placement: "env",
-        placeholder: "T0123ABCD",
+        description: "Slack bot token from your app's OAuth & Permissions page.",
       },
     ],
-    docsUrl: "https://github.com/modelcontextprotocol/servers/tree/main/src/slack",
+    docsUrl: "https://github.com/korotovsky/slack-mcp-server",
     tags: ["chat"],
   },
   {

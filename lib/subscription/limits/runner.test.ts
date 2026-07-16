@@ -27,6 +27,26 @@ function anthropicAccount(over: Partial<Account> = {}): Account {
   }
 }
 
+/** A real ChatGPT-login codex account (refreshable, unlike the api_key relay). */
+function codexChatgptAccount(over: Partial<Account> = {}): Account {
+  return {
+    id: "acc-3",
+    label: "ChatGPT Plus",
+    credential: {
+      provider: "codex",
+      accessToken: "sk-stale",
+      refreshToken: "rt-1",
+      idTokenRaw: "",
+      expiresAtMs: 1_000,
+      authMode: "chatgpt",
+      storedAtMs: 0,
+    },
+    createdAtMs: 0,
+    lastUsedAtMs: 0,
+    ...over,
+  }
+}
+
 function codexRelayAccount(): Account {
   return {
     id: "acc-2",
@@ -325,7 +345,7 @@ describe("queryAccountLimits", () => {
     expect(seenHeaders).toEqual({ "x-cognia-volc-ak": "AKID" })
   })
 
-  it("provides no refresh callback for non-anthropic providers", async () => {
+  it("provides no refresh callback for an api_key codex relay", async () => {
     let sawRefreshCb = true
     registerLimitsSource(
       "stub:codex",
@@ -354,6 +374,92 @@ describe("queryAccountLimits", () => {
     })
     expect(sawRefreshCb).toBe(false)
     expect(refreshAnthropicToken).not.toHaveBeenCalled()
+  })
+
+  // The Anthropic path has refreshed proactively for ages; Codex never did, so
+  // an aged-out ChatGPT bearer 401'd and the panel silently froze.
+  it("proactively refreshes a stale chatgpt codex bearer before fetching", async () => {
+    let sawToken: string | null = null
+    registerLimitsSource(
+      "stub:codex-token",
+      {
+        id: "stub:codex-token",
+        key: "codex",
+        matches: (q) => q.provider === "codex",
+        fetch: async (ctx) => {
+          sawToken = ctx.token
+          return {
+            provider: "codex",
+            accountId: ctx.accountId,
+            fetchedAt: ctx.now,
+            meters: [{ id: "session", kind: "window", usedPct: 3, status: "ok" }],
+          }
+        },
+      },
+      { pluginId: "stub" }
+    )
+    const refreshCodexToken = jest.fn(async () => "sk-fresh")
+    await queryAccountLimits("codex", "acc-3", {
+      getAccount: async () => codexChatgptAccount(),
+      listPresets: async () => [],
+      authedGet: async () => "",
+      refreshCodexToken,
+      isCodexFresh: () => false,
+    })
+    expect(refreshCodexToken).toHaveBeenCalledWith("acc-3")
+    expect(sawToken).toBe("sk-fresh")
+  })
+
+  it("does not refresh a fresh chatgpt codex bearer", async () => {
+    registerLimitsSource(
+      "stub:codex-fresh",
+      {
+        id: "stub:codex-fresh",
+        key: "codex",
+        matches: (q) => q.provider === "codex",
+        fetch: async (ctx) => ({
+          provider: "codex",
+          accountId: ctx.accountId,
+          fetchedAt: ctx.now,
+          meters: [{ id: "session", kind: "window", usedPct: 3, status: "ok" }],
+        }),
+      },
+      { pluginId: "stub" }
+    )
+    const refreshCodexToken = jest.fn(async () => "sk-fresh")
+    await queryAccountLimits("codex", "acc-3", {
+      getAccount: async () => codexChatgptAccount(),
+      listPresets: async () => [],
+      authedGet: async () => "",
+      refreshCodexToken,
+      isCodexFresh: () => true,
+    })
+    expect(refreshCodexToken).not.toHaveBeenCalled()
+  })
+
+  // Sources need `authMode`/`accountId` that a bare bearer can't carry.
+  it("passes the account credential to the source", async () => {
+    let seen: unknown
+    registerLimitsSource(
+      "stub:codex-cred",
+      {
+        id: "stub:codex-cred",
+        key: "codex",
+        matches: (q) => q.provider === "codex",
+        fetch: async (ctx) => {
+          seen = ctx.credential
+          return null
+        },
+      },
+      { pluginId: "stub" }
+    )
+    await queryAccountLimits("codex", "acc-3", {
+      getAccount: async () => codexChatgptAccount(),
+      listPresets: async () => [],
+      authedGet: async () => "",
+      isCodexFresh: () => true,
+    })
+    expect(seen).toMatchObject({ provider: "codex", authMode: "chatgpt" })
   })
 
   it("swallows a throwing source and falls through", async () => {

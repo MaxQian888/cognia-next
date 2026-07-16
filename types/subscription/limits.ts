@@ -19,7 +19,7 @@
 // `./usage.ts` is the Anthropic sample lineage and is unrelated; this module
 // deliberately uses the `Limits*` prefix to avoid that name clash.
 
-import type { ProviderId } from "./credential"
+import type { ProviderCredential, ProviderId } from "./credential"
 
 /** A meter is either a resetting utilization window or a credit/quota balance. */
 export type LimitsMeterKind = "window" | "balance"
@@ -88,6 +88,15 @@ export interface LimitsSourceContext {
   accountLabel?: string
   /** Bearer token for the account, or `null` when none is available. */
   token: string | null
+  /**
+   * The account's stored credential, verbatim. Sources need it for identity a
+   * bare bearer can't carry: Codex's `/wham/usage` is a ChatGPT-subscription
+   * endpoint that requires the `ChatGPT-Account-Id` header and rejects an
+   * `api_key` login outright, so the source must read `authMode`/`accountId`
+   * rather than infer them from the preset. Absent when the runner couldn't
+   * resolve the account.
+   */
+  credential?: ProviderCredential
   /** Resolved preset baseUrl (for credit/host-matched sources). */
   baseUrl?: string
   /** Resolved preset templateId (the authoritative provider-match signal). */

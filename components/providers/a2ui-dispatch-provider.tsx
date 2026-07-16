@@ -13,6 +13,7 @@
 
 import { useEffect } from "react"
 import { subscribeA2UIDispatch } from "@/lib/a2ui/ipc"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 export function A2UIDispatchProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -21,7 +22,7 @@ export function A2UIDispatchProvider({ children }: { children: React.ReactNode }
 
     void subscribeA2UIDispatch().then((fn) => {
       if (cancelled) {
-        fn()
+        safeUnlisten(fn)
       } else {
         unlisten = fn
       }
@@ -29,10 +30,8 @@ export function A2UIDispatchProvider({ children }: { children: React.ReactNode }
 
     return () => {
       cancelled = true
-      if (unlisten) {
-        unlisten()
-        unlisten = null
-      }
+      safeUnlisten(unlisten)
+      unlisten = null
     }
   }, [])
 

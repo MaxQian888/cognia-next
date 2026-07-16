@@ -15,7 +15,10 @@ jest.mock("@/lib/tauri/events", () => ({
 }))
 jest.mock("@/lib/tauri/safe-unlisten", () => ({ safeUnlisten: (fn: () => void) => fn() }))
 jest.mock("@/lib/browser/client", () => ({
-  browserClient: { embedSetSelectMode: jest.fn().mockResolvedValue(undefined) },
+  browserClient: {
+    embedSetSelectMode: jest.fn().mockResolvedValue(undefined),
+    embedDrainSelection: jest.fn(),
+  },
 }))
 
 import { browserClient } from "@/lib/browser/client"
@@ -39,16 +42,47 @@ beforeEach(() => {
   for (const k of Object.keys(mockListeners)) delete mockListeners[k]
   mockUnlisten.mockReset()
   ;(browserClient.embedSetSelectMode as jest.Mock).mockClear().mockResolvedValue(undefined)
+  ;(browserClient.embedDrainSelection as jest.Mock).mockReset().mockResolvedValue([SELECTION])
 })
 
 it("captures a selection event and disarms select mode", async () => {
   const { result } = renderHook(() => useElementSelection())
   await waitFor(() => expect(mockListeners[BROWSER_EVENTS.elementSelected]).toBeDefined())
 
-  act(() => mockListeners[BROWSER_EVENTS.elementSelected](SELECTION))
+  act(() => mockListeners[BROWSER_EVENTS.elementSelected]({ count: 1, generation: 1 }))
 
-  expect(result.current.selection?.selector).toBe("#go")
+  await waitFor(() => expect(result.current.selection?.selector).toBe("#go"))
+  expect(result.current.selections).toEqual([SELECTION])
+  expect(browserClient.embedDrainSelection).toHaveBeenCalledTimes(1)
   expect(result.current.selectMode).toBe(false)
+})
+
+it("retries a failed drain without clearing the prior selection", async () => {
+  jest.useFakeTimers()
+  ;(browserClient.embedDrainSelection as jest.Mock)
+    .mockRejectedValueOnce(new Error("navigation replaced the context"))
+    .mockResolvedValueOnce([SELECTION])
+  const { result } = renderHook(() => useElementSelection())
+  await act(async () => {})
+
+  act(() => mockListeners[BROWSER_EVENTS.elementSelected]({ count: 1, generation: 3 }))
+  expect(result.current.selection).toBeNull()
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(50)
+  })
+
+  expect(result.current.selection).toEqual(SELECTION)
+  expect(browserClient.embedDrainSelection).toHaveBeenCalledTimes(2)
+  jest.useRealTimers()
+})
+
+it("uses signal generation to ignore duplicate drains", async () => {
+  const { result } = renderHook(() => useElementSelection())
+  await waitFor(() => expect(mockListeners[BROWSER_EVENTS.elementSelected]).toBeDefined())
+  act(() => mockListeners[BROWSER_EVENTS.elementSelected]({ count: 1, generation: 4 }))
+  await waitFor(() => expect(result.current.selection).toEqual(SELECTION))
+  act(() => mockListeners[BROWSER_EVENTS.elementSelected]({ count: 1, generation: 4 }))
+  expect(browserClient.embedDrainSelection).toHaveBeenCalledTimes(1)
 })
 
 it("records navigation events", async () => {
@@ -76,10 +110,11 @@ it("setSelectMode drives the overlay and tracks state", async () => {
 it("clearSelection resets the picked element", async () => {
   const { result } = renderHook(() => useElementSelection())
   await waitFor(() => expect(mockListeners[BROWSER_EVENTS.elementSelected]).toBeDefined())
-  act(() => mockListeners[BROWSER_EVENTS.elementSelected](SELECTION))
-  expect(result.current.selection).not.toBeNull()
+  act(() => mockListeners[BROWSER_EVENTS.elementSelected]({ count: 1, generation: 1 }))
+  await waitFor(() => expect(result.current.selection).not.toBeNull())
   act(() => result.current.clearSelection())
   expect(result.current.selection).toBeNull()
+  expect(result.current.selections).toEqual([])
 })
 
 it("uses a custom select-mode driver when provided", async () => {

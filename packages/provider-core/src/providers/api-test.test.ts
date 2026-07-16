@@ -124,7 +124,7 @@ describe("testCustomProviderConnectionByProtocol", () => {
     expect(result.message).toContain("401")
   })
 
-  it("(anthropic) POSTs /messages with the x-api-key header and treats 400 as ok", async () => {
+  it("(anthropic) POSTs /v1/messages with the x-api-key header and treats 400 as ok", async () => {
     proxyFetchMock.mockResolvedValue(jsonResponse({}, { status: 400 }))
     const result = await testCustomProviderConnectionByProtocol(
       "https://api.anthropic.com",
@@ -133,9 +133,52 @@ describe("testCustomProviderConnectionByProtocol", () => {
     )
     expect(result.success).toBe(true)
     const call = proxyFetchMock.mock.calls[0]
-    expect(call[0]).toBe("https://api.anthropic.com/messages")
+    expect(call[0]).toBe("https://api.anthropic.com/v1/messages")
     expect(call[1].method).toBe("POST")
     expect(call[1].headers["x-api-key"]).toBe("key")
+  })
+
+  // Regression: the probe used to POST to `<base>/messages`, which 404s on every
+  // Anthropic-wire host. Both Kimi surfaces advertise a bare (non-/v1) base URL,
+  // so they failed the connection test with "API error: 404" despite a valid key.
+  it.each([
+    [
+      "kimi-anthropic",
+      "https://api.moonshot.cn/anthropic",
+      "https://api.moonshot.cn/anthropic/v1/messages",
+    ],
+    ["kimi-coding", "https://api.kimi.com/coding/", "https://api.kimi.com/coding/v1/messages"],
+  ])("(anthropic) builds the versioned messages URL for %s", async (_id, baseURL, expected) => {
+    proxyFetchMock.mockResolvedValue(jsonResponse({}, { status: 200 }))
+    const result = await testCustomProviderConnectionByProtocol(baseURL, "key", "anthropic")
+    expect(result.success).toBe(true)
+    expect(proxyFetchMock.mock.calls[0][0]).toBe(expected)
+  })
+
+  it("(anthropic) does not double the version segment when the base already ends in /v1", async () => {
+    proxyFetchMock.mockResolvedValue(jsonResponse({}, { status: 200 }))
+    await testCustomProviderConnectionByProtocol("https://api.anthropic.com/v1", "key", "anthropic")
+    expect(proxyFetchMock.mock.calls[0][0]).toBe("https://api.anthropic.com/v1/messages")
+  })
+
+  // A hard-coded `claude-3-haiku-20240307` is not a real model on any
+  // Anthropic-compatible third party (Kimi, GLM, MiniMax), so the probe must
+  // send the model the caller actually intends to use.
+  it("(anthropic) probes with the caller-supplied model", async () => {
+    proxyFetchMock.mockResolvedValue(jsonResponse({}, { status: 200 }))
+    await testCustomProviderConnectionByProtocol(
+      "https://api.kimi.com/coding/",
+      "key",
+      "anthropic",
+      "kimi-for-coding"
+    )
+    expect(JSON.parse(proxyFetchMock.mock.calls[0][1].body).model).toBe("kimi-for-coding")
+  })
+
+  it("(anthropic) falls back to a Claude model when the caller supplies none", async () => {
+    proxyFetchMock.mockResolvedValue(jsonResponse({}, { status: 200 }))
+    await testCustomProviderConnectionByProtocol("https://api.anthropic.com", "key", "anthropic")
+    expect(JSON.parse(proxyFetchMock.mock.calls[0][1].body).model).toBe("claude-3-haiku-20240307")
   })
 
   it("(anthropic) returns failure for non-400 API errors", async () => {
@@ -533,6 +576,39 @@ describe("probeProviderConnection / testProviderConnection", () => {
     const result = await probeProviderConnection({ providerId: "ghost" })
     expect(result.outcome).toBe("failed")
     expect(result.authoritative).toBe(true)
+  })
+
+  // Regression: settings seed a built-in config without a baseURL, so the probe
+  // used to short-circuit to the untranslated "Unknown provider" string. A
+  // built-in must fall back to its catalog defaultBaseURL/defaultModel.
+  it.each([
+    ["moonshot", "https://api.moonshot.cn/v1/models"],
+    ["kimi-anthropic", "https://api.moonshot.cn/anthropic/v1/messages"],
+    ["kimi-coding", "https://api.kimi.com/coding/v1/messages"],
+  ])("probes built-in %s with no stored baseURL", async (providerId, expectedUrl) => {
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [] }))
+    const result = await probeProviderConnection({ providerId, apiKey: "k" })
+    expect(result.outcome).toBe("verified")
+    expect(proxyFetchMock.mock.calls[0][0]).toBe(expectedUrl)
+  })
+
+  it.each([
+    ["kimi-anthropic", "kimi-k2.7-code"],
+    ["kimi-coding", "kimi-for-coding"],
+  ])("probes built-in %s with its catalog default model", async (providerId, expectedModel) => {
+    proxyFetchMock.mockResolvedValue(jsonResponse({}))
+    await probeProviderConnection({ providerId, apiKey: "k" })
+    expect(JSON.parse(proxyFetchMock.mock.calls[0][1].body).model).toBe(expectedModel)
+  })
+
+  it("prefers a stored baseURL over the built-in catalog default", async () => {
+    proxyFetchMock.mockResolvedValue(jsonResponse({ data: [] }))
+    await probeProviderConnection({
+      providerId: "moonshot",
+      apiKey: "k",
+      baseURL: "https://proxy.internal/v1",
+    })
+    expect(proxyFetchMock.mock.calls[0][0]).toBe("https://proxy.internal/v1/models")
   })
 
   it("propagates outcome=limited from Anthropic in the browser fallback", async () => {

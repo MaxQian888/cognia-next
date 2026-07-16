@@ -118,6 +118,7 @@
         "warnLabel": "Warning threshold (%)"
       }
     },
+    "quotaApiKeyOnly": "Rate-limit windows need a ChatGPT sign-in — an OpenAI API key has no usage endpoint, so there's no quota to show for this account. Usage is billed per request and visible in the OpenAI platform dashboard.",
     "title": "Codex (OpenAI)",
     "webModeBanner": "Codex credentials are stored in your OS keychain — only available in the desktop app."
   },
@@ -382,6 +383,49 @@
   "migration": {
     "toastBody": "Migrated {count, plural, =1 {1 legacy account} other {# legacy accounts}} into the new vault.",
     "toastTitle": "Subscription module upgraded"
+  },
+  "nav": {
+    "groups": {
+      "providersGroup": "Providers",
+      "usageGroup": "Usage & limits",
+      "vaultGroup": "Vault"
+    },
+    "items": {
+      "backup": {
+        "description": "Export or import an encrypted vault copy",
+        "label": "Backup & transfer"
+      },
+      "claude": {
+        "description": "Claude Pro/Max accounts, quota, and endpoints",
+        "label": "Claude"
+      },
+      "codex": {
+        "description": "ChatGPT or OpenAI API key for the codex agent",
+        "label": "Codex"
+      },
+      "opencode": {
+        "description": "OpenCode Zen/Go keys and discovered credentials",
+        "label": "OpenCode"
+      },
+      "overview": {
+        "description": "Live rate-limit windows for the active account",
+        "label": "Overview"
+      },
+      "probes": {
+        "description": "How often usage is polled in the background",
+        "label": "Usage tracking"
+      },
+      "sync": {
+        "description": "Mirror an encrypted vault copy to WebDAV",
+        "label": "Cloud sync"
+      },
+      "usage": {
+        "description": "History and analytics across every provider",
+        "label": "Usage"
+      }
+    },
+    "mobileTrigger": "Sections",
+    "title": "Subscription settings"
   },
   "opencode": {
     "description": "Discover credentials from `~/.local/share/opencode/auth.json` and paste an OpenCode-Zen subscription key. OpenCode itself manages many providers; we surface only the whitelisted ones.",

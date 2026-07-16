@@ -1047,6 +1047,7 @@ pub fn run() {
             browser::embedded::browser_embed_set_select_mode,
             browser::embedded::browser_embed_clear_selection,
             browser::embedded::browser_embed_set_panel_labels,
+            browser::embedded::browser_embed_set_frozen,
             browser::embedded::browser_embed_capture,
             browser::embedded::browser_embed_destroy,
             // Optional desktop "Pro IDE" mode — on-demand embedded code-server.
@@ -1063,6 +1064,7 @@ pub fn run() {
             codeserver::webview::codeserver_embed_destroy,
             // Agent browser loop (Phase 1) — snapshot/act/console/network + nav.
             browser::embedded::browser_embed_snapshot,
+            browser::embedded::browser_embed_drain_selection,
             browser::embedded::browser_embed_act,
             browser::embedded::browser_embed_drain_console,
             browser::embedded::browser_embed_drain_network,

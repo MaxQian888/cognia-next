@@ -118,6 +118,7 @@
         "warnLabel": "预警阈值（%）"
       }
     },
+    "quotaApiKeyOnly": "额度窗口需要 ChatGPT 登录——OpenAI API Key 没有用量查询端点，因此该账号无额度可展示。此模式按请求计费，用量请在 OpenAI 平台控制台查看。",
     "title": "Codex（OpenAI）",
     "webModeBanner": "Codex 凭证存放在 OS 钥匙串中——仅在桌面版可用。"
   },
@@ -382,6 +383,49 @@
   "migration": {
     "toastBody": "已将 {count, plural, =1 {1 个旧账号} other {# 个旧账号}} 迁移到新版凭证仓。",
     "toastTitle": "订阅模块已升级"
+  },
+  "nav": {
+    "groups": {
+      "providersGroup": "提供方",
+      "usageGroup": "用量与限额",
+      "vaultGroup": "凭证仓"
+    },
+    "items": {
+      "backup": {
+        "description": "导出或导入加密的凭证仓副本",
+        "label": "备份与迁移"
+      },
+      "claude": {
+        "description": "Claude Pro/Max 账号、额度与端点",
+        "label": "Claude"
+      },
+      "codex": {
+        "description": "供 codex 智能体使用的 ChatGPT 或 OpenAI API Key",
+        "label": "Codex"
+      },
+      "opencode": {
+        "description": "OpenCode Zen/Go 密钥与已发现的凭证",
+        "label": "OpenCode"
+      },
+      "overview": {
+        "description": "当前账号的实时额度窗口",
+        "label": "总览"
+      },
+      "probes": {
+        "description": "后台轮询用量的频率",
+        "label": "用量追踪"
+      },
+      "sync": {
+        "description": "将加密的凭证仓副本同步到 WebDAV",
+        "label": "云同步"
+      },
+      "usage": {
+        "description": "覆盖全部提供方的历史与分析",
+        "label": "用量"
+      }
+    },
+    "mobileTrigger": "分组",
+    "title": "订阅设置"
   },
   "opencode": {
     "description": "从 `~/.local/share/opencode/auth.json` 读取已配置的凭证；OpenCode-Zen 订阅以「粘贴 API key」的方式接入。OpenCode 本身管理大量服务商，我们只展示白名单内的几项。",

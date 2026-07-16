@@ -7,6 +7,7 @@ import type { Screenshot } from "@/lib/automation/types"
 import type {
   BrowserActionResult,
   BrowserSnapshot,
+  BrowserSelection,
   ConsoleEntry,
   ElementRect,
   EvaluateResult,
@@ -16,6 +17,33 @@ import type {
 } from "@/lib/browser/protocol"
 import type { RecordedStep } from "@/lib/browser/recording/protocol"
 import { transport } from "@/lib/tauri"
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value)
+
+function isBrowserSelection(value: unknown): value is BrowserSelection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  const rect = item.rect
+  if (!rect || typeof rect !== "object" || Array.isArray(rect)) return false
+  const box = rect as Record<string, unknown>
+  return (
+    typeof item.paneId === "string" &&
+    typeof item.selector === "string" &&
+    typeof item.domPath === "string" &&
+    typeof item.tagName === "string" &&
+    (item.id === null || typeof item.id === "string") &&
+    (item.classes === null || typeof item.classes === "string") &&
+    isFiniteNumber(box.x) &&
+    isFiniteNumber(box.y) &&
+    isFiniteNumber(box.width) &&
+    isFiniteNumber(box.height) &&
+    typeof item.outerHTML === "string" &&
+    typeof item.text === "string" &&
+    typeof item.pageUrl === "string" &&
+    typeof item.pageTitle === "string"
+  )
+}
 
 export const browserClient = {
   /** Create or re-navigate the embedded preview at the reserved rect. */
@@ -34,9 +62,16 @@ export const browserClient = {
   /** Push localized info-panel toggle labels into the previewed page. */
   embedSetPanelLabels: (labels: { details: string; collapse: string }) =>
     transport.call<void>("browser_embed_set_panel_labels", { labels: JSON.stringify(labels) }),
-  /** Capture the embedded preview's on-screen region as a PNG screenshot. */
-  embedCapture: (rect: ElementRect) =>
-    transport.call<Screenshot>("browser_embed_capture", { ...rect }),
+  embedSetFrozen: (on: boolean) => transport.call<void>("browser_embed_set_frozen", { on }),
+  /** Freeze dynamic content, wait for the paused frame to settle, then capture. */
+  embedCapture: async (rect: ElementRect) => {
+    try {
+      await transport.call<void>("browser_embed_set_frozen", { on: true })
+      return await transport.call<Screenshot>("browser_embed_capture", { ...rect })
+    } finally {
+      await transport.call<void>("browser_embed_set_frozen", { on: false }).catch(() => undefined)
+    }
+  },
   embedDestroy: () => transport.call<void>("browser_embed_destroy", {}),
 
   // --- Agent browser loop (Phase 1) ---------------------------------------
@@ -57,6 +92,25 @@ export const browserClient = {
     }
     if (!env.ok || !env.snapshot) throw new Error(env.error ?? "snapshot failed")
     return env.snapshot
+  },
+  embedDrainSelection: async (): Promise<BrowserSelection[]> => {
+    const raw = await transport.call<string>("browser_embed_drain_selection", {})
+    const env: unknown = JSON.parse(raw)
+    if (!env || typeof env !== "object" || Array.isArray(env)) {
+      throw new Error("invalid selection drain envelope")
+    }
+    const record = env as Record<string, unknown>
+    if (typeof record.ok !== "boolean" || !Array.isArray(record.selections)) {
+      throw new Error("invalid selection drain envelope")
+    }
+    if (!record.ok) {
+      throw new Error(typeof record.error === "string" ? record.error : "selection drain failed")
+    }
+    const selections = record.selections
+    if (selections.length > 20 || !selections.every(isBrowserSelection)) {
+      throw new Error("invalid selection drain payload")
+    }
+    return selections
   },
   /**
    * Evaluate a JS expression in the embedded page (trust-gated by the caller).

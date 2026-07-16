@@ -64,6 +64,26 @@ describe("discoverAnthropicAuth", () => {
     expect(discoverMock).toHaveBeenCalledTimes(1)
   })
 
+  it("coalesces concurrent native probes but allows a later rescan", async () => {
+    let resolveProbe!: (value: DiscoveredAnthropicAuth | null) => void
+    discoverMock.mockReturnValueOnce(
+      new Promise<DiscoveredAnthropicAuth | null>((resolve) => {
+        resolveProbe = resolve
+      })
+    )
+
+    const first = discoverAnthropicAuth()
+    const second = discoverAnthropicAuth()
+
+    expect(discoverMock).toHaveBeenCalledTimes(1)
+    resolveProbe(sample())
+    await expect(Promise.all([first, second])).resolves.toEqual([sample(), sample()])
+
+    discoverMock.mockResolvedValueOnce(sample({ subscriptionType: "pro" }))
+    await expect(discoverAnthropicAuth()).resolves.toMatchObject({ subscriptionType: "pro" })
+    expect(discoverMock).toHaveBeenCalledTimes(2)
+  })
+
   it("honours the E2E window override, including explicit null", async () => {
     const w = window as { __cogniaE2EAnthropicDiscovery?: DiscoveredAnthropicAuth | null }
     w.__cogniaE2EAnthropicDiscovery = null

@@ -11,6 +11,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "./safe-unlisten"
 
 /** Options for opening the desktop-pet overlay window. */
 export interface PetWindowOpts {
@@ -235,13 +236,13 @@ function subscribe(event: string, handler: (payload: unknown) => void): Disposer
   void import("@tauri-apps/api/event")
     .then(({ listen }) => listen(event, (e) => handler(e.payload)))
     .then((off) => {
-      if (disposed) off()
+      if (disposed) safeUnlisten(off)
       else unlisten = off
     })
     .catch((err) => console.warn(`subscribe(${event}) failed`, err))
   return () => {
     disposed = true
-    unlisten?.()
+    safeUnlisten(unlisten)
     unlisten = null
   }
 }

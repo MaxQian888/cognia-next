@@ -7,6 +7,11 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
 
+const mockListen = jest.fn()
+jest.mock("@tauri-apps/api/event", () => ({
+  listen: (...args: unknown[]) => mockListen(...args),
+}))
+
 let mockIsTauri = true
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => mockIsTauri,
@@ -26,12 +31,18 @@ import {
   openPetPopup,
   closePetPopup,
   resizePetPopup,
+  onPetNativeStateChanged,
+  onPetSuspend,
+  onPetResume,
+  onPetWorkAreaChanged,
+  onPetPopupHidden,
 } from "./pet-window"
 
 let warnSpy: jest.SpyInstance
 
 beforeEach(() => {
   mockInvoke.mockReset()
+  mockListen.mockReset()
   mockIsTauri = true
   warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
 })
@@ -154,6 +165,135 @@ describe("lib/tauri/pet-window — off Tauri", () => {
     await expect(closePetPopup()).resolves.toBe(false)
     await expect(resizePetPopup(1, 1)).resolves.toBe(false)
     expect(mockInvoke).not.toHaveBeenCalled()
+  })
+})
+
+describe("lib/tauri/pet-window — native event subscriptions", () => {
+  /** Flush the dynamic `import()` + the two chained `.then`s inside subscribe(). */
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it.each([
+    ["onPetSuspend", onPetSuspend, "pet://suspend"],
+    ["onPetResume", onPetResume, "pet://resume"],
+    ["onPetWorkAreaChanged", onPetWorkAreaChanged, "pet://work-area-changed"],
+    ["onPetPopupHidden", onPetPopupHidden, "pet-popup://hidden"],
+  ])("%s listens on %s and invokes the handler", async (_name, subscribeFn, event) => {
+    mockListen.mockResolvedValue(jest.fn())
+    const handler = jest.fn()
+    subscribeFn(handler)
+    await flush()
+
+    expect(mockListen).toHaveBeenCalledWith(event, expect.any(Function))
+    mockListen.mock.calls[0][1]({ payload: undefined })
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it("onPetNativeStateChanged forwards a well-formed payload", async () => {
+    mockListen.mockResolvedValue(jest.fn())
+    const handler = jest.fn()
+    onPetNativeStateChanged(handler)
+    await flush()
+
+    expect(mockListen).toHaveBeenCalledWith("pet://state-changed", expect.any(Function))
+    mockListen.mock.calls[0][1]({ payload: { open: true, clickThrough: false } })
+    expect(handler).toHaveBeenCalledWith({ open: true, clickThrough: false })
+  })
+
+  it.each([
+    ["null", null],
+    ["a partial payload", { open: true }],
+    ["a mistyped payload", { open: "yes", clickThrough: false }],
+  ])("onPetNativeStateChanged drops %s", async (_label, payload) => {
+    mockListen.mockResolvedValue(jest.fn())
+    const handler = jest.fn()
+    onPetNativeStateChanged(handler)
+    await flush()
+
+    mockListen.mock.calls[0][1]({ payload })
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("returns an inert disposer and never listens off Tauri", async () => {
+    mockIsTauri = false
+    const dispose = onPetSuspend(jest.fn())
+    await flush()
+
+    expect(mockListen).not.toHaveBeenCalled()
+    expect(() => dispose()).not.toThrow()
+  })
+
+  it("unlistens on dispose", async () => {
+    const off = jest.fn()
+    mockListen.mockResolvedValue(off)
+    const dispose = onPetSuspend(jest.fn())
+    await flush()
+
+    dispose()
+    expect(off).toHaveBeenCalledTimes(1)
+  })
+
+  it("unlistens immediately when disposed before listen resolves", async () => {
+    const off = jest.fn()
+    mockListen.mockResolvedValue(off)
+    const dispose = onPetSuspend(jest.fn())
+    dispose() // dispose before the dynamic import settles
+    await flush()
+
+    expect(off).toHaveBeenCalledTimes(1)
+  })
+
+  it("warns and stays inert when listen() itself rejects", async () => {
+    mockListen.mockRejectedValue(new Error("listen boom"))
+    const dispose = onPetSuspend(jest.fn())
+    await flush()
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "subscribe(pet://suspend) failed",
+      expect.objectContaining({ message: "listen boom" })
+    )
+    expect(() => dispose()).not.toThrow()
+  })
+
+  // Regression: Tauri's async `_unlisten` evaluates `listeners[eventId].handlerId`
+  // and rejects when the registration eval has not landed (StrictMode remount).
+  // The disposer must swallow it — a floating `unlisten()` surfaced it as an
+  // unhandled rejection that crashed the renderer.
+  it("does not surface an unhandled rejection when the unlisten rejects on dispose", async () => {
+    const onUnhandled = jest.fn()
+    process.on("unhandledRejection", onUnhandled)
+    try {
+      const off = jest.fn(() => Promise.reject(new TypeError("listeners[eventId].handlerId")))
+      mockListen.mockResolvedValue(off)
+      const dispose = onPetSuspend(jest.fn())
+      await flush()
+
+      expect(() => dispose()).not.toThrow()
+      await flush()
+      expect(off).toHaveBeenCalledTimes(1)
+      expect(onUnhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off("unhandledRejection", onUnhandled)
+    }
+  })
+
+  // Same race, early-dispose branch: `if (disposed) off()` floated its rejection
+  // past the trailing `.catch`, because the promise was never returned.
+  it("does not surface an unhandled rejection when the early-dispose unlisten rejects", async () => {
+    const onUnhandled = jest.fn()
+    process.on("unhandledRejection", onUnhandled)
+    try {
+      const off = jest.fn(() => Promise.reject(new TypeError("listeners[eventId].handlerId")))
+      mockListen.mockResolvedValue(off)
+      const dispose = onPetSuspend(jest.fn())
+      dispose()
+      await flush()
+
+      expect(off).toHaveBeenCalledTimes(1)
+      expect(onUnhandled).not.toHaveBeenCalled()
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      process.off("unhandledRejection", onUnhandled)
+    }
   })
 })
 

@@ -7,30 +7,105 @@
 // shape the `codex` CLI and CC Switch render. We query that by default and parse
 // its `*_window` fields first, then fall back to the older
 // `{ primary, secondary }` shape so a relay reporting the legacy layout still
-// lights up. On any failure — transport error, unexpected shape, missing fields
-// — the source returns `null`, letting the runner fall through (the panel shows
-// "no limit data") exactly like an unavailable balance. The endpoint is
-// overridable via the account's preset baseUrl.
+// lights up.
+//
+// Verified against `openai/codex` (`codex-rs/chatgpt/src/chatgpt_client.rs`,
+// `codex-rs/cloud-tasks/src/util.rs::normalize_base_url`, 2026-07-16). Three
+// facts from upstream drive the shape of this file:
+//
+//   1. The path is `/wham/usage` under `PathStyle::ChatGptApi`, hung off the
+//      `chatgpt_base_url` root (`https://chatgpt.com/backend-api`) — NOT off the
+//      Responses base (`…/backend-api/codex`) a chat preset carries. Appending
+//      `/wham/usage` to the preset baseUrl produced `…/codex/wham/usage` (404)
+//      or `…/v1/wham/usage` (404), which is why `resolveUsageBase` refuses to
+//      reuse a preset base that isn't the ChatGPT backend root.
+//   2. The endpoint needs the SAME identity headers the chat path sends
+//      (`chat-bridge.ts`) — above all `ChatGPT-Account-Id`, which selects WHICH
+//      subscription's quota to report. Bearer-only got a 401.
+//   3. It is ChatGPT-auth-only: "chatgpt authentication required to read rate
+//      limits". An `api_key` login has no usage endpoint at all, so this source
+//      declines (returns `null`) and lets the credit-balance source answer.
+//
+// Failures are surfaced as an `error` snapshot rather than swallowed. The old
+// bare `catch { return null }` made a 401/404/429 indistinguishable from "no
+// data": the panel rendered blank with nothing in the log, and every one of the
+// bugs above was invisible for years. `subscription_authed_get` already throws a
+// well-formed `"{status}: {body}"` — we keep it. Mirrors `sources/anthropic.ts`.
 
-import { windowMeter } from "../meters"
+import { errorLimits, windowMeter } from "../meters"
 
 import type {
+  CodexCredentialData,
   LimitsMeter,
   LimitsSource,
   LimitsSourceContext,
   ProviderLimits,
 } from "@/types/subscription"
 
-/** Default ChatGPT backend rate-limit endpoint. Overridable via preset baseUrl. */
+/** ChatGPT backend rate-limit path, hung off the backend-api root. */
 const DEFAULT_USAGE_PATH = "/wham/usage"
 
-/** Only the genuine ChatGPT/OpenAI endpoint reports these windows. */
-function looksLikeChatgpt(q: { providerKey?: string; baseUrl?: string }): boolean {
-  const key = q.providerKey
-  if (key && key !== "openai" && key !== "codex" && key !== "chatgpt") return false
-  const base = q.baseUrl
-  if (base && !/openai\.com|chatgpt\.com|api\.openai/i.test(base)) return false
-  return true
+/** The ChatGPT backend root. Upstream's `chatgpt_base_url` default. */
+const CHATGPT_BACKEND_BASE = "https://chatgpt.com/backend-api"
+
+/** Hosts that serve the ChatGPT backend (upstream `normalize_base_url`). */
+const CHATGPT_HOST_RE = /^https?:\/\/(chatgpt\.com|chat\.openai\.com)(\/|$)/i
+
+/**
+ * Resolve the base to hang `/wham/usage` off, or `null` when this account's
+ * endpoint can't serve it.
+ *
+ * A preset baseUrl describes where *chat* goes, which is a different surface
+ * from the usage endpoint even on the genuine backend. So we only reuse a preset
+ * base when it is a ChatGPT host, and then normalize it to the backend root
+ * (dropping the `/codex` Responses prefix). A relay/Azure/api.openai.com base
+ * yields `null` rather than silently retargeting the request at chatgpt.com —
+ * that would ship the relay's bearer to OpenAI, which is a credential leak, not
+ * a fallback.
+ */
+export function resolveUsageBase(baseUrl?: string): string | null {
+  const trimmed = baseUrl?.trim().replace(/\/+$/, "")
+  if (!trimmed) return CHATGPT_BACKEND_BASE
+  if (!CHATGPT_HOST_RE.test(trimmed)) return null
+  const root = trimmed.replace(/\/codex$/i, "").replace(/\/backend-api$/i, "")
+  return `${root}/backend-api`
+}
+
+/**
+ * Identity headers for the ChatGPT backend, mirroring `chat-bridge.ts` — the
+ * one Codex path in this repo known to authenticate successfully.
+ */
+export function usageHeaders(
+  token: string,
+  credential: CodexCredentialData | null
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+    "OpenAI-Beta": "responses=experimental",
+    originator: "codex_cli_rs",
+    "OAI-Product-Sku": "codex",
+    "User-Agent": "codex-cli",
+  }
+  const accountId = credential?.accountId?.trim()
+  if (accountId) headers["ChatGPT-Account-Id"] = accountId
+  return headers
+}
+
+type UsageFailure = { kind: "auth" | "http" | "network"; message: string }
+type UsageResult = { ok: true; body: string } | ({ ok: false } & UsageFailure)
+
+/**
+ * Classify a thrown transport error. `subscription_authed_get` rejects non-2xx
+ * as `"{status}: {body}"`, so the status is recoverable from the message; an
+ * auth verdict is what drives the one reactive token refresh.
+ */
+export function classifyUsageError(err: unknown): UsageFailure {
+  const message = err instanceof Error ? err.message : String(err)
+  const status = /^\s*(\d{3})\b/.exec(message)?.[1]
+  if (status === "401" || status === "403") return { kind: "auth", message }
+  if (status) return { kind: "http", message }
+  return { kind: "network", message }
 }
 
 interface RawWindow {
@@ -164,32 +239,70 @@ export function parseCodexWindows(body: string, now: number): LimitsMeter[] {
   return meters
 }
 
+/** One `/wham/usage` GET, normalized into a result rather than a throw. */
+async function callUsage(
+  ctx: LimitsSourceContext,
+  url: string,
+  token: string,
+  credential: CodexCredentialData | null
+): Promise<UsageResult> {
+  try {
+    return { ok: true, body: await ctx.authedGet(url, usageHeaders(token, credential)) }
+  } catch (err) {
+    return { ok: false, ...classifyUsageError(err) }
+  }
+}
+
 export const codexLimitsSource: LimitsSource = {
   key: "codex",
 
+  // Provider alone. The old `looksLikeChatgpt` gate also rejected on
+  // `providerKey`, but that is the preset's `templateId` — Codex presets are
+  // built from the `openai-compatible`/`openrouter` catalog families, so a
+  // perfectly good ChatGPT account whose preset came from the catalog made this
+  // source never match at all. `authMode` (checked in `fetch`) is the
+  // authoritative signal for "is this a ChatGPT subscription", not the preset.
   matches(q) {
-    return q.provider === "codex" && looksLikeChatgpt(q)
+    return q.provider === "codex"
   },
 
   async fetch(ctx: LimitsSourceContext): Promise<ProviderLimits | null> {
+    const credential: CodexCredentialData | null =
+      ctx.credential?.provider === "codex" ? ctx.credential : null
+
+    // Rate-limit windows are a ChatGPT-subscription concept. An api_key login
+    // has no usage endpoint upstream, so decline and let the credit-balance
+    // source answer for it (the UI explains the gap). Only decline on a KNOWN
+    // non-chatgpt mode — an absent credential keeps the legacy behavior.
+    if (credential && credential.authMode !== "chatgpt") return null
     if (!ctx.token) return null
-    const base = (ctx.baseUrl ?? "https://chatgpt.com/backend-api").replace(/\/+$/, "")
+
+    const base = resolveUsageBase(ctx.baseUrl)
+    if (!base) return null
     const url = `${base}${DEFAULT_USAGE_PATH}`
 
-    let body: string
-    try {
-      body = await ctx.authedGet(url, {
-        Authorization: `Bearer ${ctx.token}`,
-        Accept: "application/json",
-      })
-    } catch {
-      return null
+    let token = ctx.token
+    let result = await callUsage(ctx, url, token, credential)
+
+    // One reactive refresh on a real 401/403. Codex bearers expire (~ChatGPT
+    // session lifetime) and the runner refreshes proactively, but a token can
+    // still age out between resolve and fetch.
+    if (!result.ok && result.kind === "auth" && ctx.refreshToken) {
+      const refreshed = await ctx.refreshToken().catch(() => null)
+      if (refreshed && refreshed !== token) {
+        token = refreshed
+        result = await callUsage(ctx, url, token, credential)
+      }
     }
+
+    // A 401/404/429/outage is NOT "no windows" — surface it so the panel can
+    // say why instead of rendering blank.
+    if (!result.ok) return errorLimits(ctx, "codex", result.message)
 
     // Prefer the real wham/usage layout; fall back to the legacy shape so a
     // relay reporting `{ primary, secondary }` still resolves.
-    const meters = parseWhamUsage(body, ctx.now)
-    const resolved = meters.length > 0 ? meters : parseCodexWindows(body, ctx.now)
+    const meters = parseWhamUsage(result.body, ctx.now)
+    const resolved = meters.length > 0 ? meters : parseCodexWindows(result.body, ctx.now)
     if (resolved.length === 0) return null
 
     return {

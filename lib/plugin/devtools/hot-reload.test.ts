@@ -25,6 +25,8 @@ const { getPluginManager: getPluginManagerMock } = jest.requireMock(
   "@/lib/plugin/core/manager"
 ) as { getPluginManager: jest.Mock }
 
+const { listen: listenMock } = jest.requireMock("@tauri-apps/api/event") as { listen: jest.Mock }
+
 describe("PluginHotReload", () => {
   let reloader: PluginHotReload
 
@@ -107,6 +109,32 @@ describe("PluginHotReload", () => {
       reloader.setConfig({ enabled: true })
       await reloader.stopWatching()
       // No error means success
+    })
+
+    // Regression: Tauri's async unlisten rejects with `listeners[eventId].handlerId`
+    // when the registration eval lost the StrictMode mount/unmount race. It is not
+    // awaited here, so calling it raw floated the rejection past the surrounding
+    // try/catch and surfaced as an unhandled rejection.
+    it("swallows a rejecting Tauri unlisten on stopWatching", async () => {
+      const onUnhandled = jest.fn()
+      process.on("unhandledRejection", onUnhandled)
+      try {
+        const unlisten = jest.fn(() =>
+          Promise.reject(new TypeError("listeners[eventId].handlerId"))
+        )
+        listenMock.mockResolvedValueOnce(unlisten)
+        reloader.setConfig({ enabled: true, watchPaths: ["/path/to/plugin-a"] })
+
+        await reloader.startWatching([] as never)
+        await reloader.stopWatching()
+        // Flush microtasks + a macrotask so any unhandled rejection would fire.
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        expect(unlisten).toHaveBeenCalledTimes(1)
+        expect(onUnhandled).not.toHaveBeenCalled()
+      } finally {
+        process.off("unhandledRejection", onUnhandled)
+      }
     })
   })
 

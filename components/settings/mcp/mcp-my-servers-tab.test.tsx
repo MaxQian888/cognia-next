@@ -17,14 +17,19 @@ jest.mock("@/lib/db/mcp-servers", () => ({
 
 jest.mock("@cognia/logging", () => ({
   loggers: { mcp: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } },
-  // The live-session card pulls in `@/stores/chat` → `lib/execution/broker`,
-  // which calls `createLogger` at module load; stub it so the suite can import.
-  createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
 }))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 jest.mock("../mcp-import-dialog", () => ({ McpImportDialog: () => <div data-testid="import" /> }))
+// Stub the card like every other child of this tab. It drags in a deep chain
+// (`use-log-stream` → a module-scope IndexedDB transport, `@/stores/chat` →
+// `lib/execution/broker`) that this suite never asserts on, and hand-stubbing
+// each export that chain reaches breaks again every time it grows. The card has
+// its own suite in mcp-live-session-card.test.tsx.
+jest.mock("./mcp-live-session-card", () => ({
+  McpLiveSessionCard: () => <div data-testid="live-session" />,
+}))
 jest.mock("../mcp-agent-chip-group", () => ({ refreshAgentAvailability: jest.fn() }))
 jest.mock("./mcp-batch-actions-bar", () => ({
   McpBatchActionsBar: () => <div data-testid="batch" />,

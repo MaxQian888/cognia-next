@@ -208,7 +208,7 @@ export function CustomProviderDialog({
 
   const handleTestConnection = async () => {
     if (!baseURL || !apiKey) return
-    await runConnectionTest(baseURL, apiKey, apiProtocol)
+    await runConnectionTest(baseURL, apiKey, apiProtocol, defaultModel || models[0])
   }
 
   const handleDiscoverModels = async () => {

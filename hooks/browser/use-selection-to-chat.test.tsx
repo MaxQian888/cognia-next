@@ -5,6 +5,8 @@ import type { BrowserSelection } from "@/lib/browser/protocol"
 const mockSend = jest.fn().mockResolvedValue(undefined)
 const mockInterrupt = jest.fn().mockResolvedValue(undefined)
 const mockCapture = jest.fn()
+const mockSaveAnnotation = jest.fn().mockResolvedValue(undefined)
+const mockTransitionAnnotation = jest.fn().mockResolvedValue(true)
 let mockStoreState: {
   activeSessionId: string | null
   sessions: Record<string, { status: string }>
@@ -27,6 +29,10 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
     rejected: [],
     tokens: 0,
   })),
+}))
+jest.mock("@/lib/db/browser-annotations", () => ({
+  saveBrowserAnnotation: (...args: unknown[]) => mockSaveAnnotation(...args),
+  transitionBrowserAnnotation: (...args: unknown[]) => mockTransitionAnnotation(...args),
 }))
 
 import { buildSendContent } from "@/lib/chat/attachments/dispatch"
@@ -52,7 +58,32 @@ beforeEach(() => {
   mockSend.mockClear().mockResolvedValue(undefined)
   mockInterrupt.mockClear().mockResolvedValue(undefined)
   mockCapture.mockReset().mockResolvedValue({ bytes: "AAAA", width: 10, height: 10 })
+  mockSaveAnnotation.mockClear().mockResolvedValue(undefined)
+  mockTransitionAnnotation.mockClear().mockResolvedValue(true)
   mockStoreState = { activeSessionId: "s1", sessions: { s1: { status: "idle" } } }
+})
+
+it("queues a durable annotation and sends a batch with one screenshot", async () => {
+  mockStoreState.sessions.s1.status = "streaming"
+  const { result } = renderHook(() => useSelectionToChat())
+  const annotation = await result.current.queueAnnotation(SELECTION, "fix contrast", {
+    baseUrl: "http://localhost:3000",
+  })
+  expect(mockSaveAnnotation).toHaveBeenCalledWith(
+    expect.objectContaining({ comment: "fix contrast", status: "pending", sessionId: "s1" })
+  )
+  const ok = await result.current.sendAnnotations([annotation!], {
+    captureRect: { x: 0, y: 0, width: 100, height: 100 },
+  })
+  expect(ok).toBe(true)
+  expect(mockCapture).toHaveBeenCalledTimes(1)
+  expect(mockInterrupt).toHaveBeenCalledWith("s1")
+  expect(mockSend).toHaveBeenCalledTimes(1)
+  expect(mockTransitionAnnotation).toHaveBeenCalledWith(
+    annotation!.id,
+    "acknowledged",
+    expect.any(Number)
+  )
 })
 
 it("sends a comment with screenshot to the active session when idle", async () => {

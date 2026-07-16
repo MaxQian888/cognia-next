@@ -20,6 +20,29 @@ describe("MCP_PRESETS catalog", () => {
       }
     }
   })
+
+  // These npm packages are all marked "Package no longer supported" on the
+  // registry — installing one hands the user a server that can't start.
+  // Every entry here was verified deprecated against registry.npmjs.org.
+  it("references no deprecated @modelcontextprotocol packages", () => {
+    const DEPRECATED = [
+      "@modelcontextprotocol/server-github",
+      "@modelcontextprotocol/server-gitlab",
+      "@modelcontextprotocol/server-brave-search",
+      "@modelcontextprotocol/server-postgres",
+      "@modelcontextprotocol/server-puppeteer",
+      "@modelcontextprotocol/server-slack",
+    ]
+    for (const preset of MCP_PRESETS) {
+      const args = (preset.config.args as unknown[] | undefined) ?? []
+      for (const arg of args) {
+        if (typeof arg !== "string") continue
+        for (const pkg of DEPRECATED) {
+          expect(arg.startsWith(pkg)).toBe(false)
+        }
+      }
+    }
+  })
 })
 
 describe("applyPresetFields", () => {
@@ -32,11 +55,11 @@ describe("applyPresetFields", () => {
   })
 
   it("fills env vars", () => {
-    const gh = getPreset("github")!
-    const config = applyPresetFields(gh, {
-      GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_abc",
+    const gl = getPreset("gitlab")!
+    const config = applyPresetFields(gl, {
+      GITLAB_PERSONAL_ACCESS_TOKEN: "glpat_abc",
     })
-    expect((config.env as Record<string, string>).GITHUB_PERSONAL_ACCESS_TOKEN).toBe("ghp_abc")
+    expect((config.env as Record<string, string>).GITLAB_PERSONAL_ACCESS_TOKEN).toBe("glpat_abc")
   })
 
   it("does not mutate the preset", () => {

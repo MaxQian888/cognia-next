@@ -1,18 +1,87 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ExternalLinkIcon, SearchIcon } from "lucide-react"
+import { ExternalLinkIcon, Loader2Icon, SearchIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { MCP_PRESETS, type McpPreset } from "@/lib/claude/mcp-presets"
+import { searchRegistry } from "@/lib/mcp/registry/client"
 
 interface Props {
   existingNames: string[]
   onPresetSelected: (preset: McpPreset, values: Record<string, string>) => void
+}
+
+/** Debounce before hitting the network, so typing doesn't fire a request a key. */
+const REGISTRY_DEBOUNCE_MS = 350
+/** Below this, a query matches too much of the registry to be useful. */
+const REGISTRY_MIN_QUERY = 2
+
+interface RegistryState {
+  presets: McpPreset[]
+  loading: boolean
+  failed: boolean
+  /** True once a query has actually been searched (so we can show "no results"). */
+  searched: boolean
+  /** False when the registry shouldn't be consulted at all — hides the section. */
+  active: boolean
+}
+
+/**
+ * Live search against the official MCP Registry, layered under the curated
+ * catalog. Only runs for a real query — browsing with no term would just dump
+ * whatever the registry happens to return first, which isn't useful. A tag
+ * filter means the user is narrowing the curated set, so registry results are
+ * suppressed rather than shown ignoring the filter.
+ *
+ * The result is tagged with the query it came from, so everything except the
+ * fetch itself is derived at render. That keeps the effect free of synchronous
+ * setState and means a stale page can never be shown against a newer query.
+ */
+function useRegistrySearch(query: string, activeTag: string | null): RegistryState {
+  const q = query.trim()
+  const active = !activeTag && q.length >= REGISTRY_MIN_QUERY
+  const [result, setResult] = useState<{
+    query: string
+    presets: McpPreset[]
+    failed: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    if (!active) return
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      searchRegistry({ search: q, limit: 30, signal: controller.signal })
+        .then((res) => {
+          if (!controller.signal.aborted) {
+            setResult({ query: q, presets: res.presets, failed: false })
+          }
+        })
+        .catch(() => {
+          // Offline or registry down: the curated catalog still works, so fail
+          // quietly into an inline notice instead of a toast.
+          if (!controller.signal.aborted) setResult({ query: q, presets: [], failed: true })
+        })
+    }, REGISTRY_DEBOUNCE_MS)
+
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [q, active])
+
+  const fresh = result && result.query === q ? result : null
+  return {
+    presets: fresh?.presets ?? [],
+    failed: fresh?.failed ?? false,
+    loading: active && !fresh,
+    searched: !!fresh,
+    active,
+  }
 }
 
 /**
@@ -45,6 +114,8 @@ export function McpPresetGrid({ existingNames, onPresetSelected }: Props) {
       return haystack.includes(q)
     })
   }, [query, activeTag])
+
+  const registry = useRegistrySearch(query, activeTag)
 
   const nameTaken = selected ? existingNames.includes(selected.id.toLowerCase()) : false
 
@@ -156,36 +227,89 @@ export function McpPresetGrid({ existingNames, onPresetSelected }: Props) {
           ))}
         </div>
       )}
-      {presets.length === 0 ? (
+      {presets.length === 0 && !registry.active ? (
         <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
           {t("noMatch")}
         </p>
       ) : (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {presets.map((p) => {
-            const taken = existingNames.includes(p.id.toLowerCase())
-            return (
-              <button
+        presets.length > 0 && (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {presets.map((p) => (
+              <PresetCard
                 key={p.id}
-                type="button"
-                className="group flex flex-col items-start gap-1 rounded-md border bg-card p-3 text-left text-sm transition-colors hover:border-primary/40 hover:bg-accent disabled:opacity-50"
-                onClick={() => handlePick(p)}
-                disabled={taken && p.id !== "custom"}
-              >
-                <div className="flex w-full items-center gap-2">
-                  <span className="text-xl leading-none">{p.icon}</span>
-                  <span className="flex-1 truncate font-medium">{p.name}</span>
-                  {taken && p.id !== "custom" && (
-                    <span className="text-[10px] text-muted-foreground">{t("addedBadge")}</span>
-                  )}
-                </div>
-                <p className="line-clamp-2 text-[11px] text-muted-foreground">{p.description}</p>
-              </button>
-            )
-          })}
+                preset={p}
+                taken={existingNames.includes(p.id.toLowerCase()) && p.id !== "custom"}
+                takenLabel={t("addedBadge")}
+                onPick={handlePick}
+              />
+            ))}
+          </div>
+        )
+      )}
+
+      {registry.active && (
+        <div className="space-y-2 pt-1" data-testid="mcp-registry-results">
+          <div className="flex items-center gap-1.5 pt-1">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              {t("registryTitle")}
+            </span>
+            {registry.loading && (
+              <Loader2Icon className="size-3 animate-spin text-muted-foreground" />
+            )}
+          </div>
+          {registry.failed ? (
+            <p className="rounded-md border border-dashed p-3 text-center text-[11px] text-muted-foreground">
+              {t("registryError")}
+            </p>
+          ) : registry.presets.length === 0 && !registry.loading ? (
+            <p className="rounded-md border border-dashed p-3 text-center text-[11px] text-muted-foreground">
+              {t("registryEmpty")}
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {registry.presets.map((p) => (
+                <PresetCard
+                  key={p.id}
+                  preset={p}
+                  taken={existingNames.includes(p.id.toLowerCase())}
+                  takenLabel={t("addedBadge")}
+                  onPick={handlePick}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+/** One clickable card in either grid. `h-full` keeps a row's cards aligned. */
+function PresetCard({
+  preset,
+  taken,
+  takenLabel,
+  onPick,
+}: {
+  preset: McpPreset
+  taken: boolean
+  takenLabel: string
+  onPick: (preset: McpPreset) => void
+}) {
+  return (
+    <button
+      type="button"
+      className="group flex h-full flex-col items-start gap-1 rounded-md border bg-card p-3 text-left text-sm transition-colors hover:border-primary/40 hover:bg-accent disabled:opacity-50"
+      onClick={() => onPick(preset)}
+      disabled={taken}
+    >
+      <div className="flex w-full items-center gap-2">
+        <span className="text-xl leading-none">{preset.icon}</span>
+        <span className="flex-1 truncate font-medium">{preset.name}</span>
+        {taken && <span className="text-[10px] text-muted-foreground">{takenLabel}</span>}
+      </div>
+      <p className="line-clamp-2 text-[11px] text-muted-foreground">{preset.description}</p>
+    </button>
   )
 }
 

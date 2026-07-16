@@ -25,6 +25,23 @@ jest.mock("./add-account-dialog/codex", () => ({
     open ? <div data-testid="codex-add-dialog" /> : null,
 }))
 
+jest.mock("./provider-quota-panel", () => ({
+  ProviderQuotaPanel: ({ provider }: { provider: string }) => (
+    <div data-testid={`quota-panel-${provider}`} />
+  ),
+}))
+
+// `expiresAtMs` is the api-key signal the tab reads (0 = non-expiring).
+type MockAccount = { id: string; variant: string; expiresAtMs: number }
+const mockAccountsState: { accounts: MockAccount[]; activeAccountId: string | null } = {
+  accounts: [],
+  activeAccountId: null,
+}
+
+jest.mock("@/lib/subscription/core/hooks", () => ({
+  useAccounts: () => mockAccountsState,
+}))
+
 const saveMock = jest.fn(async (_: unknown) => undefined)
 type MockCodexSettings = {
   autoRefreshNearExpiry: boolean
@@ -62,6 +79,8 @@ import { ProviderTabCodex } from "./provider-tab-codex"
 beforeEach(() => {
   saveMock.mockClear()
   mockSettingsState.codexSubscriptionSettings = { ...defaultMockCodexSettings }
+  mockAccountsState.accounts = []
+  mockAccountsState.activeAccountId = null
 })
 
 describe("ProviderTabCodex", () => {
@@ -112,6 +131,27 @@ describe("ProviderTabCodex", () => {
         codexSubscriptionSettings: { ...defaultMockCodexSettings, probeEnabled: true },
       })
     })
+  })
+
+  // An api-key login has no usage endpoint upstream, so the quota panel is
+  // legitimately empty — say so rather than leaving a gap that reads as a bug.
+  it("explains the empty quota panel for an api-key account", () => {
+    mockAccountsState.accounts = [{ id: "a1", variant: "codex", expiresAtMs: 0 }]
+    mockAccountsState.activeAccountId = "a1"
+    render(<ProviderTabCodex />)
+    expect(screen.getByTestId("codex-quota-api-key-only")).toBeInTheDocument()
+  })
+
+  it("does not show the api-key note for a ChatGPT login", () => {
+    mockAccountsState.accounts = [{ id: "a1", variant: "codex", expiresAtMs: 1_800_000 }]
+    mockAccountsState.activeAccountId = "a1"
+    render(<ProviderTabCodex />)
+    expect(screen.queryByTestId("codex-quota-api-key-only")).not.toBeInTheDocument()
+  })
+
+  it("shows no api-key note when there is no active account", () => {
+    render(<ProviderTabCodex />)
+    expect(screen.queryByTestId("codex-quota-api-key-only")).not.toBeInTheDocument()
   })
 
   it("clamps a too-fast visible cadence to the floor on save", async () => {

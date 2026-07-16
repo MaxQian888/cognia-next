@@ -6,9 +6,9 @@ rustflags = ["--cfg", "tokio_unstable"]
 # recognizes it across rebuilds and stops re-prompting for the password.
 # See src-tauri/scripts/dev-codesign.sh; one-time setup: `pnpm dev:sign:setup`.
 #
-# The shim is cwd-agnostic — tauri runs cargo from `src-tauri`, plain cargo from
-# the repo root — and a no-op when the signer script is missing (CI / Linux /
-# other machines), so committing it is safe. Only fires on `cargo run`/`tauri
-# dev`, never on `cargo build`/`tauri build`.
+# This target runner covers direct `cargo run`. Tauri builds and launches the
+# artifact itself, so `tauri dev` uses the platform-specific `build.runner` in
+# `src-tauri/tauri.macos.conf.json` instead. Both paths share
+# `src-tauri/scripts/dev-codesign.sh`.
 [target.aarch64-apple-darwin]
 runner = ["/bin/sh", "-c", 'for s in src-tauri/scripts/dev-codesign.sh scripts/dev-codesign.sh; do [ -x "$s" ] && exec "$s" "$@"; done; exec "$@"', "dev-codesign-shim"]

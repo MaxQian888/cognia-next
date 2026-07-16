@@ -50,14 +50,35 @@ jest.mock("@/lib/browser/agent-engine", () => {
 jest.mock("@cognia/plugin-sdk", () => ({
   defineContextProvider: (p: unknown) => p,
 }))
+jest.mock("@/lib/db/browser-annotations", () => ({
+  saveBrowserAnnotation: jest.fn(async () => {}),
+}))
+jest.mock("@/stores/chat/chat-store", () => ({
+  useChatStore: { getState: jest.fn(() => ({ activeSessionId: "session-1" })) },
+}))
 
 import definition from "@/plugins/browser-tools/src/index"
 import * as engineModule from "@/lib/browser/agent-engine"
+import { saveBrowserAnnotation } from "@/lib/db/browser-annotations"
+import { useChatStore } from "@/stores/chat/chat-store"
 
 const engine = (engineModule as unknown as { __engine: Record<string, jest.Mock> }).__engine
 const setLiveUrl = (engineModule as unknown as { __setUrl: (u: string) => void }).__setUrl
+const saveBrowserAnnotationMock = saveBrowserAnnotation as jest.Mock
+const activeSessionMock = useChatStore.getState as jest.Mock
 
 type Tools = Record<string, (args: unknown) => Promise<unknown>>
+type ToolRegistration = {
+  name: string
+  definition: {
+    description: string
+    parametersSchema: {
+      required?: string[]
+      properties?: Record<string, { enum?: readonly string[] }>
+    }
+  }
+  execute: (args: unknown) => Promise<unknown>
+}
 
 async function collectTools(): Promise<Tools> {
   const tools: Tools = {}
@@ -75,8 +96,25 @@ async function collectTools(): Promise<Tools> {
   return tools
 }
 
+async function collectRegistrations(): Promise<Record<string, ToolRegistration>> {
+  const registrations: Record<string, ToolRegistration> = {}
+  await definition.activate!({
+    pluginId: "cognia-browser-tools",
+    logger: { info: jest.fn() },
+    agent: {
+      registerTool: (tool: ToolRegistration) => {
+        registrations[tool.name] = tool
+      },
+      context: { registerProvider: jest.fn() },
+    },
+  } as never)
+  return registrations
+}
+
 beforeEach(() => {
   Object.values(engine).forEach((m) => m.mockClear())
+  saveBrowserAnnotationMock.mockClear()
+  activeSessionMock.mockReturnValue({ activeSessionId: "session-1" })
   setLiveUrl("http://localhost/")
 })
 
@@ -87,6 +125,7 @@ describe("browser-tools plugin", () => {
       expect.arrayContaining([
         "browser_navigate",
         "browser_snapshot",
+        "browser_annotate",
         "browser_click",
         "browser_type",
         "browser_fill_form",
@@ -100,6 +139,127 @@ describe("browser-tools plugin", () => {
         "browser_evaluate",
       ])
     )
+  })
+
+  it("browser_annotate resolves the live ref and saves a pending annotation", async () => {
+    const selection = {
+      paneId: "browser-preview",
+      selector: "#hero-cta",
+      domPath: "html > body > button#hero-cta",
+      tagName: "BUTTON",
+      id: "hero-cta",
+      classes: "primary",
+      rect: { x: 20, y: 100, width: 160, height: 44 },
+      outerHTML: '<button id="hero-cta">Start</button>',
+      text: "Start",
+      pageUrl: "http://localhost:3000/pricing",
+      pageTitle: "Pricing",
+      viewport: { width: 1280, height: 800 },
+    }
+    engine.evaluate.mockResolvedValueOnce({
+      ok: true,
+      value: JSON.stringify({ ok: true, error: null, selection }),
+    })
+    const tools = await collectTools()
+    const result = (await tools.browser_annotate({
+      ref: "e7",
+      comment: "  The CTA lacks visual hierarchy. Increase contrast or isolate it.  ",
+      intent: "change",
+      severity: "important",
+    })) as { ok: boolean; annotation: { status: string; baseUrl: string } }
+
+    expect(engine.evaluate).toHaveBeenCalledWith('window.__cogniaSelectionForRef("e7")')
+    expect(saveBrowserAnnotationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        baseUrl: "http://localhost:3000",
+        selection,
+        comment: "The CTA lacks visual hierarchy. Increase contrast or isolate it.",
+        intent: "change",
+        severity: "important",
+        status: "pending",
+        thread: [],
+      })
+    )
+    expect(result.ok).toBe(true)
+    expect(result.annotation).toMatchObject({
+      status: "pending",
+      baseUrl: "http://localhost:3000",
+    })
+  })
+
+  it("browser_annotate exposes the strict critique contract", async () => {
+    const registrations = await collectRegistrations()
+    const contract = registrations.browser_annotate.definition
+    expect(contract.parametersSchema.required).toEqual(["ref", "comment", "intent", "severity"])
+    expect(contract.parametersSchema.properties?.intent.enum).toEqual([
+      "fix",
+      "change",
+      "question",
+      "approve",
+    ])
+    expect(contract.parametersSchema.properties?.severity.enum).toEqual([
+      "blocking",
+      "important",
+      "suggestion",
+    ])
+    expect(contract.description).toMatch(/2–3 sentences/)
+    expect(contract.description).toMatch(/comparable product/)
+    expect(contract.description).toMatch(/spacing rhythm/)
+  })
+
+  it("browser_annotate rejects stale refs without persisting", async () => {
+    engine.evaluate.mockResolvedValueOnce({
+      ok: true,
+      value: JSON.stringify({ ok: false, error: "Unknown or stale ref: e2", selection: null }),
+    })
+    const tools = await collectTools()
+    const result = (await tools.browser_annotate({
+      ref: "e2",
+      comment: "This navigation treatment is unclear.",
+      intent: "fix",
+      severity: "blocking",
+    })) as { ok: boolean; error: string }
+
+    expect(result).toEqual({ ok: false, error: "Unknown or stale ref: e2" })
+    expect(saveBrowserAnnotationMock).not.toHaveBeenCalled()
+  })
+
+  it("browser_annotate enforces intent and severity at execution time", async () => {
+    const tools = await collectTools()
+    await expect(
+      tools.browser_annotate({
+        ref: "e1",
+        comment: "Critique",
+        intent: "delete",
+        severity: "urgent",
+      })
+    ).resolves.toEqual({ ok: false, error: "intent must be fix, change, question, or approve" })
+    await expect(
+      tools.browser_annotate({
+        ref: "e1",
+        comment: "Critique",
+        intent: "fix",
+        severity: "urgent",
+      })
+    ).resolves.toEqual({
+      ok: false,
+      error: "severity must be blocking, important, or suggestion",
+    })
+    expect(engine.evaluate).not.toHaveBeenCalled()
+  })
+
+  it("browser_annotate requires an active chat session", async () => {
+    activeSessionMock.mockReturnValueOnce({ activeSessionId: undefined })
+    const tools = await collectTools()
+    const result = await tools.browser_annotate({
+      ref: "e1",
+      comment: "Critique",
+      intent: "question",
+      severity: "suggestion",
+    })
+    expect(result).toEqual({ ok: false, error: "No active chat session" })
+    expect(engine.evaluate).not.toHaveBeenCalled()
   })
 
   it("browser_press_key forwards the chord (and optional ref) and refreshes the snapshot", async () => {

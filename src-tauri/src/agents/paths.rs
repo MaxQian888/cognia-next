@@ -125,6 +125,32 @@ fn vscode_user_path() -> Option<PathBuf> {
     Some(base.join("User").join("mcp.json"))
 }
 
+/// Zed's settings.json. Mirrors `paths::config_dir()` in zed-industries/zed
+/// (crates/paths/src/paths.rs): Windows uses the roaming config dir under the
+/// capitalised `Zed`, Linux/FreeBSD use XDG, and macOS deliberately uses
+/// `~/.config/zed` rather than `~/Library/Application Support` — so
+/// `dirs::config_dir()` must NOT be used on macOS here.
+fn zed_settings_path() -> Option<PathBuf> {
+    let base = if cfg!(target_os = "windows") {
+        dirs::config_dir()?.join("Zed")
+    } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
+        dirs::config_dir()?.join("zed")
+    } else {
+        home()?.join(".config").join("zed")
+    };
+    Some(base.join("settings.json"))
+}
+
+/// opencode's global config. `~/.config/opencode/opencode.json` on unix.
+fn opencode_path() -> Option<PathBuf> {
+    let base = if cfg!(target_os = "windows") {
+        dirs::config_dir()?.join("opencode")
+    } else {
+        home()?.join(".config").join("opencode")
+    };
+    Some(base.join("opencode.json"))
+}
+
 /// Build the spec for a known agent id. Unknown ids return None.
 pub fn spec_for(agent: &str) -> Option<AgentSpec> {
     let path: Option<PathBuf>;
@@ -169,6 +195,24 @@ pub fn spec_for(agent: &str) -> Option<AgentSpec> {
         "windsurf" => {
             // ~/.codeium/windsurf/mcp_config.json
             path = home().map(|h| h.join(".codeium").join("windsurf").join("mcp_config.json"));
+            format = AgentFormat::Json;
+            writable = true;
+        }
+        "zed" => {
+            // settings.json is JSONC — comments don't survive a write.
+            path = zed_settings_path();
+            format = AgentFormat::Jsonc;
+            writable = true;
+        }
+        "kiro" => {
+            // ~/.kiro/settings/mcp.json (user scope; workspace file wins in Kiro
+            // but isn't ours to touch).
+            path = home().map(|h| h.join(".kiro").join("settings").join("mcp.json"));
+            format = AgentFormat::Json;
+            writable = true;
+        }
+        "opencode" => {
+            path = opencode_path();
             format = AgentFormat::Json;
             writable = true;
         }
@@ -239,5 +283,46 @@ mod tests {
     #[test]
     fn spec_for_unknown_is_none() {
         assert!(spec_for("not-an-agent").is_none());
+    }
+
+    #[test]
+    fn spec_for_zed_is_writable_jsonc_settings_file() {
+        let spec = spec_for("zed").expect("zed spec");
+        assert!(spec.writable);
+        // settings.json allows comments, so it must round-trip as JSONC.
+        assert_eq!(spec.format, AgentFormat::Jsonc);
+        let path = spec.path.expect("zed path");
+        assert!(path.ends_with("settings.json"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn zed_uses_dot_config_on_macos_not_application_support() {
+        // Zed deliberately reads ~/.config/zed on macOS; resolving it via
+        // dirs::config_dir() would wrongly land in Application Support.
+        let path = spec_for("zed").expect("zed spec").path.expect("zed path");
+        let shown = path.to_string_lossy();
+        assert!(shown.contains(".config/zed"), "unexpected zed path: {shown}");
+        assert!(!shown.contains("Application Support"));
+    }
+
+    #[test]
+    fn spec_for_kiro_is_writable_json_under_settings() {
+        let spec = spec_for("kiro").expect("kiro spec");
+        assert!(spec.writable);
+        assert_eq!(spec.format, AgentFormat::Json);
+        let path = spec.path.expect("kiro path");
+        assert!(path.ends_with("mcp.json"));
+        assert!(path.to_string_lossy().contains(".kiro"));
+    }
+
+    #[test]
+    fn spec_for_opencode_is_writable_json() {
+        let spec = spec_for("opencode").expect("opencode spec");
+        assert!(spec.writable);
+        assert_eq!(spec.format, AgentFormat::Json);
+        let path = spec.path.expect("opencode path");
+        assert!(path.ends_with("opencode.json"));
+        assert!(path.to_string_lossy().contains("opencode"));
     }
 }

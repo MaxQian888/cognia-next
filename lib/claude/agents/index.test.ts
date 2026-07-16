@@ -15,8 +15,8 @@ import {
 } from "./index"
 
 describe("MCP_AGENT_ADAPTERS registry", () => {
-  it("contains exactly the 10 known adapters", () => {
-    expect(MCP_AGENT_ADAPTERS).toHaveLength(10)
+  it("contains exactly the 13 known adapters", () => {
+    expect(MCP_AGENT_ADAPTERS).toHaveLength(13)
     expect(MCP_AGENT_ADAPTERS.map((a) => a.id).sort()).toEqual(
       [
         "claude-code",
@@ -26,9 +26,12 @@ describe("MCP_AGENT_ADAPTERS registry", () => {
         "cognia",
         "cursor",
         "gemini",
+        "kiro",
+        "opencode",
         "roo-code",
         "vscode",
         "windsurf",
+        "zed",
       ].sort()
     )
   })

@@ -21,9 +21,14 @@ export interface CodexProbeDeps {
 
 /**
  * Probe the active Codex account's usage windows once. Returns the snapshot
- * (or `null` when nothing resolved). A snapshot is persisted only when it
- * carries at least one meter — an `error`-only or empty snapshot is returned to
- * the caller but not written, so the history table never fills with blanks.
+ * (or `null` when nothing resolved).
+ *
+ * A snapshot is persisted when it carries at least one meter OR an `error`.
+ * Errors are written because the panel reads Dexie, not this return value: an
+ * unpersisted error rendered as a blank panel, which is exactly how a 401 from
+ * a stale bearer stayed invisible. An empty, error-free snapshot is still
+ * dropped so the table never fills with true blanks; `recordLimitsSnapshot`
+ * caps the table, so a persistently failing endpoint can't grow it unbounded.
  */
 export async function probeCodexUsage(
   accountId: string,
@@ -33,7 +38,7 @@ export async function probeCodexUsage(
   const persist = deps.persist ?? recordLimitsSnapshot
 
   const snapshot = await query(accountId)
-  if (snapshot && snapshot.meters.length > 0) {
+  if (snapshot && (snapshot.meters.length > 0 || snapshot.error)) {
     await persist(snapshot)
   }
   return snapshot

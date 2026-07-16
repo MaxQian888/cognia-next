@@ -244,6 +244,58 @@ pub async fn browser_embed_snapshot(
     }
 }
 
+/// Pull buffered element selections after the sentinel emitted a small signal.
+#[tauri::command]
+pub async fn browser_embed_drain_selection(app: AppHandle) -> Result<String, String> {
+    #[cfg(desktop)]
+    {
+        let raw = eval_embed_with_result(&app, "window.__cogniaGetSelection()").await?;
+        normalize_selection_drain(raw, EMBED_LABEL)
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("desktop only".to_string())
+    }
+}
+
+/// A strict aggregate cap for the complete selection envelope. This is checked
+/// before and after pane-id enrichment so a page that replaces the public drain
+/// helper cannot make Rust forward an unbounded value to the renderer.
+#[cfg(desktop)]
+const MAX_SELECTION_DRAIN_BYTES: usize = 200_000;
+
+#[cfg(desktop)]
+fn normalize_selection_drain(raw: String, pane_label: &str) -> Result<String, String> {
+    let raw = unwrap_js_string(raw);
+    if raw.len() > MAX_SELECTION_DRAIN_BYTES {
+        return Err("selection drain exceeds byte limit".to_string());
+    }
+    let mut envelope: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|_| "invalid selection drain envelope".to_string())?;
+    let selections = envelope
+        .get_mut("selections")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| "invalid selection drain envelope".to_string())?;
+    if selections.len() > 20 {
+        return Err("selection drain exceeds item limit".to_string());
+    }
+    for selection in selections {
+        let object = selection
+            .as_object_mut()
+            .ok_or_else(|| "invalid selection drain payload".to_string())?;
+        object.insert(
+            "paneId".to_string(),
+            serde_json::Value::String(pane_label.to_string()),
+        );
+    }
+    let normalized = serde_json::to_string(&envelope).map_err(|error| error.to_string())?;
+    if normalized.len() > MAX_SELECTION_DRAIN_BYTES {
+        return Err("selection drain exceeds byte limit".to_string());
+    }
+    Ok(normalized)
+}
+
 /// Cap on the serialized result of `browser_embed_evaluate` so a runaway
 /// expression (e.g. `document.documentElement.outerHTML` on a huge page) can't
 /// flood the model context.
@@ -646,6 +698,42 @@ pub async fn browser_embed_set_panel_labels(app: AppHandle, labels: String) -> R
     }
 }
 
+#[cfg(desktop)]
+fn build_set_frozen_call(on: bool) -> String {
+    format!("window.__cogniaSetFrozen({on})")
+}
+
+#[cfg(desktop)]
+fn parse_set_frozen_result(raw: String) -> Result<(), String> {
+    let envelope = unwrap_js_string(raw);
+    let value: serde_json::Value = serde_json::from_str(&envelope)
+        .map_err(|e| format!("invalid freeze response: {e}"))?;
+    if value.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
+        Ok(())
+    } else {
+        Err(value
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("freeze failed")
+            .to_string())
+    }
+}
+
+/// Pause page animations and timers around an on-screen embedded capture.
+#[tauri::command]
+pub async fn browser_embed_set_frozen(app: AppHandle, on: bool) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        let raw = eval_embed_with_result(&app, &build_set_frozen_call(on)).await?;
+        parse_set_frozen_result(raw)
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, on);
+        Err("desktop only".to_string())
+    }
+}
+
 /// Capture the embedded preview's on-screen region as a PNG. `x,y,width,height`
 /// are the reserved rect (logical px, window-relative). Reuses the automation
 /// screenshot pipeline (`capture_primary`) but bypasses its consent/audit gate —
@@ -781,6 +869,33 @@ mod tests {
 
     #[cfg(desktop)]
     #[test]
+    fn set_frozen_call_marshals_the_boolean_literal() {
+        assert_eq!(build_set_frozen_call(true), "window.__cogniaSetFrozen(true)");
+        assert_eq!(build_set_frozen_call(false), "window.__cogniaSetFrozen(false)");
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn set_frozen_result_parses_success_and_page_errors() {
+        let success = serde_json::to_string(r#"{"ok":true,"error":null,"frozen":true}"#).unwrap();
+        let failure = serde_json::to_string(r#"{"ok":false,"error":"paint failed","frozen":true}"#).unwrap();
+        assert_eq!(parse_set_frozen_result(success), Ok(()));
+        assert_eq!(
+            parse_set_frozen_result(failure),
+            Err("paint failed".to_string())
+        );
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn set_frozen_result_rejects_malformed_envelopes() {
+        assert!(parse_set_frozen_result(r#"\"not-json\""#.to_string())
+            .unwrap_err()
+            .starts_with("invalid freeze response:"));
+    }
+
+    #[cfg(desktop)]
+    #[test]
     fn unwrap_js_string_peels_exactly_one_json_layer() {
         // wry hands us the JS string `[]` as the JSON literal `"[]"`.
         assert_eq!(unwrap_js_string(r#""[]""#.to_string()), "[]");
@@ -821,6 +936,27 @@ mod tests {
             r#""unterminated"#
         );
         assert_eq!(unwrap_js_string("undefined".to_string()), "undefined");
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn selection_drain_is_capped_and_enriched() {
+        let normalized = normalize_selection_drain(
+            r##"{"ok":true,"error":null,"selections":[{"selector":"#go"}]}"##.to_string(),
+            "browser-embed",
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&normalized).unwrap();
+        assert_eq!(value["selections"][0]["paneId"], "browser-embed");
+
+        let oversized = format!(
+            r#"{{"ok":true,"selections":[{{"text":"{}"}}]}}"#,
+            "x".repeat(MAX_SELECTION_DRAIN_BYTES)
+        );
+        assert_eq!(
+            normalize_selection_drain(oversized, "browser-embed").unwrap_err(),
+            "selection drain exceeds byte limit"
+        );
     }
 
     #[cfg(desktop)]

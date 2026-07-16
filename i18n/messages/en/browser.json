@@ -13,6 +13,33 @@
     "human": "You're driving",
     "lastAction": "Last action: {action}"
   },
+  "annotation": {
+    "add": "Add to queue",
+    "intent": {
+      "approve": "Approve",
+      "change": "Change",
+      "fix": "Fix",
+      "question": "Question",
+      "label": "Annotation intent"
+    },
+    "queued": "{count, plural, one {# annotation queued} other {# annotations queued}}",
+    "remove": "Remove annotation",
+    "resolve": "Resolve annotation",
+    "send": "Send {count}",
+    "sent": "Sent {count, plural, one {# annotation} other {# annotations}} to chat",
+    "severity": {
+      "blocking": "Blocking",
+      "important": "Important",
+      "suggestion": "Suggestion",
+      "label": "Annotation severity"
+    },
+    "status": {
+      "acknowledged": "Acknowledged",
+      "dismissed": "Dismissed",
+      "pending": "Pending",
+      "resolved": "Resolved"
+    }
+  },
   "comment": {
     "cancel": "Cancel",
     "failed": "Could not send the comment",
@@ -22,6 +49,13 @@
     "send": "Send to chat",
     "sent": "Sent to chat",
     "title": "Comment on this element"
+  },
+  "detail": {
+    "compact": "Compact",
+    "detailed": "Detailed",
+    "forensic": "Forensic",
+    "label": "Annotation detail",
+    "standard": "Standard"
   },
   "empty": {
     "hint": "Enter any web address or a localhost URL to render it here, then select an element to comment on it.",

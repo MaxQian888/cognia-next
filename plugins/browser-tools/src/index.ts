@@ -11,6 +11,13 @@
  */
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { routeEngine } from "@/lib/browser/agent-engine"
+import type { BrowserSelection } from "@/lib/browser/protocol"
+import {
+  saveBrowserAnnotation,
+  type BrowserAnnotationIntent,
+  type BrowserAnnotationRow,
+  type BrowserAnnotationSeverity,
+} from "@/lib/db/browser-annotations"
 import { defineContextProvider } from "@cognia/plugin-sdk"
 
 // Last known preview URL — a fallback for when the live URL is unreadable
@@ -19,6 +26,43 @@ let lastUrl = "http://localhost:3000/"
 
 function engineFor() {
   return routeEngine(lastUrl)
+}
+
+const ANNOTATION_INTENTS = ["fix", "change", "question", "approve"] as const
+const ANNOTATION_SEVERITIES = ["blocking", "important", "suggestion"] as const
+
+interface SelectionForRefResult {
+  ok: boolean
+  error: string | null
+  selection: BrowserSelection | null
+}
+
+async function activeSessionId(): Promise<string | undefined> {
+  try {
+    const { useChatStore } = await import("@/stores/chat/chat-store")
+    const sessionId = useChatStore.getState().activeSessionId
+    return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function parseSelectionForRef(value: unknown): SelectionForRefResult {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value
+    if (!parsed || typeof parsed !== "object") throw new Error("invalid response")
+    const result = parsed as Partial<SelectionForRefResult>
+    if (result.ok !== true || !result.selection) {
+      return {
+        ok: false,
+        error: typeof result.error === "string" ? result.error : "Unknown or stale ref",
+        selection: null,
+      }
+    }
+    return { ok: true, error: null, selection: result.selection }
+  } catch {
+    return { ok: false, error: "Could not resolve ref to an element selection", selection: null }
+  }
 }
 
 /**
@@ -73,7 +117,7 @@ const definition: PluginDefinition = {
         id: "browser-tools:availability",
         name: "Browser tools availability",
         provide: () =>
-          'Browser tools drive the in-app preview webview (best for localhost / your own dev server): browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs; pass includeText:true to also read headings/paragraphs; shadow-DOM and same-origin iframe nodes are included), browser_click (optional modifiers:["ctrl","shift"])/type/fill_form/select/hover (target by ref), browser_press_key (Enter/Tab/Escape/Arrow*/ctrl+a — for shortcuts & navigation; use browser_type for text), browser_scroll (by ref or page direction), browser_evaluate (run a JS expression — trusted localhost only), browser_wait_for (text, a CSS selector, or networkIdle), browser_screenshot (PNG vision fallback), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot. Links with target="_blank" and window.open() land in the same preview (no tabs/popups), and SPA history navigations are tracked. For arbitrary PUBLIC websites the embedded preview is best-effort only (cross-origin iframes are invisible, synthetic events are untrusted, response bodies are unavailable) — prefer the Playwright MCP tools (mcp__playwright__*) for those if the Playwright MCP server is attached.',
+          'Browser tools drive the in-app preview webview (best for localhost / your own dev server): browser_navigate (+ browser_back/forward/reload/stop), browser_snapshot (a11y tree with refs; pass includeText:true to also read headings/paragraphs; shadow-DOM and same-origin iframe nodes are included), browser_click (optional modifiers:["ctrl","shift"])/type/fill_form/select/hover (target by ref), browser_annotate (save agent design critique for human triage), browser_press_key (Enter/Tab/Escape/Arrow*/ctrl+a — for shortcuts & navigation; use browser_type for text), browser_scroll (by ref or page direction), browser_evaluate (run a JS expression — trusted localhost only), browser_wait_for (text, a CSS selector, or networkIdle), browser_screenshot (PNG vision fallback), browser_read_console, browser_read_network, browser_get_page. Always take a fresh browser_snapshot after navigation or any mutating action, and act on elements by the `ref` from the latest snapshot. For design critique, write 2–3 sentences, name the design principle, give 1–2 concrete alternatives, and cite a comparable product; inspect hero hierarchy, navigation clarity, spacing rhythm, and CTA weight. Links with target="_blank" and window.open() land in the same preview (no tabs/popups), and SPA history navigations are tracked. For arbitrary PUBLIC websites the embedded preview is best-effort only (cross-origin iframes are invisible, synthetic events are untrusted, response bodies are unavailable) — prefer the Playwright MCP tools (mcp__playwright__*) for those if the Playwright MCP server is attached.',
       })
     )
 
@@ -132,6 +176,79 @@ const definition: PluginDefinition = {
         engineFor().engine.snapshot({
           includeText: !!(args as { includeText?: boolean })?.includeText,
         }),
+    })
+
+    reg({
+      name: "browser_annotate",
+      pluginId: ctx.pluginId,
+      definition: {
+        name: "browser_annotate",
+        description:
+          "Resolve a ref from the latest browser_snapshot and save a pending design annotation for human triage. Critiques should be 2–3 sentences: name the design principle, give 1–2 concrete alternatives, and cite a comparable product. Consider hero hierarchy, navigation clarity, spacing rhythm, and CTA weight. Refs expire when a new snapshot generation is created.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            ref: { type: "string" },
+            comment: { type: "string" },
+            intent: { type: "string", enum: ANNOTATION_INTENTS },
+            severity: { type: "string", enum: ANNOTATION_SEVERITIES },
+          },
+          required: ["ref", "comment", "intent", "severity"],
+          additionalProperties: false,
+        },
+      },
+      execute: async (args) => {
+        const a = (args ?? {}) as Record<string, unknown>
+        const ref = typeof a.ref === "string" ? a.ref.trim() : ""
+        const comment = typeof a.comment === "string" ? a.comment.trim() : ""
+        if (!ref) return { ok: false, error: "ref is required" }
+        if (!comment) return { ok: false, error: "comment is required" }
+        if (!ANNOTATION_INTENTS.includes(a.intent as BrowserAnnotationIntent)) {
+          return { ok: false, error: "intent must be fix, change, question, or approve" }
+        }
+        if (!ANNOTATION_SEVERITIES.includes(a.severity as BrowserAnnotationSeverity)) {
+          return { ok: false, error: "severity must be blocking, important, or suggestion" }
+        }
+
+        const sessionId = await activeSessionId()
+        if (!sessionId) return { ok: false, error: "No active chat session" }
+
+        const { engine, untrusted } = await currentRoute()
+        if (untrusted) {
+          return { ok: false, error: "browser_annotate is disabled on public origins" }
+        }
+        const evaluated = await engine.evaluate(
+          `window.__cogniaSelectionForRef(${JSON.stringify(ref)})`
+        )
+        if (!evaluated.ok) {
+          return { ok: false, error: evaluated.error ?? "Could not resolve ref" }
+        }
+        const resolved = parseSelectionForRef(evaluated.value)
+        if (!resolved.ok || !resolved.selection) return { ok: false, error: resolved.error }
+
+        let baseUrl: string
+        try {
+          baseUrl = new URL(resolved.selection.pageUrl).origin
+        } catch {
+          return { ok: false, error: "Resolved selection has an invalid page URL" }
+        }
+        const now = new Date().getTime()
+        const annotation: BrowserAnnotationRow = {
+          id: crypto.randomUUID(),
+          sessionId,
+          baseUrl,
+          selection: resolved.selection,
+          comment,
+          intent: a.intent as BrowserAnnotationIntent,
+          severity: a.severity as BrowserAnnotationSeverity,
+          status: "pending",
+          thread: [],
+          createdAt: now,
+          updatedAt: now,
+        }
+        await saveBrowserAnnotation(annotation)
+        return { ok: true, annotation }
+      },
     })
 
     reg({

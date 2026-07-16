@@ -28,9 +28,12 @@ import { CODEX_AGENT } from "./codex"
 import { COGNIA_AGENT } from "./cognia"
 import { CURSOR_AGENT } from "./cursor"
 import { GEMINI_AGENT } from "./gemini"
+import { KIRO_AGENT } from "./kiro"
+import { OPENCODE_AGENT } from "./opencode"
 import { ROO_CODE_AGENT } from "./roo-code"
 import { VSCODE_AGENT } from "./vscode"
 import { WINDSURF_AGENT } from "./windsurf"
+import { ZED_AGENT } from "./zed"
 
 export {
   CLAUDE_CODE_AGENT,
@@ -40,9 +43,12 @@ export {
   COGNIA_AGENT,
   CURSOR_AGENT,
   GEMINI_AGENT,
+  KIRO_AGENT,
+  OPENCODE_AGENT,
   ROO_CODE_AGENT,
   VSCODE_AGENT,
   WINDSURF_AGENT,
+  ZED_AGENT,
 }
 
 export type AgentFileFormat = "json" | "jsonc" | "toml"
@@ -102,6 +108,9 @@ export const MCP_AGENT_ADAPTERS: McpAgentAdapter[] = [
   CODEX_AGENT,
   GEMINI_AGENT,
   WINDSURF_AGENT,
+  ZED_AGENT,
+  KIRO_AGENT,
+  OPENCODE_AGENT,
   CLINE_AGENT,
   ROO_CODE_AGENT,
 ]

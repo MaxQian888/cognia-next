@@ -136,7 +136,12 @@ export function QuickAddProviderDialog({
 
   const handleTestConnection = async () => {
     if (!selectedPreset || !apiKey) return
-    await runConnectionTest(selectedPreset.baseURL, apiKey, selectedPreset.apiProtocol)
+    await runConnectionTest(
+      selectedPreset.baseURL,
+      apiKey,
+      selectedPreset.apiProtocol,
+      selectedPreset.defaultModel
+    )
   }
 
   const handleSave = () => {

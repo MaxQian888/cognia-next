@@ -17,6 +17,15 @@ type SelectionPayload = {
   rect: { x: number; y: number; width: number; height: number }
   outerHTML: string
   text: string
+  viewport?: { width: number; height: number }
+  contentArea?: { selector: string; left: number; right: number; width: number; centerX: number }
+  parentLayout?: {
+    display: string
+    flexDirection?: string
+    gridTemplateColumns?: string
+    gap?: string
+    selector: string
+  }
 }
 
 type OverlayApi = {
@@ -24,6 +33,21 @@ type OverlayApi = {
   domPath: (el: Element) => string
   buildPayload: (el: Element) => SelectionPayload
   isActive: () => boolean
+  freeze: () => void
+  unfreeze: () => void
+  isFrozen: () => boolean
+  drainSelection: () => string
+  restoreSelection: () => void
+  applySelectionBudget: (payload: Record<string, unknown>, count: number) => Record<string, unknown>
+  intersects: (
+    rect: DOMRect,
+    area: { x: number; y: number; width: number; height: number }
+  ) => boolean
+  marqueeTargets: (area: { x: number; y: number; width: number; height: number }) => Element[]
+  buildTextSelection: () => { element: Element; payload: Record<string, unknown> } | null
+  selectedElements: () => Element[]
+  selectedPayloads: () => Record<string, unknown>[]
+  snapshot: (options: unknown) => string
 }
 
 function install(): OverlayApi {
@@ -36,6 +60,7 @@ function install(): OverlayApi {
 
 beforeEach(() => {
   document.body.innerHTML = ""
+  sessionStorage.clear()
   delete (window as unknown as Record<string, unknown>).__cogniaSignal
   delete (window as unknown as Record<string, unknown>).__cogniaSetSelectMode
 })
@@ -82,16 +107,289 @@ describe("overlay.injected buildPayload", () => {
     expect(payload.text).toBe("Click me")
     expect(payload.outerHTML).toContain("<button")
   })
+
+  it("captures flex parent and main content layout", () => {
+    document.body.innerHTML = `<main style="display:flex;flex-direction:column;gap:24px"><button>Go</button></main>`
+    const main = document.querySelector("main")!
+    Object.defineProperty(main, "getBoundingClientRect", {
+      value: () => ({ left: 220, right: 1420, top: 0, bottom: 900, width: 1200, height: 900 }),
+    })
+    const payload = install().buildPayload(document.querySelector("button")!)
+    expect(payload.parentLayout).toMatchObject({
+      display: "flex",
+      flexDirection: "column",
+      gap: "24px",
+    })
+    expect(payload.contentArea).toEqual({
+      selector: "body > main",
+      left: 220,
+      right: 1420,
+      width: 1200,
+      centerX: 820,
+    })
+    expect(payload.viewport).toEqual({ width: window.innerWidth, height: window.innerHeight })
+  })
+
+  it("captures grid-specific parent fields only", () => {
+    document.body.innerHTML = `<div style="display:grid;grid-template-columns:1fr 2fr;gap:8px"><span>Go</span></div>`
+    const payload = install().buildPayload(document.querySelector("span")!)
+    expect(payload.parentLayout).toMatchObject({
+      display: "grid",
+      gridTemplateColumns: "1fr 2fr",
+      gap: "8px",
+    })
+    expect(payload.parentLayout).not.toHaveProperty("flexDirection")
+  })
+
+  it("omits parent layout when the parent is not flex or grid", () => {
+    document.body.innerHTML = `<div><span>Go</span></div>`
+    expect(install().buildPayload(document.querySelector("span")!).parentLayout).toBeUndefined()
+  })
+})
+
+describe("overlay.injected multi/area/text selection", () => {
+  it("accumulates shift-clicked elements and removes only the requested panel item", () => {
+    document.body.innerHTML = `<button id="a">A</button><button id="b">B</button>`
+    const api = install()
+    ;(window as unknown as { __cogniaSignal: () => void }).__cogniaSignal = () => {}
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    document
+      .getElementById("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }))
+    document
+      .getElementById("b")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }))
+    expect(api.selectedElements()).toEqual([
+      document.getElementById("a"),
+      document.getElementById("b"),
+    ])
+    expect(document.querySelectorAll("[data-cognia-select-box]")).toHaveLength(2)
+    ;(document.querySelector('[data-cognia-remove="0"]') as HTMLButtonElement).click()
+    expect(api.selectedElements()).toEqual([document.getElementById("b")])
+    expect(api.selectedPayloads()).toHaveLength(1)
+  })
+
+  it("uses strict rectangle intersection math for marquee candidates", () => {
+    const api = install()
+    const rect = { left: 10, right: 30, top: 10, bottom: 30 } as DOMRect
+    expect(api.intersects(rect, { x: 20, y: 20, width: 20, height: 20 })).toBe(true)
+    expect(api.intersects(rect, { x: 30, y: 10, width: 20, height: 20 })).toBe(false)
+  })
+
+  it("creates an element-less area payload when a drag intersects nothing", () => {
+    const api = install()
+    const signals: unknown[] = []
+    ;(window as unknown as { __cogniaSignal: (value: unknown) => void }).__cogniaSignal = (value) =>
+      signals.push(value)
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    document.body.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, button: 0, clientX: 10, clientY: 20 })
+    )
+    document.body.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 110, clientY: 70 })
+    )
+    document.body.dispatchEvent(
+      new MouseEvent("mouseup", { bubbles: true, clientX: 110, clientY: 70 })
+    )
+    expect(api.selectedPayloads()[0]).toMatchObject({
+      kind: "area",
+      selector: "",
+      rect: { x: 10, y: 20, width: 100, height: 50 },
+    })
+    expect(signals.at(-1)).toMatchObject({ count: 1 })
+  })
+
+  it("extracts selected text from the window Range", () => {
+    document.body.innerHTML = `<p id="copy">alpha beta gamma</p>`
+    const api = install()
+    const text = document.getElementById("copy")!.firstChild!
+    const range = document.createRange()
+    range.setStart(text, 6)
+    range.setEnd(text, 10)
+    window.getSelection()!.removeAllRanges()
+    window.getSelection()!.addRange(range)
+    expect(api.buildTextSelection()!.payload).toMatchObject({ kind: "text", selectedText: "beta" })
+  })
+
+  it("scales outerHTML detail with N and discloses the reduction", () => {
+    const api = install()
+    const payload = api.applySelectionBudget({ outerHTML: "x".repeat(5000) }, 5)
+    expect((payload.outerHTML as string).length).toBe(801)
+    expect(payload.detailReduced).toEqual({
+      selectionCount: 5,
+      outerHTMLLimit: 800,
+      reason: "multi-selection-budget",
+    })
+  })
+
+  it("resolves a current snapshot ref and rejects an unknown ref", () => {
+    document.body.innerHTML = `<button id="go">Go</button>`
+    const api = install()
+    const snapshot = api.snapshot({}) as unknown as { nodes: Array<{ ref: string }> }
+    const ref = snapshot.nodes[0].ref
+    const selectionForRef = (
+      window as unknown as { __cogniaSelectionForRef: (value: string) => string }
+    ).__cogniaSelectionForRef
+    expect(JSON.parse(selectionForRef(ref))).toMatchObject({
+      ok: true,
+      selection: { selector: "#go" },
+    })
+    expect(JSON.parse(selectionForRef("stale"))).toMatchObject({ ok: false, selection: null })
+  })
+})
+
+it("rearms after a normal first pick and then shift-adds a second target", () => {
+  document.body.innerHTML = `<button id="a">A</button><button id="b">B</button>`
+  const api = install()
+  ;(window as unknown as { __cogniaSignal: () => void }).__cogniaSignal = () => {}
+  const setMode = (window as unknown as { __cogniaSetSelectMode: (on: boolean) => void })
+    .__cogniaSetSelectMode
+  setMode(true)
+  document.getElementById("a")!.click()
+  setMode(true)
+  document
+    .getElementById("b")!
+    .dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }))
+  const drained = JSON.parse(api.drainSelection())
+  expect(drained.selections.map((selection: SelectionPayload) => selection.id)).toEqual(["a", "b"])
+})
+
+it("marquee keeps useful leaf targets without their ancestry or button internals", () => {
+  document.body.innerHTML = `<main><section><button id="go"><span>Go</span></button></section></main>`
+  for (const element of Array.from(document.querySelectorAll("*"))) {
+    Object.defineProperty(element, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, right: 100, bottom: 40, width: 100, height: 40 }),
+    })
+  }
+  const targets = install().marqueeTargets({ x: 0, y: 0, width: 100, height: 40 })
+  expect(targets.map((target) => target.id || target.tagName.toLowerCase())).toEqual(["go"])
+})
+
+describe("overlay.injected freeze", () => {
+  it("injects/removes pause CSS and exposes frozen state", () => {
+    const api = install()
+    api.freeze()
+    expect(api.isFrozen()).toBe(true)
+    expect(document.querySelector("style[data-cognia-chrome='freeze']")?.textContent).toContain(
+      "animation-play-state:paused"
+    )
+    api.unfreeze()
+    expect(api.isFrozen()).toBe(false)
+    expect(document.querySelector("style[data-cognia-chrome='freeze']")).toBeNull()
+  })
+
+  it("pauses and restores only running WAAPI animations", () => {
+    const running = {
+      playState: "running",
+      effect: { target: document.body },
+      pause: jest.fn(),
+      play: jest.fn(),
+    }
+    const finished = {
+      playState: "finished",
+      effect: { target: document.body },
+      pause: jest.fn(),
+      play: jest.fn(),
+    }
+    Object.defineProperty(document, "getAnimations", {
+      configurable: true,
+      value: () => [running, finished],
+    })
+    const api = install()
+    api.freeze()
+    expect(running.pause).toHaveBeenCalledTimes(1)
+    expect(finished.pause).not.toHaveBeenCalled()
+    api.unfreeze()
+    expect(running.play).toHaveBeenCalledTimes(1)
+    expect(finished.play).not.toHaveBeenCalled()
+    Reflect.deleteProperty(document, "getAnimations")
+  })
+
+  it("watchdog self-heals a stuck freeze", () => {
+    jest.useFakeTimers()
+    const api = install()
+    api.freeze()
+    jest.advanceTimersByTime(3000)
+    expect(api.isFrozen()).toBe(false)
+    jest.useRealTimers()
+  })
+
+  it("preserves string timeout and interval callbacks", () => {
+    jest.useFakeTimers()
+    install()
+    ;(window as unknown as Record<string, unknown>).__timerStringRuns = 0
+    window.setTimeout("window.__timerStringRuns += 1" as unknown as TimerHandler, 10)
+    const interval = window.setInterval(
+      "window.__timerStringRuns += 1" as unknown as TimerHandler,
+      10
+    )
+    jest.advanceTimersByTime(10)
+    window.clearInterval(interval)
+    expect((window as unknown as Record<string, unknown>).__timerStringRuns).toBe(2)
+    jest.useRealTimers()
+  })
+
+  it("replays a string timeout queued while frozen", () => {
+    jest.useFakeTimers()
+    const api = install()
+    ;(window as unknown as Record<string, unknown>).__frozenStringRuns = 0
+    window.setTimeout("window.__frozenStringRuns += 1" as unknown as TimerHandler, 10)
+    api.freeze()
+    jest.advanceTimersByTime(10)
+    expect((window as unknown as Record<string, unknown>).__frozenStringRuns).toBe(0)
+    api.unfreeze()
+    expect((window as unknown as Record<string, unknown>).__frozenStringRuns).toBe(1)
+    jest.useRealTimers()
+  })
+
+  it("acknowledges freeze only after two original frames and a settle timer", async () => {
+    const frames: FrameRequestCallback[] = []
+    const originalRaf = window.requestAnimationFrame
+    jest.useFakeTimers()
+    window.requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    try {
+      install()
+      const pending = (
+        window as unknown as { __cogniaSetFrozen: (on: boolean) => Promise<string> }
+      ).__cogniaSetFrozen(true)
+      let settled = false
+      pending.then(() => {
+        settled = true
+      })
+      expect(frames).toHaveLength(1)
+      frames.shift()!(1)
+      expect(frames).toHaveLength(1)
+      frames.shift()!(2)
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      await jest.advanceTimersByTimeAsync(16)
+      await expect(pending).resolves.toContain('"ok":true')
+      ;(window as unknown as { __cogniaSetFrozen: (on: boolean) => string }).__cogniaSetFrozen(
+        false
+      )
+    } finally {
+      window.requestAnimationFrame = originalRaf
+      jest.useRealTimers()
+    }
+  })
 })
 
 describe("overlay.injected select mode", () => {
-  it("emits a payload through __cogniaSignal on click and auto-disables", () => {
+  it("signals then drains a buffered payload and auto-disables", () => {
     document.body.innerHTML = `<button id="go">go</button>`
     const api = install()
-    const received: SelectionPayload[] = []
-    ;(window as unknown as { __cogniaSignal: (p: SelectionPayload) => void }).__cogniaSignal = (
-      p
-    ) => received.push(p)
+    const received: Array<{ count: number; generation: number }> = []
+    ;(
+      window as unknown as { __cogniaSignal: (p: { count: number; generation: number }) => void }
+    ).__cogniaSignal = (p) => received.push(p)
     ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
       true
     )
@@ -99,9 +397,57 @@ describe("overlay.injected select mode", () => {
 
     document.getElementById("go")!.click()
 
-    expect(received).toHaveLength(1)
-    expect(received[0].selector).toBe("#go")
+    expect(received.at(-1)).toMatchObject({ count: 1, generation: 1 })
+    const drained = JSON.parse(api.drainSelection())
+    expect(drained.ok).toBe(true)
+    expect(drained.selections[0].selector).toBe("#go")
+    expect(JSON.parse(api.drainSelection()).selections).toEqual([])
     expect(api.isActive()).toBe(false) // disables itself after a pick
+  })
+
+  it("restores, caps, and re-signals a fresh buffered selection", async () => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date("2026-07-16T00:00:00Z"))
+    const signal = jest.fn()
+    ;(window as unknown as { __cogniaSignal: typeof signal }).__cogniaSignal = signal
+    sessionStorage.setItem(
+      "__cognia_selection_buffer",
+      JSON.stringify({
+        version: 1,
+        savedAt: Date.now(),
+        generation: 7,
+        selections: Array.from({ length: 25 }, (_, index) => ({
+          selector: `#restored-${index}`,
+          domPath: "button",
+          tagName: "button",
+          id: null,
+          classes: null,
+          rect: { x: 0, y: 0, width: 1, height: 1 },
+          outerHTML: "<button></button>",
+          text: "",
+          pageUrl: "http://localhost/",
+          pageTitle: "",
+        })),
+      })
+    )
+    const api = install()
+    await jest.runOnlyPendingTimersAsync()
+    expect(signal).toHaveBeenCalledWith({ count: 20, generation: 7 })
+    const selections = JSON.parse(api.drainSelection()).selections
+    expect(selections).toHaveLength(20)
+    expect(selections[0].selector).toBe("#restored-5")
+    expect(sessionStorage.getItem("__cognia_selection_buffer")).toBeNull()
+    jest.useRealTimers()
+  })
+
+  it("expires and cleans up a stale buffered selection", () => {
+    sessionStorage.setItem(
+      "__cognia_selection_buffer",
+      JSON.stringify({ version: 1, savedAt: Date.now() - 120001, generation: 2, selections: [{}] })
+    )
+    const api = install()
+    expect(JSON.parse(api.drainSelection()).selections).toEqual([])
+    expect(sessionStorage.getItem("__cognia_selection_buffer")).toBeNull()
   })
 
   it("does not emit when inactive", () => {

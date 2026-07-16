@@ -31,10 +31,15 @@ describe("resolveLimitsSources", () => {
     ).toEqual(["codex"])
   })
 
-  it("returns only balance for a codex relay pointing at a credit provider", () => {
+  // The codex source now matches on provider alone (the preset templateId is
+  // not a reliable "is this a ChatGPT subscription" signal — Codex presets come
+  // from the openai-compatible/openrouter catalog families). It declines at
+  // `fetch` for an api_key credential or a non-ChatGPT base, so ordering it
+  // ahead of balance stays correct: the relay still falls through to credit.
+  it("tries codex before balance for a codex relay pointing at a credit provider", () => {
     expect(
       resolveLimitsSources({ provider: "codex", providerKey: "moonshot" }).map((s) => s.key)
-    ).toEqual(["balance"])
+    ).toEqual(["codex", "balance"])
   })
 
   it("returns [] when nothing matches", () => {

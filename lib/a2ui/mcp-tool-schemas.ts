@@ -181,6 +181,9 @@ export function defaultA2UIAppsEnabled(): Partial<Record<AgentId, boolean>> {
     codex: true,
     gemini: true,
     windsurf: true,
+    zed: true,
+    kiro: true,
+    opencode: true,
     cline: false,
     "roo-code": false,
   }

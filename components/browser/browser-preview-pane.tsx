@@ -4,17 +4,20 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   CameraIcon,
+  CheckIcon,
   ExternalLinkIcon,
   GlobeIcon,
   Loader2Icon,
   MousePointerSquareDashedIcon,
   RotateCwIcon,
   SendIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
+import { useLiveQuery } from "dexie-react-hooks"
 
 import {
   BrowserAgentIndicator,
@@ -39,8 +42,19 @@ import { useElementSelection } from "@/hooks/browser/use-element-selection"
 import { useRegionVisibility } from "@/hooks/browser/use-region-visibility"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import { browserClient } from "@/lib/browser/client"
+import {
+  deleteExpiredBrowserAnnotations,
+  listActionableBrowserAnnotations,
+  transitionBrowserAnnotation,
+  type BrowserAnnotationIntent,
+  type BrowserAnnotationSeverity,
+} from "@/lib/db/browser-annotations"
 import { setActivePaneRect } from "@/lib/browser/pane-rect"
-import { type ElementRect, normalizePreviewUrl } from "@/lib/browser/protocol"
+import {
+  type ElementRect,
+  type OutputDetailLevel,
+  normalizePreviewUrl,
+} from "@/lib/browser/protocol"
 import { isTauri } from "@/lib/tauri"
 import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
@@ -51,6 +65,8 @@ const QUICK_OPEN_URLS = [
   "http://localhost:5173",
   "http://localhost:8080",
 ] as const
+const DETAIL_LEVEL_STORAGE_KEY = "cognia.browser.output-detail"
+const DETAIL_LEVELS: OutputDetailLevel[] = ["compact", "standard", "detailed", "forensic"]
 
 /** Host of a URL for display, or the raw string / "" if it can't be parsed. */
 function hostOf(url: string | null): string {
@@ -79,6 +95,23 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
   const [comment, setComment] = useState("")
   const [sending, setSending] = useState(false)
   const [capturing, setCapturing] = useState(false)
+  const [annotationIntent, setAnnotationIntent] = useState<BrowserAnnotationIntent>("change")
+  const [annotationSeverity, setAnnotationSeverity] =
+    useState<BrowserAnnotationSeverity>("suggestion")
+  const [detailLevel, setDetailLevel] = useState<OutputDetailLevel>(() => {
+    if (typeof window === "undefined") return "standard"
+    const stored = window.localStorage.getItem(DETAIL_LEVEL_STORAGE_KEY)
+    return DETAIL_LEVELS.includes(stored as OutputDetailLevel)
+      ? (stored as OutputDetailLevel)
+      : "standard"
+  })
+  const annotationQueue =
+    useLiveQuery(
+      () => (sessionId ? listActionableBrowserAnnotations(sessionId) : Promise.resolve([])),
+      [sessionId],
+      []
+    ) ?? []
+  const pendingAnnotations = annotationQueue.filter((annotation) => annotation.status === "pending")
 
   // The committed url mirrored into a ref so the rect callback (which fires on
   // every scroll/resize frame) can gate pane-rect publishing without being
@@ -106,10 +139,10 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
     onRectChange: handleRectChange,
     visible: shouldShowLivePage,
   })
-  const { selection, navigated, selectMode, setSelectMode, clearSelection } = useElementSelection({
-    driver: browserClient.embedSetSelectMode,
-  })
-  const { sendComment, sendScreenshot, sendText } = useSelectionToChat()
+  const { selection, selections, navigated, selectMode, setSelectMode, clearSelection } =
+    useElementSelection({ driver: browserClient.embedSetSelectMode })
+  const { sendComment, queueAnnotation, sendAnnotations, sendScreenshot, sendText } =
+    useSelectionToChat()
   const { driver, lastAction } = useBrowserAgentActivity()
 
   useEffect(() => {
@@ -117,6 +150,12 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
     setActivePaneRect(committedUrl ? getRect() : null)
   }, [committedUrl, getRect])
   useEffect(() => () => setActivePaneRect(null), [])
+  useEffect(() => {
+    window.localStorage.setItem(DETAIL_LEVEL_STORAGE_KEY, detailLevel)
+  }, [detailLevel])
+  useEffect(() => {
+    void deleteExpiredBrowserAnnotations(new Date().getTime())
+  }, [])
 
   // The in-page info panel (drawn by the injected overlay) can't reach next-intl,
   // so push its localized toggle labels down once the preview webview exists.
@@ -179,13 +218,56 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
     void browserClient.embedClearSelection().catch(() => {})
   }, [clearSelection])
 
+  const onQueue = useCallback(async () => {
+    if (!selection || !comment.trim()) return
+    setSending(true)
+    try {
+      const baseUrl = new URL(currentUrl ?? selection.pageUrl).origin
+      const targets = selections.length > 0 ? selections : [selection]
+      const annotations = await Promise.all(
+        targets.map((target) =>
+          queueAnnotation(target, comment, {
+            sessionId,
+            baseUrl,
+            intent: annotationIntent,
+            severity: annotationSeverity,
+          })
+        )
+      )
+      const saved = annotations.filter((item) => item != null)
+      if (saved.length > 0) {
+        setComment("")
+        clearSelection()
+        void browserClient.embedClearSelection().catch(() => {})
+      } else {
+        toast.error(t("comment.noSession"))
+      }
+    } catch {
+      toast.error(t("comment.failed"))
+    } finally {
+      setSending(false)
+    }
+  }, [
+    selection,
+    selections,
+    comment,
+    currentUrl,
+    sessionId,
+    queueAnnotation,
+    clearSelection,
+    t,
+    annotationIntent,
+    annotationSeverity,
+  ])
+
   const onSend = useCallback(async () => {
     if (!selection || !comment.trim()) return
     setSending(true)
     try {
-      const ok = await sendComment(selection, comment, {
+      const ok = await sendComment(selections.length > 0 ? selections : selection, comment, {
         sessionId,
         captureRect: getRect() ?? undefined,
+        detailLevel,
       })
       if (ok) {
         toast.success(t("comment.sent"))
@@ -200,7 +282,48 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
     } finally {
       setSending(false)
     }
-  }, [selection, comment, sessionId, getRect, sendComment, clearSelection, t])
+  }, [
+    selection,
+    selections,
+    comment,
+    sessionId,
+    getRect,
+    sendComment,
+    clearSelection,
+    t,
+    detailLevel,
+  ])
+
+  const onSendQueue = useCallback(async () => {
+    setSending(true)
+    try {
+      const ok = await sendAnnotations(pendingAnnotations, {
+        sessionId,
+        captureRect: getRect() ?? undefined,
+        detailLevel,
+      })
+      if (ok) {
+        toast.success(t("annotation.sent", { count: pendingAnnotations.length }))
+      } else {
+        toast.error(t("comment.noSession"))
+      }
+    } catch {
+      toast.error(t("comment.failed"))
+    } finally {
+      setSending(false)
+    }
+  }, [pendingAnnotations, sessionId, getRect, sendAnnotations, t, detailLevel])
+
+  const transitionQueuedAnnotation = useCallback(
+    async (id: string, status: "resolved" | "dismissed") => {
+      try {
+        await transitionBrowserAnnotation(id, status, new Date().getTime(), "human")
+      } catch {
+        toast.error(t("comment.failed"))
+      }
+    },
+    [t]
+  )
 
   const onCommentKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -265,6 +388,18 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
           </div>
         )}
         <div className="flex items-center">
+          <select
+            value={detailLevel}
+            onChange={(event) => setDetailLevel(event.target.value as OutputDetailLevel)}
+            aria-label={t("detail.label")}
+            className="h-7 max-w-24 rounded-md border bg-background px-1 text-xs"
+          >
+            {DETAIL_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {t(`detail.${level}`)}
+              </option>
+            ))}
+          </select>
           <TooltipIconButton
             tooltip={t("actions.back")}
             aria-label={t("actions.back")}
@@ -434,11 +569,100 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
             className="resize-none text-sm"
           />
           <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="text-[11px] text-muted-foreground">{t("comment.hint")}</span>
-            <Button size="sm" disabled={sending || !comment.trim()} onClick={() => void onSend()}>
+            <div className="flex items-center gap-1">
+              <select
+                value={annotationIntent}
+                onChange={(event) =>
+                  setAnnotationIntent(event.target.value as BrowserAnnotationIntent)
+                }
+                aria-label={t("annotation.intent.label")}
+                className="h-7 rounded-md border bg-background px-1 text-xs"
+              >
+                {(["fix", "change", "question", "approve"] as const).map((intent) => (
+                  <option key={intent} value={intent}>
+                    {t(`annotation.intent.${intent}`)}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={annotationSeverity}
+                onChange={(event) =>
+                  setAnnotationSeverity(event.target.value as BrowserAnnotationSeverity)
+                }
+                aria-label={t("annotation.severity.label")}
+                className="h-7 rounded-md border bg-background px-1 text-xs"
+              >
+                {(["blocking", "important", "suggestion"] as const).map((severity) => (
+                  <option key={severity} value={severity}>
+                    {t(`annotation.severity.${severity}`)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={sending || !comment.trim()}
+                onClick={() => void onQueue()}
+              >
+                {t("annotation.add")}
+              </Button>
+              <Button size="sm" disabled={sending || !comment.trim()} onClick={() => void onSend()}>
+                <SendIcon className="size-3.5" />
+                {t("comment.send")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {annotationQueue.length > 0 && (
+        <div className="border-t bg-muted/30 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-xs font-medium">
+              {t("annotation.queued", { count: annotationQueue.length })}
+            </span>
+            <Button
+              size="sm"
+              disabled={sending || pendingAnnotations.length === 0}
+              onClick={() => void onSendQueue()}
+            >
               <SendIcon className="size-3.5" />
-              {t("comment.send")}
+              {t("annotation.send", { count: pendingAnnotations.length })}
             </Button>
+          </div>
+          <div className="space-y-1">
+            {annotationQueue.map((annotation, index) => (
+              <div key={annotation.id} className="flex items-center gap-2 text-xs">
+                <span className="min-w-0 flex-1 truncate">
+                  {index + 1}. {annotation.comment}
+                </span>
+                <Badge variant="outline" className="text-[10px]">
+                  {t(`annotation.status.${annotation.status}`)}
+                </Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  {t(`annotation.intent.${annotation.intent}`)} ·{" "}
+                  {t(`annotation.severity.${annotation.severity}`)}
+                </Badge>
+                <TooltipIconButton
+                  tooltip={t("annotation.resolve")}
+                  aria-label={t("annotation.resolve")}
+                  size="icon-xs"
+                  onClick={() => void transitionQueuedAnnotation(annotation.id, "resolved")}
+                >
+                  <CheckIcon />
+                </TooltipIconButton>
+                <TooltipIconButton
+                  tooltip={t("annotation.remove")}
+                  aria-label={t("annotation.remove")}
+                  size="icon-xs"
+                  onClick={() => void transitionQueuedAnnotation(annotation.id, "dismissed")}
+                >
+                  <Trash2Icon />
+                </TooltipIconButton>
+              </div>
+            ))}
           </div>
         </div>
       )}

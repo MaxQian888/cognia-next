@@ -1,4 +1,4 @@
-import { codexLimitsSource, parseCodexWindows, parseWhamUsage } from "./codex"
+import { codexLimitsSource, parseCodexWindows, parseWhamUsage, resolveUsageBase } from "./codex"
 
 import type { LimitsSourceContext } from "@/types/subscription"
 
@@ -143,13 +143,14 @@ describe("codexLimitsSource — wham endpoint", () => {
 })
 
 describe("codexLimitsSource", () => {
-  it("matches only a chatgpt-looking codex account", () => {
+  // Regression: `matches` used to reject on `providerKey`, but that is the
+  // preset's templateId — Codex presets come from the openai-compatible /
+  // openrouter catalog families, so a real ChatGPT account whose preset came
+  // from the catalog never matched and rendered no windows at all.
+  it("matches any codex account regardless of preset templateId", () => {
     expect(codexLimitsSource.matches({ provider: "codex" })).toBe(true)
     expect(codexLimitsSource.matches({ provider: "codex", providerKey: "openai" })).toBe(true)
-    expect(codexLimitsSource.matches({ provider: "codex", providerKey: "deepseek" })).toBe(false)
-    expect(
-      codexLimitsSource.matches({ provider: "codex", baseUrl: "https://api.deepseek.com/v1" })
-    ).toBe(false)
+    expect(codexLimitsSource.matches({ provider: "codex", providerKey: "openrouter" })).toBe(true)
     expect(codexLimitsSource.matches({ provider: "anthropic" })).toBe(false)
   })
 
@@ -164,18 +165,106 @@ describe("codexLimitsSource", () => {
     expect(await codexLimitsSource.fetch(ctx({ token: null }))).toBeNull()
   })
 
-  it("returns null when the endpoint errors", async () => {
+  it("returns null when the response has no recognizable windows", async () => {
+    expect(await codexLimitsSource.fetch(ctx({ authedGet: async () => "{}" }))).toBeNull()
+  })
+
+  // The bug that hid every other bug: a bare `catch { return null }` made a
+  // 401/404/429 look identical to "no data" — blank panel, empty log.
+  it("surfaces an endpoint error instead of swallowing it", async () => {
     const snap = await codexLimitsSource.fetch(
       ctx({
         authedGet: async () => {
-          throw new Error("403")
+          throw new Error("403: forbidden")
         },
       })
     )
-    expect(snap).toBeNull()
+    expect(snap).toMatchObject({ provider: "codex", meters: [], error: "403: forbidden" })
   })
 
-  it("returns null when the response has no recognizable windows", async () => {
-    expect(await codexLimitsSource.fetch(ctx({ authedGet: async () => "{}" }))).toBeNull()
+  it("sends the ChatGPT identity headers the backend requires", async () => {
+    let seen: Record<string, string> | undefined
+    await codexLimitsSource.fetch(
+      ctx({
+        credential: {
+          provider: "codex",
+          authMode: "chatgpt",
+          accountId: "acct-42",
+        } as LimitsSourceContext["credential"],
+        authedGet: async (_url, headers) => {
+          seen = headers
+          return "{}"
+        },
+      })
+    )
+    expect(seen).toMatchObject({
+      Authorization: "Bearer sk-chatgpt",
+      "ChatGPT-Account-Id": "acct-42",
+      "OpenAI-Beta": "responses=experimental",
+      originator: "codex_cli_rs",
+      "OAI-Product-Sku": "codex",
+    })
+  })
+
+  // An api_key login has no usage endpoint upstream ("chatgpt authentication
+  // required to read rate limits"). Decline so the credit-balance source can
+  // still answer for the account.
+  it("declines an api_key credential", async () => {
+    const authedGet = jest.fn()
+    const snap = await codexLimitsSource.fetch(
+      ctx({
+        credential: {
+          provider: "codex",
+          authMode: "api_key",
+        } as LimitsSourceContext["credential"],
+        authedGet,
+      })
+    )
+    expect(snap).toBeNull()
+    expect(authedGet).not.toHaveBeenCalled()
+  })
+
+  it("retries once with a refreshed bearer on a 401", async () => {
+    const tokens: string[] = []
+    const snap = await codexLimitsSource.fetch(
+      ctx({
+        refreshToken: async () => "sk-fresh",
+        authedGet: async (_url, headers) => {
+          const bearer = (headers?.Authorization ?? "").replace("Bearer ", "")
+          tokens.push(bearer)
+          if (bearer !== "sk-fresh") throw new Error("401: expired")
+          return JSON.stringify({ rate_limit: { primary_window: { used_percent: 12 } } })
+        },
+      })
+    )
+    expect(tokens).toEqual(["sk-chatgpt", "sk-fresh"])
+    expect(snap?.meters[0]).toMatchObject({ id: "session", usedPct: 12 })
+  })
+})
+
+describe("resolveUsageBase", () => {
+  // The `/wham/usage` path hangs off the backend-api ROOT, not off the
+  // Responses base a chat preset carries. Appending to the preset base gave
+  // `…/codex/wham/usage` → 404 → swallowed → blank panel.
+  it("defaults to the chatgpt backend root when no preset base is set", () => {
+    expect(resolveUsageBase(undefined)).toBe("https://chatgpt.com/backend-api")
+    expect(resolveUsageBase("  ")).toBe("https://chatgpt.com/backend-api")
+  })
+
+  it("strips the /codex responses prefix off a chatgpt preset base", () => {
+    expect(resolveUsageBase("https://chatgpt.com/backend-api/codex")).toBe(
+      "https://chatgpt.com/backend-api"
+    )
+    expect(resolveUsageBase("https://chatgpt.com/backend-api/")).toBe(
+      "https://chatgpt.com/backend-api"
+    )
+    expect(resolveUsageBase("https://chatgpt.com")).toBe("https://chatgpt.com/backend-api")
+  })
+
+  // Retargeting a relay's request at chatgpt.com would ship the relay's bearer
+  // to OpenAI. Decline instead.
+  it("declines a non-chatgpt base rather than retargeting the bearer", () => {
+    expect(resolveUsageBase("https://api.openai.com/v1")).toBeNull()
+    expect(resolveUsageBase("https://relay.example.com/v1")).toBeNull()
   })
 })

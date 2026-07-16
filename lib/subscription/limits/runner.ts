@@ -8,6 +8,8 @@
 
 import { refreshAndPersistAnthropicAccount } from "@/lib/subscription/anthropic/refresh"
 import { isAnthropicCredentialFresh } from "@/lib/subscription/anthropic/oauth"
+import { refreshCodexAccountIfStale } from "@/lib/subscription/codex/refresh"
+import { isCodexCredentialFresh } from "@/lib/subscription/codex/oauth"
 import { accessTokenOf, resolvePresetForAccount } from "@/lib/subscription/balance/runner"
 import {
   authedGet as defaultAuthedGet,
@@ -20,6 +22,7 @@ import { resolveLimitsSources } from "./registry"
 import type {
   Account,
   AnthropicCredentialData,
+  CodexCredentialData,
   LimitsSourceContext,
   ProviderId,
   ProviderLimits,
@@ -40,6 +43,16 @@ export interface LimitsRunnerDeps {
   refreshAnthropicToken: (accountId: string) => Promise<string | null>
   /** Freshness predicate for an Anthropic credential. Injected for tests. */
   isCredentialFresh: (credential: AnthropicCredentialData, now: number) => boolean
+  /**
+   * Refresh + persist a Codex (ChatGPT-login) account's OAuth token, returning
+   * the new bearer. The ChatGPT bearer expires exactly like the Anthropic one,
+   * and `/wham/usage` 401s on a stale token — so without this the Codex quota
+   * panel silently froze the same way "Claude 额度刷新无效" did. `reactivate:
+   * false`: a quota poll must never flip the active-account pointer.
+   */
+  refreshCodexToken: (accountId: string) => Promise<string | null>
+  /** Freshness predicate for a Codex credential. Injected for tests. */
+  isCodexFresh: (credential: CodexCredentialData, now: number) => boolean
 }
 
 const DEFAULT_DEPS: LimitsRunnerDeps = {
@@ -52,6 +65,11 @@ const DEFAULT_DEPS: LimitsRunnerDeps = {
     return merged?.accessToken ?? null
   },
   isCredentialFresh: (credential, now) => isAnthropicCredentialFresh(credential, now),
+  refreshCodexToken: async (accountId) => {
+    const fresh = await refreshCodexAccountIfStale(accountId, { reactivate: false })
+    return fresh?.accessToken ?? null
+  },
+  isCodexFresh: (credential, now) => isCodexCredentialFresh(credential, now),
 }
 
 /**
@@ -69,7 +87,16 @@ export async function queryAccountLimits(
   accountId: string,
   deps: Partial<LimitsRunnerDeps> = {}
 ): Promise<ProviderLimits | null> {
-  const { authedGet, getAccount, listPresets, now, refreshAnthropicToken, isCredentialFresh } = {
+  const {
+    authedGet,
+    getAccount,
+    listPresets,
+    now,
+    refreshAnthropicToken,
+    isCredentialFresh,
+    refreshCodexToken,
+    isCodexFresh,
+  } = {
     ...DEFAULT_DEPS,
     ...deps,
   }
@@ -79,19 +106,41 @@ export async function queryAccountLimits(
 
   let token = accessTokenOf(account.credential)
 
-  // Anthropic OAuth tokens expire (~8h). The free `/api/oauth/usage` GET 401s on
-  // a stale bearer, and every layer below swallows the error — so without this
-  // proactive refresh the quota UI silently freezes ("Claude 额度刷新无效").
-  // Refresh + persist BEFORE the fetch when the stored token is stale; a source
-  // may still call `ctx.refreshToken()` reactively on an unexpected 401.
-  // `anthropicCred` also narrows the tagged union for `isCredentialFresh`.
+  // Both OAuth providers expire their bearer (~8h Anthropic, ChatGPT session for
+  // Codex) and both usage endpoints 401 on a stale one — so refresh + persist
+  // BEFORE the fetch when the stored token is stale; a source may still call
+  // `ctx.refreshToken()` reactively on an unexpected 401. Without this the quota
+  // UI silently freezes ("Claude 额度刷新无效"). The narrowed `*Cred` locals also
+  // narrow the tagged union for the freshness predicates.
+  //
+  // Codex `api_key` logins never expire and carry no refresh token;
+  // `isCodexCredentialFresh` already reports them fresh, so they skip this.
   const anthropicCred: AnthropicCredentialData | null =
     provider === "anthropic" && account.credential.provider === "anthropic"
       ? account.credential
       : null
-  if (anthropicCred && !isCredentialFresh(anthropicCred, now())) {
+  // Only a `chatgpt` login is refreshable: an `api_key` credential has no
+  // refresh token and never expires, so it gets no callback at all.
+  const codexCred: CodexCredentialData | null =
+    provider === "codex" &&
+    account.credential.provider === "codex" &&
+    account.credential.authMode === "chatgpt"
+      ? account.credential
+      : null
+
+  const refreshBearer: (() => Promise<string | null>) | undefined = anthropicCred
+    ? () => refreshAnthropicToken(accountId)
+    : codexCred
+      ? () => refreshCodexToken(accountId)
+      : undefined
+
+  const isStale =
+    (anthropicCred && !isCredentialFresh(anthropicCred, now())) ||
+    (codexCred && !isCodexFresh(codexCred, now()))
+
+  if (isStale && refreshBearer) {
     try {
-      const refreshed = await refreshAnthropicToken(accountId)
+      const refreshed = await refreshBearer()
       if (refreshed) token = refreshed
     } catch {
       // Fall through with the stale token; the reactive retry below still tries.
@@ -106,14 +155,15 @@ export async function queryAccountLimits(
     accountId,
     accountLabel: account.label,
     token,
+    credential: account.credential,
     baseUrl: preset?.baseUrl,
     providerKey: preset?.templateId,
     presetHeaders: preset?.extraHeaders,
     authedGet,
-    refreshToken: anthropicCred
+    refreshToken: refreshBearer
       ? async () => {
           try {
-            return await refreshAnthropicToken(accountId)
+            return await refreshBearer()
           } catch {
             return null
           }

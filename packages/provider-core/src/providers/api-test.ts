@@ -4,7 +4,11 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import type { ApiProtocol } from "@cognia/provider-types"
-import { getBuiltInProviderProtocol } from "@cognia/provider-types/built-in-provider-catalog"
+import {
+  getBuiltInProviderDefaultBaseURL,
+  getBuiltInProviderDefaultModel,
+  getBuiltInProviderProtocol,
+} from "@cognia/provider-types/built-in-provider-catalog"
 import { isTauri, proxyFetch } from "./runtime-adapters"
 
 export interface ApiTestResult {
@@ -21,6 +25,8 @@ export interface ProviderConnectionProbeInput {
   apiKey?: string
   baseURL?: string
   protocol?: ApiProtocol
+  /** Model to probe with; defaults to the built-in catalog's default model. */
+  model?: string
 }
 
 export interface ProviderConnectionProbeResult extends ApiTestResult {
@@ -55,10 +61,30 @@ export const LOCAL_PROVIDER_TEST_CONFIGS: Record<
   tabbyapi: { url: "http://localhost:5000", name: "TabbyAPI", healthPath: "/v1/models" },
 }
 
+/**
+ * Probe model for an Anthropic-wire host when the caller names none. Only
+ * correct for Anthropic itself — every third-party host (Kimi, GLM, MiniMax)
+ * rejects it, so callers should pass the model they actually intend to use.
+ */
+const ANTHROPIC_PROBE_FALLBACK_MODEL = "claude-3-haiku-20240307"
+
+/**
+ * The Anthropic Messages API is served at `<base>/v1/messages`. Hosts publish
+ * their base URL either bare (`https://api.moonshot.cn/anthropic`) or already
+ * `/v1`-suffixed, so the version segment is appended only when missing —
+ * posting to `<base>/messages` 404s on every Anthropic-wire host.
+ */
+function buildAnthropicMessagesURL(trimmedBaseUrl: string): string {
+  return trimmedBaseUrl.endsWith("/v1")
+    ? `${trimmedBaseUrl}/messages`
+    : `${trimmedBaseUrl}/v1/messages`
+}
+
 export async function testCustomProviderConnectionByProtocol(
   baseUrl: string,
   apiKey: string,
-  apiProtocol: ApiProtocol = "openai"
+  apiProtocol: ApiProtocol = "openai",
+  model?: string
 ): Promise<ApiTestResult> {
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "")
   const start = Date.now()
@@ -67,7 +93,7 @@ export async function testCustomProviderConnectionByProtocol(
     let response: Response
 
     if (apiProtocol === "anthropic") {
-      response = await proxyFetch(`${normalizedBaseUrl}/messages`, {
+      response = await proxyFetch(buildAnthropicMessagesURL(normalizedBaseUrl), {
         method: "POST",
         headers: {
           "x-api-key": apiKey,
@@ -75,7 +101,7 @@ export async function testCustomProviderConnectionByProtocol(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "claude-3-haiku-20240307",
+          model: model?.trim() || ANTHROPIC_PROBE_FALLBACK_MODEL,
           max_tokens: 1,
           messages: [{ role: "user", content: "test" }],
         }),
@@ -568,10 +594,19 @@ export async function probeProviderConnection(
         await testLocalProviderConnectionByUrl(baseURL || config.url, config.name)
       )
     }
-    default:
-      if (baseURL) {
+    default: {
+      // Settings seed a built-in config without a baseURL (it is only backfilled
+      // while the Config tab is mounted), so fall back to the catalog rather
+      // than reporting the provider as unknown.
+      const resolvedBaseURL = baseURL?.trim() || getBuiltInProviderDefaultBaseURL(providerId)
+      if (resolvedBaseURL) {
         return toAuthoritativeResult(
-          await testCustomProviderConnectionByProtocol(baseURL, apiKey, protocol)
+          await testCustomProviderConnectionByProtocol(
+            resolvedBaseURL,
+            apiKey,
+            protocol,
+            input.model ?? getBuiltInProviderDefaultModel(providerId)
+          )
         )
       }
       return {
@@ -580,6 +615,7 @@ export async function probeProviderConnection(
         outcome: "failed",
         authoritative: true,
       }
+    }
   }
 }
 

@@ -3617,6 +3617,9 @@ export type AgentId =
   | "windsurf"
   | "cline"
   | "roo-code"
+  | "zed"
+  | "kiro"
+  | "opencode"
   | "cognia"
 
 export interface McpServer {

@@ -14,6 +14,8 @@ import type { Account, AnthropicCredentialData } from "@/types/subscription"
 
 export type { DiscoveredAnthropicAuth }
 
+let nativeDiscoveryInFlight: Promise<DiscoveredAnthropicAuth | null> | null = null
+
 /**
  * Probe `~/.claude/.credentials.json` + Claude Code's keyring entry. Returns
  * `null` when no CLI subscription login is present anywhere; the rejected
@@ -32,7 +34,16 @@ export async function discoverAnthropicAuth(): Promise<DiscoveredAnthropicAuth |
       return w.__cogniaE2EAnthropicDiscovery
     }
   }
-  return await anthropicOauthDiscover()
+  if (!nativeDiscoveryInFlight) {
+    nativeDiscoveryInFlight = (async () => {
+      try {
+        return await anthropicOauthDiscover()
+      } finally {
+        nativeDiscoveryInFlight = null
+      }
+    })()
+  }
+  return await nativeDiscoveryInFlight
 }
 
 /**

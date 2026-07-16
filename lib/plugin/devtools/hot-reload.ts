@@ -7,6 +7,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, UnlistenFn } from "@tauri-apps/api/event"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import type { Plugin, PluginDefinition } from "@/types/plugin"
 import { loggers } from "../core/logger"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
@@ -69,8 +70,7 @@ export class PluginHotReload {
   private pluginStates: Map<string, Record<string, unknown>> = new Map()
   private pluginLoader: ((pluginId: string) => Promise<PluginDefinition>) | null = null
   private pluginReloader:
-    | ((pluginId: string, definition: PluginDefinition) => Promise<void>)
-    | null = null
+    ((pluginId: string, definition: PluginDefinition) => Promise<void>) | null = null
 
   constructor(config: Partial<HotReloadConfig> = {}) {
     this.config = {
@@ -182,7 +182,7 @@ export class PluginHotReload {
 
       // Remove event listener
       if (this.unlistenFn) {
-        this.unlistenFn()
+        safeUnlisten(this.unlistenFn)
         this.unlistenFn = null
       }
 

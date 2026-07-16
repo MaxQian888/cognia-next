@@ -1,5 +1,11 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "build": {
+    "runner": {
+      "cmd": "./scripts/tauri-cargo-runner.sh",
+      "cwd": "."
+    }
+  },
   "app": {
     "windows": [
       {

@@ -257,7 +257,7 @@ export function McpServerCard({
   return (
     <Card
       className={cn(
-        "group flex flex-col gap-2 p-3 transition-colors",
+        "group flex h-full flex-col gap-2 p-3 transition-colors",
         selected && "border-primary/50 ring-1 ring-primary/30",
         !server.enabled && "opacity-70"
       )}
@@ -275,7 +275,7 @@ export function McpServerCard({
       <p className="line-clamp-1 break-all font-mono text-[11px] text-muted-foreground">
         {summarizeServer(server)}
       </p>
-      <div className="flex items-center justify-between gap-2">
+      <div className="mt-auto flex items-center justify-between gap-2">
         <McpAgentChipGroup server={server} />
         {actions}
       </div>

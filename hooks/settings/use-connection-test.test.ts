@@ -42,7 +42,28 @@ describe("useConnectionTest", () => {
       message: "Connected successfully.",
       latency_ms: 42,
     })
-    expect(testMock).toHaveBeenCalledWith("https://api.example.com/v1", "sk-x", "openai")
+    expect(testMock).toHaveBeenCalledWith("https://api.example.com/v1", "sk-x", "openai", undefined)
+  })
+
+  // Anthropic-wire hosts probe with a real request, so the model must reach the
+  // transport — Kimi rejects the Claude model the transport falls back to.
+  it("forwards the caller's model to the transport", async () => {
+    testMock.mockResolvedValue({ success: true, message: "ok" })
+    const { result } = renderHook(() => useConnectionTest())
+    await act(async () => {
+      await result.current.test(
+        "https://api.kimi.com/coding/",
+        "sk-x",
+        "anthropic",
+        "kimi-for-coding"
+      )
+    })
+    expect(testMock).toHaveBeenCalledWith(
+      "https://api.kimi.com/coding/",
+      "sk-x",
+      "anthropic",
+      "kimi-for-coding"
+    )
   })
 
   it("preserves the 'limited' outcome instead of collapsing it to success/error", async () => {

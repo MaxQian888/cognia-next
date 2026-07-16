@@ -48,9 +48,12 @@ describe("registry", () => {
         "cognia",
         "cursor",
         "gemini",
+        "kiro",
+        "opencode",
         "roo-code",
         "vscode",
         "windsurf",
+        "zed",
       ].sort()
     )
   })

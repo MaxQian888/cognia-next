@@ -1983,6 +1983,33 @@
       "human": "你在操作",
       "lastAction": "最近操作：{action}"
     },
+    "annotation": {
+      "add": "加入队列",
+      "intent": {
+        "approve": "认可",
+        "change": "修改",
+        "fix": "修复",
+        "label": "标注意图",
+        "question": "问题"
+      },
+      "queued": "已加入 {count} 条标注",
+      "remove": "移除标注",
+      "resolve": "解决标注",
+      "send": "发送 {count} 条",
+      "sent": "已向聊天发送 {count} 条标注",
+      "severity": {
+        "blocking": "阻塞",
+        "important": "重要",
+        "label": "标注严重程度",
+        "suggestion": "建议"
+      },
+      "status": {
+        "acknowledged": "已确认",
+        "dismissed": "已忽略",
+        "pending": "待处理",
+        "resolved": "已解决"
+      }
+    },
     "comment": {
       "cancel": "取消",
       "failed": "评论发送失败",
@@ -1992,6 +2019,13 @@
       "send": "发送到对话",
       "sent": "已发送到对话",
       "title": "对该元素评论"
+    },
+    "detail": {
+      "compact": "精简",
+      "detailed": "详细",
+      "forensic": "取证",
+      "label": "标注详细程度",
+      "standard": "标准"
     },
     "empty": {
       "hint": "输入任意网址或 localhost 地址即可在此渲染，然后选择元素进行评论。",
@@ -7432,6 +7466,9 @@
       "docs": "文档",
       "duplicateName": "已存在名为 “{name}” 的服务器，请换一个预设或先移除已有的。",
       "noMatch": "没有匹配的预设。",
+      "registryEmpty": "registry 中没有匹配的服务器。",
+      "registryError": "无法连接 MCP Registry，上方的预设仍可正常使用。",
+      "registryTitle": "来自官方 MCP Registry",
       "search": "搜索预设…",
       "subtitle": "选择一个常用预设，或选 Custom 自行配置。",
       "tagAll": "全部",
@@ -23008,6 +23045,7 @@
         "signedOutBody": "添加一个 Codex 账号即可启用 codex 外部代理。",
         "signedOutTitle": "尚未激活 Codex 账号"
       },
+      "quotaApiKeyOnly": "额度窗口需要 ChatGPT 登录——OpenAI API Key 没有用量查询端点，因此该账号无额度可展示。此模式按请求计费，用量请在 OpenAI 平台控制台查看。",
       "settings": {
         "autoRefresh": {
           "description": "当 ChatGPT Token 还剩约 5 分钟过期时自动刷新；关闭则等到下一次 401 再懒刷新。",
@@ -23293,6 +23331,49 @@
     "migration": {
       "toastBody": "已将 {count, plural, =1 {1 个旧账号} other {# 个旧账号}} 迁移到新版凭证仓。",
       "toastTitle": "订阅模块已升级"
+    },
+    "nav": {
+      "groups": {
+        "providersGroup": "提供方",
+        "usageGroup": "用量与限额",
+        "vaultGroup": "凭证仓"
+      },
+      "items": {
+        "backup": {
+          "description": "导出或导入加密的凭证仓副本",
+          "label": "备份与迁移"
+        },
+        "claude": {
+          "description": "Claude Pro/Max 账号、额度与端点",
+          "label": "Claude"
+        },
+        "codex": {
+          "description": "供 codex 智能体使用的 ChatGPT 或 OpenAI API Key",
+          "label": "Codex"
+        },
+        "opencode": {
+          "description": "OpenCode Zen/Go 密钥与已发现的凭证",
+          "label": "OpenCode"
+        },
+        "overview": {
+          "description": "当前账号的实时额度窗口",
+          "label": "总览"
+        },
+        "probes": {
+          "description": "后台轮询用量的频率",
+          "label": "用量追踪"
+        },
+        "sync": {
+          "description": "将加密的凭证仓副本同步到 WebDAV",
+          "label": "云同步"
+        },
+        "usage": {
+          "description": "覆盖全部提供方的历史与分析",
+          "label": "用量"
+        }
+      },
+      "mobileTrigger": "分组",
+      "title": "订阅设置"
     },
     "opencode": {
       "description": "从 `~/.local/share/opencode/auth.json` 读取已配置的凭证；OpenCode-Zen 订阅以「粘贴 API key」的方式接入。OpenCode 本身管理大量服务商，我们只展示白名单内的几项。",
