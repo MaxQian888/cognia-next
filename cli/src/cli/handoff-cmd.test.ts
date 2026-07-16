@@ -118,10 +118,36 @@ describe("handoffCommand", () => {
 })
 
 describe("resumeCommand", () => {
-  it("requires an id and a prompt", async () => {
+  it("requires an id and rejects a missing non-interactive prompt", async () => {
     const s = sink()
     expect(await resumeCommand(parseArgv(["resume"]), { out: s.out, home: HOME })).toBe(2)
-    expect(await resumeCommand(parseArgv(["resume", "s1"]), { out: s.out, home: HOME })).toBe(2)
+    expect(
+      await resumeCommand(parseArgv(["resume", "s1"]), {
+        out: s.out,
+        home: HOME,
+        readPrompt: async () => null,
+      })
+    ).toBe(2)
+  })
+
+  it("prompts for the next turn when resume is launched without an inline prompt", async () => {
+    const s = sink()
+    const run = jest.fn().mockResolvedValue({ sessionId: "s1", text: "continued" })
+    const readPrompt = jest.fn().mockResolvedValue("inspect the remaining failures")
+    const drop = JSON.stringify({ ts: 1, role: "assistant", content: "earlier context" }) + "\n"
+
+    const code = await resumeCommand(parseArgv(["resume", "s1"]), {
+      out: s.out,
+      home: HOME,
+      readDrop: () => drop,
+      readPrompt,
+      loadConfig: () => cfg(),
+      run,
+    })
+
+    expect(code).toBe(0)
+    expect(readPrompt).toHaveBeenCalledWith("Continue session s1 › ")
+    expect(run.mock.calls[0][0].prompt).toMatch(/inspect the remaining failures/)
   })
 
   it("errors when no drop file exists", async () => {

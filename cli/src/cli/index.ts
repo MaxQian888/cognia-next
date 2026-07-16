@@ -30,7 +30,7 @@ Usage:
                               [--timeout ms] [--handoff]
                               [--plugin-tools] [--dev-plugins [--dev-plugins-dir d]]
   cognia-agent handoff <sessionId>          push a session to the desktop app
-  cognia-agent resume <id> "<prompt>"       continue a desktop hand-back
+  cognia-agent resume <id> ["<prompt>"]     continue a desktop hand-back (prompts on TTY)
   cognia-agent auth <login|status|logout> [--provider p] [--api-key k]
   cognia-agent logto <login|status|logout>          cloud OIDC (Logto) session
                      [--issuer u] [--client-id id] [--resource api] [--scope a,b] [--org id]

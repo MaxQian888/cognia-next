@@ -142,6 +142,9 @@ function SessionRowImpl({
   const t = useTranslations("desktop.sessionRow")
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(session.title)
+  const [cogniaAgentStatus, setCogniaAgentStatus] = useState<
+    "unknown" | "checking" | "available" | "missing"
+  >("unknown")
   const inputRef = useRef<HTMLInputElement>(null)
   const liRef = useRef<HTMLLIElement>(null)
 
@@ -226,22 +229,49 @@ function SessionRowImpl({
     void onUnarchive?.(session.id)
   }
 
+  const handleActionsOpenChange = (open: boolean) => {
+    if (!open || cogniaAgentStatus === "checking" || cogniaAgentStatus === "available") return
+    setCogniaAgentStatus("checking")
+    void import("@/lib/cli-bridge/detect-cli")
+      .then(({ detectCli }) => detectCli("cognia-agent"))
+      .then((result) => setCogniaAgentStatus(result.available ? "available" : "missing"))
+      .catch(() => setCogniaAgentStatus("missing"))
+  }
+
   /**
    * Hand this session BACK to the standalone CLI: write its transcript to
-   * `~/.cognia/handoff/<id>.jsonl` and surface the `resume` command. Desktop
-   * only; lazy-imports the DB + export helper so the row stays light.
+   * `~/.cognia/handoff/<id>.jsonl`, then launch `cognia-agent resume <id>` in
+   * a fresh dock tab. Desktop only; heavy collaborators stay lazy-loaded.
    */
   const handleOpenInTerminal = () => {
     void (async () => {
       try {
-        const [{ listMessages }, { exportHandoffToCli }] = await Promise.all([
+        const [
+          { listMessages },
+          { exportHandoffToCli },
+          { launchCogniaAgent },
+          { useTerminalStore },
+          { homeDir },
+        ] = await Promise.all([
           import("@/lib/db/messages"),
           import("@/lib/chat/export-handoff-to-cli"),
+          import("@/lib/terminal/run-cognia"),
+          import("@/stores/terminal/terminal-store"),
+          import("@tauri-apps/api/path"),
         ])
         const messages = await listMessages(session.id)
-        const { command } = await exportHandoffToCli({ sessionId: session.id, messages })
+        await exportHandoffToCli({ sessionId: session.id, messages })
+        const cwd = session.workingDir?.trim() || (await homeDir())
+        const outcome = await launchCogniaAgent({
+          handoffSessionId: session.id,
+          cwd,
+          store: useTerminalStore.getState(),
+        })
+        if (outcome.kind !== "launched") {
+          throw new Error(outcome.kind === "error" ? outcome.message : outcome.reason || "denied")
+        }
         log.info("session open-in-terminal", { sessionId: session.id })
-        toast.success(t("openedInTerminal", { command }))
+        toast.success(t("openedInTerminal"))
       } catch (err) {
         toast.error(t("openInTerminalFailed"))
         log.warn("session open-in-terminal failed", { error: String(err) })
@@ -337,7 +367,7 @@ function SessionRowImpl({
         </Button>
       ) : null}
       {!editing && (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={handleActionsOpenChange}>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
@@ -407,7 +437,17 @@ function SessionRowImpl({
               </DropdownMenuSub>
             ) : null}
             {isTauri() ? (
-              <DropdownMenuItem onSelect={handleOpenInTerminal}>
+              <DropdownMenuItem
+                onSelect={handleOpenInTerminal}
+                disabled={cogniaAgentStatus !== "available"}
+                title={
+                  cogniaAgentStatus === "missing"
+                    ? t("cogniaAgentNotInstalled")
+                    : cogniaAgentStatus !== "available"
+                      ? t("cogniaAgentChecking")
+                      : undefined
+                }
+              >
                 <TerminalIcon className="mr-2 size-4" />
                 {t("openInTerminal")}
               </DropdownMenuItem>

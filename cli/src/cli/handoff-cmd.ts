@@ -10,6 +10,7 @@
 import os from "node:os"
 import path from "node:path"
 import fs from "node:fs"
+import readline from "node:readline/promises"
 
 import { resolveHome } from "../config/load"
 import { loadConfig as defaultLoadConfig } from "../config/load"
@@ -123,6 +124,8 @@ export interface ResumeDeps {
   readDrop?: (absPath: string) => string | null
   transcriptFs?: TranscriptFs
   env?: Record<string, string | undefined>
+  /** Interactive prompt seam used when no prompt follows the session id. */
+  readPrompt?: (prompt: string) => Promise<string | null>
 }
 
 function defaultReadDrop(p: string): string | null {
@@ -131,6 +134,18 @@ function defaultReadDrop(p: string): string | null {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null
     throw err
+  }
+}
+
+async function defaultReadPrompt(prompt: string): Promise<string | null> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return null
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    return await rl.question(prompt)
+  } catch {
+    return null
+  } finally {
+    rl.close()
   }
 }
 
@@ -152,9 +167,14 @@ export async function resumeCommand(args: ParsedArgs, deps: ResumeDeps = {}): Pr
     out.error('resume: usage — cognia-agent resume <id> "<prompt>"')
     return 2
   }
-  const prompt = args.positionals.slice(1).join(" ").trim()
+  let prompt = args.positionals.slice(1).join(" ").trim()
   if (!prompt) {
-    out.error("resume: a prompt is required to continue the session")
+    prompt = (
+      (await (deps.readPrompt ?? defaultReadPrompt)(`Continue session ${id} › `)) ?? ""
+    ).trim()
+  }
+  if (!prompt) {
+    out.error("resume: a prompt is required to continue the session (interactive terminal needed)")
     return 2
   }
 
