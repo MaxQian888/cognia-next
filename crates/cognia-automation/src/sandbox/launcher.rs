@@ -155,8 +155,18 @@ pub fn sandbox_exec_prefix(scope: &LaunchScope) -> Vec<String> {
 /// network gate).
 pub fn render_sbpl(scope: &LaunchScope) -> String {
     let mut out = String::from("(version 1)\n(deny default)\n");
-    out.push_str("(allow process-fork)\n(allow process-exec)\n");
+    // Modern macOS dyld aborts even trivial binaries unless process metadata
+    // operations are allowed in addition to fork/exec. `process*` is the
+    // canonical Seatbelt family used by Codex; filesystem/network remain
+    // independently scoped below.
+    out.push_str("(allow process*)\n");
     out.push_str("(allow mach-lookup)\n(allow sysctl-read)\n");
+    // Workspace-write semantics: modern macOS processes consult runtime files
+    // outside the stable system prefixes (dyld/cache locations change across
+    // releases), and denying those reads aborts even `/usr/bin/true`. Permit
+    // reads globally, then apply the SECRET-store read denies below as the
+    // final matching rules. Writes remain scoped to the explicit workspace.
+    out.push_str("(allow file-read*)\n");
     out.push_str("(allow file-read*\n");
     for p in MACOS_RO_SYSTEM {
         out.push_str(&format!("  (subpath \"{}\")\n", escape_sbpl(p)));

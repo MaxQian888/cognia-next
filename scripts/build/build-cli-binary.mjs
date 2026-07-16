@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url"
 import { execFileSync } from "node:child_process"
 import path from "node:path"
 import fs from "node:fs"
+import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.mjs"
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const cliEntry = path.join(root, "cli/src/cli/entry.ts")
@@ -41,6 +42,8 @@ const binDir = path.join(root, "cli/dist/bin")
 const cliBundle = path.join(binDir, "cli.mjs")
 const pkgBootstrap = path.join(binDir, "pkg-bootstrap.cjs")
 const sidecarOutDir = path.join(binDir, "sidecar")
+const externalHostLauncherName = process.platform === "win32" ? "cognia-external-agent-launcher.exe" : "cognia-external-agent-launcher"
+const externalHostLauncher = path.join(root, "target", "release", externalHostLauncherName)
 
 // Deps the sidecar bundle keeps external (resolved from the copied node_modules
 // at runtime): claude-agent-sdk does dynamic requires / spawns the `claude`
@@ -99,6 +102,11 @@ if (!LAYOUT_ONLY) {
     console.error("build-cli-binary: @yao-pkg/pkg is not installed. Run: pnpm add -D @yao-pkg/pkg")
     process.exit(1)
   }
+}
+
+if (!fs.existsSync(externalHostLauncher)) {
+  console.error(`build-cli-binary: missing ${path.relative(root, externalHostLauncher)} — run pnpm cli:external-host:build`)
+  process.exit(1)
 }
 
 let archiver
@@ -208,7 +216,7 @@ await esbuild.build({
   // TUI_EXTERNALS); those resolve from the adjacent node_modules at runtime.
   external: TUI_EXTERNALS,
   loader: ASSET_LOADERS,
-  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin],
+  plugins: [createCliExternalAgentAliasPlugin(root), stubNextPlugin, jsonDefaultOnlyPlugin],
   logLevel: "info",
 })
 console.log(`build-cli-binary: wrote ${path.relative(root, cliBundle)}`)
@@ -300,6 +308,8 @@ if (LAYOUT_ONLY) {
     dereference: true,
   })
   fs.cpSync(sidecarOutDir, path.join(layoutDir, "sidecar"), { recursive: true, dereference: true })
+  fs.cpSync(externalHostLauncher, path.join(layoutDir, externalHostLauncherName))
+  if (process.platform !== "win32") fs.chmodSync(path.join(layoutDir, externalHostLauncherName), 0o755)
   console.log(`build-cli-binary: assembled layout ${path.relative(root, layoutDir)}`)
   process.exit(0)
 }
@@ -368,6 +378,14 @@ for (const t of TARGETS) {
       dereference: true,
     })
     fs.cpSync(sidecarOutDir, path.join(distDir, "sidecar"), { recursive: true, dereference: true })
+    const nativeTarget =
+      (process.platform === "darwin" && process.arch === "arm64" && t.dist === "cognia-agent-macos-arm64") ||
+      (process.platform === "linux" && process.arch === "x64" && t.dist === "cognia-agent-linux-x64") ||
+      (process.platform === "win32" && process.arch === "x64" && t.dist === "cognia-agent-win-x64")
+    if (nativeTarget) {
+      fs.cpSync(externalHostLauncher, path.join(distDir, externalHostLauncherName))
+      if (process.platform !== "win32") fs.chmodSync(path.join(distDir, externalHostLauncherName), 0o755)
+    }
     console.log(`build-cli-binary: assembled ${path.relative(root, distDir)}`)
 
     // Compress the assembled folder into a shareable per-platform archive.

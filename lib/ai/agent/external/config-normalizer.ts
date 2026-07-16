@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid"
-import { isTauri } from "@/lib/utils"
+import { supportsExternalAgents } from "./agent-transport"
 import type {
   CreateExternalAgentInput,
   ExternalAgentBranchReasonCode,
@@ -119,7 +119,7 @@ function resolvePrerequisiteStatus(
 
 export function getExternalAgentEcosystemReadiness(
   config: Pick<ExternalAgentConfig, "metadata" | "transport">,
-  runtimeIsTauri = isTauri()
+  runtimeIsTauri = supportsExternalAgents()
 ): ExternalAgentEcosystemReadinessSnapshot | undefined {
   const resolved = resolveExternalAgentSurfaceFromMetadata(config.metadata)
   const metadata = config.metadata ?? {}
@@ -249,7 +249,7 @@ export async function probeExternalAgentEcosystemReadiness(
   config: Pick<ExternalAgentConfig, "metadata" | "transport" | "process">,
   options: ExternalAgentEcosystemProbeOptions = {}
 ): Promise<ExternalAgentEcosystemReadinessSnapshot | undefined> {
-  const runtimeIsTauri = options.runtimeIsTauri ?? isTauri()
+  const runtimeIsTauri = options.runtimeIsTauri ?? supportsExternalAgents()
   const readiness = getExternalAgentEcosystemReadiness(config, runtimeIsTauri)
   if (!readiness) {
     return undefined
@@ -346,7 +346,7 @@ export function getUnsupportedProtocolReason(protocol: ExternalAgentProtocol): s
 
 export function isTransportSupportedOnCurrentPlatform(
   transport: ExternalAgentTransport,
-  runtimeIsTauri = isTauri()
+  runtimeIsTauri = supportsExternalAgents()
 ): boolean {
   if (transport !== "stdio") {
     return true
@@ -356,15 +356,15 @@ export function isTransportSupportedOnCurrentPlatform(
 
 export function getExternalAgentExecutionBlockReason(
   config: ExternalAgentConfig,
-  runtimeIsTauri = isTauri()
+  runtimeSupportsExternalAgents = supportsExternalAgents()
 ): string | null {
-  const assessment = getExternalAgentExecutionBlock(config, runtimeIsTauri)
+  const assessment = getExternalAgentExecutionBlock(config, runtimeSupportsExternalAgents)
   return assessment?.reason ?? null
 }
 
 export function getExternalAgentExecutionBlock(
   config: ExternalAgentConfig,
-  runtimeIsTauri = isTauri()
+  runtimeSupportsExternalAgents = supportsExternalAgents()
 ): ExternalAgentExecutionBlockAssessment | null {
   if (!config.enabled) {
     return {
@@ -386,7 +386,7 @@ export function getExternalAgentExecutionBlock(
       reason: getUnsupportedProtocolReason(config.protocol),
     }
   }
-  if (!isTransportSupportedOnCurrentPlatform(config.transport, runtimeIsTauri)) {
+  if (!isTransportSupportedOnCurrentPlatform(config.transport, runtimeSupportsExternalAgents)) {
     return {
       code: "transport_blocked",
       reason: "The stdio transport requires the desktop (Tauri) runtime.",
@@ -398,7 +398,7 @@ export function getExternalAgentExecutionBlock(
   // and the desktop-only error surfaces later, at connect time.
   if (
     config.protocol === "opencode" &&
-    !runtimeIsTauri &&
+    !runtimeSupportsExternalAgents &&
     !config.network?.endpoint &&
     (config.metadata?.autoSpawnServer === true || Boolean(config.process?.command))
   ) {
@@ -408,7 +408,10 @@ export function getExternalAgentExecutionBlock(
         "Auto-spawning an OpenCode server requires the desktop (Tauri) runtime; configure a server endpoint instead.",
     }
   }
-  const ecosystemReadiness = getExternalAgentEcosystemReadiness(config, runtimeIsTauri)
+  const ecosystemReadiness = getExternalAgentEcosystemReadiness(
+    config,
+    runtimeSupportsExternalAgents
+  )
   if (ecosystemReadiness?.supportTier === "documented-only") {
     return {
       code: "ecosystem_documented_only",
@@ -432,7 +435,7 @@ export function getExternalAgentExecutionBlock(
 
 export function isExternalAgentExecutable(
   config: ExternalAgentConfig,
-  runtimeIsTauri = isTauri()
+  runtimeIsTauri = supportsExternalAgents()
 ): boolean {
   return getExternalAgentExecutionBlockReason(config, runtimeIsTauri) === null
 }
@@ -463,7 +466,7 @@ export function normalizeExternalAgentConfigInput(
     delete metadata.unsupportedReason
   }
 
-  const runtimeIsTauri = options?.runtimeIsTauri ?? isTauri()
+  const runtimeIsTauri = options?.runtimeIsTauri ?? supportsExternalAgents()
   const normalizedConfigBase: ExternalAgentConfig = {
     id: options?.id ?? nanoid(),
     name: input.name.trim(),

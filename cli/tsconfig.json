@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@/lib/native/external-agent": ["cli/src/runtime/external/native-shim.ts"],
+      "@/lib/ai/agent/external/agent-transport": ["cli/src/runtime/external/host-branch.ts"],
+      "@/lib/ai/agent/external/agent-hooks": ["cli/src/runtime/external/agent-hooks-shim.ts"],
+      "@/*": ["./*"]
+    }
+  }
+}

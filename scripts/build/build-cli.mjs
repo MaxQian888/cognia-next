@@ -10,6 +10,8 @@
 
 import { fileURLToPath } from "node:url"
 import path from "node:path"
+import fs from "node:fs"
+import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.mjs"
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const entry = path.join(root, "cli/src/cli/entry.ts")
@@ -103,8 +105,16 @@ await esbuild.build({
     ".woff": "empty",
     ".woff2": "empty",
   },
-  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin],
+  plugins: [createCliExternalAgentAliasPlugin(root), stubNextPlugin, jsonDefaultOnlyPlugin],
   logLevel: "info",
 })
+
+const launcherName = process.platform === "win32" ? "cognia-external-agent-launcher.exe" : "cognia-external-agent-launcher"
+const launcherSource = path.join(root, "target", "release", launcherName)
+if (!fs.existsSync(launcherSource)) {
+  throw new Error(`build-cli: missing ${path.relative(root, launcherSource)}; run pnpm cli:external-host:build`)
+}
+fs.copyFileSync(launcherSource, path.join(outdir, launcherName))
+if (process.platform !== "win32") fs.chmodSync(path.join(outdir, launcherName), 0o755)
 
 console.log(`build-cli: wrote ${path.relative(root, outdir)}/cognia-agent.js`)

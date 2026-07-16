@@ -23,7 +23,7 @@
  * `terminal/*` handlers (a net simplification over ACP).
  */
 
-import { isTauri } from "@/lib/utils"
+import { supportsExternalAgents } from "./agent-transport"
 import { loggers } from "@cognia/logging"
 import { truncateForLog } from "@cognia/logging/truncate"
 import {
@@ -313,8 +313,8 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
   async connect(config: ExternalAgentConfig): Promise<void> {
     if (this._connectionStatus === "connected") return
-    if (!isTauri()) {
-      throw new Error("Codex app-server requires the Tauri desktop environment")
+    if (!supportsExternalAgents()) {
+      throw new Error("Codex app-server requires an external-agent process host")
     }
     if (config.transport !== "stdio") {
       throw new Error(`Codex app-server only supports stdio transport, got: ${config.transport}`)
@@ -425,7 +425,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     this.cleanupListeners()
     this.peer?.rejectAll("Disconnected from Codex app-server")
 
-    if (this.processId && isTauri()) {
+    if (this.processId && supportsExternalAgents()) {
       try {
         await killExternalAgent(this.processId)
       } catch (error) {
@@ -534,7 +534,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   }
 
   private async writeToProcess(message: string): Promise<void> {
-    if (!this.processId || !isTauri()) {
+    if (!this.processId || !supportsExternalAgents()) {
       throw new Error("No active Codex app-server connection")
     }
     await sendToExternalAgent(this.processId, message)

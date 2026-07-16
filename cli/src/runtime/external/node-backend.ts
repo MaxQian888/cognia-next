@@ -1,0 +1,273 @@
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { EventEmitter } from "node:events"
+import fs from "node:fs"
+import path from "node:path"
+import readline from "node:readline"
+
+export interface NodeExternalAgentSpawnConfig {
+  id: string
+  command: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+}
+
+export interface ExternalAgentLaunch {
+  command: string
+  args: string[]
+}
+
+export type ExternalAgentLaunchResolver = (
+  config: NodeExternalAgentSpawnConfig
+) => Promise<ExternalAgentLaunch>
+
+export interface NodeExternalAgentBackendOptions {
+  workspacesRoot?: string
+  allowSmokeAgent?: boolean
+  resolveLaunch?: ExternalAgentLaunchResolver
+}
+
+const CHANNEL = {
+  stdout: "external-agent://stdout",
+  stderr: "external-agent://stderr",
+  exit: "external-agent://exit",
+  state: "external-agent://state-change",
+  spawn: "external-agent://spawn",
+} as const
+
+const BINARY_ALLOWLIST = new Set([
+  "claude",
+  "claude-code-acp",
+  "codex",
+  "codex-acp",
+  "opencode",
+  "cursor-agent",
+  "cline",
+  "gemini",
+])
+const NPX_ALLOWLIST = new Set([
+  "@zed-industries/claude-code-acp",
+  "@zed-industries/codex-acp",
+  "@anthropic-ai/claude-code",
+  "opencode-ai",
+])
+const CONFIG_ENV_KEYS = new Set([
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "TERM",
+  "LANG",
+  "LC_ALL",
+])
+const CONFIG_ENV_PREFIXES = [
+  "ANTHROPIC_",
+  "CLAUDE_",
+  "OPENAI_",
+  "CODEX_",
+  "GEMINI_",
+  "GOOGLE_",
+  "OPENCODE_",
+  "CURSOR_",
+  "ACP_",
+  "COGNIA_AGENT_",
+]
+const DANGEROUS_ENV =
+  /^(?:LD_|DYLD_|NODE_OPTIONS$|GCONV_PATH$|GIT_CONFIG_|HOSTALIASES$|NLSPATH$|RESOLV_HOST_CONF$|PSMODULEPATH$|PSEXECUTIONPOLICYPREFERENCE$)/i
+
+interface ProcessRecord {
+  child: ChildProcessWithoutNullStreams
+  stopping: boolean
+}
+
+function baseCommand(command: string): string {
+  return command
+    .trim()
+    .toLowerCase()
+    .replace(/\.(?:exe|cmd|bat)$/i, "")
+}
+
+function validateCommand(config: NodeExternalAgentSpawnConfig, smoke: boolean): void {
+  const command = config.command.trim()
+  if (!command) throw new Error("empty command")
+  if (command.includes("/") || command.includes("\\")) {
+    throw new Error(`command must be a bare allowlisted binary name, got a path: ${command}`)
+  }
+  const base = baseCommand(command)
+  if (BINARY_ALLOWLIST.has(base)) return
+  if (base === "npx") {
+    const pkg = (config.args ?? []).find((arg) => !arg.startsWith("-"))
+    if (pkg && NPX_ALLOWLIST.has(pkg)) return
+    throw new Error(`npx package ${pkg ?? "<missing>"} is not in the allowlist`)
+  }
+  const stub = path.basename(config.args?.[0] ?? "") === "stub-acp-agent.mjs"
+  if (base === "node" && smoke && stub) return
+  throw new Error(`binary ${command} is not in the external-agent allowlist`)
+}
+
+function validateCwd(root: string, requested?: string): string {
+  fs.mkdirSync(root, { recursive: true })
+  const canonicalRoot = fs.realpathSync(root)
+  const candidate = requested
+    ? path.isAbsolute(requested)
+      ? requested
+      : path.join(canonicalRoot, requested)
+    : canonicalRoot
+  const canonical = fs.realpathSync(candidate)
+  const relative = path.relative(canonicalRoot, canonical)
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`cwd ${canonical} escapes the workspaces root ${canonicalRoot}`)
+  }
+  return canonical
+}
+
+function childEnv(overrides: Record<string, string> | undefined): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!DANGEROUS_ENV.test(key)) env[key] = value
+  }
+  for (const [key, value] of Object.entries(overrides ?? {})) {
+    if (
+      !DANGEROUS_ENV.test(key) &&
+      (CONFIG_ENV_KEYS.has(key) || CONFIG_ENV_PREFIXES.some((prefix) => key.startsWith(prefix)))
+    ) {
+      env[key] = value
+    }
+  }
+  return env
+}
+
+async function defaultResolveLaunch(
+  config: NodeExternalAgentSpawnConfig
+): Promise<ExternalAgentLaunch> {
+  const { resolveSandboxedExternalAgentLaunch } = await import("./sandbox-launcher")
+  return resolveSandboxedExternalAgentLaunch(config)
+}
+
+export class NodeExternalAgentBackend {
+  private readonly events = new EventEmitter()
+  private readonly processes = new Map<string, ProcessRecord>()
+  private readonly workspacesRoot: string
+  private readonly allowSmokeAgent: boolean
+  private readonly resolveLaunch: ExternalAgentLaunchResolver
+
+  constructor(options: NodeExternalAgentBackendOptions = {}) {
+    this.workspacesRoot = path.resolve(
+      options.workspacesRoot ?? process.env.COGNIA_WORKSPACES_DIR ?? process.cwd()
+    )
+    this.allowSmokeAgent = options.allowSmokeAgent ?? process.env.COGNIA_SMOKE_AGENT === "1"
+    this.resolveLaunch = options.resolveLaunch ?? defaultResolveLaunch
+  }
+
+  listen<T>(channel: string, handler: (payload: T) => void): () => void {
+    this.events.on(channel, handler)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.events.off(channel, handler)
+    }
+  }
+
+  async invoke<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
+    switch (name) {
+      case "spawn_external_agent":
+        return (await this.spawn(args.config as NodeExternalAgentSpawnConfig)) as T
+      case "send_to_external_agent":
+        await this.send(String(args.agentId), String(args.message))
+        return undefined as T
+      case "kill_external_agent":
+        await this.kill(String(args.agentId))
+        return undefined as T
+      case "check_command_exists":
+        return (await commandExists(String(args.command))) as T
+      default:
+        throw new Error(`unsupported external-agent command: ${name}`)
+    }
+  }
+
+  private emit(channel: string, payload: unknown): void {
+    this.events.emit(channel, payload)
+  }
+
+  private async spawn(config: NodeExternalAgentSpawnConfig): Promise<string> {
+    if (this.processes.has(config.id)) throw new Error(`agent already running: ${config.id}`)
+    validateCommand(config, this.allowSmokeAgent)
+    const cwd = validateCwd(this.workspacesRoot, config.cwd)
+    const normalized = { ...config, cwd }
+    const launch = await this.resolveLaunch(normalized)
+    this.emit(CHANNEL.spawn, { agentId: config.id, status: "starting" })
+    this.emit(CHANNEL.state, { agentId: config.id, state: "Starting" })
+    const child = spawn(launch.command, launch.args, {
+      cwd,
+      env: childEnv(config.env),
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    })
+    const record: ProcessRecord = { child, stopping: false }
+    this.processes.set(config.id, record)
+    readline.createInterface({ input: child.stdout }).on("line", (data) => {
+      this.emit(CHANNEL.stdout, { agentId: config.id, data })
+    })
+    readline.createInterface({ input: child.stderr }).on("line", (data) => {
+      this.emit(CHANNEL.stderr, { agentId: config.id, data })
+    })
+    child.once("spawn", () => {
+      this.emit(CHANNEL.state, { agentId: config.id, state: "Running" })
+    })
+    child.once("error", (error) => {
+      this.processes.delete(config.id)
+      this.emit(CHANNEL.state, { agentId: config.id, state: "Failed" })
+      this.emit(CHANNEL.stderr, { agentId: config.id, data: error.message })
+    })
+    child.once("exit", (code, signal) => {
+      this.processes.delete(config.id)
+      this.emit(CHANNEL.state, { agentId: config.id, state: "Stopped" })
+      this.emit(CHANNEL.exit, { agentId: config.id, code: code ?? 0, signal })
+    })
+    return config.id
+  }
+
+  private async send(agentId: string, message: string): Promise<void> {
+    const record = this.processes.get(agentId)
+    if (!record) throw new Error(`agent not running: ${agentId}`)
+    await new Promise<void>((resolve, reject) => {
+      record.child.stdin.write(message.endsWith("\n") ? message : `${message}\n`, (error) =>
+        error ? reject(error) : resolve()
+      )
+    })
+  }
+
+  private async kill(agentId: string): Promise<void> {
+    const record = this.processes.get(agentId)
+    if (!record) throw new Error(`agent not running: ${agentId}`)
+    if (record.stopping) return
+    record.stopping = true
+    this.emit(CHANNEL.state, { agentId, state: "Stopping" })
+    if (process.platform !== "win32" && record.child.pid) {
+      process.kill(-record.child.pid, "SIGTERM")
+    } else {
+      record.child.kill("SIGTERM")
+    }
+  }
+}
+
+export async function commandExists(command: string): Promise<boolean> {
+  const trimmed = command.trim()
+  if (!trimmed || trimmed.includes("/") || trimmed.includes("\\")) return false
+  const pathDirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)
+  const extensions =
+    process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";") : [""]
+  return pathDirs.some((dir) =>
+    extensions.some((extension) => {
+      try {
+        fs.accessSync(path.join(dir, `${trimmed}${extension}`), fs.constants.X_OK)
+        return true
+      } catch {
+        return false
+      }
+    })
+  )
+}
