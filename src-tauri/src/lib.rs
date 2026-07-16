@@ -863,6 +863,7 @@ pub fn run() {
             connectors::commands::connectors_ws_open,
             connectors::commands::connectors_ws_send,
             connectors::commands::connectors_ws_close,
+            connectors::commands::connectors_onebot_send,
             connectors::commands::connectors_lark_ws_open,
             connectors::commands::connectors_lark_ws_close,
             connectors::commands::connectors_reset_all_ws,

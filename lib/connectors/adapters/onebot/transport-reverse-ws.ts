@@ -12,11 +12,12 @@
  *  2. Provides `sendToOneBot(adapterId, call)` to push an outbound RPC call
  *     to the connected client and await the echo-matched response.
  *
- * The Rust side relays outbound calls received on the
- * `connectors://onebot/<adapterId>/send` event channel back over the WS.
+ * The Rust side relays outbound calls received through the
+ * `connectors_onebot_send` command back over the WS.
  */
 
-import { listen, emit } from "@tauri-apps/api/event"
+import { listen } from "@tauri-apps/api/event"
+import { connectorsOnebotSend } from "@/lib/connectors/tauri/commands"
 import type { SerializedOneBotCall } from "./serialize"
 import type { OneBotTransport, OneBotTransportHandlers } from "./transport"
 
@@ -120,8 +121,8 @@ export async function subscribeOneBotResponses(adapterId: string): Promise<Unlis
 /**
  * Send an outbound OneBot RPC call and wait for the echo-matched response.
  *
- * Emits `connectors://onebot/<adapterId>/send` with the serialised call JSON,
- * then resolves when the matching response arrives on the response channel.
+ * Sends the serialised call through the connector command plane, then resolves
+ * when the matching response arrives on the response channel.
  *
  * Rejects after `timeoutMs` milliseconds (default 10 seconds).
  */
@@ -130,8 +131,6 @@ export async function sendToOneBot(
   call: SerializedOneBotCall,
   timeoutMs = 10_000
 ): Promise<OneBotRpcResponse> {
-  const sendTopic = `connectors://onebot/${adapterId}/send`
-
   return new Promise<OneBotRpcResponse>((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingRpcs.delete(call.echo)
@@ -143,7 +142,7 @@ export async function sendToOneBot(
       resolve(resp)
     })
 
-    emit(sendTopic, JSON.stringify(call)).catch((err) => {
+    connectorsOnebotSend(adapterId, JSON.stringify(call)).catch((err) => {
       clearTimeout(timer)
       pendingRpcs.delete(call.echo)
       reject(err instanceof Error ? err : new Error(String(err)))

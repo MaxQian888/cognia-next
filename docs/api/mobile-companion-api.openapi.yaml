@@ -3233,6 +3233,150 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/connectors_ws_open:
+    post:
+      operationId: rpcConnectorsWsOpen
+      tags: [rpc-control]
+      summary: Open an outbound connector WebSocket (service scope only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                headers:
+                  type: object
+                  additionalProperties: { type: string }
+      responses:
+        "200":
+          { description: Stable socket handle., content: { application/json: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/connectors_ws_send:
+    post:
+      operationId: rpcConnectorsWsSend
+      tags: [rpc-control]
+      summary: Send a text frame on an outbound connector WebSocket (service scope only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handleId, data]
+              properties:
+                handleId: { type: string }
+                data: { type: string }
+      responses:
+        "200": { description: Frame queued., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/connectors_ws_close:
+    post:
+      operationId: rpcConnectorsWsClose
+      tags: [rpc-control]
+      summary: Close an outbound connector WebSocket (service scope only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handleId]
+              properties:
+                handleId: { type: string }
+      responses:
+        "200": { description: Socket closed., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/connectors_onebot_send:
+    post:
+      operationId: rpcConnectorsOnebotSend
+      tags: [rpc-control]
+      summary: Send an API call to a live OneBot reverse-WS client (service scope only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapterId, callJson]
+              properties:
+                adapterId: { type: string }
+                callJson: { type: string }
+      responses:
+        "200": { description: Call queued., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/connectors_lark_ws_open:
+    post:
+      operationId: rpcConnectorsLarkWsOpen
+      tags: [rpc-control]
+      summary: Open a Lark long connection (service scope only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapterId]
+              properties:
+                adapterId: { type: string }
+      responses:
+        "200":
+          { description: Stable Lark connection handle., content: { application/json: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/connectors_lark_ws_close:
+    post:
+      operationId: rpcConnectorsLarkWsClose
+      tags: [rpc-control]
+      summary: Close a Lark long connection (service scope only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handleId]
+              properties:
+                handleId: { type: string }
+      responses:
+        "200": { description: Connection closed., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/connectors_reset_all_ws:
+    post:
+      operationId: rpcConnectorsResetAllWs
+      tags: [rpc-control]
+      summary: Reap all server-owned connector sockets (service scope only).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          { description: Number of sockets reaped., content: { application/json: { schema: { type: integer } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
   /api/v1/_rpc/connectors_attachment_fetch:
     post:
       operationId: rpcConnectorsAttachmentFetch

@@ -275,10 +275,7 @@ fn is_live(handle_id: &str) -> bool {
 /// Open a Lark long connection for `adapter_id` (credentials read from the OS
 /// keyring). Returns a stable handle id. The connection self-reconnects with
 /// back-off until `close(id)` is called.
-pub async fn open(
-    emitter: Arc<dyn EventEmitter>,
-    adapter_id: String,
-) -> Result<String, String> {
+pub async fn open(emitter: Arc<dyn EventEmitter>, adapter_id: String) -> Result<String, String> {
     let app_id = super::keyring::get(&adapter_id, "appId")?.unwrap_or_default();
     let app_secret = super::keyring::get(&adapter_id, "appSecret")?.unwrap_or_default();
     if app_id.is_empty() || app_secret.is_empty() {
@@ -612,7 +609,10 @@ mod tests {
                 serde_json::Value::String(r#"{"event":"message"}"#.to_string()),
             )]
         );
-        assert!(rx.recv().await.is_some(), "data frame must still be acknowledged");
+        assert!(
+            rx.recv().await.is_some(),
+            "data frame must still be acknowledged"
+        );
     }
 
     #[test]

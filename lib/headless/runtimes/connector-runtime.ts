@@ -60,8 +60,6 @@ export const headlessConnectorInvoker: ConnectorCommandInvoker = async <T>(
       return "companion:/connectors" as T
     case "connectors_stop_server":
       return undefined as T
-    case "connectors_reset_all_ws":
-      return 0 as T
     // Everything else passes through same-name with the wrapper args
     // verbatim (the Rust arms deserialize the same camelCase payloads the
     // Tauri commands take).

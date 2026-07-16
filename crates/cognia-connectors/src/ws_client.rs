@@ -344,7 +344,10 @@ mod tests {
         assert_eq!(
             events.as_slice(),
             &[
-                (format!("connectors://ws/{handle_id}/open"), serde_json::Value::Null),
+                (
+                    format!("connectors://ws/{handle_id}/open"),
+                    serde_json::Value::Null
+                ),
                 (
                     format!("connectors://ws/{handle_id}/message"),
                     serde_json::Value::String("hello".into()),

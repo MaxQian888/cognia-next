@@ -69,16 +69,20 @@ export function captureDecisionToAcp(
   request: AcpPermissionRequest,
   decision: CapturePermissionDecision
 ): AcpPermissionResponse {
-  const granted = decision.decision !== "deny"
   const requestedRememberChoice = decision.decision === "allow_always"
-  const wantedKinds = granted
-    ? requestedRememberChoice
-      ? (["allow_always", "allow_once"] as const)
-      : (["allow_once", "allow_always"] as const)
-    : (["reject_once", "reject_always"] as const)
+  const wantedKinds =
+    decision.decision !== "deny"
+      ? requestedRememberChoice
+        ? (["allow_always", "allow_once"] as const)
+        : (["allow_once"] as const)
+      : (["reject_once", "reject_always"] as const)
   const selectedOption = wantedKinds
     .map((kind) => request.options?.find((option) => option.kind === kind))
     .find((option) => option !== undefined)
+  const optionsConstrainChoice = Boolean(request.options?.length)
+  const granted =
+    decision.decision !== "deny" &&
+    (!optionsConstrainChoice || selectedOption?.kind.startsWith("allow") === true)
   const rememberChoice = selectedOption?.kind === "allow_always"
   return {
     requestId: request.requestId ?? request.id,

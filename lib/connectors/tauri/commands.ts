@@ -301,6 +301,11 @@ export async function connectorsWsClose(handleId: string): Promise<void> {
   await invoker("connectors_ws_close", { handleId })
 }
 
+/** Send a serialized OneBot API call to the live reverse-WS client. */
+export async function connectorsOnebotSend(adapterId: string, callJson: string): Promise<void> {
+  await invoker("connectors_onebot_send", { adapterId, callJson })
+}
+
 /**
  * Close every leaked connector WS / Lark long-connection socket and return the
  * count reaped.

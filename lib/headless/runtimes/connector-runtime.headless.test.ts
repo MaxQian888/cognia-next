@@ -113,16 +113,17 @@ describe("connector-runtime (headless)", () => {
     await stop()
   })
 
-  it("treats desktop-lifecycle commands as host no-ops (no RPC round-trip)", async () => {
+  it("keeps server lifecycle local but resets server-owned sockets over RPC", async () => {
     const { stop } = await bootConnectorRuntime()
+    mockCall.mockResolvedValue(3)
 
     const { connectorsStartServer, connectorsResetAllWs } =
       await import("@/lib/connectors/tauri/commands")
     await expect(connectorsStartServer(7842, true)).resolves.toBe("companion:/connectors")
     await expect(connectorsStopServer()).resolves.toBeUndefined()
-    await expect(connectorsResetAllWs()).resolves.toBe(0)
+    await expect(connectorsResetAllWs()).resolves.toBe(3)
 
-    expect(mockCall).not.toHaveBeenCalled()
+    expect(mockCall).toHaveBeenCalledWith("connectors_reset_all_ws", undefined)
     expect(mockTauriInvoke).not.toHaveBeenCalled()
     await stop()
   })

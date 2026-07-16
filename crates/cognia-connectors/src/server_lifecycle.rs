@@ -47,7 +47,6 @@ pub async fn start_server(
     state: ConnectorsState,
     bind_addr: SocketAddr,
     emitter: Arc<dyn EventEmitter>,
-    app_handle: Option<tauri::AppHandle>,
 ) -> Result<ServerHandle, String> {
     let listener = TcpListener::bind(bind_addr)
         .await
@@ -55,7 +54,7 @@ pub async fn start_server(
     let bound = listener.local_addr().map_err(|e| e.to_string())?;
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-    let app = build_router(state.clone(), emitter, app_handle);
+    let app = build_router(state.clone(), emitter);
 
     {
         let mut inner = state.inner.lock();
@@ -102,7 +101,6 @@ mod tests {
             state.clone(),
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
             Arc::new(NullEmitter),
-            None,
         )
         .await
         .unwrap();
@@ -118,7 +116,6 @@ mod tests {
             state.clone(),
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
             Arc::new(NullEmitter),
-            None,
         )
         .await
         .unwrap();

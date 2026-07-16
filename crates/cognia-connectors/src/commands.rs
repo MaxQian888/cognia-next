@@ -72,15 +72,8 @@ pub async fn connectors_start_server(
     } else {
         IpAddr::V4(Ipv4Addr::UNSPECIFIED)
     };
-    let app_for_bridge = app.clone();
     let emitter: Arc<dyn EventEmitter> = Arc::new(AppHandleEmitter(app));
-    let handle = start_server(
-        state.inner_state(),
-        SocketAddr::new(ip, port),
-        emitter,
-        Some(app_for_bridge),
-    )
-    .await?;
+    let handle = start_server(state.inner_state(), SocketAddr::new(ip, port), emitter).await?;
     let bound = handle.bound_addr.to_string();
     *handle_lock = Some(handle);
     Ok(bound)
@@ -204,6 +197,11 @@ pub async fn connectors_ws_send(handle_id: String, data: String) -> Result<(), S
 #[tauri::command]
 pub async fn connectors_ws_close(handle_id: String) -> Result<(), String> {
     super::ws_client::ws_close(&handle_id).await
+}
+
+#[tauri::command]
+pub async fn connectors_onebot_send(adapter_id: String, call_json: String) -> Result<(), String> {
+    super::ws_server::send(&adapter_id, call_json).await
 }
 
 // ---------------------------------------------------------------------------

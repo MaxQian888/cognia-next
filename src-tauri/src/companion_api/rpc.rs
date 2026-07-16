@@ -250,6 +250,13 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connectors_keyring_delete",
     "connectors_keyring_list",
     "connectors_http_request",
+    "connectors_ws_open",
+    "connectors_ws_send",
+    "connectors_ws_close",
+    "connectors_onebot_send",
+    "connectors_lark_ws_open",
+    "connectors_lark_ws_close",
+    "connectors_reset_all_ws",
     "connectors_attachment_fetch",
     "connectors_attachment_read",
     "connectors_media_upload",
@@ -813,6 +820,13 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "connectors_keyring_delete",
     "connectors_keyring_list",
     "connectors_http_request",
+    "connectors_ws_open",
+    "connectors_ws_send",
+    "connectors_ws_close",
+    "connectors_onebot_send",
+    "connectors_lark_ws_open",
+    "connectors_lark_ws_close",
+    "connectors_reset_all_ws",
     "connectors_attachment_fetch",
     "connectors_attachment_read",
     "connectors_media_upload",
@@ -1961,6 +1975,87 @@ pub(super) async fn dispatch(
                 .await
                 .map_err(RpcError::internal)?;
             to_json(resp)
+        }
+
+        "connectors_ws_open" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let url: String = required(&args, "url")?;
+            let headers: Option<std::collections::HashMap<String, String>> =
+                optional(&args, "headers")?;
+            let emitter = std::sync::Arc::new(super::event_bus::ConnectorEventEmitter(
+                std::sync::Arc::clone(&services.event_bus),
+            ));
+            let handle_id = crate::connectors::ws_client::open_ws(emitter, url, headers)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(handle_id)
+        }
+
+        "connectors_ws_send" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
+            let data: String = required(&args, "data")?;
+            crate::connectors::ws_client::ws_send(&handle_id, data)
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_ws_close" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
+            crate::connectors::ws_client::ws_close(&handle_id)
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_onebot_send" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let call_json: String = required_aliased(&args, "call_json", "callJson")?;
+            crate::connectors::ws_server::send(&adapter_id, call_json)
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_lark_ws_open" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let emitter = std::sync::Arc::new(super::event_bus::ConnectorEventEmitter(
+                std::sync::Arc::clone(&services.event_bus),
+            ));
+            let handle_id = crate::connectors::lark_ws::open(emitter, adapter_id)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(handle_id)
+        }
+
+        "connectors_lark_ws_close" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
+            crate::connectors::lark_ws::close(&handle_id)
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "connectors_reset_all_ws" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let count = crate::connectors::commands::connectors_reset_all_ws()
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(count)
         }
 
         "connectors_attachment_fetch" => {
@@ -3686,6 +3781,13 @@ mod tests {
             "connectors_keyring_delete",
             "connectors_keyring_list",
             "connectors_http_request",
+            "connectors_ws_open",
+            "connectors_ws_send",
+            "connectors_ws_close",
+            "connectors_onebot_send",
+            "connectors_lark_ws_open",
+            "connectors_lark_ws_close",
+            "connectors_reset_all_ws",
             "connectors_attachment_fetch",
             "connectors_attachment_read",
             "connectors_media_upload",

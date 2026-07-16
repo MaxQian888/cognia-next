@@ -99,6 +99,16 @@ pub struct EventBus {
     seq_counter: AtomicU64,
 }
 
+/// Connector event sink shared by the public ingress router and connector
+/// command-plane RPC arms in headless mode.
+pub struct ConnectorEventEmitter(pub Arc<EventBus>);
+
+impl crate::connectors::axum_app::EventEmitter for ConnectorEventEmitter {
+    fn emit(&self, topic: &str, payload: Value) {
+        self.0.publish(topic.to_string(), payload);
+    }
+}
+
 impl EventBus {
     /// Create a new `EventBus` and return it wrapped in an [`Arc`].
     pub fn new() -> Arc<Self> {

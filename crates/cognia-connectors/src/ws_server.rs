@@ -6,7 +6,7 @@
 //!
 //! When the bearer token is absent or wrong, the upgrade is rejected with 401.
 //!
-//! Once upgraded, the socket is bridged to the renderer via Tauri events,
+//! Once upgraded, the socket emits through the shared connector event sink,
 //! honouring the contract the TS adapter (`lib/connectors/adapters/onebot/
 //! transport-reverse-ws.ts`) subscribes to:
 //!
@@ -14,7 +14,7 @@
 //!   emit  `connectors://onebot/<id>/event`    <frame>  — inbound event push
 //!   emit  `connectors://onebot/<id>/response` <frame>  — inbound API response
 //!   emit  `connectors://onebot/<id>/close`             — on disconnect
-//!   listen `connectors://onebot/<id>/send`    <call>   — outbound RPC → WS
+//!   command `connectors_onebot_send`          <call>   — outbound RPC → WS
 //!
 //! OneBot multiplexes API responses (carry an `echo` field) and event pushes
 //! (no `echo`) on the one socket, so each inbound frame is routed by inspecting
@@ -37,32 +37,28 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use subtle::ConstantTimeEq;
-use tauri::{EventId, Listener};
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
-use super::axum_app::{AppHandleExt, EmitterExt, EventEmitter};
+use super::axum_app::{EmitterExt, EventEmitter};
 use super::state::ConnectorsState;
 use super::types::OneBotLiveClient;
 
-/// Per-adapter `/send` listener registry. A reconnect for the same `adapter_id`
-/// must evict the prior connection's listener so a stale half-open socket stops
-/// stealing outbound frames. Keyed by `adapter_id` → that connection's listener
-/// `EventId`.
-static ONEBOT_SEND_LISTENERS: OnceLock<Arc<Mutex<HashMap<String, EventId>>>> = OnceLock::new();
-
-fn send_listeners() -> &'static Arc<Mutex<HashMap<String, EventId>>> {
-    ONEBOT_SEND_LISTENERS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+struct LiveClient {
+    connected_at_ms: u64,
+    connection_id: Uuid,
+    tx: mpsc::Sender<Message>,
 }
 
-/// Live reverse-WS client registry: `adapter_id` → connect time (epoch ms).
+/// Live reverse-WS client registry: `adapter_id` → active socket sender.
 /// Populated on a successful upgrade and cleared on disconnect, so the OneBot
 /// settings UI can probe which adapters actually have a client dialed in.
 /// Keyed by `adapter_id` (a reconnect overwrites the timestamp); the disconnect
 /// cleanup only removes the entry when the closing socket is still the current
-/// connection (mirrors the `send_listeners` reconnect guard).
-static ONEBOT_LIVE_CLIENTS: OnceLock<Arc<Mutex<HashMap<String, u64>>>> = OnceLock::new();
+/// connection.
+static ONEBOT_LIVE_CLIENTS: OnceLock<Arc<Mutex<HashMap<String, LiveClient>>>> = OnceLock::new();
 
-fn live_client_map() -> &'static Arc<Mutex<HashMap<String, u64>>> {
+fn live_client_map() -> &'static Arc<Mutex<HashMap<String, LiveClient>>> {
     ONEBOT_LIVE_CLIENTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
 }
 
@@ -80,11 +76,24 @@ pub fn live_clients() -> Vec<OneBotLiveClient> {
         .lock()
         .unwrap()
         .iter()
-        .map(|(adapter_id, &connected_at_ms)| OneBotLiveClient {
+        .map(|(adapter_id, client)| OneBotLiveClient {
             adapter_id: adapter_id.clone(),
-            connected_at_ms,
+            connected_at_ms: client.connected_at_ms,
         })
         .collect()
+}
+
+/// Queue an API call on the currently connected reverse-WS client.
+pub async fn send(adapter_id: &str, call_json: String) -> Result<(), String> {
+    let tx = live_client_map()
+        .lock()
+        .unwrap()
+        .get(adapter_id)
+        .map(|client| client.tx.clone())
+        .ok_or_else(|| format!("OneBot adapter '{adapter_id}' has no connected client"))?;
+    tx.send(Message::Text(call_json.into()))
+        .await
+        .map_err(|e| format!("OneBot send failed: {e}"))
 }
 
 /// Where an inbound reverse-WS frame should be forwarded.
@@ -147,11 +156,9 @@ async fn ws_onebot_handler(
     State(_state): State<ConnectorsState>,
     Path(adapter_id): Path<String>,
     emitter_ext: Option<Extension<EmitterExt>>,
-    app_ext: Option<Extension<AppHandleExt>>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let app = app_ext.map(|Extension(AppHandleExt(app))| app);
     let emitter = emitter_ext.map(|Extension(EmitterExt(emitter))| emitter);
 
     // Read the expected bearer from keyring.
@@ -189,20 +196,17 @@ async fn ws_onebot_handler(
         return (StatusCode::UNAUTHORIZED, "invalid or missing bearer token").into_response();
     }
 
-    upgrade(ws, emitter, app, adapter_id)
+    upgrade(ws, emitter, adapter_id)
 }
 
 /// Complete the upgrade only when a live event sink is installed.
 fn upgrade(
     ws: WebSocketUpgrade,
     emitter: Option<Arc<dyn EventEmitter>>,
-    app: Option<tauri::AppHandle>,
     adapter_id: String,
 ) -> Response {
     match emitter {
-        Some(emitter) => {
-            ws.on_upgrade(move |socket| run_bridge(emitter, app, adapter_id, socket))
-        }
+        Some(emitter) => ws.on_upgrade(move |socket| run_bridge(emitter, adapter_id, socket)),
         None => {
             log::error!(
                 "ws_server: refusing OneBot upgrade for {adapter_id}: no event sink installed; \
@@ -213,55 +217,30 @@ fn upgrade(
     }
 }
 
-/// Bridge an accepted reverse-WS socket to the renderer over Tauri events.
-async fn run_bridge(
-    emitter: Arc<dyn EventEmitter>,
-    app: Option<tauri::AppHandle>,
-    adapter_id: String,
-    socket: WebSocket,
-) {
+/// Bridge an accepted reverse-WS socket to the configured event sink.
+async fn run_bridge(emitter: Arc<dyn EventEmitter>, adapter_id: String, socket: WebSocket) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::channel::<Message>(64);
 
-    // Listen for outbound RPC calls the TS adapter emits on `…/send`. The JS
-    // side emits `JSON.stringify(call)` as a string payload, so `event.payload()`
-    // is that JSON-encoded string — decode one level to recover the call JSON
-    // before forwarding it as a WS text frame.
-    let send_channel = format!("connectors://onebot/{adapter_id}/send");
-    let listener_id = app.as_ref().map(|app| {
-        let listener_tx = tx.clone();
-        let listener_id = app.listen(send_channel, move |event| {
-            let raw = event.payload();
-            let call_json = serde_json::from_str::<String>(raw).unwrap_or_else(|_| raw.to_string());
-            // Bounded channel: drop on a full queue rather than block the sync
-            // listener — mirrors the break-on-error back-pressure in ws_client.
-            let _ = listener_tx.try_send(Message::Text(call_json.into()));
-        });
-
-        // Reconnect: evict any prior connection's listener for this adapter.
-        let prev = send_listeners()
-            .lock()
-            .unwrap()
-            .insert(adapter_id.clone(), listener_id);
-        if let Some(prev_id) = prev {
-            if prev_id != listener_id {
-                app.unlisten(prev_id);
-            }
-        }
-        listener_id
-    });
-    // A desktop listener or the future command path owns all remaining senders.
-    drop(tx);
-
     // Record the live connection so `connectors_onebot_probe` can report it.
-    let connected_at_ms = {
+    let connection_id = Uuid::new_v4();
+    let previous = {
         let mut clients = live_client_map().lock().unwrap();
-        let timestamp = clients
-            .get(&adapter_id)
-            .map_or_else(now_ms, |previous| now_ms().max(previous.saturating_add(1)));
-        clients.insert(adapter_id.clone(), timestamp);
-        timestamp
+        let connected_at_ms = clients.get(&adapter_id).map_or_else(now_ms, |previous| {
+            now_ms().max(previous.connected_at_ms.saturating_add(1))
+        });
+        clients.insert(
+            adapter_id.clone(),
+            LiveClient {
+                connected_at_ms,
+                connection_id,
+                tx,
+            },
+        )
     };
+    if let Some(previous) = previous {
+        let _ = previous.tx.try_send(Message::Close(None));
+    }
 
     emitter.emit(
         &format!("connectors://onebot/{adapter_id}/open"),
@@ -298,23 +277,16 @@ async fn run_bridge(
     // Cleanup — only if we are still the registered connection (a newer
     // reconnect may have replaced and already unlistened us; in that case the
     // spurious `/close` must NOT fire and degrade the live connection).
-    let still_current = match listener_id {
-        Some(listener_id) => {
-            let mut map = send_listeners().lock().unwrap();
-            if map.get(&adapter_id) == Some(&listener_id) {
-                map.remove(&adapter_id);
-                if let Some(app) = app.as_ref() {
-                    app.unlisten(listener_id);
-                }
-                true
-            } else {
-                false
-            }
+    let still_current = {
+        let mut clients = live_client_map().lock().unwrap();
+        if clients.get(&adapter_id).map(|client| client.connection_id) == Some(connection_id) {
+            clients.remove(&adapter_id);
+            true
+        } else {
+            false
         }
-        None => live_client_map().lock().unwrap().get(&adapter_id) == Some(&connected_at_ms),
     };
     if still_current {
-        live_client_map().lock().unwrap().remove(&adapter_id);
         emitter.emit(
             &format!("connectors://onebot/{adapter_id}/close"),
             serde_json::Value::Null,
@@ -356,36 +328,36 @@ mod tests {
         assert_eq!(route_frame(""), FrameRoute::Drop);
     }
 
-    #[test]
-    fn send_listeners_evicts_prior_on_reconnect() {
-        // A reconnect re-inserting the same adapter_id returns the prior
-        // listener id so the caller can unlisten the stale connection.
-        let map = send_listeners();
-        let key = "ob-reconnect-test";
-        map.lock().unwrap().remove(key);
-        assert!(map.lock().unwrap().insert(key.to_string(), 11).is_none());
-        assert_eq!(map.lock().unwrap().insert(key.to_string(), 22), Some(11));
-        map.lock().unwrap().remove(key);
-    }
-
-    #[test]
-    fn live_clients_reports_registered_connections() {
+    #[tokio::test]
+    async fn live_clients_reports_and_sends_to_registered_connection() {
         let key = "ob-live-probe-test";
-        // Clean slate, then simulate an upgrade recording a live client.
+        let (tx, mut rx) = mpsc::channel(1);
         live_client_map().lock().unwrap().remove(key);
-        live_client_map()
-            .lock()
-            .unwrap()
-            .insert(key.to_string(), 1234);
+        live_client_map().lock().unwrap().insert(
+            key.to_string(),
+            LiveClient {
+                connected_at_ms: 1234,
+                connection_id: Uuid::new_v4(),
+                tx,
+            },
+        );
 
         let snapshot = live_clients();
         let entry = snapshot.iter().find(|c| c.adapter_id == key);
         assert!(entry.is_some(), "probe must report the live client");
         assert_eq!(entry.unwrap().connected_at_ms, 1234);
 
-        // Disconnect cleanup removes it again.
+        send(key, r#"{"action":"get_status"}"#.to_string())
+            .await
+            .unwrap();
+        assert_eq!(
+            rx.recv().await,
+            Some(Message::Text(r#"{"action":"get_status"}"#.into()))
+        );
+
         live_client_map().lock().unwrap().remove(key);
         assert!(live_clients().iter().all(|c| c.adapter_id != key));
+        assert!(send(key, "{}".into()).await.is_err());
     }
 
     // ── Authorization decision — pure, keyring-free (P1-3 fail-closed) ──────
@@ -452,7 +424,6 @@ mod tests {
             state,
             std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
             emitter.clone(),
-            None,
         )
         .await
         .unwrap();
@@ -530,6 +501,17 @@ mod tests {
             ))
             .await
             .unwrap();
+        send(
+            adapter,
+            r#"{"action":"send_msg","echo":"outbound-1"}"#.to_string(),
+        )
+        .await
+        .unwrap();
+        let outbound = socket.next().await.unwrap().unwrap();
+        assert_eq!(
+            outbound,
+            Message::Text(r#"{"action":"send_msg","echo":"outbound-1"}"#.into())
+        );
         socket.close(None).await.unwrap();
 
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -558,9 +540,7 @@ mod tests {
                 ),
                 (
                     format!("connectors://onebot/{adapter}/response"),
-                    serde_json::Value::String(
-                        r#"{"status":"ok","echo":"request-1"}"#.into(),
-                    ),
+                    serde_json::Value::String(r#"{"status":"ok","echo":"request-1"}"#.into(),),
                 ),
                 (
                     format!("connectors://onebot/{adapter}/close"),
@@ -609,7 +589,10 @@ mod tests {
         assert_http_status(result, StatusCode::UNAUTHORIZED);
 
         let accepted = ws_handshake(addr, adapter, Some("correct-secret")).await;
-        assert!(accepted.is_ok(), "correct bearer must upgrade, got {accepted:?}");
+        assert!(
+            accepted.is_ok(),
+            "correct bearer must upgrade, got {accepted:?}"
+        );
         handle.shutdown().await;
 
         super::super::keyring::delete(adapter, "onebotBearer").unwrap();
