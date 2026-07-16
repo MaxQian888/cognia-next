@@ -1,5 +1,11 @@
 /**
- * E2E: expression field shows {{ }} autosuggestion popups when typing.
+ * E2E: expression field shows {{ }} autosuggestions when typing.
+ *
+ * The field is a CodeMirror editor whose completion tooltip renders with
+ * role="listbox" — bind to that. An earlier version added an
+ * `.or([data-testid=expression-suggestions])` fallback, a testid no product
+ * code renders, and used fill(), which replaces the document without the
+ * typing transactions CodeMirror's activateOnTyping listens for.
  */
 
 import { expect, test } from "@playwright/test"
@@ -13,16 +19,23 @@ test.describe("workflow editor — expression field", () => {
     await resetCogniaDb(page)
   })
 
-  test("typing {{ in an expression field opens the suggestion popover", async ({ page }) => {
+  test("typing {{ $ in an expression field opens the suggestion popover", async ({ page }) => {
     await seedAndOpenWorkflow(page, "data-transform")
     await openNodeInspector(page, "data.transform")
 
-    const expr = page.locator("#ins-expression, [data-field=expression]").first()
-    await expr.click()
-    await expr.fill("{{ ")
-    // The popover surfaces nearby variables (trigger.firedAt etc.).
-    await expect(
-      page.getByRole("listbox").or(page.locator("[data-testid=expression-suggestions]")).first()
-    ).toBeVisible({ timeout: 5_000 })
+    // Focus CodeMirror's contenteditable surface — clicking the field
+    // wrapper doesn't hand the editor focus.
+    const cmContent = page
+      .locator("#ins-expression .cm-content, [data-field=expression] .cm-content")
+      .first()
+    await cmContent.click()
+    // Type character-by-character so CodeMirror's completion source sees
+    // real input transactions. The source's matchBefore requires a `$`
+    // inside the mustache (`{{ $` / `$…`) — a bare `{{ ` offers nothing.
+    await page.keyboard.type("{{ $", { delay: 40 })
+    // CodeMirror's autocomplete tooltip is a real listbox with option rows.
+    const listbox = page.getByRole("listbox").first()
+    await expect(listbox).toBeVisible({ timeout: 5_000 })
+    await expect(listbox.getByRole("option").first()).toBeVisible()
   })
 })
