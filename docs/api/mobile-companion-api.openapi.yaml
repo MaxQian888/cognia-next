@@ -1207,7 +1207,11 @@ paths:
       responses:
         "200":
           description: "`{ ok: true, hits }` or a structured policy block (`disabled` / `temporary` / `backend_unavailable`)."
-          content: { application/json: { schema: { type: object, additionalProperties: true } } }
+          content:
+            {
+              application/json:
+                { schema: { type: object, additionalProperties: true } },
+            }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "500":
           {
@@ -1235,7 +1239,11 @@ paths:
       responses:
         "200":
           description: "`{ ok: true, memories }` or a structured policy block."
-          content: { application/json: { schema: { type: object, additionalProperties: true } } }
+          content:
+            {
+              application/json:
+                { schema: { type: object, additionalProperties: true } },
+            }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "500":
           {
@@ -1268,7 +1276,11 @@ paths:
       responses:
         "200":
           description: "`{ ok: true, stored, consolidated, memoryId?, applied }` or a structured policy block (`disabled` / `temporary` / `pii_blocked`)."
-          content: { application/json: { schema: { type: object, additionalProperties: true } } }
+          content:
+            {
+              application/json:
+                { schema: { type: object, additionalProperties: true } },
+            }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
         "500":
@@ -1300,7 +1312,11 @@ paths:
       responses:
         "200":
           description: "`{ ok: true }` or a structured policy block (`disabled` / `temporary` / `pii_blocked` / `not_found`)."
-          content: { application/json: { schema: { type: object, additionalProperties: true } } }
+          content:
+            {
+              application/json:
+                { schema: { type: object, additionalProperties: true } },
+            }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
         "500":
@@ -1328,7 +1344,11 @@ paths:
       responses:
         "200":
           description: "`{ ok: true }` or a structured policy block (`disabled` / `not_found`)."
-          content: { application/json: { schema: { type: object, additionalProperties: true } } }
+          content:
+            {
+              application/json:
+                { schema: { type: object, additionalProperties: true } },
+            }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
         "500":
