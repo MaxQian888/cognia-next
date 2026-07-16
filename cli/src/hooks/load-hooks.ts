@@ -7,6 +7,8 @@
  */
 import path from "node:path"
 
+import { isFleetHookHandler } from "@/lib/claude/hooks/fleet-hooks"
+
 import {
   HOOK_EVENTS,
   HooksConfigSchema,
@@ -59,6 +61,18 @@ function readHooksBlock(absPath: string, readFile: FileReader): HooksConfig {
   return result.success ? result.data : {}
 }
 
+/** Remove whole fleet-managed groups so the TUI never masquerades as Claude Code. */
+function withoutFleetHookGroups(config: HooksConfig): HooksConfig {
+  const filtered: HooksConfig = {}
+  for (const event of HOOK_EVENTS) {
+    const groups = config[event]?.filter(
+      (group) => !group.hooks.some((handler) => isFleetHookHandler(handler))
+    )
+    if (groups && groups.length > 0) filtered[event] = groups
+  }
+  return filtered
+}
+
 /**
  * Load and merge the Cognia + Claude Code hook configs.
  *
@@ -79,7 +93,9 @@ export function loadHooks(opts: {
   builtin?: HooksConfig
 }): HooksConfig {
   const cognia = readHooksBlock(path.join(opts.home, "config.json"), opts.readFile)
-  const claude = readHooksBlock(path.join(opts.claudeHome, "settings.json"), opts.readFile)
+  const claude = withoutFleetHookGroups(
+    readHooksBlock(path.join(opts.claudeHome, "settings.json"), opts.readFile)
+  )
   return mergeHookConfigs(mergeHookConfigs(cognia, claude), opts.builtin)
 }
 

@@ -58,6 +58,31 @@ describe("loadHooks", () => {
     expect((merged.PreToolUse?.[1].hooks[0] as { command: string }).command).toBe("claude-guard")
   })
 
+  it("excludes fleet-managed Claude hook groups while preserving user hooks", () => {
+    const files = {
+      [claudePath]: JSON.stringify({
+        hooks: {
+          SessionStart: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: '"/home/.cognia/agent-monitor/claude-hook.sh" SessionStart fire',
+                },
+              ],
+            },
+            { hooks: [{ type: "command", command: "notify-user-hook" }] },
+          ],
+        },
+      }),
+    }
+
+    const loaded = loadHooks({ home, claudeHome, readFile: reader(files) })
+    expect(loaded.SessionStart).toEqual([
+      { hooks: [{ type: "command", command: "notify-user-hook" }] },
+    ])
+  })
+
   it("returns {} when neither file exists", () => {
     expect(loadHooks({ home, claudeHome, readFile: () => null })).toEqual({})
   })
