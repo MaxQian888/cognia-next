@@ -1207,11 +1207,7 @@ paths:
       responses:
         "200":
           description: "`{ ok: true, hits }` or a structured policy block (`disabled` / `temporary` / `backend_unavailable`)."
-          content:
-            {
-              application/json:
-                { schema: { type: object, additionalProperties: true } },
-            }
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "500":
           {
@@ -1239,11 +1235,7 @@ paths:
       responses:
         "200":
           description: "`{ ok: true, memories }` or a structured policy block."
-          content:
-            {
-              application/json:
-                { schema: { type: object, additionalProperties: true } },
-            }
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "500":
           {
@@ -1276,11 +1268,7 @@ paths:
       responses:
         "200":
           description: "`{ ok: true, stored, consolidated, memoryId?, applied }` or a structured policy block (`disabled` / `temporary` / `pii_blocked`)."
-          content:
-            {
-              application/json:
-                { schema: { type: object, additionalProperties: true } },
-            }
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
         "500":
@@ -1312,11 +1300,7 @@ paths:
       responses:
         "200":
           description: "`{ ok: true }` or a structured policy block (`disabled` / `temporary` / `pii_blocked` / `not_found`)."
-          content:
-            {
-              application/json:
-                { schema: { type: object, additionalProperties: true } },
-            }
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
         "500":
@@ -1344,11 +1328,7 @@ paths:
       responses:
         "200":
           description: "`{ ok: true }` or a structured policy block (`disabled` / `not_found`)."
-          content:
-            {
-              application/json:
-                { schema: { type: object, additionalProperties: true } },
-            }
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
         "500":
@@ -4234,6 +4214,58 @@ paths:
           {
             description: OK.,
             content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_diff_stat:
+    post:
+      operationId: rpcGitDiffStat
+      tags: [rpc-git]
+      summary: Per-file insertion and deletion totals across the working tree (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: OK.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: array,
+                        items:
+                          {
+                            type: object,
+                            required: [path, insertions, deletions],
+                            properties:
+                              {
+                                path: { type: string },
+                                insertions: { type: integer, minimum: 0 },
+                                deletions: { type: integer, minimum: 0 },
+                              },
+                          },
+                      },
+                  },
+              },
           }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "500":
