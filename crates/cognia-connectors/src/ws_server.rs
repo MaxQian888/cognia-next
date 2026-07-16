@@ -190,15 +190,17 @@ async fn ws_onebot_handler(
     upgrade(ws, app, adapter_id)
 }
 
-/// Complete the upgrade: run the full event bridge when an `AppHandle` is
-/// available (production), else fall back to draining frames (the
-/// `build_unresolved_router` test path, which carries no `AppHandle`).
+/// Complete the upgrade only when a live event sink is installed.
 fn upgrade(ws: WebSocketUpgrade, app: Option<tauri::AppHandle>, adapter_id: String) -> Response {
     match app {
         Some(app) => ws.on_upgrade(move |socket| run_bridge(app, adapter_id, socket)),
-        None => ws.on_upgrade(|mut socket| async move {
-            let _ = socket.recv().await;
-        }),
+        None => {
+            log::error!(
+                "ws_server: refusing OneBot upgrade for {adapter_id}: no event sink installed; \
+                 frames would be silently dropped"
+            );
+            (StatusCode::SERVICE_UNAVAILABLE, "onebot bridge unavailable").into_response()
+        }
     }
 }
 
@@ -459,19 +461,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ws_onebot_unauthenticated_optin_is_accepted() {
-        // Explicit opt-in restores unauthenticated acceptance for trusted
-        // localhost instances. No bearer set; opt-in flag truthy.
+    async fn ws_onebot_headless_without_sink_refuses_upgrade() {
+        // Authentication opt-in must not turn a headless server without a
+        // OneBot event sink into a successful-but-silent frame drain.
         let adapter = "ob-optin-test";
         super::super::keyring::delete(adapter, "onebotBearer").unwrap();
         super::super::keyring::set(adapter, "onebotAllowUnauthenticated", "true").unwrap();
 
         let (addr, handle) = start_live_server().await;
         let result = ws_handshake(addr, adapter, None).await;
-        assert!(
-            result.is_ok(),
-            "opt-in upgrade must succeed, got {result:?}"
-        );
+        assert_http_status(result, StatusCode::SERVICE_UNAVAILABLE);
         handle.shutdown().await;
 
         super::super::keyring::delete(adapter, "onebotAllowUnauthenticated").unwrap();
@@ -487,9 +486,10 @@ mod tests {
         let result = ws_handshake(addr, adapter, Some("wrong-secret")).await;
         assert_http_status(result, StatusCode::UNAUTHORIZED);
 
-        // The correct bearer is accepted on the same server.
-        let ok = ws_handshake(addr, adapter, Some("correct-secret")).await;
-        assert!(ok.is_ok(), "correct bearer must upgrade, got {ok:?}");
+        // Authentication succeeds, but this headless test server has no
+        // OneBot event sink and therefore refuses the upgrade fail-closed.
+        let without_sink = ws_handshake(addr, adapter, Some("correct-secret")).await;
+        assert_http_status(without_sink, StatusCode::SERVICE_UNAVAILABLE);
         handle.shutdown().await;
 
         super::super::keyring::delete(adapter, "onebotBearer").unwrap();
