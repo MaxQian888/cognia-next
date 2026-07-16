@@ -6,7 +6,7 @@ import { useClientLiveQuery } from "@/hooks/data"
 import { getSession } from "@/lib/db/sessions"
 import { registerProjectEditorOpener } from "@/lib/files/project-editor-bridge"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
-import { primaryRootOf } from "@/lib/workspace/roots"
+import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -24,10 +24,7 @@ export function WorkspaceRevealOpener() {
     undefined
   )
   const projects = useProjectStore((state) => state.projects)
-  const project = session?.projectId
-    ? projects.find((candidate) => candidate.id === session.projectId)
-    : undefined
-  const rootPath = project ? primaryRootOf(project)?.path : undefined
+  const rootPath = resolveSessionProjectRoot(session, projects).root?.path
 
   useEffect(() => {
     if (!session || !rootPath || !hasWorkspaceFsBackend()) return

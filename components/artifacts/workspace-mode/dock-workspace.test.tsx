@@ -282,6 +282,22 @@ describe("DockWorkspace", () => {
     expect(screen.queryByTestId("workspace-review-layout")).not.toBeInTheDocument()
   })
 
+  it("keeps the review surface active while Git status is unavailable", async () => {
+    gitState = { ...gitState, status: null }
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+        sessionId: "session-1",
+        rootPath: "/repo",
+      })
+    })
+
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-file-layout")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
+  })
+
   it("wires editor tabs, sidebar, file actions, and keyboard saves", async () => {
     activePath = "src/a.ts"
     activeFile = { absolutePath: "/repo/src/a.ts", relPath: "src/a.ts", content: "old" }

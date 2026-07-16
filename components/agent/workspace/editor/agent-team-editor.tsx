@@ -5,28 +5,21 @@
 // (workspace-fs), multi-file tabs, cross-file LSP (file:// workspaceFolder),
 // project-wide search, and external-change awareness. Desktop / paired-web only.
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { toast } from "sonner"
-import { CodeIcon, FilesIcon, SearchIcon, SquareCodeIcon } from "lucide-react"
+import { CodeIcon, SquareCodeIcon } from "lucide-react"
 import { isTauri } from "@/lib/tauri"
-import { registerProjectEditorOpener } from "@/lib/files/project-editor-bridge"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { codeServerClient } from "@/lib/codeserver/client"
 import { cn } from "@/lib/utils"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { useKeybindingStore } from "@/stores/canvas/keybinding-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
-import type { EditorActionDef } from "@/lib/editor-workbench/register-editor-actions"
 import { CodeServerPane } from "./code-server-pane"
-import { useProjectEditor } from "@/components/editor/project/use-project-editor"
-import { ProjectFileTree } from "@/components/editor/project/project-file-tree"
-import { ProjectEditorTabs } from "@/components/editor/project/project-editor-tabs"
-import { ProjectMonaco } from "@/components/editor/project/project-monaco"
 import { ProjectRootSwitcher } from "@/components/editor/project/project-root-switcher"
-import { ProjectSearchPanel } from "@/components/editor/project/project-search-panel"
-import { PROJECT_EDITOR_GOTO_EVENT } from "@/components/editor/project/editor-events"
+import {
+  ProjectEditorFileWorkbench,
+  useProjectEditorWorkbench,
+} from "@/components/editor/project/project-editor-workbench"
 
 interface Props {
   team: AgentTeam
@@ -54,10 +47,7 @@ export function AgentTeamEditor({ team }: Props) {
 }
 
 function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: string }) {
-  const t = useTranslations("projectEditor")
   const tTeam = useTranslations("agentTeamsWorkspace.editor")
-  const bindings = useKeybindingStore((s) => s.bindings)
-  const [leftTab, setLeftTab] = useState<"files" | "search">("files")
   // Optional "Pro IDE" mode — the embedded code-server webview (desktop only).
   const [mode, setMode] = useState<"monaco" | "codeserver">("monaco")
   const [proIdeSupported, setProIdeSupported] = useState(false)
@@ -75,139 +65,14 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
     }
   }, [])
 
-  const editor = useProjectEditor({ scopeKey: `team:${team.id}`, workingDir })
-  const {
-    roots,
-    rootKey,
-    rootPath,
-    openFiles,
-    activePath,
-    activeFile,
-    dirtyCount,
-    treeRefreshToken,
-    selectRoot,
-    openFile,
-    closeFile,
-    setActivePath,
-    setDraft,
-    saveFile,
-    saveAll,
-  } = editor
-
-  const gotoLine = useCallback(
-    (relPath: string, line?: number, column?: number) => {
-      void openFile(relPath).then(() => {
-        if (line === undefined) return
-        // Defer so the Monaco surface for the (possibly newly opened) file is
-        // mounted before we ask it to reveal the position.
-        setTimeout(() => {
-          window.dispatchEvent(
-            new CustomEvent(PROJECT_EDITOR_GOTO_EVENT, {
-              detail: { relPath, line, column: column ?? 1 },
-            })
-          )
-        }, 0)
-      })
-    },
-    [openFile]
-  )
-
-  // Register a cross-surface opener so terminal path-links under this root open
-  // here (editable + LSP) instead of the read-only file viewer.
-  useEffect(() => {
-    return registerProjectEditorOpener({
-      root: rootPath,
-      open: (relPath, line, column) => gotoLine(relPath, line, column),
-    })
-  }, [rootPath, gotoLine])
-
-  const handleSaveActive = useCallback(() => {
-    if (!activePath) return
-    void saveFile(activePath).catch((err) => toast.error(t("saveFailed", { error: String(err) })))
-  }, [activePath, saveFile, t])
-
-  const handleSaveAll = useCallback(() => {
-    void saveAll().catch((err) => toast.error(t("saveFailed", { error: String(err) })))
-  }, [saveAll, t])
-
-  const onKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey
-      if (mod && (e.key === "s" || e.key === "S")) {
-        e.preventDefault()
-        if (e.shiftKey) handleSaveAll()
-        else handleSaveActive()
-      }
-    },
-    [handleSaveActive, handleSaveAll]
-  )
-
-  // Surface-specific cognia actions injected into the Monaco context menu + F1.
-  const actionLabels = useMemo<Record<string, string>>(
-    () => ({
-      "file.save": t("action.save"),
-      "file.format": t("action.format"),
-      "file.copyPath": t("action.copyPath"),
-      "file.copyRelativePath": t("action.copyRelativePath"),
-      "file.searchProject": t("action.searchProject"),
-    }),
-    [t]
-  )
-
-  const actions = useMemo<EditorActionDef[]>(
-    () => [
-      {
-        id: "file.save",
-        label: actionLabels["file.save"],
-        contextMenuGroupId: "1_modification",
-        contextMenuOrder: 1,
-        alwaysAvailable: true,
-        run: handleSaveActive,
-      },
-      {
-        id: "file.format",
-        label: actionLabels["file.format"],
-        monacoCommand: "editor.action.formatDocument",
-        contextMenuGroupId: "1_modification",
-        contextMenuOrder: 2,
-        alwaysAvailable: true,
-      },
-      {
-        id: "file.copyPath",
-        label: actionLabels["file.copyPath"],
-        contextMenuGroupId: "9_cutcopypaste",
-        contextMenuOrder: 1,
-        alwaysAvailable: true,
-        run: () => {
-          if (activeFile) void navigator.clipboard?.writeText(activeFile.absolutePath)
-        },
-      },
-      {
-        id: "file.copyRelativePath",
-        label: actionLabels["file.copyRelativePath"],
-        contextMenuGroupId: "9_cutcopypaste",
-        contextMenuOrder: 2,
-        alwaysAvailable: true,
-        run: () => {
-          if (activeFile) void navigator.clipboard?.writeText(activeFile.relPath)
-        },
-      },
-      {
-        id: "file.searchProject",
-        label: actionLabels["file.searchProject"],
-        contextMenuGroupId: "z_search",
-        alwaysAvailable: true,
-        run: () => setLeftTab("search"),
-      },
-    ],
-    [actionLabels, activeFile, handleSaveActive]
-  )
+  const workbench = useProjectEditorWorkbench({ scopeKey: `team:${team.id}`, workingDir })
+  const { roots, rootKey, rootPath, selectRoot } = workbench.editor
 
   return (
     <div
       className="flex h-[70vh] min-h-0 flex-col overflow-hidden rounded-md border"
       data-testid="agent-team-editor"
-      onKeyDown={onKeyDown}
+      onKeyDown={workbench.onKeyDown}
     >
       <div className="flex items-center gap-2 border-b px-2 py-1">
         <ProjectRootSwitcher roots={roots} rootKey={rootKey} onSelect={selectRoot} />
@@ -254,84 +119,14 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
           <CodeServerPane root={rootPath} />
         </div>
       ) : (
-        <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-          <ResizablePanel defaultSize={24} minSize={14} className="min-h-0">
-            <div className="flex h-full flex-col">
-              <div className="flex border-b">
-                <button
-                  type="button"
-                  data-testid="left-tab-files"
-                  className={cn(
-                    "flex flex-1 items-center justify-center gap-1 py-1 text-xs",
-                    leftTab === "files" ? "bg-accent" : "text-muted-foreground hover:bg-accent/50"
-                  )}
-                  onClick={() => setLeftTab("files")}
-                >
-                  <FilesIcon className="size-3.5" />
-                  {t("filesTab")}
-                </button>
-                <button
-                  type="button"
-                  data-testid="left-tab-search"
-                  className={cn(
-                    "flex flex-1 items-center justify-center gap-1 py-1 text-xs",
-                    leftTab === "search" ? "bg-accent" : "text-muted-foreground hover:bg-accent/50"
-                  )}
-                  onClick={() => setLeftTab("search")}
-                >
-                  <SearchIcon className="size-3.5" />
-                  {t("searchTab")}
-                </button>
-              </div>
-              <div className="min-h-0 flex-1">
-                {leftTab === "files" ? (
-                  <ProjectFileTree
-                    rootPath={rootPath}
-                    refreshToken={treeRefreshToken}
-                    activePath={activePath}
-                    onOpenFile={(rel) => void openFile(rel)}
-                    deps={editor.deps}
-                  />
-                ) : (
-                  <ProjectSearchPanel rootPath={rootPath} onOpenMatch={gotoLine} />
-                )}
-              </div>
-            </div>
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={76} minSize={30} className="min-h-0">
-            <div className="flex h-full flex-col">
-              <ProjectEditorTabs
-                files={openFiles}
-                activePath={activePath}
-                dirtyCount={dirtyCount}
-                onSelect={setActivePath}
-                onClose={closeFile}
-                onSaveAll={handleSaveAll}
-              />
-              <div className="min-h-0 flex-1">
-                {activeFile ? (
-                  <ProjectMonaco
-                    key={activeFile.absolutePath}
-                    file={activeFile}
-                    projectRoot={rootPath}
-                    onChange={(v) => setDraft(activeFile.relPath, v)}
-                    actions={actions}
-                    actionLabels={actionLabels}
-                    bindings={bindings}
-                  />
-                ) : (
-                  <div
-                    className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground"
-                    data-testid="editor-empty"
-                  >
-                    {t("emptyEditor")}
-                  </div>
-                )}
-              </div>
-            </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+        <div className="min-h-0 flex-1">
+          <ProjectEditorFileWorkbench
+            workbench={workbench}
+            sidebarPosition="left"
+            panelIdPrefix="agent-team-editor"
+            showTabs
+          />
+        </div>
       )}
     </div>
   )

@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { gitDiffStat } from "@/lib/git/commands"
 import { collectWorkspaceChanges, undoWorkspaceChanges } from "@/lib/git/workspace-changes"
-import { primaryRootOf } from "@/lib/workspace/roots"
+import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -52,10 +52,7 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
   const repoState = useGitStore((state) => state.repoState)
   const status = useGitStore((state) => state.status)
 
-  const project = session.projectId
-    ? projects.find((candidate) => candidate.id === session.projectId)
-    : undefined
-  const rootPath = project ? primaryRootOf(project)?.path : undefined
+  const rootPath = resolveSessionProjectRoot(session, projects).root?.path
   const files = useMemo(() => (status ? collectWorkspaceChanges(status) : []), [status])
 
   useEffect(() => {
