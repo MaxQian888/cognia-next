@@ -104,6 +104,26 @@ describe("NodeExternalAgentBackend", () => {
     ).rejects.toThrow(/escapes the workspaces root/)
   })
 
+  it.each([
+    ["npx", ["-y", "@google/gemini-cli", "--experimental-acp"]],
+    ["npx", ["-y", "@qwen-code/qwen-code", "--acp"]],
+    ["npx", ["-y", "pi-acp"]],
+    ["copilot", ["--acp"]],
+    ["kiro-cli", ["acp"]],
+    ["droid", ["exec", "--output-format", "acp"]],
+  ])("allows the shipped executable preset %s %j", async (command, args) => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-agent-preset-"))
+    const backend = new NodeExternalAgentBackend({
+      workspacesRoot: workspace,
+      resolveLaunch: async () => ({ command: process.execPath, args: ["-e", "process.exit(0)"] }),
+    })
+    const agentId = await backend.invoke<string>("spawn_external_agent", {
+      config: { id: `preset-${command}-${args[1] ?? args[0]}`, command, args, cwd: workspace },
+    })
+    expect(agentId).toEqual(expect.any(String))
+    await backend.invoke("kill_external_agent", { agentId })
+  })
+
   it("checks real and absent commands", async () => {
     const backend = new NodeExternalAgentBackend({ workspacesRoot: process.cwd() })
     await expect(

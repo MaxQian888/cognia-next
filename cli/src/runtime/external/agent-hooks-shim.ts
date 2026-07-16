@@ -23,6 +23,7 @@ export interface ExternalHookFireNotice {
 }
 export type EmitHookNotice = (notice: ExternalHookFireNotice) => void
 
+/** Convert a hook decision into the notice shape consumed by the shared manager. */
 export function noticeFromDecision(
   event: string,
   toolName: string | undefined,
@@ -42,6 +43,13 @@ export function noticeFromDecision(
   return outcome ? { event, toolName, outcome, block, additionalContext, warnings } : null
 }
 
+/**
+ * Apply the CLI v1 hook policy.
+ *
+ * The desktop hook runtime depends on Tauri and persisted desktop hook state,
+ * neither of which belongs in the standalone CLI host. Returning no decision
+ * is the deliberate CLI policy until a CLI-native hook loader is introduced.
+ */
 export async function fireAgentHook(
   _event: string,
   _ctx: AgentHookContext,
@@ -50,12 +58,14 @@ export async function fireAgentHook(
   return null
 }
 
+/** Observe an external event under the CLI v1 no-hooks policy. */
 export async function observeExternalAgentEvent(
   _ctx: AgentHookContext,
   _event: ExternalAgentEvent,
   _emit?: EmitHookNotice
 ): Promise<void> {}
 
+/** Allow the normal CLI permission gate to handle requests when hooks are disabled. */
 export async function gateExternalAgentPermission(
   _ctx: AgentHookContext,
   _event: ExternalAgentPermissionRequestEvent,

@@ -116,6 +116,20 @@ describe("external-agent permission adaptation", () => {
       optionId,
     })
   })
+
+  it("falls back from allow always to a valid allow-once ACP option", () => {
+    const onceOnly = {
+      ...request,
+      options: request.options?.filter((option) => option.kind !== "allow_always"),
+    }
+    expect(captureDecisionToAcp(onceOnly, { decision: "allow_always" })).toEqual({
+      requestId: "request-1",
+      granted: true,
+      rememberChoice: false,
+      scope: "once",
+      optionId: "once",
+    })
+  })
 })
 
 describe("createExternalAgentSession", () => {

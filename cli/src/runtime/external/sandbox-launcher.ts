@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 import type { ExternalAgentLaunch, NodeExternalAgentSpawnConfig } from "./node-backend"
 
@@ -18,11 +19,18 @@ const launcherName = (): string =>
     ? "cognia-external-agent-launcher.exe"
     : "cognia-external-agent-launcher"
 
+/** Resolve launcher locations for both a single-file bundle and a split `chunks/` bundle. */
+export function bundledLauncherCandidates(moduleUrl: string, name: string): string[] {
+  const moduleDir = path.dirname(fileURLToPath(moduleUrl))
+  return [path.join(moduleDir, name), path.join(moduleDir, "..", name)]
+}
+
 function defaultCandidates(): string[] {
   const name = launcherName()
   const explicit = process.env.COGNIA_EXTERNAL_AGENT_LAUNCHER
   return [
     explicit,
+    ...bundledLauncherCandidates(import.meta.url, name),
     path.join(path.dirname(process.execPath), name),
     path.join(process.cwd(), "cli", "dist", "native", `${process.platform}-${process.arch}`, name),
     path.join(process.cwd(), "target", "release", name),

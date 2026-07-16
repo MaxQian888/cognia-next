@@ -1,9 +1,25 @@
 /** @jest-environment node */
 import path from "node:path"
 
-import { buildSandboxLauncherArgs, resolveSandboxedExternalAgentLaunch } from "./sandbox-launcher"
+import {
+  buildSandboxLauncherArgs,
+  bundledLauncherCandidates,
+  resolveSandboxedExternalAgentLaunch,
+} from "./sandbox-launcher"
 
 describe("external-agent sandbox launcher", () => {
+  it("discovers launchers beside both single-file and split bundles", () => {
+    expect(
+      bundledLauncherCandidates(
+        "file:///opt/cognia/cli/dist/chunks/external-host.mjs",
+        "cognia-external-agent-launcher"
+      )
+    ).toEqual([
+      "/opt/cognia/cli/dist/chunks/cognia-external-agent-launcher",
+      "/opt/cognia/cli/dist/cognia-external-agent-launcher",
+    ])
+  })
+
   it("passes the workspace, readable home, network gate, and target argv", () => {
     expect(
       buildSandboxLauncherArgs(

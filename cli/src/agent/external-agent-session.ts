@@ -40,7 +40,6 @@ export interface ExternalAgentSessionManager {
 export interface ExternalAgentSessionParams {
   config: ResolvedConfig
   sessionId?: string
-  sessionKind?: import("@cognia/agent-config-types").SessionKind
   home?: string
   manager?: ExternalAgentSessionManager
   transcriptFs?: TranscriptFs
@@ -71,16 +70,23 @@ export function captureDecisionToAcp(
   decision: CapturePermissionDecision
 ): AcpPermissionResponse {
   const granted = decision.decision !== "deny"
-  const rememberChoice = decision.decision === "allow_always"
-  const wantedKind = granted ? (rememberChoice ? "allow_always" : "allow_once") : "reject_once"
-  const optionId = request.options?.find((option) => option.kind === wantedKind)?.optionId
+  const requestedRememberChoice = decision.decision === "allow_always"
+  const wantedKinds = granted
+    ? requestedRememberChoice
+      ? (["allow_always", "allow_once"] as const)
+      : (["allow_once", "allow_always"] as const)
+    : (["reject_once", "reject_always"] as const)
+  const selectedOption = wantedKinds
+    .map((kind) => request.options?.find((option) => option.kind === kind))
+    .find((option) => option !== undefined)
+  const rememberChoice = selectedOption?.kind === "allow_always"
   return {
     requestId: request.requestId ?? request.id,
     granted,
     ...(decision.message ? { reason: decision.message } : {}),
     rememberChoice,
     scope: rememberChoice ? "always" : "once",
-    ...(optionId ? { optionId } : {}),
+    ...(selectedOption ? { optionId: selectedOption.optionId } : {}),
   }
 }
 

@@ -98,6 +98,7 @@ export interface ChatDeps {
   }) => Promise<number>
 }
 
+/** Select the built-in or external session implementation from resolved CLI configuration. */
 export function selectSessionFactory(
   config: ResolvedConfig,
   builtin: typeof createAgentSession,

@@ -44,11 +44,17 @@ const BINARY_ALLOWLIST = new Set([
   "cursor-agent",
   "cline",
   "gemini",
+  "copilot",
+  "kiro-cli",
+  "droid",
 ])
 const NPX_ALLOWLIST = new Set([
   "@zed-industries/claude-code-acp",
   "@zed-industries/codex-acp",
   "@anthropic-ai/claude-code",
+  "@google/gemini-cli",
+  "@qwen-code/qwen-code",
+  "pi-acp",
   "opencode-ai",
 ])
 const CONFIG_ENV_KEYS = new Set([
