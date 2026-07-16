@@ -93,6 +93,28 @@ export function invalidatePersistSnapshot(sessionId: string): void {
   persistSnapshots.delete(sessionId)
 }
 
+/**
+ * Metadata keys that `listMessages` synthesizes from top-level columns. They
+ * exist on the in-memory `UIMessage` purely so the UI can read them without
+ * threading props; the column is the source of truth, so `persistMessages`
+ * strips them back out rather than duplicating them into the metadata blob.
+ */
+const HOISTED_META_KEYS = ["senderId", "senderKind", "sessionId", "createdAt"] as const
+
+/**
+ * Drop the hoisted keys from a message's metadata ahead of a write. Returns
+ * `undefined` when nothing else remains, matching the "don't store an empty
+ * blob" convention.
+ */
+export function stripHoistedMeta(
+  meta: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!meta) return undefined
+  const copy = { ...meta }
+  for (const key of HOISTED_META_KEYS) delete copy[key]
+  return Object.keys(copy).length > 0 ? copy : undefined
+}
+
 export async function listMessages(sessionId: string): Promise<UIMessage[]> {
   const rows = await getDb()
     .messages.where("[sessionId+createdAt]")
@@ -105,11 +127,16 @@ export async function listMessages(sessionId: string): Promise<UIMessage[]> {
       // read them off the in-memory UIMessage. (The store itself uses
       // ai.UIMessage which has no senderId field.)
       // We also surface `sessionId` so per-message components like the
-      // trigger badge can read it without threading new props.
+      // trigger badge can read it without threading new props, and `createdAt`
+      // so the timeline minimap and the message action bar can show a real
+      // wall-clock time instead of falling back to "now".
+      // Every key hoisted here MUST be listed in HOISTED_META_KEYS so the next
+      // persist strips it back out — the column stays the source of truth.
       const metadata: Record<string, unknown> = { ...(r.metadata ?? {}) }
       if (r.senderId !== undefined) metadata.senderId = r.senderId
       if (r.senderKind !== undefined) metadata.senderKind = r.senderKind
       metadata.sessionId = r.sessionId
+      metadata.createdAt = r.createdAt
       return {
         id: r.id,
         role: r.role,
@@ -225,14 +252,11 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
         senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
           ? senderKindRaw
           : undefined
-      // Strip the routing keys from metadata so we don't persist them twice.
-      let strippedMeta: Record<string, unknown> | undefined = meta
-      if (meta && (senderId !== undefined || senderKind !== undefined)) {
-        const copy = { ...meta }
-        delete copy.senderId
-        delete copy.senderKind
-        strippedMeta = Object.keys(copy).length > 0 ? copy : undefined
-      }
+      // Strip every key `listMessages` hoists out of a column so a load →
+      // persist round-trip can't duplicate it into the blob. Unconditional:
+      // the hoisted keys arrive on any message that came back from disk, not
+      // just ones carrying routing fields.
+      const strippedMeta = stripHoistedMeta(meta)
       rows.push({
         id,
         sessionId,
@@ -400,13 +424,8 @@ export async function updateMessageMetadata(
   const db = getDb()
   const row = await db.messages.get(messageId)
   if (!row || row.sessionId !== sessionId) return
-  const merged: Record<string, unknown> = { ...(row.metadata ?? {}), ...patch }
-  delete merged.senderId
-  delete merged.senderKind
-  delete merged.sessionId
-  await db.messages.update(messageId, {
-    metadata: Object.keys(merged).length > 0 ? merged : undefined,
-  })
+  const merged = stripHoistedMeta({ ...(row.metadata ?? {}), ...patch })
+  await db.messages.update(messageId, { metadata: merged })
   // The row changed out-of-band from the persist snapshot; drop it so the next
   // `persistMessages` re-derives existence/createdAt from disk.
   invalidatePersistSnapshot(sessionId)

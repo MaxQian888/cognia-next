@@ -470,6 +470,7 @@ function ChatMessages({
     <MessageList
       messages={messages}
       status={status}
+      paneSessionId={sessionId}
       directCharacter={directCharacter}
       onCopy={onCopy}
       onRegenerate={onRegenerate}

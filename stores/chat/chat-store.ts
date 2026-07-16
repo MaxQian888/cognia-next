@@ -220,6 +220,72 @@ function writeApprovalJournal(
   }
 }
 
+/**
+ * The session whose history contains `messageId`, plus that history. Checks the
+ * active projection first — the focused session's slice is materialised lazily,
+ * so `sessions[activeSessionId]` can still be missing while `messages` is live.
+ * Returns null when no open session holds the id.
+ */
+function findMessageOwner(
+  s: ChatState,
+  messageId: string
+): { sessionId: string; messages: UIMessage[] } | null {
+  if (s.activeSessionId != null && s.messages.some((m) => m.id === messageId)) {
+    return { sessionId: s.activeSessionId, messages: s.messages }
+  }
+  for (const [sessionId, slice] of Object.entries(s.sessions)) {
+    if (slice.messages.some((m) => m.id === messageId)) {
+      return { sessionId, messages: slice.messages }
+    }
+  }
+  return null
+}
+
+function isBookmarked(m: UIMessage): boolean {
+  return (m as { metadata?: { bookmarked?: unknown } }).metadata?.bookmarked === true
+}
+
+/**
+ * Starred message ids across `msgs` plus every other open session's history.
+ *
+ * `bookmarkedIds` is one flat set but `messages` is per-slice, and the star is
+ * rendered for whichever pane a message is in — so deriving from the freshly
+ * loaded history alone would drop a split pane's bookmarks and blank its stars
+ * on every active-session load. `otherSessions` is scanned to keep them.
+ *
+ * Only called from the history-load path, never from the streaming one: it
+ * mints a new array, and the timeline subscribes to `bookmarkedIds` by
+ * identity.
+ */
+export function deriveBookmarkedIds(
+  msgs: UIMessage[],
+  otherSessions: Record<string, SessionChatSlice> = {},
+  excludeSessionId?: string | null
+): string[] {
+  const out = new Set<string>()
+  for (const m of msgs) if (isBookmarked(m)) out.add(m.id)
+  for (const [id, slice] of Object.entries(otherSessions)) {
+    if (id === excludeSessionId) continue
+    for (const m of slice.messages) if (isBookmarked(m)) out.add(m.id)
+  }
+  return [...out]
+}
+
+/**
+ * Write-through of a bookmark flag to Dexie — best-effort, never throws.
+ * Dynamically imported so the store keeps no static dependency on the db layer
+ * (the same shape `lib/remote-control/query-answerer` uses).
+ */
+function writeBookmark(sessionId: string, messageId: string, bookmarked: boolean): void {
+  void import("@/lib/db/messages")
+    .then(({ updateMessageMetadata }) =>
+      updateMessageMetadata(sessionId, messageId, { bookmarked })
+    )
+    .catch(() => {
+      // Durable mirror is best-effort; the in-memory store is authoritative.
+    })
+}
+
 function resolveApprovalBucket(sessionId: string): string {
   const team = decodeSubSession(sessionId)?.teamSessionId
   if (team) return team
@@ -576,9 +642,14 @@ export const useChatStore = create<ChatState>((set) => ({
   setSplitSessionId: (id) => set({ splitSessionId: id }),
   // A successful hydration / replacement clears the transient load flags.
   setMessages: (msgs) =>
-    set((s) =>
-      patchActiveState(s, { messages: msgs, messagesLoading: false, messagesLoadError: null })
-    ),
+    set((s) => ({
+      ...patchActiveState(s, { messages: msgs, messagesLoading: false, messagesLoadError: null }),
+      // History load is the one place bookmarks re-enter memory: `setActiveSession`
+      // cleared them, and only the persisted flag knows which turns were starred.
+      // The active session's own slice still holds the pre-load history here, so
+      // exclude it and take the incoming `msgs` as the truth for it.
+      bookmarkedIds: deriveBookmarkedIds(msgs, s.sessions, s.activeSessionId),
+    })),
   appendMessage: (msg) => set((s) => patchActiveState(s, { messages: [...s.messages, msg] })),
   replaceMessages: (msgs) => set((s) => patchActiveState(s, { messages: msgs })),
   setMessagesLoading: (v) => set((s) => patchActiveState(s, { messagesLoading: v })),
@@ -788,12 +859,31 @@ export const useChatStore = create<ChatState>((set) => ({
     ),
   toggleBookmark: (messageId) =>
     set((s) => {
-      const exists = s.bookmarkedIds.includes(messageId)
-      return {
-        bookmarkedIds: exists
-          ? s.bookmarkedIds.filter((id) => id !== messageId)
-          : [...s.bookmarkedIds, messageId],
-      }
+      const next = !s.bookmarkedIds.includes(messageId)
+      const bookmarkedIds = next
+        ? [...s.bookmarkedIds, messageId]
+        : s.bookmarkedIds.filter((id) => id !== messageId)
+
+      // Route by the session that actually holds the message: split view means
+      // the starred message may live in an unfocused pane, and persisting it
+      // against the *active* id would write to the wrong conversation (or
+      // nowhere), leaving a star that reads as saved and isn't.
+      const owner = findMessageOwner(s, messageId)
+      if (owner == null) return { bookmarkedIds }
+
+      // Mirror onto the message's own metadata as well as writing it through.
+      // `persistMessages` rewrites each row's metadata blob from the in-memory
+      // message, and `updateMessageMetadata` invalidates the persist snapshot
+      // (forcing exactly such a rewrite) — so a Dexie-only write would be
+      // clobbered by the next turn. Both, or neither.
+      const idx = owner.messages.findIndex((m) => m.id === messageId)
+      const target = owner.messages[idx]
+      const meta = (target as { metadata?: Record<string, unknown> }).metadata ?? {}
+      const messages = owner.messages.slice()
+      messages[idx] = { ...target, metadata: { ...meta, bookmarked: next } } as UIMessage
+
+      writeBookmark(owner.sessionId, messageId, next)
+      return { ...patchSliceState(s, owner.sessionId, { messages }), bookmarkedIds }
     }),
   setWebSearchOnForNextSend: (v) => set({ webSearchOnForNextSend: v }),
   setEphemeralSkillIds: (ids) => set({ ephemeralSkillIds: ids }),

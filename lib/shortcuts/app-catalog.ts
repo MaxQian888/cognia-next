@@ -60,6 +60,37 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     when: "platform.tauri",
   },
   {
+    id: "chat.search.toggle",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.chatSearchToggle",
+    category: "app.chat",
+    defaultChord: "ctrl+f",
+    when: "chat.hasMessages",
+  },
+  {
+    id: "chat.timeline.prevAnchor",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.chatPrevAnchor",
+    category: "app.chat",
+    // Deliberately NOT a bare alt+arrow: that's the native "move by paragraph"
+    // binding in a textarea, and these fire while the composer has focus (the
+    // normal reading posture), so a bare alt chord would fight the caret.
+    // parseKeyEvent folds Ctrl/Cmd, so this is ⌘⌥↑ on macOS and Ctrl+Alt+↑
+    // elsewhere.
+    defaultChord: "ctrl+alt+up",
+    // Registered by the timeline minimap, so it already only fires on desktop
+    // in a long-enough conversation; the guard keeps it off an empty session.
+    when: "chat.hasMessages",
+  },
+  {
+    id: "chat.timeline.nextAnchor",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.chatNextAnchor",
+    category: "app.chat",
+    defaultChord: "ctrl+alt+down",
+    when: "chat.hasMessages",
+  },
+  {
     id: "artifacts.toggleDock",
     scope: "app",
     labelKey: "settings.shortcuts.catalog.artifactsToggleDock",

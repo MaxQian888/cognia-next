@@ -85,6 +85,28 @@ describe("persistMessages + listMessages", () => {
     expect(stored?.metadata).toBeUndefined()
   })
 
+  it("hydrates the createdAt column onto metadata for the UI layer", async () => {
+    // The timeline minimap and the message action bar both read
+    // `metadata.createdAt`; without this hoist they silently render no time
+    // (timeline) or a bogus "now" (renderer fallback).
+    await persistMessages("s1", [msg("t1", "user", "when?")])
+    const stored = await getDb().messages.get("t1")
+    const list = await listMessages("s1")
+    const out = list[0] as UIMessage & { metadata?: Record<string, unknown> }
+    expect(out.metadata?.createdAt).toBe(stored?.createdAt)
+    expect(typeof out.metadata?.createdAt).toBe("number")
+  })
+
+  it("does not persist a hydrated createdAt back into the metadata blob", async () => {
+    // Round-trip: listMessages hoists createdAt in, persistMessages must strip
+    // it back out so the column stays the single source of truth.
+    await persistMessages("s1", [msg("t2", "user", "hi", { usage: { tokens: 3 } })])
+    const [loaded] = await listMessages("s1")
+    await persistMessages("s1", [loaded])
+    const stored = await getDb().messages.get("t2")
+    expect(stored?.metadata).toEqual({ usage: { tokens: 3 } })
+  })
+
   it("ignores invalid senderKind values", async () => {
     await persistMessages("s1", [msg("bad-kind", "assistant", "hey", { senderKind: "robot" })])
     const stored = await getDb().messages.get("bad-kind")

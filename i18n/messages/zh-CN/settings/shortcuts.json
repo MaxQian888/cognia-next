@@ -12,6 +12,9 @@
     "artifactsToggleDock": "切换工件面板",
     "canvasToggleLeft": "切换左侧栏",
     "canvasToggleRight": "切换右侧栏",
+    "chatNextAnchor": "跳到下一个消息锚点",
+    "chatPrevAnchor": "跳到上一个消息锚点",
+    "chatSearchToggle": "在会话中查找",
     "observabilityFocusFilter": "聚焦筛选栏",
     "observabilityOpenSettings": "打开设置",
     "observabilityRefresh": "刷新",
@@ -30,6 +33,7 @@
   "categories": {
     "a2ui": "A2UI 工作区",
     "canvasLayout": "Canvas 布局",
+    "chat": "聊天",
     "navigation": "导航",
     "observability": "可观测",
     "panels": "面板",

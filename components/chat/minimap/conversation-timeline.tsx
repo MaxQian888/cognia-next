@@ -4,11 +4,13 @@ import { memo, useCallback, useMemo, useState } from "react"
 import type { UIMessage } from "ai"
 import type { Virtualizer } from "@tanstack/react-virtual"
 import { useTranslations } from "next-intl"
-import { ChevronLeftIcon, ChevronRightIcon, ListTreeIcon } from "lucide-react"
+import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ListTreeIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useSettingsStore } from "@/stores/settings"
+import { useChatStore } from "@/stores/chat"
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { useTimelineTurns, type TimelineTurn } from "./use-timeline-turns"
 import { useTimelineScrollSync } from "./use-timeline-scroll-sync"
 import { formatTurnTime } from "./format-turn-time"
@@ -18,6 +20,12 @@ interface Props {
   scrollRef: React.RefObject<HTMLDivElement | null>
   virtualizer: Virtualizer<HTMLDivElement, Element>
   virtualize: boolean
+  /**
+   * Whether this instance owns the anchor chords. False for a split view's
+   * unfocused pane — shortcut ids are global and the runtime keeps only the
+   * last registration per id, so two timelines would fight over them.
+   */
+  shortcutsEnabled?: boolean
 }
 
 /** Half the scrub card's height, in px — used to clamp it inside the rail. */
@@ -69,9 +77,27 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   scrollRef,
   virtualizer,
   virtualize,
+  shortcutsEnabled = true,
 }: Props) {
   const t = useTranslations("chat.timeline")
-  const turns = useTimelineTurns(messages)
+  const allTurns = useTimelineTurns(messages)
+
+  // Bookmarks are starred per message from the message action bar; the rail
+  // reuses that set rather than keeping its own.
+  const bookmarkedIds = useChatStore((s) => s.bookmarkedIds)
+  const bookmarkedSet = useMemo(() => new Set(bookmarkedIds), [bookmarkedIds])
+  // A turn is bookmarked when any message in it is — starring an assistant
+  // reply must light up the turn it belongs to, not vanish.
+  const isTurnBookmarked = useCallback(
+    (turn: TimelineTurn) => turn.messageIds.some((id) => bookmarkedSet.has(id)),
+    [bookmarkedSet]
+  )
+  const [onlyBookmarked, setOnlyBookmarked] = useState(false)
+  const turns = useMemo(
+    () => (onlyBookmarked ? allTurns.filter(isTurnBookmarked) : allTurns),
+    [onlyBookmarked, allTurns, isTurnBookmarked]
+  )
+
   const geom = useTimelineScrollSync({ scrollRef, virtualizer, virtualize, turns })
 
   const settings = useSettingsStore((s) => s.settings)
@@ -83,6 +109,10 @@ export const ConversationTimeline = memo(function ConversationTimeline({
 
   const setPinned = useCallback(
     (next: boolean) => {
+      // The filter toggle only exists in the expanded panel, so a filter left on
+      // while collapsing would strand the user at an empty rail with no way to
+      // clear it. Collapsing drops the filter.
+      if (!next) setOnlyBookmarked(false)
       void save({
         conversationTimeline: { ...(settings?.conversationTimeline ?? {}), expanded: next },
       })
@@ -104,6 +134,35 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     },
     [virtualize, virtualizer, scrollRef]
   )
+
+  /**
+   * Move `delta` anchors from whichever turn the viewport is currently on.
+   * `geom.activeIndex` is the turn nearest the viewport top, so stepping from
+   * it matches what the user sees — including after they scrolled by hand
+   * rather than jumping. Clamps at both ends instead of wrapping.
+   */
+  const stepAnchor = useCallback(
+    (delta: number) => {
+      if (turns.length === 0) return
+      const from = geom.activeIndex < 0 ? 0 : geom.activeIndex
+      const target = turns[Math.max(0, Math.min(from + delta, turns.length - 1))]
+      if (target) jumpTo(target)
+    },
+    [turns, geom.activeIndex, jumpTo]
+  )
+
+  // Keyboard parity for the rail, which is pointer-only (aria-hidden). These
+  // fire while the composer has focus, so they must not be a chord the textarea
+  // wants — see the catalog note on the chosen combo. Monaco keeps its own
+  // keymap in the Canvas/editor surfaces.
+  const shortcutOptions = {
+    enabled: shortcutsEnabled,
+    preventDefault: true,
+    allowInEditable: true,
+    editorSelectors: [".monaco-editor"],
+  }
+  useAppShortcut("chat.timeline.prevAnchor", () => stepAnchor(-1), shortcutOptions)
+  useAppShortcut("chat.timeline.nextAnchor", () => stepAnchor(1), shortcutOptions)
 
   const onRailMouseMove = useCallback(
     (e: React.MouseEvent<HTMLElement>) => {
@@ -132,7 +191,9 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     [scrubTurn, yesterdayLabel]
   )
 
-  if (turns.length === 0) return null
+  // Gate on the unfiltered set: an active filter that matches nothing must
+  // still render the panel that owns the toggle.
+  if (allTurns.length === 0) return null
 
   return (
     <div
@@ -147,17 +208,35 @@ export const ConversationTimeline = memo(function ConversationTimeline({
               <ListTreeIcon className="size-3.5" />
               {t("title")}
             </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6"
-              aria-label={t("collapse")}
-              onClick={() => setPinned(false)}
-            >
-              <ChevronRightIcon className="size-4" />
-            </Button>
+            <span className="flex items-center gap-0.5">
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("size-6", onlyBookmarked && "text-yellow-500")}
+                aria-label={onlyBookmarked ? t("showAll") : t("showBookmarked")}
+                aria-pressed={onlyBookmarked}
+                onClick={() => setOnlyBookmarked((v) => !v)}
+                data-testid="timeline-filter-bookmarked"
+              >
+                <BookmarkIcon className={cn("size-3.5", onlyBookmarked && "fill-current")} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-6"
+                aria-label={t("collapse")}
+                onClick={() => setPinned(false)}
+              >
+                <ChevronRightIcon className="size-4" />
+              </Button>
+            </span>
           </div>
           <div className="relative flex-1 overflow-y-auto py-1">
+            {turns.length === 0 ? (
+              <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+                {t("noBookmarks")}
+              </p>
+            ) : null}
             {/* connector line */}
             <div
               aria-hidden
@@ -166,6 +245,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
             <ul className="flex flex-col">
               {turns.map((turn, i) => {
                 const active = i === geom.activeIndex
+                const isBookmarked = isTurnBookmarked(turn)
                 const time = formatTurnTime(turn.time, { yesterdayLabel })
                 return (
                   <li key={turn.id}>
@@ -185,7 +265,11 @@ export const ConversationTimeline = memo(function ConversationTimeline({
                             aria-hidden
                             className={cn(
                               "z-10 mt-1 size-2 shrink-0 rounded-full border-2 border-background",
-                              active ? "bg-primary" : "bg-muted-foreground/50"
+                              isBookmarked
+                                ? "bg-yellow-500"
+                                : active
+                                  ? "bg-primary"
+                                  : "bg-muted-foreground/50"
                             )}
                           />
                           <span className="min-w-0 flex-1">
@@ -270,17 +354,19 @@ export const ConversationTimeline = memo(function ConversationTimeline({
             {turns.map((turn, i) => {
               const isScrub = scrub?.index === i
               const isActive = i === geom.activeIndex
+              const isBookmarked = isTurnBookmarked(turn)
               return (
                 <span
                   key={turn.id}
                   aria-hidden
                   className={cn(
                     "absolute right-1 -translate-y-1/2 rounded-full transition-all",
-                    isScrub
-                      ? "size-2 bg-primary"
-                      : isActive
-                        ? "size-1.5 bg-primary"
-                        : "size-1.5 bg-muted-foreground/40"
+                    isScrub ? "size-2" : "size-1.5",
+                    isBookmarked
+                      ? "bg-yellow-500"
+                      : isScrub || isActive
+                        ? "bg-primary"
+                        : "bg-muted-foreground/40"
                   )}
                   style={{ top: `${(geom.positions[i] ?? 0) * 100}%` }}
                 />

@@ -12,6 +12,9 @@
     "artifactsToggleDock": "Toggle artifacts dock",
     "canvasToggleLeft": "Toggle left rail",
     "canvasToggleRight": "Toggle right rail",
+    "chatNextAnchor": "Jump to next message anchor",
+    "chatPrevAnchor": "Jump to previous message anchor",
+    "chatSearchToggle": "Find in conversation",
     "observabilityFocusFilter": "Focus filter",
     "observabilityOpenSettings": "Open settings",
     "observabilityRefresh": "Refresh",
@@ -30,6 +33,7 @@
   "categories": {
     "a2ui": "A2UI workspace",
     "canvasLayout": "Canvas layout",
+    "chat": "Chat",
     "navigation": "Navigation",
     "observability": "Observability",
     "panels": "Panels",

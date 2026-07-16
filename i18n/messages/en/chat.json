@@ -994,6 +994,15 @@
     "waitingApproval": "Waiting for approval",
     "working": "Working"
   },
+  "search": {
+    "close": "Close search",
+    "label": "Find in conversation",
+    "next": "Next match",
+    "noResults": "No matches",
+    "placeholder": "Find in conversation…",
+    "position": "{current}/{total}",
+    "previous": "Previous match"
+  },
   "sessionCost": {
     "byModelTitle": "By model",
     "cache": "Cache",
@@ -1086,7 +1095,10 @@
     "collapse": "Collapse timeline",
     "expand": "Expand conversation timeline",
     "jumpTo": "Jump to: {label}",
+    "noBookmarks": "No bookmarked turns yet. Star a message to pin it here.",
     "replyCount": "{count} replies",
+    "showAll": "Show all turns",
+    "showBookmarked": "Show only bookmarked turns",
     "title": "Timeline",
     "yesterday": "Yesterday"
   },

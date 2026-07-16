@@ -32,6 +32,7 @@ jest.mock("./thinking-indicator", () => ({
 // below can verify the `estimateSize` projection is wired up.
 const useVirtualizerCalls: Array<{ count: number; estimateSize: (i: number) => number }> = []
 const measureSpy = jest.fn()
+const scrollToIndexSpy = jest.fn()
 jest.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({
     count,
@@ -53,6 +54,7 @@ jest.mock("@tanstack/react-virtual", () => ({
       getTotalSize: () => count * 120,
       measureElement: () => {},
       measure: measureSpy,
+      scrollToIndex: scrollToIndexSpy,
     }
   },
 }))
@@ -63,6 +65,11 @@ jest.mock("@tanstack/react-virtual", () => ({
 // below assert on the `messages` prop identity across renders.
 jest.mock("./minimap/conversation-timeline", () => ({
   ConversationTimeline: jest.fn(() => null),
+}))
+
+// Capture the shortcut registration instead of driving the real dispatcher.
+jest.mock("@/hooks/shortcuts/use-app-shortcut", () => ({
+  useAppShortcut: jest.fn(),
 }))
 
 jest.mock("./message-renderer", () => {
@@ -143,7 +150,9 @@ jest.mock("@/lib/capacitor/haptics", () => ({
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import type { UIMessage } from "ai"
-import { MessageList, VIRTUALIZE_THRESHOLD } from "./message-list"
+import { MessageList, TIMELINE_THRESHOLD, VIRTUALIZE_THRESHOLD } from "./message-list"
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
+import { getAppShortcutDescriptor } from "@/lib/shortcuts/app-catalog"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
@@ -884,6 +893,216 @@ describe("MessageList — content-resize follow (deferred markdown growth)", () 
     const scroll = primeScroll(scrollEl)
     fireResize()
     expect(scroll.scrollTop).toBe(0)
+  })
+})
+
+describe("MessageList — find-in-conversation wiring", () => {
+  const searchShortcut = () => {
+    const call = (useAppShortcut as jest.Mock).mock.calls.findLast(
+      (c) => c[0] === "chat.search.toggle"
+    )
+    return call?.[1] as ((event: KeyboardEvent) => void) | undefined
+  }
+
+  const renderWith = (messages: UIMessage[]) => {
+    const Wrapper = withAdapter(makeAdapter())
+    return render(
+      <Wrapper>
+        <MessageList messages={messages} status="idle" />
+      </Wrapper>
+    )
+  }
+
+  beforeEach(() => {
+    useSettingsStore.setState({ settings: {} as never })
+    ;(useAppShortcut as jest.Mock).mockClear()
+  })
+
+  it("registers the search toggle against a real catalog id", () => {
+    renderWith(manyMsgs(3))
+    expect(searchShortcut()).toBeDefined()
+    expect(getAppShortcutDescriptor("chat.search.toggle")).toBeDefined()
+  })
+
+  it("an unfocused split pane does not register the chat shortcuts", () => {
+    // Shortcut ids are global and the runtime keeps only the last registration
+    // per id — so a second, unfocused MessageList would silently swallow Ctrl+F
+    // from the focused pane.
+    useChatStore.getState().setActiveSession("ses_1")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={manyMsgs(3)} status="idle" paneSessionId="ses_other" />
+      </Wrapper>
+    )
+    const opts = (useAppShortcut as jest.Mock).mock.calls.findLast(
+      (c) => c[0] === "chat.search.toggle"
+    )?.[2]
+    expect(opts).toMatchObject({ enabled: false })
+  })
+
+  it("the focused pane owns the chat shortcuts", () => {
+    useChatStore.getState().setActiveSession("ses_1")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={manyMsgs(3)} status="idle" paneSessionId="ses_1" />
+      </Wrapper>
+    )
+    const opts = (useAppShortcut as jest.Mock).mock.calls.findLast(
+      (c) => c[0] === "chat.search.toggle"
+    )?.[2]
+    expect(opts).toMatchObject({ enabled: true })
+  })
+
+  it("the shortcut opens the bar, and firing it again closes it", () => {
+    renderWith(manyMsgs(3))
+    expect(screen.queryByTestId("message-search-bar")).not.toBeInTheDocument()
+
+    act(() => searchShortcut()!(new KeyboardEvent("keydown")))
+    expect(screen.getByTestId("message-search-bar")).toBeInTheDocument()
+
+    act(() => searchShortcut()!(new KeyboardEvent("keydown")))
+    expect(screen.queryByTestId("message-search-bar")).not.toBeInTheDocument()
+  })
+
+  it("rings the matched row and moves the ring on to the next hit", () => {
+    // Document-flow path (3 messages ≤ VIRTUALIZE_THRESHOLD), so the rows are
+    // real DOM nodes carrying data-msg-id.
+    const { container } = renderWith([
+      userMsg("vm-0", "deploy the worker"),
+      userMsg("vm-1", "unrelated"),
+      userMsg("vm-2", "deploy again"),
+    ])
+    act(() => searchShortcut()!(new KeyboardEvent("keydown")))
+    fireEvent.change(screen.getByTestId("message-search-bar").querySelector("input")!, {
+      target: { value: "deploy" },
+    })
+    expect(container.querySelector("[data-search-hit]")).toHaveAttribute("data-msg-id", "vm-0")
+
+    fireEvent.keyDown(screen.getByTestId("message-search-bar").querySelector("input")!, {
+      key: "Enter",
+    })
+    expect(container.querySelectorAll("[data-search-hit]")).toHaveLength(1)
+    expect(container.querySelector("[data-search-hit]")).toHaveAttribute("data-msg-id", "vm-2")
+  })
+
+  it("losing pane focus closes the bar and drops the ring", () => {
+    // Without the effect this guards, an unfocused split pane would keep a find
+    // bar open behind the user's back — and mounting already-false would hide it.
+    useChatStore.getState().setActiveSession("ses_1")
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList
+          messages={[userMsg("vm-0", "deploy the worker")]}
+          status="idle"
+          paneSessionId="ses_1"
+        />
+      </Wrapper>
+    )
+    act(() => searchShortcut()!(new KeyboardEvent("keydown")))
+    fireEvent.change(screen.getByTestId("message-search-bar").querySelector("input")!, {
+      target: { value: "deploy" },
+    })
+    expect(container.querySelector("[data-search-hit]")).not.toBeNull()
+
+    act(() => useChatStore.getState().setActiveSession("ses_2"))
+    expect(screen.queryByTestId("message-search-bar")).not.toBeInTheDocument()
+    expect(container.querySelector("[data-search-hit]")).toBeNull()
+  })
+
+  it("jumps via the virtualizer on a long conversation", () => {
+    // The virtualized branch of jumpToHit: past VIRTUALIZE_THRESHOLD most rows
+    // have no DOM node, so a querySelector jump would silently no-op.
+    scrollToIndexSpy.mockClear()
+    renderWith(manyMsgs(VIRTUALIZE_THRESHOLD + 2))
+    act(() => searchShortcut()!(new KeyboardEvent("keydown")))
+    fireEvent.change(screen.getByTestId("message-search-bar").querySelector("input")!, {
+      target: { value: "Msg 3" },
+    })
+    // "Msg 3" also prefixes "Msg 30".."Msg 39"; the first hit is index 3.
+    expect(scrollToIndexSpy).toHaveBeenCalledWith(3, { align: "center" })
+  })
+
+  it("closing the bar drops the ring", () => {
+    const { container } = renderWith([userMsg("vm-0", "deploy the worker")])
+    act(() => searchShortcut()!(new KeyboardEvent("keydown")))
+    fireEvent.change(screen.getByTestId("message-search-bar").querySelector("input")!, {
+      target: { value: "deploy" },
+    })
+    expect(container.querySelector("[data-search-hit]")).not.toBeNull()
+
+    act(() => searchShortcut()!(new KeyboardEvent("keydown")))
+    expect(container.querySelector("[data-search-hit]")).toBeNull()
+  })
+})
+
+describe("MessageList — timeline mount gating", () => {
+  const timelineMock = () =>
+    jest.requireMock("./minimap/conversation-timeline").ConversationTimeline as jest.Mock
+
+  const renderWith = (n: number) => {
+    const Wrapper = withAdapter(makeAdapter())
+    return render(
+      <Wrapper>
+        <MessageList messages={manyMsgs(n)} status="idle" />
+      </Wrapper>
+    )
+  }
+
+  beforeEach(() => {
+    useSettingsStore.setState({ settings: {} as never })
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+    timelineMock().mockClear()
+  })
+
+  // These cases drive the gates off shared module state (settings store +
+  // platform mock), so hand them back at the defaults the later suites assume.
+  afterEach(() => {
+    useSettingsStore.setState({ settings: {} as never })
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+
+  it("stays unmounted at or below TIMELINE_THRESHOLD", () => {
+    renderWith(TIMELINE_THRESHOLD)
+    expect(timelineMock()).not.toHaveBeenCalled()
+  })
+
+  it("mounts one message past TIMELINE_THRESHOLD", () => {
+    renderWith(TIMELINE_THRESHOLD + 1)
+    expect(timelineMock()).toHaveBeenCalled()
+  })
+
+  it("stays unmounted on mobile regardless of length", () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    renderWith(TIMELINE_THRESHOLD + 20)
+    expect(timelineMock()).not.toHaveBeenCalled()
+  })
+
+  it("stays unmounted when disabled in settings", () => {
+    useSettingsStore.setState({
+      settings: { conversationTimeline: { enabled: false } } as never,
+    })
+    renderWith(TIMELINE_THRESHOLD + 20)
+    expect(timelineMock()).not.toHaveBeenCalled()
+  })
+
+  it("hands the timeline its shortcut ownership", () => {
+    // The unfocused split pane's timeline must not register the anchor chords —
+    // shortcut ids are global and last-registration-wins.
+    useChatStore.getState().setActiveSession("ses_1")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList
+          messages={manyMsgs(TIMELINE_THRESHOLD + 1)}
+          status="idle"
+          paneSessionId="ses_other"
+        />
+      </Wrapper>
+    )
+    expect(timelineMock().mock.calls.at(-1)![0]).toMatchObject({ shortcutsEnabled: false })
   })
 })
 

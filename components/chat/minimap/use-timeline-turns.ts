@@ -10,11 +10,23 @@ export interface TimelineTurn {
   id: string
   /** Index of the user message in the source `messages` array. */
   index: number
+  /**
+   * Every message id in this turn — the anchoring user message plus its
+   * replies. Bookmarks are per-message and the star isn't role-gated, so a
+   * turn counts as bookmarked when ANY of its messages is starred; matching on
+   * `id` alone would silently drop a starred assistant reply.
+   */
+  messageIds: string[]
   /** Short label: model-generated summary if present, else first-line truncation. */
   label: string
   /** Longer preview shown on hover. */
   preview: string
-  /** Wall-clock ms if the message carries one (persisted rows do). */
+  /**
+   * Wall-clock ms, read from `metadata.createdAt` — which `listMessages`
+   * hoists off the Dexie column. Absent on a message that hasn't been
+   * persisted yet (the turn the user just typed), so callers must tolerate
+   * `undefined`; `formatTurnTime` renders "" for it.
+   */
   time?: number
   /** Number of assistant/tool messages belonging to this turn. */
   replyCount: number
@@ -47,7 +59,8 @@ export function deriveTimelineTurns(messages: UIMessage[]): TimelineTurn[] {
     if (m.role !== "user") continue
 
     const text = plainText(m)
-    const summary = (m as { metadata?: { minimapLabel?: string } }).metadata?.minimapLabel
+    const meta = (m as { metadata?: { minimapLabel?: string; createdAt?: number } }).metadata
+    const summary = meta?.minimapLabel
     const firstLine =
       text
         .split(/\r?\n/)
@@ -55,16 +68,20 @@ export function deriveTimelineTurns(messages: UIMessage[]): TimelineTurn[] {
         ?.trim() ?? ""
     const base = (summary && summary.trim()) || firstLine || "…"
 
-    let replyCount = 0
-    for (let j = i + 1; j < messages.length && messages[j].role !== "user"; j++) replyCount++
+    const messageIds = [m.id]
+    for (let j = i + 1; j < messages.length && messages[j].role !== "user"; j++) {
+      messageIds.push(messages[j].id)
+    }
+    const replyCount = messageIds.length - 1
 
     turns.push({
       id: m.id,
       index: i,
+      messageIds,
       label: base.length > LABEL_MAX ? base.slice(0, LABEL_MAX).trim() + "…" : base,
       preview:
         text.length > PREVIEW_MAX ? text.slice(0, PREVIEW_MAX).trim() + "…" : text || firstLine,
-      time: (m as { createdAt?: number }).createdAt,
+      time: typeof meta?.createdAt === "number" ? meta.createdAt : undefined,
       replyCount,
     })
   }

@@ -44,9 +44,36 @@ describe("deriveTimelineTurns", () => {
     expect(turn.preview.length).toBeGreaterThan(turn.label.length)
   })
 
-  it("carries createdAt through as time when present", () => {
-    const [turn] = deriveTimelineTurns([userMsg("u1", "hi", { createdAt: 1234 })])
+  it("reads time from metadata.createdAt (the shape listMessages hoists)", () => {
+    const [turn] = deriveTimelineTurns([userMsg("u1", "hi", { metadata: { createdAt: 1234 } })])
     expect(turn.time).toBe(1234)
+  })
+
+  it("leaves time undefined for an unpersisted turn", () => {
+    // The turn the user just typed has no createdAt until the first persist —
+    // formatTurnTime renders "" rather than a bogus "now".
+    const [turn] = deriveTimelineTurns([userMsg("u1", "hi")])
+    expect(turn.time).toBeUndefined()
+  })
+
+  it("ignores a non-numeric createdAt", () => {
+    const [turn] = deriveTimelineTurns([
+      userMsg("u1", "hi", { metadata: { createdAt: "2026-07-16" } }),
+    ])
+    expect(turn.time).toBeUndefined()
+  })
+
+  it("collects every message id in a turn, not just the anchoring user one", () => {
+    // The bookmark star isn't role-gated, so a starred assistant reply has to
+    // resolve back to the turn it belongs to.
+    const turns = deriveTimelineTurns([
+      userMsg("u1", "q"),
+      asstMsg("a1"),
+      asstMsg("a2"),
+      userMsg("u2", "q2"),
+    ])
+    expect(turns[0].messageIds).toEqual(["u1", "a1", "a2"])
+    expect(turns[1].messageIds).toEqual(["u2"])
   })
 
   it("ignores assistant-only prefixes", () => {

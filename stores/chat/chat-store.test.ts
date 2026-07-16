@@ -1,6 +1,11 @@
 /** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import type { UIMessage } from "ai"
+
+// `toggleBookmark` write-throughs land here via a dynamic import.
+jest.mock("@/lib/db/messages", () => ({
+  updateMessageMetadata: jest.fn(async () => undefined),
+}))
 import type { PendingApproval, SendOptions } from "@cognia/agent-config-types"
 import {
   useChatStore,
@@ -551,6 +556,131 @@ describe("useChatStore", () => {
       act(() => result.current.toggleBookmark("m1"))
       act(() => result.current.toggleBookmark("m1"))
       expect(result.current.bookmarkedIds).toEqual([])
+    })
+
+    const bookmarkMsg = (id: string, metadata?: Record<string, unknown>) =>
+      ({
+        id,
+        role: "user",
+        parts: [{ type: "text", text: id }],
+        ...(metadata ? { metadata } : {}),
+      }) as unknown as UIMessage
+
+    it("a failed write-through leaves the in-memory flag alone", async () => {
+      const { updateMessageMetadata } = jest.requireMock("@/lib/db/messages")
+      ;(updateMessageMetadata as jest.Mock).mockRejectedValueOnce(new Error("dexie closed"))
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveSession("ses_bm"))
+      act(() => result.current.setMessages([bookmarkMsg("m1")]))
+      act(() => result.current.toggleBookmark("m1"))
+      await act(async () => {
+        await Promise.resolve()
+      })
+      // Best-effort mirror: the store stays authoritative and nothing throws.
+      expect(result.current.bookmarkedIds).toEqual(["m1"])
+    })
+
+    it("setMessages keeps another open pane's bookmarks", () => {
+      // bookmarkedIds is one flat set but messages are per-slice — deriving from
+      // the loaded history alone would blank a split pane's stars.
+      const { result } = renderHook(() => useChatStore())
+      act(() =>
+        result.current.setSessionMessages("ses_bg", [bookmarkMsg("bg1", { bookmarked: true })])
+      )
+      act(() => result.current.setActiveSession("ses_focused"))
+      act(() => result.current.setMessages([bookmarkMsg("f1", { bookmarked: true })]))
+      expect(result.current.bookmarkedIds.sort()).toEqual(["bg1", "f1"])
+    })
+
+    it("setMessages takes the incoming history as truth for the active session", () => {
+      // An unstarred reload of the active session must drop its stale star,
+      // not resurrect it from the pre-load slice.
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveSession("ses_bm"))
+      act(() => result.current.setMessages([bookmarkMsg("m1", { bookmarked: true })]))
+      expect(result.current.bookmarkedIds).toEqual(["m1"])
+      act(() => result.current.setMessages([bookmarkMsg("m1")]))
+      expect(result.current.bookmarkedIds).toEqual([])
+    })
+
+    it("setMessages rehydrates bookmarks from persisted metadata", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveSession("ses_bm"))
+      act(() =>
+        result.current.setMessages([
+          bookmarkMsg("m1", { bookmarked: true }),
+          bookmarkMsg("m2"),
+          bookmarkMsg("m3", { bookmarked: false }),
+        ])
+      )
+      expect(result.current.bookmarkedIds).toEqual(["m1"])
+    })
+
+    it("toggleBookmark mirrors the flag onto the message metadata", () => {
+      // persistMessages rewrites each row's metadata blob from the in-memory
+      // message, so a flag that lives only in `bookmarkedIds` gets wiped by the
+      // next turn. Pin the mirror.
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveSession("ses_bm"))
+      act(() => result.current.setMessages([bookmarkMsg("m1")]))
+      act(() => result.current.toggleBookmark("m1"))
+      expect(
+        (result.current.messages[0] as { metadata?: { bookmarked?: boolean } }).metadata?.bookmarked
+      ).toBe(true)
+
+      act(() => result.current.toggleBookmark("m1"))
+      expect(
+        (result.current.messages[0] as { metadata?: { bookmarked?: boolean } }).metadata?.bookmarked
+      ).toBe(false)
+    })
+
+    it("toggleBookmark writes the flag through to Dexie", async () => {
+      const { updateMessageMetadata } = jest.requireMock("@/lib/db/messages")
+      ;(updateMessageMetadata as jest.Mock).mockClear()
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveSession("ses_bm"))
+      act(() => result.current.setMessages([bookmarkMsg("m1")]))
+      act(() => result.current.toggleBookmark("m1"))
+      // The write-through is a dynamic import; let its microtasks drain.
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(updateMessageMetadata).toHaveBeenCalledWith("ses_bm", "m1", { bookmarked: true })
+    })
+
+    it("toggleBookmark leaves history alone for a message no open session holds", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveSession("ses_bm"))
+      act(() => result.current.setMessages([bookmarkMsg("m1")]))
+      act(() => result.current.toggleBookmark("not-here"))
+      expect(result.current.bookmarkedIds).toEqual(["not-here"])
+      expect(result.current.messages).toHaveLength(1)
+    })
+
+    it("toggleBookmark persists against the session that owns the message, not the focused one", async () => {
+      // Split view: the starred message lives in a background pane. Writing it
+      // against the active id would target the wrong conversation.
+      const { updateMessageMetadata } = jest.requireMock("@/lib/db/messages")
+      ;(updateMessageMetadata as jest.Mock).mockClear()
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setSessionMessages("ses_bg", [bookmarkMsg("bg1")]))
+      act(() => result.current.setActiveSession("ses_focused"))
+      act(() => result.current.setMessages([bookmarkMsg("f1")]))
+
+      act(() => result.current.toggleBookmark("bg1"))
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(updateMessageMetadata).toHaveBeenCalledWith("ses_bg", "bg1", { bookmarked: true })
+      // …and the flag is mirrored onto the background slice's own message.
+      const bg = result.current.sessions["ses_bg"].messages[0] as {
+        metadata?: { bookmarked?: boolean }
+      }
+      expect(bg.metadata?.bookmarked).toBe(true)
+      // The focused pane's history is untouched.
+      expect(result.current.messages).toHaveLength(1)
+      expect(result.current.messages[0].id).toBe("f1")
     })
   })
 

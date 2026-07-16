@@ -19,6 +19,9 @@ import { getDb } from "@/lib/db/schema"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ConversationTimeline } from "./minimap/conversation-timeline"
+import { MessageSearchBar } from "./message-search-bar"
+import type { MessageSearchHit } from "@/lib/chat/message-search"
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { usePlatform } from "@/hooks/use-platform"
 import { useTranslations } from "next-intl"
 import { InfoIcon } from "lucide-react"
@@ -28,6 +31,7 @@ import { useChatAutoPlayTTS } from "@/hooks/media/use-chat-auto-play-tts"
 import { useCompactionToast } from "@/hooks/chat/use-compaction-toast"
 import type { Character } from "@cognia/agent-config-types"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { cn } from "@/lib/utils"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { PerfBoundary } from "@/lib/perf"
 
@@ -42,11 +46,22 @@ export const VIRTUALIZE_THRESHOLD = 40
 // Below this many messages the conversation is short enough to scan by
 // scrolling, so the right-edge timeline minimap stays unmounted. Wide-screen /
 // desktop gating happens in the component (it's `hidden lg:flex`).
-export const TIMELINE_THRESHOLD = 20
+//
+// 8 messages is ~4 user turns — the point where the first turn has usually
+// scrolled out of view, so anchors start earning their keep. This was 20,
+// which combined with the `lg` breakpoint meant most users never saw the rail
+// at all and had no way to learn it existed.
+export const TIMELINE_THRESHOLD = 8
 
 interface Props {
   messages: UIMessage[]
   status: "idle" | "streaming" | "awaiting_approval" | "error"
+  /**
+   * The session THIS pane is bound to — which in split view is not necessarily
+   * the focused one. Only used to decide whether this instance owns the chat
+   * keyboard shortcuts; everything else still keys off the active session.
+   */
+  paneSessionId?: string | null
   /** Session-bound character in a 1:1 chat — drives read-aloud / auto-play voice. */
   directCharacter?: Character | null
   onCopy?: () => void
@@ -57,6 +72,7 @@ interface Props {
 export function MessageList({
   messages,
   status,
+  paneSessionId,
   directCharacter,
   onCopy,
   onRegenerate,
@@ -64,6 +80,13 @@ export function MessageList({
 }: Props) {
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
+
+  // Split view mounts one MessageList per pane, and the shortcut runtime keys
+  // its registry by id (last mount wins) — so without this gate the split pane
+  // would silently swallow Ctrl+F and the anchor chords from the focused one.
+  // It also keeps `when: chat.hasMessages` honest: that key is derived from the
+  // ACTIVE projection, so only the active pane may rely on it.
+  const ownsShortcuts = paneSessionId == null || paneSessionId === sessionId
   const platform = usePlatform()
   const isMobile = platform === "mobile"
   const tActions = useTranslations("mobile.messageActions")
@@ -282,6 +305,48 @@ export function MessageList({
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [])
 
+  // ── Find-in-conversation ────────────────────────────────────────────────
+  // The list owns this because jumping needs the scroll container and the
+  // virtualizer, exactly like the timeline's jumpTo.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [activeHitId, setActiveHitId] = useState<string | null>(null)
+
+  const jumpToHit = useCallback(
+    (hit: MessageSearchHit) => {
+      if (virtualize) {
+        rowVirtualizer.scrollToIndex(hit.index, { align: "center" })
+        return
+      }
+      const sel = `[data-msg-id="${hit.id.replace(/["\\]/g, "\\$&")}"]`
+      scrollParentRef.current
+        ?.querySelector<HTMLElement>(sel)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" })
+    },
+    [virtualize, rowVirtualizer]
+  )
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setActiveHitId(null)
+  }, [])
+
+  // Toggle rather than re-open: pressing the chord while the bar is up should
+  // dismiss it, matching every other find bar.
+  useAppShortcut("chat.search.toggle", () => setSearchOpen((v) => !v), {
+    enabled: ownsShortcuts,
+    preventDefault: true,
+    allowInEditable: true,
+    editorSelectors: [".monaco-editor"],
+  })
+
+  // An unfocused pane must not keep a find bar open behind the user's back.
+  useEffect(() => {
+    if (!ownsShortcuts) {
+      setSearchOpen(false)
+      setActiveHitId(null)
+    }
+  }, [ownsShortcuts])
+
   // Re-pin to the bottom when the thinking indicator grows (skeleton / tips
   // reveal or tip rotation). The stick-to-bottom effect above only reacts to
   // `messages`/`status`, so it can't see this row's internal timer growth.
@@ -335,6 +400,14 @@ export function MessageList({
   return (
     <PerfBoundary id="chat:list">
       <div className="relative flex flex-1 flex-col overflow-hidden">
+        {searchOpen ? (
+          <MessageSearchBar
+            messages={messages}
+            onJump={jumpToHit}
+            onActiveHitChange={setActiveHitId}
+            onClose={closeSearch}
+          />
+        ) : null}
         {showLongPressHint ? (
           <div
             className="flex items-center justify-center gap-1.5 px-4 py-1.5 text-[11px] text-muted-foreground"
@@ -391,7 +464,12 @@ export function MessageList({
                       <div
                         key={m.id}
                         data-index={virtualItem.index}
+                        data-search-hit={m.id === activeHitId ? "" : undefined}
                         ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
+                        className={cn(
+                          m.id === activeHitId &&
+                            "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
+                        )}
                         style={{
                           position: "absolute",
                           top: 0,
@@ -417,7 +495,16 @@ export function MessageList({
                       m.role === "assistant" &&
                       (status === "streaming" || status === "awaiting_approval")
                     return (
-                      <div key={m.id} data-msg-id={m.id} style={{ padding: "0 1rem" }}>
+                      <div
+                        key={m.id}
+                        data-msg-id={m.id}
+                        data-search-hit={m.id === activeHitId ? "" : undefined}
+                        className={cn(
+                          m.id === activeHitId &&
+                            "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
+                        )}
+                        style={{ padding: "0 1rem" }}
+                      >
                         {renderRow(m, isStreaming)}
                       </div>
                     )
@@ -453,6 +540,7 @@ export function MessageList({
               scrollRef={scrollParentRef}
               virtualizer={rowVirtualizer}
               virtualize={virtualize}
+              shortcutsEnabled={ownsShortcuts}
             />
           )}
         </div>
