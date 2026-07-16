@@ -96,6 +96,24 @@ function wrap() {
 const user = () => userEvent.setup({ pointerEventsCheck: 0 })
 
 describe("RunList", () => {
+  it("renders rows for runs that lack a workflowSnapshot (older schema rows)", async () => {
+    // Rows imported from older schema versions carry no snapshot; the header
+    // falls back to the workflow id instead of crashing on snapshot.name.
+    await getDb().workflowRuns.put({
+      id: "r-legacy",
+      workflowId: "wf1",
+      status: "succeeded",
+      triggerKind: "trigger.manual" as never,
+      triggerPayload: {},
+      startedAt: 1000,
+      completedAt: 1200,
+    } as never)
+    wrap()
+    // The crash mode was an unguarded snapshot.name read during render —
+    // reaching the row testid proves the page survived it.
+    expect(await screen.findByTestId("runs-actions-r-legacy")).toBeInTheDocument()
+  })
+
   it("renders rows and summary stats", async () => {
     await seedRun("r1", { status: "succeeded", startedAt: 1000, completedAt: 1200 })
     await seedRun("r2", { status: "failed", startedAt: 2000 })

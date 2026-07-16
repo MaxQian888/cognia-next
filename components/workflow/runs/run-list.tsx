@@ -86,10 +86,7 @@ const STATUS_OPTIONS: RunStatus[] = [
 const WINDOW_OPTIONS: RunTimeWindow[] = ["all", "24h", "7d", "30d"]
 
 type PendingDelete =
-  | { kind: "single"; runId: string }
-  | { kind: "bulk"; runIds: string[] }
-  | { kind: "all" }
-  | null
+  { kind: "single"; runId: string } | { kind: "bulk"; runIds: string[] } | { kind: "all" } | null
 
 export function RunList({ workflowId }: { workflowId: string }) {
   const t = useTranslations("workflows.runs.list")
@@ -124,7 +121,10 @@ export function RunList({ workflowId }: { workflowId: string }) {
   const filtered = useMemo(() => filterRuns(runs ?? [], filters, now), [runs, filters, now])
   const summary = useMemo(() => summarizeRuns(filtered), [filtered])
   const visible = filtered.slice(0, visibleCount)
-  const workflowName = runs?.[0]?.workflowSnapshot.name ?? workflowId
+  // Optional-chain the snapshot too: run rows from older schema versions
+  // (and imported histories) can lack `workflowSnapshot` entirely, and an
+  // unguarded read crashed the whole run-history route for them.
+  const workflowName = runs?.[0]?.workflowSnapshot?.name ?? workflowId
   const filterActive = isRunFilterActive(filters)
 
   const allVisibleSelected = visible.length > 0 && visible.every((r) => selected.has(r.id))
