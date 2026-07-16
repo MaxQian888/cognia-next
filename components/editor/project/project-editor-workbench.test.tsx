@@ -5,9 +5,9 @@ import { fireEvent, render, screen } from "@testing-library/react"
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 const disposeOpener = jest.fn()
-const registerOpener = jest.fn(() => disposeOpener)
+const registerOpener = jest.fn((_args: unknown) => disposeOpener)
 jest.mock("@/lib/files/project-editor-bridge", () => ({
-  registerProjectEditorOpener: (...args: unknown[]) => registerOpener(...args),
+  registerProjectEditorOpener: (args: unknown) => registerOpener(args),
 }))
 jest.mock("@/stores/canvas/keybinding-store", () => ({
   useKeybindingStore: (selector: (state: { bindings: Record<string, string> }) => unknown) =>

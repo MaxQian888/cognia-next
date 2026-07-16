@@ -35,7 +35,7 @@ const editorState = {
   saveAll: jest.fn(async () => {}),
   reloadFile: jest.fn(async () => {}),
 }
-const mockUseProjectEditor = jest.fn(() => editorState)
+const mockUseProjectEditor = jest.fn((_args: unknown) => editorState)
 jest.mock("@/components/editor/project/use-project-editor", () => ({
   useProjectEditor: (args: unknown) => mockUseProjectEditor(args),
 }))
