@@ -20,6 +20,17 @@ pub enum TemplateKind {
 }
 
 impl TemplateKind {
+    /// Every template kind — the exhaustive list for tests and iteration.
+    /// Adding a kind here is a compile error if a `match` on `TemplateKind`
+    /// elsewhere isn't updated, so this stays honest.
+    pub const ALL: [TemplateKind; 5] = [
+        Self::Wasm,
+        Self::Ts,
+        Self::Python,
+        Self::Hybrid,
+        Self::VscodeExtension,
+    ];
+
     pub fn parse(s: &str) -> Result<Self> {
         match s {
             "wasm" => Ok(Self::Wasm),
@@ -377,6 +388,27 @@ mod tests {
             TemplateKind::parse("vscode").unwrap(),
             TemplateKind::VscodeExtension
         );
+    }
+
+    #[test]
+    fn every_template_gitignores_the_private_key_directory() {
+        // `plugin new --with-keygen` writes the Ed25519 *private* key to
+        // `.cognia/plugin.private.b64`. Every template must ignore that dir
+        // or a first `git add -A` stages the signing key. The five templates
+        // ship five independent `.gitignore`s with no shared floor, so pin
+        // the invariant across all of them.
+        for kind in TemplateKind::ALL {
+            let files = files_for(kind, "probe");
+            let gi = files
+                .iter()
+                .find(|f| f.rel_path == PathBuf::from(".gitignore"))
+                .unwrap_or_else(|| panic!("{kind:?} template must ship a .gitignore"));
+            assert!(
+                gi.content.lines().any(|l| l.trim() == ".cognia/"),
+                "{kind:?} template's .gitignore must ignore .cognia/ — \
+                 `plugin new --with-keygen` writes the Ed25519 private key there"
+            );
+        }
     }
 
     #[test]
