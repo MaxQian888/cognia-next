@@ -12,6 +12,7 @@ jest.mock("./opencode-client", () => ({
 }))
 jest.mock("@/lib/native/external-agent", () => ({
   checkExternalAgentCommandExists: jest.fn().mockResolvedValue(true),
+  onExternalAgentExit: jest.fn().mockResolvedValue(() => {}),
   acpTerminalCreate: jest.fn(),
   acpTerminalKill: jest.fn(),
   acpTerminalOutput: jest.fn(),
@@ -28,6 +29,7 @@ import {
   getExternalAgentManager,
   checkExternalAgentDelegation,
   executeOnExternalAgent,
+  shouldReconcileExitToDisconnected,
   type ExternalAgentLifecycleEvent,
 } from "./manager"
 import { protocolAdapterRegistry } from "./protocol-adapter"
@@ -251,6 +253,23 @@ beforeEach(() => {
 afterEach(async () => {
   await ExternalAgentManager.getInstance({ healthCheckInterval: 0 }).dispose()
   ExternalAgentManager.resetInstance()
+})
+
+describe("shouldReconcileExitToDisconnected (process-exit → instance sync)", () => {
+  it("reconciles only an established connection whose adapter is gone", () => {
+    expect(shouldReconcileExitToDisconnected("connected", false)).toBe(true)
+  })
+
+  it("leaves a still-connected adapter (self-healed / reconnected) alone", () => {
+    expect(shouldReconcileExitToDisconnected("connected", true)).toBe(false)
+  })
+
+  it("ignores in-flight connects and non-live states (no reconnect flicker)", () => {
+    for (const status of ["connecting", "reconnecting", "disconnected", "error"] as const) {
+      expect(shouldReconcileExitToDisconnected(status, false)).toBe(false)
+      expect(shouldReconcileExitToDisconnected(status, true)).toBe(false)
+    }
+  })
 })
 
 describe("ExternalAgentManager — singleton + getInstance", () => {

@@ -30,6 +30,19 @@ pub struct TerminalExitStatus {
     pub signal: Option<String>,
 }
 
+/// Lightweight liveness snapshot of one ACP terminal, consumed by the
+/// unified managed-process registry (`src-tauri/src/process_registry`). Kept
+/// deliberately small — just what the performance panel's "Managed Processes"
+/// tab needs to attribute + join the OS process by PID.
+#[derive(Debug, Clone)]
+pub struct AcpTerminalManagedInfo {
+    pub id: String,
+    pub session_id: String,
+    pub command: String,
+    pub pid: Option<u32>,
+    pub running: bool,
+}
+
 /// Terminal process state
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum TerminalState {
@@ -499,6 +512,28 @@ impl AcpTerminalManager {
         let terminals = self.terminals.read().await;
         terminals.keys().cloned().collect()
     }
+
+    /// Snapshot every terminal for the unified managed-process registry.
+    ///
+    /// Uses `try_lock` so a terminal currently blocked in `wait_for_exit`
+    /// (which holds its `Mutex` across an `.await`) is skipped rather than
+    /// stalling the 1 Hz perf sampler that calls this. `child.id()` is the
+    /// live OS PID (None once the child has been reaped).
+    pub async fn managed_snapshot(&self) -> Vec<AcpTerminalManagedInfo> {
+        let terminals = self.terminals.read().await;
+        terminals
+            .values()
+            .filter_map(|t| {
+                t.try_lock().ok().map(|t| AcpTerminalManagedInfo {
+                    id: t.id.clone(),
+                    session_id: t.session_id.clone(),
+                    command: t.command.clone(),
+                    pid: t.child.id(),
+                    running: matches!(t.state, TerminalState::Running),
+                })
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -624,6 +659,29 @@ mod tests {
         assert!(mgr.get_info(&b).await.is_err());
         // Idempotent on an already-empty manager.
         mgr.kill_all().await.expect("kill_all empty");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn managed_snapshot_reports_live_terminal_with_pid() {
+        let mgr = AcpTerminalManager::new();
+        // Empty on a fresh manager.
+        assert!(mgr.managed_snapshot().await.is_empty());
+
+        let id = mgr
+            .create("sess", "cat", &[], None, None, None)
+            .await
+            .expect("spawn cat");
+
+        let snap = mgr.managed_snapshot().await;
+        let row = snap.iter().find(|r| r.id == id).expect("terminal in snapshot");
+        assert_eq!(row.command, "cat");
+        assert_eq!(row.session_id, "sess");
+        assert!(row.running);
+        assert!(row.pid.is_some(), "live terminal should report an OS pid");
+
+        mgr.kill_all().await.expect("cleanup");
+        assert!(mgr.managed_snapshot().await.is_empty());
     }
 
     #[cfg(unix)]

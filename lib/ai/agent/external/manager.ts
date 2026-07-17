@@ -72,9 +72,25 @@ import {
   createUnknownSessionExtensionSupport,
   normalizeExternalAgentValiditySnapshot,
 } from "./canonical-contract"
-import { checkExternalAgentCommandExists } from "@/lib/native/external-agent"
+import { checkExternalAgentCommandExists, onExternalAgentExit } from "@/lib/native/external-agent"
+import { isTauri } from "@/lib/tauri"
 
 const externalAgentManagerLogger = loggers.agent.child("external-manager")
+
+/**
+ * Whether a process-exit event should downgrade the manager's instance to
+ * `disconnected`. Only an *established* `connected` instance whose adapter now
+ * confirms it is gone is reconciled — in-flight connects/reconnects
+ * (`connecting`/`reconnecting`) and adapters that self-healed
+ * (`adapter.isConnected()` still true) are left alone. Pure so the
+ * reconcile decision is unit-tested without constructing the manager.
+ */
+export function shouldReconcileExitToDisconnected(
+  connectionStatus: ExternalAgentConnectionStatus,
+  adapterConnected: boolean
+): boolean {
+  return connectionStatus === "connected" && !adapterConnected
+}
 
 // ============================================================================
 // Capability Result Type
@@ -212,6 +228,7 @@ export class ExternalAgentManager {
   private healthCheckTimer?: ReturnType<typeof setInterval>
   private eventListeners: Map<string, Set<(event: ExternalAgentEvent) => void>> = new Map()
   private lifecycleListeners: Set<(event: ExternalAgentLifecycleEvent) => void> = new Set()
+  private processExitUnlisten?: Promise<() => void>
 
   private constructor(config: ExternalAgentManagerConfig = {}) {
     this.config = { ...DEFAULT_MANAGER_CONFIG, ...config }
@@ -223,6 +240,42 @@ export class ExternalAgentManager {
     if (this.config.healthCheckInterval > 0) {
       this.startHealthCheck()
     }
+
+    // Reconcile a dead process back to the instance state proactively, instead
+    // of waiting for the next health-check tick (which left the panel showing a
+    // dead agent as "connected"). See `shouldReconcileExitToDisconnected`.
+    this.subscribeToProcessExits()
+  }
+
+  /**
+   * Subscribe once to the native `external-agent://exit` channel so a process
+   * death is mirrored into `instance.connectionStatus`. No-op off desktop.
+   */
+  private subscribeToProcessExits(): void {
+    if (!isTauri()) return
+    this.processExitUnlisten = onExternalAgentExit((event) => {
+      this.handleProcessExit(event.agentId)
+    })
+  }
+
+  /**
+   * A spawned external-agent process exited. Downgrade the manager's instance
+   * to `disconnected` only when it was an established `connected` link the
+   * adapter now confirms is gone — the guard skips reconnect races and adapters
+   * that self-healed. `updateInstanceState` is change-gated, so this is a no-op
+   * when nothing actually changed.
+   */
+  private handleProcessExit(agentId: string): void {
+    const instance = this.instances.get(agentId)
+    const adapter = this.adapters.get(agentId)
+    if (!instance || !adapter) return
+    if (!shouldReconcileExitToDisconnected(instance.connectionStatus, adapter.isConnected())) {
+      return
+    }
+    this.updateInstanceState(agentId, instance, {
+      connectionStatus: "disconnected",
+      status: "idle",
+    })
   }
 
   // ==========================================================================

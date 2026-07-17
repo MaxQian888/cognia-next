@@ -34,6 +34,25 @@ pub trait ExternalAgentEventSink: Send + Sync + 'static {
     fn exited(&self, agent_id: &str, code: Option<i32>, signal: Option<String>);
 }
 
+/// Whether a forwarded external-agent stderr line is a known-transient,
+/// self-healing diagnostic that must not surface as a host-level WARN.
+///
+/// codex-cli forwards its own `tracing` output to stderr, and the stderr
+/// reader would otherwise log *every* line at WARN. Its models-manager cache
+/// (`models_cache.json`) is refetched whenever the cache TTL expires or the
+/// codex `client_version` changes (openai/codex Models Manager), so a
+/// stale-schema cache — e.g. one written by a previous codex version that
+/// predates a now-required field like `supports_reasoning_summaries` — logs an
+/// ERROR and then heals itself on the very next refetch. That is a
+/// codex-internal transient, not an external-agent failure, so it is demoted to
+/// DEBUG; every other stderr line stays at WARN. The line is still forwarded to
+/// the sink verbatim, so UI events are unaffected.
+fn is_transient_codex_noise(line: &str) -> bool {
+    line.contains("codex_models_manager")
+        && (line.contains("failed to load models cache")
+            || line.contains("failed to renew cache"))
+}
+
 /// Configuration for spawning an external agent
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ExternalAgentSpawnConfig {
@@ -300,7 +319,11 @@ impl ExternalAgentProcessManager {
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
-                log::warn!("External agent {} stderr: {}", stderr_id, line);
+                if is_transient_codex_noise(&line) {
+                    log::debug!("External agent {} stderr (transient): {}", stderr_id, line);
+                } else {
+                    log::warn!("External agent {} stderr: {}", stderr_id, line);
+                }
                 stderr_sink.stderr_line(&stderr_id, &line);
             }
         });
@@ -504,6 +527,36 @@ mod tests {
     #[cfg(unix)]
     fn noop_sink() -> Arc<dyn ExternalAgentEventSink> {
         Arc::new(CollectorSink::default())
+    }
+
+    #[test]
+    fn transient_codex_cache_noise_is_demoted() {
+        // The exact stderr line codex-cli 0.144.4 emits when a stale-schema
+        // models_cache.json is loaded before the TTL refetch heals it.
+        let missing_field = "2026-07-17T07:54:38.169956Z ERROR codex_models_manager::cache: \
+             failed to load models cache: missing field `supports_reasoning_summaries` \
+             at line 88 column 5";
+        assert!(is_transient_codex_noise(missing_field));
+
+        // The TTL-renewal variant (openai/codex #30864).
+        let renew = "ERROR codex_models_manager::manager: failed to renew cache TTL. \
+             EOF while parsing a value at line 1 column 0";
+        assert!(is_transient_codex_noise(renew));
+    }
+
+    #[test]
+    fn genuine_stderr_stays_a_warning() {
+        // Real agent errors must NOT be demoted.
+        assert!(!is_transient_codex_noise(
+            "ERROR codex_core::client: 401 Unauthorized: invalid API key"
+        ));
+        assert!(!is_transient_codex_noise("panicked at 'index out of bounds'"));
+        assert!(!is_transient_codex_noise(""));
+        // A models-manager line that is not a cache load/renew transient still
+        // warns — the two conditions are ANDed, not ORed.
+        assert!(!is_transient_codex_noise(
+            "ERROR codex_models_manager::foo: something else entirely"
+        ));
     }
 
     #[test]
