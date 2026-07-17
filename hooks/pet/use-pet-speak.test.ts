@@ -37,6 +37,17 @@ jest.mock("@/lib/pet/llm/character-persona", () => ({
   resolveCharacterPersona: (...a: unknown[]) => resolveCharacterPersona(...a),
 }))
 
+// The pet's new voice (W11): mock the speak entry + the character loader so the
+// test stays hermetic (no orchestrator / Dexie).
+const speakPetText = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/tts/speak-pet", () => ({
+  speakPetText: (...a: unknown[]) => speakPetText(...a),
+}))
+const resolveCharacterById = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/db/characters", () => ({
+  resolveCharacterById: (...a: unknown[]) => resolveCharacterById(...a),
+}))
+
 const stateRef: { current: { settings: Partial<AppSettings> | null } } = {
   current: { settings: null },
 }
@@ -95,6 +106,8 @@ beforeEach(() => {
   listRecentPetTurns.mockReset().mockResolvedValue([])
   recallAboutUser.mockReset().mockResolvedValue("")
   resolveCharacterPersona.mockReset().mockResolvedValue(null)
+  speakPetText.mockReset().mockResolvedValue(undefined)
+  resolveCharacterById.mockReset().mockResolvedValue(null)
   setLlmSpeak(true)
 })
 
@@ -122,6 +135,31 @@ describe("usePetSpeak", () => {
     const bubble = usePetStore.getState().bubble
     expect(bubble?.origin).toBe("template")
     expect(buildUtilityLlmClient).not.toHaveBeenCalled()
+  })
+
+  it("speaks the LLM reply aloud (W11)", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hello there")
+    expect(speakPetText).toHaveBeenCalledWith("Hehe, hello friend!", undefined)
+  })
+
+  it("speaks in the bound character's voice", async () => {
+    resolveCharacterById.mockResolvedValue({
+      voiceProfile: { provider: "openai", voiceId: "nova" },
+    })
+    renderHook(() => usePetSpeak({ profile, view, enabled: true, activeCharacterId: "c1" }))
+    await emitTalk("hi")
+    expect(resolveCharacterById).toHaveBeenCalledWith("c1")
+    expect(speakPetText).toHaveBeenCalledWith("Hehe, hello friend!", {
+      voiceProfile: { provider: "openai", voiceId: "nova" },
+    })
+  })
+
+  it("does not speak template fallbacks — only real replies", async () => {
+    setLlmSpeak(false)
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hi")
+    expect(speakPetText).not.toHaveBeenCalled()
   })
 
   it("acknowledges bare talk (no text) with a template, never the LLM", async () => {

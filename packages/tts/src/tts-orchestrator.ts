@@ -35,7 +35,7 @@ import {
 
 import { getAdapter } from "./providers/registry"
 
-export type TTSActiveSource = "chat" | "chat-widget" | "selection" | "settings" | "unknown"
+export type TTSActiveSource = "chat" | "chat-widget" | "selection" | "settings" | "pet" | "unknown"
 
 export interface TTSOrchestratorState {
   playbackState: TTSPlaybackState

@@ -37,6 +37,9 @@ import { hasNoLeakingPii } from "@cognia/redact"
 import { appendPetTurn, listRecentPetTurns } from "@/lib/db/pet-conversation"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { speakPetText } from "@/lib/tts/speak-pet"
+import { resolveCharacterById } from "@/lib/db/characters"
+import type { CharacterVoiceSource } from "@/lib/plugin/character-pack/character-voice"
 import { usePetStore, type PetBubble } from "@/stores/pet/pet-store"
 import { useSettingsStore } from "@/stores/settings"
 import type { PetProfile } from "@/types/pet"
@@ -50,6 +53,28 @@ const LLM_BUBBLE_MS = 7000
 const HISTORY_DEPS: PetHistoryDeps = {
   append: appendPetTurn,
   listRecent: listRecentPetTurns,
+}
+
+/**
+ * Speak a pet reply aloud in the bound character's voice. The character's
+ * voiceProfile is loaded (and cached per id) from the same characters table the
+ * persona uses. A no-op when TTS is disabled; fire-and-forget so a synthesis
+ * failure never touches the bubble.
+ */
+async function speakPetReply(
+  text: string,
+  characterId: string | null,
+  voiceCache: Map<string, CharacterVoiceSource | null>
+): Promise<void> {
+  let voice = characterId ? voiceCache.get(characterId) : null
+  if (characterId && voice === undefined) {
+    voice =
+      ((await resolveCharacterById(characterId).catch(
+        () => null
+      )) as CharacterVoiceSource | null) ?? null
+    voiceCache.set(characterId, voice)
+  }
+  await speakPetText(text, voice ?? undefined)
 }
 
 export interface UsePetSpeakArgs {
@@ -76,6 +101,8 @@ export function usePetSpeak({ profile, view, enabled, activeCharacterId }: UsePe
    *  Stores the RAW composed string (or null); the PII gate is re-applied at use
    *  time, so a cache hit never skips the privacy check. */
   const personaCache = useRef<Map<string, string | null>>(new Map())
+  /** Resolved character voiceProfile per id — avoids re-hitting Dexie every talk. */
+  const voiceCache = useRef<Map<string, CharacterVoiceSource | null>>(new Map())
 
   // The bus subscription is long-lived; read the freshest props through a ref
   // so a profile/settings change doesn't churn the subscription.
@@ -200,6 +227,13 @@ export function usePetSpeak({ profile, view, enabled, activeCharacterId }: UsePe
           }
           show(parsed.cleanText, "llm", LLM_BUBBLE_MS)
           if (parsed.emotion) enqueueOneShot(EMOTION_TO_ONESHOT[parsed.emotion])
+          // Give the reply a voice (no-op if TTS is off) in the bound
+          // character's voice. Fire-and-forget — never break the bubble.
+          void speakPetReply(
+            parsed.cleanText,
+            current.activeCharacterId ?? null,
+            voiceCache.current
+          ).catch(() => {})
           if (memoryOn) {
             await recordTurn(HISTORY_DEPS, {
               userText,
