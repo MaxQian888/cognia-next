@@ -1,6 +1,11 @@
-jest.mock("next/font/google", () => ({
-  Geist: () => ({ variable: "--font-geist-sans" }),
-  Geist_Mono: () => ({ variable: "--font-geist-mono" }),
+// Geist ships as a self-hosted local font package; its font/* entrypoints call
+// next/font/local, which only works under the Next.js compiler. Stub them so the
+// layout renders under Jest with the same CSS variables production emits.
+jest.mock("geist/font/sans", () => ({
+  GeistSans: { variable: "--font-geist-sans" },
+}))
+jest.mock("geist/font/mono", () => ({
+  GeistMono: { variable: "--font-geist-mono" },
 }))
 
 jest.mock("next-intl/server", () => ({

@@ -2,7 +2,13 @@
 // If you call an external API from the browser, add its origin to the
 // `connect-src` directive there, otherwise the request will be blocked.
 import type { Metadata, Viewport } from "next"
-import { Geist, Geist_Mono } from "next/font/google"
+// Geist ships as a self-hosted local font package (geist/font/*), so the build
+// never fetches from fonts.gstatic.com. This keeps offline / proxied / CI and
+// the Tauri + Capacitor static-export builds deterministic; the exposed CSS
+// variables (--font-geist-sans / --font-geist-mono) are identical to what
+// next/font/google emitted, so globals.css needs no change.
+import { GeistSans } from "geist/font/sans"
+import { GeistMono } from "geist/font/mono"
 import Script from "next/script"
 import { getLocale } from "next-intl/server"
 import { ThemeProvider } from "next-themes"
@@ -87,16 +93,6 @@ import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
 import { AskUserDialog } from "@/components/chat/ask-user-dialog"
 import "./globals.css"
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-})
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-})
-
 export const metadata: Metadata = {
   title: "Cognia · Claude Code",
   description: "Claude Code web client built on top of the Claude Agent SDK",
@@ -138,7 +134,7 @@ export default async function RootLayout({
           dangerouslySetInnerHTML={{ __html: BOOT_SCRIPT }}
         />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
