@@ -10,7 +10,7 @@
 
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { CANONICAL_PLUGIN_CAPABILITIES } from "./plugin-capabilities"
+import { CANONICAL_PLUGIN_CAPABILITIES, PLUGIN_CAPABILITY_CONTRACTS } from "./plugin-capabilities"
 
 const REPO_ROOT = join(__dirname, "..", "..", "..")
 
@@ -71,6 +71,35 @@ function sorted(set: Set<string>): string[] {
   return [...set].sort()
 }
 
+/**
+ * Extract the Rust `CAPABILITY_FIELDS` table — rows shaped
+ * `("cap", &["field", …])` — as a capability → sorted-fields map.
+ */
+function extractCapabilityFields(source: string): Map<string, string[]> {
+  const marker = "const CAPABILITY_FIELDS"
+  const start = source.indexOf(marker)
+  if (start === -1) throw new Error("CAPABILITY_FIELDS not found in cmd_lint.rs")
+  const end = source.indexOf("];", start)
+  if (end === -1) throw new Error("CAPABILITY_FIELDS array literal not terminated")
+  const block = source.slice(start, end)
+  const map = new Map<string, string[]>()
+  const rowRe = /\(\s*"([^"]+)"\s*,\s*&\[([^\]]*)\]\s*\)/g
+  let match: RegExpExecArray | null
+  while ((match = rowRe.exec(block)) !== null) {
+    const cap = match[1]
+    const fields = (match[2].match(/"([^"]+)"/g) ?? []).map((s) => s.slice(1, -1)).sort()
+    map.set(cap, fields)
+  }
+  return map
+}
+
+/** Stable, diff-friendly rendering of a capability → fields map. */
+function fieldEntries(map: Map<string, string[]>): Array<[string, string]> {
+  return [...map.entries()]
+    .map(([cap, fields]): [string, string] => [cap, fields.join(",")])
+    .sort((a, b) => a[0].localeCompare(b[0]))
+}
+
 describe("Rust CLI ↔ TS validator parity", () => {
   it("VALID_CAPABILITIES matches CANONICAL_PLUGIN_CAPABILITIES", () => {
     const rust = extractList(RUST_LINT, "VALID_CAPABILITIES")
@@ -88,6 +117,24 @@ describe("Rust CLI ↔ TS validator parity", () => {
     const rust = extractList(RUST_LINT, "VALID_PLUGIN_TYPES")
     const ts = extractList(TS_VALIDATION, "VALID_PLUGIN_TYPES")
     expect(sorted(rust)).toEqual(sorted(ts))
+  })
+
+  it("CAPABILITY_FIELDS matches PLUGIN_CAPABILITY_CONTRACTS array fields", () => {
+    // The app's cross-check (validation.ts) iterates PLUGIN_CAPABILITY_CONTRACTS
+    // directly: every contract with a non-empty `manifestFields` drives the
+    // field_missing / field_undeclared checks — EXCEPT `python`, whose fields
+    // are entry-point strings validated by the type block. The Rust CLI
+    // hand-copies this into CAPABILITY_FIELDS; drift means `cognia plugin lint`
+    // and the app disagree on which fields gate which capability (a false
+    // field_missing warning here, a silently-missed one there).
+    const expected = new Map<string, string[]>()
+    for (const c of PLUGIN_CAPABILITY_CONTRACTS) {
+      if (c.manifestFields.length === 0) continue
+      if (c.id === "python") continue
+      expected.set(c.id, [...c.manifestFields].sort())
+    }
+    const actual = extractCapabilityFields(RUST_LINT)
+    expect(fieldEntries(actual)).toEqual(fieldEntries(expected))
   })
 
   it("api_bridge capability_table permissions are a subset of VALID_PERMISSIONS", () => {

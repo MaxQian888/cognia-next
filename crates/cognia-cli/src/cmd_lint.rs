@@ -185,17 +185,21 @@ const VALID_CAPABILITIES: &[&str] = &[
 
 const VALID_PLUGIN_TYPES: &[&str] = &["frontend", "python", "hybrid", "wasm", "vscode-extension"];
 
-/// Capability → contribution array field(s). Mirrors the array-typed
-/// `manifestFields` in PLUGIN_CAPABILITY_CONTRACTS. Capabilities omitted are
-/// api-only (registered imperatively at activation) or have entry-point string
-/// fields (`python`) validated elsewhere. Drives the capability↔field
-/// cross-check (parity with validation.ts).
+/// Capability → contribution array field(s). This is the hand-copied Rust
+/// mirror of the app's cross-check in `validation.ts`, which iterates
+/// `PLUGIN_CAPABILITY_CONTRACTS` directly: it includes every contract whose
+/// `manifestFields` is non-empty, EXCEPT `python` (whose fields are entry-point
+/// strings — `pythonMain` / `pythonDependencies` — validated by the type block,
+/// not array contributions). Api-only capabilities (`manifestFields: []`, e.g.
+/// `themes` / `media` / `canvas` / `hooks`) are therefore absent here: listing
+/// one makes the field cross-check emit a bogus `field_missing` the app
+/// suppresses. Kept in exact parity by `rust-capability-parity.test.ts` — do
+/// not edit by hand without re-running it.
 const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
     ("tools", &["tools"]),
     ("components", &["a2uiComponents"]),
     ("modes", &["modes"]),
     ("skills", &["skills"]),
-    ("themes", &["themes"]),
     ("commands", &["commands"]),
     ("a2ui", &["a2uiComponents", "a2uiTemplates"]),
     ("scheduler", &["scheduledTasks"]),
@@ -233,6 +237,14 @@ const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
     ("fonts", &["fonts"]),
     ("wallpapers", &["wallpapers"]),
     ("cli-tools", &["cliTools"]),
+    // ADR-0025 subscription overlays + compaction-strategy: each ships an
+    // array contribution field, so it gates a field_missing check like the
+    // module-bridge capabilities above. These had contracts in the TS source
+    // but were never added here (see rust-capability-parity.test.ts).
+    ("balance-adapter", &["balanceAdapters"]),
+    ("limits-source", &["limitsSources"]),
+    ("im-rate-source", &["imRateSources"]),
+    ("compaction-strategy", &["compactionStrategies"]),
     ("pet-achievement", &["petAchievements"]),
     ("pet-item", &["petItems"]),
 ];
