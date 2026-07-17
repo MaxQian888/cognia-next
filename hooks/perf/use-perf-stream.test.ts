@@ -51,6 +51,7 @@ function sample(ts: number): PerfSample {
     },
     topSpans: [],
     systemMemory: null,
+    managed: [],
   }
 }
 

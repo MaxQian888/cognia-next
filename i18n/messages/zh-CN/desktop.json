@@ -456,6 +456,8 @@
     "actionsMenu": "会话操作",
     "archive": "归档",
     "branchedFrom": "分支会话——打开父会话",
+    "cogniaAgentChecking": "正在检查 Cognia 代理…",
+    "cogniaAgentNotInstalled": "未安装 Cognia 代理 CLI",
     "delete": "删除",
     "dragHandle": "拖拽以重新排序或移动到文件夹",
     "moveToFolder": "移动到文件夹",

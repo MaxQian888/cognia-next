@@ -61,6 +61,7 @@ function hist(...frames: ProcessSample[][]): PerfSample[] {
     },
     topSpans: [],
     systemMemory: null,
+    managed: [],
   }))
 }
 

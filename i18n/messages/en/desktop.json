@@ -456,6 +456,8 @@
     "actionsMenu": "Session actions",
     "archive": "Archive",
     "branchedFrom": "Branched conversation — open parent",
+    "cogniaAgentChecking": "Checking for the Cognia agent…",
+    "cogniaAgentNotInstalled": "The Cognia agent CLI isn't installed",
     "delete": "Delete",
     "dragHandle": "Drag to reorder or move to a folder",
     "moveToFolder": "Move to folder",

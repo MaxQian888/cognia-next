@@ -86,6 +86,7 @@ function sample(cpuPct: number, memBytes: number): PerfSample {
     },
     topSpans: [],
     systemMemory: null,
+    managed: [],
   }
 }
 

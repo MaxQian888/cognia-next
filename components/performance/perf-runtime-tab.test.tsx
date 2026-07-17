@@ -106,6 +106,7 @@ describe("PerfRuntimeTab", () => {
       runtime: makeRuntime({ perWorkerBusyPct: [10 + ts, 20 + ts, 30 + ts, 40 + ts] }),
       topSpans: [],
       systemMemory: null,
+      managed: [],
     }))
     render(<PerfRuntimeTab runtime={makeRuntime()} history={history} />)
     expect(screen.getAllByTestId("sparkline-chart")).toHaveLength(4)

@@ -10,7 +10,7 @@
 import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { ActivityIcon, CpuIcon, GaugeIcon, LayersIcon } from "lucide-react"
+import { ActivityIcon, BoxesIcon, CpuIcon, GaugeIcon, LayersIcon } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePerfStream } from "@/hooks/perf/use-perf-stream"
@@ -19,6 +19,7 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { PerfToolbar } from "./perf-toolbar"
 import { PerfOverviewTab } from "./perf-overview-tab"
 import { PerfProcessTable } from "./perf-process-table"
+import { PerfManagedProcesses } from "./perf-managed-processes"
 import { PerfHotspotsTable } from "./perf-hotspots-table"
 import { PerfRuntimeTab } from "./perf-runtime-tab"
 
@@ -81,6 +82,10 @@ export function PerformanceDashboard() {
             <LayersIcon className="mr-1 size-4" />
             {t("tabs.processes")}
           </TabsTrigger>
+          <TabsTrigger value="managed" data-testid="perf-tab-managed">
+            <BoxesIcon className="mr-1 size-4" />
+            {t("tabs.managed")}
+          </TabsTrigger>
           <TabsTrigger value="hotspots" data-testid="perf-tab-hotspots">
             <ActivityIcon className="mr-1 size-4" />
             {t("tabs.hotspots")}
@@ -100,6 +105,9 @@ export function PerformanceDashboard() {
             </TabsContent>
             <TabsContent value="processes" className="mt-0">
               <PerfProcessTable history={history} />
+            </TabsContent>
+            <TabsContent value="managed" className="mt-0">
+              <PerfManagedProcesses latest={latest} />
             </TabsContent>
             <TabsContent value="hotspots" className="mt-0">
               <PerfHotspotsTable spans={latest?.topSpans ?? []} />

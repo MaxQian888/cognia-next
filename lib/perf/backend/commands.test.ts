@@ -12,6 +12,8 @@ jest.mock("@/lib/tauri", () => ({
 
 import {
   PERF_SAMPLE_EVENT,
+  controlManagedProcess,
+  listManagedProcesses,
   perfHotspots,
   perfListTraces,
   perfOpenTraceDir,
@@ -43,6 +45,8 @@ describe("when not in Tauri", () => {
     await perfSetInterval(2000)
     await perfResetHotspots()
     await perfOpenTraceDir()
+    expect(await listManagedProcesses()).toEqual([])
+    await controlManagedProcess("chatSidecar", "chat-sidecar", "kill")
     expect(callMock).not.toHaveBeenCalled()
   })
 
@@ -103,5 +107,21 @@ describe("when in Tauri", () => {
     const result = subscribePerfSample(handler)
     expect(subscribeMock).toHaveBeenCalledWith(PERF_SAMPLE_EVENT, handler)
     expect(result).toBe(unsub)
+  })
+
+  it("listManagedProcesses calls the command", async () => {
+    callMock.mockResolvedValueOnce([{ subsystem: "chatSidecar", id: "chat-sidecar" }])
+    const rows = await listManagedProcesses()
+    expect(callMock).toHaveBeenCalledWith("list_managed_processes")
+    expect(rows).toHaveLength(1)
+  })
+
+  it("controlManagedProcess forwards subsystem/id/action", async () => {
+    await controlManagedProcess("mcpServer", "mcp-server", "kill")
+    expect(callMock).toHaveBeenCalledWith("control_managed_process", {
+      subsystem: "mcpServer",
+      id: "mcp-server",
+      action: "kill",
+    })
   })
 })

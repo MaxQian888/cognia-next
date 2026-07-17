@@ -18,6 +18,54 @@
     "empty": "尚未记录到热点。",
     "hint": "执行一次操作（发送消息、运行 OCR、执行工作流）即可填充该表。"
   },
+  "managed": {
+    "actions": {
+      "kill": "终止",
+      "restart": "重启",
+      "restartUnavailable": "该进程不支持重启。"
+    },
+    "columns": {
+      "actions": "操作",
+      "cpu": "CPU",
+      "memory": "内存",
+      "name": "进程",
+      "pid": "PID",
+      "status": "状态",
+      "uptime": "运行时长"
+    },
+    "confirm": {
+      "cancel": "取消",
+      "confirm": "终止进程",
+      "description": "这将停止 {name}。外部 Agent 会在下次使用时重连；受监督的进程可能会自动重启。",
+      "title": "终止该进程？"
+    },
+    "empty": "当前没有由 cognia 托管的进程在运行。",
+    "status": {
+      "error": "错误",
+      "running": "运行中",
+      "starting": "启动中",
+      "stopped": "已停止",
+      "stopping": "停止中"
+    },
+    "subsystems": {
+      "acpTerminal": "Agent 终端",
+      "chatSidecar": "聊天 sidecar",
+      "externalAgent": "外部 Agent",
+      "integratedTerminal": "集成终端",
+      "mcpServer": "MCP 服务器"
+    },
+    "summary": {
+      "managed": "托管进程",
+      "running": "运行中",
+      "totalCpu": "总 CPU",
+      "totalMemory": "总内存"
+    },
+    "toast": {
+      "failed": "操作失败：{error}",
+      "killed": "已停止 {name}",
+      "restarted": "已重启 {name}"
+    }
+  },
   "memoryPressure": {
     "high": "严重",
     "low": "正常",
@@ -92,6 +140,7 @@
   "subtitle": "实时查看 Rust 后端的进程树、异步运行时与操作热点。",
   "tabs": {
     "hotspots": "热点",
+    "managed": "托管进程",
     "overview": "性能",
     "processes": "进程",
     "runtime": "异步运行时"

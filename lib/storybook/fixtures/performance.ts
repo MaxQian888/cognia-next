@@ -123,6 +123,7 @@ function makeSample(i: number): PerfSample {
     }),
     topSpans: SAMPLE_SPANS,
     systemMemory: makeMemory({ usedBytes: (8.5 * 1024 + i * 4) * MB }),
+    managed: [],
   }
 }
 
