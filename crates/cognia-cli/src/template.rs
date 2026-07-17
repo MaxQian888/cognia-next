@@ -464,6 +464,30 @@ mod tests {
     }
 
     #[test]
+    fn wasm_template_ships_a_live_capability() {
+        // Working Rule 7: no dormant scaffolds. The wasm template's
+        // `tool_execute` export must be backed by a declared `tools` capability
+        // and a non-empty `tools[]` (matching ts/python/hybrid) — otherwise it
+        // ships `capabilities: []` while its code implements a tool, which is a
+        // latent bug the linter would rightly flag as dead weight.
+        let files = files_for(TemplateKind::Wasm, "probe");
+        let pj = files
+            .iter()
+            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
+            .unwrap();
+        let m: serde_json::Value = serde_json::from_str(&pj.content).unwrap();
+        let caps = m["capabilities"].as_array().expect("capabilities is an array");
+        assert!(
+            caps.iter().any(|c| c == "tools"),
+            "wasm template must declare the `tools` capability its code implements, got: {caps:?}"
+        );
+        assert!(
+            m["tools"].as_array().is_some_and(|t| !t.is_empty()),
+            "wasm template must ship a non-empty tools[] so the capability isn't dormant"
+        );
+    }
+
+    #[test]
     fn ts_template_files_are_non_empty() {
         let files = files_for(TemplateKind::Ts, "my-plugin");
         assert!(files.len() >= 8);
