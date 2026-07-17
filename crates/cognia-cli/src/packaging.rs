@@ -423,6 +423,130 @@ mod tests {
         vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]
     }
 
+    /// A core module with a *real* section graph. `min_wasm()` (magic+version
+    /// only) is a degenerate shape that survives section handling no matter how
+    /// broken it is — it is not a regression test. Every real module has at
+    /// least a type section: `01 04 01 60 00 00` = section id 1, len 4, one
+    /// entry, `0x60` functype, 0 params, 0 results.
+    fn wasm_with_type_section() -> Vec<u8> {
+        let mut v = min_wasm();
+        v.extend_from_slice(&[0x01, 0x04, 0x01, 0x60, 0x00, 0x00]);
+        v
+    }
+
+    /// A component-shaped module. `cargo component` (wasip2) emits a *component*,
+    /// not a core module: the version word is `0x0d 0x00` and a layer word
+    /// `0x01 0x00` follows. Top-level framing is identical to a core module
+    /// (`[id][leb len][contents]`), so a raw section walker round-trips both.
+    /// This fixture pins that a non-custom component section and a non-target
+    /// custom section both survive re-embedding — the core-module fixture alone
+    /// would let a fix pass here and still corrupt real `cargo component` output.
+    fn component_with_sections() -> Vec<u8> {
+        let mut v = vec![
+            0x00, 0x61, 0x73, 0x6d, // \0asm
+            0x0d, 0x00, // version 0x0d
+            0x01, 0x00, // layer 0x01 (component)
+        ];
+        // A non-target custom section named "producers": contents are
+        // [name_len][name][data].
+        let mut contents = vec![b"producers".len() as u8];
+        contents.extend_from_slice(b"producers");
+        contents.extend_from_slice(b"x");
+        v.push(0x00); // custom section id
+        v.push(contents.len() as u8); // section length (fits in one LEB byte)
+        v.extend_from_slice(&contents);
+        // An opaque non-custom top-level section (id 7 = component type); the
+        // contents are deliberately arbitrary — the walker forwards it verbatim
+        // without interpreting them.
+        v.extend_from_slice(&[0x07, 0x03, 0xaa, 0xbb, 0xcc]);
+        v
+    }
+
+    fn count_marker(bytes: &[u8], marker: &[u8]) -> usize {
+        bytes.windows(marker.len()).filter(|w| *w == marker).count()
+    }
+
+    #[test]
+    fn embed_api_version_forwards_non_custom_sections() {
+        // The core defect: `embed_api_version` errored on any module with a
+        // non-custom section (i.e. every real module). It must forward the
+        // type section and add exactly one version section.
+        let out = embed_api_version(&wasm_with_type_section(), "0.1.0")
+            .expect("embed must succeed on a module with a real section graph");
+
+        let mut saw_type = false;
+        let mut version_sections = 0usize;
+        for payload in wasmparser::Parser::new(0).parse_all(&out) {
+            match payload.expect("output must re-parse as valid wasm") {
+                wasmparser::Payload::TypeSection(_) => saw_type = true,
+                wasmparser::Payload::CustomSection(reader)
+                    if reader.name() == API_VERSION_SECTION =>
+                {
+                    version_sections += 1;
+                    assert_eq!(reader.data(), b"0.1.0");
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_type, "type section must be forwarded, not dropped");
+        assert_eq!(version_sections, 1, "exactly one cognia:api-version section");
+    }
+
+    #[test]
+    fn embed_api_version_is_idempotent_on_real_module() {
+        let once = embed_api_version(&wasm_with_type_section(), "0.2.0").unwrap();
+        let twice = embed_api_version(&once, "0.2.0")
+            .expect("re-embedding a previously-embedded real module must succeed");
+
+        let mut saw_type = false;
+        let mut version_sections = 0usize;
+        for payload in wasmparser::Parser::new(0).parse_all(&twice) {
+            match payload.expect("re-embedded output must re-parse") {
+                wasmparser::Payload::TypeSection(_) => saw_type = true,
+                wasmparser::Payload::CustomSection(r) if r.name() == API_VERSION_SECTION => {
+                    version_sections += 1
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_type, "type section must survive re-embedding");
+        assert_eq!(version_sections, 1, "re-embed must replace, not append");
+    }
+
+    #[test]
+    fn embed_api_version_round_trips_component_sections() {
+        let input = component_with_sections();
+        let out = embed_api_version(&input, "0.3.0")
+            .expect("embed must succeed on a component (cargo-component's real output shape)");
+
+        assert_eq!(&out[..8], &input[..8], "component header must be preserved");
+        assert!(
+            count_marker(&out, b"producers") == 1,
+            "non-target custom section must be forwarded intact"
+        );
+        assert!(
+            out.windows(5).any(|w| w == [0x07, 0x03, 0xaa, 0xbb, 0xcc]),
+            "non-custom component section must round-trip verbatim"
+        );
+        assert_eq!(
+            count_marker(&out, API_VERSION_SECTION.as_bytes()),
+            1,
+            "exactly one cognia:api-version section"
+        );
+        assert!(count_marker(&out, b"0.3.0") == 1);
+
+        // Re-embedding strips only the prior version section, never the
+        // component's own sections.
+        let twice = embed_api_version(&out, "0.3.0").expect("re-embed on a component must succeed");
+        assert_eq!(
+            count_marker(&twice, API_VERSION_SECTION.as_bytes()),
+            1,
+            "re-embed must replace, not append"
+        );
+        assert_eq!(count_marker(&twice, b"producers"), 1);
+        assert!(twice.windows(5).any(|w| w == [0x07, 0x03, 0xaa, 0xbb, 0xcc]));
+    }
+
     #[test]
     fn embed_api_version_appends_custom_section() {
         let out = embed_api_version(&min_wasm(), "0.1.0").unwrap();
