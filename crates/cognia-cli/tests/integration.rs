@@ -45,6 +45,24 @@ fn run_cognia_with_env(args: &[&str], envs: &[(&str, &str)]) -> (Option<i32>, St
     )
 }
 
+/// Like `run_cognia`, but runs with `dir` as the working directory (for
+/// commands like `doctor` that inspect the current directory).
+fn run_cognia_in_dir(dir: &Path, args: &[&str]) -> (Option<i32>, String, String) {
+    let mut cmd = Command::new(cognia_bin());
+    cmd.args(args)
+        .current_dir(dir)
+        .env("NO_COLOR", "1")
+        .env("CI", "true")
+        .env_remove("FORCE_COLOR")
+        .stdin(Stdio::null());
+    let out = cmd.output().expect("spawn cognia");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
 /// Build a minimal valid plugin.json beside `dir`.
 fn write_minimal_manifest(dir: &Path, id: &str) {
     let manifest = format!(
@@ -670,6 +688,28 @@ fn release_verify_json_missing_checksums_emits_payload_without_human_noise() {
     assert!(
         stderr.trim().is_empty(),
         "JSON read failure payload is already actionable; stderr should stay empty: {stderr}"
+    );
+}
+
+#[test]
+fn plugin_doctor_json_reports_checks() {
+    let tmp = tempfile::tempdir().unwrap();
+    // A non-plugin directory has no project checks, so nothing can hard-fail
+    // (environment gaps are warnings) → exit 0.
+    let (code, stdout, _stderr) = run_cognia_in_dir(tmp.path(), &["plugin", "doctor", "--json"]);
+    assert_eq!(code, Some(0), "doctor in a clean dir should exit 0: {stdout}");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("doctor --json should emit valid JSON");
+    assert_eq!(parsed["schemaVersion"], 1);
+    assert_eq!(parsed["action"], "doctor");
+    assert_eq!(parsed["ok"], true);
+    let checks = parsed["checks"].as_array().expect("checks is an array");
+    assert!(!checks.is_empty(), "doctor should run at least the env checks");
+    assert!(
+        checks
+            .iter()
+            .all(|c| c["name"].is_string() && c["status"].is_string()),
+        "each check carries a name + status: {parsed}"
     );
 }
 

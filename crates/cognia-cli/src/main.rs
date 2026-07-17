@@ -81,6 +81,7 @@ mod build_ts;
 mod cmd_acp;
 mod cmd_build;
 mod cmd_dev;
+mod cmd_doctor;
 mod cmd_info;
 mod cmd_install;
 mod cmd_keygen;
@@ -333,6 +334,17 @@ pub(crate) enum PluginCommand {
     },
     /// Probe whether the running cognia desktop bridge is reachable.
     Status {
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check the build toolchain, desktop bridge, and (inside a plugin dir)
+    /// the signing-key gitignore invariant + manifest lint.
+    Doctor {
+        /// Apply the auto-fixable remedies (rustup target add, gitignore the
+        /// signing key) instead of only reporting them.
+        #[arg(long)]
+        fix: bool,
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
@@ -623,6 +635,11 @@ fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Result<()> {
             ui.flags.json = json;
             ui.verbose(format!("running plugin status json={json}"));
             cmd_status::run(json, ui)
+        }
+        PluginCommand::Doctor { fix, json } => {
+            ui.flags.json = json;
+            ui.verbose(format!("running plugin doctor fix={fix} json={json}"));
+            cmd_doctor::run(fix, json, ui)
         }
         PluginCommand::Dev {
             path,

@@ -281,36 +281,43 @@ pub fn files_for(kind: TemplateKind, plugin_name: &str) -> Vec<TemplateFile> {
 
 /// "Next steps" hint printed after `new` so authors know what to run next.
 pub fn next_steps(kind: TemplateKind, target_dir: &Path) -> Vec<String> {
+    let cd = format!("cd {}", target_dir.display());
     match kind {
         TemplateKind::Wasm => vec![
-            format!("cd {}", target_dir.display()),
+            cd,
             "rustup target add wasm32-wasip2".into(),
             "cargo install --locked cargo-component".into(),
+            "cognia plugin doctor   # verify the toolchain is ready".into(),
+            "cognia plugin lint".into(),
             "cognia plugin build".into(),
         ],
         TemplateKind::Ts => vec![
-            format!("cd {}", target_dir.display()),
+            cd,
             "pnpm install   # (or npm install / yarn install)".into(),
             "pnpm test      # the template's jest tests should all pass".into(),
+            "cognia plugin doctor".into(),
             "cognia plugin lint".into(),
             "cognia plugin build".into(),
         ],
         TemplateKind::Python => vec![
-            format!("cd {}", target_dir.display()),
+            cd,
             "python -m py_compile main.py".into(),
+            "cognia plugin doctor".into(),
             "cognia plugin lint".into(),
             "cognia plugin build".into(),
         ],
         TemplateKind::Hybrid => vec![
-            format!("cd {}", target_dir.display()),
+            cd,
             "node --check frontend/index.js".into(),
             "python -m py_compile backend/main.py".into(),
+            "cognia plugin doctor".into(),
             "cognia plugin lint".into(),
             "cognia plugin build".into(),
         ],
         TemplateKind::VscodeExtension => vec![
-            format!("cd {}", target_dir.display()),
+            cd,
             "node --check extension/out/extension.js".into(),
+            "cognia plugin doctor".into(),
             "cognia plugin lint".into(),
             "cognia plugin build".into(),
         ],
@@ -660,5 +667,18 @@ mod tests {
         let steps = next_steps(TemplateKind::Wasm, Path::new("/tmp/x"));
         assert!(steps.iter().any(|s| s.contains("cargo-component")));
         assert!(steps.iter().any(|s| s.contains("cognia plugin build")));
+        // Wasm previously skipped lint in its next-steps; it now includes it.
+        assert!(steps.iter().any(|s| s.contains("cognia plugin lint")));
+    }
+
+    #[test]
+    fn next_steps_mention_doctor_for_every_kind() {
+        for kind in TemplateKind::ALL {
+            let steps = next_steps(kind, Path::new("/tmp/x"));
+            assert!(
+                steps.iter().any(|s| s.contains("cognia plugin doctor")),
+                "{kind:?} next-steps should point at doctor"
+            );
+        }
     }
 }
