@@ -20,27 +20,37 @@ beforeEach(async () => {
 })
 
 describe("generateCacheKey", () => {
-  it("yields the same key for identical params", () => {
+  it("yields the same key for identical params", async () => {
     const s: Partial<TTSSettings> = { openaiVoice: "alloy", openaiModel: "tts-1" }
-    expect(generateCacheKey("hello", "openai", s)).toBe(generateCacheKey("hello", "openai", s))
+    expect(await generateCacheKey("hello", "openai", s)).toBe(
+      await generateCacheKey("hello", "openai", s)
+    )
   })
 
-  it("changes when text or provider changes", () => {
+  it("changes when text or provider changes", async () => {
     const s: Partial<TTSSettings> = { openaiVoice: "alloy" }
-    const k1 = generateCacheKey("hello", "openai", s)
-    const k2 = generateCacheKey("hello!", "openai", s)
-    const k3 = generateCacheKey("hello", "elevenlabs", { elevenlabsVoice: "rachel" })
+    const k1 = await generateCacheKey("hello", "openai", s)
+    const k2 = await generateCacheKey("hello!", "openai", s)
+    const k3 = await generateCacheKey("hello", "elevenlabs", { elevenlabsVoice: "rachel" })
     expect(k1).not.toBe(k2)
     expect(k1).not.toBe(k3)
   })
 
-  it("changes when a provider-specific setting differs", () => {
-    const a = generateCacheKey("hi", "openai", { openaiVoice: "alloy" })
-    const b = generateCacheKey("hi", "openai", { openaiVoice: "nova" })
+  it("changes when a provider-specific setting differs", async () => {
+    const a = await generateCacheKey("hi", "openai", { openaiVoice: "alloy" })
+    const b = await generateCacheKey("hi", "openai", { openaiVoice: "nova" })
     expect(a).not.toBe(b)
   })
 
-  it("derives provider-specific keys for every provider", () => {
+  it("uses a SHA-256 hex digest under the tts2_ version prefix", async () => {
+    // Regression pin for the collision fix (W5): keys must be the 64-hex-char
+    // SHA-256 form, not the old 31-bit djb2 base36, and carry the tts2_ prefix
+    // so legacy tts_ entries are never re-read.
+    const k = await generateCacheKey("hello", "openai", { openaiVoice: "alloy" })
+    expect(k).toMatch(/^tts2_[0-9a-f]{64}$/)
+  })
+
+  it("derives provider-specific keys for every provider", async () => {
     const text = "x"
     const settings: Partial<TTSSettings> = {
       openaiVoice: "alloy",
@@ -63,9 +73,9 @@ describe("generateCacheKey", () => {
       "cartesia",
       "deepgram",
     ]
-    const keys = ids.map((p) => generateCacheKey(text, p, settings))
+    const keys = await Promise.all(ids.map((p) => generateCacheKey(text, p, settings)))
     expect(new Set(keys).size).toBe(keys.length)
-    expect(keys.every((k) => k.startsWith("tts_"))).toBe(true)
+    expect(keys.every((k) => k.startsWith("tts2_"))).toBe(true)
   })
 })
 

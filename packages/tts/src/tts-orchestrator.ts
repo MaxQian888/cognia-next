@@ -1,5 +1,5 @@
 /**
- * TTS orchestrator — singleton wrapper around all 9 providers.
+ * TTS orchestrator — singleton wrapper around all 11 providers.
  *
  * Ported from `D:\Project\Cognia\lib\ai\tts\tts-orchestrator.ts`. The
  * cognia-next port drops the `/api/tts/<x>` route fallback (no server
@@ -18,6 +18,7 @@ import { generateCacheKey, getCachedOrGenerate } from "./tts-cache"
 import { getProviderRuntimeOptions, toTTSSettings } from "./speech-settings"
 import {
   applyPronunciationDictionary,
+  detectLanguage,
   preprocessTextForProvider,
   splitTextForTTS,
 } from "./tts-text-utils"
@@ -472,7 +473,7 @@ export class TTSOrchestrator {
     const ttsSettings = toTTSSettings(speechSettings)
     const runtimeOptions = getProviderRuntimeOptions(speechSettings, provider)
 
-    const cacheKey = generateCacheKey(chunk, provider, ttsSettings)
+    const cacheKey = await generateCacheKey(chunk, provider, ttsSettings)
     const cached = await getCachedOrGenerate(
       cacheKey,
       async () => {
@@ -621,7 +622,10 @@ export class TTSOrchestrator {
       utterance.rate = speechSettings.ttsRate
       utterance.pitch = speechSettings.ttsPitch
       utterance.volume = speechSettings.ttsVolume
-      utterance.lang = speechSettings.sttLanguage
+      // Language of the *spoken* text, not `sttLanguage` (the microphone
+      // recognition language). Using sttLanguage here meant a Chinese reply was
+      // read by an English voice whenever STT was left on its en-US default.
+      utterance.lang = detectLanguage(text)
 
       utterance.onstart = () => {
         if (!this.isCurrentRequest(requestId)) return

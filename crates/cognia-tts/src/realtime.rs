@@ -15,16 +15,22 @@
 //   5. Forward each `response.output_audio.delta` (base64 PCM16) over the
 //      channel until `response.done`.
 //
-// Cancellation: each request registers an `Arc<Notify>` under its request id;
-// `tts_realtime_cancel` fires it and the receive loop selects on it.
+// Cancellation: each request registers a `watch` sender under its request id;
+// `tts_realtime_cancel` flips it to `true` and the receive loop selects on
+// `cancel.changed()`. Unlike `Notify::notify_waiters()` — which only wakes
+// waiters registered at that instant — a watch channel stores the state, so a
+// cancel that lands during the WSS handshake (before the loop starts watching)
+// is not lost and still stops the request once the loop is reached. It also
+// closes the per-iteration gap where a fresh `notified()` future would miss a
+// notification fired between loop turns.
 
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use tauri::ipc::Channel;
-use tokio::sync::Notify;
+use tokio::sync::watch;
 use tokio_tungstenite::{
     connect_async, tungstenite::client::IntoClientRequest, tungstenite::Message,
 };
@@ -63,9 +69,9 @@ pub enum RealtimeEvent {
     Error(String),
 }
 
-static CANCELS: OnceLock<Mutex<HashMap<String, Arc<Notify>>>> = OnceLock::new();
+static CANCELS: OnceLock<Mutex<HashMap<String, watch::Sender<bool>>>> = OnceLock::new();
 
-fn cancels() -> &'static Mutex<HashMap<String, Arc<Notify>>> {
+fn cancels() -> &'static Mutex<HashMap<String, watch::Sender<bool>>> {
     CANCELS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -84,12 +90,12 @@ pub async fn tts_realtime_synthesize(
         return Err("OpenAI API key is required".into());
     }
 
-    let cancel = Arc::new(Notify::new());
+    let (cancel_tx, cancel_rx) = watch::channel(false);
     cancels()
         .lock()
-        .insert(request.request_id.clone(), cancel.clone());
+        .insert(request.request_id.clone(), cancel_tx);
 
-    let result = synthesize(&request, &on_event, &cancel).await;
+    let result = synthesize(&request, &on_event, cancel_rx).await;
     cancels().lock().remove(&request.request_id);
 
     if let Err(message) = &result {
@@ -102,15 +108,19 @@ pub async fn tts_realtime_synthesize(
 
 #[tauri::command]
 pub fn tts_realtime_cancel(request_id: String) {
-    if let Some(cancel) = cancels().lock().remove(&request_id) {
-        cancel.notify_waiters();
+    // Flip the stored flag rather than removing the entry: the watch state
+    // persists, so this lands even if it arrives before the receive loop is
+    // watching, and the request stays cancellable for its whole lifetime. The
+    // synthesize task removes its own entry when it finishes.
+    if let Some(cancel) = cancels().lock().get(&request_id) {
+        let _ = cancel.send(true);
     }
 }
 
 async fn synthesize(
     request: &RealtimeRequest,
     on_event: &Channel<RealtimeEvent>,
-    cancel: &Arc<Notify>,
+    mut cancel: watch::Receiver<bool>,
 ) -> Result<(), String> {
     let url = format!("{REALTIME_URL_BASE}?model={}", request.model);
     let mut req = url
@@ -146,7 +156,7 @@ async fn synthesize(
 
     loop {
         tokio::select! {
-            _ = cancel.notified() => {
+            _ = cancel.changed() => {
                 let _ = ws.send(Message::Close(None)).await;
                 break;
             }
@@ -311,6 +321,33 @@ mod tests {
     fn cancel_of_unknown_id_is_a_noop() {
         // Should not panic when the id was never registered.
         tts_realtime_cancel("never-registered".into());
+    }
+
+    #[test]
+    fn cancel_lands_on_a_flag_registered_before_any_waiter() {
+        // The exact handshake-window race: a cancel arriving before the receive
+        // loop starts watching. notify_waiters() dropped it (and the removed
+        // entry made the request permanently uncancellable); the watch flag
+        // persists, so the cancel is observable.
+        let id = "w4-handshake-window";
+        let (tx, rx) = watch::channel(false);
+        cancels().lock().insert(id.to_string(), tx);
+        assert!(!*rx.borrow());
+        tts_realtime_cancel(id.to_string());
+        assert!(*rx.borrow(), "cancel must be observable on the stored flag");
+        cancels().lock().remove(id);
+    }
+
+    #[tokio::test]
+    async fn changed_resolves_when_cancelled_before_the_await() {
+        // Models the loop reaching `cancel.changed()` only after the cancel
+        // already fired. A permit-less Notify would await forever here; watch
+        // resolves at once because the stored version already advanced — this is
+        // the "exit" half of register → notify → exit.
+        let (tx, mut rx) = watch::channel(false);
+        tx.send(true).unwrap();
+        rx.changed().await.unwrap();
+        assert!(*rx.borrow());
     }
 
     #[test]

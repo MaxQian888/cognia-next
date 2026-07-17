@@ -12,6 +12,9 @@ use cognia_secrets::secret_store;
 
 const SERVICE: &str = "com.cognia.tts";
 
+// Must stay in lockstep with the TS source of truth,
+// `lib/tts/keyring.ts` KEYRING_PROVIDER_IDS. The `known_providers_match_ts`
+// test below reads that file and fails on drift.
 const KNOWN_PROVIDERS: &[&str] = &[
     "openai",
     "google",
@@ -20,6 +23,7 @@ const KNOWN_PROVIDERS: &[&str] = &[
     "hume",
     "cartesia",
     "deepgram",
+    "xiaomi",
 ];
 
 fn validate_provider(provider: &str) -> Result<(), String> {
@@ -104,6 +108,37 @@ mod tests {
         );
         tts_keyring_delete(provider.into()).await.unwrap();
         assert_eq!(tts_keyring_get(provider.into()).await.unwrap(), None);
+    }
+
+    #[test]
+    fn known_providers_match_ts() {
+        // Parity guard (plan D5): xiaomi was silently dropped once because the
+        // two lists were hand-synced with nothing pinning them. Rather than
+        // duplicate the list, read the TS source of truth and diff — drift on
+        // either side turns this test red.
+        let ts_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/tts/keyring.ts");
+        let src = std::fs::read_to_string(ts_path)
+            .unwrap_or_else(|e| panic!("cannot read {ts_path}: {e}"));
+        let anchor = src
+            .find("KEYRING_PROVIDER_IDS")
+            .expect("KEYRING_PROVIDER_IDS missing from lib/tts/keyring.ts");
+        // Skip past the `: KeyringProviderId[]` type annotation to the `=`, then
+        // take the first `[ ... ]` after it — the array literal itself.
+        let eq = src[anchor..].find('=').expect("= after KEYRING_PROVIDER_IDS") + anchor;
+        let open = src[eq..].find('[').expect("array literal open") + eq;
+        let close = src[open..].find(']').expect("array literal close") + open;
+        let mut ts_ids: Vec<String> = src[open + 1..close]
+            .split(',')
+            .map(|tok| tok.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        ts_ids.sort();
+        let mut rust_ids: Vec<String> = KNOWN_PROVIDERS.iter().map(|s| s.to_string()).collect();
+        rust_ids.sort();
+        assert_eq!(
+            rust_ids, ts_ids,
+            "Rust KNOWN_PROVIDERS drifted from TS KEYRING_PROVIDER_IDS"
+        );
     }
 
     #[tokio::test]

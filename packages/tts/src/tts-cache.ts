@@ -31,11 +31,11 @@ export interface TTSCacheEntry {
  * Cache key derived from text + provider + provider-relevant settings. Two
  * calls with the same text but a different voice/model must NOT collide.
  */
-export function generateCacheKey(
+export async function generateCacheKey(
   text: string,
   provider: TTSProvider,
   settings: Partial<TTSSettings>
-): string {
+): Promise<string> {
   const params = {
     text,
     provider,
@@ -45,13 +45,19 @@ export function generateCacheKey(
   return hashString(JSON.stringify(params))
 }
 
-function hashString(str: string): string {
-  let hash = 0
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i)
-    hash |= 0
-  }
-  return `tts_${Math.abs(hash).toString(36)}`
+/**
+ * SHA-256 → hex. The previous 31-bit djb2 hash birthday-collided at ~65k
+ * entries (well within the 100 MB cap), which returns *wrong* audio for a
+ * different input rather than a miss. The `tts2_` prefix invalidates the old
+ * `tts_` keys cleanly — legacy entries are never re-read and expire via TTL.
+ */
+async function hashString(str: string): Promise<string> {
+  const data = new TextEncoder().encode(str)
+  const digest = await crypto.subtle.digest("SHA-256", data)
+  const hex = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+  return `tts2_${hex}`
 }
 
 class TTSCacheManager {

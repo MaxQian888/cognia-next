@@ -1,7 +1,7 @@
 /**
  * TTS Types — ported verbatim from D:\Project\Cognia\types\media\tts.ts.
- * Supports 9 providers: system (Web Speech), OpenAI, Gemini, Edge, ElevenLabs,
- * LMNT, Hume, Cartesia, and Deepgram.
+ * Supports 11 providers: system (Web Speech), OpenAI, OpenAI Realtime, Gemini,
+ * Edge, ElevenLabs, LMNT, Hume, Cartesia, Deepgram, and Xiaomi.
  */
 
 export type TTSProvider =

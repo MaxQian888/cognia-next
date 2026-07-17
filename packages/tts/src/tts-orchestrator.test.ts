@@ -615,7 +615,25 @@ describe("system provider", () => {
     })
     expect(state.utterance).not.toBeNull()
     expect(state.utterance!.voice?.name).toBe("Aria")
+    expect(state.utterance!.lang).toBe("en-US")
     expect(o.getState().playbackState).toBe("stopped")
+  })
+
+  it("sets utterance.lang from the spoken text, not sttLanguage (W6)", async () => {
+    const state = setupSpeechSynth()
+    const o = new TTSOrchestrator()
+    await o.speak("你好，今天怎么样", {
+      speechSettings: {
+        ...DEFAULT_SPEECH_SETTINGS,
+        ttsEnabled: true,
+        ttsProvider: "system",
+        // Microphone recognition language stays English…
+        sttLanguage: "en-US",
+      },
+    })
+    expect(state.utterance).not.toBeNull()
+    // …but the Chinese reply is spoken in Chinese, not read by an English voice.
+    expect(state.utterance!.lang).toBe("zh-CN")
   })
 
   it("drives Web Speech API even when systemVoice is not configured", async () => {

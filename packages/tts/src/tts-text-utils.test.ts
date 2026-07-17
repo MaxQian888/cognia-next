@@ -43,6 +43,38 @@ describe("normalizeTextForTTS", () => {
   it("removes URLs", () => {
     expect(normalizeTextForTTS("see https://example.com for details")).toBe("see for details")
   })
+
+  // Regression pins for the execution-order bug (W1): each of these was broken
+  // because whitespace was collapsed and symbols were substituted BEFORE the
+  // structure was stripped.
+  it("strips a markdown heading instead of reading it as 'number'", () => {
+    // Was: "number Introduction Hello there." (# → " number " ran before the
+    // heading strip, and the collapsed newline killed the /gm anchor).
+    expect(normalizeTextForTTS("# Introduction\nHello there.")).toBe("Introduction Hello there.")
+  })
+
+  it("removes fenced code blocks instead of reading the code", () => {
+    // Was: "Here: js const x equals 1; Done." (inline-code rule ate the ```
+    // fences pairwise, exposing the body).
+    expect(normalizeTextForTTS("Here:\n```js\nconst x = 1;\n```\nDone.")).toBe("Here: Done.")
+  })
+
+  it("strips list markers on every line, not just the first", () => {
+    // Was: "Items: - first - second" (collapsed newlines left only index 0 for
+    // the /gm anchor to match).
+    expect(normalizeTextForTTS("Items:\n- first\n- second")).toBe("Items: first second")
+    expect(normalizeTextForTTS("Steps:\n1. one\n2. two")).toBe("Steps: one two")
+  })
+
+  it("unwraps bold/italic instead of leaving them as dead rules", () => {
+    // The bold/italic rules were dead because * was deleted before they ran.
+    expect(normalizeTextForTTS("a **bold** b *em* c")).toBe("a bold b em c")
+  })
+
+  it("passes emoji through unchanged (pins current behavior; see W15)", () => {
+    // Not fixed here on purpose — this pin makes a future emoji change visible.
+    expect(normalizeTextForTTS("Great job 🎉🚀 well done")).toBe("Great job 🎉🚀 well done")
+  })
 })
 
 describe("preprocessTextForProvider", () => {
@@ -71,6 +103,15 @@ describe("language helpers", () => {
     expect(detectLanguage("안녕")).toBe("ko-KR")
     expect(detectLanguage("hola, ¿que tal?")).toBe("es-ES")
     expect(detectLanguage("hello there")).toBe("en-US")
+  })
+
+  it("routes kanji-bearing Japanese to ja-JP, not zh-CN (W6)", () => {
+    // Most Japanese sentences contain kanji; the old han-first check sent them
+    // all to Chinese. Kana must win.
+    expect(detectLanguage("今日は良い天気ですね")).toBe("ja-JP")
+    expect(detectLanguage("私は本を読む")).toBe("ja-JP")
+    // Pure-han text stays Chinese.
+    expect(detectLanguage("我在读书")).toBe("zh-CN")
   })
 
   it("isCJKText flags CJK-heavy strings", () => {

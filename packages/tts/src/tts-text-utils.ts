@@ -52,8 +52,39 @@ function findBestSplitPoint(text: string, maxLength: number): string {
 }
 
 export function normalizeTextForTTS(text: string): string {
-  let out = text.replace(/\s+/g, " ")
+  // Order is load-bearing. Structure must be stripped BEFORE whitespace is
+  // collapsed (the /gm line anchors only work while newlines survive) and
+  // BEFORE the symbol pass (which deletes bare `*` that emphasis rules need).
+  //
+  // ① Strip block/inline structure while newlines still exist.
+  let out = text
+    // Fenced code blocks first — otherwise the inline-code rule below eats the
+    // ``` fences pairwise and leaves the code body to be read aloud.
+    .replace(/```[\s\S]*?```/g, "")
+    // Inline code — unwrap, keep the content.
+    .replace(/`(.*?)`/g, "$1")
+    // Headings and list markers — line-anchored, need the newlines intact.
+    .replace(/^#+\s*/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    // Emphasis — before the symbol pass strips bare `*`, so bold/italic are
+    // actually unwrapped instead of being dead rules.
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/~~(.*?)~~/g, "$1")
+    // Markdown links — keep the label; before the bare-URL rule so it doesn't
+    // swallow the closing paren first.
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    // Bare URLs — dropped (semantics lost; expansion is a separate gap).
+    .replace(/https?:\/\/\S+/g, "")
+    // Smart quotes → ASCII.
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
 
+  // ② Collapse whitespace now that newlines have done their structural job.
+  out = out.replace(/\s+/g, " ")
+
+  // ③ Expand abbreviations, then symbol → word substitutions.
   const abbreviations: Record<string, string> = {
     "Mr.": "Mister",
     "Mrs.": "Misses",
@@ -81,19 +112,6 @@ export function normalizeTextForTTS(text: string): string {
     .replace(/\*/g, "")
     .replace(/_/g, " ")
 
-  out = out
-    .replace(/\*\*(.*?)\*\*/g, "$1")
-    .replace(/\*(.*?)\*/g, "$1")
-    .replace(/~~(.*?)~~/g, "$1")
-    .replace(/`(.*?)`/g, "$1")
-    .replace(/^#+\s*/gm, "")
-    .replace(/^\s*[-*+]\s+/gm, "")
-    .replace(/^\s*\d+\.\s+/gm, "")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-
-  out = out.replace(/https?:\/\/\S+/g, "")
-  out = out.replace(/```[\s\S]*?```/g, "")
-  out = out.replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
   out = out
     .replace(/\.{3,}/g, "...")
     .replace(/!{2,}/g, "!")
@@ -123,12 +141,13 @@ export function isCJKText(text: string): boolean {
 }
 
 export function detectLanguage(text: string): string {
-  if (/[一-鿿]/.test(text)) {
-    if (/[㄀-ㄯㆠ-ㆿ]/.test(text)) return "zh-TW"
-    return "zh-CN"
-  }
+  // Kana and hangul are checked BEFORE han/kanji: most Japanese (and some
+  // Korean) text also contains kanji/hanja, so a han-first test would misroute
+  // nearly all Japanese to Chinese. The old zh-TW branch keyed on bopomofo,
+  // which almost never appears in real prose — a dead branch, now dropped.
   if (/[぀-ゟ゠-ヿ]/.test(text)) return "ja-JP"
   if (/[가-힯]/.test(text)) return "ko-KR"
+  if (/[一-鿿]/.test(text)) return "zh-CN"
   if (/[äöüß]/i.test(text)) return "de-DE"
   if (/[éèêëàâùûç]/i.test(text)) return "fr-FR"
   if (/[ñ¿¡]/i.test(text)) return "es-ES"

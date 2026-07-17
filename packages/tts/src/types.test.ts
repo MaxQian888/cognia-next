@@ -10,12 +10,13 @@ import {
 } from "./types"
 
 describe("TTS types & helpers", () => {
-  it("ships exactly the 10 documented providers in TTS_PROVIDERS", () => {
+  it("ships exactly the 11 documented providers in TTS_PROVIDERS", () => {
     const ids = Object.keys(TTS_PROVIDERS).sort()
     expect(ids).toEqual(
       [
         "system",
         "openai",
+        "openai-realtime",
         "gemini",
         "edge",
         "elevenlabs",
@@ -29,9 +30,9 @@ describe("TTS types & helpers", () => {
   })
 
   it("ORDERED_TTS_PROVIDERS lists every provider once with system first", () => {
-    expect(ORDERED_TTS_PROVIDERS).toHaveLength(10)
+    expect(ORDERED_TTS_PROVIDERS).toHaveLength(11)
     expect(ORDERED_TTS_PROVIDERS[0]).toBe("system")
-    expect(new Set(ORDERED_TTS_PROVIDERS).size).toBe(10)
+    expect(new Set(ORDERED_TTS_PROVIDERS).size).toBe(11)
   })
 
   it("DEFAULT_TTS_SETTINGS picks sensible defaults", () => {
