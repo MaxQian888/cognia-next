@@ -22,6 +22,7 @@ import {
   preprocessTextForProvider,
   splitTextForTTS,
 } from "./tts-text-utils"
+import { splitStream, type StreamSplitterOptions } from "./stream-splitter"
 import {
   DEFAULT_SPEECH_SETTINGS,
   TTS_PROVIDERS,
@@ -66,6 +67,8 @@ export interface TTSOrchestratorSpeakOptions {
   onEnd?: () => void
   onError?: (error: string) => void
   onProgress?: (progress: number) => void
+  /** Tuning for the incremental splitter used by `speakStream`. */
+  splitterOptions?: StreamSplitterOptions
 }
 
 type Subscriber = (state: TTSOrchestratorState) => void
@@ -225,6 +228,137 @@ export class TTSOrchestrator {
           }
         }
       }
+
+      if (this.isCurrentRequest(requestId)) {
+        this.setState({
+          playbackState: "stopped",
+          isLoading: false,
+          isPlaying: false,
+          isPaused: false,
+          progress: 1,
+          activeRequestId: undefined,
+          activeSource: undefined,
+          activeSourceId: undefined,
+        })
+        options.onEnd?.()
+      }
+    } catch (error) {
+      if (!this.isCurrentRequest(requestId)) return
+      const message = error instanceof Error ? error.message : "Failed to generate speech"
+      this.setState({
+        playbackState: "error",
+        isLoading: false,
+        isPlaying: false,
+        isPaused: false,
+        error: message,
+        activeRequestId: undefined,
+        activeSource: undefined,
+        activeSourceId: undefined,
+      })
+      options.onError?.(message)
+      getTtsHost().notify?.error(message)
+      throw error
+    } finally {
+      if (this.isCurrentRequest(requestId)) {
+        this.activeRequestId = null
+      }
+    }
+  }
+
+  /**
+   * Speak a *streaming* text source — e.g. the assistant's tokens as they are
+   * generated. Fragments are cut by the incremental splitter as text arrives
+   * and synthesized/played strictly in order, so the first audio starts before
+   * the whole reply is written (unlike `speak()`, whose first audio waits for
+   * the complete text). `speak(string)` is retained for callers that already
+   * hold the finished text.
+   *
+   * Per-fragment normalization is best-effort: markdown that straddles a
+   * fragment boundary (e.g. a code fence) can't be stripped as cleanly as when
+   * the whole text is known — an accepted trade for the latency win.
+   */
+  async speakStream(
+    tokens: AsyncIterable<string>,
+    options: TTSOrchestratorSpeakOptions = {}
+  ): Promise<void> {
+    const speechSettings = options.speechSettings ?? DEFAULT_SPEECH_SETTINGS
+    const providerSettings = options.providerSettings
+    const provider = options.provider ?? speechSettings.ttsProvider
+    const source = options.source ?? "unknown"
+    const sourceId = options.sourceId
+
+    if (!speechSettings.ttsEnabled) return
+
+    // Live-PCM streaming providers can't consume a growing text stream
+    // fragment-wise; buffer the whole thing and use the one-shot path.
+    if (getAdapter(provider).kind === "streaming") {
+      let full = ""
+      for await (const t of tokens) full += t
+      return this.speak(full, options)
+    }
+
+    this.stop()
+    const requestId = this.createRequestId()
+    this.activeRequestId = requestId
+    this.setState({
+      playbackState: "loading",
+      isLoading: true,
+      isPlaying: false,
+      isPaused: false,
+      progress: 0,
+      error: null,
+      currentProvider: provider,
+      activeRequestId: requestId,
+      activeSource: source,
+      activeSourceId: sourceId,
+    })
+
+    const dict = speechSettings.ttsPronunciationDictionary
+    const prep = (fragment: string): string => {
+      let piece = preprocessTextForProvider(fragment, provider)
+      if (dict && Object.keys(dict).length > 0) piece = applyPronunciationDictionary(piece, dict)
+      return piece
+    }
+    const noProgress = () => {}
+    // Fragments are chained so they always play in order. Synthesis happens
+    // inside each chain link (sequential) — the first-audio win comes from
+    // fragment 1 starting before the reply is finished, not from overlapping
+    // synth; a bounded prefetch could smooth the inter-fragment gaps later.
+    let playChain: Promise<void> = Promise.resolve()
+
+    try {
+      options.onStart?.()
+      for await (const fragment of splitStream(tokens, options.splitterOptions)) {
+        if (!this.isCurrentRequest(requestId)) return
+        const piece = prep(fragment)
+        if (!piece.trim()) continue
+
+        if (provider === "system") {
+          playChain = playChain.then(() => {
+            if (!this.isCurrentRequest(requestId)) return
+            return this.playSystemChunk(piece, speechSettings, requestId, noProgress)
+          })
+        } else {
+          playChain = playChain.then(async () => {
+            if (!this.isCurrentRequest(requestId)) return
+            const resp = await this.generateChunkAudio({
+              provider,
+              chunk: piece,
+              speechSettings,
+              providerSettings,
+            })
+            if (!resp.success || !resp.audioData) {
+              if (speechSettings.ttsFallbackEnabled && this.isCurrentRequest(requestId)) {
+                await this.playSystemChunk(piece, speechSettings, requestId, noProgress)
+                return
+              }
+              throw new Error(resp.error || "Failed to generate speech audio")
+            }
+            await this.playAudioResponse(resp, requestId, speechSettings.ttsVolume, noProgress)
+          })
+        }
+      }
+      await playChain
 
       if (this.isCurrentRequest(requestId)) {
         this.setState({

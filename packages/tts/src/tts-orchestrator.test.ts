@@ -931,3 +931,60 @@ describe("audio onpause emits paused state when not finished", () => {
     expect(o.getState().playbackState).toBe("stopped")
   })
 })
+
+describe("speakStream (W7 streaming TTS)", () => {
+  async function* streamOf(chunks: string[]): AsyncGenerator<string> {
+    for (const c of chunks) yield c
+  }
+
+  it("synthesizes and plays cloud fragments from a token stream, in order", async () => {
+    mockCache.mockResolvedValue({ audioData: new ArrayBuffer(8), mimeType: "audio/mpeg" })
+    const o = new TTSOrchestrator()
+    // Three sentence fragments emerge from these tokens.
+    await o.speakStream(streamOf(["Hello there", ", part two. ", "And a third sentence here."]), {
+      speechSettings: { ...DEFAULT_SPEECH_SETTINGS, ttsEnabled: true, ttsProvider: "openai" },
+      providerSettings: { openai: { apiKey: "k" } },
+    })
+    expect(mockCache).toHaveBeenCalledTimes(3)
+    expect(o.getState().playbackState).toBe("stopped")
+    expect(o.getState().progress).toBe(1)
+  })
+
+  it("plays system-voice fragments in order and ends stopped", async () => {
+    const state = setupSpeechSynth()
+    const o = new TTSOrchestrator()
+    await o.speakStream(streamOf(["First sentence here. ", "Second sentence here."]), {
+      speechSettings: { ...DEFAULT_SPEECH_SETTINGS, ttsEnabled: true, ttsProvider: "system" },
+    })
+    expect(state.utterance).not.toBeNull()
+    // The last fragment spoken is the second sentence.
+    expect(state.utterance!.text).toContain("Second sentence")
+    expect(o.getState().playbackState).toBe("stopped")
+  })
+
+  it("is a no-op when TTS is disabled", async () => {
+    const o = new TTSOrchestrator()
+    await o.speakStream(streamOf(["Hello there. World now."]), {
+      speechSettings: { ...DEFAULT_SPEECH_SETTINGS, ttsEnabled: false, ttsProvider: "openai" },
+    })
+    expect(mockCache).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the system voice when a cloud fragment fails", async () => {
+    const state = setupSpeechSynth()
+    mockCache.mockResolvedValue(null) // synthesis fails for the fragment
+    const o = new TTSOrchestrator()
+    await o.speakStream(streamOf(["A single sentence here."]), {
+      speechSettings: {
+        ...DEFAULT_SPEECH_SETTINGS,
+        ttsEnabled: true,
+        ttsProvider: "openai",
+        ttsFallbackEnabled: true,
+      },
+      providerSettings: { openai: { apiKey: "k" } },
+    })
+    // The system voice spoke instead of failing the whole utterance.
+    expect(state.utterance).not.toBeNull()
+    expect(o.getState().playbackState).toBe("stopped")
+  })
+})

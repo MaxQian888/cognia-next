@@ -62,3 +62,36 @@ export async function speakChatMessage({
     providerSettings,
   })
 }
+
+export interface SpeakChatMessageStreamArgs {
+  /** The owning surface id (chat message id). */
+  messageId: string
+  /** The character that "spoke" this message, if any (voice overlay). */
+  character?: CharacterVoiceSource | null
+}
+
+/**
+ * Streaming twin of {@link speakChatMessage}: reads a live token stream (the
+ * assistant's text as it generates) so synthesis starts before the reply is
+ * finished. Resolves the same settings + character overlay, then hands off to
+ * the orchestrator's `speakStream`.
+ */
+export async function speakChatMessageStream(
+  tokens: AsyncIterable<string>,
+  { messageId, character }: SpeakChatMessageStreamArgs
+): Promise<void> {
+  await useSettingsStore.getState().ensureProviderKeys()
+  const store = useSettingsStore.getState()
+
+  const base = selectSpeechSettings(store.settings)
+  const overlay = character ? resolveCharacterVoice(character) : undefined
+  const speechSettings = overlay ? { ...base, ...overlay } : base
+  const providerSettings = providerKeyMapToSettingsMap(store.providerKeys)
+
+  await ttsOrchestrator.speakStream(tokens, {
+    source: "chat",
+    sourceId: messageId,
+    speechSettings,
+    providerSettings,
+  })
+}

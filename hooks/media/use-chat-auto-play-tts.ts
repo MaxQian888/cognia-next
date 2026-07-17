@@ -1,16 +1,21 @@
 "use client"
 
 /**
- * Auto-play the latest assistant reply aloud once a turn finishes.
+ * Auto-play the latest assistant reply aloud.
  *
- * Connects the previously-dead `canAutoPlayTTS` gate to the chat surface. On
- * the `<non-idle> → idle` status transition it reads the last assistant
- * message, resolves its per-character voice (team `senderId` or the direct
- * session character), and hands off to the shared `speakChatMessage` path.
+ * Two paths, both gated by `ttsEnabled && ttsAutoPlay`:
+ *  - **Streaming** (W7): while a turn is in flight, the assistant's text is fed
+ *    to `speakChatMessageStream` as it grows (diffed off the chat store), so the
+ *    first audio starts before the reply is finished. Starting a stream marks
+ *    the message id as spoken so the turn-complete path below skips it — no
+ *    double-speak.
+ *  - **Turn-complete** (fallback): on the `<non-idle> → idle` edge, if the
+ *    streaming path never spoke the message (e.g. it started after streaming, or
+ *    a manual read), it reads the completed text via `speakChatMessage`.
  *
- * A side-effect-only hook: it returns nothing and never throws into the chat
- * loop (synthesis errors are caught + logged; the orchestrator's own
- * cancellation arbitration handles a user manually starting a different read).
+ * A side-effect-only hook: returns nothing and never throws into the chat loop
+ * (synthesis errors are caught + logged; the orchestrator arbitrates a user
+ * manually starting a different read).
  */
 
 import { useEffect, useRef } from "react"
@@ -18,7 +23,8 @@ import type { UIMessage } from "ai"
 
 import { useSettingsStore } from "@/stores/settings"
 import { canAutoPlayTTS } from "@cognia/tts/auto-play-gates"
-import { speakChatMessage } from "@/lib/tts/speak-chat-message"
+import { speakChatMessage, speakChatMessageStream } from "@/lib/tts/speak-chat-message"
+import { createPushableStream, type PushableStream } from "@/lib/tts/pushable-stream"
 import type { Character } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
 
@@ -31,6 +37,13 @@ export interface UseChatAutoPlayTTSArgs {
   characterById?: Map<string, Character>
   /** The session-bound character in a 1:1 chat (no senderId). */
   directCharacter?: Character | null
+}
+
+interface StreamSession {
+  id: string
+  /** Characters of the message already handed to the stream. */
+  fedLen: number
+  pushable: PushableStream
 }
 
 function lastAssistant(messages: UIMessage[]): UIMessage | null {
@@ -47,6 +60,15 @@ function extractText(message: UIMessage): string {
     .join("\n\n")
 }
 
+function resolveCharacter(
+  message: UIMessage,
+  characterById?: Map<string, Character>,
+  directCharacter?: Character | null
+): Character | null {
+  const senderId = (message as { metadata?: { senderId?: string } }).metadata?.senderId
+  return (senderId ? characterById?.get(senderId) : undefined) ?? directCharacter ?? null
+}
+
 export function useChatAutoPlayTTS({
   messages,
   status,
@@ -58,17 +80,76 @@ export function useChatAutoPlayTTS({
 
   const prevStatus = useRef<ChatStatus>(status)
   const lastAutoPlayedId = useRef<string | null>(null)
+  const streamSession = useRef<StreamSession | null>(null)
 
+  // Streaming path: feed the growing assistant text to speakStream as it
+  // arrives, so the first audio starts before the reply finishes.
+  useEffect(() => {
+    const gateOn = ttsEnabled && ttsAutoPlay
+    const sess = streamSession.current
+
+    // Terminal / gated-off: flush the tail and end the session. "streaming" and
+    // "awaiting_approval" both mean the turn is still in flight — keep feeding.
+    if (!gateOn || status === "idle" || status === "error") {
+      if (sess) {
+        sess.pushable.close()
+        streamSession.current = null
+      }
+      return
+    }
+
+    const last = lastAssistant(messages)
+    if (!last) return
+    const text = extractText(last)
+
+    // Close a session that belonged to an earlier message.
+    if (sess && sess.id !== last.id) {
+      sess.pushable.close()
+      streamSession.current = null
+    }
+
+    if (!streamSession.current) {
+      // Wait until the reply actually has text — a tool-only message shouldn't
+      // spin up an empty stream.
+      if (!text) return
+      const pushable = createPushableStream()
+      streamSession.current = { id: last.id, fedLen: 0, pushable }
+      // Mark spoken up front so the turn-complete effect doesn't re-read it.
+      lastAutoPlayedId.current = last.id
+      const character = resolveCharacter(last, characterById, directCharacter)
+      void speakChatMessageStream(pushable.stream, { messageId: last.id, character }).catch(
+        (err) => {
+          loggers.tts.warn("streaming auto-play failed", {
+            err: err instanceof Error ? err.message : String(err),
+          })
+        }
+      )
+    }
+
+    const current = streamSession.current
+    if (current && current.id === last.id && text.length > current.fedLen) {
+      current.pushable.push(text.slice(current.fedLen))
+      current.fedLen = text.length
+    }
+  }, [status, messages, ttsEnabled, ttsAutoPlay, characterById, directCharacter])
+
+  // Close any active stream when the hook unmounts.
+  useEffect(
+    () => () => {
+      streamSession.current?.pushable.close()
+      streamSession.current = null
+    },
+    []
+  )
+
+  // Turn-complete fallback: read the finished message unless streaming already did.
   useEffect(() => {
     const prev = prevStatus.current
     prevStatus.current = status
 
-    // Only fire on the turn-completes edge: something → idle (not idle→idle,
-    // which is just an unrelated re-render like a bookmark toggle).
+    // Only fire on the turn-completes edge: something → idle.
     if (!(status === "idle" && prev !== "idle")) return
 
-    // Gate is the single source of the auto-play rule. At this edge there is no
-    // active stream/load, so it reduces to ttsEnabled && ttsAutoPlay.
     if (!canAutoPlayTTS({ ttsEnabled, ttsAutoPlay, isLoading: false, isStreaming: false })) return
 
     const last = lastAssistant(messages)
@@ -77,10 +158,7 @@ export function useChatAutoPlayTTS({
     if (!text.trim()) return
 
     lastAutoPlayedId.current = last.id
-
-    const senderId = (last as { metadata?: { senderId?: string } }).metadata?.senderId
-    const character =
-      (senderId ? characterById?.get(senderId) : undefined) ?? directCharacter ?? null
+    const character = resolveCharacter(last, characterById, directCharacter)
 
     void speakChatMessage({ messageId: last.id, text, character }).catch((err) => {
       loggers.tts.warn("auto-play failed", {
