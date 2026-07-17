@@ -62,6 +62,13 @@ export interface RunLoopContainerInput {
   trigger: TriggerEvent
   /** Upstream outputs visible to the container (and to its body). */
   upstream: Record<string, unknown>
+  /**
+   * Global `$nodes['id']` scope — every TOP-LEVEL node completed before this
+   * container was scheduled. Passed through to body steps so non-adjacent
+   * reads work inside loops too. Body-internal outputs are NOT merged in
+   * (iteration-local data rides `$node` / `$item` as before).
+   */
+  nodesOutputs?: Record<string, unknown>
   runId: string
   signal: AbortSignal
   cache: IdempotencyCache
@@ -473,6 +480,7 @@ async function runSubgraph(input: RunSubgraphInput): Promise<SubgraphResult> {
         node: child,
         trigger: input.trigger,
         upstream: upstreamMap,
+        ...(input.nodesOutputs ? { nodesOutputs: input.nodesOutputs } : {}),
         runId: input.runId,
         signal: input.signal,
         cache: input.cache,

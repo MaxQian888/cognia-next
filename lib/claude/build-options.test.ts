@@ -308,6 +308,64 @@ describe("resolveSendOptions — plugin tools manifest failure", () => {
   })
 })
 
+describe("resolveSendOptions — workflow skills guarantee the typed runner tool", () => {
+  const workflowSkill = {
+    id: "sk-wf",
+    name: "Summarizer",
+    content: "graph-bodied",
+    kind: "workflow",
+    workflowId: "wf1",
+    status: "enabled",
+  }
+
+  it("appends wf_run_workflow_typed when a kind:workflow skill is active and the plugin is absent", async () => {
+    mListSkills.mockResolvedValueOnce([workflowSkill])
+    ;(buildPluginToolsManifest as jest.Mock).mockReturnValueOnce([])
+
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", skillIds: ["sk-wf"] }),
+    } as never)
+
+    const names = toolNames(opts)
+    expect(names).toContain("wf_run_workflow_typed")
+    const entry = (opts.pluginTools ?? []).find((t) => t.name === "wf_run_workflow_typed")
+    expect(entry?.pluginId).toBe("cognia-workflow-ai")
+  })
+
+  it("does not duplicate the runner when the workflow-ai plugin already manifests it", async () => {
+    mListSkills.mockResolvedValueOnce([workflowSkill])
+    ;(buildPluginToolsManifest as jest.Mock).mockReturnValueOnce([
+      {
+        name: "wf_run_workflow_typed",
+        description: "from plugin",
+        jsonSchema: {},
+        pluginId: "cognia-workflow-ai",
+      },
+    ])
+
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", skillIds: ["sk-wf"] }),
+    } as never)
+
+    const matches = (opts.pluginTools ?? []).filter((t) => t.name === "wf_run_workflow_typed")
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.description).toBe("from plugin")
+  })
+
+  it("does not inject the runner when no workflow skill is active", async () => {
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk-md", name: "Plain", content: "body", status: "enabled" },
+    ])
+    ;(buildPluginToolsManifest as jest.Mock).mockReturnValueOnce([])
+
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", skillIds: ["sk-md"] }),
+    } as never)
+
+    expect(toolNames(opts)).not.toContain("wf_run_workflow_typed")
+  })
+})
+
 describe("resolveSendOptions — semantic tool routing exempts flow-control tools", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let setDeps: (deps: any) => void

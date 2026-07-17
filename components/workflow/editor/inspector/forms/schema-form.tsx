@@ -24,6 +24,7 @@
  */
 
 import { useState, useEffect, useId, useMemo } from "react"
+import { useTranslations } from "next-intl"
 import { Plus, Trash2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -41,7 +42,7 @@ import { ExpressionField } from "./shared/expression-field"
 
 // ── Schema typing ──────────────────────────────────────────────────────────
 
-interface JsonSchema {
+export interface JsonSchema {
   type?: "object" | "string" | "number" | "integer" | "boolean" | "array"
   title?: string
   description?: string
@@ -306,6 +307,7 @@ function StringArrayField({
   required: boolean
 }) {
   const id = useId()
+  const t = useTranslations("workflows.forms.arrayField")
   const arr = useMemo<string[]>(() => (Array.isArray(value) ? (value as string[]) : []), [value])
   return (
     <Field
@@ -333,14 +335,14 @@ function StringArrayField({
               size="icon"
               variant="ghost"
               onClick={() => onChange(arr.filter((_, j) => j !== i))}
-              aria-label={`Remove item ${i + 1}`}
+              aria-label={t("removeItem", { index: i + 1 })}
             >
               <Trash2 className="size-3.5" />
             </Button>
           </div>
         ))}
         <Button type="button" size="sm" variant="outline" onClick={() => onChange([...arr, ""])}>
-          <Plus className="size-3.5 mr-1" /> Add
+          <Plus className="size-3.5 mr-1" /> {t("add")}
         </Button>
       </div>
     </Field>

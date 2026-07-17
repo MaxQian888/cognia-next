@@ -106,6 +106,13 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Target",
     keywords: ["goal", "objective", "completed", "done", "finished", "loop"],
   },
+  "trigger.workflow.completed": {
+    label: "On workflow completed",
+    description:
+      "Fires when another workflow's run finishes (succeeded or failed), receiving its output as the trigger payload. Chain-depth guarded; a workflow can never trigger itself.",
+    iconName: "Workflow",
+    keywords: ["workflow", "chain", "completed", "finished", "pipeline", "then", "after"],
+  },
   "trigger.pet.event": {
     label: "On pet event",
     description:
@@ -1023,7 +1030,8 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
   },
   "flow.split": {
     label: "Split (parallel)",
-    description: "Fans out to multiple branches that run concurrently.",
+    description:
+      "Fans out to multiple branches that run concurrently. Pure passthrough — every branch receives the SAME input; it does not partition or copy-slice data (use flow.loop or data.aggregate group-by for that).",
     iconName: "Workflow",
     keywords: ["parallel", "fan-out", "split"],
   },

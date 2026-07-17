@@ -53,6 +53,12 @@ const mockResolveSkillContext = jest.fn(async (sessionId: string) => ({ sessionI
 jest.mock("@/lib/skills/built-in/context", () => ({
   resolveBuiltInSkillContext: (sessionId: string) => mockResolveSkillContext(sessionId),
 }))
+// Typed workflow runner fallback — the real core drags the orchestrator +
+// Dexie in; the IPC suite only pins the ROUTING (name → shared executor).
+const mockExecuteRunWorkflowTyped = jest.fn()
+jest.mock("@/lib/workflow/publish/run-workflow-typed-tool", () => ({
+  executeRunWorkflowTyped: (args: Record<string, unknown>) => mockExecuteRunWorkflowTyped(args),
+}))
 
 import { webSearch, webFetch, buildFetchExtractor } from "@/lib/web/web-tools-core"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
@@ -322,6 +328,44 @@ describe("handlePluginToolExec — unified invokePluginTool path", () => {
     const response = await handlePluginToolExec(makeRequest({ name: "unknown_tool" }))
 
     expect(response.error).toBe("plugin tool not found: unknown_tool")
+  })
+})
+
+// ── Typed workflow runner fallback ─────────────────────────────────────
+describe("handlePluginToolExec — workflow runner fallback", () => {
+  afterEach(() => {
+    __setPluginToolResolverForTesting(null)
+    mockExecuteRunWorkflowTyped.mockReset()
+  })
+
+  it("routes wf_run_workflow_typed to the shared lib core when the plugin registry misses", async () => {
+    __setPluginToolResolverForTesting({ getTool: () => undefined })
+    const ok = { ok: true, workflowId: "wf1", workflowName: "X", runId: "r1", output: 42 }
+    mockExecuteRunWorkflowTyped.mockResolvedValue(ok)
+
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "wf_run_workflow_typed", args: { name: "X", input: { a: 1 } } })
+    )
+
+    expect(mockExecuteRunWorkflowTyped).toHaveBeenCalledWith({ name: "X", input: { a: 1 } })
+    expect(response.result).toEqual(ok)
+    expect(response.error).toBeUndefined()
+  })
+
+  it("prefers the plugin registration when the plugin is enabled", async () => {
+    const pluginExecute = jest.fn().mockResolvedValue({ ok: true, via: "plugin" })
+    __setPluginToolResolverForTesting({
+      getTool: (name) =>
+        name === "wf_run_workflow_typed"
+          ? { pluginId: "cognia-workflow-ai", execute: pluginExecute }
+          : undefined,
+    })
+
+    const response = await handlePluginToolExec(makeRequest({ name: "wf_run_workflow_typed" }))
+
+    expect(pluginExecute).toHaveBeenCalled()
+    expect(mockExecuteRunWorkflowTyped).not.toHaveBeenCalled()
+    expect(response.result).toEqual({ ok: true, via: "plugin" })
   })
 })
 

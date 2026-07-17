@@ -181,6 +181,24 @@ registerNodeExecutor({
   }),
 })
 
+// ── trigger.workflow.completed ────────────────────────────────────────────
+// Chained-workflow trigger (ADR-0081). Real firing happens in
+// `runtime/workflow-completion-fanout.ts`; this passthrough surfaces the
+// source run's payload ({ workflowId, runId, status, output, chainDepth })
+// as the trigger node's output so downstream expressions can read it via
+// `$node['<id>'].payload` in addition to `$trigger.payload`. Side-effect
+// free, mirroring trigger.manual / trigger.team / trigger.pet.event.
+registerNodeExecutor({
+  kind: "trigger.workflow.completed",
+  typeVersion: 1,
+  execute: async (ctx) => ({
+    output: {
+      firedAt: ctx.trigger.originAt,
+      payload: ctx.trigger.payload,
+    },
+  }),
+})
+
 // ── flow.set ──────────────────────────────────────────────────────────────
 registerNodeExecutor({
   kind: "flow.set",
@@ -780,14 +798,55 @@ registerNodeExecutor({
 registerNodeExecutor({
   kind: "flow.wait",
   typeVersion: 1,
+  // Event waits may legitimately outlast the workflow's step timeout budget;
+  // the run-level wall-clock guard + the node's own `timeoutMs` bound them.
+  timeoutMs: 0,
   execute: async (ctx) => {
-    const params = ctx.params as { mode?: string; durationMs?: number }
+    const params = ctx.params as {
+      mode?: string
+      durationMs?: number
+      eventKey?: string
+      timeoutMs?: number
+    }
     const mode = params.mode ?? "duration"
     if (mode !== "duration") {
-      // Event-based wait wires up in Phase 5+ (Rust trigger daemon needs to
-      // surface external wake-ups via the IPC contract). Until then, this
-      // mode is a no-op so workflows authored against it still load.
-      return { output: { skipped: "event mode not yet implemented" } }
+      // Event mode: block on the in-process wake bus until an external source
+      // fires the key (approval registry pattern). The default key is run- and
+      // step-scoped so parallel runs never collide; a custom `eventKey` makes
+      // the wait addressable from outside (e.g. the `wf_emit_workflow_event`
+      // agent tool) without knowing the runId. The run-level abort signal and
+      // the optional `timeoutMs` both unblock; a timeout is NON-retryable —
+      // re-waiting would silently double the budget.
+      const key =
+        typeof params.eventKey === "string" && params.eventKey.trim()
+          ? params.eventKey.trim()
+          : `${ctx.runId}:${ctx.stepId}`
+      const timeoutMs = Math.max(0, Number(params.timeoutMs ?? 0))
+      const startedAt = Date.now()
+      ctx.log(
+        "info",
+        `flow.wait: waiting for event "${key}"` + (timeoutMs > 0 ? ` (timeout ${timeoutMs}ms)` : "")
+      )
+      const { subscribeWake } = await import("@/lib/workflow/runtime/wake-bus")
+      try {
+        const wake = await subscribeWake(key, {
+          ...(timeoutMs > 0 ? { timeoutMs } : {}),
+          signal: ctx.signal,
+        })
+        return {
+          output: {
+            event: key,
+            source: wake.source,
+            data: wake.data,
+            waitedMs: Date.now() - startedAt,
+          },
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        const wrapped = new Error(`flow.wait: ${message}`) as Error & { retryable?: boolean }
+        wrapped.retryable = false
+        throw wrapped
+      }
     }
     const ms = Math.max(0, Number(params.durationMs ?? 0))
     if (ms > 0) {
@@ -2656,6 +2715,24 @@ registerNodeExecutor({
       `Extract data from the user message. Reply with ONLY a JSON object ` +
       `matching this shape:\n{\n${fieldList}\n}` +
       (params.hint ? `\n\nGuidance: ${params.hint}` : "")
+    // Lift the REQUIRED field names into a presence-only JSON object schema so
+    // the inner v2 turn validates the completion and auto-fixes ONCE when a
+    // required field is missing (D3). Deliberately presence-only: this node
+    // coerces type hints AFTER parsing (`coerceToType`), so a model returning
+    // `"42"` for a number hint is fine — a type-strict schema would burn the
+    // retry on completions the coercion already handles. `soft` mode on
+    // purpose: this node's own `valid` / `missing` output is the caller-facing
+    // contract, so a persistent violation degrades to the legacy best-effort
+    // parse instead of failing the step.
+    const required = Array.isArray(params.required) ? params.required : []
+    const innerOutputSchema =
+      required.length > 0
+        ? {
+            type: "object",
+            properties: Object.fromEntries(Object.keys(schema).map((k) => [k, {}])),
+            required,
+          }
+        : undefined
     // Delegate to ai.prompt v2 (see ai.classify above for the rationale).
     const aiPrompt = (await import("./registry")).getExecutor("ai.prompt", 2)
     if (!aiPrompt) throw new Error("ai.extract: ai.prompt executor unavailable")
@@ -2674,6 +2751,13 @@ registerNodeExecutor({
         mode: params.mode,
         modelAlias: params.modelAlias,
         piiGate: params.piiGate,
+        ...(innerOutputSchema
+          ? {
+              responseFormat: "json",
+              outputSchema: innerOutputSchema,
+              onSchemaViolation: "soft",
+            }
+          : {}),
       } as Record<string, unknown>,
     })
     const completion = String(
@@ -2695,7 +2779,6 @@ registerNodeExecutor({
       extracted = obj
     }
 
-    const required = Array.isArray(params.required) ? params.required : []
     const present =
       extracted && typeof extracted === "object" && !Array.isArray(extracted)
         ? (extracted as Record<string, unknown>)

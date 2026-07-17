@@ -129,6 +129,14 @@ describe("SettingsTab", () => {
     expect(store.getState().dirty).toBe(true)
   })
 
+  it("displays the shared max-concurrency default (4) when the field is absent", () => {
+    // makeWorkflow's settings carry no maxConcurrency — the input must show
+    // DEFAULT_MAX_CONCURRENCY, matching what the zod backfill actually runs,
+    // never the old sequential `1`.
+    mount()
+    expect(screen.getByLabelText("Max in-run nodes")).toHaveValue(4)
+  })
+
   it("editing a retry attempt count writes through setSettings", () => {
     const store = mount()
     fireEvent.change(screen.getByLabelText("Attempts"), { target: { value: "5" } })

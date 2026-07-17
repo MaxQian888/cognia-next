@@ -641,7 +641,7 @@
       "label": "设置变量"
     },
     "split": {
-      "description": "把执行扇出到多个并行分支。",
+      "description": "把执行扇出到多个并行分支。纯透传——每个分支收到相同输入；不做数据切分或分片（需要切分请用 flow.loop 或 data.aggregate 的 group-by）。",
       "label": "并行分发"
     },
     "subworkflow": {
@@ -741,6 +741,12 @@
     "webhook": {
       "description": "当 HTTP 请求命中工作流的 Webhook 路径时触发。",
       "label": "Webhook 触发"
+    },
+    "workflow": {
+      "completed": {
+        "description": "当另一个工作流的运行结束（成功或失败）时触发，并把其输出作为触发载荷。",
+        "label": "工作流完成时"
+      }
     }
   }
 }

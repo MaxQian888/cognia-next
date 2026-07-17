@@ -55,3 +55,33 @@ export function checkReachability(wf: VisualWorkflow): Diagnostic[] {
   }
   return out
 }
+
+/**
+ * A `flow.join` INSIDE a loop body silently degrades its `joinPolicy` to
+ * "all" at run time — the loop subgraph runner has its own readiness model
+ * and honors neither "any" nor "race" (documented orchestrator limitation).
+ * Warn at author time so the degradation is never a surprise.
+ */
+export function checkLoopBodyJoinPolicy(wf: VisualWorkflow): Diagnostic[] {
+  const loopContainerIds = new Set(
+    wf.nodes.filter((n) => n.type === "flow.loop" && n.typeVersion >= 2).map((n) => n.id)
+  )
+  const out: Diagnostic[] = []
+  for (const node of wf.nodes) {
+    if (node.type !== "flow.join") continue
+    if (!node.parentId || !loopContainerIds.has(node.parentId)) continue
+    const policy = (node.data?.params as { joinPolicy?: unknown } | undefined)?.joinPolicy
+    if (policy === "any" || policy === "race") {
+      out.push(
+        makeDiagnostic({
+          severity: "warning",
+          code: "joinPolicyInLoop",
+          nodeId: node.id,
+          field: "joinPolicy",
+          messageParams: { policy },
+        })
+      )
+    }
+  }
+  return out
+}

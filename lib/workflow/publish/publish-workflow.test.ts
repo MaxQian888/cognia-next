@@ -10,6 +10,7 @@ import {
   derivePublishedInterface,
   toolNameForWorkflow,
   workflowSkillCanonicalId,
+  WORKFLOW_RUNNER_TOOL_NAME,
 } from "./publish-workflow"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
@@ -96,7 +97,12 @@ describe("publishWorkflow", () => {
     expect(skill?.kind).toBe("workflow")
     expect(skill?.workflowId).toBe(wf.id)
     expect(skill?.canonicalId).toBe(workflowSkillCanonicalId(wf.id))
-    expect(skill?.content).toMatch(/wf_summarizer/)
+    // The body must point at the REAL registered runner tool with the workflow
+    // name — never at the display-only `wf_<slug>` (no such tool is ever
+    // registered; a body naming it strands the model on a ghost tool).
+    expect(skill?.content).toContain(WORKFLOW_RUNNER_TOOL_NAME)
+    expect(skill?.content).toContain('"name": "Summarizer"')
+    expect(skill?.content).not.toMatch(/wf_summarizer/)
   })
 
   it("is idempotent — re-publish updates the same skill row", async () => {

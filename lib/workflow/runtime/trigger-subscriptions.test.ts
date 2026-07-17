@@ -254,6 +254,31 @@ describe("trigger-subscriptions", () => {
     expect(matches.map((m) => m.workflowId)).toEqual(["wf_any"])
   })
 
+  it("indexes trigger.workflow.completed and scopes by source workflow + status", () => {
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_b", [trigger("n", "trigger.workflow.completed", { workflowId: "wf_a" })]),
+      wf("wf_c", [
+        trigger("n", "trigger.workflow.completed", { workflowId: "wf_a", status: "succeeded" }),
+      ]),
+      wf("wf_d", [trigger("n", "trigger.workflow.completed", { workflowId: "wf_other" })]),
+      wf("wf_any", [trigger("n", "trigger.workflow.completed", {})]),
+    ])
+
+    // Success of wf_a: scoped-any-status + scoped-succeeded + unscoped match.
+    const success = findMatchingWorkflows("trigger.workflow.completed", {
+      sourceWorkflowId: "wf_a",
+      status: "succeeded",
+    })
+    expect(success.map((m) => m.workflowId).sort()).toEqual(["wf_any", "wf_b", "wf_c"])
+
+    // Failure of wf_a: the succeeded-only node drops out.
+    const failure = findMatchingWorkflows("trigger.workflow.completed", {
+      sourceWorkflowId: "wf_a",
+      status: "failed",
+    })
+    expect(failure.map((m) => m.workflowId).sort()).toEqual(["wf_any", "wf_b"])
+  })
+
   it("returns an empty array when nothing matches or cache is empty", () => {
     expect(findMatchingWorkflows("trigger.chat.message", {})).toEqual([])
     _seedTriggerSubscriptionsForTest([])

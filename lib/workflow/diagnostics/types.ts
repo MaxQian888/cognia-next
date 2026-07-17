@@ -34,6 +34,7 @@ export type DiagnosticCode =
   | "credentialMissing"
   | "pluginUnavailable"
   | "desktopOnlyInWeb"
+  | "joinPolicyInLoop"
 
 export interface Diagnostic {
   /** Stable identity across recomputes — `diagId(code, {nodeId,edgeId,field})`. */

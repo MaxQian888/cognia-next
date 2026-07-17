@@ -641,7 +641,7 @@
       "label": "Set variable"
     },
     "split": {
-      "description": "Fans out to multiple branches that run concurrently.",
+      "description": "Fans out to multiple branches that run concurrently. Pure passthrough — every branch receives the SAME input; it does not partition or copy-slice data (use flow.loop or data.aggregate group-by for that).",
       "label": "Split (parallel)"
     },
     "subworkflow": {
@@ -741,6 +741,12 @@
     "webhook": {
       "description": "Fires when an HTTP request hits the workflow's webhook path.",
       "label": "On webhook"
+    },
+    "workflow": {
+      "completed": {
+        "description": "Fires when another workflow's run finishes (succeeded or failed), receiving its output as the trigger payload.",
+        "label": "On workflow completed"
+      }
     }
   }
 }

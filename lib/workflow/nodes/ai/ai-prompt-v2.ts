@@ -9,15 +9,26 @@
  *   - Streams deltas through `ctx.emitStream` (live output in the run UI).
  *   - Reports token/cost usage through `ctx.reportUsage` (`step_usage`).
  *
+ * Structured output (D3) matches v1 exactly: when JSON mode declares an
+ * `outputSchema`, the completion is validated against it with ONE bounded
+ * auto-fix retry (`runStructuredTurn`), and `onSchemaViolation` decides
+ * whether a persistent violation throws (`fail`, default — feeds the node's
+ * errorPolicy machinery) or rides the output as `schemaValid: false`
+ * (`soft`). The legacy `jsonSchema` string param stays a shape HINT only.
+ * `ai.classify` / `ai.extract` delegate here and inherit the contract.
+ *
  * Explicit mode keeps v1's deliberate echo-stub when credentials are
  * missing (so half-configured workflows still run end-to-end); routed mode
  * has NO stub — a missing route or missing keys is a hard, descriptive error.
+ * The stub never enforces the schema (there is no model to auto-fix).
  */
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
 import type { ApiFlavor } from "@cognia/provider-types/provider"
 import { applyPiiGate, type PiiGateMode } from "./pii-gate"
 import { buildJsonInstruction, parseStructured } from "./structured"
+import { runStructuredTurn, type SchemaViolationMode } from "./structured-turn"
+import { validateAgainstJsonSchema } from "./schema-validate"
 
 export interface AiPromptV2Params {
   mode?: "explicit" | "routed"
@@ -40,7 +51,16 @@ export interface AiPromptV2Params {
   userPrompt?: string
   temperature?: number
   responseFormat?: "text" | "json"
+  /** Legacy JSON shape HINT (string) — never validated. */
   jsonSchema?: string
+  /**
+   * JSON object schema the JSON-mode output must satisfy (D3). When set on a
+   * real (non-stub) call, the completion is validated and auto-fixed once;
+   * `schemaValid` / `schemaErrors` ride the output.
+   */
+  outputSchema?: Record<string, unknown>
+  /** `fail` (default) throws on violation; `soft` keeps the unvalidated value. */
+  onSchemaViolation?: SchemaViolationMode
   piiGate?: PiiGateMode
 }
 
@@ -64,8 +84,13 @@ interface PromptOutcome {
 export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<StepExecutionResult> {
   const params = ctx.params as AiPromptV2Params
   const jsonMode = params.responseFormat === "json"
+  const outputSchema = params.outputSchema
+  const enforceSchema = jsonMode && !!outputSchema && Object.keys(outputSchema).length > 0
+  // A declared output schema doubles as the JSON shape hint (v1 parity);
+  // otherwise the legacy `jsonSchema` string hint applies.
+  const schemaHint = enforceSchema ? JSON.stringify(outputSchema, null, 2) : params.jsonSchema
   const baseSystem = jsonMode
-    ? [params.systemPrompt, buildJsonInstruction(params.jsonSchema)].filter(Boolean).join("\n\n")
+    ? [params.systemPrompt, buildJsonInstruction(schemaHint)].filter(Boolean).join("\n\n")
     : params.systemPrompt
 
   // PII gate FIRST — nothing leaves the machine before it ran. "block"
@@ -98,18 +123,61 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     }
   }
 
+  // Shared tail: attach `structured` / `parseError` in JSON mode, plus the
+  // soft `schemaValid` / `schemaErrors` stamp when a schema is enforced —
+  // identical to v1's finalize so the two versions' outputs stay
+  // shape-compatible for downstream expressions.
   const finalize = (out: PromptOutcome): StepExecutionResult => {
     const withPii = gated.redacted ? { ...out, piiRedacted: true } : out
     if (!jsonMode) return { output: withPii }
     const parsed = parseStructured(out.completion)
+    const schemaFields =
+      enforceSchema && !parsed.error
+        ? (() => {
+            const v = validateAgainstJsonSchema(outputSchema!, parsed.value)
+            return v.ok ? { schemaValid: true } : { schemaValid: false, schemaErrors: v.errors }
+          })()
+        : enforceSchema
+          ? { schemaValid: false }
+          : {}
     return {
       output: {
         ...withPii,
         structured: parsed.value,
         ...(parsed.error ? { parseError: parsed.error } : {}),
+        ...schemaFields,
       },
     }
   }
+
+  /**
+   * Drive one-or-two model calls through the typed-output contract. `callOnce`
+   * owns the actual model invocation (routed or explicit); the auto-fix retry
+   * appends the corrective re-prompt to the user prompt — same placement as
+   * v1. Returns the LAST outcome (the retry's completion when one happened);
+   * `runStructuredTurn` throws in `fail` mode when the schema still fails.
+   */
+  const runWithSchema = async (
+    callOnce: (fixInstruction?: string) => Promise<PromptOutcome>
+  ): Promise<PromptOutcome> => {
+    if (!enforceSchema) return callOnce()
+    let last: PromptOutcome | undefined
+    await runStructuredTurn({
+      outputSchema: outputSchema!,
+      onSchemaViolation: params.onSchemaViolation,
+      runOnce: async (fix) => {
+        last = await callOnce(fix)
+        const parsed = parseStructured(last.completion)
+        return parsed.error
+          ? { object: parsed.value, parseError: parsed.error }
+          : { object: parsed.value }
+      },
+    })
+    // runStructuredTurn always invoked runOnce at least once.
+    return last!
+  }
+
+  const withFix = (user: string, fix?: string): string => (fix ? `${user}\n\n${fix}` : user)
 
   const { startSpan, endSpan } = await import("@cognia/agent-trace/emitter")
   const span = startSpan({
@@ -143,19 +211,30 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
 
   if (params.mode === "routed") {
     const { runRoutedPrompt, defaultRoutedPromptDeps } = await import("./ai-prompt-routed")
-    try {
+    const deps = await defaultRoutedPromptDeps()
+    // Sum usage/cost across the auto-fix retry so `step_usage` reflects what
+    // the node actually spent, not just the last call.
+    const totals = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+    let totalCostUsd: number | undefined
+    const callOnce = async (fix?: string): Promise<PromptOutcome> => {
       const result = await runRoutedPrompt(
         {
           modelAlias: params.modelAlias,
-          userPrompt: gated.user,
+          userPrompt: withFix(gated.user, fix),
           systemPrompt: gated.system,
           temperature: params.temperature,
           onDelta: ctx.emitStream,
           log: (level, message) => ctx.log(level, message),
         },
-        await defaultRoutedPromptDeps()
+        deps
       )
-      const out: PromptOutcome = {
+      totals.inputTokens += result.usage.inputTokens
+      totals.outputTokens += result.usage.outputTokens
+      totals.totalTokens += result.usage.totalTokens
+      if (typeof result.costUsd === "number") {
+        totalCostUsd = (totalCostUsd ?? 0) + result.costUsd
+      }
+      return {
         provider: result.provider,
         model: result.model,
         completion: result.completion,
@@ -165,12 +244,15 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
         attempts: result.attempts,
         routingReason: result.routingReason,
       }
-      finishSpan(out)
+    }
+    try {
+      const out = await runWithSchema(callOnce)
+      finishSpan({ ...out, usage: { ...out.usage, ...totals } })
       ctx.reportUsage?.({
-        ...result.usage,
-        providerId: result.provider,
-        modelId: result.model,
-        costUsd: result.costUsd,
+        ...totals,
+        providerId: out.provider,
+        modelId: out.model,
+        costUsd: totalCostUsd,
       })
       return finalize(out)
     } catch (err) {
@@ -214,27 +296,42 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     defaultTemperature: params.temperature,
   })
 
-  let completion: string
-  try {
+  const callOnce = async (fix?: string): Promise<PromptOutcome> => {
+    const user = withFix(gated.user, fix)
     const options = {
       system: gated.system,
       temperature: params.temperature,
       abortSignal: ctx.signal,
     }
+    let completion: string
     if (ctx.emitStream && client.stream) {
       completion = ""
-      for await (const delta of client.stream(gated.user, options)) {
+      for await (const delta of client.stream(user, options)) {
         completion += delta
         ctx.emitStream(delta)
       }
     } else {
-      completion = await client.complete(gated.user, options)
+      completion = await client.complete(user, options)
     }
+    return {
+      provider: params.provider,
+      model: params.model,
+      completion,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      stub: false,
+    }
+  }
+
+  let out: PromptOutcome
+  try {
+    out = await runWithSchema(callOnce)
   } catch (err) {
     failSpan(err)
     throw err
   }
 
+  // Snapshot ONCE after the (possibly retried) turn — the client accumulates
+  // usage across calls, so this is the true total for the step.
   const usage = client.getUsageSnapshot?.() ?? {
     inputTokens: 0,
     outputTokens: 0,
@@ -247,14 +344,7 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
   })
-  const out: PromptOutcome = {
-    provider: params.provider,
-    model: params.model,
-    completion,
-    usage,
-    stub: false,
-    costUsd,
-  }
+  out = { ...out, usage, costUsd }
   finishSpan(out)
   ctx.reportUsage?.({
     ...usage,

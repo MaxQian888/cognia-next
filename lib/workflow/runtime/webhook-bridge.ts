@@ -9,6 +9,7 @@
  */
 
 import type { VisualWorkflow, WorkflowNode } from "@/types/workflow/visual"
+import { validateWorkflowCronExpression } from "@/lib/scheduler/cron-parser"
 import { registerTrigger, unregisterTrigger, getWebhookUrl } from "./tauri-bridge"
 
 interface WebhookParams {
@@ -58,9 +59,20 @@ async function syncOneTrigger(
   switch (node.type) {
     case "trigger.cron": {
       const cronParams = params as CronParams
+      const expression = cronParams.cron ?? ""
+      const validation = validateWorkflowCronExpression(expression)
+      if (!validation.valid) {
+        throw new Error(
+          "Cannot register workflow cron '" +
+            expression +
+            "': " +
+            (validation.error ?? "invalid expression")
+        )
+      }
       await registerTrigger({
         ...baseInput,
-        cron: cronParams.cron,
+        cron: expression,
+        timezone: cronParams.timezone,
       })
       return
     }
@@ -86,6 +98,7 @@ async function syncOneTrigger(
     case "trigger.connector.inbound":
     case "trigger.chat.message":
     case "trigger.goal.completed":
+    case "trigger.workflow.completed":
     case "trigger.terminal.command":
     case "trigger.desktop.event":
     case "trigger.team":

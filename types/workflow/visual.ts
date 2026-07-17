@@ -217,6 +217,11 @@ export type WorkflowNodeKind =
   // + nurture action. Runner lives in `lib/workflow/runtime/pet-event-trigger.ts`.
   | "trigger.pet.event"
   | "action.pet.interact"
+  // Chained workflows (ADR-0081): fires when another workflow's run reaches a
+  // terminal status (succeeded/failed). Emitted by the orchestrator through
+  // `lib/workflow/runtime/workflow-completion-fanout.ts` with a chain-depth
+  // guard + self-trigger protection, consumed via the TS-hook trigger index.
+  | "trigger.workflow.completed"
   // AI primitives
   | "ai.prompt"
   | "ai.classify"
@@ -430,6 +435,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.terminal.command",
   "trigger.pet.event",
   "action.pet.interact",
+  "trigger.workflow.completed",
   "ai.prompt",
   "ai.classify",
   "ai.extract",
@@ -683,9 +689,11 @@ export interface WorkflowSettings {
   concurrency: number
   /**
    * Per ADR-0022 §3.7. Max in-flight nodes WITHIN a single run for the
-   * ready-set scheduler. Optional and defaults to 1 in `runWorkflow` to
-   * preserve the legacy sequential behavior. NOT the same as `concurrency`
-   * (that field caps concurrent RUNS of the same workflow).
+   * ready-set scheduler. Optional; absent values are backfilled to
+   * {@link DEFAULT_MAX_CONCURRENCY} by the zod settings schema, so the
+   * orchestrator, the editor forms, and new-workflow seeds all agree on ONE
+   * default. NOT the same as `concurrency` (that field caps concurrent RUNS
+   * of the same workflow).
    */
   maxConcurrency?: number
   retryDefaults: WorkflowRetryPolicy
@@ -950,6 +958,8 @@ export interface WorkflowTriggerRow {
   enabled: boolean
   /** Cron expression (only meaningful for `trigger.cron`). */
   cron?: string
+  /** IANA timezone used for cron wall-clock evaluation; absent means host local. */
+  timezone?: string
   /** Pre-computed next-fire timestamp (used by the editor preview). */
   nextFireAt?: number
   /** Webhook path or connector binding (kind-dependent). */
@@ -1067,6 +1077,8 @@ export interface RegisterTriggerInput {
   triggerId: string
   kind: WorkflowNodeKind
   cron?: string
+  /** IANA timezone used by the Rust cron daemon; absent means host local. */
+  timezone?: string
   webhookPath?: string
   /** HTTP method the receiver allows. Defaults to POST. */
   webhookMethod?: string
@@ -1104,14 +1116,21 @@ export interface RegisterTriggerInput {
 // Defaults — the editor and seed loaders use these when creating new entities.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The ONE in-run ready-set parallelism default. Four sources used to disagree
+ * (zod: none, seed: 4, orchestrator: 1, editor: 1/4) — making the same
+ * workflow sequential or 4-wide depending on whether its persisted `settings`
+ * blob happened to carry the field. Every consumer now derives from this
+ * constant: the zod settings schema backfills it at validation, so legacy
+ * no-field workflows run 4-wide like new ones.
+ */
+export const DEFAULT_MAX_CONCURRENCY = 4
+
 export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
   errorPolicy: "stop",
   timeoutMs: 600_000,
   concurrency: 1,
-  // In-run ready-set parallelism for NEW workflows. Persisted workflows
-  // without the field keep the legacy sequential behavior (`?? 1` in
-  // runWorkflow) — only the seed for newly created workflows changed.
-  maxConcurrency: 4,
+  maxConcurrency: DEFAULT_MAX_CONCURRENCY,
   retryDefaults: { attempts: 3, backoff: "exponential", baseMs: 1000, maxMs: 30_000 },
   onFailure: { runCatchNodes: true, notify: false },
 }

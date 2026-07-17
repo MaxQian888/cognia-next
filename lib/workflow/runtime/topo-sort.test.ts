@@ -57,7 +57,9 @@ describe("topoSort", () => {
     expect(a).toEqual(b)
   })
 
-  it("recognizes loop back-edges and excludes them from the order", () => {
+  it("throws on a cycle through a flow.loop node instead of silently dropping the back-edge", () => {
+    // The old "authorized back-edge" tolerance removed e3 and ran the graph
+    // once — a validated-looking loop that never looped. Cycles now throw.
     const w = wf(
       [
         { id: "a", type: "trigger.manual" },
@@ -70,9 +72,24 @@ describe("topoSort", () => {
         { id: "e3", source: "b", target: "loop" }, // back-edge
       ]
     )
+    expect(() => topoSort(w)).toThrow(/flow\.loop container/)
+  })
+
+  it("keeps a linear chain through a flow.wait node sortable (no cycle, no throw)", () => {
+    const w = wf(
+      [
+        { id: "a", type: "trigger.manual" },
+        { id: "wait", type: "flow.wait" },
+        { id: "b", type: "ai.prompt" },
+      ],
+      [
+        { id: "e1", source: "a", target: "wait" },
+        { id: "e2", source: "wait", target: "b" },
+      ]
+    )
     const r = topoSort(w)
-    expect(r.order).toEqual(["a", "loop", "b"])
-    expect(r.backEdges.map((e) => e.id)).toEqual(["e3"])
+    expect(r.order).toEqual(["a", "wait", "b"])
+    expect(r.backEdges).toEqual([])
   })
 
   it("throws when a cycle has no flow.loop / flow.wait on it", () => {

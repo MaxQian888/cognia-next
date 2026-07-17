@@ -319,6 +319,10 @@
       "label": "标题"
     }
   },
+  "arrayField": {
+    "add": "添加",
+    "removeItem": "移除第 {index} 项"
+  },
   "branch": {
     "condition": {
       "hint": "表达式，求值为真值则走真分支。支持 '{{ }}' 表达式。",
@@ -2357,6 +2361,10 @@
       "hint": "作为子工作流的触发负载转发。",
       "label": "输入（JSON）"
     },
+    "typedInput": {
+      "hint": "根据已发布目标声明的输入 schema 生成的字段。运行时会按该 schema 校验。",
+      "label": "类型化输入"
+    },
     "workflowId": {
       "label": "子工作流"
     }
@@ -2812,7 +2820,8 @@
         "map": "Map（映射）",
         "reduce": "Reduce（归约）",
         "sort": "Sort（排序）"
-      }
+      },
+      "reduceHint": "此处的 reduce 仅对条目表达式做数值求和。需要通用折叠（collect / group-by / dedupe / merge / 自定义 reducer）请使用 data.aggregate 节点。"
     }
   },
   "twinIngest": {
@@ -2875,12 +2884,21 @@
         "sec": "秒"
       }
     },
+    "eventKey": {
+      "hint": "外部来源触发的唤醒键（例如 wf_emit_workflow_event 工具）。留空表示仅限本次运行与本节点的私有键。",
+      "label": "事件键（可选）",
+      "placeholder": "deploy-approved"
+    },
     "mode": {
       "label": "等待方式",
       "options": {
         "duration": "固定时长",
         "event": "等待事件（Phase 4+）"
       }
+    },
+    "timeoutMs": {
+      "hint": "等待超过该时长后放弃。0 表示一直等到运行被取消或超时。",
+      "label": "等待超时"
     }
   },
   "webClone": {
@@ -2997,6 +3015,21 @@
       "hint": "可选。默认为工作流运行 ID。",
       "label": "响应正文模板",
       "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
+    }
+  },
+  "workflowCompletedTrigger": {
+    "status": {
+      "hint": "仅在指定结果时触发。“任意”表示成功与失败都会触发。",
+      "label": "结果过滤",
+      "options": {
+        "any": "任意",
+        "failed": "失败",
+        "succeeded": "成功"
+      }
+    },
+    "workflowId": {
+      "hint": "要监听的来源工作流。留空表示任何工作流完成都会触发（始终排除本工作流自身）。",
+      "label": "来源工作流（可选）"
     }
   }
 }

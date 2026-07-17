@@ -12,7 +12,7 @@ import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
 import { collectGraphIntegrityIssues } from "@/lib/workflow/definition/validate"
 import { validateNodeParams } from "@/lib/workflow/nodes/validate-params"
 import { diagId, makeDiagnostic } from "./diagnostic-id"
-import { checkReachability } from "./checks/graph-structure"
+import { checkLoopBodyJoinPolicy, checkReachability } from "./checks/graph-structure"
 import { checkExpressionRefs } from "./checks/expression-refs"
 import { checkCredentials, checkKindAvailability } from "./checks/availability"
 import { checkDesktopOnly } from "./checks/desktop-only"
@@ -84,6 +84,7 @@ export function runDiagnostics(input: DiagnosticsInput): DiagnosticsResult {
     ...adaptNodeParams(workflow),
     ...adaptGraphIntegrity(workflow),
     ...checkReachability(workflow),
+    ...checkLoopBodyJoinPolicy(workflow),
     ...checkExpressionRefs(workflow),
     ...checkCredentials(workflow),
     ...(isKindAvailable ? checkKindAvailability(workflow, isKindAvailable) : []),

@@ -68,11 +68,15 @@ describe("editor store — graph mutations", () => {
     // ai.prompt v2 = routed mode + PII gate + streaming (explicit mode stays
     // wire-compatible with v1).
     const aiId = useStore.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    // flow.loop v1 only produces an index array WITHOUT running its body —
+    // new loops must always be the v2 container.
+    const loopId = useStore.getState().addNode("flow.loop", { x: 0, y: 0 })
     const setId = useStore.getState().addNode("flow.set", { x: 0, y: 0 })
     const byId = (id: string) => useStore.getState().nodes.find((n) => n.id === id)!
     expect(byId(branchId).data.typeVersion).toBe(2)
     expect(byId(switchId).data.typeVersion).toBe(2)
     expect(byId(aiId).data.typeVersion).toBe(2)
+    expect(byId(loopId).data.typeVersion).toBe(2)
     expect(byId(setId).data.typeVersion).toBe(1)
   })
 

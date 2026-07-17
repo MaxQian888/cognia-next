@@ -166,6 +166,7 @@ import {
   WaitConfig,
   WebhookRespondConfig,
   WebhookTriggerConfig,
+  WorkflowCompletedTriggerConfig,
   OutputConfig,
 } from "./forms"
 
@@ -183,6 +184,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "trigger.connector.inbound": ConnectorInboundConfig,
   "trigger.chat.message": ChatMessageTriggerConfig,
   "trigger.goal.completed": GoalCompletedTriggerConfig,
+  "trigger.workflow.completed": WorkflowCompletedTriggerConfig,
   "trigger.webhook": WebhookTriggerConfig,
   "trigger.team": TeamTriggerConfig,
   "trigger.desktop.event": DesktopEventTriggerConfig,

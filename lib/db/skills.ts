@@ -1,5 +1,6 @@
 import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@cognia/agent-config-types"
 import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
+import { WORKFLOW_RUNNER_TOOL_NAME } from "@/lib/workflow/publish/runner-tool"
 import { getDb } from "./schema"
 import {
   deleteResourcesForSkill,
@@ -402,13 +403,43 @@ export async function bulkImportSkills(
 }
 
 /**
+ * Canonical body for a graph-bodied skill (`kind:"workflow"`) — instructs the
+ * model to call the shared typed runner with the workflow's name. Derived from
+ * the name alone so it can be RE-derived at render time: rows published before
+ * the runner-tool fix carry stale bodies naming a `wf_<slug>` ghost tool, and
+ * re-deriving here self-heals them without a data migration.
+ * `publishWorkflow` stores this same body on the skill row.
+ */
+export function workflowSkillBody(name: string): string {
+  return [
+    `# ${name}`,
+    "",
+    `This skill runs the **${name}** workflow as a typed tool.`,
+    "",
+    `When this skill is relevant, call the \`${WORKFLOW_RUNNER_TOOL_NAME}\` tool with ` +
+      `\`{ "name": ${JSON.stringify(name)}, "input": { … } }\` where \`input\` matches the ` +
+      `workflow's declared input schema — it executes the workflow graph and returns ` +
+      `its typed output. Do NOT try to perform the steps yourself; the workflow runs ` +
+      `them deterministically.`,
+  ].join("\n")
+}
+
+/**
  * Render a list of skills as a system-prompt suffix. Each skill becomes a
  * `## <name>` section followed by its markdown body, joined by blank lines.
+ * Graph-bodied skills (`kind:"workflow"`) render the canonical runner
+ * instruction instead of their stored content (see {@link workflowSkillBody}).
  * Returns an empty string when there are no skills.
  */
 export function renderSkillsSection(skills: Skill[]): string {
   if (skills.length === 0) return ""
-  return skills.map((s) => `## ${s.name}\n\n${s.content.trim()}`).join("\n\n")
+  return skills
+    .map((s) =>
+      s.kind === "workflow"
+        ? `## ${s.name}\n\n${workflowSkillBody(s.name)}`
+        : `## ${s.name}\n\n${s.content.trim()}`
+    )
+    .join("\n\n")
 }
 
 /**
@@ -424,6 +455,15 @@ export function renderSkillsCatalog(skills: Skill[]): string {
   if (skills.length === 0) return ""
   const lines = skills.map((s) => {
     const desc = s.description?.trim()
+    // Graph-bodied skills need no load_skill round-trip — the callable
+    // contract fits on one line, so surface it directly.
+    if (s.kind === "workflow") {
+      return (
+        `- \`${s.id}\` — ${s.name}${desc ? `: ${desc}` : ""} ` +
+        `(graph-bodied skill: run it by calling the \`${WORKFLOW_RUNNER_TOOL_NAME}\` tool ` +
+        `with \`{ "name": ${JSON.stringify(s.name)} }\`)`
+      )
+    }
     return `- \`${s.id}\` — ${s.name}${desc ? `: ${desc}` : ""}`
   })
   return [

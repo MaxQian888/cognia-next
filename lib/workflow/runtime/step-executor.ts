@@ -59,6 +59,13 @@ export interface RunStepInput {
   cacheKey?: string
   /** Iteration provenance stamped onto step start/complete event payloads. */
   iterationMeta?: { loopId: string; iterationIndex: number }
+  /**
+   * Outputs of every node completed so far in this run — the
+   * `{{ $nodes['id'] }}` global expression scope. Direct predecessors remain
+   * the `upstream` map (`$node[...]`); this is the best-effort superset for
+   * non-adjacent reads. Optional so isolated callers stay unchanged.
+   */
+  nodesOutputs?: Record<string, unknown>
 }
 
 export interface StepExecution {
@@ -140,6 +147,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     staticData: input.staticData ?? {},
     params: node.data.params as Record<string, unknown>,
     variables: input.workflow.variables ?? {},
+    ...(input.nodesOutputs ? { nodes: input.nodesOutputs } : {}),
   })
 
   const ctx: StepExecutionContext = {

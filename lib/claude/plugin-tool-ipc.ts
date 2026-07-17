@@ -22,6 +22,7 @@
  */
 
 import type { PluginToolContext } from "@/types/plugin"
+import { WORKFLOW_RUNNER_TOOL_NAME } from "@/lib/workflow/publish/runner-tool"
 import { ASK_USER_TOOL_NAME } from "./ask-user-tool"
 import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "./agents/dispatch-agent-tool"
 import { isWebBuiltinTool, runWebBuiltinTool, type WebToolRunDeps } from "./web-builtin-tools"
@@ -357,6 +358,18 @@ export async function handlePluginToolExec(
         })
         return { ...baseResponse, result }
       }
+    }
+    // ── Typed workflow runner fallback ─────────────────────────────────
+    // Graph-bodied skills (`kind:"workflow"`) point the model at the shared
+    // runner; `build-options.ts` manifests it even when the workflow-ai
+    // plugin is disabled, so resolution through the plugin registry can
+    // legitimately miss. Execute the shared lib core directly — same code
+    // the plugin registration wraps.
+    if (request.name === WORKFLOW_RUNNER_TOOL_NAME) {
+      const { executeRunWorkflowTyped } =
+        await import("@/lib/workflow/publish/run-workflow-typed-tool")
+      const result = await executeRunWorkflowTyped(request.args)
+      return { ...baseResponse, result }
     }
     // ── ADR-0026 — built-in skill fallback ────────────────────────────
     // Tool not in the plugin registry — try the built-in skill registry.

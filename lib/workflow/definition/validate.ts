@@ -12,6 +12,7 @@
 
 import { z } from "zod"
 import {
+  DEFAULT_MAX_CONCURRENCY,
   WORKFLOW_NODE_KINDS,
   type VisualWorkflow,
   type WorkflowNodeKind,
@@ -120,9 +121,12 @@ const settingsSchema = z.object({
   concurrency: z.number().int().min(1).max(100),
   /**
    * Per ADR-0022 §3.7. Max in-flight nodes WITHIN a single run for the
-   * orchestrator's ready-set scheduler. Optional; orchestrator defaults to 1.
+   * orchestrator's ready-set scheduler. Backfilled at validation to the ONE
+   * shared default so legacy persisted settings blobs without the field run
+   * exactly like new workflows (the orchestrator reads the VALIDATED
+   * snapshot, so this default is what actually executes).
    */
-  maxConcurrency: z.number().int().min(0).max(100).optional(),
+  maxConcurrency: z.number().int().min(0).max(100).default(DEFAULT_MAX_CONCURRENCY),
   retryDefaults: retryPolicySchema,
   timezone: z.string().optional(),
   /**
@@ -152,9 +156,10 @@ const viewportSchema = z.object({
 
 /**
  * Top-level workflow envelope. Note: `nodes` and `edges` integrity (edge
- * endpoints reference real node ids; cycles only allowed via loop/wait
- * nodes) is checked separately in `validateGraphIntegrity` below — zod can
- * enforce shape but not graph constraints.
+ * endpoints reference real node ids; no cycles — iteration lives inside
+ * `flow.loop` v2 containers) is checked separately in
+ * `validateGraphIntegrity` below — zod can enforce shape but not graph
+ * constraints.
  */
 export const visualWorkflowSchema = z.object({
   id: z.string().min(1),
@@ -217,11 +222,16 @@ export interface GraphIntegrityIssue {
 }
 
 /**
- * The set of nodes that form an UNAUTHORIZED cycle — a cycle with no
- * `flow.loop` / `flow.wait` node on it to make the back-edge explicit. Returns
- * an empty set when the only cycles are authorized or there are none. Shared
- * by `collectGraphIntegrityIssues` (here) and the editor diagnostics engine so
- * the two never drift.
+ * The set of nodes that form a cycle. EVERY cycle is unauthorized: the
+ * orchestrator schedules the graph as a DAG and silently drops back-edges, so
+ * a "loop" drawn as a top-level cycle runs each node exactly ONCE — the only
+ * construct that actually iterates is the `flow.loop` typeVersion-2 CONTAINER
+ * (whose body nodes carry `parentId` and never form top-level edges).
+ * Historically a cycle passing through any `flow.loop`/`flow.wait` node was
+ * "authorized", which validated graphs whose runtime behavior was a silent
+ * single pass; that authorization is gone. Returns an empty set when there
+ * are no cycles. Shared by `collectGraphIntegrityIssues` (here) and the
+ * editor diagnostics engine so the two never drift.
  */
 export function collectUnauthorizedCycleNodes(wf: VisualWorkflow): Set<string> {
   const nodeIds = new Set(wf.nodes.map((n) => n.id))
@@ -267,11 +277,7 @@ export function collectUnauthorizedCycleNodes(wf: VisualWorkflow): Set<string> {
       }
     }
   }
-  if (cycleNodes.size === 0) return new Set()
-  const authorized = wf.nodes.some(
-    (n) => cycleNodes.has(n.id) && (n.type === "flow.loop" || n.type === "flow.wait")
-  )
-  return authorized ? new Set() : cycleNodes
+  return cycleNodes
 }
 
 /**
@@ -451,7 +457,10 @@ function stringifyIntegrityIssue(issue: GraphIntegrityIssue): string {
       return `Edge ${issue.edgeId} crosses a loop container boundary (${p.source} → ${p.target})`
     case "graphCycle":
       // Re-collapsed by the caller; never reached via the per-node path.
-      return `Cycle detected through nodes: ${p.nodes}. Add a flow.loop or flow.wait node to make the back-edge explicit.`
+      return (
+        `Cycle detected through nodes: ${p.nodes}. Top-level back-edges never re-execute — ` +
+        "move the nodes that should repeat INSIDE a flow.loop container (typeVersion 2) instead."
+      )
   }
 }
 
@@ -460,9 +469,10 @@ function stringifyIntegrityIssue(issue: GraphIntegrityIssue): string {
  * cycle violations. The orchestrator runs this BEFORE topo-sort so users
  * see all problems at once instead of crashing mid-run.
  *
- * Cycles are allowed only when at least one node on the cycle is a `flow.loop`
- * or `flow.wait` — these are the explicit "back-edge" nodes. Generic cycles
- * are rejected.
+ * ALL cycles are rejected: the scheduler drops back-edges, so a cyclic graph
+ * would validate and then silently run every node once. Iteration is expressed
+ * with the `flow.loop` typeVersion-2 container, whose body is a nested
+ * sub-canvas — never a top-level back-edge.
  *
  * Derived from `collectGraphIntegrityIssues` so the runtime strings and the
  * editor's structured diagnostics never drift.
@@ -483,7 +493,8 @@ export function validateGraphIntegrity(wf: VisualWorkflow): GraphIntegrityResult
   if (cycleNodes.length > 0) {
     errors.push(
       `Cycle detected through nodes: ${cycleNodes.join(", ")}. ` +
-        "Add a flow.loop or flow.wait node to make the back-edge explicit."
+        "Top-level back-edges never re-execute — move the nodes that should repeat " +
+        "INSIDE a flow.loop container (typeVersion 2) instead."
     )
   }
   return { errors, warnings }

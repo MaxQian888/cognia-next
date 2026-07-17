@@ -37,6 +37,7 @@ const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.team",
   "trigger.desktop.event",
   "trigger.pet.event",
+  "trigger.workflow.completed",
 ]
 
 interface SubscriptionState {
@@ -121,6 +122,12 @@ export interface TriggerMatchContext {
   /** Goal id (goal.completed) — optional match; unspecified node matches any goal. */
   goalId?: string
   /**
+   * Source workflow id (workflow.completed) — matched against the node's
+   * `workflowId` param. A node without the filter matches EVERY workflow's
+   * terminal run (self-triggering is still rejected by the fanout emitter).
+   */
+  sourceWorkflowId?: string
+  /**
    * Outcome status — goal.completed sends the terminal goal status (e.g.
    * "completed"); terminal.command sends "success" / "failure". Optional
    * equality match against the node's `status` param.
@@ -201,6 +208,12 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
   }
   if (typeof p.goalId === "string" && p.goalId.length > 0) {
     if (ctx.goalId !== p.goalId) return false
+  }
+  // workflow.completed: the node's `workflowId` param scopes to ONE source
+  // workflow; entries are partitioned per kind so this never collides with
+  // other kinds' params.
+  if (typeof p.workflowId === "string" && p.workflowId.length > 0) {
+    if (ctx.sourceWorkflowId !== p.workflowId) return false
   }
   if (typeof p.status === "string" && p.status.length > 0) {
     if (ctx.status !== p.status) return false

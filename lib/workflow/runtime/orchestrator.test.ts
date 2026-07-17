@@ -46,6 +46,20 @@ jest.mock("./secret-resolver-keyring", () => ({
   }),
 }))
 
+// Chained-trigger fanout (ADR-0081) — the orchestrator must announce every
+// REAL terminal state (and suppress partial/catch runs). Mocked so no chained
+// dispatch actually runs; behavior is covered in workflow-completion-fanout.test.ts.
+const mockEmitCompletionFanout = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("./workflow-completion-fanout", () => ({
+  emitWorkflowCompletedFanout: (...args: unknown[]) => mockEmitCompletionFanout(...args),
+}))
+
+/** Flush the orchestrator's fire-and-forget fanout (dynamic import + then). */
+async function flushFanout(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 0))
+  await new Promise((r) => setTimeout(r, 0))
+}
+
 import { runWorkflow } from "./orchestrator"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listRunEvents } from "./event-log"
@@ -1018,7 +1032,36 @@ describe("runWorkflow — concurrent scheduling", () => {
     expect(maxInflightBC).toBe(2)
   })
 
-  it("maxConcurrency=1 default serializes (backward compat)", async () => {
+  it("absent maxConcurrency backfills to the shared default (4-wide)", async () => {
+    let inflight = 0
+    let maxInflight = 0
+    registerNodeExecutor({
+      kind: "test.async" as never,
+      typeVersion: 1,
+      execute: async () => {
+        inflight += 1
+        maxInflight = Math.max(maxInflight, inflight)
+        await new Promise((r) => setTimeout(r, 15))
+        inflight -= 1
+        return { output: null }
+      },
+    })
+
+    // No maxConcurrency set → the zod settings schema backfills
+    // DEFAULT_MAX_CONCURRENCY (4), so a legacy no-field settings blob runs at
+    // the same width as a freshly created workflow. Three independent nodes
+    // must all be in flight together (3 < 4).
+    const wf: VisualWorkflow = {
+      ...buildAsyncWorkflow(["a", "b", "c"], [], 1),
+    }
+    delete (wf.settings as { maxConcurrency?: number }).maxConcurrency
+
+    const result = await runWorkflow({ workflow: wf, trigger })
+    expect(result.status).toBe("succeeded")
+    expect(maxInflight).toBe(3)
+  })
+
+  it("explicit maxConcurrency=1 still serializes", async () => {
     let inflight = 0
     let maxInflight = 0
     registerNodeExecutor({
@@ -1033,12 +1076,7 @@ describe("runWorkflow — concurrent scheduling", () => {
       },
     })
 
-    // No maxConcurrency set → defaults to 1 inside the orchestrator.
-    const wf: VisualWorkflow = {
-      ...buildAsyncWorkflow(["a", "b", "c"], [], 1),
-    }
-    delete (wf.settings as { maxConcurrency?: number }).maxConcurrency
-
+    const wf = buildAsyncWorkflow(["a", "b", "c"], [], 1)
     const result = await runWorkflow({ workflow: wf, trigger })
     expect(result.status).toBe("succeeded")
     expect(maxInflight).toBe(1)
@@ -1677,5 +1715,184 @@ describe("runWorkflow — risk gate", () => {
       triggeredBy: { source: "im", adapterId: "a1", conversationKey: "c1" },
     })
     expect(r.status).toBe("succeeded")
+  })
+})
+
+describe("runWorkflow — workflow-completed chain fanout (ADR-0081)", () => {
+  it("announces a succeeded run with its final output and the run's trigger", async () => {
+    const wf = buildWorkflow([setNode("n_a", "v")])
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("succeeded")
+
+    await flushFanout()
+    expect(mockEmitCompletionFanout).toHaveBeenCalledTimes(1)
+    expect(mockEmitCompletionFanout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: { id: "wf_x", name: "Test workflow" },
+        runId: r.runId,
+        status: "succeeded",
+        output: r.output,
+        trigger,
+      })
+    )
+  })
+
+  it("announces a failed run with the error envelope", async () => {
+    registerNodeExecutor({
+      kind: "test.fanout-fail" as never,
+      typeVersion: 1,
+      execute: async () => {
+        const err = new Error("kaboom") as Error & { retryable?: boolean }
+        err.retryable = false
+        throw err
+      },
+    })
+    const wf = buildWorkflow([
+      {
+        id: "n_boom",
+        type: "test.fanout-fail" as VisualWorkflow["nodes"][number]["type"],
+        typeVersion: 1,
+        position: { x: 0, y: 0 },
+        data: { label: "boom", params: {} },
+      },
+    ])
+
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("failed")
+
+    await flushFanout()
+    expect(mockEmitCompletionFanout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "failed",
+        error: expect.objectContaining({ message: "kaboom", nodeId: "n_boom" }),
+      })
+    )
+  })
+
+  it("announces a validation failure as a failed completion", async () => {
+    const wf = buildWorkflow([setNode("n_a", "v")])
+    wf.edges = [{ id: "e_ghost", source: "n_a", target: "n_missing" }]
+
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("failed")
+
+    await flushFanout()
+    expect(mockEmitCompletionFanout).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" })
+    )
+  })
+
+  it("stays silent for catch sub-runs (suppressCatch)", async () => {
+    const wf = buildWorkflow([setNode("n_a", "v")])
+    const r = await runWorkflow({ workflow: wf, trigger, suppressCatch: true })
+    expect(r.status).toBe("succeeded")
+
+    await flushFanout()
+    expect(mockEmitCompletionFanout).not.toHaveBeenCalled()
+  })
+
+  it('stays silent for partial "run this step" runs (restrictToStepIds)', async () => {
+    const wf = buildWorkflow([setNode("n_a", "v"), setNode("n_b", "w")])
+    const r = await runWorkflow({ workflow: wf, trigger, restrictToStepIds: ["n_a"] })
+    expect(r.status).toBe("succeeded")
+
+    await flushFanout()
+    expect(mockEmitCompletionFanout).not.toHaveBeenCalled()
+  })
+})
+
+describe("runWorkflow — $nodes global expression scope", () => {
+  it("lets a node read a NON-adjacent completed node's output", async () => {
+    // n_a → n_b → n_c; n_c references n_a via $nodes (no direct edge a→c).
+    const wf = buildWorkflow(
+      [
+        setNode("n_a", "from-a"),
+        setNode("n_b", "from-b"),
+        {
+          id: "n_c",
+          type: "data.template",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: {
+            label: "render",
+            params: { template: "far={{ $nodes['n_a'].value }} near={{ $node['n_b'].value }}" },
+          },
+        },
+      ],
+      [
+        { id: "e1", source: "n_a", target: "n_b" },
+        { id: "e2", source: "n_b", target: "n_c" },
+      ]
+    )
+
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("succeeded")
+    expect((r.output as { rendered: string }).rendered).toBe("far=from-a near=from-b")
+  })
+
+  it("a $nodes reference to a not-yet-run node renders empty (best-effort)", async () => {
+    // n_c runs parallel to n_a (no ordering path) — the read must not crash.
+    const wf = buildWorkflow(
+      [
+        setNode("n_a", "from-a"),
+        {
+          id: "n_c",
+          type: "data.template",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: {
+            label: "render",
+            params: { template: "got=[{{ $nodes['n_zzz'].value }}]" },
+          },
+        },
+      ],
+      []
+    )
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("succeeded")
+    const outputs = r.output as Record<string, { rendered?: string } | { value?: unknown }>
+    const rendered = Object.values(outputs).find(
+      (o): o is { rendered: string } => typeof (o as { rendered?: unknown }).rendered === "string"
+    )
+    expect(rendered?.rendered).toBe("got=[]")
+  })
+})
+
+describe("runWorkflow — $nodes reaches loop-body steps", () => {
+  it("a loop-body template reads a top-level completed node via $nodes", async () => {
+    const wf: VisualWorkflow = {
+      ...buildWorkflow([], []),
+      schemaVersion: 2,
+      nodes: [
+        setNode("n_top", "top-value"),
+        {
+          id: "n_loop",
+          type: "flow.loop",
+          typeVersion: 2,
+          position: { x: 200, y: 0 },
+          data: { label: "loop", params: { mode: "times", times: 1 } },
+        },
+        {
+          id: "n_body",
+          type: "data.template",
+          typeVersion: 1,
+          parentId: "n_loop",
+          position: { x: 10, y: 10 },
+          data: {
+            label: "body",
+            params: { template: "saw={{ $nodes['n_top'].value }}" },
+          },
+        },
+      ],
+      edges: [{ id: "e1", source: "n_top", target: "n_loop" }],
+    }
+
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("succeeded")
+    // The body's rendered output lives in its step_completed event (loop items
+    // default to the iteration index in times mode).
+    const events = await listRunEvents(r.runId)
+    const bodyDone = events.find((e) => e.stepId === "n_body" && e.type === "step_completed")
+    expect(JSON.stringify(bodyDone?.payload ?? {})).toContain("saw=top-value")
   })
 })

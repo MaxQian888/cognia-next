@@ -2223,6 +2223,29 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           pluginId: e.pluginId,
         })),
       ]
+      // Graph-bodied skills (`kind:"workflow"`) instruct the model to call the
+      // shared typed runner — that tool must therefore BE in the session
+      // whenever such a skill is active, even when the `cognia-workflow-ai`
+      // plugin is disabled (its registration normally provides it) or when
+      // semantic pruning would have dropped it. Appended AFTER pruning so it
+      // can't be pruned away; execution falls back to
+      // `lib/workflow/publish/run-workflow-typed-tool.ts` via
+      // `plugin-tool-ipc.ts` when the plugin isn't there to resolve it.
+      if (skills.some((s) => s.kind === "workflow")) {
+        const {
+          WORKFLOW_RUNNER_TOOL_NAME,
+          WORKFLOW_RUNNER_TOOL_DEFINITION,
+          WORKFLOW_AI_PLUGIN_ID,
+        } = await import("@/lib/workflow/publish/runner-tool")
+        if (!combined.some((entry) => entry.name === WORKFLOW_RUNNER_TOOL_NAME)) {
+          combined.push({
+            name: WORKFLOW_RUNNER_TOOL_NAME,
+            description: WORKFLOW_RUNNER_TOOL_DEFINITION.description,
+            jsonSchema: WORKFLOW_RUNNER_TOOL_DEFINITION.parametersSchema,
+            pluginId: WORKFLOW_AI_PLUGIN_ID,
+          })
+        }
+      }
       if (combined.length > 0) opts.pluginTools = combined
     } catch (err) {
       // Non-fatal — skip plugin tools for this turn if the bridge isn't ready

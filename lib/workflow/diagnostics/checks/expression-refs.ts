@@ -58,7 +58,25 @@ export function checkExpressionRefs(wf: VisualWorkflow): Diagnostic[] {
         if (segment.kind !== "expr") continue
         const tokens = tokenize(segment.value)
         const head = tokens[0]
-        if (!head || head.kind !== "node") continue
+        if (!head) continue
+        // `$nodes['id']` — the GLOBAL read scope. Existence is still checkable
+        // (an unknown id can never resolve); the upstream warning does NOT
+        // apply — reading non-adjacent completed nodes is its whole point.
+        if (head.kind === "nodes") {
+          if (!nodeIdSet.has(head.id)) {
+            out.push(
+              makeDiagnostic({
+                severity: "error",
+                code: "exprUnknownNode",
+                nodeId: node.id,
+                field: topField(path),
+                messageParams: { ref: head.id },
+              })
+            )
+          }
+          continue
+        }
+        if (head.kind !== "node") continue
         const ref = head.id
         const field = topField(path)
         if (ref === node.id || !nodeIdSet.has(ref)) {

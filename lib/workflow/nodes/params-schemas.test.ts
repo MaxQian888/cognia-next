@@ -1084,3 +1084,36 @@ describe("annotation schemas", () => {
     expect(s.safeParse({ width: 480, height: 320 }).success).toBe(true)
   })
 })
+
+describe("trigger.workflow.completed schema", () => {
+  const s = PARAMS_SCHEMAS["trigger.workflow.completed"]
+
+  it("accepts an unscoped node (both params absent)", () => {
+    expect(s.safeParse({}).success).toBe(true)
+  })
+
+  it("accepts the succeeded/failed outcomes AND the editor's empty-string any sentinel", () => {
+    expect(s.safeParse({ status: "succeeded" }).success).toBe(true)
+    expect(s.safeParse({ status: "failed" }).success).toBe(true)
+    // patchParam stores "" rather than deleting — the enum must tolerate it.
+    expect(s.safeParse({ status: "" }).success).toBe(true)
+  })
+
+  it("rejects unknown outcomes", () => {
+    expect(s.safeParse({ status: "cancelled" }).success).toBe(false)
+  })
+})
+
+describe("flow.wait event-mode schema", () => {
+  const s = PARAMS_SCHEMAS["flow.wait"]
+
+  it("accepts eventKey + timeoutMs alongside event mode", () => {
+    expect(
+      s.safeParse({ mode: "event", eventKey: "deploy-approved", timeoutMs: 60_000 }).success
+    ).toBe(true)
+  })
+
+  it("rejects a negative timeout", () => {
+    expect(s.safeParse({ mode: "event", timeoutMs: -1 }).success).toBe(false)
+  })
+})

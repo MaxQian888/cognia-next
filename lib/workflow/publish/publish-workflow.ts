@@ -17,15 +17,22 @@
 import type { VisualWorkflow, WorkflowInterface } from "@/types/workflow/visual"
 import { getWorkflow, updateWorkflow } from "@/lib/db/workflows"
 import { getDb } from "@/lib/db/schema"
-import { createSkill, updateSkill, deleteSkill } from "@/lib/db/skills"
+import { createSkill, updateSkill, deleteSkill, workflowSkillBody } from "@/lib/db/skills"
+import { WORKFLOW_RUNNER_TOOL_NAME } from "./runner-tool"
 import type { Skill } from "@cognia/agent-config-types"
+
+export { WORKFLOW_RUNNER_TOOL_NAME }
 
 /** Canonical id of the skill-catalog entry backing a published workflow. */
 export function workflowSkillCanonicalId(workflowId: string): string {
   return `workflow:${workflowId}`
 }
 
-/** Stable, slug-based tool name the agent calls to run the workflow. */
+/**
+ * Stable, slug-based display identifier for a published workflow. Shown in
+ * publish UI / catalog rows only — it is NOT a registered tool name; the
+ * callable surface is {@link WORKFLOW_RUNNER_TOOL_NAME}.
+ */
 export function toolNameForWorkflow(workflow: Pick<VisualWorkflow, "name">): string {
   const slug = workflow.name
     .toLowerCase()
@@ -54,19 +61,6 @@ export function derivePublishedInterface(workflow: VisualWorkflow): WorkflowInte
     ...(inputSchema ? { inputSchema } : {}),
     ...(outputSchema ? { outputSchema } : {}),
   }
-}
-
-/** The skill body for a graph-bodied skill — points the model at the tool. */
-function workflowSkillContent(name: string, toolName: string): string {
-  return [
-    `# ${name}`,
-    "",
-    `This skill runs the **${name}** workflow as a typed tool.`,
-    "",
-    `When this skill is relevant, call the \`${toolName}\` tool with the declared ` +
-      `input — it executes the workflow graph and returns its typed output. Do NOT ` +
-      `try to perform the steps yourself; the workflow runs them deterministically.`,
-  ].join("\n")
 }
 
 async function findWorkflowSkill(canonicalId: string): Promise<Skill | undefined> {
@@ -102,7 +96,9 @@ export async function publishWorkflow(workflowId: string, at: number): Promise<P
   const draft = {
     name: workflow.name,
     description: workflow.description?.trim() || `Run the "${workflow.name}" workflow.`,
-    content: workflowSkillContent(workflow.name, toolName),
+    // Canonical graph-bodied skill body (shared with `renderSkillsSection`,
+    // which re-derives it at render time so stale stored bodies self-heal).
+    content: workflowSkillBody(workflow.name),
     category: "meta" as const,
     source: "generated" as const,
     canonicalId,

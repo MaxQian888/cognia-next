@@ -75,6 +75,7 @@ describe("syncWorkflowTriggers", () => {
       kind: "trigger.cron",
       enabled: true,
       cron: "*/5 * * * *",
+      timezone: "UTC",
     })
   })
 

@@ -234,6 +234,151 @@ describe("executeAiPromptV2 — explicit mode", () => {
   })
 })
 
+describe("executeAiPromptV2 — structured output contract (D3)", () => {
+  const outputSchema = {
+    type: "object",
+    properties: { title: { type: "string" } },
+    required: ["title"],
+  }
+  const schemaParams = {
+    provider: "openai",
+    model: "gpt-x",
+    apiKey: "k",
+    userPrompt: "hi",
+    responseFormat: "json",
+    outputSchema,
+  }
+
+  it("bakes the declared schema into the JSON instruction", async () => {
+    mockComplete.mockResolvedValue('{"title":"ok"}')
+    await executeAiPromptV2(makeCtx(schemaParams))
+    const sentSystem = mockComplete.mock.calls[0][1].system as string
+    expect(sentSystem).toContain('"title"')
+    expect(sentSystem).toContain("Respond with ONLY a single valid JSON value")
+  })
+
+  it("validates and stamps schemaValid on a conforming completion", async () => {
+    mockComplete.mockResolvedValue('{"title":"ok"}')
+    const result = await executeAiPromptV2(makeCtx(schemaParams))
+    const output = result.output as { structured: unknown; schemaValid?: boolean }
+    expect(output.structured).toEqual({ title: "ok" })
+    expect(output.schemaValid).toBe(true)
+    expect(mockComplete).toHaveBeenCalledTimes(1)
+  })
+
+  it("auto-fix retries ONCE with the corrective re-prompt appended to the user prompt", async () => {
+    mockComplete.mockResolvedValueOnce('{"nope": 1}').mockResolvedValueOnce('{"title":"fixed"}')
+    const result = await executeAiPromptV2(makeCtx(schemaParams))
+    const output = result.output as { structured: unknown; schemaValid?: boolean }
+    expect(output.structured).toEqual({ title: "fixed" })
+    expect(output.schemaValid).toBe(true)
+    expect(mockComplete).toHaveBeenCalledTimes(2)
+    const retryPrompt = mockComplete.mock.calls[1][0] as string
+    expect(retryPrompt).toContain("hi")
+    expect(retryPrompt.length).toBeGreaterThan("hi".length)
+  })
+
+  it("throws after the failed auto-fix in fail mode (default), ending the span with the error", async () => {
+    mockComplete.mockResolvedValue('{"nope": 1}')
+    await expect(executeAiPromptV2(makeCtx(schemaParams))).rejects.toThrow(
+      /did not satisfy the required schema/
+    )
+    expect(mockComplete).toHaveBeenCalledTimes(2)
+    expect(mockEndSpan).toHaveBeenCalledWith(
+      "span1",
+      expect.objectContaining({ errorType: "SchemaViolationError" })
+    )
+  })
+
+  it("soft mode keeps the unvalidated value and stamps schemaValid:false + errors", async () => {
+    mockComplete.mockResolvedValue('{"nope": 1}')
+    const result = await executeAiPromptV2(makeCtx({ ...schemaParams, onSchemaViolation: "soft" }))
+    const output = result.output as {
+      structured: unknown
+      schemaValid?: boolean
+      schemaErrors?: string[]
+    }
+    expect(output.structured).toEqual({ nope: 1 })
+    expect(output.schemaValid).toBe(false)
+    expect(output.schemaErrors?.length).toBeGreaterThan(0)
+  })
+
+  it("routed mode enforces the same contract and sums usage across the retry", async () => {
+    mockRunRoutedPrompt
+      .mockResolvedValueOnce({
+        provider: "p1",
+        model: "m1",
+        completion: '{"nope": 1}',
+        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        costUsd: 0.01,
+        attempts: 1,
+        routingReason: "r",
+      })
+      .mockResolvedValueOnce({
+        provider: "p1",
+        model: "m1",
+        completion: '{"title":"fixed"}',
+        usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
+        costUsd: 0.02,
+        attempts: 1,
+        routingReason: "r",
+      })
+    const reportUsage = jest.fn()
+    const result = await executeAiPromptV2(
+      makeCtx(
+        {
+          mode: "routed",
+          modelAlias: "fast",
+          userPrompt: "hi",
+          responseFormat: "json",
+          outputSchema,
+        },
+        { reportUsage }
+      )
+    )
+    const output = result.output as { structured: unknown; schemaValid?: boolean }
+    expect(output.structured).toEqual({ title: "fixed" })
+    expect(output.schemaValid).toBe(true)
+    expect(mockRunRoutedPrompt).toHaveBeenCalledTimes(2)
+    expect(reportUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputTokens: 30,
+        outputTokens: 10,
+        totalTokens: 40,
+        costUsd: expect.closeTo(0.03),
+      })
+    )
+  })
+
+  it("the credential-less stub never enforces the schema (no model to auto-fix)", async () => {
+    const result = await executeAiPromptV2(
+      makeCtx({ userPrompt: "hi", responseFormat: "json", outputSchema })
+    )
+    const output = result.output as { stub: boolean; schemaValid?: boolean }
+    expect(output.stub).toBe(true)
+    expect(output.schemaValid).toBe(false)
+    expect(mockComplete).not.toHaveBeenCalled()
+  })
+
+  it("a bare jsonSchema string stays a hint only — no validation fields", async () => {
+    mockComplete.mockResolvedValue('{"anything": true}')
+    const result = await executeAiPromptV2(
+      makeCtx({
+        provider: "openai",
+        model: "gpt-x",
+        apiKey: "k",
+        userPrompt: "hi",
+        responseFormat: "json",
+        jsonSchema: '{ "title": "string" }',
+      })
+    )
+    const output = result.output as Record<string, unknown>
+    expect(output.structured).toEqual({ anything: true })
+    expect("schemaValid" in output).toBe(false)
+    expect(mockComplete).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe("executeAiPromptV2 — PII gate", () => {
   it("blocks PII prompts before any call when piiGate=block", async () => {
     const ctx = makeCtx({

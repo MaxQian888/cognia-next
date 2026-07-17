@@ -50,6 +50,9 @@ import type { PluginCapabilities } from "@/lib/plugin/api/plugin-capability-regi
 import { CronBuilder } from "./shared/cron-builder"
 import { DurationField } from "./shared/duration-field"
 import { TypedOutputFields, OutputSchemaField } from "./output-schema-field"
+import { SchemaForm, type JsonSchema } from "./schema-form"
+import { useLiveQuery } from "dexie-react-hooks"
+import { getWorkflow } from "@/lib/db/workflows"
 
 type Params = Record<string, unknown>
 type ChangeFn = (next: Params) => void
@@ -351,6 +354,48 @@ export function GoalCompletedTriggerConfig({ params, onChange }: ConfigProps) {
           value={characterId}
           onChange={(v) => onChange(patchParam(params, "characterId", v))}
         />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── trigger.workflow.completed ────────────────────────────────────────────
+export function WorkflowCompletedTriggerConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.workflowCompletedTrigger")
+  const workflowId = readString(params, "workflowId")
+  const status = readString(params, "status", "any")
+  return (
+    <FieldGroup>
+      <Field
+        label={t("workflowId.label")}
+        htmlFor="wc-workflow"
+        hint={t("workflowId.hint")}
+        name="workflowId"
+      >
+        <SubworkflowPicker
+          id="wc-workflow"
+          value={workflowId}
+          onChange={(v) => onChange(patchParam(params, "workflowId", v))}
+        />
+      </Field>
+      <Field label={t("status.label")} htmlFor="wc-status" hint={t("status.hint")} name="status">
+        <Select
+          value={status}
+          onValueChange={(v) =>
+            // "any" = no filter — store the param as absent, matching the
+            // params schema (status is a succeeded/failed enum when present).
+            onChange(patchParam(params, "status", v === "any" ? "" : v))
+          }
+        >
+          <SelectTrigger id="wc-status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">{t("status.options.any")}</SelectItem>
+            <SelectItem value="succeeded">{t("status.options.succeeded")}</SelectItem>
+            <SelectItem value="failed">{t("status.options.failed")}</SelectItem>
+          </SelectContent>
+        </Select>
       </Field>
     </FieldGroup>
   )
@@ -4318,7 +4363,35 @@ export function WaitConfig({ params, onChange }: ConfigProps) {
             onChange={(next) => onChange(patchParam(params, "durationMs", next))}
           />
         </Field>
-      ) : null}
+      ) : (
+        <>
+          <Field
+            label={t("eventKey.label")}
+            htmlFor="w-event-key"
+            hint={t("eventKey.hint")}
+            name="eventKey"
+          >
+            <Input
+              id="w-event-key"
+              value={readString(params, "eventKey")}
+              onChange={(e) => onChange(patchParam(params, "eventKey", e.target.value))}
+              placeholder={t("eventKey.placeholder")}
+            />
+          </Field>
+          <Field
+            label={t("timeoutMs.label")}
+            htmlFor="w-event-timeout"
+            hint={t("timeoutMs.hint")}
+            name="timeoutMs"
+          >
+            <DurationField
+              id="w-event-timeout"
+              value={readNumber(params, "timeoutMs", 0)}
+              onChange={(next) => onChange(patchParam(params, "timeoutMs", next))}
+            />
+          </Field>
+        </>
+      )}
     </FieldGroup>
   )
 }
@@ -4457,6 +4530,9 @@ export function TransformConfig({ params, onChange }: ConfigProps) {
           </SelectContent>
         </Select>
       </Field>
+      {op === "reduce" ? (
+        <p className="text-xs text-muted-foreground">{t("operation.reduceHint")}</p>
+      ) : null}
       <Field
         label={t("expression.label")}
         htmlFor="tr-expr"
@@ -6688,6 +6764,27 @@ export function SubworkflowConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.subworkflow")
   const workflowId = readString(params, "workflowId")
   const inputJson = readString(params, "inputJson", "{}")
+  // Typed input fields (D3b/D5): when the selected target is PUBLISHED with a
+  // declared object inputSchema, render schema-driven fields instead of the
+  // raw JSON textarea. Unpublished / schema-less targets keep the fallback —
+  // the user is never stranded. Live query so publishing the target while
+  // this inspector is open upgrades the form in place.
+  const target = useLiveQuery(
+    () => (workflowId && !workflowId.includes("{{") ? getWorkflow(workflowId) : undefined),
+    [workflowId]
+  )
+  const inputSchema = target?.published ? target.interface?.inputSchema : undefined
+  const typedSchema =
+    inputSchema &&
+    (inputSchema as JsonSchema).type === "object" &&
+    (inputSchema as JsonSchema).properties &&
+    Object.keys((inputSchema as JsonSchema).properties ?? {}).length > 0
+      ? (inputSchema as JsonSchema)
+      : undefined
+  const inputObject =
+    params.input && typeof params.input === "object" && !Array.isArray(params.input)
+      ? (params.input as Record<string, unknown>)
+      : (parseObjectJson(inputJson) ?? {})
   return (
     <FieldGroup>
       <Field label={t("workflowId.label")} htmlFor="sw-wf" name="workflowId" required>
@@ -6697,29 +6794,51 @@ export function SubworkflowConfig({ params, onChange }: ConfigProps) {
           onChange={(v) => onChange(patchParam(params, "workflowId", v))}
         />
       </Field>
-      <Field
-        label={t("inputJson.label")}
-        htmlFor="sw-input"
-        hint={t("inputJson.hint")}
-        name="inputJson"
-      >
-        <Textarea
-          id="sw-input"
-          value={inputJson}
-          onChange={(e) => {
-            const next = patchParam(params, "inputJson", e.target.value) as Record<string, unknown>
-            try {
-              const parsed = JSON.parse(e.target.value)
-              ;(next as Record<string, unknown>).input = parsed
-            } catch {
-              // ignore
+      {typedSchema ? (
+        <Field label={t("typedInput.label")} hint={t("typedInput.hint")} name="input">
+          <SchemaForm
+            schema={typedSchema}
+            params={inputObject}
+            onChange={(next) =>
+              // Keep `input` (what the executor validates + sends) and
+              // `inputJson` (the fallback textarea's source) in lockstep so
+              // switching targets never shows stale text.
+              onChange({
+                ...params,
+                input: next,
+                inputJson: JSON.stringify(next, null, 2),
+              })
             }
-            onChange(next)
-          }}
-          rows={5}
-          className="font-mono text-xs"
-        />
-      </Field>
+          />
+        </Field>
+      ) : (
+        <Field
+          label={t("inputJson.label")}
+          htmlFor="sw-input"
+          hint={t("inputJson.hint")}
+          name="inputJson"
+        >
+          <Textarea
+            id="sw-input"
+            value={inputJson}
+            onChange={(e) => {
+              const next = patchParam(params, "inputJson", e.target.value) as Record<
+                string,
+                unknown
+              >
+              try {
+                const parsed = JSON.parse(e.target.value)
+                ;(next as Record<string, unknown>).input = parsed
+              } catch {
+                // ignore
+              }
+              onChange(next)
+            }}
+            rows={5}
+            className="font-mono text-xs"
+          />
+        </Field>
+      )}
     </FieldGroup>
   )
 }

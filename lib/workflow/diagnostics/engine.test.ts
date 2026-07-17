@@ -154,6 +154,26 @@ describe("runDiagnostics", () => {
   })
 })
 
+describe("loop-body join policy surfaces through the engine", () => {
+  it("emits joinPolicyInLoop for a race join inside a loop container", () => {
+    const w = wf([
+      node("t", "trigger.manual"),
+      node("loop", "flow.loop", { typeVersion: 2 }),
+      node("j", "flow.join", {
+        parentId: "loop",
+        data: { label: "j", params: { joinPolicy: "race" } },
+      }),
+    ])
+    const result = runDiagnostics({ workflow: w, isWeb: false })
+    const warning = result.diagnostics.find((d) => d.code === "joinPolicyInLoop")
+    expect(warning).toMatchObject({
+      nodeId: "j",
+      severity: "warning",
+      messageParams: { policy: "race" },
+    })
+  })
+})
+
 describe("EMPTY_DIAGNOSTICS", () => {
   it("is a zeroed result", () => {
     expect(EMPTY_DIAGNOSTICS.diagnostics).toEqual([])

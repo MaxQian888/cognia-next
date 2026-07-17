@@ -5,6 +5,7 @@
  * expressions:
  *
  *     {{ $node['n_start'].out.timestamp }}
+ *     {{ $nodes['n_anywhere'].out.value }}
  *     {{ $trigger.payload.text }}
  *     {{ $static.counter }}
  *
@@ -13,9 +14,15 @@
  * `eval()` would be a significant attack surface in a desktop app that imports
  * arbitrary workflow JSON. Instead, we accept a fixed grammar:
  *
- *     <token>      := $node['<id>'] | $trigger | $static | $params
+ *     <token>      := $node['<id>'] | $nodes['<id>'] | $trigger | $static | $params
  *     <accessor>   := .<field>  | ['<key>']  | ["<key>"]  | [<index>]
  *     <expression> := <token>(<accessor>)*
+ *
+ * `$node[...]` reads DIRECT predecessors only (an edge must point at the
+ * consumer). `$nodes[...]` reads ANY node that has already completed in this
+ * run — best-effort: a node that hasn't completed (or is skipped, or runs
+ * later in the topological order) yields `undefined` rather than throwing, so
+ * authors must ensure a path orders the producer before the consumer.
  *
  * The grammar is intentionally tiny — everything else (string concat,
  * arithmetic, ternaries) belongs in a `data.template` or `data.code` node,
@@ -41,6 +48,13 @@ export interface ExpressionScope {
   params: Record<string, unknown>
   /** Author-time environment variables, referenced as `{{ $vars.KEY }}`. */
   variables?: Record<string, string>
+  /**
+   * Outputs of EVERY node completed so far in this run, keyed by node id —
+   * the `{{ $nodes['id'] }}` global scope. Optional: contexts that only carry
+   * direct-predecessor data (older callers, isolated tests) simply resolve
+   * every `$nodes` reference to `undefined`.
+   */
+  nodes?: Record<string, unknown>
 }
 
 /**
@@ -147,6 +161,9 @@ export function evalToken(expr: string, scope: ExpressionScope): unknown {
   if (head.kind === "node") {
     // $node['n_id']
     cursor = scope.upstream[head.id]
+  } else if (head.kind === "nodes") {
+    // $nodes['n_id'] — any completed node this run (best-effort global read).
+    cursor = scope.nodes?.[head.id]
   } else if (head.kind === "ident") {
     switch (head.name) {
       case "$trigger":
@@ -191,6 +208,7 @@ export function evalToken(expr: string, scope: ExpressionScope): unknown {
 type Token =
   | { kind: "ident"; name: string }
   | { kind: "node"; id: string }
+  | { kind: "nodes"; id: string }
   | { kind: "field"; name: string }
   | { kind: "key"; name: string }
   | { kind: "index"; index: number }
@@ -198,9 +216,11 @@ type Token =
 export function tokenize(expr: string): Token[] {
   const tokens: Token[] = []
   let i = 0
-  // First — head: $node['id'] or $ident
-  if (expr.startsWith("$node")) {
-    i = 5
+  // First — head: $nodes['id'] / $node['id'] or $ident. `$nodes` MUST be
+  // checked first — `startsWith("$node")` also matches it.
+  const nodesHead = expr.startsWith("$nodes")
+  if (nodesHead || expr.startsWith("$node")) {
+    i = nodesHead ? 6 : 5
     // expect '['
     while (expr[i] === " ") i++
     if (expr[i] !== "[") return []
@@ -216,7 +236,7 @@ export function tokenize(expr: string): Token[] {
     while (expr[i] === " ") i++
     if (expr[i] !== "]") return []
     i++
-    tokens.push({ kind: "node", id })
+    tokens.push(nodesHead ? { kind: "nodes", id } : { kind: "node", id })
   } else {
     const m = /^\$[A-Za-z_][A-Za-z0-9_]*/.exec(expr.slice(i))
     if (!m) return []

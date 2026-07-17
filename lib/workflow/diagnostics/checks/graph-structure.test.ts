@@ -1,5 +1,5 @@
 import type { VisualWorkflow, WorkflowNode } from "@/types/workflow/visual"
-import { checkReachability } from "./graph-structure"
+import { checkLoopBodyJoinPolicy, checkReachability } from "./graph-structure"
 
 function node(id: string, type = "ai.prompt", extra: Partial<WorkflowNode> = {}): WorkflowNode {
   return {
@@ -57,5 +57,39 @@ describe("checkReachability", () => {
     const diags = checkReachability(w)
     expect(diags).toHaveLength(1)
     expect(diags[0]).toMatchObject({ code: "orphanNode", nodeId: "island" })
+  })
+})
+
+describe("checkLoopBodyJoinPolicy", () => {
+  it("warns for an any/race join inside a loop body (degrades to all at run time)", () => {
+    const w = wf([
+      node("t", "trigger.manual"),
+      node("loop", "flow.loop", { typeVersion: 2 }),
+      node("j", "flow.join", {
+        parentId: "loop",
+        data: { label: "j", params: { joinPolicy: "race" } },
+      }),
+    ])
+    const diags = checkLoopBodyJoinPolicy(w)
+    expect(diags).toHaveLength(1)
+    expect(diags[0]).toMatchObject({
+      code: "joinPolicyInLoop",
+      nodeId: "j",
+      severity: "warning",
+      messageParams: { policy: "race" },
+    })
+  })
+
+  it("stays silent for all-policy body joins and for top-level any/race joins", () => {
+    const w = wf([
+      node("t", "trigger.manual"),
+      node("loop", "flow.loop", { typeVersion: 2 }),
+      node("j_all", "flow.join", {
+        parentId: "loop",
+        data: { label: "j", params: { joinPolicy: "all" } },
+      }),
+      node("j_top", "flow.join", { data: { label: "j", params: { joinPolicy: "any" } } }),
+    ])
+    expect(checkLoopBodyJoinPolicy(w)).toEqual([])
   })
 })

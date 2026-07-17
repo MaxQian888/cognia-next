@@ -338,8 +338,11 @@ describe("B4 — ai.extract typed parameter extraction", () => {
     expect(out.extracted).toEqual({ flag: true, name: "123", amount: 7, note: null })
   })
 
-  it("reports missing required fields and valid=false", async () => {
-    completeMock.mockResolvedValueOnce('{"name":"Bob"}')
+  it("reports missing required fields and valid=false after the auto-fix retry", async () => {
+    // Missing required fields now trigger the inner v2 turn's ONE auto-fix
+    // retry (presence-only schema, soft mode); when the retry still misses
+    // the field, the node reports it as before.
+    completeMock.mockResolvedValueOnce('{"name":"Bob"}').mockResolvedValueOnce('{"name":"Bob"}')
     const out = await run("ai.extract", {
       provider: "openai",
       model: "gpt",
@@ -348,8 +351,26 @@ describe("B4 — ai.extract typed parameter extraction", () => {
       schema: { name: "string", amount: "number" },
       required: ["name", "amount"],
     })
+    expect(completeMock).toHaveBeenCalledTimes(2)
     expect(out.missing).toEqual(["amount"])
     expect(out.valid).toBe(false)
+  })
+
+  it("recovers a missing required field through the auto-fix retry", async () => {
+    completeMock
+      .mockResolvedValueOnce('{"name":"Bob"}')
+      .mockResolvedValueOnce('{"name":"Bob","amount":42}')
+    const out = await run("ai.extract", {
+      provider: "openai",
+      model: "gpt",
+      apiKey: "k",
+      input: "Bob spent 42",
+      schema: { name: "string", amount: "number" },
+      required: ["name", "amount"],
+    })
+    expect(completeMock).toHaveBeenCalledTimes(2)
+    expect(out.extracted).toEqual({ name: "Bob", amount: 42 })
+    expect(out.valid).toBe(true)
   })
 
   it("surfaces a parseError (and valid=false) when the model returns no JSON", async () => {

@@ -5,7 +5,16 @@ into cognia's **orchestration harness**, and for how **skills** relate to it.
 Keep this glossary stable; flag any usage that conflicts with it. Scope is the
 visual workflow subsystem (`lib/workflow/`, `components/workflow/`,
 `types/workflow/visual.ts`, `src-tauri/src/workflow/`) and its seam with
-`lib/skills/`. Companion ADRs: 0011 / 0017 / 0022 / 0034.
+`lib/skills/`. Companion ADRs: 0011 / 0017 / 0022 / 0034 / 0077.
+
+> **Status note (2026-07):** the D3 / D5 / D6 build targets below have SHIPPED
+> (structured output on `agent.turn` + `ai.prompt` v1/v2, `ai.ensemble` /
+> `ai.council`, `data.aggregate`, publish + the shared typed runner
+> `wf_run_workflow_typed`, the skills→tools projection, and the
+> `trigger.workflow.completed` chain trigger). The Decision texts are kept for
+> their rationale; where a "gap" is named, read it as the gap that MOTIVATED
+> the decision, not the current state. See
+> `docs/plans/2026-07-16-workflow-linkage-remediation.md` for what closed when.
 
 ## Glossary
 
@@ -22,9 +31,11 @@ _intent_ is sound; its _literal mechanism_ is not a 1:1 port (see Decisions).
 The thing an orchestration composes = a **bounded agent invocation**:
 `action.agent.turn` parameterized by prompt + (loaded) skills + tools + an
 **output schema** that forces a validated, typed result. This is cognia's
-equivalent of the harness `agent(prompt, { schema })`. Today `action.agent.turn`
-returns **free text only** (`lib/workflow/nodes/actions/agent-turn.ts:133`) — the
-output-schema half is the keystone gap.
+equivalent of the harness `agent(prompt, { schema })`. SHIPPED: `agent.turn`
+and `ai.prompt` (v1 AND v2) consume `outputSchema` / `onSchemaViolation`
+through the shared `runStructuredTurn` contract (validate → one bounded
+auto-fix retry → fail into errorPolicy, or soft-stamp `schemaValid:false`) —
+see `lib/workflow/nodes/ai/structured-turn.ts`.
 
 ### Skill _(in this domain)_
 
@@ -59,8 +70,11 @@ DynamicStructuredTool` and Dify's `WORKFLOW` provider type. This — not
 Parallel/fan-out, pipeline, dynamic map (runtime-sized N), and
 loop-until-condition + accumulator are **already** delivered by the DAG +
 `flow.loop` v2 (`orchestrator.ts` ready-set scheduler; `loop-container.ts`
-`while`/`iterationConcurrency`/`items[]`). Only friction: `maxConcurrency`
-defaults to **1**.
+`while`/`iterationConcurrency`/`items[]`). The old 1-vs-4 `maxConcurrency`
+default split is gone: `DEFAULT_MAX_CONCURRENCY` (4) is backfilled by the
+settings zod schema, so legacy no-field workflows run at the same width as
+new ones. Top-level back-edges are now REJECTED at validation (they never
+re-executed — the only iterating construct is the `flow.loop` v2 container).
 
 ## Decisions
 
@@ -108,21 +122,35 @@ defaults to **1**.
   - **Interface (explicit):** declared by canvas `trigger.input` (input schema)
     - `output` (output schema) nodes — visible contract, drag-to-map, mirrors
       n8n's `ExecuteWorkflowTrigger` and the harness agent signature.
-  - **Publishing registers 3 call surfaces:** ① a typed **agent tool** (the
-    typed successor to the existing untyped `wf_run_workflow_by_name`), ② a typed
-    **`flow.subworkflow`** target, ③ a **skill-catalog entry `kind:"workflow"`**.
-  - **Graph-bodied skill behavior (the novel/irreversible part):** when a
-    character enables it, a short **name+description is injected** (progressive
-    disclosure — reuses the CLI's `renderSkillsCatalog` idiom, NOT the full
-    `renderSkillsSection` body) AND a **tool is registered** that actually runs
-    the graph. Model sees the description → calls the tool → graph executes →
-    typed output returns. It is NOT injected as a prose playbook (that would lose
+  - **Publishing registers 3 call surfaces:** ① the typed **agent tool** — ONE
+    shared runner `wf_run_workflow_typed` (name → published workflow), NOT a
+    per-workflow `wf_<slug>` tool; the slug in `published.toolName` is
+    display-only (`lib/workflow/publish/runner-tool.ts` is the single source
+    for the name + definition), ② a typed **`flow.subworkflow`** target (the
+    inspector renders schema-driven typed input fields for published targets),
+    ③ a **skill-catalog entry `kind:"workflow"`**.
+  - **Graph-bodied skill behavior — SHIPPED:** `renderSkillsSection` /
+    `renderSkillsCatalog` special-case `kind:"workflow"` (the canonical body /
+    one-line contract both name the shared runner + the workflow name; stale
+    stored bodies self-heal at render), and the skills→tools projection in
+    `lib/claude/build-options.ts` guarantees the runner tool is in the session
+    whenever a workflow skill is active — with an execution fallback in
+    `lib/claude/plugin-tool-ipc.ts` for when the workflow-ai plugin is
+    disabled. It is NOT injected as a prose playbook (that would lose
     deterministic execution — explicitly rejected).
+  - **Chaining (ADR-0081):** `trigger.workflow.completed` fires a decoupled
+    downstream workflow when a run reaches a terminal status — depth-capped
+    (10) with self-trigger rejection; emitted by the orchestrator through
+    `runtime/workflow-completion-fanout.ts`. `flow.subworkflow` remains the
+    embedded (parent-owns-child) composition; the trigger is the decoupled one.
 
-- **D6 — Genuine net-new build targets (the real gaps):** ① structured output
-  (D3, keystone) ② first-class ensemble / N-vote / adversarial-verify node
-  (neither n8n nor Dify has one — a differentiator) ③ real reduce/aggregate
-  (today `flow.join` only gathers; `data.transform` reduce is a sum-only stub).
+- **D6 — Genuine net-new build targets — ALL SHIPPED:** ① structured output
+  (D3, keystone — `structured-turn.ts`) ② first-class ensemble / N-vote /
+  adversarial-verify node (`ai.ensemble` + `ai.council`, `lib/workflow/nodes/ai/`)
+  ③ real reduce/aggregate (`data.aggregate` with collect / concat / merge /
+  group-by / dedupe / numeric / custom reducer; `flow.join` can apply it
+  inline). `data.transform`'s `reduce` op remains a back-compat numeric sum —
+  the inspector points users at `data.aggregate` for general folds.
 
 - **D6② — Ensemble is ONE configurable first-class node.** Wraps a `target` =
   inline `agent.turn` config OR a referenced sub-workflow, runs it ×N (reusing

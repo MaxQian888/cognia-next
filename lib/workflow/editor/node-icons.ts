@@ -52,6 +52,7 @@ const ICONS: Partial<Record<WorkflowNodeKind, LucideIcon>> = {
   "trigger.connector.inbound": InboxIcon,
   "trigger.chat.message": MessageIcon,
   "trigger.goal.completed": TargetIcon,
+  "trigger.workflow.completed": WorkflowIcon,
   "trigger.pet.event": PawPrintIcon,
   "action.pet.interact": PawPrintIcon,
   "trigger.webhook": WebhookIcon,

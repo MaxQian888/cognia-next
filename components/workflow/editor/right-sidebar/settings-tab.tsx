@@ -22,6 +22,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
+import { DEFAULT_MAX_CONCURRENCY } from "@/types/workflow/visual"
 import { Field, FieldGroup } from "../inspector/forms/shared"
 import { DurationField } from "../inspector/forms/shared/duration-field"
 import { TimezoneSelect } from "@/components/scheduler/timezone-select"
@@ -120,9 +121,11 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
                   id="wf-max-concurrency"
                   type="number"
                   min={1}
-                  value={settings.maxConcurrency ?? 1}
+                  value={settings.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY}
                   onChange={(e) =>
-                    setSettings({ maxConcurrency: Math.max(1, num(e.target.value, 1)) })
+                    setSettings({
+                      maxConcurrency: Math.max(1, num(e.target.value, DEFAULT_MAX_CONCURRENCY)),
+                    })
                   }
                 />
               </Field>

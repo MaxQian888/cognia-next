@@ -5,7 +5,7 @@ import {
   validateWorkflow,
   visualWorkflowSchema,
 } from "./validate"
-import type { VisualWorkflow } from "@/types/workflow/visual"
+import { DEFAULT_MAX_CONCURRENCY, type VisualWorkflow } from "@/types/workflow/visual"
 
 function baseWorkflow(overrides: Partial<VisualWorkflow> = {}): VisualWorkflow {
   return {
@@ -213,6 +213,27 @@ describe("visualWorkflowSchema", () => {
     expect(result.success).toBe(false)
   })
 
+  it("backfills maxConcurrency to the shared default when absent", () => {
+    // baseWorkflow's settings carry no maxConcurrency — the schema must
+    // backfill DEFAULT_MAX_CONCURRENCY so the orchestrator, editor, and seed
+    // all execute legacy blobs at the same width.
+    const result = visualWorkflowSchema.safeParse(baseWorkflow())
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.settings.maxConcurrency).toBe(DEFAULT_MAX_CONCURRENCY)
+    }
+  })
+
+  it("keeps an explicit maxConcurrency untouched", () => {
+    const wf = baseWorkflow()
+    wf.settings = { ...wf.settings, maxConcurrency: 1 }
+    const result = visualWorkflowSchema.safeParse(wf)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.settings.maxConcurrency).toBe(1)
+    }
+  })
+
   it("rejects negative timeoutMs and zero concurrency", () => {
     expect(
       visualWorkflowSchema.safeParse(
@@ -259,7 +280,10 @@ describe("validateGraphIntegrity", () => {
     expect(r.errors.some((e) => e.includes("Cycle"))).toBe(true)
   })
 
-  it("permits a cycle that goes through a flow.loop node", () => {
+  it("rejects a cycle even when a flow.loop node sits on it (back-edges never iterate)", () => {
+    // The scheduler drops back-edges, so this graph used to validate and then
+    // silently run each node ONCE. It must now fail with guidance pointing at
+    // the loop CONTAINER instead.
     const wf = baseWorkflow()
     wf.nodes.push({
       id: "n_loop",
@@ -271,7 +295,24 @@ describe("validateGraphIntegrity", () => {
     wf.edges.push({ id: "e2", source: "n2", target: "n_loop" })
     wf.edges.push({ id: "e3", source: "n_loop", target: "n2" })
     const r = validateGraphIntegrity(wf)
-    expect(r.errors).toEqual([])
+    const cycleError = r.errors.find((e) => e.includes("Cycle"))
+    expect(cycleError).toBeDefined()
+    expect(cycleError).toMatch(/flow\.loop container/)
+  })
+
+  it("rejects a cycle through a flow.wait node (event mode is not a back-edge)", () => {
+    const wf = baseWorkflow()
+    wf.nodes.push({
+      id: "n_wait",
+      type: "flow.wait",
+      typeVersion: 1,
+      position: { x: 400, y: 0 },
+      data: { label: "Wait", params: { mode: "duration", durationMs: 10 } },
+    })
+    wf.edges.push({ id: "e2", source: "n2", target: "n_wait" })
+    wf.edges.push({ id: "e3", source: "n_wait", target: "n2" })
+    const r = validateGraphIntegrity(wf)
+    expect(r.errors.some((e) => e.includes("Cycle"))).toBe(true)
   })
 })
 
@@ -309,14 +350,41 @@ describe("collectUnauthorizedCycleNodes", () => {
     expect(cycle.has("n2")).toBe(true)
   })
 
-  it("returns empty when a flow.loop sits on the cycle (authorized)", () => {
+  it("returns the cycle nodes even when a flow.loop sits on the cycle (no authorization)", () => {
     const wf = baseWorkflow()
     wf.nodes[1] = { ...wf.nodes[1], type: "flow.loop", typeVersion: 2 }
     wf.edges = [
       { id: "e1", source: "n1", target: "n2" },
       { id: "e2", source: "n2", target: "n1" },
     ]
+    const cycle = collectUnauthorizedCycleNodes(wf)
+    expect(cycle.has("n1")).toBe(true)
+    expect(cycle.has("n2")).toBe(true)
+  })
+
+  it("does not flag a loop@2 container graph (body nesting is not a cycle)", () => {
+    const wf = baseWorkflow({ schemaVersion: 2 })
+    wf.nodes = [
+      wf.nodes[0],
+      {
+        id: "loop",
+        type: "flow.loop",
+        typeVersion: 2,
+        position: { x: 100, y: 0 },
+        data: { label: "Loop", params: { mode: "forEach", source: "{{ $trigger.payload.x }}" } },
+      },
+      {
+        id: "child",
+        type: "flow.set",
+        typeVersion: 1,
+        parentId: "loop",
+        position: { x: 10, y: 10 },
+        data: { label: "Body", params: { variable: "v", value: "1" } },
+      },
+    ]
+    wf.edges = [{ id: "e1", source: "n1", target: "loop" }]
     expect(collectUnauthorizedCycleNodes(wf).size).toBe(0)
+    expect(validateWorkflow(wf).ok).toBe(true)
   })
 })
 

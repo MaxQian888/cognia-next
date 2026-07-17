@@ -23,6 +23,10 @@ const scope: ExpressionScope = {
   trigger,
   staticData: { counter: 5, nested: { deep: "v" } },
   params: { mode: "live" },
+  nodes: {
+    n_a: { result: { value: 42, items: ["x", "y", "z"] } },
+    n_far: { summary: "distant" },
+  },
 }
 
 describe("parseExpression", () => {
@@ -123,6 +127,30 @@ describe("resolveExpression", () => {
   it("returns non-string inputs unchanged", () => {
     // The runtime calls resolveExpression on every leaf; non-strings pass.
     expect(resolveExpression(42 as unknown as string, scope)).toBe(42)
+  })
+})
+
+describe("$nodes global scope", () => {
+  it("reads a non-adjacent completed node through $nodes", () => {
+    expect(resolveExpression("{{ $nodes['n_far'].summary }}", scope)).toBe("distant")
+  })
+
+  it("keeps $node (direct predecessors) and $nodes (global) distinct", () => {
+    // n_far is NOT a direct predecessor — $node must not see it.
+    expect(resolveExpression("{{ $node['n_far'].summary }}", scope)).toBeUndefined()
+    // n_a is in both scopes; both forms resolve.
+    expect(resolveExpression("{{ $node['n_a'].result.value }}", scope)).toBe(42)
+    expect(resolveExpression("{{ $nodes['n_a'].result.value }}", scope)).toBe(42)
+  })
+
+  it("resolves to undefined for nodes not yet completed", () => {
+    expect(resolveExpression("{{ $nodes['n_future'].x }}", scope)).toBeUndefined()
+  })
+
+  it("resolves to undefined when the scope carries no nodes map (older callers)", () => {
+    const bare: ExpressionScope = { ...scope }
+    delete (bare as { nodes?: unknown }).nodes
+    expect(resolveExpression("{{ $nodes['n_a'].result.value }}", bare)).toBeUndefined()
   })
 })
 

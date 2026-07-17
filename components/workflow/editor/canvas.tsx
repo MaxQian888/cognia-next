@@ -25,7 +25,7 @@ import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto
 import { createEditorStore, type EditorStore, type EditorState } from "@/lib/workflow/editor/store"
 import { persistEditorWorkflow } from "@/lib/workflow/editor/persist-workflow"
 import { downloadWorkflowJson, parseWorkflowImport } from "@/lib/workflow/editor/workflow-json"
-import { outputHandlesFor } from "@/lib/workflow/editor/node-handles"
+import { defaultTypeVersionFor, outputHandlesFor } from "@/lib/workflow/editor/node-handles"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { runSingleNode } from "@/lib/workflow/runtime/run-single-node"
 import { useRunStatusBridge } from "@/lib/workflow/runtime/run-status-bridge"
@@ -514,7 +514,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
           {
             id: trigId,
             type: "trigger.manual",
-            typeVersion: 1,
+            // Latest-version metadata — never hardcode 1; a future
+            // trigger.manual@2 must not regress bootstrap nodes.
+            typeVersion: defaultTypeVersionFor("trigger.manual"),
             position: { x: -200, y: 0 },
             data: { label: "Manual trigger", params: {} },
           },

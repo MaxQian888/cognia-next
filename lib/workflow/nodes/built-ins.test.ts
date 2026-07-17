@@ -527,9 +527,53 @@ describe("flow.wait", () => {
     await expect(exec("flow.wait", ctx)).rejects.toThrow(/aborted/)
   })
 
-  it("treats event mode as a no-op stub", async () => {
-    const r = await exec("flow.wait", makeCtx("flow.wait", { mode: "event" }))
-    expect((r.output as Record<string, unknown>).skipped).toBeDefined()
+  it("event mode blocks until an external wake fires the custom key", async () => {
+    const { emitWake } = await import("@/lib/workflow/runtime/wake-bus")
+    const pending = exec(
+      "flow.wait",
+      makeCtx("flow.wait", { mode: "event", eventKey: "deploy-approved" })
+    )
+    // Give the executor a tick to subscribe before waking.
+    await new Promise((r) => setTimeout(r, 10))
+    expect(emitWake("deploy-approved", { source: "test", data: { ok: 1 } })).toBe(true)
+    const r = await pending
+    const out = r.output as Record<string, unknown>
+    expect(out.event).toBe("deploy-approved")
+    expect(out.source).toBe("test")
+    expect(out.data).toEqual({ ok: 1 })
+    expect(typeof out.waitedMs).toBe("number")
+  })
+
+  it("event mode defaults its key to runId:stepId", async () => {
+    const { emitWake } = await import("@/lib/workflow/runtime/wake-bus")
+    const ctx = makeCtx("flow.wait", { mode: "event" })
+    const pending = exec("flow.wait", ctx)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(emitWake(`${ctx.runId}:${ctx.stepId}`, { source: "test" })).toBe(true)
+    const r = await pending
+    expect((r.output as Record<string, unknown>).event).toBe(`${ctx.runId}:${ctx.stepId}`)
+  })
+
+  it("event mode times out with a NON-retryable error", async () => {
+    const pending = exec(
+      "flow.wait",
+      makeCtx("flow.wait", { mode: "event", eventKey: "never", timeoutMs: 20 })
+    )
+    await expect(pending).rejects.toMatchObject({
+      message: expect.stringMatching(/timed out/),
+      retryable: false,
+    })
+  })
+
+  it("event mode unblocks on run abort", async () => {
+    const ac = new AbortController()
+    const ctx = {
+      ...makeCtx("flow.wait", { mode: "event", eventKey: "abort-me" }),
+      signal: ac.signal,
+    }
+    const pending = exec("flow.wait", ctx)
+    setTimeout(() => ac.abort(new Error("test abort")), 10)
+    await expect(pending).rejects.toThrow(/aborted/)
   })
 })
 

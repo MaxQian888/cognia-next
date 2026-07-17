@@ -319,6 +319,10 @@
       "label": "Title"
     }
   },
+  "arrayField": {
+    "add": "Add",
+    "removeItem": "Remove item {index}"
+  },
   "branch": {
     "condition": {
       "hint": "Expression that resolves to a truthy value. Supports '{{ }}' expressions.",
@@ -2357,6 +2361,10 @@
       "hint": "Forwarded as the subworkflow's trigger payload.",
       "label": "Input (JSON)"
     },
+    "typedInput": {
+      "hint": "Fields generated from the published target's declared input schema. Values are validated against it at run time.",
+      "label": "Typed input"
+    },
     "workflowId": {
       "label": "Sub workflow"
     }
@@ -2812,7 +2820,8 @@
         "map": "Map",
         "reduce": "Reduce",
         "sort": "Sort"
-      }
+      },
+      "reduceHint": "Reduce here is a NUMERIC SUM over the item expression only. For general folds (collect, group-by, dedupe, merge, custom reducer) use the data.aggregate node."
     }
   },
   "twinIngest": {
@@ -2875,12 +2884,21 @@
         "sec": "seconds"
       }
     },
+    "eventKey": {
+      "hint": "Wake key an external source fires (e.g. the wf_emit_workflow_event agent tool). Empty = a private key scoped to this run and step.",
+      "label": "Event key (optional)",
+      "placeholder": "deploy-approved"
+    },
     "mode": {
       "label": "Wait mode",
       "options": {
         "duration": "Fixed duration",
         "event": "Wait for event (Phase 4+)"
       }
+    },
+    "timeoutMs": {
+      "hint": "Give up waiting after this long. 0 = wait until the run is cancelled or times out.",
+      "label": "Wait timeout"
     }
   },
   "webClone": {
@@ -2997,6 +3015,21 @@
       "hint": "Optional. Defaults to the workflow run id.",
       "label": "Response body template",
       "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
+    }
+  },
+  "workflowCompletedTrigger": {
+    "status": {
+      "hint": "Only fire for one outcome. \"Any\" fires on both success and failure.",
+      "label": "Outcome filter",
+      "options": {
+        "any": "Any",
+        "failed": "Failed",
+        "succeeded": "Succeeded"
+      }
+    },
+    "workflowId": {
+      "hint": "The source workflow to watch. Empty fires for every workflow that finishes (this workflow itself is always excluded).",
+      "label": "Source workflow (optional)"
     }
   }
 }

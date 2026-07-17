@@ -266,6 +266,22 @@ describe("renderSkillsSection", () => {
     ] as Parameters<typeof renderSkillsSection>[0])
     expect(out).toBe("## One\n\nbody 1\n\n## Two\n\nbody 2")
   })
+
+  it("re-derives the canonical runner body for kind:workflow skills", () => {
+    // Stored content simulates a stale pre-fix row that still names the
+    // `wf_<slug>` ghost tool — the render must self-heal it.
+    const out = renderSkillsSection([
+      {
+        name: "Summarizer",
+        content: "call the `wf_summarizer` tool",
+        kind: "workflow",
+        workflowId: "wf_1",
+      },
+    ] as Parameters<typeof renderSkillsSection>[0])
+    expect(out).toContain("`wf_run_workflow_typed`")
+    expect(out).toContain('"name": "Summarizer"')
+    expect(out).not.toContain("wf_summarizer")
+  })
 })
 
 describe("renderSkillsCatalog (name-only / progressive disclosure)", () => {
@@ -286,6 +302,22 @@ describe("renderSkillsCatalog (name-only / progressive disclosure)", () => {
     // The full body must never leak into the catalog (that's the whole point).
     expect(out).not.toContain("SECRET BODY")
     expect(out).not.toContain("another body")
+  })
+
+  it("inlines the runner contract for kind:workflow skills (no load_skill round-trip)", () => {
+    const out = renderSkillsCatalog([
+      {
+        id: "s1",
+        name: "Summarizer",
+        description: "Sums things",
+        content: "ignored",
+        kind: "workflow",
+        workflowId: "wf_1",
+      },
+    ] as Parameters<typeof renderSkillsCatalog>[0])
+    expect(out).toContain("`wf_run_workflow_typed`")
+    expect(out).toContain('{ "name": "Summarizer" }')
+    expect(out).not.toContain("ignored")
   })
 })
 

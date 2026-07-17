@@ -104,6 +104,16 @@ const TeamTriggerParams = z.object({
   status: z.enum(["completed", "failed", "cancelled"]).optional(),
 })
 
+const WorkflowCompletedTriggerParams = z.object({
+  // Both optional — an unscoped node fires for EVERY workflow's terminal run
+  // (self-triggering is rejected by the fanout emitter). `workflowId` scopes
+  // to one source workflow; `status` to one outcome. The empty string is the
+  // editor's "any" sentinel (patchParam stores "" rather than deleting), so
+  // the enum must tolerate it alongside absence.
+  workflowId: optionalString,
+  status: z.union([z.enum(["succeeded", "failed"]), z.literal("")]).optional(),
+})
+
 /** Lifecycle kinds `trigger.pet.event` may subscribe to. */
 export const PET_TRIGGER_KINDS = ["levelUp", "evolved", "achievementUnlocked", "unwell"] as const
 
@@ -1469,6 +1479,13 @@ const LoopParams = z.union([LoopParamsV2, LoopParamsV1])
 const WaitParams = z.object({
   mode: z.enum(["duration", "event"]).optional(),
   durationMs: numberRange(0).optional(),
+  /**
+   * Event mode: wake key an external source fires (`emitWake`). Empty means
+   * the run-scoped default `${runId}:${stepId}` — private to this run.
+   */
+  eventKey: optionalString,
+  /** Event mode: give up after this long (0 / absent = wait until run abort). */
+  timeoutMs: numberRange(0).optional(),
 })
 
 const SetVariableParams = z.object({
@@ -1657,6 +1674,7 @@ export const PARAMS_SCHEMAS = {
   "trigger.connector.inbound": ConnectorInboundParams,
   "trigger.chat.message": ChatMessageTriggerParams,
   "trigger.goal.completed": GoalCompletedTriggerParams,
+  "trigger.workflow.completed": WorkflowCompletedTriggerParams,
   "trigger.pet.event": PetEventTriggerParams,
   "action.pet.interact": PetInteractActionParams,
   "trigger.webhook": WebhookTriggerParams,

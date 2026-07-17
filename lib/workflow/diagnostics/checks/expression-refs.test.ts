@@ -60,6 +60,30 @@ describe("checkExpressionRefs", () => {
     expect(checkExpressionRefs(w)).toEqual([])
   })
 
+  it("never warns exprNotUpstream for a $nodes global read of a real node", () => {
+    // c is NOT upstream of b — $nodes reads are best-effort by design.
+    const w = wf(
+      [
+        node("a", {}, "trigger.manual"),
+        node("b", { template: "{{ $nodes['c'].out }}" }),
+        node("c", {}),
+      ],
+      [
+        { id: "e1", source: "a", target: "b" },
+        { id: "e2", source: "a", target: "c" },
+      ]
+    )
+    expect(checkExpressionRefs(w)).toEqual([])
+  })
+
+  it("still flags a $nodes reference to a node that does not exist", () => {
+    const w = wf([node("a", { template: "{{ $nodes['ghost'].out }}" }, "trigger.manual")])
+    const diags = checkExpressionRefs(w)
+    expect(diags).toHaveLength(1)
+    expect(diags[0].code).toBe("exprUnknownNode")
+    expect(diags[0].messageParams?.ref).toBe("ghost")
+  })
+
   it("skips nodes with no params object", () => {
     const orphanParams = node("a", undefined as unknown as Record<string, unknown>)
     expect(checkExpressionRefs(wf([orphanParams]))).toEqual([])

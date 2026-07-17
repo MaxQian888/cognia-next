@@ -9,8 +9,8 @@
  *   3. Resolve secrets / credentials at the boundary.
  *   4. Topo-sort the graph; identify back-edges for loop/wait nodes.
  *   5. Schedule ready nodes up to `maxConcurrency` (ADR-0022 §1 Decision).
- *      Default `maxConcurrency=1` preserves the legacy sequential behavior;
- *      higher values allow independent nodes to run concurrently.
+ *      Absent values are backfilled to `DEFAULT_MAX_CONCURRENCY` by the
+ *      settings schema; independent nodes run concurrently up to the cap.
  *   6. Persist the WorkflowRunRow + every WorkflowRunEventRow to Dexie.
  *   7. Mirror the run state to the Rust SQLite shadow (Tauri only — web mode
  *      uses Dexie alone for crash recovery).
@@ -27,6 +27,7 @@
 import { nanoid } from "nanoid"
 import { getDb } from "@/lib/db/schema"
 import { resolveScopeProjectId } from "@/lib/db/project-scope"
+import { DEFAULT_MAX_CONCURRENCY } from "@/types/workflow/visual"
 import { validateWorkflow, type ValidatedVisualWorkflow } from "@/lib/workflow/definition/validate"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { generateWorkflowRunTitle } from "@/lib/workflow/runtime/run-title"
@@ -116,8 +117,9 @@ export interface RunWorkflowInput {
   /**
    * Per ADR-0022 §3.7. Dynamic concurrency cap consulted on each scheduling
    * tick. When omitted, the orchestrator constructs one from
-   * `workflow.settings.maxConcurrency ?? 1`, making the change backward-
-   * compatible with existing call sites (sequential behavior preserved).
+   * `workflow.settings.maxConcurrency` — the zod settings schema backfills
+   * absent values to `DEFAULT_MAX_CONCURRENCY`, so legacy persisted
+   * workflows run at the same width as new ones.
    */
   concurrency?: ConcurrencyController
   /**
@@ -174,6 +176,32 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   const runId = input.runId ?? "run_" + nanoid(12)
   const logger = createRunLogger(runId)
 
+  // Chained triggers (ADR-0081): announce terminal states to any
+  // `trigger.workflow.completed` subscription. Fire-and-forget — a chained
+  // run must never block or fail THIS run. Suppressed for catch sub-runs
+  // (internal recovery, not a real completion) and for partial editor runs
+  // ("run from here" / "run this step"), whose outputs aren't the workflow's
+  // contract. Depth cap + self-trigger rejection live in the fanout module.
+  const emitCompletionFanout = (
+    status: "succeeded" | "failed",
+    detail: { output?: unknown; error?: { message: string; nodeId?: string; code?: string } } = {}
+  ): void => {
+    if (input.suppressCatch || input.restrictToStepIds || input.startStepId) return
+    void import("./workflow-completion-fanout")
+      .then((m) =>
+        m.emitWorkflowCompletedFanout({
+          workflow: { id: workflow.id, name: workflow.name },
+          runId,
+          status,
+          ...detail,
+          trigger,
+        })
+      )
+      .catch(() => {
+        // best-effort — never surfaces into the finished run
+      })
+  }
+
   // 1. Validate the workflow.
   const validation = validateWorkflow(workflow)
   if (!validation.ok) {
@@ -183,6 +211,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     // Notify plugins that this workflow tried to start but failed validation.
     getPluginEventHooks().dispatchWorkflowStart(workflow.id, workflow.name)
     getPluginEventHooks().dispatchWorkflowError(workflow.id, new Error(message))
+    emitCompletionFanout("failed", { error: { message } })
     return { runId, status: "failed", error: { message } }
   }
   const validated = validation.workflow as ValidatedVisualWorkflow
@@ -281,6 +310,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     await persistRunState({ runId, workflowId: workflow.id, status: "failed" })
     getPluginEventHooks().dispatchWorkflowError(workflow.id, new Error(message))
     getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+    emitCompletionFanout("failed", { error: { message, nodeId, code } })
     await releaseRunResources(runId)
     return { runId, status: "failed", error: { message, nodeId, code } }
   }
@@ -327,10 +357,12 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   }
   const secretResolver = input.secretResolver ?? getDefaultSecretResolver()
 
-  // Dynamic concurrency cap (ADR-0022 §3.7). Defaults to settings.maxConcurrency
-  // or 1, preserving sequential behavior for existing callers.
+  // Dynamic concurrency cap (ADR-0022 §3.7). `validated.settings` always
+  // carries maxConcurrency (zod backfills DEFAULT_MAX_CONCURRENCY); the `??`
+  // is defense-in-depth for callers injecting hand-built snapshots in tests.
   const concurrency =
-    input.concurrency ?? createConcurrencyController(validated.settings.maxConcurrency ?? 1)
+    input.concurrency ??
+    createConcurrencyController(validated.settings.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY)
 
   // Loop-container bodies (schemaVersion 2): nodes whose parent is a flow.loop
   // container belong to that container's sub-canvas and are executed by the
@@ -366,6 +398,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     const sortError = err instanceof Error ? err : new Error(message)
     getPluginEventHooks().dispatchWorkflowError(workflow.id, sortError)
     getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+    emitCompletionFanout("failed", { error: { message } })
     await releaseRunResources(runId)
     return { runId, status: "failed", error: { message } }
   }
@@ -547,6 +580,16 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       }
     }
 
+    // Global `$nodes['id']` scope — outputs of everything completed so far
+    // (fresh this run OR hydrated from the resume cache). Best-effort: nodes
+    // not yet completed simply resolve to undefined in expressions.
+    const nodesScope: Record<string, unknown> = {}
+    for (const id of completed) {
+      if (skipped.has(id)) continue
+      if (stepOutputs.has(id)) nodesScope[id] = stepOutputs.get(id)
+      else if (cache.has(id)) nodesScope[id] = cache.get(id)
+    }
+
     // Child abort controller — follows the run-level signal AND can be
     // aborted individually by a race join cancelling this branch.
     const stepAc = new AbortController()
@@ -580,6 +623,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 node,
                 trigger,
                 upstream: upstreamMap,
+                nodesOutputs: nodesScope,
                 runId,
                 signal: stepAc.signal,
                 cache,
@@ -594,6 +638,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 node,
                 trigger,
                 upstream: upstreamMap,
+                nodesOutputs: nodesScope,
                 runId,
                 signal: stepAc.signal,
                 cache,
@@ -850,6 +895,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       }
     }
 
+    emitCompletionFanout("failed", { error: { message, nodeId: stepId, code: errorCode } })
     await releaseRunResources(runId)
     return { runId, status: "failed", error: { message, nodeId: stepId, code: errorCode } }
   }
@@ -880,6 +926,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   void generateWorkflowRunTitle(runId)
   // Plugin host hook: workflow finished successfully.
   getPluginEventHooks().dispatchWorkflowComplete(workflow.id, true, finalOutput)
+  emitCompletionFanout("succeeded", { output: finalOutput })
 
   await releaseRunResources(runId)
   return { runId, status: "succeeded", output: finalOutput }
