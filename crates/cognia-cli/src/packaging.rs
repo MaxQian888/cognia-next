@@ -65,82 +65,79 @@ fn write_leb128(buf: &mut Vec<u8>, mut value: u64) {
     }
 }
 
+/// Strip the top-level custom section named `target_name`, forwarding every
+/// other section — of any kind — byte-for-byte.
+///
+/// Core modules and components share identical top-level framing: an 8-byte
+/// header (magic + version, plus a layer word for components) followed by a
+/// sequence of sections, each `[id: u8][size: u32 LEB128][contents]`. Custom
+/// sections use id 0 and their contents begin with a LEB128-length-prefixed
+/// name. We only interpret the *name* of id-0 sections — to decide whether to
+/// drop them; every other section (and every non-target custom section) is
+/// copied verbatim. That is deliberate: enumerating section kinds would be the
+/// old bug with a longer whitelist. Copying raw bytes means unknown and
+/// component-model section kinds (`ComponentTypeSection`, aliases, nested core
+/// modules, …) round-trip losslessly — which is what real `cargo component`
+/// output is made of. `cognia:api-version` is the only section ever removed,
+/// so the build path can never strip its own version section.
 fn strip_section(wasm: &[u8], target_name: &str) -> Result<Vec<u8>> {
-    // Use the wasmparser crate to walk sections and drop the matching one.
-    let mut parser = wasmparser::Parser::new(0);
-    let mut buf = wasm;
+    if wasm.len() < 8 || &wasm[..4] != b"\0asm" {
+        bail!("input is not a wasm module (bad magic)");
+    }
     let mut out = Vec::with_capacity(wasm.len());
-    out.extend_from_slice(&wasm[..8]); // magic + version
-    let mut cursor = 8usize;
-    loop {
-        let payload = match parser.parse(buf, true)? {
-            wasmparser::Chunk::NeedMoreData(_) => break,
-            wasmparser::Chunk::Parsed { consumed, payload } => {
-                let next = &buf[..consumed];
-                // The first chunk's consumed bytes include the magic+version;
-                // for subsequent chunks we forward whatever was consumed.
-                if cursor == 8 {
-                    // first chunk already wrote magic; skip those bytes.
-                } else {
-                    // No-op — we forward bytes section-by-section below.
-                }
-                let _ = next;
-                buf = &buf[consumed..];
-                cursor += consumed;
-                payload
-            }
-        };
-        match payload {
-            wasmparser::Payload::CustomSection(reader) if reader.name() == target_name => {
-                // skip
-            }
-            wasmparser::Payload::End(_) => break,
-            other => {
-                // Forward the section's raw bytes by reconstructing from
-                // the parser's offset. We re-encode rather than peek the
-                // chunk because wasmparser doesn't expose raw byte ranges
-                // for all payload variants.
-                forward_payload(&other, &mut out)?;
-            }
+    out.extend_from_slice(&wasm[..8]); // magic + version (+ layer for components)
+    let mut pos = 8usize;
+    while pos < wasm.len() {
+        let section_start = pos;
+        let id = wasm[pos];
+        pos += 1;
+        let (size, size_len) = read_leb128_u32(&wasm[pos..])
+            .with_context(|| format!("malformed section length at offset {pos}"))?;
+        pos += size_len;
+        let contents_end = pos
+            .checked_add(size as usize)
+            .filter(|end| *end <= wasm.len())
+            .ok_or_else(|| {
+                anyhow!("section at offset {section_start} overruns the module bounds")
+            })?;
+        let contents = &wasm[pos..contents_end];
+        pos = contents_end;
+
+        let is_target =
+            id == 0 && custom_section_name(contents).as_deref() == Some(target_name);
+        if !is_target {
+            out.extend_from_slice(&wasm[section_start..contents_end]);
         }
     }
     Ok(out)
 }
 
-fn forward_payload(payload: &wasmparser::Payload<'_>, out: &mut Vec<u8>) -> Result<()> {
-    // For v0.1 the only payload variants we need to round-trip are
-    // CustomSection + the standard module sections. `wasmparser` exposes
-    // raw byte access via `range` on most sections; we use a manual
-    // walker via the underlying bytes.
-    use wasmparser::Payload::*;
-    match payload {
-        CustomSection(reader) => {
-            out.push(0);
-            let name = reader.name().as_bytes();
-            let data = reader.data();
-            let mut body = Vec::with_capacity(5 + name.len() + data.len());
-            write_leb128(&mut body, name.len() as u64);
-            body.extend_from_slice(name);
-            body.extend_from_slice(data);
-            write_leb128(out, body.len() as u64);
-            out.extend_from_slice(&body);
+/// Decode an unsigned LEB128 `u32` from the front of `bytes`, returning the
+/// value and the number of bytes consumed. Errors if the encoding is truncated
+/// or does not fit in 32 bits (a u32 LEB128 is at most 5 bytes).
+fn read_leb128_u32(bytes: &[u8]) -> Result<(u32, usize)> {
+    let mut result: u64 = 0;
+    let mut shift = 0u32;
+    for (i, &byte) in bytes.iter().enumerate().take(5) {
+        result |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            let value =
+                u32::try_from(result).map_err(|_| anyhow!("LEB128 value exceeds 32 bits"))?;
+            return Ok((value, i + 1));
         }
-        Version { .. } => {
-            // The header was already copied at function start.
-        }
-        _ => {
-            // For non-custom sections we don't currently round-trip via
-            // wasmparser — the stripping path is only invoked when the
-            // input was previously embedded by us, so an existing
-            // `cognia:api-version` is the only thing we need to drop.
-            // Other sections are preserved by writing the raw remainder.
-            return Err(anyhow!(
-                "section forwarding for {:?} is not implemented (this is a v0.1 limitation; re-embedding api-version on a wasm that wasn't previously embedded is fine, but re-embedding twice on a complex section graph is not)",
-                payload
-            ));
-        }
+        shift += 7;
     }
-    Ok(())
+    bail!("truncated LEB128 value (or wider than 32 bits)")
+}
+
+/// For an id-0 custom section, decode its name from `[len LEB][name bytes]…`.
+/// Returns `None` if the contents are truncated or the name isn't valid UTF-8,
+/// in which case the section is treated as non-matching and forwarded intact.
+fn custom_section_name(contents: &[u8]) -> Option<String> {
+    let (name_len, consumed) = read_leb128_u32(contents).ok()?;
+    let end = consumed.checked_add(name_len as usize)?;
+    let name_bytes = contents.get(consumed..end)?;
+    std::str::from_utf8(name_bytes).ok().map(str::to_owned)
 }
 
 #[derive(Debug, Clone)]
