@@ -83,6 +83,19 @@ fn path_is_relevant(
     true
 }
 
+/// Canonicalize a repo path into a stable map key so `path`, `path/`, and
+/// `path/.` (and a symlink vs its real path) all resolve to the *same* watcher
+/// entry. Without this, different string forms of one repo would each start an
+/// independent recursive watcher — duplicate `git://status-changed` events —
+/// and a `stop` with a different form than `start` used would leak one. Falls
+/// back to the raw string when canonicalization fails (e.g. the path was
+/// removed before `stop`), which still matches a raw-keyed entry.
+fn watcher_key(repo_path: &str) -> String {
+    std::fs::canonicalize(repo_path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| repo_path.to_string())
+}
+
 /// Start (or replace) the watcher for `repo_path`, emitting debounced
 /// `git://status-changed` events on `app`.
 pub fn start(state: &GitWatcherState, app: &AppHandle, repo_path: &str) -> Result<()> {
@@ -140,14 +153,17 @@ pub fn start(state: &GitWatcherState, app: &AppHandle, repo_path: &str) -> Resul
         }
     });
 
-    // Inserting replaces (and drops) any prior watcher for this repo.
-    state.watchers.lock().insert(repo_path.to_string(), watcher);
+    // Inserting under the canonical key replaces (and drops) any prior watcher
+    // for this repo, regardless of the string form it was started with.
+    state.watchers.lock().insert(watcher_key(repo_path), watcher);
     Ok(())
 }
 
 /// Stop watching `repo_path`. Dropping the watcher ends its debounce task.
+/// Keyed by the canonical path so any string form of the repo stops the same
+/// watcher `start` created.
 pub fn stop(state: &GitWatcherState, repo_path: &str) {
-    state.watchers.lock().remove(repo_path);
+    state.watchers.lock().remove(&watcher_key(repo_path));
 }
 
 #[cfg(test)]
@@ -198,6 +214,55 @@ mod tests {
     fn stop_is_safe_when_absent() {
         let state = GitWatcherState::new();
         stop(&state, "/nope"); // must not panic
+        assert!(state.watchers.lock().is_empty());
+    }
+
+    /// A no-op watcher instance for map/lifecycle tests. Constructing one needs
+    /// no async runtime and no Tauri `AppHandle` (the emit path is exercised
+    /// only when `start` runs under Tauri).
+    fn dummy_watcher() -> RecommendedWatcher {
+        notify::recommended_watcher(|_res: notify::Result<notify::Event>| {}).unwrap()
+    }
+
+    #[test]
+    fn watcher_key_collapses_path_forms() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().to_str().unwrap();
+        let key = watcher_key(base);
+        assert_eq!(watcher_key(&format!("{base}/")), key);
+        assert_eq!(watcher_key(&format!("{base}/.")), key);
+    }
+
+    #[test]
+    fn duplicate_forms_collapse_to_one_map_entry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().to_str().unwrap();
+        let state = GitWatcherState::new();
+        // Two "starts" with different string forms land on one entry, so no
+        // duplicate recursive watcher is registered for the same repo.
+        state
+            .watchers
+            .lock()
+            .insert(watcher_key(base), dummy_watcher());
+        state
+            .watchers
+            .lock()
+            .insert(watcher_key(&format!("{base}/")), dummy_watcher());
+        assert_eq!(state.watchers.lock().len(), 1);
+    }
+
+    #[test]
+    fn stop_removes_entry_started_under_a_different_form() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().to_str().unwrap();
+        let state = GitWatcherState::new();
+        state
+            .watchers
+            .lock()
+            .insert(watcher_key(base), dummy_watcher());
+        assert_eq!(state.watchers.lock().len(), 1);
+        // Stopping with a different string form still finds and drops it.
+        stop(&state, &format!("{base}/"));
         assert!(state.watchers.lock().is_empty());
     }
 }
