@@ -119,7 +119,7 @@ export function SubscriptionOverviewTab({
         }
         action={
           <Button
-            onClick={() => void refresh()}
+            onClick={() => void refresh({ force: true })}
             disabled={refreshing}
             data-testid="overview-refresh"
           >
@@ -156,7 +156,7 @@ export function SubscriptionOverviewTab({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => void refresh()}
+          onClick={() => void refresh({ force: true })}
           disabled={refreshing}
           data-testid="overview-refresh"
           aria-label={t("overview.refresh")}

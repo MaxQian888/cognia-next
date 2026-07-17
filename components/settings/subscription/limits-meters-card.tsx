@@ -153,7 +153,7 @@ export function LimitsMetersCard({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => void refresh()}
+          onClick={() => void refresh({ force: true })}
           disabled={refreshing}
           data-testid={`limits-refresh-${accountId}`}
           aria-label={t("refresh")}

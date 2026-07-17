@@ -13,7 +13,7 @@ import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import { useSettingsStore } from "@/stores/settings"
 
-import { queryAccountLimits } from "./runner"
+import { queryAccountLimitsCoalesced } from "./coalesce"
 import { queryAllConfiguredLimits } from "./aggregate"
 import { recordLimitsSnapshot } from "./store"
 
@@ -26,8 +26,12 @@ export interface UseProviderLimitsResult {
   refreshing: boolean
   /** `true` when no source matched the account on the last refresh. */
   unavailable: boolean
-  /** Run the query runner + persist the result. No-op outside Tauri. */
-  refresh: () => Promise<void>
+  /**
+   * Run the query runner + persist the result. No-op outside Tauri. Automatic
+   * callers omit `force` so they share the coalescer's throttle; an explicit
+   * user "Refresh" passes `{ force: true }` to bypass it.
+   */
+  refresh: (options?: { force?: boolean }) => Promise<void>
 }
 
 /**
@@ -53,21 +57,26 @@ export function useProviderLimits(
       return rows.reduce((newest, r) => (r.fetchedAt > newest.fetchedAt ? r : newest))
     }, [provider, accountId]) ?? null
 
-  const refresh = useCallback(async () => {
-    if (!isTauri()) return
-    setRefreshing(true)
-    try {
-      const result = await queryAccountLimits(provider, accountId)
-      if (result === null) {
-        setUnavailable(true)
-        return
+  const refresh = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (!isTauri()) return
+      setRefreshing(true)
+      try {
+        const result = await queryAccountLimitsCoalesced(provider, accountId, {
+          force: options?.force,
+        })
+        if (result === null) {
+          setUnavailable(true)
+          return
+        }
+        setUnavailable(false)
+        await recordLimitsSnapshot(result)
+      } finally {
+        setRefreshing(false)
       }
-      setUnavailable(false)
-      await recordLimitsSnapshot(result)
-    } finally {
-      setRefreshing(false)
-    }
-  }, [provider, accountId])
+    },
+    [provider, accountId]
+  )
 
   return { snapshot, refreshing, unavailable, refresh }
 }
@@ -96,6 +105,11 @@ export function useAllConfiguredLimits(activeProvider?: ProviderId): UseAllConfi
         activeProvider,
         // Read the custom-source list live so a freshly-added source is included.
         listCustomSources: () => useSettingsStore.getState().settings?.customLimitsSources ?? [],
+        // Funnel every per-account query through the shared coalescer so the
+        // status bar + tray + settings tabs don't stampede the rate-limited
+        // usage endpoints (they all fire refresh on mount and on every
+        // subscription-changed event).
+        runAccount: (provider, accountId) => queryAccountLimitsCoalesced(provider, accountId),
       })
       setSnapshots(all)
       for (const snap of all) {

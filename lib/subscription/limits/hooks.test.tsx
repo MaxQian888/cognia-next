@@ -13,9 +13,9 @@ jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => useLiveQueryMock() }
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 
-const queryAccountLimitsMock = jest.fn()
-jest.mock("./runner", () => ({
-  queryAccountLimits: (...a: unknown[]) => queryAccountLimitsMock(...a),
+const queryAccountLimitsCoalescedMock = jest.fn()
+jest.mock("./coalesce", () => ({
+  queryAccountLimitsCoalesced: (...a: unknown[]) => queryAccountLimitsCoalescedMock(...a),
 }))
 
 const queryAllConfiguredLimitsMock = jest.fn()
@@ -47,19 +47,33 @@ describe("useProviderLimits", () => {
     expect(result.current.snapshot?.accountId).toBe("acc-1")
   })
 
-  it("refreshes: queries the runner and persists the result", async () => {
-    queryAccountLimitsMock.mockResolvedValue(snap())
+  it("refreshes: queries the coalescer and persists the result", async () => {
+    queryAccountLimitsCoalescedMock.mockResolvedValue(snap())
     const { result } = renderHook(() => useProviderLimits("anthropic", "acc-1"))
     await act(async () => {
       await result.current.refresh()
     })
-    expect(queryAccountLimitsMock).toHaveBeenCalledWith("anthropic", "acc-1")
+    // Automatic callers don't force — they share the coalescer's throttle.
+    expect(queryAccountLimitsCoalescedMock).toHaveBeenCalledWith("anthropic", "acc-1", {
+      force: undefined,
+    })
     expect(recordLimitsSnapshotMock).toHaveBeenCalledTimes(1)
     expect(result.current.unavailable).toBe(false)
   })
 
-  it("marks unavailable when the runner returns null", async () => {
-    queryAccountLimitsMock.mockResolvedValue(null)
+  it("forwards force so an explicit refresh bypasses the throttle", async () => {
+    queryAccountLimitsCoalescedMock.mockResolvedValue(snap())
+    const { result } = renderHook(() => useProviderLimits("anthropic", "acc-1"))
+    await act(async () => {
+      await result.current.refresh({ force: true })
+    })
+    expect(queryAccountLimitsCoalescedMock).toHaveBeenCalledWith("anthropic", "acc-1", {
+      force: true,
+    })
+  })
+
+  it("marks unavailable when the coalescer returns null", async () => {
+    queryAccountLimitsCoalescedMock.mockResolvedValue(null)
     const { result } = renderHook(() => useProviderLimits("anthropic", "acc-1"))
     await act(async () => {
       await result.current.refresh()
@@ -74,13 +88,20 @@ describe("useProviderLimits", () => {
     await act(async () => {
       await result.current.refresh()
     })
-    expect(queryAccountLimitsMock).not.toHaveBeenCalled()
+    expect(queryAccountLimitsCoalescedMock).not.toHaveBeenCalled()
   })
 })
 
 describe("useAllConfiguredLimits", () => {
-  it("aggregates and persists each snapshot", async () => {
-    queryAllConfiguredLimitsMock.mockResolvedValue([snap(), snap({ accountId: "acc-2" })])
+  it("aggregates and persists each snapshot, routing accounts through the coalescer", async () => {
+    queryAllConfiguredLimitsMock.mockImplementation(
+      async (deps: { runAccount: (p: string, a: string) => Promise<unknown> }) => {
+        // Exercise the injected runAccount so the status-bar/tray → coalescer
+        // wiring is covered (the whole point of the 429 fix).
+        await deps.runAccount("anthropic", "acc-1")
+        return [snap(), snap({ accountId: "acc-2" })]
+      }
+    )
     const { result } = renderHook(() => useAllConfiguredLimits("anthropic"))
     await act(async () => {
       await result.current.refresh()
@@ -89,8 +110,10 @@ describe("useAllConfiguredLimits", () => {
       expect.objectContaining({
         activeProvider: "anthropic",
         listCustomSources: expect.any(Function),
+        runAccount: expect.any(Function),
       })
     )
+    expect(queryAccountLimitsCoalescedMock).toHaveBeenCalledWith("anthropic", "acc-1")
     expect(result.current.snapshots).toHaveLength(2)
     expect(recordLimitsSnapshotMock).toHaveBeenCalledTimes(2)
   })

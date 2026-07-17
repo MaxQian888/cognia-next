@@ -695,7 +695,7 @@ function CurrentWindowCard({
     <Button
       variant="outline"
       size="sm"
-      onClick={() => void refresh()}
+      onClick={() => void refresh({ force: true })}
       disabled={refreshing || !activeAccountId}
       data-testid="usage-window-refresh"
       aria-label={t("refresh")}

@@ -3,6 +3,7 @@
     "hint": "每次桌面应用启动时把配置与凭据推送到 CLI。凭据会写入 CLI 主目录下仅所有者可读写（0600）的文件。",
     "label": "启动时自动同步"
   },
+  "codexChatGptHint": "Codex API 密钥会同步到 CLI，但 Codex 的 ChatGPT 登录态无法迁移——需在 CLI 中重新登录 Codex。",
   "description": "把本应用的智能体配置与服务商凭据推送到独立的 cognia-agent CLI，使其无需二次登录即可使用相同设置。",
   "mcpHint": "MCP 服务器在 MCP 设置页按服务器逐个同步——Cognia CLI 是其中一个 agent 目标。",
   "status": {
