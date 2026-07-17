@@ -539,7 +539,7 @@ describe("applyBackupPackage — plugins domain", () => {
     expect(summary.added.plugins).toBe(1)
   })
 
-  it("imports permissions / scheduled-jobs / analytics only for imported plugin ids", async () => {
+  it("imports permissions and analytics only for imported plugin ids", async () => {
     const db = getDb()
     const summary = await applyBackupPackage(
       pkg({
@@ -557,38 +557,41 @@ describe("applyBackupPackage — plugins domain", () => {
           { pluginId: "plg-with-data", key: "tool.invoke", count: 5, lastEventAt: 1 },
           { pluginId: "plg-orphan", key: "tool.invoke", count: 5, lastEventAt: 1 },
         ],
-        pluginScheduledJobs: [
-          {
-            id: "j1",
-            pluginId: "plg-with-data",
-            cron: "0 * * * *",
-            handler: "tick",
-            status: "active",
-            createdAt: 1,
-            updatedAt: 1,
-          },
-          {
-            id: "j2",
-            pluginId: "plg-orphan",
-            cron: "0 * * * *",
-            handler: "tick",
-            status: "active",
-            createdAt: 1,
-            updatedAt: 1,
-          },
-        ],
       }),
       { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
       { projectMcp: async () => [] }
     )
     expect(await db.pluginPermissions.toArray()).toHaveLength(1)
     expect(await db.pluginAnalytics.toArray()).toHaveLength(1)
-    const jobs = await db.pluginScheduledJobs.toArray()
-    expect(jobs).toHaveLength(1)
-    expect(jobs[0]?.pluginId).toBe("plg-with-data")
     expect(summary.added.pluginPermissions).toBe(1)
     expect(summary.added.pluginAnalytics).toBe(1)
-    expect(summary.added.pluginScheduledJobs).toBe(1)
+  })
+
+  it("ignores the retired pluginScheduledJobs field in legacy backups", async () => {
+    const legacyPayload = {
+      plugins: [pluginRow({ id: "plg-legacy" })],
+      pluginScheduledJobs: [
+        {
+          id: "legacy-job",
+          pluginId: "plg-legacy",
+          cron: "0 * * * *",
+          handler: "tick",
+          status: "active",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    }
+
+    await expect(
+      applyBackupPackage(
+        pkg(legacyPayload as never),
+        { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+        { projectMcp: async () => [] }
+      )
+    ).resolves.toBeDefined()
+    expect(await getDb().plugins.get("plg-legacy")).toBeDefined()
+    expect(getDb().tables.map((table) => table.name)).not.toContain("pluginScheduledJobs")
   })
 
   it("skip strategy preserves local plugin rows", async () => {

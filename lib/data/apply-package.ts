@@ -21,12 +21,7 @@ import type {
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import { getDb } from "@/lib/db/schema"
-import type {
-  PluginAnalyticsRow,
-  PluginPermissionRow,
-  PluginRow,
-  PluginScheduledJobRow,
-} from "@/lib/db/plugin-types"
+import type { PluginAnalyticsRow, PluginPermissionRow, PluginRow } from "@/lib/db/plugin-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
 import {
   emptySummary,
@@ -119,7 +114,6 @@ export async function applyBackupPackage(
       db.plugins,
       db.pluginPermissions,
       db.pluginAnalytics,
-      db.pluginScheduledJobs,
       db.twinSources,
       db.twinChunks,
       db.twinProfile,
@@ -356,15 +350,6 @@ export async function applyBackupPackage(
           if (rows.length > 0) {
             await db.pluginAnalytics.bulkPut(rows)
             incrementCounterBy(summary.added, "pluginAnalytics", rows.length)
-          }
-        }
-        if (env.pluginScheduledJobs && env.pluginScheduledJobs.length > 0) {
-          const rows = (env.pluginScheduledJobs as PluginScheduledJobRow[]).filter((r) =>
-            importedIds.has(r.pluginId)
-          )
-          if (rows.length > 0) {
-            await db.pluginScheduledJobs.bulkPut(rows)
-            incrementCounterBy(summary.added, "pluginScheduledJobs", rows.length)
           }
         }
       }

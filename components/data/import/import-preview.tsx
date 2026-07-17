@@ -35,7 +35,6 @@ const FIELDS: Array<{
   { key: "pluginPermissions", labelKey: "pluginPermissions" },
   { key: "pluginReviews", labelKey: "pluginReviews" },
   { key: "pluginAnalytics", labelKey: "pluginAnalytics" },
-  { key: "pluginScheduledJobs", labelKey: "pluginScheduledJobs" },
 ]
 
 export function ImportPreview({ pkg }: { pkg: BackupPackageV3 }) {
@@ -53,6 +52,7 @@ export function ImportPreview({ pkg }: { pkg: BackupPackageV3 }) {
         })}
       </p>
       <p className="mb-2 break-all font-mono text-[10px] text-muted-foreground">
+        {/* i18n-exempt: technical manifest diagnostics — schema/integrity/trace ids, not UI prose */}
         schema v{pkg.manifest.schemaVersion} · integrity {integrityShort}… · trace{" "}
         {pkg.manifest.traceId.slice(0, 8)}
       </p>
@@ -69,6 +69,7 @@ export function ImportPreview({ pkg }: { pkg: BackupPackageV3 }) {
         })}
         {snapshotCount > 0 && (
           <li>
+            {/* i18n-exempt: raw payload key name, not UI prose */}
             <span className="font-mono">localStorageSnapshots:</span> <span>{snapshotCount}</span>
           </li>
         )}

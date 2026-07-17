@@ -84,7 +84,6 @@ Dexie 数据库名是 `cognia-claude`（保留原始代号，避免对已有用�
 | `pluginPermissions`   | `[pluginId+permission], pluginId, permission, decision, expiresAt`            |
 | `pluginReviews`       | `[pluginId+id], pluginId, rating, createdAt`                                  |
 | `pluginAnalytics`     | `[pluginId+key], pluginId, key, lastEventAt`                                  |
-| `pluginScheduledJobs` | `id, pluginId, cron, lastRunAt, nextRunAt, status`                            |
 
 详见 [插件系统](../subsystems/plugin-system)。
 
@@ -204,6 +203,7 @@ timeline
 | **v13** | A2UI                  | + `a2uiApps / a2uiSurfaces / a2uiTemplates / a2uiEventHistory`；幂等种子化 A2UI bridge MCP；`characters.a2uiEnabled` 回填。                                           |
 | **v14** | 员工数字孪生          | + `twinSources / twinChunks / twinProfile / twinDrafts / twinJobs`。                                                                                                  |
 | **v15** | 插件                  | + `plugins / pluginPermissions / pluginReviews / pluginAnalytics / pluginScheduledJobs`。                                                                             |
+| **v113** | 调度清理              | 删除未使用的 `pluginScheduledJobs`；插件计划任务统一存储为 SchedulerDB 中 `type: "plugin"` 的任务。                                                                  |
 | **v16** | 主题双变体迁移        | 无新表；`settings.customThemes[]` 中每行 `{colors, isDark}` 迁移为 `{tokens:{light,dark}, baseVariant, derivedVariant}`，借助 `lib/appearance/derive-variant`。幂等。 |
 | **v17** | External Bridge       | + `wikiArticles / wikiSections / wikiManifest / mcpAuditLog`（最后一个限 5 000 行）。                                                                                 |
 | **v18** | 平台连接器            | + 8 张连接器表（见上）。                                                                                                                                              |

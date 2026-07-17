@@ -115,7 +115,6 @@ export interface BackupPayloadV3 {
   pluginPermissions?: unknown[]
   pluginReviews?: unknown[]
   pluginAnalytics?: unknown[]
-  pluginScheduledJobs?: unknown[]
   /**
    * Digital-twin tables (schema v14). Always-additive: legacy v3 envelopes
    * that pre-date the twin subsystem omit these fields, and the importer

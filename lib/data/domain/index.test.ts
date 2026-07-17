@@ -420,33 +420,11 @@ describe("buildDomainExport — plugins", () => {
       { pluginId: "plg-user", key: "tool", count: 1, lastEventAt: 1 },
       { pluginId: "plg-builtin", key: "tool", count: 1, lastEventAt: 1 },
     ])
-    await db.pluginScheduledJobs.bulkPut([
-      {
-        id: "j-user",
-        pluginId: "plg-user",
-        cron: "0 * * * *",
-        handler: "tick",
-        status: "active",
-        createdAt: 1,
-        updatedAt: 1,
-      },
-      {
-        id: "j-builtin",
-        pluginId: "plg-builtin",
-        cron: "0 * * * *",
-        handler: "tick",
-        status: "active",
-        createdAt: 1,
-        updatedAt: 1,
-      },
-    ])
-
     const file = await buildDomainExport("plugins")
     expect(file.payload.plugins).toHaveLength(1)
     expect((file.payload.plugins?.[0] as { id: string }).id).toBe("plg-user")
     expect(file.payload.pluginPermissions).toHaveLength(1)
     expect(file.payload.pluginAnalytics).toHaveLength(1)
-    expect(file.payload.pluginScheduledJobs).toHaveLength(1)
   })
 })
 
