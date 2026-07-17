@@ -771,6 +771,12 @@ fn is_control_command(name: &str) -> bool {
     CONTROL_COMMANDS_SET.contains(name)
 }
 
+fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
+    !is_control_command(name)
+        || (name == "terminal_exec" && scope == Some("service"))
+        || super::control_allow_list::global().is_allowed(device_id)
+}
+
 /// Commands whose TS dispatch arm needs the authenticated caller's device id
 /// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
 /// exactly these names — see [`inject_caller_device_id`].
@@ -1070,8 +1076,7 @@ pub async fn rpc_handler(
     // `dispatch` directly, bypassing this handler — stays gated too. Failing
     // here means an unauthorized device never burns a rate-limit token or
     // touches the sidecar.
-    if is_control_command(&name) && !super::control_allow_list::global().is_allowed(&ctx.device_id)
-    {
+    if !is_control_authorized(&name, &ctx.device_id, Some(ctx.scope.as_str())) {
         return Err(RpcError::forbidden(
             "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
         ));
@@ -1257,7 +1262,7 @@ pub(super) async fn dispatch(
     // the WebRTC `signaling::dispatch` path (both funnel through here), so the
     // elevated capability is enforced regardless of transport. Baseline chat
     // and read-only sync are not in `CONTROL_COMMANDS`, so they pass through.
-    if is_control_command(name) && !super::control_allow_list::global().is_allowed(device_id) {
+    if !is_control_authorized(name, device_id, scope) {
         return Err(RpcError::forbidden(
             "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
         ));
@@ -3645,6 +3650,47 @@ mod tests {
         .await
         .expect_err("device-scoped channel must be rejected");
         assert_eq!(err.0, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn service_scope_is_authorized_only_for_terminal_exec() {
+        assert!(is_control_authorized(
+            "terminal_exec",
+            "brain-local",
+            Some("service")
+        ));
+        assert!(!is_control_authorized(
+            "terminal_exec",
+            "unapproved-device",
+            Some("device")
+        ));
+        assert!(!is_control_authorized(
+            "git_push",
+            "brain-local",
+            Some("service")
+        ));
+    }
+
+    #[tokio::test]
+    async fn service_scope_executes_terminal_command_on_the_headless_host() {
+        let state = test_state();
+        let result = dispatch(
+            "terminal_exec",
+            json!({ "command": "echo cognia-headless-shell", "shell": true }),
+            &state,
+            &headless_host(),
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("service-scoped terminal exec");
+
+        assert_eq!(result["exitCode"], 0);
+        assert_eq!(result["timedOut"], false);
+        assert!(result["stdout"]
+            .as_str()
+            .is_some_and(|stdout| stdout.contains("cognia-headless-shell")));
     }
 
     /// Policy deny → 403 naming the violation, with a `deny` audit line;

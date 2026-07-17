@@ -9,9 +9,9 @@
  *   1. `settings.terminal.allowUnattendedExecution` is the master switch
  *      — off (the default) fails closed.
  *   2. `deny` verdicts never run, regardless of any policy.
- *   3. `allow` verdicts run on the Rust headless backend
- *      (`terminal_headless_exec`, or `terminal_headless_run` when a
- *      persistent session id is supplied).
+ *   3. `allow` verdicts run on the active host execution backend: the
+ *      companion `terminal_exec` RPC in brain, or the desktop
+ *      `terminal_headless_exec` / `terminal_headless_run` commands.
  *   4. `ask` verdicts follow the effective ask-policy
  *      (`input.onAskVerdict` → `settings.terminal.unattendedAskPolicy` →
  *      `"fail"`): fail the step, fall back to the visible-dock consent
@@ -62,6 +62,13 @@ interface RustHeadlessResult {
   exitCode: number | null
   timedOut: boolean
   durationMs: number
+}
+
+interface ServerExecResult {
+  stdout: string
+  stderr: string
+  exitCode: number | null
+  timedOut: boolean
 }
 
 function readTerminalSettings() {
@@ -211,13 +218,18 @@ async function runViaDockConsent(
   }
 }
 
-/** Execute on the Rust headless backend. */
+/** Execute on the host backend. */
 async function execHeadless(
   input: HeadlessExecInput,
   command: string,
   verdict: "allow" | "ask",
   source: "workflow" | "agent"
 ): Promise<HeadlessExecOutcome> {
+  const { isHeadlessHost } = await import("@/lib/platform/detect")
+  if (isHeadlessHost()) {
+    return execOnHeadlessServer(input, command, verdict, source)
+  }
+
   const { isTauri } = await import("@/lib/tauri")
   if (!isTauri()) {
     return { ok: false, reason: "headless terminal execution requires the desktop app" }
@@ -278,6 +290,78 @@ async function execHeadless(
     output: result.output,
     durationMs: result.durationMs,
     timedOut: false,
+    verdict,
+  }
+}
+
+async function execOnHeadlessServer(
+  input: HeadlessExecInput,
+  command: string,
+  verdict: "allow" | "ask",
+  source: "workflow" | "agent"
+): Promise<HeadlessExecOutcome> {
+  const reject = (reason: string): HeadlessExecOutcome => {
+    audit({
+      command,
+      verdict,
+      reason,
+      blocked: true,
+      source,
+      runId: input.runId,
+    })
+    return { ok: false, reason, verdict }
+  }
+
+  if (input.sessionId) {
+    return reject(
+      "persistent headless terminal sessions are unavailable on the server execution plane"
+    )
+  }
+
+  const sandboxed = readTerminalSettings()?.sandboxed ?? false
+  if (sandboxed) {
+    return reject("sandboxed headless execution is unavailable on the server execution plane")
+  }
+  if (input.shell?.trim()) {
+    return reject("custom shells are unavailable on the server execution plane")
+  }
+
+  const { transport } = await import("@/lib/tauri")
+  const startedAt = Date.now()
+  let result: ServerExecResult
+  try {
+    result = await transport.call<ServerExecResult>("terminal_exec", {
+      command,
+      args: [],
+      cwd: input.cwd,
+      env: input.env,
+      timeoutMs: input.timeoutMs,
+      shell: true,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, reason: message, verdict }
+  }
+
+  const durationMs = Date.now() - startedAt
+  const output = [result.stdout, result.stderr].filter(Boolean).join("\n")
+  audit({
+    command,
+    verdict,
+    reason: verdict === "ask" ? 'ask verdict ran under policy "run"' : "allowed by classifier",
+    blocked: false,
+    source,
+    runId: input.runId,
+    exitCode: result.exitCode,
+    durationMs,
+  })
+
+  return {
+    ok: true,
+    exitCode: result.timedOut ? null : result.exitCode,
+    output,
+    durationMs,
+    timedOut: result.timedOut,
     verdict,
   }
 }

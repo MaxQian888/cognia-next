@@ -69,6 +69,16 @@ export type CapabilityId = CoreCapabilityId | `plugin:${string}`
 
 const CORE_ID_SET: ReadonlySet<string> = new Set(CORE_CAPABILITY_IDS)
 
+/** Capabilities implemented by the cognia-server + brain execution plane. */
+const SERVER_BACKED: readonly CapabilityId[] = Object.freeze([
+  "shell",
+  "sidecar",
+  "always-on",
+  "connector-runtime",
+  "mcp-runtime",
+  "headless",
+] as const)
+
 /** True when `value` is a well-formed capability id (core or `plugin:<id>`). */
 export function isCapabilityId(value: unknown): value is CapabilityId {
   if (typeof value !== "string") return false
@@ -107,6 +117,7 @@ const PLATFORM_BASELINES: Record<Platform, readonly CapabilityId[]> = {
     "biometric",
   ] as const),
   web: Object.freeze(["webview"] as const),
+  headless: SERVER_BACKED,
 }
 
 /**
@@ -137,11 +148,13 @@ export function hasCapability(
  * *web standalone* (BYOK, in-webview only). Companion profiles pair the
  * local baseline with {@link serverBackedCapabilities}.
  */
-export type HostProfile = "desktop" | "mobile-companion" | "cloud-companion" | "web-standalone"
+export type HostProfile =
+  "desktop" | "mobile-companion" | "cloud-companion" | "web-standalone" | "headless"
 
 /** Resolve the host profile. Stable after first paint; memoize freely. */
 export function detectHostProfile(): HostProfile {
   const platform = detectPlatform()
+  if (platform === "headless") return "headless"
   if (platform === "tauri") return "desktop"
   if (platform === "mobile") return "mobile-companion"
   // Lazy require keeps this module a pure leaf for non-web callers; the
@@ -171,17 +184,9 @@ export function serverBackedCapabilities(
       return SERVER_BACKED
     case "desktop":
     case "web-standalone":
+    case "headless":
       return EMPTY_CAPS
   }
 }
-
-const SERVER_BACKED: readonly CapabilityId[] = Object.freeze([
-  "shell",
-  "sidecar",
-  "always-on",
-  "connector-runtime",
-  "mcp-runtime",
-  "headless",
-] as const)
 
 const EMPTY_CAPS: readonly CapabilityId[] = Object.freeze([])

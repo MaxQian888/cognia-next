@@ -24,6 +24,7 @@ function setCapacitorNative(on: boolean) {
 }
 
 afterEach(() => {
+  delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
   setTauri(false)
   setCapacitorNative(false)
 })
@@ -47,6 +48,21 @@ describe("isCapabilityId", () => {
 })
 
 describe("detectLocalCapabilities", () => {
+  it("returns the complete server-backed baseline in the headless brain", () => {
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+
+    const caps = detectLocalCapabilities()
+    expect(caps).toEqual([
+      "shell",
+      "sidecar",
+      "always-on",
+      "connector-runtime",
+      "mcp-runtime",
+      "headless",
+    ])
+    expect(caps).toBe(serverBackedCapabilities("cloud-companion"))
+  })
+
   it("returns the tauri baseline under the Tauri marker", () => {
     setTauri(true)
     const caps = detectLocalCapabilities()
@@ -147,6 +163,11 @@ describe("detectHostProfile", () => {
     expect(detectHostProfile()).toBe("mobile-companion")
   })
 
+  it("resolves the brain as its own headless execution profile", () => {
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    expect(detectHostProfile()).toBe("headless")
+  })
+
   it("cloud-companion on web with a server target, web-standalone otherwise", () => {
     expect(detectHostProfile()).toBe("web-standalone")
     process.env[ENV_KEY] = "https://cloud.example.com"
@@ -171,6 +192,7 @@ describe("serverBackedCapabilities", () => {
   it("empty for hosts that are their own execution plane or have no server", () => {
     expect(serverBackedCapabilities("desktop")).toEqual([])
     expect(serverBackedCapabilities("web-standalone")).toEqual([])
+    expect(serverBackedCapabilities("headless")).toEqual([])
   })
 
   it("local-OR-server composition answers the C3 gating question", () => {

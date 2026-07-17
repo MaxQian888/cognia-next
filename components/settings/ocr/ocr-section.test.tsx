@@ -167,6 +167,13 @@ describe("OcrSection", () => {
     expect(document.querySelector('[data-status="unsupported"]')).not.toBeNull()
   })
 
+  it("marks every OCR provider unsupported in the headless host profile", async () => {
+    const user = userEvent.setup()
+    renderSection({}, null, { platform: "headless" })
+    await user.click(screen.getAllByTestId("ocr-sidebar-item-mistral-ocr")[0]!)
+    expect(document.querySelector('[data-status="unsupported"]')).not.toBeNull()
+  })
+
   it("shows the LocalModelManager for managed-model backends when a bridge is provided", async () => {
     const user = userEvent.setup()
     const stubBridge = makeBridgeStub({

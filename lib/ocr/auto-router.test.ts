@@ -33,6 +33,10 @@ describe("DEFAULT_LOCAL_PREFERENCE", () => {
     expect(DEFAULT_LOCAL_PREFERENCE.browser[0]).toBe("tesseract-wasm")
   })
 
+  it("does not claim a local OCR engine in headless mode", () => {
+    expect(DEFAULT_LOCAL_PREFERENCE.headless).toEqual([])
+  })
+
   it("seeds windows-media-ocr ahead of tesseract on Windows", () => {
     expect(DEFAULT_LOCAL_PREFERENCE.windows[0]).toBe("windows-media-ocr")
   })

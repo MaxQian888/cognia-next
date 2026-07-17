@@ -36,7 +36,28 @@ jest.mock("@/lib/claude/permissions/command-safety", () => {
   }
 })
 
-jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+jest.mock("@/lib/tauri", () => {
+  const state = { headless: false }
+  return {
+    __mockHostState: state,
+    isTauri: () => !state.headless,
+    transport: {
+      call: jest.fn(async () => ({
+        stdout: "server out",
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+      })),
+    },
+  }
+})
+
+jest.mock("@/lib/platform/detect", () => {
+  const { __mockHostState } = jest.requireMock("@/lib/tauri") as {
+    __mockHostState: { headless: boolean }
+  }
+  return { isHeadlessHost: () => __mockHostState.headless }
+})
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(async () => ({ output: "ok", exitCode: 0, timedOut: false, durationMs: 12 })),
@@ -66,6 +87,10 @@ const { __mockClassifyState } = jest.requireMock("@/lib/claude/permissions/comma
   __mockClassifyState: { verdict: "allow" | "ask" | "deny" }
 }
 const { invoke: mockInvoke } = jest.requireMock("@tauri-apps/api/core") as { invoke: jest.Mock }
+const { __mockHostState, transport: mockTransport } = jest.requireMock("@/lib/tauri") as {
+  __mockHostState: { headless: boolean }
+  transport: { call: jest.Mock }
+}
 const { appendUnattendedExecAudit: mockAudit } = jest.requireMock("@/lib/db/terminal-audit") as {
   appendUnattendedExecAudit: jest.Mock
 }
@@ -78,12 +103,17 @@ async function flushAudit(): Promise<void> {
 }
 
 beforeEach(() => {
+  __mockHostState.headless = false
   __mockTerminalSettings.allowUnattendedExecution = true
   __mockTerminalSettings.unattendedAskPolicy = undefined
+  __mockTerminalSettings.sandboxed = false
   __mockClassifyState.verdict = "allow"
   mockInvoke
     .mockReset()
     .mockResolvedValue({ output: "ok", exitCode: 0, timedOut: false, durationMs: 12 })
+  mockTransport.call
+    .mockReset()
+    .mockResolvedValue({ stdout: "server out", stderr: "", exitCode: 0, timedOut: false })
   mockAudit.mockReset().mockResolvedValue(undefined)
   mockDock
     .mockReset()
@@ -115,6 +145,93 @@ describe("runHeadlessExec — policy matrix", () => {
     expect(mockAudit).toHaveBeenCalledWith(
       expect.objectContaining({ verdict: "allow", blocked: false, runId: "r1" })
     )
+  })
+
+  it("routes a headless brain command through the server execution plane", async () => {
+    __mockHostState.headless = true
+
+    const out = await runHeadlessExec({
+      command: "printf server",
+      cwd: "/data/workspace",
+      env: { COGNIA_TEST: "1" },
+      timeoutMs: 4_000,
+    })
+
+    expect(out).toMatchObject({
+      ok: true,
+      exitCode: 0,
+      output: "server out",
+      verdict: "allow",
+    })
+    expect(mockTransport.call).toHaveBeenCalledWith("terminal_exec", {
+      command: "printf server",
+      args: [],
+      cwd: "/data/workspace",
+      env: { COGNIA_TEST: "1" },
+      timeoutMs: 4_000,
+      shell: true,
+    })
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("fails closed instead of dropping the sandbox policy on the server", async () => {
+    __mockHostState.headless = true
+    __mockTerminalSettings.sandboxed = true
+
+    const out = await runHeadlessExec({ command: "echo confined" })
+
+    expect(out).toMatchObject({ ok: false, reason: expect.stringContaining("sandboxed") })
+    expect(mockTransport.call).not.toHaveBeenCalled()
+  })
+
+  it("fails explicitly when a custom shell cannot be preserved on the server", async () => {
+    __mockHostState.headless = true
+
+    const out = await runHeadlessExec({ command: "echo zsh", shell: "/bin/zsh" })
+
+    expect(out).toMatchObject({ ok: false, reason: expect.stringContaining("custom shells") })
+    expect(mockTransport.call).not.toHaveBeenCalled()
+  })
+
+  it("rejects persistent sessions that do not exist on the server execution plane", async () => {
+    __mockHostState.headless = true
+
+    const out = await runHeadlessExec({ command: "echo stateful", sessionId: "server-session" })
+
+    expect(out).toMatchObject({ ok: false, reason: expect.stringContaining("persistent") })
+    expect(mockTransport.call).not.toHaveBeenCalled()
+    await flushAudit()
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ blocked: true, reason: expect.stringContaining("persistent") })
+    )
+  })
+
+  it("maps server stderr and timeout results without inventing an exit code", async () => {
+    __mockHostState.headless = true
+    mockTransport.call.mockResolvedValue({
+      stdout: "partial stdout",
+      stderr: "timed out",
+      exitCode: 9,
+      timedOut: true,
+    })
+
+    const out = await runHeadlessExec({ command: "sleep 100" })
+
+    expect(out).toMatchObject({
+      ok: true,
+      output: "partial stdout\ntimed out",
+      exitCode: null,
+      timedOut: true,
+    })
+  })
+
+  it("surfaces a non-Error server transport rejection", async () => {
+    __mockHostState.headless = true
+    mockTransport.call.mockRejectedValue("server offline")
+
+    const out = await runHeadlessExec({ command: "echo hi" })
+
+    expect(out).toMatchObject({ ok: false, reason: "server offline", verdict: "allow" })
   })
 
   it("forwards the global sandbox toggle to terminal_headless_exec (ADR-0028 P3.3)", async () => {

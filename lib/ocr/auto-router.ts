@@ -68,6 +68,7 @@ export const DEFAULT_LOCAL_PREFERENCE: Required<NonNullable<AutoRouterDeps["loca
   tauri: [],
   mobile: [],
   web: ["tesseract-wasm"],
+  headless: [],
   windows: ["windows-media-ocr", "ocrs", "paddle-ocr", "tesseract-native", "tesseract-wasm"],
   macos: ["apple-vision", "ocrs", "paddle-ocr", "tesseract-native", "tesseract-wasm"],
   linux: ["ocrs", "paddle-ocr", "tesseract-native", "tesseract-wasm"],

@@ -66,6 +66,8 @@ export function shellAllows(provider: OcrProvider, platform: NativePlatform): bo
       return provider.shells.capacitor
     case "web":
       return provider.shells.browser
+    case "headless":
+      return false
   }
 }
 

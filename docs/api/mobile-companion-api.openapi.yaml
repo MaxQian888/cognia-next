@@ -1207,11 +1207,7 @@ paths:
       responses:
         "200":
           description: "`{ ok: true, hits }` or a structured policy block (`disabled` / `temporary` / `backend_unavailable`)."
-          content:
-            {
-              application/json:
-                { schema: { type: object, additionalProperties: true } },
-            }
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "500":
           {
@@ -1239,11 +1235,7 @@ paths:
       responses:
         "200":
           description: "`{ ok: true, memories }` or a structured policy block."
-          content:
-            {
-              application/json:
-                { schema: { type: object, additionalProperties: true } },
-            }
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "500":
           {
@@ -1276,11 +1268,7 @@ paths:
       responses:
         "200":
           description: "`{ ok: true, stored, consolidated, memoryId?, applied }` or a structured policy block (`disabled` / `temporary` / `pii_blocked`)."
-          content:
-            {
-              application/json:
-                { schema: { type: object, additionalProperties: true } },
-            }
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
         "500":
@@ -1312,11 +1300,7 @@ paths:
       responses:
         "200":
           description: "`{ ok: true }` or a structured policy block (`disabled` / `temporary` / `pii_blocked` / `not_found`)."
-          content:
-            {
-              application/json:
-                { schema: { type: object, additionalProperties: true } },
-            }
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
         "500":
@@ -1344,11 +1328,7 @@ paths:
       responses:
         "200":
           description: "`{ ok: true }` or a structured policy block (`disabled` / `not_found`)."
-          content:
-            {
-              application/json:
-                { schema: { type: object, additionalProperties: true } },
-            }
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403": { $ref: "#/components/responses/RemoteControlForbidden" }
         "500":
@@ -3252,10 +3232,16 @@ paths:
                   additionalProperties: { type: string }
       responses:
         "200":
-          { description: Stable socket handle., content: { application/json: { schema: { type: string } } } }
+          {
+            description: Stable socket handle.,
+            content: { application/json: { schema: { type: string } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403":
-          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/connectors_ws_send:
     post:
@@ -3273,10 +3259,17 @@ paths:
                 handleId: { type: string }
                 data: { type: string }
       responses:
-        "200": { description: Frame queued., content: { application/json: { schema: { type: "null" } } } }
+        "200":
+          {
+            description: Frame queued.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403":
-          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/connectors_ws_close:
     post:
@@ -3293,10 +3286,17 @@ paths:
               properties:
                 handleId: { type: string }
       responses:
-        "200": { description: Socket closed., content: { application/json: { schema: { type: "null" } } } }
+        "200":
+          {
+            description: Socket closed.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403":
-          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/connectors_onebot_send:
     post:
@@ -3314,10 +3314,14 @@ paths:
                 adapterId: { type: string }
                 callJson: { type: string }
       responses:
-        "200": { description: Call queued., content: { application/json: { schema: { type: "null" } } } }
+        "200":
+          { description: Call queued., content: { application/json: { schema: { type: "null" } } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403":
-          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/connectors_lark_ws_open:
     post:
@@ -3335,10 +3339,16 @@ paths:
                 adapterId: { type: string }
       responses:
         "200":
-          { description: Stable Lark connection handle., content: { application/json: { schema: { type: string } } } }
+          {
+            description: Stable Lark connection handle.,
+            content: { application/json: { schema: { type: string } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403":
-          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/connectors_lark_ws_close:
     post:
@@ -3355,10 +3365,17 @@ paths:
               properties:
                 handleId: { type: string }
       responses:
-        "200": { description: Connection closed., content: { application/json: { schema: { type: "null" } } } }
+        "200":
+          {
+            description: Connection closed.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403":
-          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/connectors_reset_all_ws:
     post:
@@ -3372,10 +3389,16 @@ paths:
             schema: { type: object }
       responses:
         "200":
-          { description: Number of sockets reaped., content: { application/json: { schema: { type: integer } } } }
+          {
+            description: Number of sockets reaped.,
+            content: { application/json: { schema: { type: integer } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403":
-          { description: device-scope token, content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/connectors_attachment_fetch:
     post:
@@ -7013,11 +7036,13 @@ paths:
     post:
       operationId: rpcTerminalExec
       tags: [rpc-terminal]
-      summary: Run a one-shot command and capture output. Requires allowRemoteControl.
+      summary: Run a one-shot command and capture output.
       description: |
         Arbitrary code execution on the host. Bounded by `timeoutMs` (default
         120000, max 600000); on timeout the child is killed and `timedOut` is
-        set. The child inherits the desktop process environment plus `env`.
+        set. Device tokens require allowRemoteControl; the loopback-only
+        headless service token is authorized directly. The child inherits the
+        host process environment plus `env`.
         With `shell: true`, `command` is a complete shell line run via the
         platform shell (`cmd /C` / `sh -c`) — `args` must be empty then.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]

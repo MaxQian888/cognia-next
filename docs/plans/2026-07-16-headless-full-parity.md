@@ -1,7 +1,7 @@
 # 无头模式全功能对等 — 实施计划
 
 **日期**: 2026-07-16
-**状态**: 待评审(未动工)
+**状态**: 实施中(C1 代码于 2026-07-17 完成,U6 容器 smoke 待跑;C1a 完成 one-shot 子项,其余项按依赖推进)
 **目标**: 服务器独占运行,桌面不参与;**凡在无头下有意义的功能**都与桌面对等
 **范围**: 两部分 ——
 
@@ -621,6 +621,8 @@ case "connectors_reset_all_ws":  return 0 as T                         // ❌ �
 
 ### C1a — 摘掉 `terminal_headless_exec` 的 `AppHandle` 🔧
 
+**2026-07-17 实施结果(one-shot 子项)**:复核发现 companion API 已有 host-neutral 的 `terminal_exec` free function + RPC arm,且支持 `shell: true` 的完整命令行。brain 的 `runHeadlessExec()` 现在复用这条既有执行面;service-scope token 可调用该 arm,普通 device token 仍受 remote-control gate 约束。persistent session、自定义 shell 与 sandboxed server exec 仍未完成,当前明确 fail-closed 并写审计,所以 **C1a 整项保持进行中**,不把 one-shot 对等冒充完整对等。
+
 **依赖**: 无。**是 C1 的硬前提。**
 
 **问题**: 见 F14。`headless.rs:541-550` 只为 `resolve_dirs(&app)` 吃了个 `AppHandle`。
@@ -632,6 +634,8 @@ case "connectors_reset_all_ws":  return 0 as T                         // ❌ �
 ---
 
 ### C1 — 能力探测认得出无头 🔴
+
+**2026-07-17 实施结果**:代码完成,U6 容器 smoke 待跑。`Platform` / `HostProfile` 均显式表达 `headless`,`detectPlatform()` 在 window shim 之前识别 brain,headless baseline 与 `SERVER_BACKED` 共用同一份冻结能力集(引用同一性测试防漂移);workflow capability preflight 已用默认能力集钉住 shell 节点不再在 t=0 被拒。
 
 **依赖**: C1a。
 
@@ -674,6 +678,8 @@ case "connectors_reset_all_ws":  return 0 as T                         // ❌ �
 - D4 那份清单第一次有了**代码里的**真相来源
 
 > ⚠️ **`keyring` 的归属存疑** [UNVERIFIED]:无头用的是加密文件 store(ADR-0059 W5)而非 OS keyring,但 `keyring:*` secret ref 在无头下**是**能解析的。它算不算 `keyring` 能力?`SERVER_BACKED` 没列它。C1 动工前需确认 —— 列错会让一批 secret-ref 节点被误拒。
+
+**2026-07-17 核查结论**:`keyring` 不进入 headless baseline。该 capability 的代码定义是「OS keyring access」;headless 使用 `cognia-secrets` 的 master-key 加密文件,不是 OS keyring。并且当前 `getDefaultSecretResolver()` 只在 Tauri 返回 keyring resolver,companion RPC 也没有 `keyring_secret_*` arm,所以原文「`keyring:*` 在无头能解析」的推断不成立。现有 workflow catalog 没有节点声明 `requires: ["keyring"]`,因此省略它不会误拒现有节点;无头 secret-ref 对等应另列工作项,不能靠谎报 capability 解决。
 
 **验收**: brain 里 `detectLocalCapabilities()` 返回 headless 基线;一个含 shell 节点的工作流在 cognia-server 里**跑通而不是 t=0 失败**;桌面/移动/web 三档零变化。
 
@@ -842,7 +848,7 @@ D4 一句话排除了 "OCR"。但 OCR 子系统(ADR-0024)是有 **cloud provider
 | U4     | F6 黑洞的完整链条(五环推理,未实跑)                                                          | H0 的验收就是它的复现                                                                                                                            |
 | **U5** | 定时任务在 cognia-server 里到点是否真的自己跑                                               | **已基本答出**(F13):驱动可插拔,brain 走 `RendererTimingDriver` + `setInterval`,且 brain 常驻。**剩下的只是实跑确认一次** —— 通过则 C2 零代码关闭 |
 | **U6** | F12 链条(五环推理,未实跑)—— brain 里 `detectLocalCapabilities()` 是否真的返回 `["webview"]` | C1 的前提。**验证成本极低**:在 brain 里打一行日志,或跑一个含 shell 节点的工作流看是否 t=0 失败                                                   |
-| U7     | `keyring` 能力在无头下的归属(见 C1 的 ⚠️ 段)                                                | 列错会让一批 secret-ref 节点被误拒                                                                                                               |
+| U7     | ~~`keyring` 能力在无头下的归属~~ **[RESOLVED 2026-07-17]**                                  | 不纳入:capability 指 OS keyring;无头 secret-ref 当前也未接 companion arm,见 C1 核查结论                                                          |
 | U8     | desktop ↔ server 的同步拓扑能否让同一个 workflow 行同时存在于两边                           | ⬇️ **仅当 U5 意外失败、C2 真要走 Rust 路径时才需要答**(决定是否复用 H1 的 lease)。U5 通过则本条作废                                              |
 
 > **本计划全部结论来自读代码,零实跑。** U4 / U6 尤其:两者都是从五处代码推出来的,作者认为链条闭合,但**没有真起一个容器验证过**。H0 / C1 的第一步分别就是把它们复现出来 —— 如果复现不了,F6 / F12 及其结论需要重写。

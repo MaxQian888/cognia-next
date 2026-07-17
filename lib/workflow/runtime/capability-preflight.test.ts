@@ -86,6 +86,16 @@ describe("preflightCapabilities", () => {
     const failures = preflightCapabilities(wf)
     expect(failures).toEqual([{ nodeId: "n_git", kind: "action.git.commit", missing: ["shell"] }])
   })
+
+  it("accepts shell workflows by default in the headless brain", () => {
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    try {
+      const wf = { nodes: [node("n_git", "action.git.commit")] }
+      expect(preflightCapabilities(wf)).toEqual([])
+    } finally {
+      delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+    }
+  })
 })
 
 describe("formatPreflightFailures", () => {

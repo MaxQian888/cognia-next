@@ -353,6 +353,7 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
     if (!selectedProvider) {
       return (
         <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+          {/* i18n-exempt: pre-existing unreachable fallback; selected ids come from the registry */}
           Unknown OCR provider.
         </div>
       )
@@ -536,6 +537,8 @@ function shellAllowsPlatform(shells: OcrProviderShellSupport, platform: NativePl
       return shells.capacitor
     case "web":
       return shells.browser
+    case "headless":
+      return false
   }
 }
 

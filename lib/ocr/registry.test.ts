@@ -107,6 +107,7 @@ describe("shellAllows", () => {
     ["tauri", false],
     ["mobile", true],
     ["web", true],
+    ["headless", false],
   ] as const)("returns the matching shell flag (%s)", (platform, expected) => {
     expect(shellAllows(provider, platform)).toBe(expected)
   })

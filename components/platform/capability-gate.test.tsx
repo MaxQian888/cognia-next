@@ -16,6 +16,7 @@ jest.mock("@/hooks/use-host-profile", () => ({
       "mobile-companion": ["webview", "sidecar", "shell"],
       "cloud-companion": ["webview", "sidecar", "shell"],
       "web-standalone": ["webview"],
+      headless: ["shell", "sidecar", "always-on", "connector-runtime", "mcp-runtime", "headless"],
     }
     return byProfile[profileMock].includes(cap)
   },
