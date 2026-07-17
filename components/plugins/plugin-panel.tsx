@@ -33,6 +33,7 @@ import {
 } from "@/stores/plugins"
 import { deletePlugin, listPlugins, updatePlugin } from "@/lib/db/plugins"
 import { getDb } from "@/lib/db/schema"
+import { unregisterScheduledTasksForPlugin } from "@/lib/plugin/bridge/scheduled-task-bridge"
 import { usePluginMarketplace, PluginsViewProvider } from "@/hooks/plugins"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -351,13 +352,13 @@ function PluginDeleteDialogHost() {
       onConfirm={async ({ cascade }) => {
         if (!target) return
         const id = target.pluginId
+        await unregisterScheduledTasksForPlugin(id)
         await deletePlugin(id)
         if (cascade) {
           const db = getDb()
           await Promise.all([
             db.pluginPermissions.where("pluginId").equals(id).delete(),
             db.pluginAnalytics.where("pluginId").equals(id).delete(),
-            db.pluginScheduledJobs.where("pluginId").equals(id).delete(),
           ])
         }
         advance()

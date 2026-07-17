@@ -79,6 +79,10 @@ jest.mock("@/lib/db/plugins", () => ({
   updatePlugin: jest.fn(async () => undefined),
 }))
 
+jest.mock("@/lib/plugin/bridge/scheduled-task-bridge", () => ({
+  unregisterScheduledTasksForPlugin: jest.fn(async () => 0),
+}))
+
 // The cognia registry client behind the "Sync Registry" button.
 jest.mock("@/lib/plugin/package/marketplace", () => ({
   getPluginMarketplace: jest.fn(() => ({
@@ -90,10 +94,6 @@ jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     pluginAnalytics: {
       orderBy: () => ({ reverse: () => ({ toArray: async () => [] }) }),
-    },
-    pluginScheduledJobs: {
-      orderBy: () => ({ toArray: async () => [] }),
-      where: () => ({ equals: () => ({ delete: async () => undefined }) }),
     },
     pluginPermissions: {
       where: () => ({ equals: () => ({ delete: async () => undefined }) }),
@@ -127,6 +127,8 @@ jest.mock("@/components/feature-shell/feature-page-shell", () => ({
 
 import { PluginPanel } from "./plugin-panel"
 import { getPluginMarketplace } from "@/lib/plugin/package/marketplace"
+import { deletePlugin } from "@/lib/db/plugins"
+import { unregisterScheduledTasksForPlugin } from "@/lib/plugin/bridge/scheduled-task-bridge"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
 const getPluginMarketplaceMock = getPluginMarketplace as unknown as jest.Mock
@@ -138,6 +140,8 @@ beforeEach(() => {
   mockSearchCacheKey = ""
   mockSearchCacheValue = new URLSearchParams("")
   mockReplace.mockClear()
+  jest.mocked(deletePlugin).mockClear()
+  jest.mocked(unregisterScheduledTasksForPlugin).mockClear()
   usePluginsStore.setState({
     activeSection: "library",
     librarySubFilter: "all",
@@ -190,6 +194,17 @@ describe("PluginPanel (3-pane shell)", () => {
     usePluginsStore.setState({ rollbackTarget: "plugin_x" })
     render(<PluginPanel />)
     expect(screen.getAllByText(/title/).length).toBeGreaterThan(0)
+  })
+
+  it("removes real scheduler tasks before a direct uninstall", async () => {
+    usePluginsStore.setState({
+      deleteTarget: { pluginId: "plugin_x", name: "Test Plugin" },
+    })
+    render(<PluginPanel />)
+    fireEvent.click(screen.getByRole("button", { name: "confirm" }))
+
+    await waitFor(() => expect(unregisterScheduledTasksForPlugin).toHaveBeenCalledWith("plugin_x"))
+    expect(deletePlugin).toHaveBeenCalledWith("plugin_x")
   })
 
   it("redirects a legacy ?tab=browse deep link to the canonical ?section=discover URL", () => {
