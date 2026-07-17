@@ -41,12 +41,15 @@ use cognia_remote_control::allowlist::ParsedAllowlist;
 use cognia_remote_control::rate_limit::FixedWindowRateLimiter;
 
 use super::api_keys::{self, GatewayApiKey};
+use super::concurrency::{ConcurrencyLimiter, Slot};
+use super::cooldown::{self, KeyCooldownMap};
 use super::execute::{
     candidates_from_entries, embeddings_url, expand_key_pools, record_key_success,
-    resolve_candidates, rewrite_model, upstream_headers, upstream_url, Candidate, KeyRotationMap,
-    SseDeframer,
+    resolve_candidates, rewrite_model, strip_request_fields, upstream_headers, upstream_url,
+    Candidate, KeyRotationMap, SseDeframer,
 };
 use super::keyed_rate_limit::KeyedRateLimiter;
+use super::session_key::derive_session_id;
 use super::snapshot::RoutingSnapshot;
 use super::translate::errors::{error_body, InboundFormat};
 use super::translate::responses as responses_translate;
@@ -88,6 +91,9 @@ struct ReqCtx {
     remote_ip: String,
     key_id: Option<String>,
     key_model_allowlist: Vec<String>,
+    /// Client User-Agent, captured for the W1.3 fallback session key (all
+    /// loopback callers share `remote_ip`, so the UA carries the distinctness).
+    user_agent: String,
 }
 
 #[derive(Clone)]
@@ -107,9 +113,14 @@ struct AppState {
     decisions: Arc<DecisionRegistry>,
     /// Per-provider upstream key-pool rotation cursors (shared with the state).
     key_rotation: Arc<KeyRotationMap>,
+    /// Per-upstream-key cooldown / permanent-disable state (W1.1 + W3.1).
+    key_cooldown: Arc<KeyCooldownMap>,
+    /// In-flight concurrency caps (W1.2).
+    concurrency: Arc<ConcurrencyLimiter>,
     http: reqwest::Client,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn spawn_server(
     app_handle: AppHandle,
     config: Arc<RwLock<GatewayConfig>>,
@@ -117,6 +128,8 @@ pub async fn spawn_server(
     snapshot: Arc<RwLock<Option<RoutingSnapshot>>>,
     decisions: Arc<DecisionRegistry>,
     key_rotation: Arc<KeyRotationMap>,
+    key_cooldown: Arc<KeyCooldownMap>,
+    concurrency: Arc<ConcurrencyLimiter>,
     on_request: Arc<dyn RequestObserver>,
 ) -> Result<ServerHandle, GatewayError> {
     // Snapshot the bind-time config (these apply only on start).
@@ -173,6 +186,8 @@ pub async fn spawn_server(
         snapshot,
         decisions,
         key_rotation,
+        key_cooldown,
+        concurrency,
         http,
     };
 
@@ -187,6 +202,9 @@ pub async fn spawn_server(
 
     let app = Router::new()
         .route("/healthz", get(healthz))
+        // W3.4: real-relay upstream self-check (loopback-only). Probes each
+        // resolved candidate through the actual resolve + upstream path.
+        .route("/healthz/upstream", post(healthz_upstream))
         .merge(protected)
         .with_state(state);
 
@@ -234,6 +252,135 @@ pub async fn spawn_server(
 
 async fn healthz() -> impl IntoResponse {
     Json(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }))
+}
+
+/// Loopback-only upstream self-check (W3.4). Resolves the requested model to its
+/// candidates through the REAL resolve path and fires one minimal (`max_tokens`
+/// = 1) upstream call per candidate, reporting each candidate's ok/status/
+/// latency. "Test is the production path": it exercises candidate resolution,
+/// pool expansion (cooldown-aware), field stripping, headers and the timeout —
+/// the same plumbing a live chat request walks — without the renderer-side
+/// batch tester's separate code path.
+#[derive(serde::Deserialize)]
+struct UpstreamProbeRequest {
+    model: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpstreamProbeResult {
+    provider_id: String,
+    model_id: String,
+    ok: bool,
+    status: Option<u16>,
+    latency_ms: u64,
+    error: Option<String>,
+}
+
+async fn healthz_upstream(
+    State(state): State<AppState>,
+    ConnectInfo(connect_info): ConnectInfo<SocketAddr>,
+    Json(req): Json<UpstreamProbeRequest>,
+) -> Response {
+    // A diagnostic that makes real (billable) upstream calls must never be
+    // reachable off-box, even under LAN binding.
+    if !connect_info.ip().is_loopback() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "self-check is loopback-only" })),
+        )
+            .into_response();
+    }
+    let cfg = state.config.read().clone();
+    let Some(snapshot) = state.snapshot.read().clone() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "no routing snapshot yet" })),
+        )
+            .into_response();
+    };
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let candidates = expand_key_pools(
+        resolve_candidates(&snapshot, &req.model),
+        &state.key_rotation,
+        &state.key_cooldown,
+        now_ms,
+    );
+    if candidates.is_empty() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("model \"{}\" resolves to no candidate", req.model) })),
+        )
+            .into_response();
+    }
+    let mut results = Vec::new();
+    for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
+        let started = Instant::now();
+        let (ok, status, error) = probe_candidate(&state, &cfg, candidate).await;
+        results.push(UpstreamProbeResult {
+            provider_id: candidate.provider.id.clone(),
+            model_id: candidate.model_id.clone(),
+            ok,
+            status,
+            latency_ms: started.elapsed().as_millis() as u64,
+            error,
+        });
+    }
+    Json(json!({ "model": req.model, "results": results })).into_response()
+}
+
+/// Fire one minimal upstream call for a candidate and classify the outcome.
+async fn probe_candidate(
+    state: &AppState,
+    cfg: &GatewayConfig,
+    candidate: &Candidate,
+) -> (bool, Option<u16>, Option<String>) {
+    let mut body = minimal_probe_body(&candidate.provider.protocol, &candidate.model_id);
+    strip_request_fields(
+        &mut body,
+        &candidate.provider.id,
+        &cfg.stripped_request_fields,
+        &cfg.field_strip_allow,
+    );
+    let url = upstream_url(&candidate.provider.protocol, &candidate.provider.base_url);
+    let mut rb = apply_timeout(state.http.post(&url).json(&body), cfg);
+    for (name, value) in upstream_headers(
+        &candidate.provider.protocol,
+        candidate.provider.api_key.as_deref(),
+    ) {
+        rb = rb.header(name, value);
+    }
+    match rb.send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            if status < 400 {
+                (true, Some(status), None)
+            } else {
+                let text = resp.text().await.unwrap_or_default();
+                (
+                    false,
+                    Some(status),
+                    Some(text.chars().take(200).collect::<String>()),
+                )
+            }
+        }
+        Err(err) => (false, None, Some(format!("connect error: {err}"))),
+    }
+}
+
+/// A one-token probe body in the candidate's wire protocol.
+fn minimal_probe_body(protocol: &str, model_id: &str) -> Value {
+    let mut body = json!({
+        "model": model_id,
+        "max_tokens": 1,
+        "messages": [{ "role": "user", "content": "ping" }],
+    });
+    if protocol != "anthropic" {
+        // OpenAI-compatible chat completions don't require max_tokens, but a
+        // 1-token cap keeps the probe cheap; leave the shape otherwise shared.
+        body["max_tokens"] = json!(1);
+    }
+    body
 }
 
 // ---- middleware -------------------------------------------------------------
@@ -387,11 +534,17 @@ async fn middleware(
         );
     }
 
+    let user_agent = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     request.extensions_mut().insert(ReqCtx {
         route: route.clone(),
         remote_ip: remote_ip.to_string(),
         key_id: Some(key_id),
         key_model_allowlist,
+        user_agent,
     });
 
     let response = next.run(request).await;
@@ -515,13 +668,18 @@ async fn openai_embeddings(
     }
 
     // Only OpenAI-compatible providers expose `/embeddings`. Expand each
-    // provider's upstream key pool so a rate-limited account fails over.
+    // provider's upstream key pool so a rate-limited account fails over, and
+    // skip pooled keys the upstream just parked (W1.1) / permanently disabled
+    // (W3.1) — the same cooldown state the chat path records.
+    let now_ms = chrono::Utc::now().timestamp_millis();
     let all = resolve_candidates(&snapshot, &model);
     let candidates: Vec<Candidate> = expand_key_pools(
         all.into_iter()
             .filter(|c| c.provider.protocol == "openai")
             .collect(),
         &state.key_rotation,
+        &state.key_cooldown,
+        now_ms,
     );
     if candidates.is_empty() {
         return logged_error(
@@ -538,7 +696,13 @@ async fn openai_embeddings(
     let mut failures: Vec<String> = Vec::new();
     for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
         let started = Instant::now();
-        let upstream_body = rewrite_model(&body, &candidate.model_id);
+        let mut upstream_body = rewrite_model(&body, &candidate.model_id);
+        strip_request_fields(
+            &mut upstream_body,
+            &candidate.provider.id,
+            &cfg.stripped_request_fields,
+            &cfg.field_strip_allow,
+        );
         let url = embeddings_url(&candidate.provider.base_url);
         let mut req = state.http.post(&url).json(&upstream_body);
         req = apply_timeout(req, &cfg);
@@ -556,7 +720,24 @@ async fn openai_embeddings(
 
         let status = resp.status().as_u16();
         if status >= 400 {
+            let headers = resp.headers().clone();
+            let retry_after = headers.get("retry-after").and_then(|v| v.to_str().ok());
+            let unified = headers
+                .get("anthropic-ratelimit-unified-reset")
+                .and_then(|v| v.to_str().ok());
             let text = resp.text().await.unwrap_or_default();
+            // W1.1 + W3.1: park / disable the pooled key so later requests (any
+            // endpoint) stop re-selecting it.
+            record_upstream_cooldown(
+                &state,
+                &cfg,
+                candidate,
+                status,
+                retry_after,
+                unified,
+                &text,
+                now_ms,
+            );
             let message = format!(
                 "HTTP {status}: {}",
                 text.chars().take(500).collect::<String>()
@@ -665,7 +846,13 @@ async fn openai_responses(
         return resp;
     }
 
-    let candidates = expand_key_pools(resolve_candidates(&snapshot, &model), &state.key_rotation);
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let candidates = expand_key_pools(
+        resolve_candidates(&snapshot, &model),
+        &state.key_rotation,
+        &state.key_cooldown,
+        now_ms,
+    );
     if candidates.is_empty() {
         return logged_error(
             &state,
@@ -685,13 +872,19 @@ async fn openai_responses(
         let started = Instant::now();
         let mut candidate_ir = ir.clone();
         candidate_ir.model = candidate.model_id.clone();
-        let upstream_body = match request_from_ir(&candidate.provider.protocol, &candidate_ir) {
+        let mut upstream_body = match request_from_ir(&candidate.provider.protocol, &candidate_ir) {
             Ok(body) => body,
             Err(err) => {
                 failures.push(format!("{}: {}", candidate.provider.id, err.reason));
                 continue;
             }
         };
+        strip_request_fields(
+            &mut upstream_body,
+            &candidate.provider.id,
+            &cfg.stripped_request_fields,
+            &cfg.field_strip_allow,
+        );
 
         let url = upstream_url(&candidate.provider.protocol, &candidate.provider.base_url);
         let mut req = state.http.post(&url).json(&upstream_body);
@@ -713,7 +906,22 @@ async fn openai_responses(
 
         let status = resp.status().as_u16();
         if status >= 400 {
+            let headers = resp.headers().clone();
+            let retry_after = headers.get("retry-after").and_then(|v| v.to_str().ok());
+            let unified = headers
+                .get("anthropic-ratelimit-unified-reset")
+                .and_then(|v| v.to_str().ok());
             let text = resp.text().await.unwrap_or_default();
+            record_upstream_cooldown(
+                &state,
+                &cfg,
+                candidate,
+                status,
+                retry_after,
+                unified,
+                &text,
+                now_ms,
+            );
             let message = format!(
                 "HTTP {status}: {}",
                 text.chars().take(500).collect::<String>()
@@ -758,6 +966,9 @@ async fn openai_responses(
                         Some(ir_resp.usage.input_tokens),
                         Some(ir_resp.usage.output_tokens),
                     )),
+                    None,
+                    None,
+                    // Responses API has no chat-affinity session key.
                     None,
                 );
                 log_success(
@@ -896,12 +1107,75 @@ fn apply_timeout(req: reqwest::RequestBuilder, cfg: &GatewayConfig) -> reqwest::
     }
 }
 
+/// Parse an upstream error response's account-level cooldown signal, record it
+/// against the pooled key (temporary cooldown or permanent disable — W1.1 +
+/// W3.1), and return the cooldown window (ms) to surface on the outcome event
+/// (the renderer breaker's dynamic-cooldown path consumes it). A no-op for
+/// keyless / single-key providers with no pooled key to park.
+#[allow(clippy::too_many_arguments)]
+fn record_upstream_cooldown(
+    state: &AppState,
+    cfg: &GatewayConfig,
+    candidate: &Candidate,
+    status: u16,
+    retry_after: Option<&str>,
+    unified_reset: Option<&str>,
+    body: &str,
+    now_ms: i64,
+) -> Option<i64> {
+    let api_key = candidate.provider.api_key.as_deref()?;
+    if let Some(reason) = cooldown::permanent_failure_reason(status, body, &cfg.disable_keywords) {
+        cooldown::record_permanent(
+            &state.key_cooldown,
+            &candidate.provider.id,
+            api_key,
+            &reason,
+        );
+        return None;
+    }
+    let ms = cooldown::cooldown_ms_from_headers(
+        status,
+        retry_after,
+        unified_reset,
+        cfg.cooldown_fallback_secs,
+        cfg.overload_cooldown_secs,
+        now_ms,
+    )?;
+    cooldown::record_cooldown(
+        &state.key_cooldown,
+        &candidate.provider.id,
+        api_key,
+        now_ms + ms,
+        &format!("HTTP {status}"),
+    );
+    Some(ms)
+}
+
+/// The "in-flight concurrency cap reached" 429 terminal (W1.2).
+fn concurrency_rejected(
+    state: &AppState,
+    ctx: &ReqCtx,
+    format: InboundFormat,
+    model: Option<&str>,
+) -> Response {
+    logged_error(
+        state,
+        ctx,
+        format,
+        StatusCode::TOO_MANY_REQUESTS,
+        "rate_limit_error",
+        "concurrency limit reached — too many in-flight requests for this key",
+        model,
+    )
+}
+
 /// Ask the renderer for a live routing decision (full engine).
 async fn live_decision(
     state: &AppState,
     snapshot: &RoutingSnapshot,
     model: &str,
     body: &Value,
+    session_id: &str,
 ) -> Option<Vec<Candidate>> {
     let request_id = format!("gwd_{}", uuid::Uuid::new_v4().simple());
     let (tx, rx) = oneshot::channel::<Vec<super::snapshot::SnapshotEntry>>();
@@ -924,7 +1198,12 @@ async fn live_decision(
 
     let emitted = state.app_handle.emit(
         DECIDE_EVENT,
-        json!({ "requestId": request_id, "model": model, "promptText": prompt_text }),
+        json!({
+            "requestId": request_id,
+            "model": model,
+            "promptText": prompt_text,
+            "sessionId": session_id,
+        }),
     );
     if emitted.is_err() {
         state.decisions.lock().remove(&request_id);
@@ -977,13 +1256,44 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         return resp;
     }
     let stream = body["stream"].as_bool().unwrap_or(false);
+    let now_ms = chrono::Utc::now().timestamp_millis();
+
+    // W1.3: derive a stable affinity key for this request and thread it through
+    // the live decision (so the routing engine's session-affinity filter sticks
+    // this conversation to one deployment) and the outcome event (so a
+    // successful turn pins it — the same machinery the chat plane already uses).
+    let session_id = derive_session_id(
+        &body,
+        &ctx.remote_ip,
+        &ctx.user_agent,
+        ctx.key_id.as_deref().unwrap_or(""),
+    );
+
+    // W1.2: gateway-key in-flight cap for the whole request. Held until the
+    // response completes — moved into the streaming task below so it releases at
+    // stream end, not at this handler's return.
+    let wait = Duration::from_millis(cfg.concurrency_wait_ms as u64);
+    let gw_slot = match state
+        .concurrency
+        .acquire(
+            &format!("gw:{}", ctx.key_id.as_deref().unwrap_or("_")),
+            cfg.max_concurrent_per_key,
+            wait,
+        )
+        .await
+    {
+        Ok(slot) => slot,
+        Err(()) => return concurrency_rejected(&state, &ctx, format, Some(&model)),
+    };
 
     let candidates = expand_key_pools(
-        match live_decision(&state, &snapshot, &model, &body).await {
+        match live_decision(&state, &snapshot, &model, &body, &session_id).await {
             Some(candidates) => candidates,
             None => resolve_candidates(&snapshot, &model),
         },
         &state.key_rotation,
+        &state.key_cooldown,
+        now_ms,
     );
     if candidates.is_empty() {
         return logged_error(
@@ -1024,8 +1334,35 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
     let mut failures: Vec<String> = Vec::new();
     for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
         let started = Instant::now();
+
+        // W1.2: per-upstream-key in-flight cap for THIS attempt. On failover the
+        // slot drops here (released); on success it is kept alive (buffered) or
+        // moved into the streaming task.
+        let up_slot = match state
+            .concurrency
+            .acquire(
+                &format!(
+                    "up:{}:{}",
+                    candidate.provider.id,
+                    candidate.provider.api_key.as_deref().unwrap_or("")
+                ),
+                cfg.max_concurrent_per_upstream_key,
+                wait,
+            )
+            .await
+        {
+            Ok(slot) => slot,
+            Err(()) => {
+                failures.push(format!(
+                    "{}: upstream concurrency limit reached",
+                    candidate.provider.id
+                ));
+                continue;
+            }
+        };
+
         let passthrough = candidate.provider.protocol == format.protocol_name();
-        let upstream_body = if passthrough {
+        let mut upstream_body = if passthrough {
             rewrite_model(&body, &candidate.model_id)
         } else {
             let mut ir = ir.clone().expect("ir computed for translated pairs");
@@ -1038,6 +1375,14 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 }
             }
         };
+        // W3.2: strip client-supplied billing/privacy/behaviour toggles from the
+        // outbound body (both passthrough AND translated paths).
+        strip_request_fields(
+            &mut upstream_body,
+            &candidate.provider.id,
+            &cfg.stripped_request_fields,
+            &cfg.field_strip_allow,
+        );
 
         let url = upstream_url(&candidate.provider.protocol, &candidate.provider.base_url);
         let mut req = state.http.post(&url).json(&upstream_body);
@@ -1062,6 +1407,8 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                     started,
                     None,
                     Some(&message),
+                    None,
+                    Some(&session_id),
                 );
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
@@ -1070,12 +1417,24 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
 
         let status = resp.status().as_u16();
         if status >= 400 {
-            let retry_after = resp
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
+            let headers = resp.headers().clone();
+            let retry_after = headers.get("retry-after").and_then(|v| v.to_str().ok());
+            let unified = headers
+                .get("anthropic-ratelimit-unified-reset")
+                .and_then(|v| v.to_str().ok());
             let text = resp.text().await.unwrap_or_default();
+            // W1.1 + W3.1: park (or permanently disable) the pooled key and get
+            // the cooldown window to forward to the renderer breaker.
+            let retry_after_ms = record_upstream_cooldown(
+                &state,
+                &cfg,
+                candidate,
+                status,
+                retry_after,
+                unified,
+                &text,
+                now_ms,
+            );
             let mut message = format!("HTTP {status}");
             if let Some(ra) = retry_after {
                 message.push_str(&format!(" retry-after: {ra}"));
@@ -1088,6 +1447,8 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 started,
                 None,
                 Some(&message),
+                retry_after_ms,
+                Some(&session_id),
             );
             if cfg.should_retry(status) {
                 failures.push(format!("{}: {message}", candidate.provider.id));
@@ -1105,8 +1466,15 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         }
 
         if stream {
-            return stream_response(state, ctx, format, candidate, resp, started, &model).await;
+            return stream_response(
+                state, ctx, format, candidate, resp, started, &model, session_id, gw_slot, up_slot,
+            )
+            .await;
         }
+        // Buffered path: `gw_slot` / `up_slot` carry Drop glue, so they release
+        // only when this handler returns — i.e. after the awaited response
+        // below completes — holding the concurrency slots for the whole
+        // non-streaming request without being passed down.
         return buffered_response(
             state,
             ctx,
@@ -1116,6 +1484,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             started,
             passthrough,
             &model,
+            &session_id,
         )
         .await;
     }
@@ -1133,6 +1502,7 @@ async fn buffered_response(
     started: Instant,
     passthrough: bool,
     model: &str,
+    session_id: &str,
 ) -> Response {
     let upstream: Value = match resp.json().await {
         Ok(v) => v,
@@ -1145,6 +1515,8 @@ async fn buffered_response(
                 started,
                 None,
                 Some(&message),
+                None,
+                Some(session_id),
             );
             return logged_error(
                 &state,
@@ -1176,6 +1548,8 @@ async fn buffered_response(
             started,
             Some(usage),
             None,
+            None,
+            Some(session_id),
         );
         log_success(
             &state,
@@ -1202,6 +1576,8 @@ async fn buffered_response(
                     Some(ir_resp.usage.output_tokens),
                 )),
                 None,
+                None,
+                Some(session_id),
             );
             log_success(
                 &state,
@@ -1224,6 +1600,8 @@ async fn buffered_response(
                 started,
                 None,
                 Some(&err.reason),
+                None,
+                Some(session_id),
             );
             logged_error(
                 &state,
@@ -1247,6 +1625,9 @@ async fn stream_response(
     resp: reqwest::Response,
     started: Instant,
     model: &str,
+    session_id: String,
+    gw_slot: Slot,
+    up_slot: Slot,
 ) -> Response {
     let passthrough = candidate.provider.protocol == format.protocol_name();
     if passthrough {
@@ -1259,6 +1640,9 @@ async fn stream_response(
         let ctx = ctx.clone();
         let model = model.to_string();
         tokio::spawn(async move {
+            // Hold the W1.2 concurrency slots for the WHOLE stream — they
+            // release when this task ends, not at the handler's return.
+            let _slots = (gw_slot, up_slot);
             let mut deframer = SseDeframer::default();
             let mut input: Option<u64> = None;
             let mut output: Option<u64> = None;
@@ -1289,6 +1673,8 @@ async fn stream_response(
                 started,
                 Some((input, output)),
                 None,
+                None,
+                Some(&session_id),
             );
             log_success(
                 &task_state,
@@ -1323,6 +1709,8 @@ async fn stream_response(
     let ctx = ctx.clone();
     let model = model.to_string();
     tokio::spawn(async move {
+        // Hold the W1.2 concurrency slots for the WHOLE transcoded stream.
+        let _slots = (gw_slot, up_slot);
         let mut deframer = SseDeframer::default();
         let mut upstream = resp.bytes_stream();
         'pump: while let Some(chunk) = upstream.next().await {
@@ -1346,6 +1734,8 @@ async fn stream_response(
             started,
             Some((Some(usage.input_tokens), Some(usage.output_tokens))),
             None,
+            None,
+            Some(&session_id),
         );
         log_success(
             &task_state,
@@ -1411,6 +1801,7 @@ fn sse_response(body: Body) -> Response {
 /// Per-attempt outcome event — the renderer forwards it into
 /// `recordProviderOutcome` so gateway traffic feeds the same health / breaker /
 /// cost stores the chat plane reads.
+#[allow(clippy::too_many_arguments)]
 fn emit_outcome(
     app_handle: &AppHandle,
     candidate: &Candidate,
@@ -1418,6 +1809,12 @@ fn emit_outcome(
     started: Instant,
     usage: Option<(Option<u64>, Option<u64>)>,
     error: Option<&str>,
+    // `retry_after_ms`: upstream-derived cooldown window (W1.1) — feeds the
+    // renderer breaker's dynamic cooldown. `None` on success / non-rate-limit
+    // failures. `session_id`: affinity key (W1.3) — a successful outcome pins
+    // the session to this deployment; a permanent failure releases the pin.
+    retry_after_ms: Option<i64>,
+    session_id: Option<&str>,
 ) {
     let (input_tokens, output_tokens) = usage.unwrap_or((None, None));
     let payload = json!({
@@ -1428,6 +1825,8 @@ fn emit_outcome(
         "inputTokens": input_tokens,
         "outputTokens": output_tokens,
         "errorMessage": error,
+        "retryAfterMs": retry_after_ms,
+        "sessionId": session_id,
     });
     let _ = app_handle.emit(REQUEST_OUTCOME_EVENT, payload);
 }
@@ -1581,6 +1980,7 @@ mod tests {
             remote_ip: "127.0.0.1".into(),
             key_id: Some("k1".into()),
             key_model_allowlist: vec![],
+            user_agent: "test-agent".into(),
         }
     }
 
@@ -1599,6 +1999,18 @@ mod tests {
     #[test]
     fn decide_timeout_is_bounded() {
         assert_eq!(DECIDE_TIMEOUT_MS, 800);
+    }
+
+    #[test]
+    fn minimal_probe_body_is_one_token_per_protocol() {
+        let oa = minimal_probe_body("openai", "gpt-4o-mini");
+        assert_eq!(oa["model"], "gpt-4o-mini");
+        assert_eq!(oa["max_tokens"], 1);
+        assert_eq!(oa["messages"][0]["role"], "user");
+
+        let an = minimal_probe_body("anthropic", "claude-haiku");
+        assert_eq!(an["model"], "claude-haiku");
+        assert_eq!(an["max_tokens"], 1);
     }
 
     #[test]

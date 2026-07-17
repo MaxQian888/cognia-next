@@ -52,6 +52,28 @@ describe("gatewayOutcomeToProviderOutcome", () => {
   it("treats a single present token count as a partial sum", () => {
     expect(gatewayOutcomeToProviderOutcome({ ...base, outputTokens: null }).tokensUsed).toBe(10)
   })
+
+  it("forwards sessionId (affinity) and retryAfterMs (breaker cooldown) when present", () => {
+    const o = gatewayOutcomeToProviderOutcome({
+      ...base,
+      ok: false,
+      errorMessage: "HTTP 429",
+      sessionId: "gw-cc-abc",
+      retryAfterMs: 30_000,
+    })
+    expect(o.sessionId).toBe("gw-cc-abc")
+    expect(o.retryAfterMs).toBe(30_000)
+  })
+
+  it("omits sessionId / retryAfterMs when absent or null", () => {
+    const o = gatewayOutcomeToProviderOutcome({ ...base, sessionId: null, retryAfterMs: null })
+    expect("sessionId" in o).toBe(false)
+    expect("retryAfterMs" in o).toBe(false)
+    // Also absent when the fields aren't on the outcome at all (older events).
+    const o2 = gatewayOutcomeToProviderOutcome(base)
+    expect("sessionId" in o2).toBe(false)
+    expect("retryAfterMs" in o2).toBe(false)
+  })
 })
 
 describe("forwardGatewayOutcome", () => {

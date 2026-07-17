@@ -27,6 +27,13 @@ export function gatewayOutcomeToProviderOutcome(o: GatewayRequestOutcome): Provi
     // (the gateway outcome carries no SDK cost figure of its own).
     ...(o.inputTokens != null ? { inputTokens: o.inputTokens } : {}),
     ...(o.outputTokens != null ? { outputTokens: o.outputTokens } : {}),
+    // W1.3: threading the session key lets a successful gateway turn pin the
+    // deployment (affinity routing) and a permanent failure release it — the
+    // same machinery the chat plane uses.
+    ...(o.sessionId ? { sessionId: o.sessionId } : {}),
+    // W1.1: the upstream-derived cooldown window feeds the breaker's dynamic
+    // cooldown (previously only the chat/sidecar path supplied it).
+    ...(o.retryAfterMs != null ? { retryAfterMs: o.retryAfterMs } : {}),
   }
 }
 

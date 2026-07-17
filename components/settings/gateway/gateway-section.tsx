@@ -24,6 +24,7 @@ import { isTauri } from "@/lib/tauri"
 import {
   gatewayGetConfig,
   gatewayGetStatus,
+  gatewayListCooldowns,
   gatewayStart,
   gatewayStop,
   gatewayUpdateConfig,
@@ -32,6 +33,7 @@ import {
   DEFAULT_GATEWAY_CONFIG,
   type GatewayBindInterface,
   type GatewayConfig,
+  type GatewayKeyCooldown,
   type GatewayStatus,
 } from "@/types/gateway"
 import { GatewayKeysCard } from "./gateway-keys-card"
@@ -98,10 +100,16 @@ export function GatewaySection() {
 
   const [config, setConfig] = useState<GatewayConfig>(DEFAULT_GATEWAY_CONFIG)
   const [status, setStatus] = useState<GatewayStatus | null>(null)
+  const [cooldowns, setCooldowns] = useState<GatewayKeyCooldown[]>([])
 
   const refreshStatus = () =>
     gatewayGetStatus()
       .then(setStatus)
+      .catch(() => {})
+
+  const refreshCooldowns = () =>
+    gatewayListCooldowns()
+      .then(setCooldowns)
       .catch(() => {})
 
   useEffect(() => {
@@ -113,6 +121,9 @@ export function GatewaySection() {
       .catch(() => {})
     gatewayGetStatus()
       .then(setStatus)
+      .catch(() => {})
+    gatewayListCooldowns()
+      .then(setCooldowns)
       .catch(() => {})
   }, [desktop])
 
@@ -371,6 +382,140 @@ export function GatewaySection() {
               checked={config.hideRawProviderModels}
               onCheckedChange={(v) => void persist({ hideRawProviderModels: v })}
             />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Upstream protection (cooldown + concurrency + field stripping) */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">{t("concurrencyHeading")}</CardTitle>
+          <CardDescription>{t("concurrencyHelp")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <NumberRow
+            id="gw-cc-per-key"
+            label={t("maxConcurrentPerKey")}
+            help={t("maxConcurrentPerKeyHelp")}
+            value={config.maxConcurrentPerKey}
+            min={0}
+            max={1000}
+            fallback={0}
+            onCommit={(v) => void persist({ maxConcurrentPerKey: v })}
+          />
+          <NumberRow
+            id="gw-cc-per-upstream"
+            label={t("maxConcurrentPerUpstreamKey")}
+            help={t("maxConcurrentPerUpstreamKeyHelp")}
+            value={config.maxConcurrentPerUpstreamKey}
+            min={0}
+            max={1000}
+            fallback={0}
+            onCommit={(v) => void persist({ maxConcurrentPerUpstreamKey: v })}
+          />
+          <NumberRow
+            id="gw-cc-wait"
+            label={t("concurrencyWait")}
+            help={t("concurrencyWaitHelp")}
+            value={config.concurrencyWaitMs}
+            min={0}
+            max={120000}
+            fallback={10000}
+            onCommit={(v) => void persist({ concurrencyWaitMs: v })}
+          />
+          <NumberRow
+            id="gw-cooldown-fallback"
+            label={t("cooldownFallback")}
+            help={t("cooldownFallbackHelp")}
+            value={config.cooldownFallbackSecs}
+            min={0}
+            max={3600}
+            fallback={20}
+            onCommit={(v) => void persist({ cooldownFallbackSecs: v })}
+          />
+          <NumberRow
+            id="gw-overload-cooldown"
+            label={t("overloadCooldown")}
+            help={t("overloadCooldownHelp")}
+            value={config.overloadCooldownSecs}
+            min={0}
+            max={3600}
+            fallback={600}
+            onCommit={(v) => void persist({ overloadCooldownSecs: v })}
+          />
+
+          <div className="space-y-2">
+            <Label>{t("disableKeywords")}</Label>
+            <ChipInput
+              values={config.disableKeywords}
+              onCommit={(next) => void persist({ disableKeywords: next })}
+              placeholder={t("disableKeywordsPlaceholder")}
+              ariaLabel={t("disableKeywords")}
+              removeLabel={t("remove")}
+            />
+            <p className="text-xs text-muted-foreground">{t("disableKeywordsHelp")}</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>{t("strippedFields")}</Label>
+            <ChipInput
+              values={config.strippedRequestFields}
+              onCommit={(next) => void persist({ strippedRequestFields: next })}
+              placeholder={t("strippedFieldsPlaceholder")}
+              ariaLabel={t("strippedFields")}
+              removeLabel={t("remove")}
+            />
+            <p className="text-xs text-muted-foreground">{t("strippedFieldsHelp")}</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>{t("fieldStripAllow")}</Label>
+            <ChipInput
+              values={config.fieldStripAllow}
+              onCommit={(next) => void persist({ fieldStripAllow: next })}
+              placeholder={t("fieldStripAllowPlaceholder")}
+              ariaLabel={t("fieldStripAllow")}
+              removeLabel={t("remove")}
+            />
+            <p className="text-xs text-muted-foreground">{t("fieldStripAllowHelp")}</p>
+          </div>
+
+          {/* Parked upstream accounts (W3.1 visibility) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <Label>{t("cooldownsHeading")}</Label>
+              <Button size="sm" variant="outline" onClick={() => void refreshCooldowns()}>
+                {t("cooldownsRefresh")}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("cooldownsHelp")}</p>
+            {cooldowns.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("cooldownsEmpty")}</p>
+            ) : (
+              <ul className="space-y-1">
+                {cooldowns.map((c) => (
+                  <li
+                    key={`${c.providerId}-${c.keyHint}`}
+                    className="flex items-center justify-between gap-2 rounded bg-muted px-2 py-1 text-xs"
+                  >
+                    <span className="font-mono">
+                      {c.providerId} · {c.keyHint}
+                    </span>
+                    <span
+                      className={
+                        c.permanent ? "text-destructive" : "text-amber-600 dark:text-amber-400"
+                      }
+                    >
+                      {c.permanent
+                        ? t("cooldownsPermanent")
+                        : t("cooldownsCoolingUntil", {
+                            time: new Date(c.untilMs).toLocaleTimeString(),
+                          })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </CardContent>
       </Card>

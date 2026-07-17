@@ -32,6 +32,32 @@ export interface GatewayConfig {
   exposedModels: string[]
   /** List only aliases in `/v1/models` (hide raw provider model ids). */
   hideRawProviderModels: boolean
+
+  // ---- W1.1 upstream cooldown (per pooled key) ------------------------------
+  /** Cooldown (seconds) for a 429 with no parseable recovery header; `0`
+   * disables the header-less fallback. Header-derived cooldowns always apply. */
+  cooldownFallbackSecs: number
+  /** Cooldown (seconds) for a 529 "overloaded" with no recovery header. */
+  overloadCooldownSecs: number
+
+  // ---- W3.1 permanent key disable -------------------------------------------
+  /** Case-insensitive substrings that, in a failing body, permanently disable
+   * the pooled key (quota exhausted / org disabled). A 401 is always permanent. */
+  disableKeywords: string[]
+
+  // ---- W1.2 in-flight concurrency caps --------------------------------------
+  /** Max simultaneous in-flight requests per gateway API key; `0` = unlimited. */
+  maxConcurrentPerKey: number
+  /** Max simultaneous in-flight upstream calls per pooled key; `0` = unlimited. */
+  maxConcurrentPerUpstreamKey: number
+  /** Wait (ms) for a concurrency slot before rejecting with 429; `0` = no queue. */
+  concurrencyWaitMs: number
+
+  // ---- W3.2 outbound field stripping ----------------------------------------
+  /** Dotted-path fields stripped from every upstream request body. */
+  strippedRequestFields: string[]
+  /** Per-provider re-permits (`"providerId:field"`) that keep a stripped field. */
+  fieldStripAllow: string[]
 }
 
 export const DEFAULT_GATEWAY_CONFIG: GatewayConfig = {
@@ -46,6 +72,24 @@ export const DEFAULT_GATEWAY_CONFIG: GatewayConfig = {
   retryStatusCodes: [408, 409, 429, 500, 502, 503, 504],
   exposedModels: [],
   hideRawProviderModels: false,
+  cooldownFallbackSecs: 20,
+  overloadCooldownSecs: 600,
+  disableKeywords: [
+    "insufficient_quota",
+    "organization has been disabled",
+    "deactivated_workspace",
+    "account_deactivated",
+  ],
+  maxConcurrentPerKey: 0,
+  maxConcurrentPerUpstreamKey: 0,
+  concurrencyWaitMs: 10_000,
+  strippedRequestFields: [
+    "service_tier",
+    "store",
+    "safety_identifier",
+    "stream_options.include_obfuscation",
+  ],
+  fieldStripAllow: [],
 }
 
 /** Live status surfaced to the settings UI. */
@@ -179,6 +223,24 @@ export interface GatewayRequestOutcome {
   inputTokens: number | null
   outputTokens: number | null
   errorMessage: string | null
+  /** Upstream-derived cooldown window (W1.1) — feeds the breaker's dynamic
+   * cooldown. Present only on a 429/529 with a recovery hint. */
+  retryAfterMs?: number | null
+  /** Gateway-derived affinity session key (W1.3) — a successful outcome pins
+   * this deployment; a permanent failure releases the pin. */
+  sessionId?: string | null
+}
+
+/** One cooling / permanently-disabled upstream key (from
+ * `gateway_list_cooldowns`; W1.1 + W3.1). Mirrors Rust `CooldownRow`. */
+export interface GatewayKeyCooldown {
+  providerId: string
+  /** Key fingerprint (last 4 chars) — never the secret. */
+  keyHint: string
+  /** Epoch-ms the cooldown lifts; ignored when `permanent`. */
+  untilMs: number
+  permanent: boolean
+  reason: string
 }
 
 export const GATEWAY_REQUEST_LOG_EVENT = "gateway://request-log"

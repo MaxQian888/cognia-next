@@ -80,6 +80,38 @@ describe("resolveModelPriceUsdPer1M", () => {
 
     expect(resolveModelPriceUsdPer1M("host", "m")).toBe(6)
   })
+
+  it("prices a reasoning-effort virtual model from its base model (W3.3)", () => {
+    const settings = {
+      customProviders: [
+        {
+          id: "acme",
+          customModelMetadata: { "gpt-5": { pricing: { promptPer1M: 2, completionPer1M: 6 } } },
+        },
+      ],
+    }
+    // `gpt-5-high` has no pricing of its own → inherits `gpt-5`'s blended rate.
+    expect(resolveModelPriceUsdPer1M("acme", "gpt-5-high", settings)).toBe(4)
+  })
+
+  it("prefers a virtual id's own pricing over the base's when set", () => {
+    const settings = {
+      customProviders: [
+        {
+          id: "acme",
+          customModelMetadata: {
+            "gpt-5": { pricing: { promptPer1M: 2, completionPer1M: 6 } },
+            "gpt-5-high": { pricing: { promptPer1M: 10, completionPer1M: 10 } },
+          },
+        },
+      ],
+    }
+    expect(resolveModelPriceUsdPer1M("acme", "gpt-5-high", settings)).toBe(10)
+  })
+
+  it("does not invent pricing for an ordinary unknown id", () => {
+    expect(resolveModelPriceUsdPer1M("acme", "totally-unknown")).toBeUndefined()
+  })
 })
 
 describe("estimateCallCostUsd", () => {

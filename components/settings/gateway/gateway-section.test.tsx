@@ -21,12 +21,14 @@ const mockGetStatus = jest.fn()
 const mockStart = jest.fn()
 const mockStop = jest.fn()
 const mockUpdate = jest.fn()
+const mockListCooldowns = jest.fn()
 jest.mock("@/lib/tauri/gateway", () => ({
   gatewayGetConfig: () => mockGetConfig(),
   gatewayGetStatus: () => mockGetStatus(),
   gatewayStart: () => mockStart(),
   gatewayStop: () => mockStop(),
   gatewayUpdateConfig: (...a: unknown[]) => mockUpdate(...a),
+  gatewayListCooldowns: () => mockListCooldowns(),
 }))
 
 jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
@@ -56,6 +58,7 @@ beforeEach(() => {
   mockStart.mockReset().mockResolvedValue(undefined)
   mockStop.mockReset().mockResolvedValue(undefined)
   mockUpdate.mockReset().mockResolvedValue(undefined)
+  mockListCooldowns.mockReset().mockResolvedValue([])
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: jest.fn().mockResolvedValue(undefined) },
@@ -141,5 +144,34 @@ describe("GatewaySection", () => {
     await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
     fireEvent.change(screen.getByLabelText("requestTimeout"), { target: { value: "0" } })
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ requestTimeoutSecs: 0 }))
+  })
+
+  it("persists a per-gateway-key concurrency cap", async () => {
+    render(<GatewaySection />)
+    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
+    fireEvent.change(screen.getByLabelText("maxConcurrentPerKey"), { target: { value: "4" } })
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ maxConcurrentPerKey: 4 }))
+  })
+
+  it("persists a rate-limit cooldown fallback change", async () => {
+    render(<GatewaySection />)
+    await waitFor(() => expect(mockGetConfig).toHaveBeenCalled())
+    fireEvent.change(screen.getByLabelText("cooldownFallback"), { target: { value: "0" } })
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ cooldownFallbackSecs: 0 }))
+  })
+
+  it("lists parked upstream accounts and refreshes on demand", async () => {
+    const user = userEvent.setup()
+    mockListCooldowns
+      .mockResolvedValueOnce([]) // initial mount → empty
+      .mockResolvedValueOnce([
+        { providerId: "openai", keyHint: "…1234", untilMs: 0, permanent: true, reason: "quota" },
+      ])
+    render(<GatewaySection />)
+    await waitFor(() => expect(mockListCooldowns).toHaveBeenCalled())
+    expect(screen.getByText("cooldownsEmpty")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "cooldownsRefresh" }))
+    expect(await screen.findByText(/openai · …1234/)).toBeInTheDocument()
+    expect(screen.getByText("cooldownsPermanent")).toBeInTheDocument()
   })
 })

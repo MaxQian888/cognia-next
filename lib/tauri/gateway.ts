@@ -15,6 +15,7 @@ import type {
   GatewayApiKeyPatch,
   GatewayApiKeyRedacted,
   GatewayConfig,
+  GatewayKeyCooldown,
   GatewayRoutingSnapshot,
   GatewaySnapshotEntry,
   GatewayStatus,
@@ -106,4 +107,12 @@ export async function gatewayDecisionResponse(
   entries: GatewaySnapshotEntry[]
 ): Promise<void> {
   await transport.call<void>("gateway_decision_response", { requestId, entries })
+}
+
+/**
+ * List pooled upstream keys currently cooling (429/529) or permanently disabled
+ * (401 / quota — W1.1 + W3.1). Secrets are fingerprinted, never returned whole.
+ */
+export async function gatewayListCooldowns(): Promise<GatewayKeyCooldown[]> {
+  return transport.call<GatewayKeyCooldown[]>("gateway_list_cooldowns")
 }

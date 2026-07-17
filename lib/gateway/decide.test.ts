@@ -62,7 +62,7 @@ describe("resolveGatewayDecision", () => {
     expect(() => resolveGatewayDecision(req, engineThrowing(new Error("boom")))).toThrow("boom")
   })
 
-  it("threads promptText + estimatedInputTokens into the engine", () => {
+  it("threads promptText + estimatedInputTokens + sessionId into the engine", () => {
     const seen: unknown[] = []
     const engine = {
       selectProvider: (opts: unknown) => {
@@ -71,9 +71,32 @@ describe("resolveGatewayDecision", () => {
       },
     } as unknown as ProviderRoutingEngine
     resolveGatewayDecision(
-      { requestId: "r", model: "fast", promptText: "hi", estimatedInputTokens: 42 },
+      {
+        requestId: "r",
+        model: "fast",
+        promptText: "hi",
+        estimatedInputTokens: 42,
+        sessionId: "gw-cc-abc",
+      },
       engine
     )
-    expect(seen[0]).toMatchObject({ model: "fast", promptText: "hi", estimatedInputTokens: 42 })
+    expect(seen[0]).toMatchObject({
+      model: "fast",
+      promptText: "hi",
+      estimatedInputTokens: 42,
+      sessionId: "gw-cc-abc",
+    })
+  })
+
+  it("omits sessionId when absent so affinity stays untouched", () => {
+    const seen: Array<Record<string, unknown>> = []
+    const engine = {
+      selectProvider: (opts: Record<string, unknown>) => {
+        seen.push(opts)
+        return null
+      },
+    } as unknown as ProviderRoutingEngine
+    resolveGatewayDecision({ requestId: "r", model: "fast" }, engine)
+    expect("sessionId" in seen[0]).toBe(false)
   })
 })

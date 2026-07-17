@@ -26,9 +26,12 @@
 
 pub mod api_keys;
 pub mod commands;
+pub mod concurrency;
+pub mod cooldown;
 pub mod execute;
 pub mod keyed_rate_limit;
 pub mod server;
+pub mod session_key;
 pub mod snapshot;
 pub mod translate;
 pub mod types;
@@ -42,6 +45,8 @@ use tauri::AppHandle;
 use tokio::sync::oneshot;
 
 use api_keys::{ApiKeyPatch, GatewayApiKey, RedactedApiKey};
+use concurrency::ConcurrencyLimiter;
+use cooldown::{CooldownRow, KeyCooldownMap};
 use execute::KeyRotationMap;
 use server::{RequestObserver, ServerHandle};
 use snapshot::{RoutingSnapshot, SnapshotEntry};
@@ -71,6 +76,12 @@ pub struct GatewayState {
     /// least-used counts). Shared with the running server so the cursor
     /// advances across requests; process-local, reset on restart.
     key_rotation: Arc<KeyRotationMap>,
+    /// Per-upstream-key cooldown / permanent-disable state (W1.1 + W3.1).
+    /// Shared with the running server so a parked key stays parked across
+    /// requests; process-local, reset on restart.
+    key_cooldown: Arc<KeyCooldownMap>,
+    /// In-flight concurrency caps per gateway key / upstream key (W1.2).
+    concurrency: Arc<ConcurrencyLimiter>,
 }
 
 struct GatewayInner {
@@ -106,7 +117,17 @@ impl GatewayState {
             snapshot: Arc::new(RwLock::new(None)),
             decisions: Arc::new(Mutex::new(HashMap::new())),
             key_rotation: Arc::new(KeyRotationMap::default()),
+            key_cooldown: Arc::new(KeyCooldownMap::default()),
+            concurrency: Arc::new(ConcurrencyLimiter::default()),
         }
+    }
+
+    /// Snapshot the current cooling / permanently-disabled upstream keys for the
+    /// settings surface (W3.1 visibility). Secrets are fingerprinted, never
+    /// returned in full; expired temporary cooldowns are omitted.
+    pub fn cooldowns(&self) -> Vec<CooldownRow> {
+        let now = chrono::Utc::now().timestamp_millis();
+        cooldown::snapshot_rows(&self.key_cooldown, now)
     }
 
     /// Point the state at its on-disk config mirror and load it (Tauri setup
@@ -323,6 +344,8 @@ impl GatewayState {
             self.snapshot.clone(),
             self.decisions.clone(),
             self.key_rotation.clone(),
+            self.key_cooldown.clone(),
+            self.concurrency.clone(),
             observer,
         )
         .await?;
@@ -576,5 +599,25 @@ mod tests {
     fn resolve_decision_for_unknown_id_is_a_noop() {
         let state = GatewayState::new();
         state.resolve_decision("never-registered", vec![]); // must not panic
+    }
+
+    #[test]
+    fn cooldowns_surface_reflects_recorded_state() {
+        let state = GatewayState::new();
+        assert!(state.cooldowns().is_empty());
+        let now = chrono::Utc::now().timestamp_millis();
+        cooldown::record_cooldown(
+            &state.key_cooldown,
+            "p",
+            "sk-abcd",
+            now + 60_000,
+            "HTTP 429",
+        );
+        cooldown::record_permanent(&state.key_cooldown, "p", "sk-dead", "quota");
+        let rows = state.cooldowns();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|r| r.permanent));
+        // Fingerprinted — no full secret leaks.
+        assert!(!serde_json::to_string(&rows).unwrap().contains("sk-abcd"));
     }
 }

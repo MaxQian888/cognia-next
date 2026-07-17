@@ -125,6 +125,16 @@ pub async fn gateway_decision_response(
     Ok(())
 }
 
+/// List the pooled upstream keys currently cooling (429/529) or permanently
+/// disabled (401 / quota — W1.1 + W3.1), for the settings surface. Secrets are
+/// fingerprinted, never returned in full.
+#[tauri::command]
+pub async fn gateway_list_cooldowns(
+    state: State<'_, GatewayState>,
+) -> Result<Vec<super::cooldown::CooldownRow>, String> {
+    Ok(state.cooldowns())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -27,6 +27,36 @@ fn default_retry_status_codes() -> Vec<u16> {
     vec![408, 409, 429, 500, 502, 503, 504]
 }
 
+fn default_cooldown_fallback_secs() -> u32 {
+    20
+}
+
+fn default_overload_cooldown_secs() -> u32 {
+    600
+}
+
+fn default_disable_keywords() -> Vec<String> {
+    vec![
+        "insufficient_quota".to_string(),
+        "organization has been disabled".to_string(),
+        "deactivated_workspace".to_string(),
+        "account_deactivated".to_string(),
+    ]
+}
+
+fn default_concurrency_wait_ms() -> u32 {
+    10_000
+}
+
+fn default_stripped_request_fields() -> Vec<String> {
+    vec![
+        "service_tier".to_string(),
+        "store".to_string(),
+        "safety_identifier".to_string(),
+        "stream_options.include_obfuscation".to_string(),
+    ]
+}
+
 /// Which network interface the listener binds to.
 ///
 /// `Loopback` (default) binds `127.0.0.1` — only same-machine processes can
@@ -96,6 +126,48 @@ pub struct GatewayConfig {
     /// raw model ids). Direct `provider:model` literals still resolve.
     #[serde(default)]
     pub hide_raw_provider_models: bool,
+
+    // ---- W1.1 upstream cooldown (per pooled key) ----------------------------
+    /// Cooldown (seconds) applied to a pooled key that returned 429 WITHOUT a
+    /// parseable `Retry-After` / `anthropic-ratelimit-unified-reset` header, so
+    /// the failover walk stops immediately re-selecting a just-limited account.
+    /// `0` disables the header-less fallback (only header-derived cooldowns
+    /// apply). Header-derived cooldowns are always honoured.
+    #[serde(default = "default_cooldown_fallback_secs")]
+    pub cooldown_fallback_secs: u32,
+    /// Cooldown (seconds) applied on a 529 "overloaded" with no recovery header.
+    #[serde(default = "default_overload_cooldown_secs")]
+    pub overload_cooldown_secs: u32,
+
+    // ---- W3.1 permanent key disable -----------------------------------------
+    /// Case-insensitive substrings that, when present in a failing upstream
+    /// body, mark the pooled key PERMANENTLY disabled (quota exhausted / org
+    /// disabled) rather than merely cooled. A 401 is always permanent.
+    #[serde(default = "default_disable_keywords")]
+    pub disable_keywords: Vec<String>,
+
+    // ---- W1.2 in-flight concurrency caps ------------------------------------
+    /// Max simultaneous in-flight requests per gateway API key. `0` = unlimited.
+    #[serde(default)]
+    pub max_concurrent_per_key: u32,
+    /// Max simultaneous in-flight upstream calls per pooled upstream key.
+    /// `0` = unlimited.
+    #[serde(default)]
+    pub max_concurrent_per_upstream_key: u32,
+    /// How long (ms) a request waits for a concurrency slot before it is
+    /// rejected with 429. `0` = reject immediately (no queueing).
+    #[serde(default = "default_concurrency_wait_ms")]
+    pub concurrency_wait_ms: u32,
+
+    // ---- W3.2 outbound field stripping --------------------------------------
+    /// Dotted-path fields stripped from every upstream request body (billing /
+    /// privacy / behaviour toggles the client must not control).
+    #[serde(default = "default_stripped_request_fields")]
+    pub stripped_request_fields: Vec<String>,
+    /// Per-provider re-permits for stripped fields, as `"providerId:field"`
+    /// entries. A match leaves that field intact for that provider only.
+    #[serde(default)]
+    pub field_strip_allow: Vec<String>,
 }
 
 impl Default for GatewayConfig {
@@ -112,6 +184,14 @@ impl Default for GatewayConfig {
             retry_status_codes: default_retry_status_codes(),
             exposed_models: Vec::new(),
             hide_raw_provider_models: false,
+            cooldown_fallback_secs: default_cooldown_fallback_secs(),
+            overload_cooldown_secs: default_overload_cooldown_secs(),
+            disable_keywords: default_disable_keywords(),
+            max_concurrent_per_key: 0,
+            max_concurrent_per_upstream_key: 0,
+            concurrency_wait_ms: default_concurrency_wait_ms(),
+            stripped_request_fields: default_stripped_request_fields(),
+            field_strip_allow: Vec::new(),
         }
     }
 }
@@ -221,6 +301,20 @@ mod tests {
         assert!(cfg.retry_status_codes.contains(&429));
         assert!(cfg.exposed_models.is_empty());
         assert!(!cfg.hide_raw_provider_models);
+        assert_eq!(cfg.cooldown_fallback_secs, 20);
+        assert_eq!(cfg.overload_cooldown_secs, 600);
+        assert!(cfg
+            .disable_keywords
+            .iter()
+            .any(|k| k == "insufficient_quota"));
+        assert_eq!(cfg.max_concurrent_per_key, 0);
+        assert_eq!(cfg.max_concurrent_per_upstream_key, 0);
+        assert_eq!(cfg.concurrency_wait_ms, 10_000);
+        assert!(cfg
+            .stripped_request_fields
+            .iter()
+            .any(|f| f == "service_tier"));
+        assert!(cfg.field_strip_allow.is_empty());
     }
 
     #[test]
@@ -237,6 +331,14 @@ mod tests {
             retry_status_codes: vec![429, 503],
             exposed_models: vec!["fast".into()],
             hide_raw_provider_models: true,
+            cooldown_fallback_secs: 15,
+            overload_cooldown_secs: 300,
+            disable_keywords: vec!["insufficient_quota".into()],
+            max_concurrent_per_key: 4,
+            max_concurrent_per_upstream_key: 2,
+            concurrency_wait_ms: 5_000,
+            stripped_request_fields: vec!["service_tier".into()],
+            field_strip_allow: vec!["openai:service_tier".into()],
         };
         let json = serde_json::to_value(&cfg).unwrap();
         assert_eq!(json["rateLimitPerMin"], 120);
@@ -245,10 +347,21 @@ mod tests {
         assert_eq!(json["requestTimeoutSecs"], 0);
         assert_eq!(json["maxRetries"], 2);
         assert_eq!(json["hideRawProviderModels"], true);
+        assert_eq!(json["cooldownFallbackSecs"], 15);
+        assert_eq!(json["overloadCooldownSecs"], 300);
+        assert_eq!(json["maxConcurrentPerKey"], 4);
+        assert_eq!(json["maxConcurrentPerUpstreamKey"], 2);
+        assert_eq!(json["concurrencyWaitMs"], 5_000);
+        assert_eq!(json["fieldStripAllow"][0], "openai:service_tier");
         let back: GatewayConfig = serde_json::from_value(json).unwrap();
         assert_eq!(back.port, 50001);
         assert_eq!(back.bind_interface, BindInterface::Lan);
         assert_eq!(back.exposed_models, vec!["fast".to_string()]);
+        assert_eq!(back.max_concurrent_per_key, 4);
+        assert_eq!(
+            back.stripped_request_fields,
+            vec!["service_tier".to_string()]
+        );
     }
 
     #[test]
@@ -262,6 +375,15 @@ mod tests {
         assert_eq!(back.bind_interface, BindInterface::Loopback);
         assert_eq!(back.request_timeout_secs, 300);
         assert_eq!(back.retry_status_codes, default_retry_status_codes());
+        // New W1/W3 fields fill their defaults when absent from the JSON.
+        assert_eq!(back.cooldown_fallback_secs, 20);
+        assert_eq!(back.overload_cooldown_secs, 600);
+        assert_eq!(back.concurrency_wait_ms, 10_000);
+        assert!(back.stripped_request_fields.iter().any(|f| f == "store"));
+        assert!(back
+            .disable_keywords
+            .iter()
+            .any(|k| k == "account_deactivated"));
     }
 
     #[test]

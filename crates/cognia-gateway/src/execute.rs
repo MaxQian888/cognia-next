@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use parking_lot::Mutex;
 use serde_json::Value;
 
+use super::cooldown::{usable_pool, KeyCooldownMap};
 use super::snapshot::{ProviderSnapshot, RoutingSnapshot, SnapshotEntry};
 
 /// One executable route: a provider snapshot (credentials + protocol) and
@@ -72,10 +73,21 @@ fn rotation_start(strategy: &str, pool: &[String], st: &mut ProviderKeyRotation)
 /// includes 429 + 5xx) rolls over to the next account of the SAME provider
 /// before moving on. Candidates without a usable pool pass through unchanged
 /// (single `api_key` — the app's single-key send path).
-pub fn expand_key_pools(candidates: Vec<Candidate>, rotation: &KeyRotationMap) -> Vec<Candidate> {
+///
+/// Keys the upstream just parked (429/529 cooldown) or that are permanently
+/// disabled (401 / quota exhausted — W1.1 + W3.1) are skipped via
+/// [`usable_pool`], so the walk stops re-selecting a key the upstream is
+/// refusing. A fully-cooling pool keeps its earliest-recovering key instead of
+/// collapsing to zero candidates.
+pub fn expand_key_pools(
+    candidates: Vec<Candidate>,
+    rotation: &KeyRotationMap,
+    cooldown: &KeyCooldownMap,
+    now_ms: i64,
+) -> Vec<Candidate> {
     let mut out = Vec::with_capacity(candidates.len());
     for candidate in candidates {
-        let pool: Vec<String> = if candidate.provider.rotation_enabled {
+        let raw_pool: Vec<String> = if candidate.provider.rotation_enabled {
             candidate
                 .provider
                 .api_keys
@@ -86,9 +98,15 @@ pub fn expand_key_pools(candidates: Vec<Candidate>, rotation: &KeyRotationMap) -
         } else {
             Vec::new()
         };
-        if pool.is_empty() {
-            // No rotation pool — keep the provider's single `api_key`.
+        if raw_pool.is_empty() {
+            // No rotation pool — keep the provider's single `api_key` (the
+            // single-key send path has no alternative account to fail over to).
             out.push(candidate);
+            continue;
+        }
+        let pool = usable_pool(cooldown, &candidate.provider.id, &raw_pool, now_ms);
+        if pool.is_empty() {
+            // Every pooled key is permanently disabled → no usable candidate.
             continue;
         }
         let start = if pool.len() >= 2 {
@@ -276,6 +294,52 @@ pub fn rewrite_model(body: &Value, model_id: &str) -> Value {
     out
 }
 
+/// Strip client-supplied request fields that must not be forwarded upstream
+/// (W3.2): billing / privacy / behaviour toggles like `service_tier`, `store`,
+/// `safety_identifier`, `stream_options.include_obfuscation`. Applies to BOTH
+/// the passthrough body and the translated body (passthrough bypasses
+/// `translate/`, so stripping must live at the send boundary, not in the
+/// translator). A field re-permitted for this provider via an
+/// `"providerId:field"` entry in `allow` is left intact. Each `field` is a
+/// dotted path; a nested leaf is removed without disturbing its siblings.
+pub fn strip_request_fields(
+    body: &mut Value,
+    provider_id: &str,
+    fields: &[String],
+    allow: &[String],
+) {
+    for field in fields {
+        let field = field.trim();
+        if field.is_empty() {
+            continue;
+        }
+        let permitted = {
+            let scoped = format!("{provider_id}:{field}");
+            allow.iter().any(|a| a.trim() == scoped)
+        };
+        if permitted {
+            continue;
+        }
+        remove_path(body, field);
+    }
+}
+
+/// Remove a dotted-path leaf from a JSON object, leaving siblings intact.
+fn remove_path(value: &mut Value, path: &str) {
+    match path.split_once('.') {
+        None => {
+            if let Some(obj) = value.as_object_mut() {
+                obj.remove(path);
+            }
+        }
+        Some((head, rest)) => {
+            if let Some(child) = value.as_object_mut().and_then(|o| o.get_mut(head)) {
+                remove_path(child, rest);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -422,10 +486,13 @@ mod tests {
     #[test]
     fn expand_passes_through_without_a_pool() {
         let rotation = KeyRotationMap::default();
+        let cooldown = KeyCooldownMap::default();
         // rotation disabled → single key preserved, one candidate.
         let out = expand_key_pools(
             vec![pooled_candidate(&["sk-a", "sk-b"], false, None)],
             &rotation,
+            &cooldown,
+            0,
         );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].provider.api_key.as_deref(), Some("sk-single"));
@@ -434,6 +501,7 @@ mod tests {
     #[test]
     fn expand_produces_one_candidate_per_pooled_key() {
         let rotation = KeyRotationMap::default();
+        let cooldown = KeyCooldownMap::default();
         let out = expand_key_pools(
             vec![pooled_candidate(
                 &["sk-a", "sk-b", "sk-c"],
@@ -441,6 +509,8 @@ mod tests {
                 Some("round-robin"),
             )],
             &rotation,
+            &cooldown,
+            0,
         );
         assert_eq!(out.len(), 3);
         let keys: Vec<&str> = out
@@ -454,13 +524,18 @@ mod tests {
     #[test]
     fn round_robin_advances_the_starting_key_each_call() {
         let rotation = KeyRotationMap::default();
+        let cooldown = KeyCooldownMap::default();
         let first = expand_key_pools(
             vec![pooled_candidate(&["sk-a", "sk-b", "sk-c"], true, None)],
             &rotation,
+            &cooldown,
+            0,
         );
         let second = expand_key_pools(
             vec![pooled_candidate(&["sk-a", "sk-b", "sk-c"], true, None)],
             &rotation,
+            &cooldown,
+            0,
         );
         // Consecutive requests start at different pool slots.
         assert_ne!(
@@ -472,6 +547,7 @@ mod tests {
     #[test]
     fn least_used_prefers_the_key_with_fewest_successes() {
         let rotation = KeyRotationMap::default();
+        let cooldown = KeyCooldownMap::default();
         // sk-a used twice, sk-b once → least-used should start at sk-c (zero).
         record_key_success(&rotation, "groq", Some("sk-a"));
         record_key_success(&rotation, "groq", Some("sk-a"));
@@ -483,6 +559,8 @@ mod tests {
                 Some("least-used"),
             )],
             &rotation,
+            &cooldown,
+            0,
         );
         assert_eq!(out[0].provider.api_key.as_deref(), Some("sk-c"));
     }
@@ -490,12 +568,96 @@ mod tests {
     #[test]
     fn expand_skips_blank_pool_keys() {
         let rotation = KeyRotationMap::default();
+        let cooldown = KeyCooldownMap::default();
         let out = expand_key_pools(
             vec![pooled_candidate(&["sk-a", "  ", ""], true, None)],
             &rotation,
+            &cooldown,
+            0,
         );
         // Only the one non-blank key survives.
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].provider.api_key.as_deref(), Some("sk-a"));
+    }
+
+    #[test]
+    fn expand_skips_cooling_and_disabled_pool_keys() {
+        use super::super::cooldown::{record_cooldown, record_permanent};
+        let rotation = KeyRotationMap::default();
+        let cooldown = KeyCooldownMap::default();
+        // sk-a cooling until 100, sk-b permanently disabled → only sk-c usable.
+        record_cooldown(&cooldown, "groq", "sk-a", 100, "HTTP 429");
+        record_permanent(&cooldown, "groq", "sk-b", "quota");
+        let out = expand_key_pools(
+            vec![pooled_candidate(&["sk-a", "sk-b", "sk-c"], true, None)],
+            &rotation,
+            &cooldown,
+            0,
+        );
+        let keys: Vec<&str> = out
+            .iter()
+            .filter_map(|c| c.provider.api_key.as_deref())
+            .collect();
+        assert_eq!(keys, vec!["sk-c"]);
+
+        // Once the cooldown expires, sk-a returns but the disabled sk-b stays out.
+        let out2 = expand_key_pools(
+            vec![pooled_candidate(&["sk-a", "sk-b", "sk-c"], true, None)],
+            &rotation,
+            &cooldown,
+            200,
+        );
+        let keys2: Vec<&str> = out2
+            .iter()
+            .filter_map(|c| c.provider.api_key.as_deref())
+            .collect();
+        assert!(keys2.contains(&"sk-a") && keys2.contains(&"sk-c") && !keys2.contains(&"sk-b"));
+    }
+
+    #[test]
+    fn strip_request_fields_removes_toggles_and_honours_allowlist() {
+        let fields = vec![
+            "service_tier".to_string(),
+            "store".to_string(),
+            "safety_identifier".to_string(),
+            "stream_options.include_obfuscation".to_string(),
+        ];
+        let mut body = serde_json::json!({
+            "model": "m",
+            "service_tier": "flex",
+            "store": true,
+            "safety_identifier": "user-123",
+            "stream_options": { "include_usage": true, "include_obfuscation": true },
+            "messages": [1]
+        });
+        strip_request_fields(&mut body, "openai", &fields, &[]);
+        assert!(body.get("service_tier").is_none());
+        assert!(body.get("store").is_none());
+        assert!(body.get("safety_identifier").is_none());
+        // Nested leaf removed; sibling preserved.
+        assert!(body["stream_options"].get("include_obfuscation").is_none());
+        assert_eq!(body["stream_options"]["include_usage"], true);
+        // Untouched fields survive.
+        assert_eq!(body["model"], "m");
+        assert_eq!(body["messages"], serde_json::json!([1]));
+
+        // Per-provider allowlist re-permits a field for that provider only.
+        let mut body2 = serde_json::json!({ "service_tier": "flex" });
+        strip_request_fields(
+            &mut body2,
+            "openai",
+            &fields,
+            &["openai:service_tier".to_string()],
+        );
+        assert_eq!(body2["service_tier"], "flex");
+        // A different provider is unaffected by that allowlist entry.
+        let mut body3 = serde_json::json!({ "service_tier": "flex" });
+        strip_request_fields(
+            &mut body3,
+            "groq",
+            &fields,
+            &["openai:service_tier".to_string()],
+        );
+        assert!(body3.get("service_tier").is_none());
     }
 }

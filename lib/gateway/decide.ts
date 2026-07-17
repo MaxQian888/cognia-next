@@ -17,6 +17,9 @@ export interface GatewayDecideRequest {
   model: string
   promptText?: string | null
   estimatedInputTokens?: number | null
+  /** Gateway-derived affinity key (W1.3) — lets the routing engine's
+   * session-affinity filter stick this conversation to one deployment. */
+  sessionId?: string | null
 }
 
 /**
@@ -36,6 +39,7 @@ export function resolveGatewayDecision(
       ...(req.estimatedInputTokens != null
         ? { estimatedInputTokens: req.estimatedInputTokens }
         : {}),
+      ...(req.sessionId ? { sessionId: req.sessionId } : {}),
     })
   } catch (err) {
     // Alias matched but every deployment is unavailable → empty = let the

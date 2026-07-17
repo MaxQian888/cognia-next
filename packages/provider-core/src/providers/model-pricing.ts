@@ -1,5 +1,6 @@
 import { getModelConfig, type ModelPricing } from "@cognia/provider-types/provider"
 import { getCatalogModelMetadata } from "./models-dev-sync"
+import { parseReasoningSuffix } from "./reasoning-suffix"
 
 /**
  * Resolve a comparable per-1M-token USD price for a provider:model, used by the
@@ -113,6 +114,26 @@ export function resetModelPricingResolverForTesting(): void {
 /** @deprecated alias — superseded by {@link PricingSettings}; kept for callers. */
 export type PriceLookupSettings = PricingSettings
 
+/**
+ * Resolve pricing for a model id, falling through the reasoning-effort virtual
+ * model form (`<base>-<effort>`, W3.3): a virtual id with no pricing of its own
+ * inherits its base model's price (the user can still override the virtual id
+ * independently via custom model metadata, which the direct lookup honours
+ * first). Wired at the public entry points so it applies whether the default or
+ * a host-injected resolver is active.
+ */
+function resolvePricingWithVirtual(
+  providerId: string,
+  modelId: string,
+  options?: ResolvePricingOptions
+): Partial<ModelPricing> | null {
+  const direct = modelPricingResolver(providerId, modelId, options)
+  if (direct) return direct
+  const parsed = parseReasoningSuffix(modelId)
+  if (!parsed) return null
+  return modelPricingResolver(providerId, parsed.baseModel, options)
+}
+
 export function resolveModelPriceUsdPer1M(
   providerId: string,
   modelId: string,
@@ -121,7 +142,7 @@ export function resolveModelPriceUsdPer1M(
   // The resolver returns null unless at least one base rate is known, so a
   // non-null result always has a side to blend (a single-sided price is reused
   // for the absent side to keep the ranking figure comparable).
-  const pricing = modelPricingResolver(providerId, modelId, { settings })
+  const pricing = resolvePricingWithVirtual(providerId, modelId, { settings })
   if (!pricing) return undefined
   const inp = pricing.promptPer1M
   const out = pricing.completionPer1M
@@ -146,7 +167,7 @@ export interface EstimateCallCostInput {
  * — routing prices on the input/output mix only.)
  */
 export function estimateCallCostUsd(input: EstimateCallCostInput): number | undefined {
-  const pricing = modelPricingResolver(input.providerId, input.modelId, {
+  const pricing = resolvePricingWithVirtual(input.providerId, input.modelId, {
     settings: input.settings,
   })
   if (!pricing) return undefined

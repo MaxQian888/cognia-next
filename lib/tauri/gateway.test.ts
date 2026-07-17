@@ -3,6 +3,7 @@ import {
   gatewayCreateKey,
   gatewayDeleteKey,
   gatewayGetConfig,
+  gatewayListCooldowns,
   gatewayListKeys,
   gatewayResetKeyQuota,
   gatewayRevealKey,
@@ -71,5 +72,14 @@ describe("lib/tauri/gateway", () => {
     expect(callSpy).toHaveBeenCalledWith("gateway_reset_key_quota", { id: "k1" })
     await gatewayDeleteKey("k1")
     expect(callSpy).toHaveBeenCalledWith("gateway_delete_key", { id: "k1" })
+  })
+
+  it("lists upstream key cooldowns", async () => {
+    const rows = [
+      { providerId: "openai", keyHint: "…1234", untilMs: 0, permanent: true, reason: "quota" },
+    ]
+    const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce(rows)
+    await expect(gatewayListCooldowns()).resolves.toEqual(rows)
+    expect(callSpy).toHaveBeenCalledWith("gateway_list_cooldowns")
   })
 })
