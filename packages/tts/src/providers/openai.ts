@@ -5,7 +5,7 @@
 
 import { proxyFetch } from "../proxy-fetch"
 import {
-  getTTSError,
+  ttsFailure,
   TTS_PROVIDERS,
   type OpenAITTSModel,
   type OpenAITTSVoice,
@@ -37,14 +37,11 @@ export async function generateOpenAITTS(
   } = options
 
   if (!apiKey) {
-    return { success: false, error: getTTSError("api-key-missing").message }
+    return ttsFailure("api-key-missing")
   }
   const max = TTS_PROVIDERS.openai.maxTextLength
   if (text.length > max) {
-    return {
-      success: false,
-      error: getTTSError("text-too-long", `Maximum ${max} characters`).message,
-    }
+    return ttsFailure("text-too-long", { providerMessage: `Maximum ${max} characters` })
   }
 
   const body: Record<string, unknown> = {
@@ -72,11 +69,10 @@ export async function generateOpenAITTS(
       const err = await response
         .json<{ error?: { message?: string } }>()
         .catch(() => ({}) as { error?: { message?: string } })
-      return {
-        success: false,
-        error: getTTSError("api-error", err.error?.message ?? `API error: ${response.status}`)
-          .message,
-      }
+      return ttsFailure("api-error", {
+        status: response.status,
+        providerMessage: err.error?.message ?? `API error: ${response.status}`,
+      })
     }
 
     return {
@@ -85,11 +81,9 @@ export async function generateOpenAITTS(
       mimeType: getMimeType(responseFormat),
     }
   } catch (error) {
-    return {
-      success: false,
-      error: getTTSError("network-error", error instanceof Error ? error.message : "Unknown error")
-        .message,
-    }
+    return ttsFailure("network-error", {
+      providerMessage: error instanceof Error ? error.message : "Unknown error",
+    })
   }
 }
 

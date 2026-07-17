@@ -48,23 +48,11 @@ import {
   HUME_TTS_VOICES,
   LMNT_TTS_VOICES,
   OPENAI_TTS_VOICES,
+  ORDERED_TTS_PROVIDERS,
   XIAOMI_TTS_VOICES,
   type TTSProvider,
 } from "@cognia/tts/types"
-
-/** TTS providers (mirrors the union in `lib/claude/types.ts`). */
-const TTS_PROVIDERS = [
-  "system",
-  "openai",
-  "gemini",
-  "edge",
-  "elevenlabs",
-  "lmnt",
-  "hume",
-  "cartesia",
-  "deepgram",
-  "xiaomi",
-] as const
+import { SPEECH_LANGUAGES } from "@cognia/tts/speech"
 
 /**
  * Per-provider voice config — maps each provider to its flat AppSettings voice
@@ -164,17 +152,10 @@ function VoiceSelect({
   )
 }
 
-/** STT language presets — `auto` clears the override (provider auto-detect). */
-const STT_LANGUAGES = [
-  "auto",
-  "en-US",
-  "zh-CN",
-  "ja-JP",
-  "ko-KR",
-  "fr-FR",
-  "de-DE",
-  "es-ES",
-] as const
+/** STT language presets — `auto` clears the override (provider auto-detect).
+ *  Codes come from the canonical `SPEECH_LANGUAGES` list (W18) so this can't
+ *  drift from the rest of the subsystem. */
+const STT_LANGUAGES = ["auto", ...SPEECH_LANGUAGES.map((l) => l.code)] as const
 
 export default function MobileSpeechPage() {
   const t = useTranslations("mobile.speech")
@@ -235,7 +216,7 @@ export default function MobileSpeechPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {TTS_PROVIDERS.map((id) => (
+                  {ORDERED_TTS_PROVIDERS.map((id) => (
                     <SelectItem key={id} value={id}>
                       {t(`providers.${id}`)}
                     </SelectItem>
@@ -262,43 +243,49 @@ export default function MobileSpeechPage() {
             </Item>
           )}
 
-          <Item size="sm" className="px-0">
-            <ItemContent>
-              <ItemTitle className="text-xs">
-                {t("rate")} · {ttsRate.toFixed(1)}×
-              </ItemTitle>
-              <Slider
-                value={[ttsRate]}
-                min={0.5}
-                max={2}
-                step={0.1}
-                disabled={!ttsEnabled}
-                onValueChange={([v]) => void update({ ttsRate: v })}
-                data-testid="speech-tts-rate"
-                aria-label={t("rate")}
-                className="mt-2"
-              />
-            </ItemContent>
-          </Item>
+          {/* Rate + pitch only affect the system voice; cloud providers use
+              their own speed field, so these were dead controls for them (W13). */}
+          {ttsProvider === "system" && (
+            <>
+              <Item size="sm" className="px-0">
+                <ItemContent>
+                  <ItemTitle className="text-xs">
+                    {t("rate")} · {ttsRate.toFixed(1)}×
+                  </ItemTitle>
+                  <Slider
+                    value={[ttsRate]}
+                    min={0.5}
+                    max={2}
+                    step={0.1}
+                    disabled={!ttsEnabled}
+                    onValueChange={([v]) => void update({ ttsRate: v })}
+                    data-testid="speech-tts-rate"
+                    aria-label={t("rate")}
+                    className="mt-2"
+                  />
+                </ItemContent>
+              </Item>
 
-          <Item size="sm" className="px-0">
-            <ItemContent>
-              <ItemTitle className="text-xs">
-                {t("pitch")} · {ttsPitch.toFixed(1)}
-              </ItemTitle>
-              <Slider
-                value={[ttsPitch]}
-                min={0}
-                max={2}
-                step={0.1}
-                disabled={!ttsEnabled}
-                onValueChange={([v]) => void update({ ttsPitch: v })}
-                data-testid="speech-tts-pitch"
-                aria-label={t("pitch")}
-                className="mt-2"
-              />
-            </ItemContent>
-          </Item>
+              <Item size="sm" className="px-0">
+                <ItemContent>
+                  <ItemTitle className="text-xs">
+                    {t("pitch")} · {ttsPitch.toFixed(1)}
+                  </ItemTitle>
+                  <Slider
+                    value={[ttsPitch]}
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    disabled={!ttsEnabled}
+                    onValueChange={([v]) => void update({ ttsPitch: v })}
+                    data-testid="speech-tts-pitch"
+                    aria-label={t("pitch")}
+                    className="mt-2"
+                  />
+                </ItemContent>
+              </Item>
+            </>
+          )}
 
           <Item size="sm" className="px-0">
             <ItemContent>

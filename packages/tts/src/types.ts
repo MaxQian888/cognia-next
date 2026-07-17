@@ -557,7 +557,15 @@ export interface TTSResponse {
   audioUrl?: string
   mimeType?: string
   duration?: number
+  /** Canonical, user-facing message (the collapsed `ERROR_MESSAGES[type]`). */
   error?: string
+  /** Structured failure detail (W14): the error kind, the upstream HTTP status
+   *  (when it came from a provider response), and the provider's own message.
+   *  Preserved so the UI can show the real reason and retry can classify by
+   *  status — a permanent 401 must not be retried like a transient 503. */
+  errorType?: TTSErrorType
+  status?: number
+  providerMessage?: string
 }
 
 export interface TTSNormalizedError {
@@ -597,6 +605,24 @@ const ERROR_MESSAGES: Record<TTSErrorType, string> = {
   cancelled: "Speech synthesis was cancelled",
 }
 
+/**
+ * Build a structured failure `TTSResponse` (W14). Keeps the canonical message
+ * for display AND the error kind / HTTP status / provider message, so callers
+ * (retry, UI) don't have to reverse-engineer a collapsed string.
+ */
+export function ttsFailure(
+  type: TTSErrorType,
+  opts: { status?: number; providerMessage?: string } = {}
+): TTSResponse {
+  return {
+    success: false,
+    error: ERROR_MESSAGES[type],
+    errorType: type,
+    status: opts.status,
+    providerMessage: opts.providerMessage,
+  }
+}
+
 export function getTTSError(type: TTSErrorType, details?: string): TTSError {
   return { type, message: ERROR_MESSAGES[type], details }
 }
@@ -627,12 +653,34 @@ export const KEYED_TTS_PROVIDERS: TTSProvider[] = [
   "openai-realtime",
 ]
 
-/** Stable list of TTS provider IDs in display order (system first). */
+/**
+ * Retired providers — kept in the `TTSProvider` union and `TTS_PROVIDERS`
+ * record (so persisted selections and code keep resolving) but removed from
+ * the selectable list below. Intentional dormancy (ADR-0075):
+ *
+ * - `edge` (plan O2): Edge-TTS only works by impersonating the Edge browser (a
+ *   token forged from a constant lifted out of the browser, plus a spoofed UA
+ *   and `chrome-extension://` Origin). There is no acceptable terms of service
+ *   and no key to request, and it returns 403 in mainland China — this
+ *   product's market. The synthesis code stays one release before deletion.
+ *
+ * - `openai-realtime` (plan D2): a pure-TTS use of OpenAI's speech-to-speech
+ *   Realtime model, at ~$64/1M audio output vs ~$12 for `gpt-4o-mini-tts`, and
+ *   steered by a "read this verbatim" prompt to suppress the model's agency —
+ *   the wrong tool. The `openai` provider already uses `gpt-4o-mini-tts` over
+ *   REST, so that is the TTS path now. The Realtime s2s transport
+ *   (`crates/cognia-tts/src/realtime.rs`, `providers/openai-realtime.ts`) is
+ *   kept, reserved for a future real-time voice-conversation feature (O1).
+ */
+export const RETIRED_TTS_PROVIDERS: TTSProvider[] = ["edge", "openai-realtime"]
+
+/**
+ * Stable list of *selectable* TTS provider IDs in display order (system
+ * first). Retired providers (see `RETIRED_TTS_PROVIDERS`) are excluded.
+ */
 export const ORDERED_TTS_PROVIDERS: TTSProvider[] = [
   "system",
-  "edge",
   "openai",
-  "openai-realtime",
   "gemini",
   "elevenlabs",
   "cartesia",

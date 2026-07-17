@@ -8,7 +8,7 @@
  */
 
 import { getTtsHost } from "../host"
-import { getTTSError, TTS_PROVIDERS, type EdgeTTSVoice, type TTSResponse } from "../types"
+import { ttsFailure, TTS_PROVIDERS, type EdgeTTSVoice, type TTSResponse } from "../types"
 
 export interface EdgeTTSOptions {
   voice?: EdgeTTSVoice
@@ -42,10 +42,7 @@ export async function generateEdgeTTS(
 
   const max = TTS_PROVIDERS.edge.maxTextLength
   if (effectiveText.length > max) {
-    return {
-      success: false,
-      error: getTTSError("text-too-long", `Maximum ${max} characters`).message,
-    }
+    return ttsFailure("text-too-long", { providerMessage: `Maximum ${max} characters` })
   }
 
   if (!(getTtsHost().isNativeShell?.() ?? false)) {
@@ -70,11 +67,9 @@ export async function generateEdgeTTS(
       mimeType: response.mime || "audio/mpeg",
     }
   } catch (error) {
-    return {
-      success: false,
-      error: getTTSError("api-error", error instanceof Error ? error.message : String(error))
-        .message,
-    }
+    return ttsFailure("api-error", {
+      providerMessage: error instanceof Error ? error.message : String(error),
+    })
   }
 }
 

@@ -87,6 +87,8 @@
     "provider": "Provider",
     "rate": "Rate",
     "remove": "Remove",
+    "retiredNotice": "This voice provider has been retired and may stop working at any time. Please pick another provider.",
+    "retiredSuffix": "(retired)",
     "sample": {
       "en": "Hello, this is a test of the text-to-speech feature.",
       "ja": "こんにちは、これはテスト音声です。",

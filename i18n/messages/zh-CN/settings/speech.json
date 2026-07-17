@@ -87,6 +87,8 @@
     "provider": "服务商",
     "rate": "语速",
     "remove": "移除",
+    "retiredNotice": "该语音服务商已退役，随时可能失效。请改用其他服务商。",
+    "retiredSuffix": "（已退役）",
     "sample": {
       "en": "Hello, this is a test of the text-to-speech feature.",
       "ja": "こんにちは、これはテスト音声です。",

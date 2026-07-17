@@ -162,6 +162,11 @@ export const TTS_ADAPTERS: Record<TTSProvider, TTSProviderAdapter> = {
     generate: (text, options) =>
       generateXiaomiTTS(text, options as Parameters<typeof generateXiaomiTTS>[1]),
   },
+  // Retired as a selectable TTS provider (RETIRED_TTS_PROVIDERS, plan D2): a
+  // pure-TTS use of the speech-to-speech Realtime model costs ~$64/1M vs ~$12
+  // for `gpt-4o-mini-tts` (which the `openai` provider already uses over REST).
+  // The adapter stays so persisted selections keep resolving, and the s2s
+  // transport is reserved for a future real-time voice-conversation feature (O1).
   "openai-realtime": {
     info: TTS_PROVIDERS["openai-realtime"],
     kind: "streaming",

@@ -5,7 +5,7 @@
 
 import { proxyFetch } from "../proxy-fetch"
 import {
-  getTTSError,
+  ttsFailure,
   TTS_PROVIDERS,
   type CartesiaTTSModel,
   type CartesiaTTSVoice,
@@ -40,14 +40,11 @@ export async function generateCartesiaTTS(
   } = options
 
   if (!apiKey) {
-    return { success: false, error: getTTSError("api-key-missing").message }
+    return ttsFailure("api-key-missing")
   }
   const max = TTS_PROVIDERS.cartesia.maxTextLength
   if (text.length > max) {
-    return {
-      success: false,
-      error: getTTSError("text-too-long", `Maximum ${max} characters`).message,
-    }
+    return ttsFailure("text-too-long", { providerMessage: `Maximum ${max} characters` })
   }
 
   const outputFormatConfig =
@@ -87,20 +84,18 @@ export async function generateCartesiaTTS(
       const err = await response
         .json<{ message?: string }>()
         .catch(() => ({}) as { message?: string })
-      return {
-        success: false,
-        error: getTTSError("api-error", err.message ?? `API error: ${response.status}`).message,
-      }
+      return ttsFailure("api-error", {
+        status: response.status,
+        providerMessage: err.message ?? `API error: ${response.status}`,
+      })
     }
 
     const mime =
       outputFormat === "mp3" ? "audio/mpeg" : outputFormat === "wav" ? "audio/wav" : "audio/pcm"
     return { success: true, audioData: response.bytes, mimeType: mime }
   } catch (error) {
-    return {
-      success: false,
-      error: getTTSError("api-error", error instanceof Error ? error.message : "Unknown error")
-        .message,
-    }
+    return ttsFailure("api-error", {
+      providerMessage: error instanceof Error ? error.message : "Unknown error",
+    })
   }
 }

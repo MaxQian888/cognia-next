@@ -228,7 +228,12 @@ export function applyPronunciationDictionary(
     const placeholder = `__PD_${i}__`
     placeholders.set(placeholder, replacement)
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    result = result.replace(new RegExp(`\\b${escaped}\\b`, "gi"), placeholder)
+    // `\b` is defined by ASCII `\w`, so it never fires around CJK — a Chinese
+    // entry would silently never match. CJK has no spaces between words, so
+    // match those as a substring; keep the whole-word `\b` guard for ASCII.
+    const isCjk = /[㐀-鿿぀-ヿ가-힯]/.test(word)
+    const pattern = isCjk ? escaped : `\\b${escaped}\\b`
+    result = result.replace(new RegExp(pattern, "gi"), placeholder)
     i++
   }
   for (const [placeholder, replacement] of placeholders) {

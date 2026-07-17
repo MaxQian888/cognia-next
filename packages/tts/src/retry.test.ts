@@ -10,12 +10,44 @@ const tooLong: TTSResponse = { success: false, error: getTTSError("text-too-long
 const noDelay = () => Promise.resolve()
 
 describe("isRetryableTtsFailure", () => {
-  it("retries transient network/api errors only", () => {
+  it("retries transient network/api errors only (legacy string path)", () => {
     expect(isRetryableTtsFailure(networkFail)).toBe(true)
     expect(isRetryableTtsFailure(apiFail)).toBe(true)
     expect(isRetryableTtsFailure(keyFail)).toBe(false)
     expect(isRetryableTtsFailure(tooLong)).toBe(false)
     expect(isRetryableTtsFailure(ok)).toBe(false)
+  })
+
+  it("classifies api-error by HTTP status (W14) — permanent 4xx is not retried", () => {
+    const at = (status: number): TTSResponse => ({
+      success: false,
+      error: "TTS API returned an error",
+      errorType: "api-error",
+      status,
+    })
+    // The exact bug: a permanent 401 was retried 3× like a transient 503.
+    expect(isRetryableTtsFailure(at(401))).toBe(false)
+    expect(isRetryableTtsFailure(at(403))).toBe(false)
+    expect(isRetryableTtsFailure(at(404))).toBe(false)
+    expect(isRetryableTtsFailure(at(503))).toBe(true)
+    expect(isRetryableTtsFailure(at(502))).toBe(true)
+    expect(isRetryableTtsFailure(at(429))).toBe(true)
+  })
+
+  it("retries a structured api-error with no status (unknown → transient)", () => {
+    expect(isRetryableTtsFailure({ success: false, errorType: "api-error", error: "x" })).toBe(true)
+  })
+
+  it("always retries a structured network-error and never a permanent kind", () => {
+    expect(isRetryableTtsFailure({ success: false, errorType: "network-error", error: "x" })).toBe(
+      true
+    )
+    expect(
+      isRetryableTtsFailure({ success: false, errorType: "api-key-missing", error: "x" })
+    ).toBe(false)
+    expect(isRetryableTtsFailure({ success: false, errorType: "text-too-long", error: "x" })).toBe(
+      false
+    )
   })
 })
 

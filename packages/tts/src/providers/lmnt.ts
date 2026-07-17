@@ -4,7 +4,7 @@
  */
 
 import { proxyFetch } from "../proxy-fetch"
-import { getTTSError, TTS_PROVIDERS, type LMNTTTSVoice, type TTSResponse } from "../types"
+import { ttsFailure, TTS_PROVIDERS, type LMNTTTSVoice, type TTSResponse } from "../types"
 
 export interface LMNTTTSOptions {
   apiKey: string
@@ -26,14 +26,11 @@ export async function generateLMNTTTS(text: string, options: LMNTTTSOptions): Pr
   } = options
 
   if (!apiKey) {
-    return { success: false, error: getTTSError("api-key-missing").message }
+    return ttsFailure("api-key-missing")
   }
   const max = TTS_PROVIDERS.lmnt.maxTextLength
   if (text.length > max) {
-    return {
-      success: false,
-      error: getTTSError("text-too-long", `Maximum ${max} characters`).message,
-    }
+    return ttsFailure("text-too-long", { providerMessage: `Maximum ${max} characters` })
   }
 
   try {
@@ -55,10 +52,10 @@ export async function generateLMNTTTS(text: string, options: LMNTTTSOptions): Pr
 
     if (!response.ok) {
       const err = await response.json<{ error?: string }>().catch(() => ({}) as { error?: string })
-      return {
-        success: false,
-        error: getTTSError("api-error", err.error ?? `API error: ${response.status}`).message,
-      }
+      return ttsFailure("api-error", {
+        status: response.status,
+        providerMessage: err.error ?? `API error: ${response.status}`,
+      })
     }
     return {
       success: true,
@@ -66,10 +63,8 @@ export async function generateLMNTTTS(text: string, options: LMNTTTSOptions): Pr
       mimeType: format === "wav" ? "audio/wav" : "audio/mpeg",
     }
   } catch (error) {
-    return {
-      success: false,
-      error: getTTSError("api-error", error instanceof Error ? error.message : "Unknown error")
-        .message,
-    }
+    return ttsFailure("api-error", {
+      providerMessage: error instanceof Error ? error.message : "Unknown error",
+    })
   }
 }

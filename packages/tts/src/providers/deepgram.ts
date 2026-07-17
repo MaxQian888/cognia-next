@@ -4,7 +4,7 @@
  */
 
 import { proxyFetch } from "../proxy-fetch"
-import { getTTSError, TTS_PROVIDERS, type DeepgramTTSVoice, type TTSResponse } from "../types"
+import { ttsFailure, TTS_PROVIDERS, type DeepgramTTSVoice, type TTSResponse } from "../types"
 
 const DEEPGRAM_API_BASE = "https://api.deepgram.com/v1/speak"
 
@@ -23,14 +23,11 @@ export async function generateDeepgramTTS(
   const { apiKey, voice = "aura-2-asteria-en", encoding = "mp3", container, sampleRate } = options
 
   if (!apiKey) {
-    return { success: false, error: getTTSError("api-key-missing").message }
+    return ttsFailure("api-key-missing")
   }
   const max = TTS_PROVIDERS.deepgram.maxTextLength
   if (text.length > max) {
-    return {
-      success: false,
-      error: getTTSError("text-too-long", `Maximum ${max} characters`).message,
-    }
+    return ttsFailure("text-too-long", { providerMessage: `Maximum ${max} characters` })
   }
 
   try {
@@ -51,10 +48,10 @@ export async function generateDeepgramTTS(
       const err = await response
         .json<{ err_msg?: string }>()
         .catch(() => ({}) as { err_msg?: string })
-      return {
-        success: false,
-        error: getTTSError("api-error", err.err_msg ?? `API error: ${response.status}`).message,
-      }
+      return ttsFailure("api-error", {
+        status: response.status,
+        providerMessage: err.err_msg ?? `API error: ${response.status}`,
+      })
     }
 
     const mime =
@@ -71,10 +68,8 @@ export async function generateDeepgramTTS(
                 : "audio/mpeg"
     return { success: true, audioData: response.bytes, mimeType: mime }
   } catch (error) {
-    return {
-      success: false,
-      error: getTTSError("api-error", error instanceof Error ? error.message : "Unknown error")
-        .message,
-    }
+    return ttsFailure("api-error", {
+      providerMessage: error instanceof Error ? error.message : "Unknown error",
+    })
   }
 }

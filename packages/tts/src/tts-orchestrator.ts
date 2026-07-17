@@ -199,7 +199,9 @@ export class TTSOrchestrator {
               }),
             consume: async (response, index) => {
               if (!response.success || !response.audioData) {
-                throw new Error(response.error || "Failed to generate speech audio")
+                throw new Error(
+                  response.providerMessage || response.error || "Failed to generate speech audio"
+                )
               }
               await this.playAudioResponse(
                 response,
@@ -352,7 +354,9 @@ export class TTSOrchestrator {
                 await this.playSystemChunk(piece, speechSettings, requestId, noProgress)
                 return
               }
-              throw new Error(resp.error || "Failed to generate speech audio")
+              throw new Error(
+                resp.providerMessage || resp.error || "Failed to generate speech audio"
+              )
             }
             await this.playAudioResponse(resp, requestId, speechSettings.ttsVolume, noProgress)
           })

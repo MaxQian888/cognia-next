@@ -169,4 +169,11 @@ describe("applyPronunciationDictionary", () => {
       "hi earth"
     )
   })
+
+  it("matches CJK entries as substrings (W15 — \\b never fires around CJK)", () => {
+    // Was broken: a Chinese entry never replaced because \b is ASCII-only.
+    expect(applyPronunciationDictionary("你好世界", { 你好: "nihao" })).toBe("nihao世界")
+    // ASCII still requires a whole-word boundary.
+    expect(applyPronunciationDictionary("category", { cat: "feline" })).toBe("category")
+  })
 })

@@ -5,7 +5,7 @@
  */
 
 import { proxyFetch } from "../proxy-fetch"
-import { getTTSError, TTS_PROVIDERS, type GeminiTTSVoice, type TTSResponse } from "../types"
+import { ttsFailure, TTS_PROVIDERS, type GeminiTTSVoice, type TTSResponse } from "../types"
 
 const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -23,14 +23,11 @@ export async function generateGeminiTTS(
   const { apiKey, voice = "Kore", model = GEMINI_TTS_MODEL } = options
 
   if (!apiKey) {
-    return { success: false, error: getTTSError("api-key-missing").message }
+    return ttsFailure("api-key-missing")
   }
   const max = TTS_PROVIDERS.gemini.maxTextLength
   if (text.length > max) {
-    return {
-      success: false,
-      error: getTTSError("text-too-long", `Maximum ${max} characters`).message,
-    }
+    return ttsFailure("text-too-long", { providerMessage: `Maximum ${max} characters` })
   }
 
   try {
@@ -55,11 +52,10 @@ export async function generateGeminiTTS(
       const err = await response
         .json<{ error?: { message?: string } }>()
         .catch(() => ({}) as { error?: { message?: string } })
-      return {
-        success: false,
-        error: getTTSError("api-error", err.error?.message ?? `API error: ${response.status}`)
-          .message,
-      }
+      return ttsFailure("api-error", {
+        status: response.status,
+        providerMessage: err.error?.message ?? `API error: ${response.status}`,
+      })
     }
 
     const result = await response.json<{
@@ -76,10 +72,7 @@ export async function generateGeminiTTS(
     const audioBase64 = inline?.data
     const mimeType = inline?.mimeType
     if (!audioBase64) {
-      return {
-        success: false,
-        error: getTTSError("api-error", "No audio data in response").message,
-      }
+      return ttsFailure("api-error", { providerMessage: "No audio data in response" })
     }
 
     const bytes = base64ToBytes(audioBase64)
@@ -98,11 +91,9 @@ export async function generateGeminiTTS(
       mimeType: isPcm ? "audio/wav" : mimeType,
     }
   } catch (error) {
-    return {
-      success: false,
-      error: getTTSError("network-error", error instanceof Error ? error.message : "Unknown error")
-        .message,
-    }
+    return ttsFailure("network-error", {
+      providerMessage: error instanceof Error ? error.message : "Unknown error",
+    })
   }
 }
 

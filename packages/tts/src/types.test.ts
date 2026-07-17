@@ -2,11 +2,13 @@ import {
   DEFAULT_SPEECH_SETTINGS,
   DEFAULT_TTS_SETTINGS,
   ORDERED_TTS_PROVIDERS,
+  RETIRED_TTS_PROVIDERS,
   TTS_PROVIDERS,
   getApiKeyProvider,
   getEdgeVoicesByLanguage,
   getTTSError,
   providerRequiresApiKey,
+  ttsFailure,
 } from "./types"
 
 describe("TTS types & helpers", () => {
@@ -29,10 +31,23 @@ describe("TTS types & helpers", () => {
     )
   })
 
-  it("ORDERED_TTS_PROVIDERS lists every provider once with system first", () => {
-    expect(ORDERED_TTS_PROVIDERS).toHaveLength(11)
+  it("ORDERED_TTS_PROVIDERS lists every selectable provider once with system first", () => {
+    // 11 providers ship, but edge (W9/O2) and openai-realtime (W8/D2) are
+    // retired, leaving 9 selectable.
+    expect(ORDERED_TTS_PROVIDERS).toHaveLength(9)
     expect(ORDERED_TTS_PROVIDERS[0]).toBe("system")
-    expect(new Set(ORDERED_TTS_PROVIDERS).size).toBe(11)
+    expect(new Set(ORDERED_TTS_PROVIDERS).size).toBe(9)
+  })
+
+  it("retires edge and openai-realtime on all three axes", () => {
+    // Intentional dormancy per Rule 7: documented (RETIRED list), inert in the
+    // picker (absent from ORDERED), but still resolvable providers so persisted
+    // selections and the synthesis code keep working.
+    for (const p of ["edge", "openai-realtime"] as const) {
+      expect(RETIRED_TTS_PROVIDERS).toContain(p)
+      expect(ORDERED_TTS_PROVIDERS).not.toContain(p)
+      expect(TTS_PROVIDERS[p]).toBeDefined()
+    }
   })
 
   it("DEFAULT_TTS_SETTINGS picks sensible defaults", () => {
@@ -67,6 +82,16 @@ describe("TTS types & helpers", () => {
     expect(e.type).toBe("api-key-missing")
     expect(e.message).toContain("API key is required")
     expect(e.details).toBe("extra")
+  })
+
+  it("ttsFailure carries structured error detail (type, status, providerMessage)", () => {
+    const r = ttsFailure("api-error", { status: 401, providerMessage: "Invalid API key" })
+    expect(r.success).toBe(false)
+    expect(r.errorType).toBe("api-error")
+    expect(r.status).toBe(401)
+    expect(r.providerMessage).toBe("Invalid API key")
+    // The canonical message is still there for display.
+    expect(r.error).toContain("TTS API returned an error")
   })
 
   it("getEdgeVoicesByLanguage filters by language prefix", () => {

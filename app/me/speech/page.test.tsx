@@ -133,6 +133,16 @@ describe("MobileSpeechPage", () => {
     expect(screen.getByTestId("mobile-sub-page-back").closest("a")).toHaveAttribute("href", "/me")
   })
 
+  it("hides rate/pitch for a cloud provider but keeps volume (W13)", () => {
+    // Rate + pitch only drive the system voice; they were dead controls for
+    // cloud providers, which use their own speed field.
+    settingsRef.current = { ttsEnabled: true, ttsProvider: "openai" }
+    render(<Page />)
+    expect(screen.queryByTestId("speech-tts-rate")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("speech-tts-pitch")).not.toBeInTheDocument()
+    expect(screen.getByTestId("speech-tts-volume")).toBeInTheDocument()
+  })
+
   it("disables provider + dependent controls until TTS is enabled", () => {
     render(<Page />)
     expect(screen.getByTestId("speech-tts-provider")).toBeDisabled()

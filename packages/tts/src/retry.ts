@@ -9,14 +9,27 @@
 
 import { getTTSError, type TTSResponse } from "./types"
 
-/** Canonical messages for the transient error types worth retrying. */
+/** Canonical messages for the transient error types worth retrying (legacy path). */
 const RETRYABLE_MESSAGES = new Set<string>([
   getTTSError("network-error").message,
   getTTSError("api-error").message,
 ])
 
+/** HTTP statuses worth retrying with backoff — transient upstream conditions. */
+const RETRYABLE_STATUS = new Set<number>([408, 429, 500, 502, 503, 504])
+
 export function isRetryableTtsFailure(response: TTSResponse): boolean {
-  return !response.success && !!response.error && RETRYABLE_MESSAGES.has(response.error)
+  if (response.success) return false
+  // Structured classification (W14): a permanent 4xx (invalid key, quota, not
+  // found) must NOT be retried like a transient 503 — the old code collapsed
+  // both to "api-error" and retried everything.
+  if (response.errorType === "network-error") return true
+  if (response.errorType === "api-error") {
+    return response.status === undefined || RETRYABLE_STATUS.has(response.status)
+  }
+  if (response.errorType) return false // a known, permanent kind
+  // Legacy fallback for responses without structured detail.
+  return !!response.error && RETRYABLE_MESSAGES.has(response.error)
 }
 
 export interface TtsRetryOptions {

@@ -6,7 +6,7 @@
 
 import { proxyFetch } from "../proxy-fetch"
 import {
-  getTTSError,
+  ttsFailure,
   TTS_PROVIDERS,
   type ElevenLabsTTSModel,
   type ElevenLabsTTSVoice,
@@ -36,14 +36,11 @@ export async function generateElevenLabsTTS(
   } = options
 
   if (!apiKey) {
-    return { success: false, error: getTTSError("api-key-missing").message }
+    return ttsFailure("api-key-missing")
   }
   const max = TTS_PROVIDERS.elevenlabs.maxTextLength
   if (text.length > max) {
-    return {
-      success: false,
-      error: getTTSError("text-too-long", `Maximum ${max} characters`).message,
-    }
+    return ttsFailure("text-too-long", { providerMessage: `Maximum ${max} characters` })
   }
 
   try {
@@ -68,11 +65,10 @@ export async function generateElevenLabsTTS(
       const err = await response
         .json<{ detail?: { message?: string } }>()
         .catch(() => ({}) as { detail?: { message?: string } })
-      return {
-        success: false,
-        error: getTTSError("api-error", err.detail?.message ?? `API error: ${response.status}`)
-          .message,
-      }
+      return ttsFailure("api-error", {
+        status: response.status,
+        providerMessage: err.detail?.message ?? `API error: ${response.status}`,
+      })
     }
     return {
       success: true,
@@ -80,10 +76,8 @@ export async function generateElevenLabsTTS(
       mimeType: "audio/mpeg",
     }
   } catch (error) {
-    return {
-      success: false,
-      error: getTTSError("api-error", error instanceof Error ? error.message : "Unknown error")
-        .message,
-    }
+    return ttsFailure("api-error", {
+      providerMessage: error instanceof Error ? error.message : "Unknown error",
+    })
   }
 }

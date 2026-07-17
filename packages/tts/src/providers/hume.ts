@@ -5,7 +5,7 @@
  */
 
 import { proxyFetch } from "../proxy-fetch"
-import { getTTSError, TTS_PROVIDERS, type HumeTTSVoice, type TTSResponse } from "../types"
+import { ttsFailure, TTS_PROVIDERS, type HumeTTSVoice, type TTSResponse } from "../types"
 
 export interface HumeTTSOptions {
   apiKey: string
@@ -19,14 +19,11 @@ export async function generateHumeTTS(text: string, options: HumeTTSOptions): Pr
   const { apiKey, voice = "kora", actingInstructions, version = 1 } = options
 
   if (!apiKey) {
-    return { success: false, error: getTTSError("api-key-missing").message }
+    return ttsFailure("api-key-missing")
   }
   const max = TTS_PROVIDERS.hume.maxTextLength
   if (text.length > max) {
-    return {
-      success: false,
-      error: getTTSError("text-too-long", `Maximum ${max} characters`).message,
-    }
+    return ttsFailure("text-too-long", { providerMessage: `Maximum ${max} characters` })
   }
 
   try {
@@ -54,10 +51,10 @@ export async function generateHumeTTS(text: string, options: HumeTTSOptions): Pr
       const err = await response
         .json<{ message?: string }>()
         .catch(() => ({}) as { message?: string })
-      return {
-        success: false,
-        error: getTTSError("api-error", err.message ?? `API error: ${response.status}`).message,
-      }
+      return ttsFailure("api-error", {
+        status: response.status,
+        providerMessage: err.message ?? `API error: ${response.status}`,
+      })
     }
 
     const result = await response
@@ -73,10 +70,7 @@ export async function generateHumeTTS(text: string, options: HumeTTSOptions): Pr
     const formatType = generation?.encoding?.format ?? "mp3"
 
     if (!audioBase64 || typeof audioBase64 !== "string") {
-      return {
-        success: false,
-        error: getTTSError("api-error", "No audio returned by Hume API").message,
-      }
+      return ttsFailure("api-error", { providerMessage: "No audio returned by Hume API" })
     }
 
     const bytes = base64ToBytes(audioBase64)
@@ -90,11 +84,9 @@ export async function generateHumeTTS(text: string, options: HumeTTSOptions): Pr
         formatType === "wav" ? "audio/wav" : formatType === "pcm" ? "audio/pcm" : "audio/mpeg",
     }
   } catch (error) {
-    return {
-      success: false,
-      error: getTTSError("api-error", error instanceof Error ? error.message : "Unknown error")
-        .message,
-    }
+    return ttsFailure("api-error", {
+      providerMessage: error instanceof Error ? error.message : "Unknown error",
+    })
   }
 }
 

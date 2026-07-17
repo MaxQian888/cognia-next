@@ -8,7 +8,7 @@
 
 import { proxyFetch } from "../proxy-fetch"
 import {
-  getTTSError,
+  ttsFailure,
   TTS_PROVIDERS,
   XIAOMI_TTS_STYLES,
   type TTSResponse,
@@ -34,14 +34,11 @@ export async function generateXiaomiTTS(
   const { apiKey, voice = "mimo_default", model = "mimo-v2-tts", style, dialect } = options
 
   if (!apiKey) {
-    return { success: false, error: getTTSError("api-key-missing").message }
+    return ttsFailure("api-key-missing")
   }
   const max = TTS_PROVIDERS.xiaomi.maxTextLength
   if (text.length > max) {
-    return {
-      success: false,
-      error: getTTSError("text-too-long", `Maximum ${max} characters`).message,
-    }
+    return ttsFailure("text-too-long", { providerMessage: `Maximum ${max} characters` })
   }
 
   // Build the style hint for the user message.
@@ -82,11 +79,10 @@ export async function generateXiaomiTTS(
       const err = await response
         .json<{ error?: { message?: string } }>()
         .catch(() => ({}) as { error?: { message?: string } })
-      return {
-        success: false,
-        error: getTTSError("api-error", err.error?.message ?? `API error: ${response.status}`)
-          .message,
-      }
+      return ttsFailure("api-error", {
+        status: response.status,
+        providerMessage: err.error?.message ?? `API error: ${response.status}`,
+      })
     }
 
     const result = await response
@@ -104,10 +100,7 @@ export async function generateXiaomiTTS(
     const audioBase64 = result?.choices?.[0]?.message?.audio?.data
 
     if (!audioBase64 || typeof audioBase64 !== "string") {
-      return {
-        success: false,
-        error: getTTSError("api-error", "No audio returned by Xiaomi MiMo API").message,
-      }
+      return ttsFailure("api-error", { providerMessage: "No audio returned by Xiaomi MiMo API" })
     }
 
     const bytes = base64ToBytes(audioBase64)
@@ -120,11 +113,9 @@ export async function generateXiaomiTTS(
       mimeType: "audio/wav",
     }
   } catch (error) {
-    return {
-      success: false,
-      error: getTTSError("network-error", error instanceof Error ? error.message : "Unknown error")
-        .message,
-    }
+    return ttsFailure("network-error", {
+      providerMessage: error instanceof Error ? error.message : "Unknown error",
+    })
   }
 }
 
