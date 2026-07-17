@@ -72,12 +72,12 @@ pub async fn resolve_manual(repo_path: &str, path: &str, content: &str) -> Resul
     let repo = open_repo(repo_path)?;
     let workdir = repo
         .workdir()
-        .ok_or_else(|| GitError::NotARepo(repo_path.to_string()))?
+        .ok_or_else(|| GitError::NotARepo(repo_path.to_string().into()))?
         .to_path_buf();
     let full = workdir.join(path);
     tokio::fs::write(&full, content)
         .await
-        .map_err(|e| GitError::CommandFailed(format!("write resolved {path}: {e}")))?;
+        .map_err(|e| GitError::CommandFailed(format!("write resolved {path}: {e}").into()))?;
     exec::run(&cwd(repo_path), ["add", "--", path]).await
 }
 

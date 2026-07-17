@@ -27,7 +27,7 @@ where
 {
     tokio::task::spawn_blocking(f)
         .await
-        .map_err(|e| GitError::CommandFailed(format!("{label} task panicked: {e}")))?
+        .map_err(|e| GitError::CommandFailed(format!("{label} task panicked: {e}").into()))?
 }
 
 // ---------------------------------------------------------------- reads (git2)

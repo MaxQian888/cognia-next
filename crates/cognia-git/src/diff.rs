@@ -251,7 +251,7 @@ fn deltas_to_changes(diff: &Diff<'_>) -> Vec<GitFileChange> {
 fn resolve_to_commit<'r>(repo: &'r Repository, rev: &str) -> Result<Commit<'r>> {
     repo.revparse_single(rev)
         .and_then(|obj| obj.peel_to_commit())
-        .map_err(|_| GitError::InvalidArgument(format!("cannot resolve ref: {rev}")))
+        .map_err(|_| GitError::InvalidArgument(format!("cannot resolve ref: {rev}").into()))
 }
 
 /// The two trees a `base...target` comparison spans: the merge-base tree (old)
@@ -313,7 +313,7 @@ fn tree_blob_text(repo: &Repository, tree: &Tree<'_>, path: &str) -> Option<Stri
 
 fn resolve_commit<'r>(repo: &'r Repository, sha: &str) -> Result<Commit<'r>> {
     let oid = git2::Oid::from_str(sha)
-        .map_err(|_| GitError::InvalidArgument(format!("invalid commit sha: {sha}")))?;
+        .map_err(|_| GitError::InvalidArgument(format!("invalid commit sha: {sha}").into()))?;
     repo.find_commit(oid).map_err(GitError::from)
 }
 

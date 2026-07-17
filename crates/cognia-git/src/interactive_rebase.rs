@@ -41,7 +41,7 @@ pub fn list_commits(repo_path: &str, base: &str) -> Result<Vec<GitCommit>> {
     let repo = open_repo(repo_path)?;
     let base_oid = repo
         .revparse_single(base)
-        .map_err(|_| GitError::InvalidArgument(format!("invalid base ref: {base}")))?
+        .map_err(|_| GitError::InvalidArgument(format!("invalid base ref: {base}").into()))?
         .id();
     let head = repo.head()?.peel_to_commit()?.id();
 
@@ -100,7 +100,7 @@ pub async fn run(repo_path: &str, base: &str, entries: &[RebaseTodoEntry]) -> Re
     let seq = SCRATCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("cognia-irebase-{}-{}", std::process::id(), seq));
     std::fs::create_dir_all(&dir)
-        .map_err(|e| GitError::CommandFailed(format!("irebase scratch dir: {e}")))?;
+        .map_err(|e| GitError::CommandFailed(format!("irebase scratch dir: {e}").into()))?;
 
     let result = run_in_dir(&cwd, base, entries, &dir).await;
     let _ = std::fs::remove_dir_all(&dir);
@@ -116,7 +116,7 @@ async fn run_in_dir(
     let write = |name: &str, content: &str| -> Result<std::path::PathBuf> {
         let p = dir.join(name);
         std::fs::write(&p, content)
-            .map_err(|e| GitError::CommandFailed(format!("irebase {name}: {e}")))?;
+            .map_err(|e| GitError::CommandFailed(format!("irebase {name}: {e}").into()))?;
         Ok(p)
     };
 

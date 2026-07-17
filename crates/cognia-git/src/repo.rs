@@ -26,14 +26,14 @@ pub async fn ignore_add(repo_path: &str, pattern: &str) -> Result<()> {
     let repo = open_repo(repo_path)?;
     let workdir = repo
         .workdir()
-        .ok_or_else(|| GitError::NotARepo(repo_path.to_string()))?
+        .ok_or_else(|| GitError::NotARepo(repo_path.to_string().into()))?
         .to_path_buf();
     let path = workdir.join(".gitignore");
 
     let existing = match tokio::fs::read_to_string(&path).await {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(GitError::CommandFailed(format!("read .gitignore: {e}"))),
+        Err(e) => return Err(GitError::CommandFailed(format!("read .gitignore: {e}").into())),
     };
     if existing.lines().any(|l| l.trim() == pattern) {
         return Ok(());
@@ -47,7 +47,7 @@ pub async fn ignore_add(repo_path: &str, pattern: &str) -> Result<()> {
     next.push('\n');
     tokio::fs::write(&path, next)
         .await
-        .map_err(|e| GitError::CommandFailed(format!("write .gitignore: {e}")))
+        .map_err(|e| GitError::CommandFailed(format!("write .gitignore: {e}").into()))
 }
 
 #[cfg(test)]

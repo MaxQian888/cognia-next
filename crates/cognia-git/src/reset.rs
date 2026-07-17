@@ -11,9 +11,9 @@ fn mode_flag(mode: &str) -> Result<&'static str> {
         "soft" => Ok("--soft"),
         "mixed" => Ok("--mixed"),
         "hard" => Ok("--hard"),
-        other => Err(GitError::InvalidArgument(format!(
-            "unknown reset mode: {other}"
-        ))),
+        other => Err(GitError::InvalidArgument(
+            format!("unknown reset mode: {other}").into(),
+        )),
     }
 }
 

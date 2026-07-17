@@ -88,7 +88,7 @@ fn path_is_relevant(
 pub fn start(state: &GitWatcherState, app: &AppHandle, repo_path: &str) -> Result<()> {
     let repo_root = PathBuf::from(repo_path);
     if !repo_root.exists() {
-        return Err(GitError::NotARepo(repo_path.to_string()));
+        return Err(GitError::NotARepo(repo_path.to_string().into()));
     }
 
     // Build a gitignore matcher once from the repo-root .gitignore.
@@ -111,11 +111,11 @@ pub fn start(state: &GitWatcherState, app: &AppHandle, repo_path: &str) -> Resul
             }
         }
     })
-    .map_err(|e| GitError::CommandFailed(format!("notify init: {e}")))?;
+    .map_err(|e| GitError::CommandFailed(format!("notify init: {e}").into()))?;
 
     watcher
         .watch(&repo_root, RecursiveMode::Recursive)
-        .map_err(|e| GitError::CommandFailed(format!("watch start: {e}")))?;
+        .map_err(|e| GitError::CommandFailed(format!("watch start: {e}").into()))?;
 
     // Debounce emitter: after the first event, wait for DEBOUNCE_MS of quiet
     // before emitting a single refresh signal.

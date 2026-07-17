@@ -7,51 +7,88 @@
 //! A tagged enum lets the renderer `switch (err.kind)` instead of
 //! locale-fragile substring sniffing on a flat string.
 //!
-//! The serde shape is `{ "kind": "...", "detail": "..." }`. Every `detail`
-//! is passed through [`crate::exec::redact`] before it leaves the
-//! backend so a credentialed remote URL never lands in renderer logs.
+//! The serde shape is `{ "kind": "...", "detail": "..." }`. Every `detail` is
+//! a [`Detail`], which strips embedded credentials at BOTH serialization and
+//! `Display` time — so a credentialed remote URL never lands in renderer logs
+//! or in the `Result<T, String>` interop path, no matter which construction
+//! site produced the error.
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use thiserror::Error;
+
+/// A redaction-guaranteed error detail string.
+///
+/// The invariant "a credentialed remote URL never leaves the backend" is
+/// enforced *structurally* here rather than at each construction site: the
+/// inner string is private, so the only way to build a `Detail` is via
+/// `From<String>`/`From<&str>`, and both `Serialize` and `Display` run it
+/// through [`crate::exec::redact`]. A future `GitError` variant or a direct
+/// `CommandFailed(format!(...))` therefore cannot leak a token by accident.
+#[derive(Debug, Clone)]
+pub struct Detail(String);
+
+impl From<String> for Detail {
+    fn from(s: String) -> Self {
+        Detail(s)
+    }
+}
+
+impl From<&str> for Detail {
+    fn from(s: &str) -> Self {
+        Detail(s.to_string())
+    }
+}
+
+impl std::fmt::Display for Detail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&crate::exec::redact(&self.0))
+    }
+}
+
+impl Serialize for Detail {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&crate::exec::redact(&self.0))
+    }
+}
 
 #[derive(Debug, Error, Serialize)]
 #[serde(tag = "kind", content = "detail", rename_all = "camelCase")]
 pub enum GitError {
     #[error("not a git repository: {0}")]
-    NotARepo(String),
+    NotARepo(Detail),
 
     #[error("not found: {0}")]
-    NotFound(String),
+    NotFound(Detail),
 
     #[error("working tree has uncommitted changes: {0}")]
-    DirtyWorkingTree(String),
+    DirtyWorkingTree(Detail),
 
     #[error("merge conflict: {0}")]
-    MergeConflict(String),
+    MergeConflict(Detail),
 
     #[error("authentication required: {0}")]
-    AuthRequired(String),
+    AuthRequired(Detail),
 
     #[error("network operation failed: {0}")]
-    NetworkFailed(String),
+    NetworkFailed(Detail),
 
     #[error("could not apply patch: {0}")]
-    PatchFailed(String),
+    PatchFailed(Detail),
 
     #[error("repository is locked: {0}")]
-    LockHeld(String),
+    LockHeld(Detail),
 
     #[error("git is not installed or not on PATH")]
     GitNotInstalled,
 
     #[error("libgit2 error: {0}")]
-    Libgit2(String),
+    Libgit2(Detail),
 
     #[error("git command failed: {0}")]
-    CommandFailed(String),
+    CommandFailed(Detail),
 
     #[error("invalid argument: {0}")]
-    InvalidArgument(String),
+    InvalidArgument(Detail),
 }
 
 pub type Result<T> = std::result::Result<T, GitError>;
@@ -60,12 +97,12 @@ impl From<git2::Error> for GitError {
     fn from(err: git2::Error) -> Self {
         use git2::ErrorCode;
         match err.code() {
-            ErrorCode::NotFound => GitError::NotFound(err.message().to_string()),
-            ErrorCode::Locked => GitError::LockHeld(err.message().to_string()),
+            ErrorCode::NotFound => GitError::NotFound(err.message().into()),
+            ErrorCode::Locked => GitError::LockHeld(err.message().into()),
             ErrorCode::Conflict | ErrorCode::Unmerged => {
-                GitError::MergeConflict(err.message().to_string())
+                GitError::MergeConflict(err.message().into())
             }
-            _ => GitError::Libgit2(err.message().to_string()),
+            _ => GitError::Libgit2(err.message().into()),
         }
     }
 }
@@ -103,7 +140,7 @@ mod tests {
             "no such ref",
         );
         match GitError::from(err) {
-            GitError::NotFound(msg) => assert!(msg.contains("no such ref")),
+            GitError::NotFound(msg) => assert!(msg.0.contains("no such ref")),
             other => panic!("expected NotFound, got {other:?}"),
         }
     }
@@ -122,5 +159,26 @@ mod tests {
     fn into_string_uses_display() {
         let s: String = GitError::GitNotInstalled.into();
         assert!(s.contains("not installed"));
+    }
+
+    #[test]
+    fn detail_redacts_credentialed_url_via_serde() {
+        // A detail can arrive with an embedded credential regardless of the
+        // construction path — here a direct `Libgit2(...)`.
+        let raw = "fatal: unable to access 'https://alice:ghp_secret@github.com/o/r.git'";
+        let json = serde_json::to_value(GitError::Libgit2(raw.into())).unwrap();
+        let detail = json["detail"].as_str().unwrap();
+        assert!(!detail.contains("ghp_secret"), "token leaked in serde: {detail}");
+        assert!(detail.contains("<redacted>"));
+    }
+
+    #[test]
+    fn detail_redacts_credentialed_url_via_display_interop() {
+        // The `Result<T, String>` interop path goes through Display, which must
+        // redact too — a direct `CommandFailed(format!(...))` here.
+        let raw = "remote: https://bob:ghp_secret@example.com/x.git rejected";
+        let s: String = GitError::CommandFailed(raw.into()).into();
+        assert!(!s.contains("ghp_secret"), "token leaked in Display: {s}");
+        assert!(s.contains("<redacted>"));
     }
 }

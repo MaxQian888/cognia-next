@@ -17,7 +17,7 @@ use super::types::{GitOperation, GitRepoState};
 /// Open a repository, searching upward from `path` for the `.git` dir (so a
 /// subdirectory of the repo still resolves, matching `git` CLI behavior).
 pub fn open_repo(path: &str) -> Result<Repository> {
-    Repository::discover(path).map_err(|_| GitError::NotARepo(path.to_string()))
+    Repository::discover(path).map_err(|_| GitError::NotARepo(path.to_string().into()))
 }
 
 /// Short name of the current branch, or `None` when detached/unborn.

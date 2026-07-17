@@ -10,7 +10,7 @@ use super::types::GitStashEntry;
 /// List stash entries newest-first. git2's `stash_foreach` requires `&mut`.
 pub fn list_stashes(repo_path: &str) -> Result<Vec<GitStashEntry>> {
     let mut repo = Repository::discover(repo_path)
-        .map_err(|_| super::error::GitError::NotARepo(repo_path.to_string()))?;
+        .map_err(|_| super::error::GitError::NotARepo(repo_path.to_string().into()))?;
     let mut out = Vec::new();
     repo.stash_foreach(|index, message, _oid| {
         // Stash messages look like "WIP on main: <sha> <subject>".

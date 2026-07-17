@@ -19,7 +19,7 @@ use regex::Regex;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use super::error::GitError;
+use super::error::{Detail, GitError};
 
 /// `https://user:token@host/...` → `https://<redacted>@host/...`.
 /// Generalizes `github::workspace::redact_token` (which only strips a *known*
@@ -58,7 +58,9 @@ fn base_command(cwd: &Path) -> Command {
 /// [`GitError`] variant we can. Falls back to `CommandFailed`.
 pub fn classify_failure(stderr: &str) -> GitError {
     let s = stderr.to_lowercase();
-    let detail = redact(stderr.trim());
+    // `Detail` redacts on Serialize/Display, so the payload is carried raw here
+    // and stripped of any embedded credential when it leaves the backend.
+    let detail: Detail = stderr.trim().into();
     if s.contains("authentication failed")
         || s.contains("could not read username")
         || s.contains("could not read password")
@@ -102,7 +104,7 @@ fn spawn_error(e: std::io::Error) -> GitError {
     if e.kind() == std::io::ErrorKind::NotFound {
         GitError::GitNotInstalled
     } else {
-        GitError::CommandFailed(format!("git spawn: {e}"))
+        GitError::CommandFailed(format!("git spawn: {e}").into())
     }
 }
 
@@ -180,16 +182,16 @@ where
     if let Some(mut sink) = child.stdin.take() {
         sink.write_all(stdin.as_bytes())
             .await
-            .map_err(|e| GitError::CommandFailed(format!("write patch to git stdin: {e}")))?;
+            .map_err(|e| GitError::CommandFailed(format!("write patch to git stdin: {e}").into()))?;
         sink.shutdown()
             .await
-            .map_err(|e| GitError::CommandFailed(format!("close git stdin: {e}")))?;
+            .map_err(|e| GitError::CommandFailed(format!("close git stdin: {e}").into()))?;
     }
 
     let output = child
         .wait_with_output()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("git wait: {e}")))?;
+        .map_err(|e| GitError::CommandFailed(format!("git wait: {e}").into()))?;
     if !output.status.success() {
         return Err(classify_failure(&String::from_utf8_lossy(&output.stderr)));
     }
@@ -285,7 +287,10 @@ mod tests {
             "fatal: Authentication failed for 'https://u:tok@github.com/o/r.git/'",
         );
         if let GitError::AuthRequired(detail) = err {
-            assert!(!detail.contains("u:tok"));
+            // `Detail` redacts at its Display/Serialize boundary.
+            let shown = detail.to_string();
+            assert!(!shown.contains("u:tok"), "token leaked: {shown}");
+            assert!(shown.contains("<redacted>"));
         } else {
             panic!("expected AuthRequired");
         }
