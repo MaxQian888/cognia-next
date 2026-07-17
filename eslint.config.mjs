@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    // Storybook static build output (`pnpm build-storybook`) — minified vendor
+    // JS bundles, gitignored and never authored here. eslint's flat config does
+    // not read .gitignore, so it must be listed explicitly like out/ & docs/out/.
+    "storybook-static/**",
     "cli/dist/**",
     // Bare `coverage/**` only matches the repo-root coverage dir; `**/coverage/**`
     // also covers per-package coverage output (e.g. packages/*/coverage/) — all

@@ -58,8 +58,9 @@ describe("pickStartIndex", () => {
     const s = settings({ apiKeyRotationEnabled: true })
     recordKeyAttempt("tavily", "a", 0)
     expect(pickStartIndex("tavily", pool, s)).toBe(1)
-    // brave has its own untouched cursor
-    expect(pickStartIndex("brave", pool, { ...s, providerId: "brave" })).toBe(0)
+    // brave has its own untouched cursor — providerId comes from the first arg,
+    // so the rotation settings object (RotationInput) carries no providerId.
+    expect(pickStartIndex("brave", pool, s)).toBe(0)
   })
 
   it("random strategy uses the injected rng and clamps", () => {
