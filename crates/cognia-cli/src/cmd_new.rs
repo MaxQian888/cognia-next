@@ -2,9 +2,9 @@
 //! into a new directory.
 //!
 //! Five kinds ship today:
-//!   * `wasm` (default): Rust + cargo-component starter for a WASM
-//!     Component Model plugin.
-//!   * `ts`: TypeScript frontend plugin with esbuild + jest already wired.
+//!   * `ts` (default): TypeScript frontend plugin with esbuild + jest already
+//!     wired — the shape 36 of 38 first-party plugins actually use.
+//!   * `wasm`: Rust + cargo-component starter for a WASM Component Model plugin.
 //!   * `python`: Python SDK entrypoint with a build-free packaging flow.
 //!   * `hybrid`: build-free frontend + Python runtime entries.
 //!   * `vscode-extension`: build-free Node sidecar extension entry.
@@ -220,8 +220,8 @@ fn collect_answers(
         Some(s) => TemplateKind::parse(&s)?,
         None if interactive => {
             let items = [
-                "wasm  (Rust + cargo-component)",
                 "ts    (TypeScript frontend)",
+                "wasm  (Rust + cargo-component)",
                 "python (Python SDK entrypoint)",
                 "hybrid (Frontend + Python entries)",
                 "vscode-extension (VS Code sidecar entry)",
@@ -232,18 +232,20 @@ fn collect_answers(
                     "Template kind",
                     &items,
                     0,
-                    "--kind wasm|ts|python|hybrid|vscode-extension",
+                    "--kind ts|wasm|python|hybrid|vscode-extension",
                 )
                 .map_err(|e| anyhow!("{e}"))?;
             match idx {
-                0 => TemplateKind::Wasm,
-                1 => TemplateKind::Ts,
+                0 => TemplateKind::Ts,
+                1 => TemplateKind::Wasm,
                 2 => TemplateKind::Python,
                 3 => TemplateKind::Hybrid,
                 _ => TemplateKind::VscodeExtension,
             }
         }
-        None => TemplateKind::Wasm,
+        // Default to `ts`: 36 of 38 first-party plugins are frontend, while the
+        // former default (`wasm`) is used by exactly one.
+        None => TemplateKind::Ts,
     };
 
     // ── description ─────────────────────────────────────────────────────
@@ -598,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn new_stamps_wasm_template_by_default() {
+    fn new_stamps_wasm_template_when_kind_wasm() {
         let parent = tempdir().unwrap();
         let target = parent.path().join("hello-wasm");
         stamp(
@@ -790,6 +792,37 @@ mod tests {
     }
 
     #[test]
+    fn default_kind_is_ts_when_kind_omitted() {
+        use crate::ui::runtime::UiFlags;
+        let parent = tempdir().unwrap();
+        let target = parent.path().join("defaulted");
+        // Non-TTY (cargo test) with no --kind → the default resolves to ts.
+        let mut ui = RuntimeUi::new(UiFlags::default());
+        run(
+            Some("defaulted".into()),
+            Some(target.clone()),
+            None, // no --kind
+            None,
+            None,
+            None,
+            Some(false),
+            &mut ui,
+        )
+        .unwrap();
+        let m: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(target.join("plugin.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            m["type"],
+            serde_json::Value::String("frontend".into()),
+            "default kind must be ts (frontend), not wasm"
+        );
+        // A ts scaffold ships package.json, not Cargo.toml.
+        assert!(target.join("package.json").exists());
+        assert!(!target.join("Cargo.toml").exists());
+    }
+
+    #[test]
     fn run_with_keygen_embeds_public_key() {
         use crate::ui::runtime::UiFlags;
         let parent = tempdir().unwrap();
@@ -865,7 +898,7 @@ mod tests {
         let target = parent.path().join("wizard-plugin");
         let answers = vec![
             Answer::Input("wizard-plugin".into()),        // name
-            Answer::Select(1),                            // kind = ts
+            Answer::Select(0),                            // kind = ts (now index 0)
             Answer::Input("From wizard".into()),          // description
             Answer::Input("Max".into()),                  // author name
             Answer::InputOptional(Some("m@x.io".into())), // author email
@@ -934,8 +967,8 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(target.join("plugin.json")).unwrap())
                 .unwrap();
         assert_eq!(m["id"], serde_json::Value::String("ci-plugin".into()));
-        // Default kind is wasm.
-        assert_eq!(m["type"], serde_json::Value::String("wasm".into()));
+        // Default kind is ts → manifest type "frontend".
+        assert_eq!(m["type"], serde_json::Value::String("frontend".into()));
         // `--yes` follows the non-TTY default: no signing key is generated, so
         // it can never mint a key the author didn't ask for (see W1.1).
         assert!(
