@@ -802,6 +802,9 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
     //    in lib/plugin/core/validation.ts — keep rule-for-rule in lockstep) ─
     lint_cli_tools(obj, &mut out);
 
+    // ── lazy-factory contribution fields: `entry` path safety ────────────
+    lint_lazy_factory_entries(obj, &mut out);
+
     // ── commands[]: each must have id + name ────────────────────────────
     if let Some(arr) = obj.get("commands").and_then(Value::as_array) {
         for (i, cmd) in arr.iter().enumerate() {
@@ -1446,6 +1449,89 @@ fn cli_has_path_traversal(rel_path: &str) -> bool {
     rel_path.split(['/', '\\']).any(|segment| segment == "..")
 }
 
+/// The seven ADR-0026 lazy-factory contribution fields. Each shares the
+/// `{ id, label, entry, export }` shape and its `entry` is a *relative* path
+/// the host lazy-imports at activation. Mirrors the callers of
+/// `validateLazyFactoryArray` in `lib/plugin/core/validation.ts`.
+const LAZY_FACTORY_FIELDS: &[&str] = &[
+    "ocrProviders",
+    "workspaceBackends",
+    "messageRenderers",
+    "aiProviders",
+    "modalMounts",
+    "routingStrategies",
+    "chatMiddlewares",
+];
+
+/// Reject unsafe `entry` paths across the lazy-factory fields, using the same
+/// `manifest.<field>.entry.*` codes the app's validator emits. This is an
+/// author-side lint gate (skippable), not a runtime sandbox — it stops honest
+/// mistakes and makes CI meaningful; the loader enforces its own boundary.
+fn lint_lazy_factory_entries(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic>) {
+    for field in LAZY_FACTORY_FIELDS {
+        let Some(arr) = obj.get(*field).and_then(Value::as_array) else {
+            continue;
+        };
+        for (i, item) in arr.iter().enumerate() {
+            let Some(entry) = item
+                .as_object()
+                .and_then(|o| o.get("entry"))
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            for code in lazy_factory_entry_violations(entry) {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}[{i}].entry"),
+                    code: format!("manifest.{field}.entry.{code}"),
+                    message: lazy_factory_entry_message(code),
+                    hint: Some(
+                        "\"entry\" must be a relative path inside the plugin directory.".into(),
+                    ),
+                });
+            }
+        }
+    }
+}
+
+/// Mirrors the `LAZY_FACTORY_ENTRY_*` regexes in `validation.ts`. Returns the
+/// TS code suffix(es) an `entry` violates, in the same check order
+/// (`invalid_chars`, `absolute`, `traversal`); one path can trip several.
+fn lazy_factory_entry_violations(entry: &str) -> Vec<&'static str> {
+    let mut codes = Vec::new();
+    // LAZY_FACTORY_ENTRY_NUL = /\0/
+    if entry.contains('\0') {
+        codes.push("invalid_chars");
+    }
+    // LAZY_FACTORY_ENTRY_ABS = /^(\/|[a-zA-Z]:[\\/])/
+    let bytes = entry.as_bytes();
+    let absolute = entry.starts_with('/')
+        || (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && (bytes[2] == b'/' || bytes[2] == b'\\'));
+    if absolute {
+        codes.push("absolute");
+    }
+    // LAZY_FACTORY_ENTRY_TRAVERSAL = /(^|[\\/])\.\.([\\/]|$)/
+    if entry.split(['/', '\\']).any(|seg| seg == "..") {
+        codes.push("traversal");
+    }
+    codes
+}
+
+fn lazy_factory_entry_message(code: &str) -> String {
+    match code {
+        "invalid_chars" => "\"entry\" must not contain NUL bytes".into(),
+        "absolute" => {
+            "\"entry\" must be a relative path (no leading \"/\" or drive letter)".into()
+        }
+        "traversal" => "\"entry\" must not contain \"..\" path segments".into(),
+        _ => "invalid \"entry\" path".into(),
+    }
+}
+
 fn require_string(
     obj: &serde_json::Map<String, Value>,
     field: &str,
@@ -1994,6 +2080,60 @@ mod tests {
         assert!(diags
             .iter()
             .any(|d| d.severity == Severity::Warning && d.code == "manifest.name.long"));
+    }
+
+    #[test]
+    fn lint_rejects_lazy_factory_entry_traversal() {
+        let mut m = minimal_frontend();
+        m["capabilities"] = json!(["message-renderer"]);
+        m["messageRenderers"] = json!([
+            { "id": "evil", "partType": "x", "entry": "../../../../etc/passwd", "export": "default" }
+        ]);
+        assert_has_error_code(m, "manifest.messageRenderers.entry.traversal");
+    }
+
+    #[test]
+    fn lint_rejects_lazy_factory_entry_absolute() {
+        let mut m = minimal_frontend();
+        m["capabilities"] = json!(["workspace-backend"]);
+        m["workspaceBackends"] = json!([
+            { "id": "evil2", "label": "L", "entry": "/etc/shadow", "export": "default" }
+        ]);
+        assert_has_error_code(m, "manifest.workspaceBackends.entry.absolute");
+    }
+
+    #[test]
+    fn lint_accepts_relative_lazy_factory_entry() {
+        let mut m = minimal_frontend();
+        m["capabilities"] = json!(["modal-mount"]);
+        m["modalMounts"] = json!([
+            { "id": "ok", "label": "L", "entry": "dist/mount.js", "export": "default" }
+        ]);
+        let diags = validate_manifest(&m);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code.starts_with("manifest.modalMounts.entry.")),
+            "a clean relative entry must not trip a path-safety code, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn lazy_factory_entry_violations_match_ts_regexes() {
+        let none: Vec<&str> = Vec::new();
+        assert_eq!(lazy_factory_entry_violations("dist/index.js"), none);
+        assert_eq!(lazy_factory_entry_violations("../secret"), vec!["traversal"]);
+        assert_eq!(lazy_factory_entry_violations("a/../b"), vec!["traversal"]);
+        assert_eq!(lazy_factory_entry_violations("/etc/shadow"), vec!["absolute"]);
+        assert_eq!(lazy_factory_entry_violations("C:\\win"), vec!["absolute"]);
+        assert_eq!(lazy_factory_entry_violations("has\0nul"), vec!["invalid_chars"]);
+        // A path can trip several checks, in TS order.
+        assert_eq!(
+            lazy_factory_entry_violations("/foo/../bar"),
+            vec!["absolute", "traversal"]
+        );
+        // `..foo` is not a `..` path segment.
+        assert_eq!(lazy_factory_entry_violations("..foo/bar"), none);
     }
 
     #[test]
