@@ -710,6 +710,12 @@ fn lint_json_carries_schema_version() {
     assert_eq!(parsed["ok"], true);
     assert_eq!(parsed["action"], "lint");
     assert_eq!(parsed["valid"], serde_json::Value::Bool(true));
+    // Unified shape (W2.5): camelCase manifestPath + always-present stage.
+    assert_eq!(parsed["stage"], "validate");
+    assert!(
+        parsed["manifestPath"].is_string(),
+        "success payload must carry manifestPath: {parsed}"
+    );
 }
 
 #[test]
@@ -790,8 +796,10 @@ fn plugin_lint_json_missing_path_emits_input_payload_without_human_noise() {
     assert_eq!(parsed["ok"], false);
     assert_eq!(parsed["action"], "lint");
     assert_eq!(parsed["stage"], "input");
+    // Unified with the success payload: the failed manifest path is under
+    // `manifestPath` (was `path`), so a consumer reads one key on both shapes.
     assert_eq!(
-        parsed["path"].as_str(),
+        parsed["manifestPath"].as_str(),
         Some(missing.to_string_lossy().as_ref())
     );
     assert!(!parsed["valid"].as_bool().unwrap_or(true));

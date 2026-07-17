@@ -1024,9 +1024,10 @@ mod tests {
     #[test]
     fn build_failure_json_payload_wraps_lint_report() {
         let lint = cmd_lint::LintReport {
-            schema_version: 1,
+            schema_version: 2,
             ok: false,
             action: "lint",
+            stage: "validate",
             manifest_path: PathBuf::from("plugin.json"),
             valid: false,
             diagnostics: vec![cmd_lint::Diagnostic {

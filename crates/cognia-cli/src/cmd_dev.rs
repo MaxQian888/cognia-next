@@ -911,9 +911,10 @@ mod tests {
     #[test]
     fn dev_build_error_message_labels_lint_errors() {
         let report = crate::cmd_lint::LintReport {
-            schema_version: 1,
+            schema_version: 2,
             ok: false,
             action: "lint",
+            stage: "validate",
             valid: false,
             manifest_path: PathBuf::from("plugin.json"),
             diagnostics: Vec::new(),

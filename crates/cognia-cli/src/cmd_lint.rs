@@ -284,6 +284,11 @@ pub struct LintReport {
     pub schema_version: u32,
     pub ok: bool,
     pub action: &'static str,
+    /// Which stage produced this payload. `"validate"` for a real lint result;
+    /// the input-failure payload carries `"input"`. Always present so a `--json`
+    /// consumer can bucket on `.stage` uniformly across success and failure.
+    pub stage: &'static str,
+    #[serde(rename = "manifestPath")]
     pub manifest_path: PathBuf,
     pub valid: bool,
     pub diagnostics: Vec<Diagnostic>,
@@ -384,6 +389,7 @@ pub fn run(
         schema_version: 2,
         ok,
         action: "lint",
+        stage: "validate",
         manifest_path,
         valid,
         diagnostics,
@@ -415,6 +421,9 @@ struct LintFailureReport {
     ok: bool,
     action: &'static str,
     stage: &'static str,
+    /// Same key as the success payload's `manifestPath`, so a `--json` consumer
+    /// reads one field for "the manifest this run was about" on both shapes.
+    #[serde(rename = "manifestPath")]
     path: PathBuf,
     valid: bool,
     diagnostics: Vec<Diagnostic>,
@@ -451,6 +460,7 @@ pub fn validate_at(path: &Path) -> Result<LintReport> {
         schema_version: 2,
         ok: valid,
         action: "lint",
+        stage: "validate",
         manifest_path,
         valid,
         diagnostics,
@@ -2277,9 +2287,10 @@ mod tests {
     #[test]
     fn report_serializes_to_json() {
         let report = LintReport {
-            schema_version: 1,
+            schema_version: 2,
             ok: false,
             action: "lint",
+            stage: "validate",
             manifest_path: PathBuf::from("/tmp/plugin.json"),
             valid: false,
             diagnostics: vec![Diagnostic {
@@ -2295,6 +2306,9 @@ mod tests {
         assert!(json_str.contains("\"action\":\"lint\""));
         assert!(json_str.contains("\"valid\":false"));
         assert!(json_str.contains("\"severity\":\"error\""));
-        assert!(json_str.contains("\"schemaVersion\":1"), "got: {json_str}");
+        assert!(json_str.contains("\"schemaVersion\":2"), "got: {json_str}");
+        // Unified shape: camelCase manifestPath + always-present stage.
+        assert!(json_str.contains("\"manifestPath\":"), "got: {json_str}");
+        assert!(json_str.contains("\"stage\":\"validate\""), "got: {json_str}");
     }
 }

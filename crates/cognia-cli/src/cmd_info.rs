@@ -194,7 +194,12 @@ impl InfoReport {
         };
         InfoJsonPayload {
             schema_version: 1,
-            ok: true,
+            // `info` is an inspection, not a gate (that's `verify`), but it must
+            // not report `ok: true` for a bundle whose signature it just proved
+            // *invalid* — a `jq -e .ok` check would pass for a tampered bundle.
+            // Any other status (valid / not-applicable / no-key / no-sidecar)
+            // leaves `ok` true; only a definitively bad signature flips it.
+            ok: !matches!(self.signature, SignatureStatus::Invalid { .. }),
             action: "info",
             input_kind: self.input_kind.as_str(),
             path: self.path.display().to_string(),
@@ -870,6 +875,9 @@ mod tests {
         let s = serde_json::to_string(&payload).unwrap();
         assert!(s.contains("\"status\":\"invalid\""), "got: {s}");
         assert!(s.contains("\"reason\""), "got: {s}");
+        // `info` must not report ok:true for a bundle it just proved tampered —
+        // otherwise `info --json | jq -e .ok` passes for an invalid signature.
+        assert!(!payload.ok, "invalid signature must flip ok to false: {s}");
     }
 
     #[test]
