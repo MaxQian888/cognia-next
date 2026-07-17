@@ -1,4 +1,9 @@
-import { parseCodexThemeName, readCodexHighlightTheme, codexCodeOverrides } from "./codex"
+import {
+  parseCodexThemeName,
+  readCodexHighlightTheme,
+  codexCodeOverrides,
+  CODEX_DEFAULT_HIGHLIGHT_THEME,
+} from "./codex"
 
 describe("parseCodexThemeName", () => {
   it("reads a dotted tui.theme assignment", () => {
@@ -60,5 +65,26 @@ describe("codexCodeOverrides", () => {
     expect(o.accent).toBeUndefined()
     expect(o.border).toBeUndefined()
     expect(o.heading1).toBeUndefined()
+  })
+
+  it("maps Codex's own default (catppuccin-mocha) rather than the generic fallback", () => {
+    const mocha = codexCodeOverrides("catppuccin-mocha")
+    const fallback = codexCodeOverrides("some-unknown-theme")
+    expect(mocha.codeHighlight).toBe("catppuccin-mocha")
+    // A recognised base ⇒ different tokens from the neutral fallback.
+    expect(mocha.codeKeyword).not.toBe(fallback.codeKeyword)
+  })
+
+  it("maps the catppuccin-latte light default to its own (distinct) palette", () => {
+    const latte = codexCodeOverrides("catppuccin-latte")
+    const mocha = codexCodeOverrides("catppuccin-mocha")
+    expect(latte.codeHighlight).toBe("catppuccin-latte")
+    expect(latte.codeKeyword).toMatch(/^#[0-9a-f]{6}$/i)
+    // Light vs dark variant must not collapse to the same tokens.
+    expect(latte.codeKeyword).not.toBe(mocha.codeKeyword)
+  })
+
+  it("exposes catppuccin-mocha as Codex's default highlight theme", () => {
+    expect(CODEX_DEFAULT_HIGHLIGHT_THEME).toBe("catppuccin-mocha")
   })
 })

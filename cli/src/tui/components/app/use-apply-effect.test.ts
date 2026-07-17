@@ -238,11 +238,36 @@ describe("useApplyEffect", () => {
     expect(deps.agent.send).toHaveBeenCalled()
   })
 
-  it("live-applies + persists a theme", () => {
-    const deps = buildDeps()
+  it("live-applies + persists a theme, and repaints the scrollback (scrollback mode)", () => {
+    const deps = buildDeps({ fullscreen: false })
     run(deps)({ kind: "theme", theme: "dracula" })
     expect(deps.dispatch).toHaveBeenCalledWith({ type: "SET_THEME", theme: "dracula" })
     expect(deps.persist).toHaveBeenCalledWith("theme", "dracula")
+    // `<Static>` freezes already-printed rows — force a re-print so the whole
+    // transcript + banner recolour, not just new cells.
+    expect(deps.clearScreen).toHaveBeenCalled()
+    expect(deps.dispatch).toHaveBeenCalledWith({ type: "REPAINT" })
+  })
+
+  it("does NOT clear/repaint on a theme change in fullscreen (transcript recolours live)", () => {
+    const deps = buildDeps({ fullscreen: true })
+    run(deps)({ kind: "theme", theme: "dracula" })
+    expect(deps.dispatch).toHaveBeenCalledWith({ type: "SET_THEME", theme: "dracula" })
+    expect(deps.clearScreen).not.toHaveBeenCalled()
+    expect(deps.dispatch).not.toHaveBeenCalledWith({ type: "REPAINT" })
+  })
+
+  it("applies a custom theme and repaints the scrollback (scrollback mode)", () => {
+    const home = fs.mkdtempSync(nodePath.join(os.tmpdir(), "custom-theme-"))
+    try {
+      const deps = buildDeps({ home, fullscreen: false })
+      run(deps)({ kind: "customTheme", base: { accent: "#ff0000" } })
+      expect(deps.dispatch).toHaveBeenCalledWith({ type: "SET_THEME", theme: "custom:cli" })
+      expect(deps.clearScreen).toHaveBeenCalled()
+      expect(deps.dispatch).toHaveBeenCalledWith({ type: "REPAINT" })
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
   })
 
   it("persists the status bar patch", () => {

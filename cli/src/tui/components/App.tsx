@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } 
 import { Box, useApp, useStdout, type DOMElement } from "ink"
 
 import { Banner } from "./Banner"
+import { overlayListRows } from "./overlay-layout"
 import { useScroll } from "../hooks/useScroll"
 import { useTranscriptCursor } from "../hooks/useTranscriptCursor"
 import { resolveLayoutMode, readLayoutCapability, type LayoutCapability } from "../layout-mode"
@@ -579,13 +580,13 @@ export function App({
   // under jsdom with no TTY, keeps the historic layout untouched).
   const capability = layoutCapability ?? readLayoutCapability()
   const fullscreen = resolveLayoutMode(state.config.layout, capability) === "fullscreen"
-  // Row budget for the modal overlay list (e.g. `/model`). The list's own chrome
-  // (border/title/footer/scroll hints) plus the bottom status/mascot/footer cost
-  // ~8 rows. In fullscreen the FIXED top banner (~7 rows) is also on-screen above
-  // the overlay, so reserve for it too — otherwise a long list builds a box taller
-  // than the terminal and the highlighted row scrolls off the bottom (the cursor
-  // "disappears"). In scrollback mode the banner scrolls away, so ~8 is enough.
-  const overlayRows = Math.max(3, rows - (fullscreen ? 15 : 8))
+  // Row budget for the modal overlay list (e.g. `/model`). Reserves the list's
+  // own chrome (border/title/footer AND the two "↑/↓ N more" scroll-hint rows),
+  // the bottom status/mascot/footer, and — in fullscreen — the fixed top banner.
+  // Under-reserving lets a long list build a box taller than the terminal, which
+  // squeezes the list and clips the highlighted row (the cursor "disappears" as
+  // you scroll down). See overlay-layout.ts for the per-region breakdown.
+  const overlayRows = overlayListRows(rows, fullscreen)
   // Fullscreen mouse model (default = native click-drag selection). Drives the
   // alt-screen mouse escapes below and whether the wheel scrolls the transcript.
   const mouseMode = state.config.mouse ?? DEFAULT_MOUSE_MODE
@@ -1360,8 +1361,16 @@ export function App({
           index,
         },
       })
+      // A theme change from the settings panel recolours the palette, but in
+      // scrollback mode the committed transcript + banner live inside `<Static>`,
+      // which never repaints in place — clear + bump the render epoch so they
+      // re-print with the new colours (mirrors the `/theme` command path).
+      if (target.kind === "theme" && !fullscreen) {
+        clearScreen()
+        dispatch({ type: "REPAINT" })
+      }
     },
-    [state.config, state.overlay, home, agent]
+    [state.config, state.overlay, home, agent, clearScreen, fullscreen]
   )
 
   // Enter on a delegate/form settings row: delegate rows run the existing slash

@@ -1,4 +1,6 @@
 import path from "node:path"
+import fs from "node:fs"
+import os from "node:os"
 import React from "react"
 import { act, render, waitFor } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
@@ -1537,12 +1539,20 @@ describe("App", () => {
     expect(container.textContent).toContain("Clickable paths")
   })
 
-  it("switches + persists the colour theme on /theme", async () => {
+  it("switches + persists the colour theme on /theme and repaints the scrollback", async () => {
     const { create } = fakeSession()
     const persistConfig = jest.fn().mockReturnValue(true)
+    const clearScreen = jest.fn()
     const { container } = render(
-      <App config={config} sessionId="s1" createSession={create} persistConfig={persistConfig} />
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        persistConfig={persistConfig}
+        clearScreen={clearScreen}
+      />
     )
+    clearScreen.mockClear()
     type("/theme dark")
     await act(async () => {
       submit()
@@ -1550,6 +1560,42 @@ describe("App", () => {
     })
     expect(persistConfig).toHaveBeenCalledWith("theme", "dark")
     expect(container.textContent).toContain("Theme: dark")
+    // The committed transcript lives in `<Static>`; a theme switch clears + reprints
+    // it so the whole history recolours (not just new cells).
+    expect(clearScreen).toHaveBeenCalled()
+  })
+
+  it("repaints the scrollback when the theme is cycled from the settings panel", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "app-settings-theme-"))
+    try {
+      const { create } = fakeSession()
+      const clearScreen = jest.fn()
+      const { container } = render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          persistConfig={() => true}
+          clearScreen={clearScreen}
+          home={homeDir}
+        />
+      )
+      type("/config")
+      submit()
+      expect(container.textContent).toContain("Settings")
+      clearScreen.mockClear()
+      // Tab into "Appearance" (section 1, row 0 = Theme enum), then →/right to
+      // cycle it — which recolours the palette and must reprint the `<Static>`
+      // transcript, exactly like the `/theme` command path.
+      act(() => __fireInput("", { tab: true }))
+      await act(async () => {
+        __fireInput("", { rightArrow: true })
+        await Promise.resolve()
+      })
+      expect(clearScreen).toHaveBeenCalled()
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true })
+    }
   })
 
   it("switches theme via the picker overlay", async () => {

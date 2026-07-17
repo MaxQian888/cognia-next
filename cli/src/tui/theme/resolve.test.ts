@@ -68,8 +68,19 @@ describe("resolveTheme", () => {
     expect(p.codeHighlight).toBe("dracula")
   })
 
-  it("falls back to the default theme when codex is selected but Codex isn't configured", () => {
-    expect(resolveTheme(cfg("codex"), deps())).toEqual(getBuiltinTheme("cognia"))
+  it("uses Codex's own default (catppuccin-mocha on ansi UI) when Codex isn't configured", () => {
+    // "codex" reuse must RESEMBLE Codex even with no `tui.theme` pinned — Codex
+    // auto-selects catppuccin-mocha for dark terminals — not fall back to our
+    // warm `cognia` default (which looks nothing like Codex).
+    const p = resolveTheme(cfg("codex"), deps())
+    const ansi = getBuiltinTheme("ansi")
+    expect(p.accent).toBe(ansi.accent)
+    expect(p.border).toBe(ansi.border)
+    expect(p.codeHighlight).toBe("catppuccin-mocha")
+    // codeKeyword derives from the theme's `secondary` (catppuccin-mocha pink).
+    expect(p.codeKeyword.toLowerCase()).toBe("#f5c2e7")
+    // NOT the cognia default
+    expect(p.accent).not.toBe(getBuiltinTheme("cognia").accent)
   })
 
   it("resolves our own custom theme from <cogniaHome>/themes/<slug>.json", () => {

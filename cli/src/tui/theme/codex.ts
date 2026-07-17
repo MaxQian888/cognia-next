@@ -53,6 +53,15 @@ export function readCodexHighlightTheme(opts: CodexThemeOptions): string | null 
   return parseCodexThemeName(raw)
 }
 
+/**
+ * Codex's own default syntax theme when the user hasn't pinned `tui.theme`:
+ * Codex auto-selects `catppuccin-mocha` for dark terminals (and `catppuccin-latte`
+ * for light ones). We default the reuse to the dark variant so an unconfigured
+ * Codex still resembles Codex out of the box (its UI accent is cyan, which the
+ * `ansi` base already reproduces) instead of falling back to our own default.
+ */
+export const CODEX_DEFAULT_HIGHLIGHT_THEME = "catppuccin-mocha"
+
 // Curated mapping of well-known Codex/bat theme names to a base palette we use
 // to derive the code-block tokens. We can't reproduce all 32 .tmThemes, so an
 // unknown name falls back to a neutral dark base — the user still gets a themed,
@@ -93,6 +102,18 @@ const CODEX_BASES: Record<string, BaseColors> = {
     warning: "#e0af68",
     danger: "#f7768e",
     muted: "#565f89",
+  },
+  // Codex's own defaults (auto-selected by terminal background): mocha for dark
+  // terminals, latte for light ones. Both are mapped so a user who pins either
+  // in `~/.codex/config.toml` gets the matching light/dark code palette.
+  "catppuccin-latte": {
+    accent: "#8839ef",
+    secondary: "#ea76cb",
+    info: "#04a5e5",
+    success: "#40a02b",
+    warning: "#df8e1d",
+    danger: "#d20f39",
+    muted: "#9ca0b0",
   },
   "solarized-light": {
     accent: "#268bd2",

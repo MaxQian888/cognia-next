@@ -152,6 +152,19 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
   } = deps
   return useCallback(
     (effect: CommandEffect) => {
+      // Recolour the committed scrollback after a display-only change (theme).
+      // In scrollback mode the transcript + banner live inside Ink's `<Static>`,
+      // which freezes already-emitted rows and never re-renders them in place —
+      // so a new palette reaches only NEW cells and the switch looks like a no-op.
+      // Clearing the screen and bumping `renderEpoch` remounts `<Static>` so every
+      // cell re-prints with the active palette (same pattern as resize recovery /
+      // the clear-screen chord). Fullscreen renders the transcript live and
+      // recolours on its own, so the repaint is a no-op there — skip it.
+      const repaintScrollback = () => {
+        if (fullscreen) return
+        clearScreen()
+        dispatch({ type: "REPAINT" })
+      }
       switch (effect.kind) {
         case "none":
           break
@@ -436,15 +449,17 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           break
         }
         case "theme":
-          // Live-apply the colour theme (the reducer re-resolves the palette so
-          // the whole UI recolours in place), then persist the scalar key. The
-          // theme is display-only, so no SendOptions invalidation is needed.
+          // Live-apply the colour theme (the reducer re-resolves the palette),
+          // persist the scalar key, then force a scrollback re-print so the
+          // already-printed transcript + banner recolour too. The theme is
+          // display-only, so no SendOptions invalidation is needed.
           dispatch({ type: "SET_THEME", theme: effect.theme })
           if (!persist("theme", effect.theme)) {
             dispatch({ type: "NOTICE", message: "Theme updated (couldn't save to config)." })
           } else {
             dispatch({ type: "NOTICE", message: `Theme: ${effect.theme}` })
           }
+          repaintScrollback()
           break
         case "outputStyle":
           // Live-apply the response mode, persist it (scalar config key), and
@@ -519,6 +534,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           }
           dispatch({ type: "SET_THEME", theme: `custom:${slug}` })
           dispatch({ type: "NOTICE", message: "Applied your custom theme." })
+          repaintScrollback()
           break
         }
         case "settingsSet": {

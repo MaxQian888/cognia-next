@@ -17,7 +17,7 @@ import path from "node:path"
 
 import { BUILTIN_THEMES, BUILTIN_THEME_NAMES, CLASSIC, getBuiltinTheme } from "./builtins"
 import { readClaudeCodeTheme, type ThemeFileReader } from "./claude-code"
-import { codexCodeOverrides, readCodexHighlightTheme } from "./codex"
+import { CODEX_DEFAULT_HIGHLIGHT_THEME, codexCodeOverrides, readCodexHighlightTheme } from "./codex"
 import { normalizeInkColor } from "./color"
 import { expandPalette, type BaseColors, type ThemePalette } from "./palette"
 import type { ResolvedConfig } from "../../config/schema"
@@ -120,10 +120,16 @@ export function resolveTheme(config: ResolvedConfig, deps: ResolveThemeDeps): Th
   }
 
   if (theme === "codex") {
-    // Codex reuse themes only the code block; the UI chrome stays on the
-    // terminal-neutral raw-ANSI palette so it doesn't fight the user's terminal.
-    const name = readCodexHighlightTheme({ osHome: deps.osHome, read: deps.read })
-    if (!name) return getBuiltinTheme(undefined)
+    // Codex's `tui.theme` themes only the code block + diffs; its UI chrome is
+    // terminal-neutral with a cyan accent (codex-rs/tui/src/style.rs) — which our
+    // `ansi` base already reproduces. So keep the UI on `ansi` and override just
+    // the `code*` tokens from the user's Codex syntax theme. When Codex has no
+    // explicit `tui.theme`, fall back to Codex's OWN default (catppuccin-mocha)
+    // rather than our warm `cognia` default, so the reuse actually resembles
+    // Codex out of the box instead of looking nothing like it.
+    const name =
+      readCodexHighlightTheme({ osHome: deps.osHome, read: deps.read }) ??
+      CODEX_DEFAULT_HIGHLIGHT_THEME
     return { ...getBuiltinTheme("ansi"), ...codexCodeOverrides(name) }
   }
 
