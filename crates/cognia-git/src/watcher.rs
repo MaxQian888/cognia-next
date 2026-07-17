@@ -126,6 +126,15 @@ pub fn start(state: &GitWatcherState, app: &AppHandle, repo_path: &str) -> Resul
     })
     .map_err(|e| GitError::CommandFailed(format!("notify init: {e}").into()))?;
 
+    // Known limitation (ADR-0038): this registers the whole tree recursively.
+    // On macOS (FSEvents) and Windows (ReadDirectoryChangesW) that is a single
+    // kernel stream, so a huge gitignored tree (node_modules/target) costs
+    // nothing extra. On Linux (inotify) it is one watch per directory, which a
+    // very large gitignored tree can inflate toward `max_user_watches`.
+    // notify 6.x has no native exclude, so selective subtree watching is
+    // deferred; spurious events are still dropped downstream by
+    // `path_is_relevant` (gitignore-aware), so correctness — not Linux
+    // registration cost — is unaffected.
     watcher
         .watch(&repo_root, RecursiveMode::Recursive)
         .map_err(|e| GitError::CommandFailed(format!("watch start: {e}").into()))?;
@@ -249,6 +258,23 @@ mod tests {
             .lock()
             .insert(watcher_key(&format!("{base}/")), dummy_watcher());
         assert_eq!(state.watchers.lock().len(), 1);
+    }
+
+    #[test]
+    fn gitignored_worktree_churn_is_filtered() {
+        // Regression guard for the recursive-watch known-limitation: even though
+        // the whole tree is registered, churn under a gitignored directory
+        // (node_modules) must never reach the renderer as a refresh, while a
+        // tracked source file still does.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("node_modules")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
+        builder.add_line(None, "node_modules/").unwrap();
+        let gi = builder.build().unwrap();
+        assert!(!path_is_relevant(root, Some(&gi), &root.join("node_modules")));
+        assert!(path_is_relevant(root, Some(&gi), &root.join("src/main.rs")));
     }
 
     #[test]
