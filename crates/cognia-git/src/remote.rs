@@ -273,6 +273,108 @@ mod tests {
         assert!(matches!(err, GitError::InvalidArgument(_)));
     }
 
+    fn run_git_in(cwd: &std::path::Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?} failed");
+    }
+
+    /// Identity + no commit signing (the CI/dev box may have `commit.gpgsign`
+    /// on globally with no TTY for pinentry).
+    fn cfg(dir: &std::path::Path) {
+        run_git_in(dir, &["config", "user.email", "t@e.com"]);
+        run_git_in(dir, &["config", "user.name", "T"]);
+        run_git_in(dir, &["config", "commit.gpgsign", "false"]);
+    }
+
+    #[tokio::test]
+    async fn push_set_upstream_fetch_pull_sync_roundtrip() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        run_git_in(tmp.path(), &["init", "-q", "--bare", "-b", "main", "remote.git"]);
+        let bare = tmp.path().join("remote.git");
+        let work = tmp.path().join("work");
+        run_git_in(tmp.path(), &["init", "-q", "-b", "main", "work"]);
+        cfg(&work);
+        fs::write(work.join("a.txt"), "one\n").unwrap();
+        run_git_in(&work, &["add", "."]);
+        run_git_in(&work, &["commit", "-q", "-m", "init"]);
+        let wp = work.to_string_lossy().into_owned();
+        add(&wp, "origin", bare.to_str().unwrap()).await.unwrap();
+
+        // set_upstream with NO explicit remote resolves the sole remote (origin)
+        // via resolve_default_remote, publishes main, and sets the upstream.
+        push(&wp, None, Some("main"), true, false).await.unwrap();
+
+        // Upstream is now configured, so sync is a clean no-op divergence.
+        let ab = sync(&wp).await.unwrap();
+        assert_eq!((ab.ahead, ab.behind), (0, 0));
+
+        // fetch (with prune) and pull against the configured remote both succeed.
+        fetch(&wp, Some("origin"), true).await.unwrap();
+        pull(&wp, Some("origin"), Some("main"), false)
+            .await
+            .unwrap();
+
+        // The bare remote actually received main.
+        let out = std::process::Command::new("git")
+            .args(["-C", bare.to_str().unwrap(), "rev-parse", "--verify", "main"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "remote is missing main");
+    }
+
+    #[tokio::test]
+    async fn pull_integrates_a_commit_from_the_remote() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        run_git_in(tmp.path(), &["init", "-q", "--bare", "-b", "main", "remote.git"]);
+        let url = tmp.path().join("remote.git");
+        let url = url.to_str().unwrap();
+
+        // Repo A publishes main.
+        let a = tmp.path().join("a");
+        run_git_in(tmp.path(), &["init", "-q", "-b", "main", "a"]);
+        cfg(&a);
+        fs::write(a.join("f.txt"), "1\n").unwrap();
+        run_git_in(&a, &["add", "."]);
+        run_git_in(&a, &["commit", "-q", "-m", "c1"]);
+        let ap = a.to_string_lossy().into_owned();
+        add(&ap, "origin", url).await.unwrap();
+        push(&ap, Some("origin"), Some("main"), true, false)
+            .await
+            .unwrap();
+
+        // Repo B clones the published branch.
+        run_git_in(tmp.path(), &["clone", "-q", url, "b"]);
+        let b = tmp.path().join("b");
+        cfg(&b);
+
+        // A advances main and pushes.
+        fs::write(a.join("f.txt"), "2\n").unwrap();
+        run_git_in(&a, &["commit", "-q", "-am", "c2"]);
+        push(&ap, Some("origin"), Some("main"), false, false)
+            .await
+            .unwrap();
+
+        // B pulls via our pull() and sees c2.
+        let bp = b.to_string_lossy().into_owned();
+        pull(&bp, Some("origin"), Some("main"), false)
+            .await
+            .unwrap();
+        assert_eq!(fs::read_to_string(b.join("f.txt")).unwrap(), "2\n");
+    }
+
     fn git_on_path() -> bool {
         std::process::Command::new("git")
             .arg("--version")
