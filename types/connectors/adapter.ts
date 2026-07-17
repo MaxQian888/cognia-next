@@ -12,6 +12,7 @@ import type {
 import type { ConversationReference, NormalizedInboundEvent } from "./event"
 import type { OutboundRequest, OutboundResult } from "./outbound"
 import type { PresenceStatusInput } from "./presence"
+import type { RunPresentationDriver } from "@/types/execution/run"
 
 export type TransportMode =
   "longpoll" | "webhook" | "reverse-ws" | "forward-ws" | "gateway" | "imap-smtp" | "stub" // tests only
@@ -182,6 +183,9 @@ export interface PlatformAdapter {
   start(ctx: AdapterContext): Promise<void>
   stop(): Promise<void>
   health(): AdapterHealth
+
+  /** Native projection for durable execution runs. Absence selects the generic A2UI/edit fallback. */
+  readonly runPresentation?: RunPresentationDriver
 
   send(req: OutboundRequest): Promise<OutboundResult>
   /**

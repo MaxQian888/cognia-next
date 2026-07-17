@@ -762,6 +762,8 @@ export interface TriggerEvent {
 export interface WorkflowTriggerBinding {
   adapterId?: string
   sessionId?: string
+  /** Platform-native inbound message id used to anchor thread-native run streams. */
+  sourceMessageId?: string
   conversationKey?: string
   characterId?: string
   /** Scopes a `trigger.goal.completed` subscription to a specific goal id. */
@@ -789,7 +791,13 @@ export interface WorkflowTriggeredFrom {
   source: "im" | "ui" | "api" | "chat" | "desktop"
   adapterId?: string
   conversationKey?: string
+  sourceMessageId?: string
   sessionId?: string
+  initiator?: {
+    platformIdentityId?: string
+    remoteUserId?: string
+    displayName?: string
+  }
   /**
    * Paired-device id of the companion caller (ADR-0060). Stamped server-side
    * from the verified device JWT — never client-supplied — so run history and

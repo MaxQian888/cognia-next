@@ -30,6 +30,10 @@ describe("parseSlackEventCallback", () => {
       expect(result!.conversationKey).toBe(`slack:${ADAPTER_ID}:D111CHANNEL`)
     })
 
+    it("preserves the workspace team id for channel-native streams", () => {
+      expect(result!.conversationRef.teamId).toBe(envelope.team_id)
+    })
+
     it("channel kind is private (channel_type=im)", () => {
       expect(result!.channel.kind).toBe("private")
     })

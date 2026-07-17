@@ -96,6 +96,8 @@ export interface ImPermissionResponderContext {
   recordBinding?: typeof recordCallbackBinding
   audit?: typeof appendAudit
   ttlMs?: number
+  /** Durable Execution Run that owns this permission request. */
+  runId?: string
 }
 
 /**
@@ -118,6 +120,21 @@ export function makeImPermissionResponder(
 
     // 2. Project the approval card + record one binding per button.
     const bindingId = newIdempotencyKey().slice(0, 8)
+    const interruptId = ctx.runId ? `tool-interrupt:${ctx.runId}:${req.requestId}` : undefined
+    if (ctx.runId && interruptId) {
+      const { createRunInterrupt } = await import("@/lib/execution/run-control")
+      await createRunInterrupt({
+        id: interruptId,
+        runId: ctx.runId,
+        type: "tool_approval",
+        status: "pending",
+        title: `Approve ${req.toolName}`,
+        toolName: req.toolName,
+        requestDigest: req.requestId,
+        expiresAt: Date.now() + (ctx.ttlMs ?? 30 * 60 * 1_000),
+        createdAt: Date.now(),
+      })
+    }
     const surfaceId = `tool_approve:${ctx.conversationKey}:${bindingId}`
     const surface = buildToolApprovalSurface({ bindingId, toolName: req.toolName })
 
@@ -173,6 +190,10 @@ export function makeImPermissionResponder(
     } catch {
       // If we can't even surface the card, fail closed — deny so the turn
       // completes rather than hanging on a card the user never saw.
+      if (ctx.runId && interruptId) {
+        const { resolveRunInterruptFromSource } = await import("@/lib/execution/run-control")
+        await resolveRunInterruptFromSource(ctx.runId, interruptId, "deny")
+      }
       return { decision: "deny", message: "failed to surface approval card" }
     }
 
@@ -180,6 +201,11 @@ export function makeImPermissionResponder(
     const opts: AwaitApprovalOptions = {
       ttlMs: ctx.ttlMs,
       onExpire: () => {
+        if (ctx.runId && interruptId) {
+          void import("@/lib/execution/run-control").then(({ expireRunInterruptFromSource }) =>
+            expireRunInterruptFromSource(ctx.runId!, interruptId)
+          )
+        }
         void audit({
           adapterId: ctx.adapterId,
           kind: "tool_approve.expired",
@@ -189,7 +215,16 @@ export function makeImPermissionResponder(
         }).catch(() => undefined)
       },
     }
-    return awaitApproval(ctx.sessionId, req.requestId, opts)
+    const decision = await awaitApproval(ctx.sessionId, req.requestId, opts)
+    if (ctx.runId && interruptId) {
+      const { resolveRunInterruptFromSource } = await import("@/lib/execution/run-control")
+      await resolveRunInterruptFromSource(
+        ctx.runId,
+        interruptId,
+        decision.decision === "allow" ? "approve" : "deny"
+      )
+    }
+    return decision
   }
 }
 

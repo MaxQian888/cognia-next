@@ -13,6 +13,8 @@ import { __resetBusForTesting, getBus, type CallbackHandler } from "./bus"
 import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
 import type { PlatformIdentity } from "@/types/connectors/event"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { createExecutionRun } from "@/lib/db/execution-runs"
+import { registerRunControlHandler } from "@/lib/execution/run-control"
 
 // The wf_approve path drives a REAL `startWorkflowFromIM`, which fires
 // `void runWorkflow(...)` in the background (fire-and-forget by design). In a
@@ -143,6 +145,44 @@ describe("ConnectorBus.dispatchConnectorCallback", () => {
     expect(audit.some((r) => r.kind === "callback.unbound")).toBe(true)
   })
 
+  it("routes a self-describing execution-run control before generic A2UI handling", async () => {
+    await createExecutionRun({
+      id: "run-control-1",
+      kind: "agent-turn",
+      sourceId: "turn-1",
+      title: "Agent run",
+      status: "running",
+      initiator: { remoteUserId: sender.remoteUserId },
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    const sourceHandler = jest.fn(async () => undefined)
+    const unregister = registerRunControlHandler("agent-turn", sourceHandler)
+    const bus = getBus()
+    const genericHandler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = genericHandler
+
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        triggerId: "run:run-control-1:stop:0",
+        surfaceId: "",
+        value: "stop",
+        payload: { runId: "run-control-1", action: "stop", revision: 0 },
+      })
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(sourceHandler).toHaveBeenCalledTimes(1)
+    expect(genericHandler).not.toHaveBeenCalled()
+    expect(
+      await getDb().executionRunEvents.where("runId").equals("run-control-1").first()
+    ).toMatchObject({
+      type: "control.accepted",
+    })
+    unregister()
+  })
+
   it("audits callback.handler_failed when handler throws", async () => {
     const bus = getBus()
     bus.callbackHandler = () => {
@@ -179,9 +219,7 @@ describe("ConnectorBus.dispatchConnectorCallback", () => {
     expect(handler).not.toHaveBeenCalled()
     const audit = await getDb().connectorAudit.toArray()
     expect(
-      audit.some(
-        (r) => r.kind === "adapter.error" && r.reason === "callback_binding_lookup_failed"
-      )
+      audit.some((r) => r.kind === "adapter.error" && r.reason === "callback_binding_lookup_failed")
     ).toBe(true)
 
     // Platform redelivery of the SAME triggerId now goes through.

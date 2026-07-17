@@ -21,6 +21,7 @@ import type {
   ForwardMessageInput,
   UrgentChannel,
 } from "@/types/connectors/adapter"
+import { createLarkRunPresentationDriver } from "@/lib/connectors/run-presentation/lark-driver"
 import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { extractLarkCode, LARK_PERMISSION_CODES } from "./http"
@@ -856,6 +857,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       }
     },
     id: opts.id,
+    runPresentation: createLarkRunPresentationDriver(doRequest),
     start,
     stop,
     health,

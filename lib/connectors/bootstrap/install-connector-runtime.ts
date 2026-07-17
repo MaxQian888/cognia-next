@@ -81,7 +81,10 @@ import {
   startOutboundRetentionSweep,
   type DailyScheduleHandle,
 } from "@/lib/connectors/daily-schedule"
-import { startWorkflowProgressRunner } from "@/lib/connectors/a2ui-bridge/workflow-progress-runner"
+import { startWorkflowExecutionBridge } from "@/lib/execution/workflow-bridge"
+import { startExecutionRunPresentationRunner } from "@/lib/connectors/run-presentation/runner"
+import { installExecutionRunControlHandlers } from "@/lib/execution/control-handlers"
+import { recoverPendingRunInterrupts } from "@/lib/execution/run-control"
 import {
   startResumeReconnect,
   type ResumeReconnectHandle,
@@ -236,7 +239,9 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
   let outboundRetentionSweep: DailyScheduleHandle | null = null
   let heartbeatSweep: HeartbeatSweepHandle | null = null
   let resumeReconnect: ResumeReconnectHandle | null = null
-  let stopWorkflowProgressRunner: (() => void) | null = null
+  let stopWorkflowExecutionBridge: (() => void) | null = null
+  let stopExecutionRunPresentationRunner: (() => void) | null = null
+  let disposeExecutionRunControlHandlers: (() => void) | null = null
 
   /**
    * Boot a single adapter through the full lifecycle: build its
@@ -564,11 +569,15 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       cleanupHandle = startCallbackBindingCleanupSchedule()
     }
 
-    // Workflow → IM fan-out runner: subscribes to `workflowRunEvents` for
-    // IM-triggered runs and pushes step progress + a terminal summary
-    // through the same outbound queue that everything else uses.
+    // Source bridges write one durable execution journal; the presentation
+    // runner owns native projection, coalescing, cursor commits, and fallback.
     if (!cancelled) {
-      stopWorkflowProgressRunner = startWorkflowProgressRunner()
+      stopWorkflowExecutionBridge = startWorkflowExecutionBridge()
+      stopExecutionRunPresentationRunner = startExecutionRunPresentationRunner()
+      disposeExecutionRunControlHandlers = installExecutionRunControlHandlers().dispose
+      void recoverPendingRunInterrupts().catch((error) => {
+        console.error("[execution-run] pending interrupt recovery failed", error)
+      })
     }
 
     // Credentials hot-reload: when Settings/Connections saves a form,
@@ -715,8 +724,12 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     heartbeatSweep = null
     resumeReconnect?.dispose()
     resumeReconnect = null
-    stopWorkflowProgressRunner?.()
-    stopWorkflowProgressRunner = null
+    stopWorkflowExecutionBridge?.()
+    stopWorkflowExecutionBridge = null
+    stopExecutionRunPresentationRunner?.()
+    stopExecutionRunPresentationRunner = null
+    disposeExecutionRunControlHandlers?.()
+    disposeExecutionRunControlHandlers = null
     // Tear down every running adapter through the lifecycle registry so
     // the per-adapter abort signals get cleaned up too. Swallow
     // per-adapter errors so a bad stop() can't crash the teardown; the

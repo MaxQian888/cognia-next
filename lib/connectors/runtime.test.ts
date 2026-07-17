@@ -415,7 +415,7 @@ describe("installRuntime — ai-run (streamReply weaving)", () => {
 })
 
 describe("installRuntime — ai-run (live-activity card wiring)", () => {
-  it("omits onEvent when liveActivity override is false", async () => {
+  it("keeps the durable journal but omits the IM binding when liveActivity is false", async () => {
     let receivedCap: { onEvent?: unknown } | undefined
     const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
       receivedCap = cap as typeof receivedCap
@@ -450,12 +450,18 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
     })
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_liveoff" })
     await callHandler(event, "ai-run")
-    expect(receivedCap?.onEvent).toBeUndefined()
+    expect(typeof receivedCap?.onEvent).toBe("function")
+    expect(
+      await getDb()
+        .executionRunBindings.where("conversationKey")
+        .equals("telegram:adapter_1:chat_liveoff")
+        .count()
+    ).toBe(0)
     const audits = await getDb().connectorAudit.toArray()
     expect(audits.filter((a) => a.kind === "activity.card_dispatched")).toHaveLength(0)
   })
 
-  it("appends progress lines (no cumulative card) when the adapter has no edit()", async () => {
+  it("journals progress for the generic projection runner when the adapter has no edit()", async () => {
     let receivedCap: { onEvent?: unknown } | undefined
     const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
       receivedCap = cap as typeof receivedCap
@@ -472,16 +478,15 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_append" })
     await callHandler(event, "ai-run")
     expect(typeof receivedCap?.onEvent).toBe("function")
-    const audits = await getDb().connectorAudit.toArray()
-    // Append mode emits card_appended, never the cumulative card_dispatched.
-    expect(audits.filter((a) => a.kind === "activity.card_dispatched")).toHaveLength(0)
-    expect(audits.some((a) => a.kind === "activity.card_appended")).toBe(true)
-    // The append lines go through the outbound queue with an `activity:…:append:` key.
-    const jobs = await getDb().outboundQueue.toArray()
-    expect(jobs.some((j) => j.request.metadata?.idempotencyKey?.includes(":append:"))).toBe(true)
+    const run = await getDb().executionRuns.where("kind").equals("agent-turn").first()
+    const events = await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()
+    expect(events.map((item) => item.type)).toEqual(
+      expect.arrayContaining(["run.started", "tool.started", "run.completed"])
+    )
+    expect(await getDb().executionRunBindings.where("runId").equals(run!.id).count()).toBe(1)
   })
 
-  it("dispatches a live-activity card when an edit-capable adapter fires tool-call events", async () => {
+  it("creates one durable native-preferred binding for an edit-capable adapter", async () => {
     const capturing: RunAndCaptureFn = jest.fn(async (_sid, _content, _opts, cap) => {
       await cap?.onEvent?.({ type: "tool-call", toolName: "bash", input: {} })
       return { text: "final", messageId: "uuid-activity" }
@@ -510,17 +515,14 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
     })
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_activity" })
     await callHandler(event, "ai-run")
-    const audits = await getDb().connectorAudit.toArray()
-    expect(audits.filter((a) => a.kind === "activity.card_dispatched")).toHaveLength(1)
-    const jobs = await getDb().outboundQueue.toArray()
-    // At least one activity card job (the entry frame) plus the final reply.
-    const activityJobs = jobs.filter(
-      (j) =>
-        typeof j.request.metadata?.idempotencyKey === "string" &&
-        (j.request.metadata.idempotencyKey as string).startsWith("activity:")
+    const run = await getDb().executionRuns.where("kind").equals("agent-turn").first()
+    expect(await getDb().executionRunBindings.where("runId").equals(run!.id).first()).toMatchObject(
+      {
+        status: "active",
+        deliveryMode: "native",
+        sourceMessageId: event.messageId,
+      }
     )
-    expect(activityJobs.length).toBeGreaterThanOrEqual(1)
-    expect(activityJobs[0].request.segments[0]).toMatchObject({ type: "a2ui" })
   })
 })
 
@@ -2027,7 +2029,7 @@ describe("installRuntime — ai-run (adapter teardown abort propagation)", () =>
     __resetLifecycleForTesting()
   })
 
-  it("threads the running adapter's abort signal into the capture options", async () => {
+  it("combines the running adapter abort signal with the per-run control signal", async () => {
     const adapterAc = new AbortController()
     registerRunningAdapter("adapter_1", {
       adapter: stubAdapterHandle,
@@ -2040,16 +2042,20 @@ describe("installRuntime — ai-run (adapter teardown abort propagation)", () =>
     const cap = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][3] as {
       signal?: AbortSignal
     }
-    expect(cap.signal).toBe(adapterAc.signal)
+    expect(cap.signal).toBeDefined()
+    expect(cap.signal?.aborted).toBe(false)
+    adapterAc.abort()
+    expect(cap.signal?.aborted).toBe(true)
   })
 
-  it("omits the signal when the adapter has no lifecycle entry (web/test hosts)", async () => {
+  it("provides a per-run control signal when the adapter has no lifecycle entry", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_nosignal" })
     await callHandler(event, "ai-run")
     const cap = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][3] as {
       signal?: AbortSignal
     }
-    expect(cap.signal).toBeUndefined()
+    expect(cap.signal).toBeDefined()
+    expect(cap.signal?.aborted).toBe(false)
   })
 
   it("aborting the adapter signal halts an in-flight capture (audited, no enqueue)", async () => {

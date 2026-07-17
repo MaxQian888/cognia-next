@@ -22,6 +22,7 @@ import type {
   AttachmentDescriptor,
   ReactionRef,
 } from "@/types/connectors/adapter"
+import { createSlackRunPresentationDriver } from "@/lib/connectors/run-presentation/slack-driver"
 import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { connectorsHttpRequest, connectorsMediaUpload } from "@/lib/connectors/tauri/commands"
@@ -968,6 +969,9 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
       }
     },
     id: opts.id,
+    runPresentation: opts.assistantAppEnabled
+      ? createSlackRunPresentationDriver(doRequest)
+      : undefined,
     start,
     stop,
     health,

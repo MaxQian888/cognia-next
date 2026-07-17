@@ -230,6 +230,7 @@ export function parseSlackEventCallback(
       conversationRef: {
         platform: "slack",
         adapterId,
+        teamId: envelope.team_id,
         channelId: channel,
         threadTs,
       },
@@ -280,6 +281,7 @@ export function parseSlackEventCallback(
       conversationRef: {
         platform: "slack",
         adapterId,
+        teamId: envelope.team_id,
         channelId: channel,
         threadTs,
       },
@@ -344,6 +346,7 @@ export function parseSlackEventCallback(
     conversationRef: {
       platform: "slack",
       adapterId,
+      teamId: envelope.team_id,
       channelId: channel,
       threadTs: threadTs,
     },
@@ -409,6 +412,7 @@ export function parseSlackSlashCommand(
     conversationRef: {
       platform: "slack",
       adapterId,
+      teamId: payload.team_id,
       channelId: channel,
     },
     conversationKey,

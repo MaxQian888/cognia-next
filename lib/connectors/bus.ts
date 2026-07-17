@@ -1415,6 +1415,69 @@ export class ConnectorBus {
       return false
     }
 
+    // Durable Execution Run controls are self-describing CardKit/Slack actions.
+    // The actor comes from the signed platform callback envelope; values inside
+    // the card are used only for the run/action target and optimistic revision.
+    const runId = typeof event.payload?.runId === "string" ? event.payload.runId : ""
+    const runAction = typeof event.payload?.action === "string" ? event.payload.action : ""
+    const runRevision = Number(event.payload?.revision)
+    if (runId && Number.isInteger(runRevision)) {
+      const allowedActions = new Set([
+        "stop",
+        "pause",
+        "resume",
+        "approve",
+        "deny",
+        "retry",
+        "open_details",
+      ])
+      if (allowedActions.has(runAction)) {
+        // Return to the transport immediately so CardKit can ACK well inside
+        // its three-second deadline. Durable execution and card refresh happen
+        // asynchronously from the journal update.
+        void (async () => {
+          try {
+            const [{ executeRunControlCommand }, adapterRow] = await Promise.all([
+              import("@/lib/execution/run-control"),
+              getAdapterInstance(event.adapterId),
+            ])
+            const configuredOperators = adapterRow?.settings.runOperatorUserIds
+            const operatorIds = Array.isArray(configuredOperators)
+              ? configuredOperators.filter((value): value is string => typeof value === "string")
+              : []
+            await executeRunControlCommand(
+              {
+                runId,
+                action: runAction as import("@/types/execution/run").RunControlAction,
+                idempotencyKey: event.triggerId,
+                expectedRevision: runRevision,
+                actor: {
+                  platformIdentityId: event.user.id,
+                  remoteUserId: event.user.remoteUserId,
+                  displayName: event.user.displayName,
+                },
+                ...(typeof event.payload?.interruptId === "string"
+                  ? { interruptId: event.payload.interruptId }
+                  : {}),
+              },
+              { operatorIds }
+            )
+          } catch (err) {
+            await appendAudit({
+              adapterId: event.adapterId,
+              kind: "callback.handler_failed",
+              at: Date.now(),
+              conversationKey: resolvedConversationKey ?? undefined,
+              reason: err instanceof Error ? err.name : "unknown",
+              message: err instanceof Error ? err.message : String(err),
+              fields: { triggerId: event.triggerId, runId, action: runAction },
+            })
+          }
+        })()
+        return true
+      }
+    }
+
     if (!resolvedSurfaceId) {
       // No anchoring surface at all — log and bail. We DON'T fire the
       // handler because A2UI ActionEvents require a target surface.

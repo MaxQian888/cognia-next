@@ -178,6 +178,11 @@ describe("getDb", () => {
     expect(db.connectorAudit).toBeDefined()
     expect(db.connectorDrafts).toBeDefined()
     expect(db.connectorAttachments).toBeDefined()
+    // v114 — unified execution journal + IM presentation state.
+    expect(db.executionRuns).toBeDefined()
+    expect(db.executionRunEvents).toBeDefined()
+    expect(db.executionRunBindings).toBeDefined()
+    expect(db.executionRunInterrupts).toBeDefined()
     // v51 — Heartbeats split out of connectorAudit into their own table.
     expect(db.connectorHeartbeats).toBeDefined()
     // v27 — Plugin Dexie table registry (M0 platform feature).
@@ -188,6 +193,20 @@ describe("getDb", () => {
     expect(db.codeAdoptionTurns).toBeDefined()
     // v109 — user-consent binary ledger.
     expect(db.approvedBinaries).toBeDefined()
+  })
+
+  it("v114 opens the unified execution journal and its compound indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(114)
+    expect(db.executionRuns.schema.indexes.map((index) => index.name)).toContain("[kind+sourceId]")
+    expect(db.executionRunEvents.schema.indexes.map((index) => index.name)).toContain("[runId+seq]")
+    expect(db.executionRunBindings.schema.indexes.map((index) => index.name)).toContain(
+      "[runId+conversationKey]"
+    )
+    expect(db.executionRunInterrupts.schema.indexes.map((index) => index.name)).toContain(
+      "[runId+status]"
+    )
   })
 
   it("v108 stores a code-adoption turn and resolves its indexes", async () => {

@@ -97,6 +97,12 @@ import type { TerminalHistoryRow } from "./terminal-history"
 import type { ProviderCostDailyRow } from "./provider-cost-daily"
 import type { UnattendedExecAuditRow } from "./terminal-audit"
 import type { BehaviorEventRow } from "./behavior-event-types"
+import type {
+  ExecutionRun,
+  ExecutionRunBinding,
+  ExecutionRunInterrupt,
+  RunEvent,
+} from "@/types/execution/run"
 // Row types relocated out of this file but still wired into the table
 // declarations below and re-exported at the bottom for `@/lib/db/schema`
 // import-site stability. See `lib/db/CONVENTIONS.md`.
@@ -224,6 +230,11 @@ export class CogniaDB extends Dexie {
   teams!: Table<Team, string>
   trustedWorkspaces!: Table<TrustedWorkspace, string>
   backupHistory!: Table<BackupHistoryRow, string>
+  // v114 — unified semantic execution journal and IM presentation state.
+  executionRuns!: Table<ExecutionRun, string>
+  executionRunEvents!: Table<RunEvent, string>
+  executionRunBindings!: Table<ExecutionRunBinding, string>
+  executionRunInterrupts!: Table<ExecutionRunInterrupt, string>
   notifications!: Table<NotificationRecord, string>
   canvasDocuments!: Table<CanvasDocumentRow, string>
   canvasVersions!: Table<CanvasVersionRow, string>
@@ -2501,6 +2512,19 @@ export class CogniaDB extends Dexie {
     // cleanup observe the wrong storage.
     this.version(113).stores({
       pluginScheduledJobs: null,
+    })
+
+    // v114 — Durable execution semantics shared by Agent turns, Visual
+    // Workflows, and IM presentation drivers. Source runtimes remain their
+    // execution authority; these tables are the replayable presentation and
+    // control journal. Pure additions, so no backfill is required.
+    this.version(114).stores({
+      executionRuns:
+        "&id, kind, sourceId, status, sessionId, projectId, updatedAt, [kind+sourceId]",
+      executionRunEvents: "&id, runId, [runId+seq], type, ts, projectId",
+      executionRunBindings:
+        "&id, runId, adapterId, conversationKey, status, [runId+conversationKey], projectId",
+      executionRunInterrupts: "&id, runId, status, expiresAt, [runId+status], projectId",
     })
 
     // First full-chain construction under Jest: cache the merged spec so every

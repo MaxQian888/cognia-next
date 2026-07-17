@@ -60,8 +60,9 @@ import { startWorkflowFromIM } from "@/lib/workflow/runtime/start-from-im"
 import { evaluateImRate } from "@/lib/connectors/im-rate/registry"
 import { getRunningAdapter } from "./lifecycle"
 import { makeImPermissionResponder } from "./hitl/tool-approval"
-import { TurnActivityDispatcher } from "./activity/turn-activity-dispatcher"
-import { resolveActivityI18n } from "./activity/i18n"
+import { createExecutionRun, putExecutionRunBinding } from "@/lib/db/execution-runs"
+import { AgentRunEventProducer } from "@/lib/execution/sources/agent-turn"
+import { registerAgentRunController } from "@/lib/execution/control-handlers"
 
 /**
  * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
@@ -831,7 +832,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               source: "im",
               adapterId: event.adapterId,
               conversationKey: event.conversationKey,
+              sourceMessageId: event.messageId,
               ...(session.id ? { sessionId: session.id } : {}),
+              initiator: {
+                platformIdentityId: event.sender.id,
+                remoteUserId: event.sender.remoteUserId,
+                displayName: event.sender.displayName,
+              },
             },
           })
           await appendAudit({
@@ -933,38 +940,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // legitimate human approval (registry TTL 10 min) resolves before the
         // turn times out, while a genuinely stuck sidecar is still bounded.
         const targetAdapter = bus.getAdapter(event.adapterId)
-        // Live in-turn activity card (control-plane visibility — the
-        // cc-connect-style "the agent is working" live card). Default ON
-        // (`override?.liveActivity !== false`); operators can suppress it
-        // for noisy channels. The dispatcher is inert in suppress mode
-        // (adapter without `edit()`), so constructing it is cheap. Every card
-        // dispatch flows through `enqueueOutbound`, so it inherits the
-        // outbound runner's rate-limit / circuit-breaker / quiet-hours /
-        // idempotency gates automatically. See
-        // `lib/connectors/activity/turn-activity-dispatcher.ts`.
         const liveActivityEnabled = override?.liveActivity !== false
-        const activityDispatcher = liveActivityEnabled
-          ? new TurnActivityDispatcher({
-              adapterId: event.adapterId,
-              conversationKey: event.conversationKey,
-              conversationRef: event.conversationRef,
-              surfaceId: `activity:${event.conversationKey}:${Date.now()}`,
-              i18n: resolveActivityI18n(appSettings?.language),
-              enqueue: enqueueOutbound,
-              supportsEdit: () => typeof targetAdapter?.edit === "function",
-              canAppend: () => override?.appendActivity !== false,
-              getJob: (id) => getDb().outboundQueue.get(id),
-              onAudit: (kind, fields) => {
-                void appendAudit({
-                  adapterId: event.adapterId,
-                  kind,
-                  at: Date.now(),
-                  conversationKey: event.conversationKey,
-                  fields,
-                })
-              },
-            })
-          : null
         // ── Respond-via bot (multi-bot cross-account send) ──
         // A matched dispatch rule may ask for the reply to be delivered
         // through ANOTHER of our own bot instances. Validate the target at
@@ -984,11 +960,58 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const streamsThroughReceiver =
           outboundTarget.adapterId === event.adapterId &&
           outboundTarget.conversationKey === event.conversationKey
+        const executionRunId = `execution:agent:${session.id}:${storedMsg.id}`
+        await createExecutionRun({
+          id: executionRunId,
+          kind: "agent-turn",
+          sourceId: storedMsg.id,
+          sessionId: session.id,
+          projectId: session.projectId,
+          title: "Agent run",
+          status: "queued",
+          initiator: {
+            platformIdentityId: event.sender.id,
+            remoteUserId: event.sender.remoteUserId,
+            displayName: event.sender.displayName,
+          },
+          currentRevision: 0,
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
+        })
+        if (liveActivityEnabled) {
+          const teamId =
+            typeof event.conversationRef.teamId === "string"
+              ? event.conversationRef.teamId
+              : undefined
+          await putExecutionRunBinding({
+            id: `execution-binding:${executionRunId}:${event.adapterId}:${event.conversationKey}`,
+            runId: executionRunId,
+            projectId: session.projectId,
+            adapterId: event.adapterId,
+            conversationKey: event.conversationKey,
+            status: "active",
+            deliveryMode: "native",
+            locale: appSettings?.language,
+            sourceMessageId: event.messageId,
+            recipientUserId: event.sender.remoteUserId,
+            recipientTeamId: teamId,
+            lastProjectedRevision: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          })
+        }
+        const runProducer = new AgentRunEventProducer(executionRunId)
+        await runProducer.start()
         // Abort propagation: thread the per-adapter teardown signal (aborted
         // by the install teardown and by a lifecycle requeue/stop) into the
         // capture, so tearing the runtime down halts an in-flight turn instead
         // of letting it run to the 15-min timeout and write Dexie post-unmount.
         const adapterSignal = getRunningAdapter(event.adapterId)?.abortController.signal
+        const runController = new AbortController()
+        const unregisterRunController = registerAgentRunController(executionRunId, runController)
+        const captureSignal = adapterSignal
+          ? AbortSignal.any([adapterSignal, runController.signal])
+          : runController.signal
         const cap: import("@/lib/claude/run-and-capture").RunAndCaptureOptions & {
           adapterId?: string
           conversationKey?: string
@@ -999,21 +1022,23 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           conversationKey: event.conversationKey,
           timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
           idleTimeoutMs: CONNECTOR_TURN_IDLE_TIMEOUT_MS,
-          ...(adapterSignal ? { signal: adapterSignal } : {}),
+          signal: captureSignal,
           onPermissionRequest: makeImPermissionResponder({
+            runId: executionRunId,
             sessionId: session.id,
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
             conversationRef: event.conversationRef,
             approvalMode: override?.approvalMode,
           }),
-          ...(activityDispatcher
-            ? {
-                onEvent: (ev: import("@/lib/claude/run-and-capture").CaptureStreamEvent) => {
-                  activityDispatcher.onEvent(ev, Date.now())
-                },
-              }
-            : {}),
+          onEvent: (ev: import("@/lib/claude/run-and-capture").CaptureStreamEvent) => {
+            void runProducer.onCaptureEvent(ev, Date.now()).catch((error) => {
+              console.error(
+                `[execution-run] capture mapping failed for run=${executionRunId}`,
+                error
+              )
+            })
+          },
           ...(streamsThroughReceiver && typeof targetAdapter?.streamReply === "function"
             ? {
                 onPartial: (text: string) => {
@@ -1048,13 +1073,12 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               fields: { sourceMessageId: storedMsg.id },
             })
           }
-          // Finalize the live-activity card to its Failed terminal state.
-          // Self-contained try/catch so a dispatcher failure (e.g. a Dexie
-          // write during the crash) never masks the original error. On a
-          // failed turn this emits one terminal card even if no live card
-          // was sent yet — the user deserves to know.
           try {
-            await activityDispatcher?.finalize("failed", Date.now())
+            await runProducer.finish(
+              captureSignal.aborted ? "cancelled" : "failed",
+              Date.now(),
+              isPiiBlocked ? "Sensitive content was blocked" : "Agent run failed"
+            )
           } catch {
             /* best-effort — the original error is what matters */
           }
@@ -1073,15 +1097,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               errorMessage: err instanceof Error ? err.message : String(err),
             })
           }
+          unregisterRunController()
           break
         }
+        unregisterRunController()
 
-        // Finalize the live-activity card to its Done terminal state so the
-        // terminal summary (with any file-edit diffs) lands before the final
-        // reply below. A short turn that never dispatched a card suppresses
-        // the terminal — the final reply is the user's signal.
         try {
-          await activityDispatcher?.finalize("done", Date.now())
+          await runProducer.finish("completed", Date.now(), "Response ready")
         } catch {
           /* best-effort — the final reply still flows through below */
         }
