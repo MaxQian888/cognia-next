@@ -592,3 +592,30 @@ jobs:
       - name: Run Rust tests
         working-directory: src-tauri
         run: cargo test --locked
+
+  cargo-test-cli:
+    name: Rust Tests (cognia CLI)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      # The plugin-author CLI (`crates/cognia-cli`) has no
+      # `tauri::generate_context!()`, so it needs neither a Node toolchain nor
+      # a Next.js static export — unlike the `cargo-test-windows` job above.
+      # Its 342 tests never ran in CI (the src-tauri step tests only that
+      # member); gate just this package — the full workspace is 20+ crates and
+      # cognia-next already dominates the other job's wall clock.
+      - name: Run Rust tests (cognia-cli)
+        run: cargo test --locked -p cognia-cli
