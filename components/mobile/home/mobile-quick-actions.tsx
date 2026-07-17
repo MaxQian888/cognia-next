@@ -17,6 +17,7 @@ import { SlidersHorizontalIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { MobileSpotIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   Sheet,
   SheetContent,
@@ -93,9 +94,9 @@ export function MobileQuickActions({ onNewChat, onSearch, className }: MobileQui
               }
             }}
             data-testid={`mobile-quick-action-${item.id}`}
-            className="flex cursor-pointer flex-col items-center gap-1.5 rounded-md p-3 text-center shadow-none transition-colors active:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl p-2 text-center shadow-none transition-colors active:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <item.Icon className="size-5 text-primary" aria-hidden="true" />
+            <MobileSpotIcon name={item.spotIcon} size={64} className="-my-1" />
             <span className="line-clamp-1 text-xs font-medium">{tActions(item.i18nKey)}</span>
           </Card>
         ))}

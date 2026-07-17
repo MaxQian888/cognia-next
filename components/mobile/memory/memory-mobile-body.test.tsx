@@ -54,5 +54,6 @@ describe("<MemoryMobileBody />", () => {
     liveQuery.mockReturnValue([])
     render(<MemoryMobileBody />)
     expect(screen.getByTestId("empty-state")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-spot-icon-memory")).toBeInTheDocument()
   })
 })

@@ -91,6 +91,7 @@ describe("<DiscoverHome />", () => {
       />
     )
     expect(screen.getByTestId("discover-home-empty")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-spot-icon-discover")).toBeInTheDocument()
   })
 
   it("renders featured + recent + section strips", () => {

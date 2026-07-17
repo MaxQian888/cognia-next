@@ -17,6 +17,10 @@ import * as React from "react"
 import Link from "next/link"
 import { ChevronRightIcon, type LucideIcon } from "lucide-react"
 
+import {
+  MobileSpotIcon,
+  type MobileSpotIconName,
+} from "@/components/mobile/mobile-spot-icon"
 import { cn } from "@/lib/utils"
 import {
   Item,
@@ -30,6 +34,8 @@ import {
 export interface MeRowProps {
   /** Lucide icon component rendered in the leading slot. Optional. */
   icon?: LucideIcon
+  /** Larger companion illustration for a selected feature entry. */
+  spotIcon?: MobileSpotIconName
   /** Tint class applied to the icon wrapper (e.g. `text-emerald-600`). */
   iconClassName?: string
   /** Primary label. */
@@ -54,6 +60,7 @@ export interface MeRowProps {
 
 export function MeRow({
   icon: Icon,
+  spotIcon,
   iconClassName,
   label,
   description,
@@ -81,7 +88,11 @@ export function MeRow({
 
   const inner = (
     <>
-      {Icon ? (
+      {spotIcon ? (
+        <ItemMedia className={cn("size-12", iconClassName)}>
+          <MobileSpotIcon name={spotIcon} size={48} />
+        </ItemMedia>
+      ) : Icon ? (
         <ItemMedia variant="icon" className={cn("size-9 rounded-md", iconClassName)}>
           <Icon className="size-4" aria-hidden="true" />
         </ItemMedia>

@@ -2,6 +2,10 @@
 
 import type { ComponentType, ReactNode, SVGProps } from "react"
 
+import {
+  MobileSpotIcon,
+  type MobileSpotIconName,
+} from "@/components/mobile/mobile-spot-icon"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
@@ -15,6 +19,7 @@ import { cn } from "@/lib/utils"
 
 export interface EmptyStateProps {
   icon?: ComponentType<SVGProps<SVGSVGElement>>
+  spotIcon?: MobileSpotIconName
   title: string
   description?: string
   cta?: {
@@ -28,6 +33,7 @@ export interface EmptyStateProps {
 
 export function EmptyState({
   icon: Icon,
+  spotIcon,
   title,
   description,
   cta,
@@ -43,7 +49,11 @@ export function EmptyState({
       )}
     >
       <EmptyHeader className="gap-2">
-        {Icon ? (
+        {spotIcon ? (
+          <EmptyMedia className="bg-transparent">
+            <MobileSpotIcon name={spotIcon} size={96} className="-my-3" />
+          </EmptyMedia>
+        ) : Icon ? (
           <EmptyMedia className="bg-transparent">
             <Icon
               aria-hidden="true"

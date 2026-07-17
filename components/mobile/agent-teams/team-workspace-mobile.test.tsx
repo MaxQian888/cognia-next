@@ -93,6 +93,7 @@ describe("<TeamWorkspaceMobile />", () => {
     const user = userEvent.setup()
     render(<TeamWorkspaceMobile />)
     expect(screen.getByTestId("empty-state")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-spot-icon-agent-teams")).toBeInTheDocument()
     await user.click(screen.getByTestId("mobile-team-back"))
     expect(push).toHaveBeenCalledWith("/discover")
   })

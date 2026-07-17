@@ -14,7 +14,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CompassIcon, PlusIcon } from "lucide-react"
+import { PlusIcon } from "lucide-react"
 
 import { ActiveFilterChips } from "@/components/discover/active-filter-chips"
 import { CategoryChipStrip } from "@/components/discover/category-chip-strip"
@@ -246,7 +246,7 @@ export function DiscoverMobileBody() {
                 <ListSkeleton />
               ) : characters.length === 0 ? (
                 <EmptyState
-                  icon={CompassIcon}
+                  spotIcon="profile"
                   title={trimmed.length > 0 ? t("emptyFiltered", { query }) : t("emptyCharacters")}
                   description={trimmed.length > 0 ? undefined : t("emptyCharactersHint")}
                 />
@@ -279,7 +279,7 @@ export function DiscoverMobileBody() {
               <ListSkeleton />
             ) : teams.length === 0 ? (
               <EmptyState
-                icon={CompassIcon}
+                spotIcon="agent-teams"
                 title={trimmed.length > 0 ? t("emptyFiltered", { query }) : t("emptyTeams")}
                 description={trimmed.length > 0 ? undefined : t("emptyTeamsHint")}
               />
@@ -306,7 +306,7 @@ export function DiscoverMobileBody() {
                 <ListSkeleton />
               ) : skills.length === 0 ? (
                 <EmptyState
-                  icon={CompassIcon}
+                  spotIcon="skills"
                   title={trimmed.length > 0 ? t("emptyFiltered", { query }) : t("emptySkills")}
                   description={trimmed.length > 0 ? undefined : t("emptySkillsHint")}
                 />

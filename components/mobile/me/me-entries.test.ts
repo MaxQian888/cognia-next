@@ -28,6 +28,32 @@ describe("me-entries registry", () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it("assigns each companion illustration to one matching core feature entry", () => {
+    const spots = Object.fromEntries(
+      ME_ENTRIES.filter((entry) => entry.spotIcon).map((entry) => [entry.id, entry.spotIcon])
+    )
+
+    expect(spots).toEqual({
+      profile: "profile",
+      sync: "device-sync",
+      conversation: "chat",
+      canvas: "canvas",
+      agent: "digital-twin",
+      connectors: "connectors",
+      "web-search": "browser",
+      search: "discover",
+      terminal: "terminal",
+      "agent-teams-settings": "agent-teams",
+      skills: "skills",
+      scheduler: "scheduler",
+      goals: "goals",
+      "workflows-settings": "workflows",
+      backup: "secure-backup",
+      memory: "memory",
+    })
+    expect(new Set(Object.values(spots)).size).toBe(16)
+  })
+
   it("routes every entry to an absolute path", () => {
     for (const entry of ME_ENTRIES) {
       expect(entry.href.startsWith("/")).toBe(true)

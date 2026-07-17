@@ -71,6 +71,7 @@ describe("<GoalsMobileBody />", () => {
     liveQuery.mockReturnValue([])
     render(<GoalsMobileBody />)
     expect(screen.getByTestId("empty-state")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-spot-icon-goals")).toBeInTheDocument()
   })
 
   it("opens the goal detail sheet on tap", async () => {

@@ -119,6 +119,7 @@ export default function MePage() {
       <LongPress key={testid} onLongPress={() => void togglePin(entry.id)} className="block">
         <MeRow
           icon={entry.icon}
+          spotIcon={entry.spotIcon}
           label={t(entry.labelKey)}
           href={entry.href}
           value={rowValue(entry)}

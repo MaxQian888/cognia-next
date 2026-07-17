@@ -10,7 +10,7 @@
  */
 
 import { useTranslations } from "next-intl"
-import { ChevronRightIcon, CompassIcon } from "lucide-react"
+import { ChevronRightIcon } from "lucide-react"
 
 import { DiscoverGrid } from "@/components/discover/discover-grid"
 import { DiscoverItemCard } from "@/components/discover/discover-item-card"
@@ -90,7 +90,7 @@ export function DiscoverHome({
         className={cn("flex flex-1 items-center justify-center p-6", className)}
         data-testid="discover-home-empty"
       >
-        <EmptyState icon={CompassIcon} title={t("home.empty")} description={t("home.emptyHint")} />
+        <EmptyState spotIcon="discover" title={t("home.empty")} description={t("home.emptyHint")} />
       </div>
     )
   }

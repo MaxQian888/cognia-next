@@ -109,7 +109,11 @@ jest.mock("@/components/interactions/long-press", () => ({
   ),
 }))
 jest.mock("@/components/mobile/empty-state", () => ({
-  EmptyState: ({ title }: { title: string }) => <div data-testid="empty-state">{title}</div>,
+  EmptyState: ({ title, spotIcon }: { title: string; spotIcon?: string }) => (
+    <div data-testid="empty-state" data-spot-icon={spotIcon}>
+      {title}
+    </div>
+  ),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
 
@@ -165,6 +169,7 @@ describe("<WorkflowList />", () => {
     pushQueries({})
     render(<WorkflowList />)
     expect(screen.getByTestId("empty-state")).toBeInTheDocument()
+    expect(screen.getByTestId("empty-state")).toHaveAttribute("data-spot-icon", "workflows")
     expect(screen.queryByTestId("pinned-section-stub")).not.toBeInTheDocument()
   })
 

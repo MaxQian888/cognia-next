@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { ChevronRightIcon, FolderIcon, WorkflowIcon } from "lucide-react"
+import { ChevronRightIcon, FolderIcon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
@@ -220,7 +220,7 @@ export function WorkflowList({ className }: WorkflowListProps) {
           ) : null}
 
           {isEmpty ? (
-            <EmptyState icon={WorkflowIcon} title={t("empty")} />
+            <EmptyState spotIcon="workflows" title={t("empty")} />
           ) : (
             <motion.ul
               className="flex flex-col gap-2"

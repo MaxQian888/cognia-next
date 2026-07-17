@@ -14,6 +14,23 @@ describe("<MeRow />", () => {
     expect(screen.getByText("订阅")).toBeInTheDocument()
   })
 
+  it("uses a companion illustration instead of the Lucide fallback when supplied", () => {
+    const { container } = render(
+      <MeRow
+        icon={KeyRoundIcon}
+        spotIcon="secure-backup"
+        label="Backup"
+        href="/me/backup"
+      />
+    )
+
+    expect(screen.getByTestId("mobile-spot-icon-secure-backup")).toHaveAttribute(
+      "src",
+      "/icons/cognia-mobile-spots/png/secure-backup.png"
+    )
+    expect(container.querySelector("svg.lucide-key-round")).toBeNull()
+  })
+
   it("renders a button + invokes onClick when only onClick is provided", () => {
     const onClick = jest.fn()
     render(<MeRow icon={LogOutIcon} label="Sign out" onClick={onClick} />)

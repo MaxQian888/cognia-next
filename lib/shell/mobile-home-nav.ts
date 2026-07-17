@@ -21,6 +21,7 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
+import type { MobileSpotIconName } from "@/components/mobile/mobile-spot-icon"
 import {
   MOBILE_QUICK_ACTION_CATALOG,
   type MobileHomeLayout,
@@ -40,9 +41,23 @@ export const MOBILE_QUICK_ACTION_ICONS: Record<string, LucideIcon> = {
   me: UserRoundIcon,
 }
 
+/** id → spacious-card illustration. Dense editor rows keep the Lucide map above. */
+export const MOBILE_QUICK_ACTION_SPOT_ICONS: Record<string, MobileSpotIconName> = {
+  newChat: "chat",
+  search: "discover",
+  workflows: "workflows",
+  discover: "discover",
+  inbox: "chat",
+  twin: "digital-twin",
+  agentTeams: "agent-teams",
+  fleet: "device-sync",
+  me: "profile",
+}
+
 /** A catalog entry with its resolved icon. */
 export interface MobileQuickActionItem extends MobileQuickActionMeta {
   Icon: LucideIcon
+  spotIcon: MobileSpotIconName
 }
 
 /** The quick-action catalog with icons attached, in canonical order. */
@@ -50,6 +65,7 @@ export function getMobileQuickActionCatalog(): MobileQuickActionItem[] {
   return MOBILE_QUICK_ACTION_CATALOG.map((m) => ({
     ...m,
     Icon: MOBILE_QUICK_ACTION_ICONS[m.id] ?? PlusIcon,
+    spotIcon: MOBILE_QUICK_ACTION_SPOT_ICONS[m.id] ?? "chat",
   }))
 }
 

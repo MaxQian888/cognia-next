@@ -11,7 +11,6 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { BrainIcon } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
 import { EmptyState } from "@/components/mobile/empty-state"
@@ -66,7 +65,7 @@ export function MemoryMobileBody() {
       <PullToRefresh onRefresh={handleRefresh}>
         <section className="flex flex-col gap-2 px-4 pb-4">
           {visible.length === 0 ? (
-            <EmptyState icon={BrainIcon} title={t("empty")} />
+            <EmptyState spotIcon="memory" title={t("empty")} />
           ) : (
             visible.map((m) => (
               <MemoryRow

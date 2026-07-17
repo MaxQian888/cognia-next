@@ -176,6 +176,15 @@ describe("MePage platform gate", () => {
     expect(hrefOf("me-row-scheduler")).toBe("/me/scheduler")
   })
 
+  it("renders companion illustrations on the selected core feature entries", () => {
+    platformValue = "mobile"
+    render(<MePage />)
+
+    expect(screen.getByTestId("mobile-spot-icon-profile")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-spot-icon-workflows")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-spot-icon-secure-backup")).toBeInTheDocument()
+  })
+
   it("surfaces the new terminal and remote-sessions entries", () => {
     platformValue = "mobile"
     render(<MePage />)

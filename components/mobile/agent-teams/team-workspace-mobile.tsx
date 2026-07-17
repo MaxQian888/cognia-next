@@ -23,7 +23,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
 import { useLiveQuery } from "dexie-react-hooks"
-import { ArrowLeftIcon, UsersIcon } from "lucide-react"
+import { ArrowLeftIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -98,7 +98,7 @@ export function TeamWorkspaceMobile() {
       >
         <div className="px-4">
           <EmptyState
-            icon={UsersIcon}
+            spotIcon="agent-teams"
             title={t("missing")}
             cta={{
               label: tm("backToTeams"),

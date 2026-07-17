@@ -12,6 +12,7 @@
  */
 
 import type { LucideIcon } from "lucide-react"
+import type { MobileSpotIconName } from "@/components/mobile/mobile-spot-icon"
 import {
   ActivityIcon,
   AppWindowIcon,
@@ -74,6 +75,8 @@ export interface MeEntry {
   /** Stable id — drives the `me-row-<id>` test id and the pin set. */
   id: string
   icon: LucideIcon
+  /** Larger companion illustration for selected high-value feature rows. */
+  spotIcon?: MobileSpotIconName
   /** i18n key under `mobile.me.<labelKey>`. */
   labelKey: string
   href: string
@@ -118,6 +121,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "profile",
     icon: UserRoundIcon,
+    spotIcon: "profile",
     labelKey: "profileRow",
     href: "/me/profile",
     section: "account",
@@ -134,6 +138,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "sync",
     icon: RefreshCwIcon,
+    spotIcon: "device-sync",
     labelKey: "syncRow",
     href: "/me/sync",
     section: "account",
@@ -200,6 +205,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "conversation",
     icon: MessagesSquareIcon,
+    spotIcon: "chat",
     labelKey: "conversationRow",
     href: "/me/conversation",
     section: "appearance",
@@ -216,6 +222,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "canvas",
     icon: PenToolIcon,
+    spotIcon: "canvas",
     labelKey: "canvasRow",
     href: "/me/canvas",
     section: "appearance",
@@ -227,6 +234,7 @@ export const ME_ENTRIES: MeEntry[] = [
     id: "agent",
     pairedOnly: true,
     icon: BotIcon,
+    spotIcon: "digital-twin",
     labelKey: "agentRow",
     href: "/me/agent",
     section: "connection",
@@ -252,6 +260,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "connectors",
     icon: LinkIcon,
+    spotIcon: "connectors",
     labelKey: "connectorsRow",
     href: "/me/connectors",
     section: "connection",
@@ -268,6 +277,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "web-search",
     icon: SearchIcon,
+    spotIcon: "browser",
     labelKey: "webSearchRow",
     href: "/me/web-search",
     section: "connection",
@@ -276,6 +286,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "search",
     icon: SparklesIcon,
+    spotIcon: "discover",
     labelKey: "searchRow",
     href: "/search",
     section: "connection",
@@ -292,6 +303,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "terminal",
     icon: TerminalSquareIcon,
+    spotIcon: "terminal",
     labelKey: "terminalRow",
     href: "/me/terminal",
     section: "connection",
@@ -405,6 +417,7 @@ export const ME_ENTRIES: MeEntry[] = [
     id: "agent-teams-settings",
     pairedOnly: true,
     icon: UsersRoundIcon,
+    spotIcon: "agent-teams",
     labelKey: "agentTeamsSettingsRow",
     href: "/me/agent-teams-settings",
     section: "connection",
@@ -421,6 +434,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "skills",
     icon: GraduationCapIcon,
+    spotIcon: "skills",
     labelKey: "skillsRow",
     href: "/me/skills",
     section: "connection",
@@ -455,6 +469,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "scheduler",
     icon: CalendarClockIcon,
+    spotIcon: "scheduler",
     labelKey: "schedulerRow",
     href: "/me/scheduler",
     section: "automation",
@@ -463,6 +478,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "goals",
     icon: TargetIcon,
+    spotIcon: "goals",
     labelKey: "goalsRow",
     href: "/goals",
     section: "automation",
@@ -471,6 +487,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "workflows-settings",
     icon: WorkflowIcon,
+    spotIcon: "workflows",
     labelKey: "workflowsSettingsRow",
     href: "/me/workflows-settings",
     section: "automation",
@@ -481,6 +498,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "backup",
     icon: SaveIcon,
+    spotIcon: "secure-backup",
     labelKey: "backupRow",
     href: "/me/backup",
     section: "data",
@@ -505,6 +523,7 @@ export const ME_ENTRIES: MeEntry[] = [
   {
     id: "memory",
     icon: BrainIcon,
+    spotIcon: "memory",
     labelKey: "memoryRow",
     href: "/memory",
     section: "data",

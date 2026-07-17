@@ -630,6 +630,17 @@ describe("<DiscoverMobileBody />", () => {
       render(<DiscoverMobileBody />)
       expect(screen.getByText("emptyCharactersHint")).toBeInTheDocument()
     })
+
+    it.each([
+      ["characters", "profile"],
+      ["teams", "agent-teams"],
+      ["skills", "skills"],
+    ] as const)("uses the %s companion illustration for its empty state", (category, icon) => {
+      mockUseDiscoverQuery.mockReturnValue({ items: [], loading: false })
+      currentSearch = `?category=${category}`
+      render(<DiscoverMobileBody />)
+      expect(screen.getByTestId(`mobile-spot-icon-${icon}`)).toBeInTheDocument()
+    })
   })
 
   // ── Loading skeletons ───────────────────────────────────────────────────────

@@ -17,7 +17,6 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { TargetIcon } from "lucide-react"
 
 import { Card } from "@/components/ui/card"
 import { EmptyState } from "@/components/mobile/empty-state"
@@ -90,7 +89,7 @@ export function GoalsMobileBody() {
             </div>
           ) : rows.length === 0 ? (
             <EmptyState
-              icon={TargetIcon}
+              spotIcon="goals"
               title={section === "overview" ? t("console.activeEmpty") : t("history.empty")}
             />
           ) : (
