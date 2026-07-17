@@ -534,3 +534,90 @@ pub async fn git_watch_stop(
     super::watcher::stop(&state, &repo_path);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn git_on_path() -> bool {
+        std::process::Command::new("git")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok()
+    }
+
+    fn run_git(cwd: &std::path::Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?} failed");
+    }
+
+    fn staged_names(cwd: &std::path::Path) -> String {
+        let out = std::process::Command::new("git")
+            .args(["diff", "--cached", "--name-only"])
+            .current_dir(cwd)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[tokio::test]
+    async fn blocking_maps_a_panic_to_command_failed() {
+        // The blocking wrapper must turn a spawn_blocking panic into a typed
+        // CommandFailed instead of unwinding the command task.
+        let r: Result<(), GitError> = blocking("boom", || panic!("kaboom")).await;
+        assert!(matches!(r, Err(GitError::CommandFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn blocking_passes_through_ok_and_err() {
+        let ok: Result<i32, GitError> = blocking("ok", || Ok(7)).await;
+        assert_eq!(ok.unwrap(), 7);
+        let err: Result<(), GitError> =
+            blocking("err", || Err(GitError::InvalidArgument("x".into()))).await;
+        assert!(matches!(err, Err(GitError::InvalidArgument(_))));
+    }
+
+    #[tokio::test]
+    async fn resolve_conflict_without_content_or_side_is_invalid_argument() {
+        // The third dispatch branch: neither mergedContent nor side provided
+        // fails fast with InvalidArgument, before touching the repo.
+        let r = git_resolve_conflict("/nonexistent".into(), "f.txt".into(), None, None).await;
+        assert!(matches!(r, Err(GitError::InvalidArgument(_))));
+    }
+
+    #[tokio::test]
+    async fn stage_and_unstage_dispatch_to_paths_without_a_hunk() {
+        if !git_on_path() {
+            return;
+        }
+        // hunk_patch = None must route git_stage/git_unstage to whole-file
+        // (path) staging, not the hunk path.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let p = tmp.path();
+        run_git(p, &["init", "-q", "-b", "main"]);
+        run_git(p, &["config", "user.email", "t@e.com"]);
+        run_git(p, &["config", "user.name", "T"]);
+        std::fs::write(p.join("a.txt"), "one\n").unwrap();
+        run_git(p, &["add", "."]);
+        run_git(p, &["commit", "-q", "-m", "init"]);
+        std::fs::write(p.join("a.txt"), "two\n").unwrap();
+        let rp = p.to_string_lossy().into_owned();
+
+        git_stage(rp.clone(), vec!["a.txt".into()], None)
+            .await
+            .unwrap();
+        assert!(staged_names(p).contains("a.txt"));
+
+        git_unstage(rp, vec!["a.txt".into()], None).await.unwrap();
+        assert!(!staged_names(p).contains("a.txt"));
+    }
+}
