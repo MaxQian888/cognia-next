@@ -10,7 +10,7 @@
 "use client"
 
 import { useCallback, useEffect } from "react"
-import { isTauri } from "@/lib/tauri"
+import { isSourceControlUiAvailable } from "@/lib/git/commands"
 import { loadGitRepo } from "@/lib/git/load"
 import { useGitStore } from "@/stores/git/git-store"
 import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
@@ -24,7 +24,7 @@ export interface UseGitRepoResult {
 }
 
 export function useGitRepo(): UseGitRepoResult {
-  const available = isTauri()
+  const available = isSourceControlUiAvailable()
   const rootDir = useGitStore((s) => s.rootDir)
 
   const refresh = useCallback(() => loadGitRepo(rootDir), [rootDir])

@@ -21,7 +21,6 @@ import { useEffect, useRef, type ReactNode } from "react"
 import { motion } from "motion/react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { cn } from "@/lib/utils"
-import { isTauri } from "@/lib/tauri"
 import { useBreakpoint } from "@/hooks/ui"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -30,7 +29,6 @@ import {
   useArtifactDockLayoutStore,
 } from "@/stores/artifact/artifact-dock-layout-store"
 import { useArtifactDockShortcuts } from "@/hooks/artifacts/use-artifact-dock-shortcuts"
-import { useGitBranchIndicator } from "@/hooks/git/use-git-branch-indicator"
 import { ArtifactPanel } from "./artifact-panel"
 import { ArtifactDock } from "./artifact-dock"
 import { MobileWorkspaceSheet } from "./workspace-mode/mobile-workspace-sheet"
@@ -50,10 +48,6 @@ export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
 }
 
 function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
-  // DesktopAppShell's StatusBar remains the sole native watcher owner even
-  // when a Tauri window narrows. Paired web/mobile has no StatusBar, so this
-  // narrow host owns the Companion-side binding/subscription there.
-  useGitBranchIndicator({ enabled: !isTauri() })
   const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
   const mobileSheetOpen = useArtifactDockLayoutStore((state) => state.mobileSheetOpen)
   const setDockMode = useArtifactDockLayoutStore((state) => state.setDockMode)

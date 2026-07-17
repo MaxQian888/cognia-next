@@ -9,12 +9,9 @@
 "use client"
 
 import { useEffect } from "react"
-import { isTauri } from "@/lib/tauri"
-import { gitWatchStart, gitWatchStop } from "@/lib/git/commands"
+import { gitWatchStart, gitWatchStop, isSourceControlUiAvailable } from "@/lib/git/commands"
 import { subscribeGitStatusChanged } from "@/lib/git/events"
 import { loadGitRepo, refreshGitStatus } from "@/lib/git/load"
-import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
-import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 import { useProjectStore } from "@/stores/project/project-store"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { useGitBranchInfo, useGitBusy, useGitStore } from "@/stores/git/git-store"
@@ -47,9 +44,10 @@ export interface UseGitBranchIndicatorOptions {
 export function useGitBranchIndicator({
   enabled = true,
 }: UseGitBranchIndicatorOptions = {}): BranchIndicator {
-  const ownsNativeWatcher = isTauri()
-  const { paired } = useCompanionConfig()
-  const available = enabled && (ownsNativeWatcher || paired)
+  // Source Control is desktop-only for now (see `isSourceControlUiAvailable`).
+  // The chip and the panel (`useGitRepo`) share this one gate, so a live chip
+  // can never navigate to a dead panel.
+  const available = enabled && isSourceControlUiAvailable()
   const rootDir = useGitStore((s) => s.rootDir)
   const setRootDir = useGitStore((s) => s.setRootDir)
   const branchInfo = useGitBranchInfo()
@@ -76,18 +74,16 @@ export function useGitBranchIndicator({
     }
   }, [available, activeProjectRoot, setRootDir])
 
-  // Own the watcher + subscription for the bound repo.
+  // Own the native fs watcher + subscription for the bound repo. `available`
+  // implies Tauri, so watcher start/stop are unconditional here.
   useEffect(() => {
     if (!available || !rootDir) return undefined
     let cancelled = false
 
     void (async () => {
-      // Prime the synchronous transport cache before the first Companion RPC.
-      if (!ownsNativeWatcher) await hydrateCompanionConfig()
-      if (cancelled) return
       await loadGitRepo(rootDir)
       if (cancelled) return
-      if (ownsNativeWatcher) await gitWatchStart(rootDir)
+      await gitWatchStart(rootDir)
     })()
 
     const unsubscribe = subscribeGitStatusChanged((event) => {
@@ -97,9 +93,9 @@ export function useGitBranchIndicator({
     return () => {
       cancelled = true
       unsubscribe()
-      if (ownsNativeWatcher) void gitWatchStop(rootDir)
+      void gitWatchStop(rootDir)
     }
-  }, [available, ownsNativeWatcher, rootDir])
+  }, [available, rootDir])
 
   return {
     available,

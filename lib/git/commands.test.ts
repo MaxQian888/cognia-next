@@ -85,6 +85,7 @@ import {
   gitWorktreePrune,
   gitWorktreeRemove,
   hasGitBridge,
+  isSourceControlUiAvailable,
 } from "./commands"
 import { EMPTY_REPO_STATE, EMPTY_STATUS } from "@/types/git"
 
@@ -201,6 +202,18 @@ describe("when on a companion transport (Capacitor / paired web)", () => {
     expect(hasGitBridge()).toBe(false)
     hasWebCompanionTargetMock.mockReturnValue(true)
     expect(hasGitBridge()).toBe(true)
+  })
+
+  it("isSourceControlUiAvailable stays desktop-only, narrower than hasGitBridge", () => {
+    // The seam can reach git over a web-companion...
+    isTauriMock.mockReturnValue(false)
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    expect(hasGitBridge()).toBe(true)
+    // ...but the panel/chip UI is not offered off the desktop.
+    expect(isSourceControlUiAvailable()).toBe(false)
+    // On Tauri desktop both are live.
+    isTauriMock.mockReturnValue(true)
+    expect(isSourceControlUiAvailable()).toBe(true)
   })
 })
 

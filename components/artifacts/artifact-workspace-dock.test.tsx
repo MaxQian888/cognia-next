@@ -11,12 +11,6 @@ jest.mock("@/hooks/ui", () => ({
 jest.mock("@/hooks/artifacts/use-artifact-dock-shortcuts", () => ({
   useArtifactDockShortcuts: jest.fn(),
 }))
-jest.mock("@/hooks/git/use-git-branch-indicator", () => ({
-  useGitBranchIndicator: jest.fn(),
-}))
-jest.mock("@/lib/tauri", () => ({
-  isTauri: jest.fn(() => false),
-}))
 
 jest.mock("@/lib/ui/motion", () => ({
   mobileTransition: () => ({}),
@@ -81,19 +75,14 @@ jest.mock("./workspace-mode/workspace-reveal-opener", () => ({
 
 import { ArtifactWorkspaceDock } from "./artifact-workspace-dock"
 import { useBreakpoint } from "@/hooks/ui"
-import { useGitBranchIndicator } from "@/hooks/git/use-git-branch-indicator"
-import { isTauri } from "@/lib/tauri"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 
 const useBreakpointMock = useBreakpoint as jest.MockedFunction<typeof useBreakpoint>
-const useGitBranchIndicatorMock = useGitBranchIndicator as jest.Mock
-const isTauriMock = isTauri as jest.Mock
 
 beforeEach(() => {
   localStorage.clear()
   useBreakpointMock.mockReturnValue("desktop")
-  isTauriMock.mockReturnValue(false)
   act(() => {
     useArtifactDockLayoutStore.getState().resetLayout()
     useArtifactStore.setState({ activeArtifactId: null, panelOpen: false, panelView: "artifact" })
@@ -124,19 +113,6 @@ describe("ArtifactWorkspaceDock", () => {
     expect(screen.getByTestId("workspace-sheet")).toBeInTheDocument()
     expect(screen.getByTestId("workspace-reveal-opener")).toBeInTheDocument()
     expect(screen.queryByTestId("artifact-workspace-dock")).not.toBeInTheDocument()
-  })
-
-  it("keeps the StatusBar as sole Git controller owner in a narrow Tauri window", () => {
-    useBreakpointMock.mockReturnValue("tablet")
-    isTauriMock.mockReturnValue(true)
-
-    render(
-      <ArtifactWorkspaceDock>
-        <div data-testid="chat" />
-      </ArtifactWorkspaceDock>
-    )
-
-    expect(useGitBranchIndicatorMock).toHaveBeenCalledWith({ enabled: false })
   })
 
   it("tablet: also uses the Sheet fallback", () => {

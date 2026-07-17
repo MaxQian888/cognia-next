@@ -1,8 +1,10 @@
-const isTauriMock = jest.fn()
+const uiAvailableMock = jest.fn()
 const loadGitRepoMock = jest.fn()
 const openFolderAsWorkspaceMock = jest.fn()
 
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+jest.mock("@/lib/git/commands", () => ({
+  isSourceControlUiAvailable: () => uiAvailableMock(),
+}))
 jest.mock("@/lib/git/load", () => ({ loadGitRepo: (...a: unknown[]) => loadGitRepoMock(...a) }))
 jest.mock("@/lib/workspace/open-folder", () => ({
   openFolderAsWorkspace: (...a: unknown[]) => openFolderAsWorkspaceMock(...a),
@@ -13,7 +15,7 @@ import { useGitRepo } from "./use-git-repo"
 import { useGitStore } from "@/stores/git/git-store"
 
 beforeEach(() => {
-  isTauriMock.mockReset()
+  uiAvailableMock.mockReset()
   loadGitRepoMock.mockReset().mockResolvedValue(undefined)
   openFolderAsWorkspaceMock.mockReset().mockResolvedValue(null)
   act(() => useGitStore.setState({ rootDir: null }))
@@ -21,14 +23,14 @@ beforeEach(() => {
 
 describe("useGitRepo", () => {
   it("loads on mount when a repo is bound (desktop)", async () => {
-    isTauriMock.mockReturnValue(true)
+    uiAvailableMock.mockReturnValue(true)
     act(() => useGitStore.setState({ rootDir: "/repo" }))
     renderHook(() => useGitRepo())
     await waitFor(() => expect(loadGitRepoMock).toHaveBeenCalledWith("/repo"))
   })
 
   it("does not load on web", async () => {
-    isTauriMock.mockReturnValue(false)
+    uiAvailableMock.mockReturnValue(false)
     act(() => useGitStore.setState({ rootDir: "/repo" }))
     renderHook(() => useGitRepo())
     await Promise.resolve()
@@ -36,7 +38,7 @@ describe("useGitRepo", () => {
   })
 
   it("openFolder opens a folder as a workspace (indicator binds rootDir)", async () => {
-    isTauriMock.mockReturnValue(true)
+    uiAvailableMock.mockReturnValue(true)
     openFolderAsWorkspaceMock.mockResolvedValue({ id: "p1" })
     const { result } = renderHook(() => useGitRepo())
     await act(async () => {
@@ -49,7 +51,7 @@ describe("useGitRepo", () => {
   })
 
   it("refresh proxies to loadGitRepo for the bound path", async () => {
-    isTauriMock.mockReturnValue(true)
+    uiAvailableMock.mockReturnValue(true)
     act(() => useGitStore.setState({ rootDir: "/repo" }))
     const { result } = renderHook(() => useGitRepo())
     loadGitRepoMock.mockClear()

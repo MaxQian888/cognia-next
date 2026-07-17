@@ -43,11 +43,27 @@ import {
 /**
  * Whether a transport that can actually reach the native git backend is
  * active: Tauri desktop, the Capacitor mobile shell, or a web client paired
- * with a cognia server. UI callers use this (not `isTauri()`) to decide
- * whether source-control features are live.
+ * with a cognia server. This is the *seam capability* gate — every command
+ * wrapper below short-circuits on it. It is NOT the UI-availability gate:
+ * whether the Source Control *panel* is offered is a separate, narrower
+ * decision (see {@link isSourceControlUiAvailable}).
  */
 export function hasGitBridge(): boolean {
   return isTauri() || isCapacitor() || hasWebCompanionTarget()
+}
+
+/**
+ * Whether the Source Control *UI* — the panel and the StatusBar branch chip —
+ * should be offered. Deliberately narrower than {@link hasGitBridge}: the panel
+ * is desktop-only for now. The seam can already reach git over Capacitor and a
+ * web-companion, but surfacing the panel there needs repo-binding, fs-watcher,
+ * and open-folder semantics redefined for a repo-less mobile shell and a remote
+ * host — tracked as an ADR-0038 follow-up. Both the panel (`useGitRepo`) and
+ * the chip (`useGitBranchIndicator`) gate on THIS single helper so a live chip
+ * can never navigate to a dead panel.
+ */
+export function isSourceControlUiAvailable(): boolean {
+  return isTauri()
 }
 
 // ----------------------------------------------------------------- reads
