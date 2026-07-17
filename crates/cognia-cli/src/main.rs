@@ -221,6 +221,10 @@ pub(crate) enum PluginCommand {
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
+        /// Treat warnings as errors: exit non-zero if any warning is present
+        /// (notices never gate). Useful in CI to keep warnings from rotting.
+        #[arg(short = 'W', long = "warnings-as-errors")]
+        warnings_as_errors: bool,
     },
     /// Build or package the plugin into a `.zip` bundle.
     Build {
@@ -483,13 +487,17 @@ fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Result<()> {
                 ui,
             )
         }
-        PluginCommand::Lint { path, json } => {
+        PluginCommand::Lint {
+            path,
+            json,
+            warnings_as_errors,
+        } => {
             ui.flags.json = json;
             ui.verbose(format!(
-                "running plugin lint path={} json={json}",
+                "running plugin lint path={} json={json} warnings_as_errors={warnings_as_errors}",
                 path.display()
             ));
-            cmd_lint::run(path, json, ui)
+            cmd_lint::run(path, json, warnings_as_errors, ui)
         }
         PluginCommand::Build {
             path,

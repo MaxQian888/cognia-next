@@ -258,6 +258,12 @@ const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
 pub enum Severity {
     Error,
     Warning,
+    /// Informational tier: surfaced, but never gates — not even under
+    /// `--warnings-as-errors`. Reserved for advisory rules (e.g. the
+    /// version-compatibility notices in W3.4). No production rule emits one
+    /// yet; tests construct it to pin the non-gating behavior.
+    #[allow(dead_code)]
+    Notice,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -295,6 +301,13 @@ impl LintReport {
         self.diagnostics
             .iter()
             .filter(|d| d.severity == Severity::Warning)
+            .count()
+    }
+
+    pub fn notice_count(&self) -> usize {
+        self.diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Notice)
             .count()
     }
 }
@@ -337,7 +350,12 @@ impl std::error::Error for LintError {}
 ///
 /// `_ui` is accepted but unused in Phase 1; Phase 2 paints diagnostics
 /// with severity color and uses `ui.json()` instead of the bool argument.
-pub fn run(path: PathBuf, as_json: bool, ui: &mut RuntimeUi) -> Result<()> {
+pub fn run(
+    path: PathBuf,
+    as_json: bool,
+    warnings_as_errors: bool,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
     let crate_root = match path.canonicalize() {
         Ok(root) => root,
         Err(err) if as_json => {
@@ -357,10 +375,14 @@ pub fn run(path: PathBuf, as_json: bool, ui: &mut RuntimeUi) -> Result<()> {
         Err(err) => return Err(err),
     };
     let diagnostics = validate_manifest(&manifest);
+    // `valid` describes the manifest (no errors); `ok` describes this run's
+    // gate. Under `--warnings-as-errors`, warnings escalate the exit but do
+    // not change `valid`. Notices never gate on either axis.
     let valid = !diagnostics.iter().any(|d| d.severity == Severity::Error);
+    let ok = run_passes(&diagnostics, warnings_as_errors);
     let report = LintReport {
-        schema_version: 1,
-        ok: valid,
+        schema_version: 2,
+        ok,
         action: "lint",
         manifest_path,
         valid,
@@ -368,14 +390,22 @@ pub fn run(path: PathBuf, as_json: bool, ui: &mut RuntimeUi) -> Result<()> {
     };
     if as_json {
         println!("{}", serde_json::to_string_pretty(&report)?);
-    } else if !ui.flags.quiet || !report.valid {
+    } else if !ui.flags.quiet || !ok {
         print_human(&report);
     }
-    if report.valid {
+    if ok {
         Ok(())
     } else {
         Err(LintError { report }.into())
     }
+}
+
+/// Whether a lint run passes its gate. Errors always gate; warnings gate only
+/// under `--warnings-as-errors`; notices never gate on either axis.
+fn run_passes(diagnostics: &[Diagnostic], warnings_as_errors: bool) -> bool {
+    let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
+    let has_warning = diagnostics.iter().any(|d| d.severity == Severity::Warning);
+    !has_error && !(warnings_as_errors && has_warning)
 }
 
 #[derive(Debug, Serialize)]
@@ -392,7 +422,7 @@ struct LintFailureReport {
 
 fn emit_json_input_failure(path: &Path, error: String, code: &'static str) -> Result<()> {
     let report = LintFailureReport {
-        schema_version: 1,
+        schema_version: 2,
         ok: false,
         action: "lint",
         stage: "input",
@@ -418,7 +448,7 @@ pub fn validate_at(path: &Path) -> Result<LintReport> {
     let diagnostics = validate_manifest(&manifest);
     let valid = !diagnostics.iter().any(|d| d.severity == Severity::Error);
     Ok(LintReport {
-        schema_version: 1,
+        schema_version: 2,
         ok: valid,
         action: "lint",
         manifest_path,
@@ -441,6 +471,7 @@ fn print_human(report: &LintReport) {
         let tag = match d.severity {
             Severity::Error => style::error("ERROR"),
             Severity::Warning => style::warn("WARN "),
+            Severity::Notice => style::dim("NOTE "),
         };
         println!("  [{tag}] {}: {}", style::bold(&d.field), d.message);
         if let Some(hint) = &d.hint {
@@ -449,15 +480,24 @@ fn print_human(report: &LintReport) {
         println!("         code: {}", style::dim(&d.code));
     }
     println!();
-    let summary = format!(
+    let mut summary = format!(
         "{} error(s), {} warning(s)",
         report.error_count(),
         report.warning_count()
     );
-    if report.valid {
+    if report.notice_count() > 0 {
+        summary.push_str(&format!(", {} notice(s)", report.notice_count()));
+    }
+    if !report.valid {
+        println!("{}", style::error(&summary));
+    } else if !report.ok {
+        // No errors, but `--warnings-as-errors` escalated the warnings.
+        println!("{} (--warnings-as-errors)", style::error(&summary));
+    } else if report.warning_count() > 0 {
         println!("{}", style::warn(&summary));
     } else {
-        println!("{}", style::error(&summary));
+        // Notices only — passes cleanly.
+        println!("{}{summary}", style::success_prefix());
     }
 }
 
@@ -2137,6 +2177,67 @@ mod tests {
     }
 
     #[test]
+    fn notices_never_gate_even_with_warnings_as_errors() {
+        let notice = Diagnostic {
+            severity: Severity::Notice,
+            field: "x".into(),
+            code: "manifest.demo.notice".into(),
+            message: "informational".into(),
+            hint: None,
+        };
+        // A notice passes the gate on both axes.
+        assert!(run_passes(std::slice::from_ref(&notice), false));
+        assert!(
+            run_passes(std::slice::from_ref(&notice), true),
+            "a notice must not gate even under --warnings-as-errors"
+        );
+
+        let warning = Diagnostic {
+            severity: Severity::Warning,
+            ..notice.clone()
+        };
+        assert!(run_passes(std::slice::from_ref(&warning), false));
+        assert!(
+            !run_passes(std::slice::from_ref(&warning), true),
+            "--warnings-as-errors must escalate a warning"
+        );
+
+        let error = Diagnostic {
+            severity: Severity::Error,
+            ..notice
+        };
+        assert!(!run_passes(std::slice::from_ref(&error), false));
+        assert!(!run_passes(std::slice::from_ref(&error), true));
+    }
+
+    #[test]
+    fn warnings_as_errors_flips_the_exit_on_a_warning() {
+        // A manifest with exactly one warning (long name) and no errors.
+        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags {
+            json: true,
+            ..crate::ui::runtime::UiFlags::default()
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let mut m = minimal_frontend();
+        m["name"] = json!("a".repeat(60));
+        std::fs::write(
+            tmp.path().join("plugin.json"),
+            serde_json::to_vec_pretty(&m).unwrap(),
+        )
+        .unwrap();
+
+        // Without -W: the warning does not gate → Ok.
+        run(tmp.path().to_path_buf(), true, false, &mut ui)
+            .expect("a warning alone must not fail lint");
+        // With -W: the same warning gates → Err.
+        let err = run(tmp.path().to_path_buf(), true, true, &mut ui).unwrap_err();
+        assert!(
+            err.is::<LintError>(),
+            "--warnings-as-errors must fail on a warning"
+        );
+    }
+
+    #[test]
     fn validate_at_returns_report() {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("plugin.json");
@@ -2155,7 +2256,7 @@ mod tests {
             ..crate::ui::runtime::UiFlags::default()
         });
 
-        let err = run(tmp.path().to_path_buf(), true, &mut ui).unwrap_err();
+        let err = run(tmp.path().to_path_buf(), true, false, &mut ui).unwrap_err();
         let err = err
             .downcast_ref::<LintError>()
             .expect("invalid lint reports should return a downcastable LintError");

@@ -706,10 +706,38 @@ fn lint_json_carries_schema_version() {
     assert_eq!(code, Some(0));
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("lint --json should emit valid JSON");
-    assert_eq!(parsed["schemaVersion"], serde_json::Value::Number(1.into()));
+    assert_eq!(parsed["schemaVersion"], serde_json::Value::Number(2.into()));
     assert_eq!(parsed["ok"], true);
     assert_eq!(parsed["action"], "lint");
     assert_eq!(parsed["valid"], serde_json::Value::Bool(true));
+}
+
+#[test]
+fn lint_warnings_as_errors_flips_the_exit() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Exactly one warning (name > 50 chars) and no errors; empty capabilities
+    // avoids the field cross-check.
+    let manifest = format!(
+        r#"{{"id":"warnprobe","name":"{}","version":"0.1.0","description":"smoke","type":"frontend","capabilities":[],"main":"dist/index.js"}}"#,
+        "a".repeat(60)
+    );
+    std::fs::write(tmp.path().join("plugin.json"), manifest).unwrap();
+    let path = tmp.path().to_str().unwrap();
+
+    // Default: a warning does not gate.
+    let (code, _o, _e) = run_cognia(&["plugin", "lint", "--path", path]);
+    assert_eq!(code, Some(0), "a warning alone must not fail lint");
+
+    // -W: the same warning gates.
+    let (code_w, _o, _e) = run_cognia(&["plugin", "lint", "--path", path, "-W"]);
+    assert_ne!(code_w, Some(0), "--warnings-as-errors must fail on a warning");
+
+    // The payload marks the run not-ok while the manifest stays valid.
+    let (_c, stdout, _e) = run_cognia(&["plugin", "lint", "--path", path, "-W", "--json"]);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(parsed["schemaVersion"], 2);
+    assert_eq!(parsed["valid"], true, "no errors → manifest is valid");
+    assert_eq!(parsed["ok"], false, "-W escalates the warning → run not ok");
 }
 
 #[test]
@@ -728,7 +756,7 @@ fn lint_json_failure_exits_nonzero_without_extra_error_report() {
     assert_ne!(code, Some(0), "lint should fail on broken manifest");
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("lint --json failure should emit valid JSON only");
-    assert_eq!(parsed["schemaVersion"], 1);
+    assert_eq!(parsed["schemaVersion"], 2);
     assert_eq!(parsed["ok"], false);
     assert_eq!(parsed["action"], "lint");
     assert_eq!(parsed["valid"], false);
@@ -758,7 +786,7 @@ fn plugin_lint_json_missing_path_emits_input_payload_without_human_noise() {
     assert_ne!(code, Some(0), "lint should fail for a missing plugin path");
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("lint --json input failure should emit valid JSON");
-    assert_eq!(parsed["schemaVersion"], 1);
+    assert_eq!(parsed["schemaVersion"], 2);
     assert_eq!(parsed["ok"], false);
     assert_eq!(parsed["action"], "lint");
     assert_eq!(parsed["stage"], "input");
