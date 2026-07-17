@@ -8,23 +8,34 @@
  * against the authoritative TS sources, so a drift fails here loudly.
  */
 
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { CANONICAL_PLUGIN_CAPABILITIES } from "./plugin-capabilities"
 
 const REPO_ROOT = join(__dirname, "..", "..", "..")
-const RUST_LINT = readFileSync(
-  join(REPO_ROOT, "crates", "cognia-cli", "src", "cmd_lint.rs"),
-  "utf8"
-)
-const TS_VALIDATION = readFileSync(
-  join(REPO_ROOT, "lib", "plugin", "core", "validation.ts"),
-  "utf8"
-)
-const API_BRIDGE = readFileSync(
-  join(REPO_ROOT, "src-tauri", "src", "plugin_api", "api_bridge.rs"),
-  "utf8"
-)
+
+/**
+ * Read a load-bearing parity source, failing *loudly* if it has moved. A
+ * silent ENOENT here disables the whole suite: when ADR-0067 relocated
+ * api_bridge.rs on 2026-07-13, this file ENOENT'd at module load, so 0 tests
+ * ran and drift stopped being caught while the red state read like just
+ * another known-broken baseline. An explicit "it moved — repoint this guard"
+ * error is the difference between a fix and a rearmed trap.
+ */
+function readGuarded(...segments: string[]): string {
+  const path = join(REPO_ROOT, ...segments)
+  if (!existsSync(path)) {
+    throw new Error(
+      `parity-guard source not found: ${path} — it moved. Repoint this guard; ` +
+        `a silent ENOENT here disables Rust↔TS capability parity checking entirely.`
+    )
+  }
+  return readFileSync(path, "utf8")
+}
+
+const RUST_LINT = readGuarded("crates", "cognia-cli", "src", "cmd_lint.rs")
+const TS_VALIDATION = readGuarded("lib", "plugin", "core", "validation.ts")
+const API_BRIDGE = readGuarded("crates", "cognia-plugin-runtime", "src", "api_bridge.rs")
 
 /** Permission strings advertised inside the gateway's `capability_table()`. */
 function extractCapabilityTablePermissions(source: string): Set<string> {
