@@ -8,7 +8,7 @@ description: >-
   event (PreToolUse, PostToolUse, UserPromptSubmit, SessionStart/End, Stop,
   PreCompact, InstructionsLoaded, …), gate/deny a tool or prompt, inject context
   into a turn, or "make cognia do X automatically before/after the agent runs".
-  Covers built-in hook scripts under hooks/builtin/, the lib/Codex/hooks/
+  Covers built-in hook scripts under hooks/builtin/, the lib/claude/hooks/
   registry, the CLI + Rust runners, and the plugin hook SDK. Use it even when the
   user only says "add a hook", "block edits to X", "auto-load context", or
   "run a check before every tool call" without naming the hook system.
@@ -22,7 +22,7 @@ contracts, runtimes, and audiences.
 | | **System B — built-in / settings.json hooks** | **System A — plugin hooks** |
 |---|---|---|
 | What | External command/webhook scripts fired by the Rust + CLI runtime | In-process JS/Python callbacks dispatched to loaded plugins |
-| Author as | A self-contained `*.mjs` script + a registry entry (or a user `settings.json` entry) | A `@hook("event")` handler in a plugin's TS/Python entry |
+| Author as | A self-contained `*.mjs` script + mirrored TS/Rust registry entries (or a user `settings.json` entry) | A `@hook("event")` handler in a plugin's TS/Python entry |
 | Can block? | Yes — `PreToolUse` / `UserPromptSubmit` (non-zero exit / `permissionDecision: deny`) | Depends on the hook (pipeline hooks transform; observers don't) |
 | Runs in | Desktop (Rust) + CLI (Node). Web/mobile: command hooks no-op | Anywhere the plugin is loaded |
 | Best for | Repo/policy guards, context loaders, budget gates shipped with the product | Plugin-specific reactions to app events |
@@ -33,9 +33,9 @@ build a **System-B built-in hook** (most common — start here). If the behavior
 belongs to a specific plugin reacting to an app event, build a **System-A
 plugin hook**.
 
-Read `references/hook-event-catalog.md` for the full event list, which events
-actually fire where, and each event's payload shape — consult it before picking
-an event so you don't wire a hook to a dormant one.
+Read `references/hook-event-catalog.md` before choosing an event. Confirm it
+against the authoritative metadata in `lib/claude/hooks/event-catalog.ts`; a
+typed event can still be dormant.
 
 ---
 
@@ -46,8 +46,7 @@ merged **under** the user's own settings (so users can override/disable it).
 
 ### 1. Write the script — `hooks/builtin/<domain>-<policy>.mjs`
 
-Follow the house pattern (see the existing `hooks/builtin/*.mjs` and
-`.Codex/hooks/protect-generated-files.mjs`). The script is self-contained Node
+Follow the house pattern in `hooks/builtin/*.mjs`. The script is self-contained Node
 with no `lib/` imports, because it runs as a spawned subprocess in both the
 desktop and CLI runtimes.
 
@@ -75,9 +74,16 @@ of their own agent — soft-allow (exit 0) on any ambiguity. See
 `cost-quota-guard.mjs`: an unparseable budget exits 0, not 2. Cap any injected
 context so a runaway file can't blow the prompt budget.
 
-### 2. Register it — `lib/Codex/hooks/builtin-hooks.ts`
+### 2. Register it in both shell catalogs
 
-Add a `BuiltinHookDef` to the `BUILTIN_HOOKS` array:
+Add matching entries to:
+
+- `lib/claude/hooks/builtin-hooks.ts` for the renderer/CLI runtime
+- `src-tauri/src/hooks/builtin.rs` for the Rust desktop runtime
+
+The two catalogs are intentionally mirrored; neither is generated from the
+other. Keep `id`, event, matcher, script, and default-enabled state identical.
+Add the TypeScript entry in this shape:
 
 ```ts
 {
@@ -95,24 +101,27 @@ fresh install never unexpectedly denies a turn; a purely additive hook (only
 adds context when a file exists) may default `true`. The registry resolves each
 id through `builtinHookOverrides` (id → enabled), so users keep final control.
 
-### 3. The wiring is already done — verify, don't rebuild
+### 3. Verify the existing merge seams
 
 - **CLI:** `createHookRunner` (`cli/src/tui/runtime/hook-runner.ts`) already
   calls `buildBuiltinHookGroups` and merges it under user hooks via `loadHooks`.
   A new registry entry is picked up automatically.
-- **Desktop:** the Rust settings loader merges the same registry under
-  user/project/local settings (`src-tauri/src/hooks/`).
+- **Desktop:** `src-tauri/src/hooks/builtin.rs` builds and merges the Rust
+  catalog under user/project/local settings.
 - **Override field:** `builtinHookOverrides` exists in the CLI config schema and
   the desktop settings; the Settings → Hooks "Built-in hooks" list toggles it.
 
 ### 4. Test it (required — coverage gate ≥90%)
 
-- Add spawn-smoke cases to `lib/Codex/hooks/builtin-hooks.test.ts`: run the
+- Add spawn-smoke cases to `lib/claude/hooks/builtin-hooks.test.ts`: run the
   script with `execFileSync(process.execPath, [scriptPath], { input })` and
   assert exit code + stdout/stderr for the allow, block, and inject paths.
 - If you added a registry entry, assert `buildBuiltinHookGroups` emits/omits it
   under the right `overrides`.
-- Run `NODE_ENV=test npx jest lib/Codex/hooks` from the repo root.
+- Extend the Rust tests in `src-tauri/src/hooks/builtin.rs` so catalog parity,
+  defaults, overrides, and command construction stay covered.
+- Run `rtk pnpm test -- lib/claude/hooks/builtin-hooks.test.ts` and
+  `rtk cargo test --manifest-path src-tauri/Cargo.toml hooks::builtin`.
 
 ---
 
@@ -150,6 +159,7 @@ same interface with `cli/src/tui/runtime/lifecycle-firer.ts`.
 ## Before you call it done
 
 - The event you chose actually fires (catalog) — a hook on a dormant event is dead code.
-- Co-located tests cover allow / block / inject; `pnpm test:coverage` stays ≥90%.
-- Any new user-facing string (settings label, toast) has en + zh keys; `pnpm lint:i18n` passes.
+- Co-located tests cover allow / block / inject; `rtk pnpm test:coverage` stays ≥90%.
+- Any new user-facing string (settings label, toast) has en + zh keys;
+  `rtk pnpm lint:i18n` passes.
 - Run the `preflight` skill — the `wiring-auditor` confirms the hook is reachable, not built-but-dormant.

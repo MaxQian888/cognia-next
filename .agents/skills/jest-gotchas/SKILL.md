@@ -1,12 +1,11 @@
 ---
 name: jest-gotchas
-description: Repo-specific Jest/RTL/eslint traps for cognia-next, each with the working pattern. Use before writing or fixing any test in this repo, and when hitting TDZ errors in jest.mock factories, failing spyOn, TS2556, Radix interaction failures, or set-state-in-effect lint blocks.
+description: Diagnose Cognia-specific Jest, RTL, and test-lint failures. Use when writing or fixing tests, especially for jest.mock TDZ behavior, ESM namespace spies, strict jest.fn types, Radix interactions, hidden content, ESM dependencies, or coverage collection.
 ---
 
 # Jest / RTL / ESLint Gotchas (cognia-next)
 
-Every entry below cost a debugging round. Check this list BEFORE writing
-tests, and again when a test fails for a non-obvious reason.
+Use the narrowest applicable pattern, then prove it with the changed test file.
 
 ## jest.mock traps
 
@@ -48,24 +47,23 @@ tests, and again when a test fails for a non-obvious reason.
 
 ## ESLint rules that block common test/impl patterns
 
-7. **set-state-in-effect** — synchronous `setState` inside `useEffect` is
-   blocked by the local eslint config (and runs in lint-staged on commit).
-   Prefer derived state during render; deriving selection from props beats
-   set-state-in-effect (established pattern in the skills page).
-8. **no-Date.now / ref-write / inner-component-in-render** are also enforced
-   — inject clocks, don't write refs during render, hoist nested component
-   definitions.
+7. **React compiler lint** — outside vendored `components/ui/` and
+   `components/ai-elements/`, prefer render-derived state, inject clocks, write
+   refs in effects/handlers, and hoist nested components. The vendored paths
+   have explicit relaxations in `eslint.config.mjs`; application code does not.
 
 ## Runner traps
 
-9. **`pnpm test -- --coverage` treats flags as test-name patterns** (runs
+8. **`pnpm test -- --coverage` treats flags as test-name patterns** (runs
    nothing useful). Coverage is `pnpm test:coverage` only.
-10. **Single file**: `pnpm test -- path/to/file.test.ts`. Narrow first; the
+9. **Single file**: `rtk pnpm test -- path/to/file.test.ts`. Narrow first; the
     full suite is the final gate.
-11. **Stale background tsc** — a long-running `tsc --watch`/background check
-    can report errors from a previous tree state; re-run `rtk tsc` fresh
+10. **Stale background tsc** — a long-running `tsc --watch`/background check
+    can report errors from a previous tree state; re-run `rtk pnpm typecheck`
     before trusting failures you didn't cause.
-12. **Coverage exemptions**: pure type-only modules go in the
-    `collectCoverageFrom` exclusion list in `jest.config.ts` (V8 reports 0%
-    for them). A new type-only file must either be excluded there or get a
-    surface test, or the gate drops.
+11. **ESM dependency parse errors** — add only the failing package to the
+    pnpm-aware negative lookahead in `jest.config.ts#transformIgnorePatterns`;
+    copy the existing scoped-package forms instead of replacing the pattern.
+12. **Coverage exemptions** — exclude a genuinely type-only barrel beside the
+    existing `collectCoverageFrom` exceptions in `jest.config.ts`; runtime
+    constants or guards still require tests.

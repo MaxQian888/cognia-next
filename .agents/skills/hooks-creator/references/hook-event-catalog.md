@@ -1,10 +1,11 @@
 # Hook event catalog (System B)
 
 The 27 lifecycle events the settings.json runtime knows, where they fire, and
-whether a hook on them can block. Canonical source: `src-tauri/src/hooks/types.rs`
-(Rust) mirrored in `cli/src/hooks/types.ts` and `lib/claude/hooks.ts`. Mapping
-from the agent stream lives in `src-tauri/src/hooks/classify.rs` and
-`cli/src/hooks/classify.ts`.
+whether a hook on them can block. Canonical product metadata lives in
+`lib/claude/hooks/event-catalog.ts`; wire types mirror it in
+`src-tauri/src/hooks/types.rs`, `cli/src/hooks/types.ts`, and
+`lib/claude/hooks.ts`. Agent-stream classification lives in
+`src-tauri/src/hooks/classify.rs` and `cli/src/hooks/classify.ts`.
 
 **Before wiring a hook, confirm the event fires.** A hook on a dormant event is
 dead code.
@@ -24,7 +25,8 @@ dead code.
 | `TaskCreated` / `TaskCompleted` | `system/task_started` / `task_notification` |
 | `PermissionRequest` / `PermissionDenied` | the permission round-trip |
 
-These also fire for the **external agents** (claude-code/codex/opencode) via the
+Relevant lifecycle seams also fire for **external agents** (Claude Code, Codex,
+OpenCode) via the
 TS bridge `lib/ai/agent/external/agent-hooks.ts`, and for the **goal judge** and
 **team planning** via `lib/claude/hooks/lifecycle-firer.ts`.
 
@@ -63,7 +65,8 @@ UI badges them "no trigger source yet". Add a source before relying on them.
 
 ## Built-in hooks shipped today
 
-See `lib/claude/hooks/builtin-hooks.ts` and `hooks/builtin/`:
+See the mirrored catalogs in `lib/claude/hooks/builtin-hooks.ts` and
+`src-tauri/src/hooks/builtin.rs`, plus `hooks/builtin/`:
 
 - `auto-context-loader.mjs` — injects `.cognia/agent-context.md` (SessionStart + UserPromptSubmit; default ON).
 - `cost-quota-guard.mjs` — denies a turn over the session token budget (UserPromptSubmit; default OFF).

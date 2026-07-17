@@ -7,18 +7,18 @@ description: Agent Media OS, the single skill for every media need in a HyperFra
 
 The media OS for HyperFrames: resolve · generate · operate · remember, every media type, one skill, zero context noise.
 
-## Setup — install heygen first (free-usage path)
+## Setup — inspect before installing
+
+Run the local doctor first. If the requested operation needs HeyGen and the CLI is absent or outdated, explain what will be installed, where credentials are stored, and whether OAuth or API credits will be used. Install or authenticate only with explicit user approval.
 
 ```bash
-curl -fsSL https://static.heygen.ai/cli/install.sh | bash
-heygen update             # free usage needs the OAuth-capable CLI (v0.3.0+)
-heygen auth login --oauth # OAuth = free subscription credits; --api-key bills API credits
+rtk node <SKILL_DIR>/scripts/resolve.mjs --doctor
 ```
 
-This unlocks the FREE path for bgm/sfx/image/icon catalog search, TTS (voice), and avatar videos. Sign in with `--oauth` — the free allowance rides on the OAuth session (an API key bills API credits instead). **media-use requires heygen >= v0.3.0 uniformly** (the OAuth free-usage path needs it), so `--doctor` nudges older CLIs to update even for API-key-only use. Before resolving anything, verify setup with:
+The HeyGen free path covers catalog search, TTS, and avatar video. OAuth uses subscription credits while an API key may bill API credits. After the user approves setup, follow the current official HeyGen install/auth instructions and rerun:
 
 ```bash
-node <SKILL_DIR>/scripts/resolve.mjs --doctor
+rtk node <SKILL_DIR>/scripts/resolve.mjs --doctor
 ```
 
 ## What it owns (the gaps HyperFrames leaves)
@@ -423,21 +423,15 @@ runs; providers tag requests with the allowlisted `X-HeyGen-Client-Source` heade
 
 ## Telemetry
 
-`resolve` and the edit tools (transcribe / transcript-cut / audio-duck) send an
-anonymous usage event to PostHog (`scripts/lib/telemetry.mjs`), so we can see
-which capabilities are actually used. It records only the media TYPE, the
-resolution SOURCE, and the winning PROVIDER: never the intent text, file names,
-or paths, and `$ip:null` so no IP is stored. Best-effort and non-blocking (a
-resolve never waits on or fails from telemetry).
-
-Opt out with `DO_NOT_TRACK=1` or `HYPERFRAMES_NO_TELEMETRY=1` (also off in CI and
-dev). Same public PostHog project key and opt-outs as the `hyperframes` CLI.
+Default project runs to no telemetry by setting `DO_NOT_TRACK=1` or
+`HYPERFRAMES_NO_TELEMETRY=1` before invoking media-use scripts. Enable anonymous
+events only after explicit user opt-in. Even then, inspect the command and never
+transmit intent text, file names, paths, media contents, credentials, or account
+identifiers.
 
 ## Privacy
 
-media-use uses the same shared install id as the `hyperframes` CLI/studio
-(`~/.hyperframes/config.json`). When you are signed in to HeyGen, usage is
-linked to your account email, or username when email is unavailable, matching
-the CLI behavior. The events stay coarse: media type, source, provider, and
-small counts only; intent text and paths stay local. Disable telemetry with
-`HYPERFRAMES_NO_TELEMETRY=1` or `DO_NOT_TRACK=1`.
+media-use may share local configuration with the HyperFrames CLI/studio. Treat
+that configuration and any authenticated HeyGen identity as private. Keep
+telemetry disabled unless the user explicitly opts in, and never surface tokens
+or account data in logs or generated project artifacts.

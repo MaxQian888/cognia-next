@@ -41,10 +41,10 @@ generator absorbs all the styling and routing so the spec stays small.
 
 ```
 ① write spec.json (nodes/groups/cards/edges/legend, absolute coords)
-② node svggen.cjs spec.json out.svg           # spec → styled SVG
-③ whiteboard-cli -i out.svg -o out.png -s 2   # local PNG preview — iterate here
-④ docs +create … <whiteboard type="svg" path="@out.svg">   # land in Feishu
-⑤ whiteboard +query --output_as image         # export thumbnail, verify Feishu render
+② rtk node svggen.cjs spec.json out.svg              # spec → styled SVG
+③ rtk pnpm dlx @larksuite/whiteboard-cli …           # local PNG preview
+④ rtk lark-cli docs +create … <whiteboard …>         # land in Feishu
+⑤ rtk lark-cli whiteboard +query --output_as image   # verify Feishu render
 ```
 
 **Always preview locally (③) and iterate before writing to Feishu.** Rendering is
@@ -63,7 +63,7 @@ cp <skill>/scripts/spec.sample.json <work>/spec-1.json   # rect/group/cylinder/l
 cp <skill>/scripts/spec.cards-sample.json <work>/         # card-panorama example (system overview)
 ```
 
-Dependencies: `node`, `npx` (pulls `@larksuite/whiteboard-cli@^0.2.11`), and
+Dependencies: `node`, `pnpm` (runs `@larksuite/whiteboard-cli@^0.2.11`), and
 `lark-cli` logged in as user (see the `lark-shared` skill for auth). All `lark-cli`
 calls use `--as user`.
 
@@ -95,8 +95,9 @@ labels** (`①②③…`) and carry the description in node subtitles instead.
 ## Step ② / ③ — generate and preview
 
 ```bash
-node svggen.cjs spec-1.json 1.svg
-npx -y @larksuite/whiteboard-cli@^0.2.11 -i 1.svg -o 1.png -s 2   # or --check for overlap report
+rtk node svggen.cjs spec-1.json 1.svg
+rtk pnpm dlx @larksuite/whiteboard-cli@^0.2.11 -i 1.svg -o 1.png -s 2
+# Replace the render flags with --check for an overlap report.
 ```
 
 Read `1.png`, fix coordinates/labels, regenerate. This is the iteration loop —
@@ -112,8 +113,7 @@ resolves. Full recipe, the mermaid alternative, and every trap are in
 to Feishu. The core call:
 
 ```bash
-cd <work>   # dir containing the .svg files and doc.xml
-lark-cli docs +create --content "$(cat doc.xml)" --as user --json
+rtk lark-cli docs +create --content "$(rtk cat doc.xml)" --as user --json
 # doc.xml uses: <whiteboard type="svg" path="@1.svg"></whiteboard>
 ```
 
@@ -124,7 +124,7 @@ per whiteboard. **Check `new_blocks` has one entry per diagram** and there is no
 ## Step ⑤ — verify the Feishu render
 
 ```bash
-lark-cli whiteboard +query --whiteboard-token <block_token> --output_as image \
+rtk lark-cli whiteboard +query --whiteboard-token <block_token> --output_as image \
   --output fb-1.png --as user
 ```
 

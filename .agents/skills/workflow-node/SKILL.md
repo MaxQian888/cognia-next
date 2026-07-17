@@ -1,6 +1,6 @@
 ---
 name: workflow-node
-description: End-to-end checklist for adding a visual workflow node (or trigger) to cognia-next. Use whenever adding/changing a node kind — the registration is spread across 6+ files and two registry tests go red (or worse, stay silently green) when a step is missed.
+description: Add or change a Cognia visual workflow node or trigger end to end. Use when introducing a WorkflowNodeKind, executor, catalog entry, parameter schema, inspector form, handles, or trigger registration; covers parity tests, i18n, and runtime wiring.
 ---
 
 # Adding a Workflow Node
@@ -13,10 +13,10 @@ left gaps in node-config-registry).
 
 ## Checklist (do every step; verify with the named test)
 
-1. **Kind + types** — add the node kind and its param types where the
-   existing kinds live (`types/workflow/visual.ts` and
-   `lib/workflow/nodes/typed-params.ts`). Search for a sibling kind (e.g.
-   `"ocr.extract"`) and mirror every site it appears in.
+1. **Kind + types** — add the union member and `WORKFLOW_NODE_KINDS` entry in
+   `types/workflow/visual.ts`. Parameter types are inferred from
+   `lib/workflow/nodes/params-schemas.ts` through `typed-params.ts`; extend the
+   schema rather than hand-writing a duplicate params interface.
 2. **Catalog entry** — `lib/workflow/nodes/catalog.ts`: label, category,
    inputs/outputs (multi-output nodes declare named output handles —
    routing is sourceHandle-first). Verify: `catalog.test.ts`.
@@ -27,10 +27,10 @@ left gaps in node-config-registry).
    `lib/workflow/nodes/` (e.g. `git.ts`, `ocr.ts`, `terminal.ts`) and
    register it in `lib/workflow/nodes/registry.ts`. Verify:
    `executor-coverage.test.ts` — it fails on any kind without an executor.
-5. **Inspector config** — `components/workflow/editor/inspector/`
-   `node-config-registry`: a config component (or explicit default mapping)
-   per kind. Verify: `node-config-registry.test.tsx` (known to have
-   pre-existing `pattern.*` gaps — don't add to them).
+5. **Inspector config** — add the form/schema mapping under
+   `components/workflow/editor/inspector/` and the explicit entry in
+   `node-config-registry.tsx`. Verify with its co-located test; every new kind
+   must resolve deliberately, including kinds that use the generic form.
 6. **i18n** — node label/description keys in BOTH
    `i18n/messages/en.json` and `zh-CN.json` (catalog i18n was a whole audit
    theme once). `lib/workflow/i18n/` holds the wiring.
@@ -40,17 +40,16 @@ left gaps in node-config-registry).
 
 ## Triggers (extra steps on top)
 
-Trigger-type nodes additionally register in `lib/workflow/triggers/` and
-must survive the trigger-normalizer — it DROPS fields not in its allowlist,
-so new trigger config fields must be added to the normalizer too (this
-silently ate fields before).
+Trigger-type nodes additionally register their source in
+`lib/workflow/triggers/registry.ts` and must wire the matching runtime
+subscription/bridge. Extend the registry parity test and exercise one real
+dispatch path so a catalog-only trigger cannot ship dormant.
 
 ## Known traps
 
-- `.out` wrapper: expression access is `$node['id']` direct — there is a
-  latent `.out`-wrapper inconsistency; follow what existing nodes do, don't
-  "fix" it in passing.
-- `honorPinData` is editor-only; runtime ignores pinned data.
+- Expression access uses `$node['id']`; follow the current expression tests.
+- `honorPinData` is opt-in for editor execution; production-style runs leave
+  it false.
 - `runSingleNode` uses `seedOutputs`/`restrictToStepIds` — reuse it for
   node-level debugging instead of inventing a runner.
 
@@ -59,5 +58,6 @@ silently ate fields before).
 ```
 rtk pnpm test -- lib/workflow/nodes
 rtk pnpm test -- components/workflow/editor/inspector
-rtk tsc && rtk pnpm lint:i18n
+rtk pnpm typecheck
+rtk pnpm lint:i18n
 ```

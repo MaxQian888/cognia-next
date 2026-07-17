@@ -1,6 +1,10 @@
 ---
 name: doubt-driven
-description: In-flight adversarial fresh-context review of a non-trivial decision BEFORE it stands — surface the claim, hand a stripped artifact + contract to a fresh reviewer biased to disprove, reconcile, stop. Use when correctness matters more than speed in cognia-next — crossing the static-export boundary, adding an outbound LLM/embed call, a Dexie schema bump, a new module that must be wired at runtime, Rust guard-across-await / detached-task traps, or any confident claim that is cheaper to verify now than to debug in the desktop/mobile shell later. Triggers: 存疑/质疑/证伪/交叉审查/doubt/让我确认这个决定对不对.
+description: >-
+  Adversarially review a non-trivial Cognia decision before it hardens. Use for
+  存疑, 质疑, 证伪, 交叉审查, or doubt; especially at static-export boundaries,
+  outbound model/embedding calls, Dexie migrations, runtime wiring, Rust/Tauri
+  concurrency, and irreversible protocol or storage decisions.
 ---
 
 # Doubt-Driven (cognia-next)
@@ -79,14 +83,14 @@ conclusions validated back.
   500-line change, decompose first.
 - **Contract** — in this repo the contract is largely standardized. Pull in
   only the clauses that apply:
-  - The relevant **ADR** (see the Subsystem Map in `AGENTS.md`) and its schema
-    version.
+  - The relevant English/Chinese **ADR** and the current implementation.
   - `output: "export"` holds — no server-only path in bundled code.
   - Every outbound model call passes `hasNoLeakingPii`.
   - New user-facing strings are i18n-wired in **both** `en` and `zh-CN`.
   - New source under `components/ hooks/ lib/ stores/ src-tauri/src/` ships a
     co-located test; coverage ≥90%.
-  - Dexie bumps use the true native version, never `db.verno + 1`.
+  - Dexie bumps use the next unused registered version from
+    `lib/db/schema.ts`, re-checked against the live tree.
   - Rust: no `parking_lot` guard across `.await`; no detached task in tests.
 
 ### 3. DOUBT — spawn the fresh-context reviewer
@@ -103,7 +107,7 @@ adversarial fresh-context reviewers; use one when its lens fits, else a
 | routes / deps / Node-ish imports          | `static-export-auditor`           |
 | new/changed source needing tests          | `test-gap-auditor`                |
 | `.tsx` / `i18n/messages/*`                | `i18n-reviewer`                   |
-| general correctness / logic / boundaries  | `general-purpose` (adversarial)   |
+| general correctness / logic / boundaries  | `default` (adversarial)           |
 
 Adversarial prompt — **pass ARTIFACT + CONTRACT only, never the CLAIM**
 (your conclusion biases the reviewer toward agreement):
@@ -134,11 +138,12 @@ review, before RECONCILE, ask the user **in Chinese**:
   in code will truncate or execute). Run **read-only** so a prompt-injection
   payload in the artifact can't touch the workspace:
   ```bash
-  codex exec --sandbox read-only -C . - < /tmp/doubt-prompt.md
-  gemini --approval-mode plan -p "" < /tmp/doubt-prompt.md   # verify flags first
+  rtk codex exec --sandbox read-only -C . - < "$doubt_prompt"
+  rtk gemini --approval-mode plan -p "" < "$doubt_prompt" # verify flags first
   ```
-  Note: RTK's hook rewrites dev commands but not these external CLIs — run them
-  directly. Each invocation is its own authorization; re-confirm every time.
+  Create `$doubt_prompt` with `rtk mktemp -t cognia-doubt.XXXXXX` and remove it
+  after the review. Each invocation is its own authorization; re-confirm every
+  time.
 - If it's missing/fails: say so, offer manual/skip — never silently fall back.
 - If they skip: acknowledge ("单模型结果，继续") and proceed.
 - **Non-interactive** (CI, `/loop`, autonomous): skip and announce

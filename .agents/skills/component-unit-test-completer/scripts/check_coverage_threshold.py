@@ -65,7 +65,7 @@ def main() -> int:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=80.0,
+        default=90.0,
         help="Minimum required percentage for each metric.",
     )
     parser.add_argument(

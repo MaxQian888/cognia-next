@@ -28,8 +28,7 @@ Keep prose clean of `<`, `>`, `&` (use `→` not `>`); those are the only chars 
 escaping in `<p>` text. Then create from the SVG dir:
 
 ```bash
-cd <work>                        # dir with the .svg files AND doc.xml
-lark-cli docs +create --content "$(cat doc.xml)" --as user --json
+rtk lark-cli docs +create --content "$(rtk cat doc.xml)" --as user --json
 ```
 
 Passing `--content "$(cat doc.xml)"` keeps the shell arg clean: command-substitution
@@ -61,7 +60,7 @@ Feishu re-parses the SVG server-side; its parser is stricter than the local
 whiteboard-cli, so **always** export a thumbnail and look at it:
 
 ```bash
-lark-cli whiteboard +query --whiteboard-token <block_token> \
+rtk lark-cli whiteboard +query --whiteboard-token <block_token> \
   --output_as image --output fb-1.png --as user
 ```
 

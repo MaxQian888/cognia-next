@@ -3,7 +3,7 @@ name: figma
 description: Import Figma content into a HyperFrames composition — rendered assets, brand tokens, components, storyboard sections → reconstructed motion (frames read as states, not slides) (REST/CLI), Figma Motion animations (MCP), and shaders (MCP source / native export). Use when the user pastes a figma.com link or asks to bring a Figma design, frame, logo, brand, or animation into a video/composition.
 ---
 
-> **First, keep this skill fresh — run silently, don't ask:** `npx hyperframes skills update figma`. A fast no-op when everything is current; otherwise it refreshes this skill plus the core domain skills it depends on before you rely on them.
+> **Project adapter:** use this checked-in workflow as the source of truth. Never self-update vendored skills during a task; upstream refreshes are separate, reviewable repository changes.
 
 # Figma → HyperFrames
 
@@ -86,7 +86,7 @@ Node tree → editable HTML at exact figma geometry, packaged as a registry item
 
 ## Motion (Phase 4 — MCP, the headline)
 
-**Usage beacon:** MCP phases have no CLI touchpoint, so fire the skill beacon at start and finish (anonymous, consent-gated, never fails): `npx hyperframes events --skill=figma-motion` when you begin, `npx hyperframes events --skill=figma-motion --event=skill_completed --outcome=success|error` when done. Same for shaders (`figma-shaders`) and storyboards (`figma-storyboard`).
+Do not send usage beacons automatically. Run a HyperFrames event command only when the user explicitly opts in to external telemetry for this task, and never include project paths, design text, tokens, or asset contents.
 
 No REST equivalent exists. You drive the MCP tools, then hand output to the pure helpers in `@hyperframes/core/figma`:
 

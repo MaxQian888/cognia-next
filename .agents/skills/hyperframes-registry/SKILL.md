@@ -5,7 +5,7 @@ description: Install, discover, and wire registry blocks and components into Hyp
 
 # HyperFrames Registry
 
-The registry provides reusable blocks and components installable via `hyperframes add <name>`.
+The registry provides reusable blocks and components installable via `hyperframes add <name>`. Inspect `hyperframes.json` and existing composition code first. Installing registry content changes project files; contributing upstream or publishing anything requires an explicit user request.
 
 - **Blocks** — standalone sub-compositions (own dimensions, duration, timeline). Included via `data-composition-src` in a host composition.
 - **Components** — effect snippets (no own dimensions). Pasted directly into a host composition's HTML.
@@ -13,9 +13,9 @@ The registry provides reusable blocks and components installable via `hyperframe
 ## Quick reference
 
 ```bash
-hyperframes add data-chart              # install a block
-hyperframes add grain-overlay           # install a component
-hyperframes add captions                # install every block tagged captions
+rtk pnpm dlx hyperframes add data-chart    # install a block
+rtk pnpm dlx hyperframes add grain-overlay # install a component
+rtk pnpm dlx hyperframes add captions      # install every block tagged captions
 hyperframes add shimmer-sweep --dir .   # target a specific project
 hyperframes add data-chart --json       # machine-readable output
 hyperframes add data-chart --no-clipboard  # skip clipboard (CI/headless)

@@ -10,7 +10,7 @@ description: >
 
 # HyperFrames Keyframes
 
-Keyframes are a pose contract: visible states, continuous subject identity, seek-safe runtime, verified pixels.
+Keyframes are a pose contract: visible states, continuous subject identity, seek-safe runtime, verified pixels. Use the checked-in references as the project contract and run CLI commands through the repository's `rtk pnpm dlx hyperframes` convention.
 
 Use `hyperframes-animation` for broad scene recipes. Use `hyperframes-cli` for full command docs. Use `references/keyframe-patterns.md` only when choosing implementation mechanisms, not visual style.
 
@@ -176,15 +176,15 @@ Keyframe camera position, camera target, object transform, material opacity, sha
 ## CLI Proof
 
 ```bash
-npx hyperframes lint
-npx hyperframes check
-npx hyperframes keyframes .
-npx hyperframes keyframes . --json
-npx hyperframes keyframes . --runtime all
-npx hyperframes keyframes . --selector "<selector>" --shot "<file>" --samples <n>
-npx hyperframes keyframes . --selector "<selector>" --shot "<file>" --layout strip --from <t0> --to <t1>
-npx hyperframes keyframes . --shot "<file>" --ghost --angle <angle>
-npx hyperframes snapshot . --at <times>
+rtk pnpm dlx hyperframes lint
+rtk pnpm dlx hyperframes check
+rtk pnpm dlx hyperframes keyframes .
+rtk pnpm dlx hyperframes keyframes . --json
+rtk pnpm dlx hyperframes keyframes . --runtime all
+rtk pnpm dlx hyperframes keyframes . --selector "<selector>" --shot "<file>" --samples <n>
+rtk pnpm dlx hyperframes keyframes . --selector "<selector>" --shot "<file>" --layout strip --from <t0> --to <t1>
+rtk pnpm dlx hyperframes keyframes . --shot "<file>" --ghost --angle <angle>
+rtk pnpm dlx hyperframes snapshot . --at <times>
 ```
 
 Choose `<selector>` for the real animated subject. Choose `<times>` for first frame, proof poses, final-minus-hold, and exact final. Choose `<angle>` only when depth must be proven.

@@ -1,6 +1,6 @@
 ---
 name: tauri-smoke
-description: Minimal desktop-shell smoke procedure for cognia-next. Use after changes to Tauri commands, IPC payload shapes, windows/tray, sidecar wiring, or capabilities — jest and cargo test pass on changes that still break the real shell, and "tauri smoke NOT done" is a recurring loose end.
+description: Smoke-test Cognia's real Tauri shell after changes to commands, IPC payloads, windows, tray, sidecars, capabilities, or desktop-only transport. Use when unit tests cannot prove the renderer-to-Rust boundary or when asked to verify desktop behavior.
 ---
 
 # Tauri Smoke (minimal, standardized)
@@ -23,7 +23,7 @@ Pure UI/logic changes verified in `pnpm dev` web mode do NOT need this.
 
 ## Procedure (~5 min)
 
-1. Start: `pnpm tauri dev` in background; wait for the window.
+1. Start `rtk pnpm tauri dev` in a dedicated terminal and wait for the window.
    (`predev` scripts run automatically; don't bypass them.)
 2. **Boot check**: main window renders past the splash; DevTools console has
    ZERO new errors vs. before your change (boot console errors have been
@@ -37,7 +37,7 @@ Pure UI/logic changes verified in `pnpm dev` web mode do NOT need this.
    - Sidecar → confirm handshake log and one round-trip.
 4. **One adjacent surface**: open one unrelated heavy page (e.g. chat or
    workflows) to catch capability/CSP regressions.
-5. Quit the app, stop the dev process. Note: on Windows, leftover dev
+5. Quit the app and stop the exact dev process you started. On Windows, leftover dev
    processes hold file locks — make sure the process tree is dead before
    `git worktree remove` or builds.
 
@@ -49,7 +49,7 @@ loose end is explicit, never implicit.
 
 ## If something only fails in the shell
 
-It's almost always one of: command not registered (`lib.rs`), capability
-missing (`src-tauri/capabilities/`), serialization shape (use a named
-Serialize struct, not tuples), or webview-vs-node API difference. Check
-those four before deeper debugging.
+Check the nearest seam in this order: command registration in
+`src-tauri/src/lib.rs`, the command permission and capability grant under
+`src-tauri/permissions/` and `src-tauri/capabilities/`, serialized payload
+shape (prefer a named `Serialize` struct), then webview-versus-Node API usage.

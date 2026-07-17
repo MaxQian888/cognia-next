@@ -1,6 +1,6 @@
 ---
 name: subsystem-docs
-description: Write or renovate a bilingual multi-page Fumadocs subsystem section under docs/content/docs/{en,zh}/. Use when documenting a subsystem, replacing a stale docs page, or adding ADR-backed docs. Encodes the established canvas-section workflow and every known MDX build trap for this repo.
+description: Write or renovate implementation-accurate bilingual Fumadocs subsystem documentation under docs/content/docs/{en,zh}/. Use for subsystem sections, stale docs replacement, ADR-backed docs, sidebar changes, or MDX build failures.
 ---
 
 # Subsystem Docs (bilingual Fumadocs canvas section)
@@ -12,10 +12,10 @@ implementation-accurate, bilingual docs section. Pages live under
 
 ## Workflow
 
-1. **Map before writing.** Dispatch parallel read-only mapping agents, one per
-   planned page. Each must return line-accurate references (`file.ts:line`),
-   real code snippets, and a mermaid diagram sketch. Never write docs from the
-   ADR alone — ADRs drift.
+1. **Map before writing.** Read the relevant ADR plus the live implementation,
+   tests, registration/bootstrap points, and user-facing routes. For several
+   independent pages, map them in parallel. Keep line-accurate source notes and
+   verify every claimed count; the ADR alone is not authoritative.
 2. **Document drift explicitly.** Where the implementation diverges from the
    ADR, the docs describe the *implementation* and call out the divergence
    (e.g. "ADR-0024 specifies 4 commands; the implementation registers 5").
@@ -27,9 +27,9 @@ implementation-accurate, bilingual docs section. Pages live under
    survive; otherwise grep all of `docs/content/` for the old slug and rewire.
 4. **Translate.** zh pages are full translations, not summaries. Keep code
    blocks, identifiers, and paths in English.
-5. **Verify.** `rtk pnpm docs:build` is the ONLY gate that catches MDX
-   prerender errors. Record the page count and confirm it grew by the expected
-   number. `docs/.source/` is auto-generated — never edit it.
+5. **Verify.** Run `rtk pnpm docs:build`; it catches MDX prerender failures that
+   type checking misses. Confirm every new route appears and both sidebar trees
+   contain the expected pages. Treat `docs/.source/` as generated output.
 
 ## MDX build traps (every one of these has burned a session)
 

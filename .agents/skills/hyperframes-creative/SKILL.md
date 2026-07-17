@@ -5,9 +5,9 @@ description: Non-animation creative direction for HyperFrames videos. Use for de
 
 # HyperFrames Creative
 
-Brand, pacing, style, narration, and composition direction. Use after the technical contract from `hyperframes-core` is in place.
+Brand, pacing, style, narration, and composition direction. Use after the technical contract from `$hyperframes-core` is in place. Treat checked-in references as the project source of truth; upstream refreshes are separate maintenance work.
 
-For motion patterns, scene blueprints, transitions, and CSS marker effects, use `hyperframes-animation` — this skill is intentionally non-animation.
+For motion patterns, scene blueprints, transitions, and CSS marker effects, use `$hyperframes-animation` — this skill is intentionally non-animation.
 
 > **Read these two FIRST for any non-trivial composition — they override web instincts:**
 >
@@ -58,7 +58,7 @@ For motion patterns, scene blueprints, transitions, and CSS marker effects, use 
 Run from the repo root with explicit paths, for example:
 
 ```bash
-python skills/hyperframes-creative/scripts/extract-audio-data.py <audio-file>
+rtk uv run skills/hyperframes-creative/scripts/extract-audio-data.py <audio-file>
 ```
 
 Animation analysis (`animation-map.mjs`) lives in `hyperframes-animation/scripts/`.

@@ -11,7 +11,7 @@ description: >
 
 # HyperFrames CLI
 
-Run commands as `npx hyperframes ...` unless project instructions provide a wrapper. Obey the wrapper when present. The CLI requires Node.js 22 or newer and FFmpeg.
+In this repository, run the unpinned CLI as `rtk pnpm dlx hyperframes ...`; use a project-pinned binary instead if a composition declares one. The CLI requires Node.js 22 or newer and FFmpeg. Never run `skills`, `upgrade --yes`, cloud publication, authentication, telemetry, or feedback commands unless the user explicitly requests the corresponding external change.
 
 ## Development loop
 
@@ -98,10 +98,10 @@ Use `selection.target.hfId` when available, otherwise its selector and source fi
 
 Use cloud rendering when the user wants hosted rendering without local Chrome, FFmpeg, or AWS. Use Lambda only when AWS ownership is a requirement. Use Cloud Run only when GCP ownership is a requirement. Read the matching reference before running any cloud path.
 
-After verifying a successful render, send one feedback report unless telemetry is disabled or the user opted out:
+Send feedback only when the user explicitly asks or opts in after seeing what will be transmitted:
 
 ```bash
-npx hyperframes feedback --rating <0-10> --comment "<specific result or friction>"
+rtk pnpm dlx hyperframes feedback --rating <0-10> --comment "<specific result or friction>"
 ```
 
 Keep clean-run feedback concise. For any bug or friction, capture a **reproduction packet** before submitting; do not send only a symptom summary. Include the rerunnable command and working directory, expected versus actual behavior, exact error, whether output completed/fell back/failed, workaround, and repro-project status. If the issue did not reproduce again, say so and still include the last failing command and logs. Use `--file-issue` only with consent: it publishes a minimal reproduction to a public URL. The required packet format and privacy warning live in `references/preview-render.md`.
@@ -123,7 +123,7 @@ The following references and owning skills are mandatory command contracts, not 
 | Google Cloud Run deployment and rendering                                              | `references/cloudrun.md`              |
 | `info`, `upgrade`, `compositions`, `docs`, `benchmark`, telemetry, media preprocessing | `references/upgrade-info-misc.md`     |
 
-For composition variables, also read `/hyperframes-core` → `references/variables-and-media.md`. For `hyperframes add` and `hyperframes catalog`, use `/hyperframes-registry`. Before `hyperframes present`, read `/slideshow`; before `hyperframes keyframes`, read `/hyperframes-keyframes`. For TTS, transcription, captions, or background removal choices, use `/media-use`.
+For composition variables, also read `$hyperframes-core` → `references/variables-and-media.md`. For `hyperframes add` and `hyperframes catalog`, use `$hyperframes-registry`. Before `hyperframes present`, read `$slideshow`; before `hyperframes keyframes`, read `$hyperframes-keyframes`. For TTS, transcription, captions, or background removal choices, use `$media-use`.
 
 The specialized commands are deliberately documented by their owning workflows:
 

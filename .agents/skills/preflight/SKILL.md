@@ -1,6 +1,6 @@
 ---
 name: preflight
-description: Pre-commit audit fan-out for cognia-next. Dispatches the six project auditors (test-gap, i18n, static-export, tauri-rust, pii-gate, wiring) in parallel over the current diff, synthesizes one report, and ends with the exact gate commands. Use before committing, before claiming "done", or when asked to preflight/审查/提交前检查 a change.
+description: Audit a Cognia change before commit or completion. Use for preflight, 提交前检查, or final verification; scopes the diff, runs the applicable test-gap, i18n, static-export, Tauri/Rust, PII, and wiring auditors, synthesizes findings, and executes deterministic gates.
 ---
 
 # Preflight (parallel audit fan-out)
@@ -13,13 +13,13 @@ then reports one prioritized list. Auditors report; YOU decide and fix.
 Determine what's being shipped:
 
 - Uncommitted work: `rtk git status` + `rtk git diff --name-only HEAD`
-- A branch: `rtk git diff --name-only <merge-base>` (default merge base:
-  `master`, or `dev` if the branch forked from dev — check with
-  `git merge-base`)
+- A branch: identify the actual base with `rtk git merge-base HEAD <base>`,
+  then run `rtk git diff --name-only <merge-base>...HEAD`. Do not infer the base
+  from a stale branch convention.
 
 Record the file list — it decides which auditors run.
 
-## 2. Dispatch auditors IN PARALLEL (one message, multiple Agent calls)
+## 2. Dispatch applicable auditors in parallel
 
 Pass each agent the same scope statement: the base ref to diff against and
 the file list. Skip an auditor only when its trigger set is empty:
@@ -53,11 +53,14 @@ and i18n). Fix blockers before proceeding unless the user says otherwise.
 
 Audits don't replace the real gates. Finish with:
 
-```
-rtk tsc && rtk pnpm lint && rtk pnpm lint:i18n && pnpm i18n:sort:check
-rtk pnpm test -- <changed test files>        # narrow first
-pnpm test:coverage                            # full gate when claiming done
-rtk cargo test --manifest-path src-tauri/Cargo.toml   # if src-tauri changed
+```bash
+rtk pnpm typecheck
+rtk pnpm lint
+rtk pnpm lint:i18n
+rtk pnpm i18n:sort:check
+rtk pnpm test -- <changed-test-files>
+rtk pnpm test:coverage
+rtk cargo test --manifest-path src-tauri/Cargo.toml # when src-tauri changed
 ```
 
 Report gate output verbatim — no "should pass".

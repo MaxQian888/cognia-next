@@ -18,7 +18,7 @@ prevented — or would have prevented — a recorded incident.
    only-mine.)
 
 2. **Verify identity before every commit.** Immediately before committing,
-   run `rtk git status` and `git rev-parse --abbrev-ref HEAD`:
+   run `rtk git status` and `rtk git branch --show-current`:
    - Branch name is what you expect (incident: a concurrent agent *renamed*
      the live branch mid-session; fix was `git branch -f`).
    - Staged list contains ONLY your files. If anything else is staged,

@@ -14,7 +14,7 @@ description: >
 
 # HyperFrames entry point
 
-HyperFrames **renders video from HTML** — a composition is an HTML file whose DOM declares timing with `data-*` attributes, whose animation runtime is seekable, and whose media playback is owned by the framework. The full authoring contract lives in `/hyperframes-core`; read it before writing composition HTML.
+HyperFrames **renders video from HTML** — a composition is an HTML file whose DOM declares timing with `data-*` attributes, whose animation runtime is seekable, and whose media playback is owned by the framework. The full authoring contract lives in `$hyperframes-core`; read it before writing composition HTML.
 
 ## 1. Start from project state
 
@@ -127,15 +127,9 @@ The full route-filtered slice appears only when the user asks what else is possi
 
 Then enter the workflow (`flow: companion` → `/general-video`; otherwise the matched route), installing it first per § 5. The workflow's Setup writes `BRIEF.md` from this summary as its **first action after `hyperframes init`** (never before — `init` refuses a non-empty directory), using canonical frontmatter values and preserving the user's important wording in the body — the chosen pitch, when there is one, under `## Intent`. It then records the preference-backed fields (`../hyperframes-core/references/brief-format.md` names the subset), and asks no brief question again.
 
-## 5. Install and enter the workflow
+## 5. Enter the checked-in workflow
 
-Before reading the selected workflow, install or refresh it and the core domain skills:
-
-```bash
-npx hyperframes skills update <workflow-name>
-```
-
-Use the bare name without `/`. If the command fails, surface the error; do not reconstruct the workflow from memory. Everything else about installation — the core-vs-lazy split, what `init` refreshes, diagnosis, CI opt-out, and the no-CLI fallback — lives in `references/skill-lifecycle.md`.
+This repository vendors the full workflow set under `.agents/skills/`. Route to the selected `$skill-name` without installing or refreshing skills during the task. Upstream refreshes can overwrite project adaptations and therefore belong in a separate, reviewable maintenance change. Use `references/skill-lifecycle.md` only to diagnose a genuinely missing vendored workflow.
 
 ## 6. Load domain skills on demand
 

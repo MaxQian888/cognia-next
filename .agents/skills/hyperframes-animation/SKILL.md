@@ -5,7 +5,7 @@ description: "All animation knowledge for HyperFrames — atomic motion rules, m
 
 # HyperFrames Animation
 
-All motion knowledge in one skill: **rules** (atomic recipes), **blueprints** (multi-phase scene templates), **transitions** (scene-to-scene), **techniques** (broader motion-design patterns), and **adapters** (per-runtime APIs).
+All motion knowledge in one skill: **rules** (atomic recipes), **blueprints** (multi-phase scene templates), **transitions** (scene-to-scene), **techniques** (broader motion-design patterns), and **adapters** (per-runtime APIs). Use the checked-in indexes and adapters as the project contract; do not fetch replacements during a task.
 
 For the composition contract (data attributes, sub-compositions, determinism) see `hyperframes-core`.
 
@@ -69,7 +69,7 @@ Animation-craft additions on top of core's contract:
 ## Scripts
 
 ```bash
-node skills/hyperframes-animation/scripts/animation-map.mjs <composition-dir> \
+rtk node skills/hyperframes-animation/scripts/animation-map.mjs <composition-dir> \
   --out <composition-dir>/.hyperframes/anim-map
 ```
 
