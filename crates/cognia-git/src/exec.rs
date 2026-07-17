@@ -67,6 +67,13 @@ pub fn classify_failure(stderr: &str) -> GitError {
         || s.contains("permission denied (publickey)")
         || s.contains("terminal prompts disabled")
         || s.contains("invalid username or password")
+        // HTTP 401/403 on the remote URL — an insufficient/expired token, not a
+        // transport failure. Must precede the network branch below, since the
+        // 403 string also contains "unable to access".
+        || s.contains("the requested url returned error: 401")
+        || s.contains("the requested url returned error: 403")
+        || s.contains("401 unauthorized")
+        || s.contains("403 forbidden")
     {
         return GitError::AuthRequired(detail);
     }
@@ -234,6 +241,25 @@ mod tests {
         ));
         assert!(matches!(
             classify_failure("git@github.com: Permission denied (publickey)."),
+            GitError::AuthRequired(_)
+        ));
+    }
+
+    #[test]
+    fn classify_http_403_and_401_as_auth_not_network() {
+        // GitHub returns 403/401 for an insufficient or expired token. The
+        // string also contains "unable to access", so it must be classified as
+        // auth *before* the network branch (which owns "unable to access").
+        assert!(matches!(
+            classify_failure(
+                "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403"
+            ),
+            GitError::AuthRequired(_)
+        ));
+        assert!(matches!(
+            classify_failure(
+                "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 401"
+            ),
             GitError::AuthRequired(_)
         ));
     }
