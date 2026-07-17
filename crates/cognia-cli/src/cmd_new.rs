@@ -194,25 +194,31 @@ fn collect_answers(
     ui: &mut RuntimeUi,
 ) -> Result<WizardAnswers> {
     let is_tty = ui.is_tty;
+    // `--yes` (documented as "pre-confirm every interactive prompt … required
+    // for CI") resolves every field from its default without asking, exactly
+    // like a non-TTY run. Prompt only on a real terminal *and* when the caller
+    // did not pass --yes.
+    let interactive = is_tty && !ui.flags.yes;
 
     // ── name ────────────────────────────────────────────────────────────
     let name = match cli_name {
         Some(n) => n,
-        None if !is_tty => bail!(
-            "plugin name is required on a non-interactive shell; pass `<name>` explicitly (or run from a TTY for the wizard)"
-        ),
-        None => ui
+        None if interactive => ui
             .prompter()
             .input("Plugin name", default_name_from_cwd().as_deref(), "<name>")
             .map_err(|e| anyhow!("{e}"))?,
+        // Non-interactive (piped stdin or --yes): the plugin name has no
+        // sensible default, so require it explicitly rather than inventing one.
+        None => bail!(
+            "plugin name is required on a non-interactive shell; pass `<name>` explicitly (or run from a TTY for the wizard)"
+        ),
     };
     validate_name(&name)?;
 
     // ── kind ────────────────────────────────────────────────────────────
     let kind = match cli_kind {
         Some(s) => TemplateKind::parse(&s)?,
-        None if !is_tty => TemplateKind::Wasm,
-        None => {
+        None if interactive => {
             let items = [
                 "wasm  (Rust + cargo-component)",
                 "ts    (TypeScript frontend)",
@@ -237,13 +243,13 @@ fn collect_answers(
                 _ => TemplateKind::VscodeExtension,
             }
         }
+        None => TemplateKind::Wasm,
     };
 
     // ── description ─────────────────────────────────────────────────────
     let description = match cli_description {
         Some(d) => d,
-        None if !is_tty => format!("A cognia {} plugin", kind_label(kind)),
-        None => ui
+        None if interactive => ui
             .prompter()
             .input(
                 "Short description",
@@ -251,14 +257,14 @@ fn collect_answers(
                 "--description",
             )
             .map_err(|e| anyhow!("{e}"))?,
+        None => format!("A cognia {} plugin", kind_label(kind)),
     };
 
     // ── author name ─────────────────────────────────────────────────────
     let author_default = git_user_name();
     let author_name = match cli_author {
         Some(a) => a,
-        None if !is_tty => author_default.unwrap_or_else(|| "Anonymous".to_string()),
-        None => ui
+        None if interactive => ui
             .prompter()
             .input(
                 "Author name",
@@ -266,23 +272,23 @@ fn collect_answers(
                 "--author \"Your Name\"",
             )
             .map_err(|e| anyhow!("{e}"))?,
+        None => author_default.unwrap_or_else(|| "Anonymous".to_string()),
     };
 
     // ── author email (optional) ─────────────────────────────────────────
     let author_email = match cli_author_email {
         Some(e) => Some(e),
-        None if !is_tty => None,
-        None => ui
+        None if interactive => ui
             .prompter()
             .input_optional("Author email (optional, blank to skip)", "--author-email")
             .map_err(|e| anyhow!("{e}"))?,
+        None => None,
     };
 
     // ── with_keygen ─────────────────────────────────────────────────────
     let with_keygen = match cli_with_keygen {
         Some(b) => b,
-        None if !is_tty => false,
-        None => ui
+        None if interactive => ui
             .prompter()
             .confirm(
                 "Generate a signing keypair now and embed the public key?",
@@ -290,6 +296,9 @@ fn collect_answers(
                 "--with-keygen true|false",
             )
             .map_err(|e| anyhow!("{e}"))?,
+        // Default off for --yes and non-TTY alike: "yes to prompts" must not
+        // silently mint an Ed25519 signing key the author never asked for.
+        None => false,
     };
 
     Ok(WizardAnswers {
@@ -892,6 +901,65 @@ mod tests {
         assert_eq!(
             m["author"]["email"],
             serde_json::Value::String("m@x.io".into())
+        );
+    }
+
+    #[test]
+    fn yes_flag_takes_defaults_without_prompting() {
+        use crate::ui::prompter::MockPrompter;
+        use crate::ui::runtime::UiFlags;
+        let parent = tempdir().unwrap();
+        let target = parent.path().join("ci-plugin");
+        // An empty-answer MockPrompter errors on *any* prompt call, so a clean
+        // run proves `--yes` resolved every field from defaults without
+        // prompting — even on a TTY, where the wizard would otherwise ask.
+        let mut ui = RuntimeUi::new(UiFlags {
+            yes: true,
+            ..UiFlags::default()
+        })
+        .with_prompter(Box::new(MockPrompter::new()));
+        ui.is_tty = true;
+        run(
+            Some("ci-plugin".into()),
+            Some(target.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            &mut ui,
+        )
+        .expect("--yes must scaffold from defaults without touching the prompter");
+        let m: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(target.join("plugin.json")).unwrap())
+                .unwrap();
+        assert_eq!(m["id"], serde_json::Value::String("ci-plugin".into()));
+        // Default kind is wasm.
+        assert_eq!(m["type"], serde_json::Value::String("wasm".into()));
+        // `--yes` follows the non-TTY default: no signing key is generated, so
+        // it can never mint a key the author didn't ask for (see W1.1).
+        assert!(
+            !target.join(".cognia/plugin.private.b64").exists(),
+            "--yes must not generate a signing key"
+        );
+        assert!(m["author"].get("publicKey").is_none());
+    }
+
+    #[test]
+    fn yes_flag_still_requires_an_explicit_name() {
+        use crate::ui::prompter::MockPrompter;
+        use crate::ui::runtime::UiFlags;
+        // The plugin name has no sensible default; `--yes` must not invent one.
+        let mut ui = RuntimeUi::new(UiFlags {
+            yes: true,
+            ..UiFlags::default()
+        })
+        .with_prompter(Box::new(MockPrompter::new()));
+        ui.is_tty = true;
+        let err = run(None, None, None, None, None, None, None, &mut ui).unwrap_err();
+        assert!(
+            err.to_string().contains("plugin name is required"),
+            "got: {err}"
         );
     }
 
