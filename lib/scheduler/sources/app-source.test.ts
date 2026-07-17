@@ -1,4 +1,4 @@
-import { createAppSource, toUnified } from "./app-source"
+import { createAppSource, createPluginTaskSource, toUnified } from "./app-source"
 import type { ScheduledTask } from "@/types/scheduler"
 
 function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
@@ -66,6 +66,20 @@ describe("toUnified (app source mapper)", () => {
       edit: true,
       delete: true,
     })
+  })
+
+  it("maps real plugin executor tasks to the plugin kind", () => {
+    const unified = toUnified(
+      makeTask({
+        id: "plugin-row",
+        type: "plugin",
+        payload: { pluginId: "demo", handler: "heartbeat" },
+      })
+    )
+
+    expect(unified.kind).toBe("plugin")
+    expect(unified.unifiedId).toBe("plugin:plugin-row")
+    expect(unified.origin.tableName).toBe("tasks")
   })
 
   it("collapses an unknown status to 'unknown'", () => {
@@ -152,6 +166,42 @@ describe("createAppSource", () => {
     expect(await source.get("digest-row")).toBeUndefined()
     expect(await source.get("send-row")).toBeUndefined()
     expect((await source.get("app-row"))?.sourceId).toBe("app-row")
+  })
+
+  it("splits real plugin tasks into the plugin source without duplication", async () => {
+    const tasks = [makeTask({ id: "app-row" }), makeTask({ id: "plugin-row", type: "plugin" })]
+    const db = {
+      getAllTasks: jest.fn(async () => tasks),
+      getTask: jest.fn(async (id: string) => tasks.find((task) => task.id === id) ?? null),
+    }
+    const scheduler = makeStubs().scheduler
+
+    expect((await createAppSource({ scheduler, db }).list()).map((item) => item.sourceId)).toEqual([
+      "app-row",
+    ])
+    expect(
+      (await createPluginTaskSource({ scheduler, db }).list()).map((item) => item.sourceId)
+    ).toEqual(["plugin-row"])
+  })
+
+  it("filters execution ownership before applying the recent-run limit", async () => {
+    const getRecentExecutionsMatching = jest.fn(async (ownsTaskType, limit) => {
+      expect(ownsTaskType("chat")).toBe(true)
+      expect(ownsTaskType("plugin")).toBe(false)
+      expect(limit).toBe(7)
+      return []
+    })
+    const source = createAppSource({
+      scheduler: makeStubs().scheduler,
+      db: {
+        getAllTasks: jest.fn(async () => []),
+        getTask: jest.fn(async () => null),
+        getRecentExecutionsMatching,
+      },
+    })
+
+    await expect(source.listRuns?.(7)).resolves.toEqual([])
+    expect(getRecentExecutionsMatching).toHaveBeenCalledTimes(1)
   })
 
   it("get() returns undefined for a missing id", async () => {

@@ -10,7 +10,7 @@
 
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
-import type { ScheduledItemKind } from "@/types/scheduler/unified"
+import { SCHEDULED_ITEM_KINDS, type ScheduledItemKind } from "@/types/scheduler/unified"
 
 export interface KindFilterChipsProps {
   selected: Set<ScheduledItemKind>
@@ -18,15 +18,6 @@ export interface KindFilterChipsProps {
   onClear: () => void
   countsByKind: Record<ScheduledItemKind, number>
 }
-
-const KIND_ORDER: ScheduledItemKind[] = [
-  "app",
-  "workflow",
-  "backup",
-  "plugin",
-  "system",
-  "connector",
-]
 
 export function KindFilterChips({
   selected,
@@ -36,7 +27,7 @@ export function KindFilterChips({
 }: KindFilterChipsProps) {
   const t = useTranslations("scheduler")
   const allActive = selected.size === 0
-  const totalCount = KIND_ORDER.reduce((sum, k) => sum + (countsByKind[k] ?? 0), 0)
+  const totalCount = SCHEDULED_ITEM_KINDS.reduce((sum, k) => sum + (countsByKind[k] ?? 0), 0)
   return (
     <div data-testid="kind-filter-chips" className="flex flex-wrap gap-1.5 px-3 pb-2">
       <button
@@ -48,7 +39,7 @@ export function KindFilterChips({
         {t("kindFilter.all") || "All"}
         <span className="ml-1 tabular-nums text-[10px] opacity-70">{totalCount}</span>
       </button>
-      {KIND_ORDER.map((kind) => {
+      {SCHEDULED_ITEM_KINDS.map((kind) => {
         const isActive = selected.has(kind)
         const count = countsByKind[kind] ?? 0
         return (

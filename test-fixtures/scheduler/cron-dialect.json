@@ -1,0 +1,64 @@
+{
+  "anchorUtc": "2026-07-16T00:07:00Z",
+  "timezone": "UTC",
+  "cases": [
+    {
+      "expression": "*/15 * * * *",
+      "accepted": true,
+      "nextUtc": "2026-07-16T00:15:00Z"
+    },
+    {
+      "expression": "0 9 * * 1-5",
+      "accepted": true,
+      "nextUtc": "2026-07-16T09:00:00Z"
+    },
+    {
+      "expression": "0 9 * * 1,3,5",
+      "accepted": true,
+      "nextUtc": "2026-07-17T09:00:00Z"
+    },
+    {
+      "expression": "0 9 * * 1-7",
+      "accepted": true,
+      "nextUtc": "2026-07-16T09:00:00Z"
+    },
+    {
+      "expression": "30 0 9 * * *",
+      "accepted": true,
+      "nextUtc": "2026-07-16T09:00:30Z"
+    },
+    {
+      "expression": "*/30 * * * * *",
+      "accepted": true,
+      "nextUtc": "2026-07-16T00:07:30Z"
+    },
+    {
+      "expression": "0 0 L * *",
+      "accepted": false
+    },
+    {
+      "expression": "0 0 * * 5#2",
+      "accepted": false
+    },
+    {
+      "expression": "0 0 12 1 1 * 2027",
+      "accepted": false
+    }
+  ],
+  "timezoneCases": [
+    {
+      "name": "spring-forward",
+      "expression": "0 9 * * *",
+      "timezone": "America/New_York",
+      "anchorUtc": "2026-03-07T15:00:00Z",
+      "nextUtc": ["2026-03-08T13:00:00Z", "2026-03-09T13:00:00Z"]
+    },
+    {
+      "name": "fall-back",
+      "expression": "0 9 * * *",
+      "timezone": "America/New_York",
+      "anchorUtc": "2026-10-31T14:00:00Z",
+      "nextUtc": ["2026-11-01T14:00:00Z", "2026-11-02T14:00:00Z"]
+    }
+  ]
+}

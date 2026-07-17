@@ -167,12 +167,32 @@ describe("promoteToSystemTask", () => {
   })
 
   describe("cron grammar guard", () => {
-    it("promotes a plain 5-field cron", () => {
+    it("promotes a fixed-value 5-field cron", () => {
       const task = createMockTask({
-        trigger: { type: "cron", cronExpression: "0 9 * * 1-5" },
+        trigger: { type: "cron", cronExpression: "0 9 * * 1" },
         payload: { language: "bash", code: "echo hi" },
       })
       expect(promoteToSystemTask(task).promotable).toBe(true)
+    })
+
+    it.each([
+      ["*/15 * * * *", /step|\/15/i],
+      ["0 9 * * 1-5", /range|1-5/i],
+      ["0 9 * * 1,3,5", /list|1,3,5/i],
+    ])("rejects cron syntax launchd cannot represent: %s", (cronExpression, reason) => {
+      const task = createMockTask({ trigger: { type: "cron", cronExpression } })
+      const result = promoteToSystemTask(task, "macos")
+
+      expect(result.promotable).toBe(false)
+      expect(result.reason).toMatch(reason)
+    })
+
+    it("keeps step, range, and list cron available to non-launchd backends", () => {
+      for (const cronExpression of ["*/15 * * * *", "0 9 * * 1-5", "0 9 * * 1,3,5"]) {
+        const task = createMockTask({ trigger: { type: "cron", cronExpression } })
+        expect(promoteToSystemTask(task, "windows").promotable).toBe(true)
+        expect(promoteToSystemTask(task, "linux").promotable).toBe(true)
+      }
     })
 
     it("rejects seconds-level (6-field) cron", () => {

@@ -1862,7 +1862,11 @@ export function getTaskScheduler(): TaskSchedulerImpl {
 /**
  * Initialize the task scheduler
  */
-export async function initTaskScheduler(): Promise<void> {
+export async function initTaskScheduler(driver?: SchedulerTimingDriver): Promise<void> {
+  if (driver) {
+    schedulerInstance?.stop()
+    schedulerInstance = createTaskScheduler(driver)
+  }
   const scheduler = getTaskScheduler()
   await scheduler.initialize()
 }
@@ -1873,6 +1877,7 @@ export async function initTaskScheduler(): Promise<void> {
 export function stopTaskScheduler(): void {
   if (schedulerInstance) {
     schedulerInstance.stop()
+    schedulerInstance = null
   }
 }
 

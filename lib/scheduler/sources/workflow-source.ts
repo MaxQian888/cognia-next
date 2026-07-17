@@ -23,7 +23,12 @@ import { liveQuery } from "dexie"
 import { getDb } from "@/lib/db/schema"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
-import type { VisualWorkflow, WorkflowNode, WorkflowTriggerRow } from "@/types/workflow/visual"
+import type {
+  VisualWorkflow,
+  WorkflowNode,
+  WorkflowRunRow,
+  WorkflowTriggerRow,
+} from "@/types/workflow/visual"
 import {
   makeUnifiedId,
   type UnifiedScheduledItem,
@@ -34,6 +39,7 @@ import type {
   ScheduledItemSourceObserver,
   ScheduledItemSubscription,
 } from "./types"
+import { toUnifiedFromWorkflowRun } from "./run-mappers"
 
 export class WorkflowSourceWriteNotSupportedError extends Error {
   constructor(action: string) {
@@ -72,6 +78,7 @@ export interface WorkflowSourceDeps {
   sync?: (workflow: VisualWorkflow) => Promise<void>
   run?: (input: WorkflowRunInput) => Promise<unknown>
   observe?: (querier: () => Promise<WorkflowTriggerRow[]>) => WorkflowRawObservable
+  listRuns?: (limit: number) => Promise<WorkflowRunRow[]>
 }
 
 export function createWorkflowSource(
@@ -92,6 +99,9 @@ export function createWorkflowSource(
         },
       }))
   const observe = deps.observe ?? ((querier) => liveQuery(querier))
+  const listRuns =
+    deps.listRuns ??
+    ((limit: number) => getDb().workflowRuns.orderBy("startedAt").reverse().limit(limit).toArray())
 
   async function patchTriggerNode(
     workflowId: string,
@@ -122,6 +132,10 @@ export function createWorkflowSource(
     async list(): Promise<UnifiedScheduledItem[]> {
       const rows = await db.workflowTriggers.toArray()
       return rows.map(toUnifiedTrigger)
+    },
+
+    async listRuns(limit) {
+      return (await listRuns(limit)).map(toUnifiedFromWorkflowRun)
     },
 
     async get(sourceId: string): Promise<UnifiedScheduledItem | undefined> {
@@ -188,6 +202,7 @@ export function toUnifiedTrigger(row: WorkflowTriggerRow): UnifiedScheduledItem 
       type: row.kind === "trigger.cron" ? "cron" : "event",
       cron: row.cron,
       eventType: row.kind,
+      timezone: row.timezone,
     },
     nextRunAt: row.nextFireAt,
     origin: {

@@ -98,6 +98,8 @@ pub struct RegisterTriggerInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cron: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_path: Option<String>,
     /// HTTP method the receiver allows. Defaults to "POST" when absent.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -244,6 +246,7 @@ mod tests {
             kind: "trigger.cron".into(),
             enabled: true,
             cron: Some("0 9 * * 1-5".into()),
+            timezone: Some("Asia/Shanghai".into()),
             webhook_path: None,
             webhook_method: None,
             webhook_hmac_secret: None,

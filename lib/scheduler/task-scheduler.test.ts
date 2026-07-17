@@ -1338,6 +1338,15 @@ describe("TaskScheduler", () => {
       expect(driver.stop).toHaveBeenCalled()
     })
 
+    it("installs an injected driver on the scheduler singleton", async () => {
+      const driver = makeMockDriver()
+
+      await initTaskScheduler(driver)
+
+      expect(getTaskScheduler().getStatus().initialized).toBe(true)
+      expect(driver.start).toHaveBeenCalledTimes(1)
+    })
+
     it("arms newly-created tasks through the driver", async () => {
       const driver = makeMockDriver()
       const sched = createTaskScheduler(driver)
@@ -1350,6 +1359,26 @@ describe("TaskScheduler", () => {
       })
 
       expect(driver.arm).toHaveBeenCalledWith(task.id, expect.any(Number))
+      sched.stop()
+    })
+
+    it("disarms and re-arms tasks across pause and resume", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const task = await sched.createTask({
+        name: "Lifecycle Task",
+        type: "plugin",
+        trigger: { type: "interval", intervalMs: 60_000 },
+      })
+
+      mockSchedulerDb.getTask.mockResolvedValueOnce(task)
+      await expect(sched.pauseTask(task.id)).resolves.toBe(true)
+      expect(driver.disarm).toHaveBeenCalledWith(task.id)
+
+      mockSchedulerDb.getTask.mockResolvedValueOnce({ ...task, status: "paused" })
+      await expect(sched.resumeTask(task.id)).resolves.toBe(true)
+      expect(driver.arm).toHaveBeenLastCalledWith(task.id, expect.any(Number))
       sched.stop()
     })
 

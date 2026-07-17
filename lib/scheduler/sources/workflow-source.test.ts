@@ -113,6 +113,15 @@ describe("createWorkflowSource", () => {
     expect(items[0].unifiedId).toBe("workflow:trigger-1")
   })
 
+  it("loads recent workflow runs through the source contract", async () => {
+    const { db, sync, run } = makeStubs()
+    const listRuns = jest.fn(async () => [])
+    const source = createWorkflowSource({ db, sync, run, listRuns })
+
+    await expect(source.listRuns?.(7)).resolves.toEqual([])
+    expect(listRuns).toHaveBeenCalledWith(7)
+  })
+
   it("get() returns undefined for missing trigger", async () => {
     const { db, sync, run } = makeStubs()
     const source = createWorkflowSource({ db, sync, run })

@@ -115,6 +115,51 @@ pub enum SystemTaskTrigger {
     OnEvent { source: String, event_id: u32 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemTriggerKind {
+    Cron,
+    Interval,
+    Once,
+    OnBoot,
+    OnLogon,
+    OnEvent,
+}
+
+impl SystemTriggerKind {
+    pub const ALL: [Self; 6] = [
+        Self::Cron,
+        Self::Interval,
+        Self::Once,
+        Self::OnBoot,
+        Self::OnLogon,
+        Self::OnEvent,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cron => "cron",
+            Self::Interval => "interval",
+            Self::Once => "once",
+            Self::OnBoot => "on_boot",
+            Self::OnLogon => "on_logon",
+            Self::OnEvent => "on_event",
+        }
+    }
+}
+
+impl SystemTaskTrigger {
+    pub const fn kind(&self) -> SystemTriggerKind {
+        match self {
+            Self::Cron { .. } => SystemTriggerKind::Cron,
+            Self::Interval { .. } => SystemTriggerKind::Interval,
+            Self::Once { .. } => SystemTriggerKind::Once,
+            Self::OnBoot { .. } => SystemTriggerKind::OnBoot,
+            Self::OnLogon { .. } => SystemTriggerKind::OnLogon,
+            Self::OnEvent { .. } => SystemTriggerKind::OnEvent,
+        }
+    }
+}
+
 /// Action to perform when task triggers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -167,6 +212,46 @@ fn default_memory_limit() -> u64 {
 
 fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod trigger_kind_tests {
+    use super::*;
+
+    #[test]
+    fn derived_capabilities_cover_every_trigger_kind_in_order() {
+        let capabilities = derive_trigger_capabilities(|_| (true, false, vec![], vec![]));
+        let names: Vec<_> = capabilities
+            .iter()
+            .map(|capability| capability.trigger_type.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["cron", "interval", "once", "on_boot", "on_logon", "on_event"]
+        );
+    }
+
+    #[test]
+    fn every_trigger_variant_maps_to_the_derived_kind() {
+        let triggers = [
+            SystemTaskTrigger::Cron {
+                expression: "0 9 * * *".to_string(),
+                timezone: None,
+            },
+            SystemTaskTrigger::Interval { seconds: 60 },
+            SystemTaskTrigger::Once {
+                run_at: "2026-07-16T00:00:00Z".to_string(),
+            },
+            SystemTaskTrigger::OnBoot { delay_seconds: 0 },
+            SystemTaskTrigger::OnLogon { user: None },
+            SystemTaskTrigger::OnEvent {
+                source: "System".to_string(),
+                event_id: 1,
+            },
+        ];
+        let kinds: Vec<_> = triggers.iter().map(SystemTaskTrigger::kind).collect();
+        assert_eq!(kinds, SystemTriggerKind::ALL);
+    }
 }
 
 /// System task definition
@@ -301,6 +386,25 @@ pub struct TriggerCapability {
     /// Backend behavior notes for available triggers (shown as contextual help)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backend_notes: Vec<String>,
+}
+
+pub fn derive_trigger_capabilities<F>(configure: F) -> Vec<TriggerCapability>
+where
+    F: Fn(SystemTriggerKind) -> (bool, bool, Vec<String>, Vec<String>),
+{
+    SystemTriggerKind::ALL
+        .into_iter()
+        .map(|kind| {
+            let (available, requires_admin, constraint_notes, backend_notes) = configure(kind);
+            TriggerCapability {
+                trigger_type: kind.as_str().to_string(),
+                available,
+                requires_admin,
+                constraint_notes,
+                backend_notes,
+            }
+        })
+        .collect()
 }
 
 /// Result of validating trigger translation fidelity on the active platform

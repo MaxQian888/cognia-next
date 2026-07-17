@@ -24,7 +24,11 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import type { ScheduledTask, SystemTask, TaskStatistics } from "@/types/scheduler"
-import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
+import {
+  SCHEDULED_ITEM_KINDS,
+  type ScheduledItemKind,
+  type UnifiedScheduledItem,
+} from "@/types/scheduler/unified"
 
 import { FilterChips } from "./filter-chips"
 import { TaskSidebarItem } from "./task-sidebar-item"
@@ -290,9 +294,7 @@ export function SchedulerSidebarContent({
         {/* Unified groups by kind — preferred path when unified data is supplied. */}
         {groupedUnified && !showEmptyState && !showFilteredEmpty && (
           <>
-            {(
-              ["app", "workflow", "backup", "plugin", "system", "connector"] as ScheduledItemKind[]
-            ).map((kind) => {
+            {SCHEDULED_ITEM_KINDS.map((kind) => {
               const items = groupedUnified[kind]
               if (items.length === 0) return null
               return (

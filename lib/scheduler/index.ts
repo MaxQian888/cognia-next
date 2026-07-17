@@ -10,6 +10,7 @@
 import { loggers } from "@cognia/logging"
 import { initTaskScheduler, stopTaskScheduler } from "./task-scheduler"
 import { registerBuiltInExecutors } from "./executors"
+import type { SchedulerTimingDriver } from "@/types/scheduler"
 
 const log = loggers.scheduler
 
@@ -113,9 +114,9 @@ export {
 } from "./event-integration"
 
 /** Initialize the scheduler — register executors, start the loop. */
-export async function initSchedulerSystem(): Promise<void> {
+export async function initSchedulerSystem(driver?: SchedulerTimingDriver): Promise<void> {
   registerBuiltInExecutors()
-  await initTaskScheduler()
+  await initTaskScheduler(driver)
   log.info("[Scheduler] Scheduler system initialized")
 }
 

@@ -247,6 +247,31 @@ describe("SchedulerDatabase", () => {
       expect(recent.length).toBe(3)
     })
 
+    it("filters before limiting recent executions for a scheduler source", async () => {
+      for (let i = 0; i < 3; i++) {
+        await schedulerDb.createExecution(
+          createMockExecution("app-task", {
+            id: `app-exec-${i}`,
+            taskType: "chat",
+            startedAt: new Date(2_000 + i),
+          })
+        )
+      }
+      await schedulerDb.createExecution(
+        createMockExecution("plugin-task", {
+          id: "plugin-exec",
+          taskType: "plugin",
+          startedAt: new Date(1_000),
+        })
+      )
+
+      const recent = await schedulerDb.getRecentExecutionsMatching(
+        (taskType) => taskType === "plugin",
+        1
+      )
+      expect(recent.map((execution) => execution.id)).toEqual(["plugin-exec"])
+    })
+
     it("should cleanup old executions", async () => {
       const task = createMockTask({ id: "task-cleanup" })
       await schedulerDb.createTask(task)

@@ -1,9 +1,11 @@
 # 定时任务子系统 — 缺陷修复与扩展点硬化计划
 
 **日期**: 2026-07-16
-**状态**: 待评审(未实施 —— 下文每一项都是已核实的缺陷或缺口,不是设想)
+**状态**: 已实施(2026-07-16)
 **范围**: 四波 —— W1 正确性缺陷(影响线上用户)、W2 幽灵代码清理、W3 扩展点硬化、W4 文档补位
 **参考 ADR**: 0002(scheduler,主 ADR)、0011(workflows / `trigger.cron`)、0006/0016/0026(插件扩展点)、0067(crate 分解 → `cognia-scheduling`)、拟新增 **0073**(调度扩展点契约,见 W4.2)
+
+**实施决策**: OPEN-1 选择拒绝 launchd 无法无损表达的 cron；OPEN-2 接受并归一化 5/6 字段；OPEN-3 删除 `pluginScheduledJobs`；OPEN-4 删除 GitHub polling；OPEN-5 立即强制 `scheduler` capability。扩展点 ADR 最终编号为 **0079**。
 
 ---
 

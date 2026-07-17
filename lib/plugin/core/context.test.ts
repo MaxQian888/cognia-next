@@ -28,6 +28,9 @@ import {
   __resetBackgroundAgentManagerForTesting,
 } from "@/lib/ai/agent/background-agent-manager"
 import { nodeCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
+import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
+import type { ScheduledTask } from "@/types/scheduler"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
@@ -57,6 +60,21 @@ jest.mock("@/lib/plugin/security/rate-limiter", () => ({
 
 jest.mock("@/lib/native/utils", () => ({
   isTauri: jest.fn(() => false),
+}))
+
+jest.mock("@/lib/scheduler/scheduler-db", () => ({
+  schedulerDb: {
+    getTask: jest.fn(),
+    getFilteredTasks: jest.fn().mockResolvedValue([]),
+    getExecution: jest.fn(),
+    getTaskExecutions: jest.fn().mockResolvedValue([]),
+    createExecution: jest.fn().mockResolvedValue(undefined),
+    updateExecution: jest.fn().mockResolvedValue(undefined),
+  },
+}))
+
+jest.mock("@/lib/scheduler/task-scheduler", () => ({
+  getTaskScheduler: jest.fn(),
 }))
 
 // Sonner toast — `ui.showToast` routes here.
@@ -185,6 +203,34 @@ const mockManager = {
 } as unknown as PluginManager
 
 const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
+const mockSchedulerDb = schedulerDb as jest.Mocked<typeof schedulerDb>
+const mockGetTaskScheduler = getTaskScheduler as jest.MockedFunction<typeof getTaskScheduler>
+
+function pluginTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+  const now = new Date("2026-07-16T00:00:00.000Z")
+  return {
+    id: "plugin-task-1",
+    name: "Plugin task",
+    type: "plugin",
+    trigger: { type: "interval", intervalMs: 60_000 },
+    payload: { pluginId: "test-plugin", handler: "heartbeat", args: {} },
+    config: {
+      timeout: 300_000,
+      maxRetries: 0,
+      retryDelay: 60_000,
+      runMissedOnStartup: false,
+      allowConcurrent: false,
+    },
+    notification: { onStart: false, onComplete: false, onError: true },
+    status: "active",
+    runCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  }
+}
 
 describe("createPluginContext", () => {
   beforeEach(() => {
@@ -263,6 +309,88 @@ describe("createPluginContext", () => {
       expect(entry.defaultParams).toEqual({ path: "/demo", method: "POST" })
 
       dispose()
+    })
+  })
+
+  describe("scheduler API", () => {
+    const createTask = jest.fn()
+    const updateTask = jest.fn()
+    const deleteTask = jest.fn()
+    const pauseTask = jest.fn()
+    const resumeTask = jest.fn()
+
+    beforeEach(() => {
+      jest.clearAllMocks()
+      mockGetTaskScheduler.mockReturnValue({
+        createTask,
+        updateTask,
+        deleteTask,
+        pauseTask,
+        resumeTask,
+      } as never)
+    })
+
+    const schedulerPlugin = () =>
+      createMockPlugin({
+        manifest: { ...mockManifest, capabilities: ["tools", "scheduler"] },
+      })
+
+    it("rejects scheduler calls when the manifest omits the capability", async () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      await expect(context.scheduler.listTasks()).rejects.toThrow(/scheduler.*capability/i)
+
+      expect(mockGetTaskScheduler).not.toHaveBeenCalled()
+    })
+
+    it("creates tasks through the live scheduler engine", async () => {
+      createTask.mockResolvedValue(
+        pluginTask({
+          payload: { pluginId: "test-plugin", handler: "heartbeat", metadata: { tier: 2 } },
+        })
+      )
+      const context = createPluginContext(schedulerPlugin(), mockManager)
+
+      const created = await context.scheduler.createTask({
+        name: "Plugin task",
+        trigger: { type: "interval", seconds: 60 },
+        handler: "heartbeat",
+      })
+
+      expect(createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Plugin task",
+          type: "plugin",
+          trigger: expect.objectContaining({ type: "interval", intervalMs: 60_000 }),
+          payload: expect.objectContaining({
+            pluginId: "test-plugin",
+            handler: "heartbeat",
+          }),
+        })
+      )
+      expect(created.id).toBe("plugin-task-1")
+      expect(created.metadata).toEqual({ tier: 2 })
+    })
+
+    it("pauses owned tasks through the engine so the timing driver is disarmed", async () => {
+      mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
+      pauseTask.mockResolvedValue(true)
+      const context = createPluginContext(schedulerPlugin(), mockManager)
+
+      await expect(context.scheduler.pauseTask("plugin-task-1")).resolves.toBe(true)
+
+      expect(pauseTask).toHaveBeenCalledWith("plugin-task-1")
+    })
+
+    it("preserves the cross-plugin ownership boundary before mutations", async () => {
+      mockSchedulerDb.getTask.mockResolvedValue(
+        pluginTask({ payload: { pluginId: "another-plugin", handler: "heartbeat" } })
+      )
+      const context = createPluginContext(schedulerPlugin(), mockManager)
+
+      await expect(context.scheduler.deleteTask("plugin-task-1")).resolves.toBe(false)
+
+      expect(deleteTask).not.toHaveBeenCalled()
     })
   })
 

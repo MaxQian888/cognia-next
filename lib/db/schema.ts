@@ -43,7 +43,6 @@ import type {
   PluginPermissionRow,
   PluginReviewRow,
   PluginAnalyticsRow,
-  PluginScheduledJobRow,
   PluginMarketplaceSourceRow,
   PluginDexieMeta,
 } from "./plugin-types"
@@ -246,7 +245,6 @@ export class CogniaDB extends Dexie {
   pluginPermissions!: Table<PluginPermissionRow, [string, string]>
   pluginReviews!: Table<PluginReviewRow, [string, string]>
   pluginAnalytics!: Table<PluginAnalyticsRow, [string, string]>
-  pluginScheduledJobs!: Table<PluginScheduledJobRow, string>
   // v17 — External Bridge (LLM Wiki) tables. Wiki articles are addressed by
   // slug (unique within scope); the manifest is keyed by `scope` so each
   // (scope, build) pair is one row. The audit log is capped at 5000 newest
@@ -2495,6 +2493,14 @@ export class CogniaDB extends Dexie {
     // user's consent preference.
     this.version(112).stores({
       behaviorEvents: "&id, eventName, at, sessionId, [eventName+at]",
+    })
+
+    // v113 — Remove the unused pluginScheduledJobs table. Plugin schedules
+    // are canonical ScheduledTask rows in the separate SchedulerDatabase;
+    // keeping a second unwritten table made unified views and uninstall
+    // cleanup observe the wrong storage.
+    this.version(113).stores({
+      pluginScheduledJobs: null,
     })
 
     // First full-chain construction under Jest: cache the merged spec so every

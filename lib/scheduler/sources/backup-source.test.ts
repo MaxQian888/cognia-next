@@ -69,6 +69,15 @@ describe("createBackupSource", () => {
     expect(items[0].unifiedId).toBe(`backup:${BACKUP_SOURCE_ID}`)
   })
 
+  it("loads recent backup runs through the source contract", async () => {
+    const stubs = makeStubs(makeConfig())
+    const listRuns = jest.fn(async () => [])
+    const source = createBackupSource({ ...stubs, listRuns, pollIntervalMs: 0 })
+
+    await expect(source.listRuns?.(7)).resolves.toEqual([])
+    expect(listRuns).toHaveBeenCalledWith({ limit: 7 })
+  })
+
   it("get() returns undefined for non-default ids", async () => {
     const stubs = makeStubs(makeConfig())
     const source = createBackupSource({ ...stubs, pollIntervalMs: 0 })

@@ -1,6 +1,6 @@
 "use client"
 
-// Reads `pluginScheduledJobs` straight from Dexie, presents one row per
+// Reads real plugin ScheduledTask rows from SchedulerDB, presents one row per
 // job with cron + next-run + last-run + status. Mirrors the scheduler
 // settings panel shape but scoped to plugin contributions only. Provides
 // a deep link to the global scheduler section for advanced configuration.
@@ -30,17 +30,43 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
-import { getDb } from "@/lib/db/schema"
-import type { PluginScheduledJobRow } from "@/lib/db/plugin-types"
+import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { FilterChips } from "@/components/scheduler/filter-chips"
+import type { ScheduledTaskStatus } from "@/types/scheduler"
 
-async function listScheduledJobs(): Promise<PluginScheduledJobRow[]> {
-  return getDb().pluginScheduledJobs.orderBy("nextRunAt").toArray()
+export interface PluginScheduledJobView {
+  id: string
+  pluginId: string
+  handler: string
+  cron: string
+  status: ScheduledTaskStatus
+  nextRunAt?: number
+  lastRunAt?: number
+}
+
+async function listScheduledJobs(): Promise<PluginScheduledJobView[]> {
+  const tasks = await schedulerDb.getFilteredTasks({ types: ["plugin"] })
+  return tasks.map((task) => {
+    const payload = task.payload as { pluginId?: string; handler?: string }
+    return {
+      id: task.id,
+      pluginId: payload.pluginId ?? "",
+      handler: payload.handler ?? "",
+      cron:
+        task.trigger.cronExpression ??
+        (task.trigger.intervalMs
+          ? `${task.trigger.type}:${task.trigger.intervalMs}ms`
+          : task.trigger.type),
+      status: task.status,
+      nextRunAt: task.nextRunAt?.getTime(),
+      lastRunAt: task.lastRunAt?.getTime(),
+    }
+  })
 }
 
 type SortKey = "pluginId" | "handler" | "cron" | "status" | "nextRunAt" | "lastRunAt"
 type SortDir = "asc" | "desc"
-type StatusFilter = "all" | "active" | "paused" | "error"
+type StatusFilter = "all" | "active" | "paused" | "disabled"
 
 interface SortableHeaderProps {
   label: string
@@ -85,7 +111,7 @@ function SortableHeader({
 
 interface PluginScheduledJobsProps {
   /** Override the live data — used by tests to avoid wiring Dexie. */
-  jobsOverride?: PluginScheduledJobRow[]
+  jobsOverride?: PluginScheduledJobView[]
   /**
    * When set, only jobs belonging to this plugin are rendered. Used by the
    * per-plugin detail pane (`PluginDetailData`) to filter the shared Dexie
@@ -112,10 +138,10 @@ export function PluginScheduledJobs({ jobsOverride, pluginId }: PluginScheduledJ
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
 
   const filteredAndSorted = useMemo(() => {
-    if (!jobs) return [] as PluginScheduledJobRow[]
+    if (!jobs) return [] as PluginScheduledJobView[]
     const filtered =
       statusFilter === "all" ? jobs : jobs.filter((job) => job.status === statusFilter)
-    const cmp = (a: PluginScheduledJobRow, b: PluginScheduledJobRow): number => {
+    const cmp = (a: PluginScheduledJobView, b: PluginScheduledJobView): number => {
       const av = readKey(a, sortKey)
       const bv = readKey(b, sortKey)
       if (av === bv) return 0
@@ -156,21 +182,21 @@ export function PluginScheduledJobs({ jobsOverride, pluginId }: PluginScheduledJ
   }
 
   const filterChips = [
-    { key: "all", label: t("statusFilter.all") || "All", count: jobs.length },
+    { key: "all", label: t("status.all"), count: jobs.length },
     {
       key: "active",
-      label: t("status.active") || "Active",
+      label: t("status.active"),
       count: jobs.filter((j) => j.status === "active").length,
     },
     {
       key: "paused",
-      label: t("status.paused") || "Paused",
+      label: t("status.paused"),
       count: jobs.filter((j) => j.status === "paused").length,
     },
     {
-      key: "error",
-      label: t("status.error") || "Error",
-      count: jobs.filter((j) => j.status === "error").length,
+      key: "disabled",
+      label: t("status.disabled"),
+      count: jobs.filter((j) => j.status === "disabled").length,
     },
   ]
 
@@ -275,7 +301,7 @@ export function PluginScheduledJobs({ jobsOverride, pluginId }: PluginScheduledJ
   )
 }
 
-function readKey(job: PluginScheduledJobRow, key: SortKey): string | number | null {
+function readKey(job: PluginScheduledJobView, key: SortKey): string | number | null {
   switch (key) {
     case "pluginId":
       return job.pluginId
@@ -292,7 +318,7 @@ function readKey(job: PluginScheduledJobRow, key: SortKey): string | number | nu
   }
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status }: { status: ScheduledTaskStatus }) {
   const t = useTranslations("plugins.scheduledJobs.status")
   if (status === "active") {
     return (
@@ -310,16 +336,16 @@ function StatusBadge({ status }: { status: string }) {
       </Badge>
     )
   }
-  if (status === "error") {
+  if (status === "disabled") {
     return (
       <Badge variant="destructive" className="text-xs">
-        {t("error")}
+        {t("disabled")}
       </Badge>
     )
   }
   return (
     <Badge variant="outline" className="text-xs">
-      {status}
+      {t("expired")}
     </Badge>
   )
 }

@@ -33,6 +33,7 @@ pub async fn workflow_register_trigger(
                 input.trigger_id.clone(),
                 input.workflow_id.clone(),
                 cron,
+                input.timezone.as_deref(),
                 input.enabled,
                 input.binding.clone(),
             )?;
@@ -194,7 +195,14 @@ mod tests {
         let (state, _) = WorkflowState::open_in_memory_for_testing();
         state
             .cron
-            .upsert("trg_1".into(), "wf_1".into(), "0 0 9 * * 1-5", true, None)
+            .upsert(
+                "trg_1".into(),
+                "wf_1".into(),
+                "0 0 9 * * 1-5",
+                None,
+                true,
+                None,
+            )
             .unwrap();
         assert_eq!(state.cron.entry_count(), 1);
     }
@@ -208,6 +216,7 @@ mod tests {
                 "trg_1".into(),
                 "wf_1".into(),
                 "completely broken",
+                None,
                 true,
                 None,
             )

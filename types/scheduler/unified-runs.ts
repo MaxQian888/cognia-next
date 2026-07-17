@@ -8,7 +8,7 @@
  *   - app / system → `schedulerDb.executions` (TaskExecution)
  *   - workflow     → `getDb().workflowRuns` (WorkflowRunRow)
  *   - backup       → `listBackupHistory()` (BackupHistoryRow)
- *   - plugin       → `getDb().pluginScheduledJobs` (lastRunAt only)
+ *   - plugin       → SchedulerDB `executions` for `type: "plugin"` tasks
  *   - connector    → `getDb().connectorAudit` (AuditEntry)
  */
 

@@ -15,6 +15,7 @@ import type {
   PluginManifest,
   PluginContext,
   PluginPermission,
+  PluginCapability,
   PluginLogger,
   PluginStorage,
   PluginEventEmitter,
@@ -292,7 +293,7 @@ export function createPluginContext(
     secrets: guardNativeApi(pluginId, createSecretsAPI(pluginId), SECRETS_GUARD_MAP, [
       "onDidChange",
     ]),
-    scheduler: createSchedulerAPI(pluginId),
+    scheduler: createSchedulerAPI(pluginId, plugin.manifest.capabilities ?? []),
     workflow: createWorkflowAPI(pluginId),
     dexie: plugin.manifest.dexie
       ? createDexieAPI(getDb() as unknown as import("dexie").default, pluginId)
@@ -1930,34 +1931,72 @@ import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { nanoid } from "nanoid"
 
-function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
+function mapPluginTaskTrigger(trigger: PluginTaskTrigger): ScheduledTask["trigger"] {
+  return {
+    type: trigger.type,
+    cronExpression: trigger.type === "cron" ? trigger.expression : undefined,
+    intervalMs: trigger.type === "interval" ? trigger.seconds * 1000 : undefined,
+    runAt: trigger.type === "once" ? new Date(trigger.runAt) : undefined,
+    eventType: trigger.type === "event" ? trigger.eventType : undefined,
+    eventSource: trigger.type === "event" ? trigger.eventSource : undefined,
+    timezone: trigger.type === "cron" ? trigger.timezone : undefined,
+  }
+}
+
+async function loadTaskScheduler() {
+  const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+  return getTaskScheduler()
+}
+
+const SCHEDULER_SYNC_METHODS = new Set([
+  "registerHandler",
+  "unregisterHandler",
+  "hasHandler",
+  "getHandlers",
+])
+
+function deniedSchedulerAPI(pluginId: string): PluginSchedulerAPI {
+  return new Proxy({} as PluginSchedulerAPI, {
+    get: (_target, property) => {
+      const error = new Error(
+        "Plugin '" +
+          pluginId +
+          "' must declare the 'scheduler' capability before using ctx.scheduler"
+      )
+      if (SCHEDULER_SYNC_METHODS.has(String(property))) {
+        return () => {
+          throw error
+        }
+      }
+      return () => Promise.reject(error)
+    },
+  })
+}
+
+function createSchedulerAPI(
+  pluginId: string,
+  capabilities: readonly PluginCapability[]
+): PluginSchedulerAPI {
+  if (!capabilities.includes("scheduler")) {
+    return deniedSchedulerAPI(pluginId)
+  }
   // Local handler registry for this plugin
   const handlers = new Map<string, PluginTaskHandler>()
 
   return {
     // Task Management
     createTask: async (input: CreatePluginTaskInput): Promise<PluginScheduledTask> => {
-      const taskId = nanoid()
-      const now = new Date()
-
-      const task: ScheduledTask = {
-        id: taskId,
+      const scheduler = await loadTaskScheduler()
+      const task = await scheduler.createTask({
         name: input.name,
         description: input.description,
         type: "plugin",
-        trigger: {
-          type: input.trigger.type,
-          cronExpression: input.trigger.type === "cron" ? input.trigger.expression : undefined,
-          intervalMs: input.trigger.type === "interval" ? input.trigger.seconds * 1000 : undefined,
-          runAt: input.trigger.type === "once" ? new Date(input.trigger.runAt) : undefined,
-          eventType: input.trigger.type === "event" ? input.trigger.eventType : undefined,
-          eventSource: input.trigger.type === "event" ? input.trigger.eventSource : undefined,
-          timezone: input.trigger.type === "cron" ? input.trigger.timezone : undefined,
-        },
+        trigger: mapPluginTaskTrigger(input.trigger),
         payload: {
           pluginId,
           handler: input.handler,
           args: input.handlerArgs || {},
+          ...(input.metadata && { metadata: input.metadata }),
         },
         config: {
           timeout: (input.timeout || 300) * 1000,
@@ -1974,16 +2013,13 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
           onProgress: false,
           channels: ["toast"],
         },
-        status: input.enabled !== false ? "active" : "paused",
         tags: input.tags,
-        runCount: 0,
-        successCount: 0,
-        failureCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      }
+      })
 
-      await schedulerDb.createTask(task)
+      if (input.enabled === false) {
+        await scheduler.pauseTask(task.id)
+        return mapToPluginTask({ ...task, status: "paused" }, pluginId)
+      }
       return mapToPluginTask(task, pluginId)
     },
 
@@ -1999,36 +2035,35 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
         return null
       }
 
-      const updatedTask: ScheduledTask = { ...existingTask, updatedAt: new Date() }
-
-      if (input.name !== undefined) updatedTask.name = input.name
-      if (input.description !== undefined) updatedTask.description = input.description
-      if (input.trigger !== undefined) {
-        updatedTask.trigger = {
-          type: input.trigger.type,
-          cronExpression: input.trigger.type === "cron" ? input.trigger.expression : undefined,
-          intervalMs: input.trigger.type === "interval" ? input.trigger.seconds * 1000 : undefined,
-          runAt: input.trigger.type === "once" ? new Date(input.trigger.runAt) : undefined,
-          eventType: input.trigger.type === "event" ? input.trigger.eventType : undefined,
-          eventSource: input.trigger.type === "event" ? input.trigger.eventSource : undefined,
-          timezone: input.trigger.type === "cron" ? input.trigger.timezone : undefined,
-        }
-      }
-      if (input.handler !== undefined) {
-        updatedTask.payload = {
-          ...(existingTask.payload as Record<string, unknown>),
-          handler: input.handler,
-        }
-      }
-      if (input.handlerArgs !== undefined) {
-        updatedTask.payload = {
-          ...(existingTask.payload as Record<string, unknown>),
-          args: input.handlerArgs,
-        }
-      }
-      if (input.tags !== undefined) updatedTask.tags = input.tags
-
-      await schedulerDb.updateTask(updatedTask)
+      const scheduler = await loadTaskScheduler()
+      const updatedTask = await scheduler.updateTask(taskId, {
+        name: input.name,
+        description: input.description,
+        trigger: input.trigger ? mapPluginTaskTrigger(input.trigger) : undefined,
+        payload:
+          input.handler !== undefined ||
+          input.handlerArgs !== undefined ||
+          input.metadata !== undefined
+            ? {
+                ...(existingTask.payload as Record<string, unknown>),
+                ...(input.handler !== undefined && { handler: input.handler }),
+                ...(input.handlerArgs !== undefined && { args: input.handlerArgs }),
+                ...(input.metadata !== undefined && { metadata: input.metadata }),
+              }
+            : undefined,
+        config:
+          input.timeout !== undefined || input.retry !== undefined
+            ? {
+                ...(input.timeout !== undefined && { timeout: input.timeout * 1000 }),
+                ...(input.retry !== undefined && {
+                  maxRetries: input.retry.maxAttempts,
+                  retryDelay: input.retry.delaySeconds * 1000,
+                }),
+              }
+            : undefined,
+        tags: input.tags,
+      })
+      if (!updatedTask) return null
       return mapToPluginTask(updatedTask, pluginId)
     },
 
@@ -2040,7 +2075,8 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
       ) {
         return false
       }
-      return schedulerDb.deleteTask(taskId)
+      const scheduler = await loadTaskScheduler()
+      return scheduler.deleteTask(taskId)
     },
 
     getTask: async (taskId: string): Promise<PluginScheduledTask | null> => {
@@ -2102,9 +2138,8 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
       ) {
         return false
       }
-      const updatedTask = { ...existingTask, status: "paused" as const, updatedAt: new Date() }
-      await schedulerDb.updateTask(updatedTask)
-      return true
+      const scheduler = await loadTaskScheduler()
+      return scheduler.pauseTask(taskId)
     },
 
     resumeTask: async (taskId: string): Promise<boolean> => {
@@ -2115,9 +2150,8 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
       ) {
         return false
       }
-      const updatedTask = { ...existingTask, status: "active" as const, updatedAt: new Date() }
-      await schedulerDb.updateTask(updatedTask)
-      return true
+      const scheduler = await loadTaskScheduler()
+      return scheduler.resumeTask(taskId)
     },
 
     runTaskNow: async (taskId: string, _args?: Record<string, unknown>): Promise<string> => {
@@ -2289,6 +2323,7 @@ function mapToPluginTask(task: ScheduledTask, pluginId: string): PluginScheduled
     trigger: pluginTrigger,
     handler: (payload?.handler as string) || "",
     handlerArgs: payload?.args as Record<string, unknown> | undefined,
+    metadata: payload?.metadata as Record<string, unknown> | undefined,
     status: task.status as "active" | "paused" | "disabled" | "completed" | "error",
     lastRunAt: task.lastRunAt,
     nextRunAt: task.nextRunAt,

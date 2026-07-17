@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
-import { PluginScheduledJobs } from "./plugin-scheduled-jobs"
-import type { PluginScheduledJobRow } from "@/lib/db/plugin-types"
+import { PluginScheduledJobs, type PluginScheduledJobView } from "./plugin-scheduled-jobs"
 
 // Table of plugin-contributed scheduled jobs (cron / next-run / last-run /
 // status) with sortable columns and a status filter. The `jobsOverride` prop
@@ -9,7 +8,7 @@ import type { PluginScheduledJobRow } from "@/lib/db/plugin-types"
 
 const now = Date.parse("2025-06-20T12:00:00.000Z")
 
-const makeJob = (over: Partial<PluginScheduledJobRow> = {}): PluginScheduledJobRow => ({
+const makeJob = (over: Partial<PluginScheduledJobView> = {}): PluginScheduledJobView => ({
   id: "job-1",
   pluginId: "com.acme.web-tools",
   cron: "0 */6 * * *",
@@ -17,12 +16,10 @@ const makeJob = (over: Partial<PluginScheduledJobRow> = {}): PluginScheduledJobR
   status: "active",
   lastRunAt: now - 6 * 3_600_000,
   nextRunAt: now + 6 * 3_600_000,
-  createdAt: now - 30 * 86_400_000,
-  updatedAt: now,
   ...over,
 })
 
-const JOBS: PluginScheduledJobRow[] = [
+const JOBS: PluginScheduledJobView[] = [
   makeJob(),
   makeJob({
     id: "job-2",
@@ -36,7 +33,7 @@ const JOBS: PluginScheduledJobRow[] = [
     pluginId: "com.acme.ocr",
     handler: "reindexDocs",
     cron: "0 3 * * *",
-    status: "error",
+    status: "disabled",
     nextRunAt: now + 86_400_000,
   }),
 ]
@@ -44,7 +41,7 @@ const JOBS: PluginScheduledJobRow[] = [
 // `PluginScheduledJobs` takes all-optional props (default `{}`), so anchor the
 // story args to an explicit type rather than relying on component-props
 // inference.
-type Args = { jobsOverride?: PluginScheduledJobRow[]; pluginId?: string }
+type Args = { jobsOverride?: PluginScheduledJobView[]; pluginId?: string }
 
 const meta: Meta<Args> = {
   title: "Plugins/Detail/PluginScheduledJobs",

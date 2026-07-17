@@ -3,9 +3,9 @@
  */
 
 import { render, screen, fireEvent, within } from "@testing-library/react"
-import type { PluginScheduledJobRow } from "@/lib/db/plugin-types"
+import type { PluginScheduledJobView } from "./plugin-scheduled-jobs"
 
-let mockJobs: PluginScheduledJobRow[] | undefined
+let mockJobs: PluginScheduledJobView[] | undefined
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
@@ -23,28 +23,17 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockJobs,
 }))
 
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({
-    pluginScheduledJobs: {
-      orderBy: () => ({ toArray: async () => mockJobs ?? [] }),
-    },
-  }),
-}))
-
 import { PluginScheduledJobs } from "./plugin-scheduled-jobs"
 
-function makeJob(overrides: Partial<PluginScheduledJobRow> = {}): PluginScheduledJobRow {
+function makeJob(overrides: Partial<PluginScheduledJobView> = {}): PluginScheduledJobView {
   return {
     id: "job-1",
     pluginId: "plugin-a",
     cron: "*/5 * * * *",
     handler: "doThing",
-    args: {},
     status: "active",
     nextRunAt: 1_700_000_000_000,
     lastRunAt: 1_699_000_000_000,
-    createdAt: 1_698_000_000_000,
-    updatedAt: 1_698_000_000_000,
     ...overrides,
   }
 }
@@ -117,7 +106,7 @@ describe("PluginScheduledJobs", () => {
     mockJobs = [
       makeJob({ id: "1", pluginId: "alpha", status: "active" }),
       makeJob({ id: "2", pluginId: "beta", status: "paused" }),
-      makeJob({ id: "3", pluginId: "gamma", status: "error" }),
+      makeJob({ id: "3", pluginId: "gamma", status: "disabled" }),
     ]
     render(<PluginScheduledJobs />)
     expect(screen.getByText("alpha")).toBeInTheDocument()

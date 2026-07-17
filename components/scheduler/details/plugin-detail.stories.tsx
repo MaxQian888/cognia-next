@@ -3,7 +3,7 @@ import { fn } from "storybook/test"
 
 import { PluginDetail } from "./plugin-detail"
 
-// `PluginDetail` reads a `pluginScheduledJobs` row from Dexie by `jobId` and
+// `PluginDetail` reads a plugin ScheduledTask from SchedulerDB by `jobId` and
 // shows its cron/handler/args plus a deep link into plugin settings and recent
 // runs. With no seeded job the live query resolves to `undefined`, so the panel
 // renders its "plugin job not found" fallback.

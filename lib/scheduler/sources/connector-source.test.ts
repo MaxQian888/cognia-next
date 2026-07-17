@@ -167,6 +167,29 @@ describe("createConnectorSource — list", () => {
     expect(items).toHaveLength(1)
     expect(items[0].name).toContain("(0)")
   })
+
+  it("merges connector task executions and audit rows through the run contract", async () => {
+    const getRecentExecutionsMatching = jest.fn(async (ownsTaskType, limit) => {
+      expect(ownsTaskType(CONNECTOR_DIGEST_TYPE)).toBe(true)
+      expect(ownsTaskType("chat")).toBe(false)
+      expect(limit).toBe(7)
+      return []
+    })
+    const listAuditRuns = jest.fn(async () => [])
+    const source = createConnectorSource({
+      db: {
+        getAllTasks: jest.fn(async () => []),
+        getTask: jest.fn(async () => null),
+        getRecentExecutionsMatching,
+      },
+      outboundQueueProbe: stubProbe(0),
+      listAuditRuns,
+    })
+
+    await expect(source.listRuns?.(7)).resolves.toEqual([])
+    expect(getRecentExecutionsMatching).toHaveBeenCalledTimes(1)
+    expect(listAuditRuns).toHaveBeenCalledWith(7)
+  })
 })
 
 describe("createConnectorSource — get", () => {

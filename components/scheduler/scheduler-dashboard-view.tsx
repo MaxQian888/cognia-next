@@ -21,7 +21,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { ScheduledTask, TaskExecution, TaskStatistics } from "@/types/scheduler"
-import type { ScheduledItemKind } from "@/types/scheduler/unified"
+import { SCHEDULED_ITEM_KINDS, type ScheduledItemKind } from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { useSchedulerDashboardView } from "@/hooks/scheduler/use-scheduler-dashboard-view"
@@ -121,15 +121,6 @@ function ExecutionStatusIcon({ status }: { status: TaskExecution["status"] }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-const KIND_ORDER: ScheduledItemKind[] = [
-  "app",
-  "workflow",
-  "backup",
-  "plugin",
-  "system",
-  "connector",
-]
-
 interface KindSummaryStripProps {
   countsByKind?: Record<ScheduledItemKind, number>
   activeCountsByKind?: Record<ScheduledItemKind, number>
@@ -143,7 +134,7 @@ function KindSummaryStrip({ countsByKind, activeCountsByKind }: KindSummaryStrip
       data-testid="kind-summary-strip"
       className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6"
     >
-      {KIND_ORDER.map((kind) => {
+      {SCHEDULED_ITEM_KINDS.map((kind) => {
         const total = countsByKind[kind] ?? 0
         const active = activeCountsByKind?.[kind] ?? 0
         const muted = total === 0

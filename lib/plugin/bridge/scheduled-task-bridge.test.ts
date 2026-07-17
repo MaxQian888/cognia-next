@@ -36,6 +36,15 @@ function makeFakeScheduler(seed: ScheduledTask[] = []) {
       tasks.push(task)
       return task
     }),
+    updateTask: jest.fn(async (id, input) => {
+      const task = tasks.find((candidate) => candidate.id === id)
+      if (!task) return null
+      Object.assign(task, input)
+      if (input.trigger?.type === "interval") {
+        task.nextRunAt = new Date(input.trigger.intervalMs ?? 0)
+      }
+      return task
+    }),
     deleteTask: jest.fn(async (id: string) => {
       const i = tasks.findIndex((t) => t.id === id)
       if (i === -1) return false
@@ -95,6 +104,7 @@ describe("registerScheduledTasksForPlugin", () => {
     ])
     const result = await registerScheduledTasksForPlugin(manifest, { scheduler })
     expect(result.created).toBe(1)
+    expect(result.updated).toBe(0)
     expect(scheduler.createTask).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "plugin",
@@ -111,6 +121,7 @@ describe("registerScheduledTasksForPlugin", () => {
         id: "existing",
         name: "daily",
         type: "plugin",
+        trigger: { type: "interval", intervalMs: 60_000 },
         payload: { pluginId: "sched-plugin", handler: "doDaily" },
       } as unknown as ScheduledTask,
     ])
@@ -140,8 +151,32 @@ describe("registerScheduledTasksForPlugin", () => {
   it("no-ops with empty defs (no scheduler access)", async () => {
     const scheduler = makeFakeScheduler()
     const result = await registerScheduledTasksForPlugin(makeManifest([]), { scheduler })
-    expect(result).toEqual({ created: 0, skipped: 0, errors: [] })
+    expect(result).toEqual({ created: 0, skipped: 0, updated: 0, errors: [] })
     expect(scheduler.getAllTasks).not.toHaveBeenCalled()
+  })
+
+  it("updates and re-arms an existing task when the manifest trigger changes", async () => {
+    const scheduler = makeFakeScheduler([
+      {
+        id: "existing",
+        name: "daily",
+        type: "plugin",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        payload: { pluginId: "sched-plugin", handler: "doDaily" },
+      } as unknown as ScheduledTask,
+    ])
+    const manifest = makeManifest([
+      { name: "daily", handler: "doDaily", trigger: { type: "interval", seconds: 300 } },
+    ])
+
+    const result = await registerScheduledTasksForPlugin(manifest, { scheduler })
+
+    expect(result.updated).toBe(1)
+    expect(scheduler.updateTask).toHaveBeenCalledWith("existing", {
+      trigger: { type: "interval", intervalMs: 300_000 },
+    })
+    expect(scheduler.tasks[0].trigger).toEqual({ type: "interval", intervalMs: 300_000 })
+    expect(scheduler.tasks[0].nextRunAt).toEqual(new Date(300_000))
   })
 })
 

@@ -7,7 +7,7 @@
  */
 
 const registerBuiltInExecutorsMock = jest.fn()
-const initTaskSchedulerMock = jest.fn(async () => undefined)
+const initTaskSchedulerMock = jest.fn(async (_driver?: unknown) => undefined)
 const stopTaskSchedulerMock = jest.fn()
 
 jest.mock("./executors", () => ({
@@ -32,15 +32,25 @@ jest.mock("./task-scheduler", () => ({
   __esModule: true,
   getTaskScheduler: jest.fn(),
   createTaskScheduler: jest.fn(),
-  initTaskScheduler: () => initTaskSchedulerMock(),
+  initTaskScheduler: (driver?: unknown) => initTaskSchedulerMock(driver),
   stopTaskScheduler: () => stopTaskSchedulerMock(),
   registerTaskExecutor: jest.fn(),
   unregisterTaskExecutor: jest.fn(),
 }))
 
 jest.mock("@cognia/logging", () => {
-  const stub = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
-  return { loggers: { app: stub, scheduler: stub, store: stub, plugin: stub } }
+  const stub = {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    child: jest.fn(),
+  }
+  stub.child.mockReturnValue(stub)
+  return {
+    createLogger: () => stub,
+    loggers: new Proxy({}, { get: () => stub }),
+  }
 })
 
 import * as barrel from "./index"
@@ -132,6 +142,14 @@ describe("initSchedulerSystem", () => {
     await barrel.initSchedulerSystem()
     expect(registerBuiltInExecutorsMock).toHaveBeenCalled()
     expect(initTaskSchedulerMock).toHaveBeenCalled()
+  })
+
+  it("forwards an injected timing driver to the scheduler singleton", async () => {
+    const driver = { supportsLeaderElection: false }
+
+    await barrel.initSchedulerSystem(driver as never)
+
+    expect(initTaskSchedulerMock).toHaveBeenCalledWith(driver)
   })
 })
 

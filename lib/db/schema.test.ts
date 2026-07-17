@@ -158,12 +158,12 @@ describe("getDb", () => {
     expect(db.canvasSessions).toBeDefined()
     expect(db.sessionState).toBeDefined()
     expect(db.tts_provider_keys).toBeDefined()
-    // §A-Schema (v15) — the five plugin tables added by the plugin port.
+    // §A-Schema (v15), minus the retired pluginScheduledJobs table (v113).
     expect(db.plugins).toBeDefined()
     expect(db.pluginPermissions).toBeDefined()
     expect(db.pluginReviews).toBeDefined()
     expect(db.pluginAnalytics).toBeDefined()
-    expect(db.pluginScheduledJobs).toBeDefined()
+    expect(db.tables.map((table) => table.name)).not.toContain("pluginScheduledJobs")
     // v17 — External Bridge (LLM Wiki + MCP audit) tables.
     expect(db.wikiArticles).toBeDefined()
     expect(db.wikiSections).toBeDefined()
@@ -430,6 +430,14 @@ describe("getDb", () => {
     expect(
       await db.behaviorEvents.where("[eventName+at]").equals(["chat.message.sent", 1]).first()
     ).toEqual(expect.objectContaining({ id: "event-1" }))
+    db.close()
+  })
+
+  it("v113 removes the unused pluginScheduledJobs table", async () => {
+    const db = new CogniaDB()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(113)
+    expect(db.tables.map((table) => table.name)).not.toContain("pluginScheduledJobs")
     db.close()
   })
 
@@ -1919,16 +1927,6 @@ describe("getDb", () => {
       lastEventAt: now,
     })
 
-    await db.pluginScheduledJobs.put({
-      id: "job-1",
-      pluginId: "p1",
-      cron: "0 * * * *",
-      handler: "syncRepo",
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-    })
-
     expect(await db.plugins.get("p1")).toMatchObject({ name: "Test Plugin", enabled: true })
     expect(await db.pluginPermissions.get(["p1", "shell:execute"])).toMatchObject({
       decision: "allow",
@@ -1937,7 +1935,6 @@ describe("getDb", () => {
     expect(await db.pluginAnalytics.get(["p1", "tool.git_status.invocations"])).toMatchObject({
       count: 7,
     })
-    expect(await db.pluginScheduledJobs.get("job-1")).toMatchObject({ status: "active" })
   })
 
   it("v15 plugin indexes drive filtered queries (multi-entry capabilities)", async () => {

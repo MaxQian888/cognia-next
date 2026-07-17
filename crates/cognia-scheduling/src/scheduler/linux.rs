@@ -15,9 +15,9 @@ use std::process::Command;
 use super::error::{Result, SchedulerError};
 use super::service::{generate_task_name, now_iso, SystemScheduler, TASK_PREFIX};
 use super::types::{
-    CreateSystemTaskInput, RunLevel, SchedulerCapabilities, SystemTask, SystemTaskAction,
-    SystemTaskId, SystemTaskStatus, SystemTaskTrigger, TaskMetadataState, TaskRunResult,
-    TranslationValidation, TriggerCapability,
+    derive_trigger_capabilities, CreateSystemTaskInput, RunLevel, SchedulerCapabilities,
+    SystemTask, SystemTaskAction, SystemTaskId, SystemTaskStatus, SystemTaskTrigger,
+    SystemTriggerKind, TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
 };
 
 /// Linux systemd scheduler implementation
@@ -823,62 +823,16 @@ impl SystemScheduler for LinuxScheduler {
     }
 
     fn get_trigger_capabilities(&self) -> Vec<TriggerCapability> {
-        vec![
-            TriggerCapability {
-                trigger_type: "cron".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Uses systemd OnCalendar directive. Persistent=true ensures missed runs are caught up.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "interval".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Uses systemd OnUnitActiveSec. First run triggered 60s after boot via OnBootSec.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "once".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Uses systemd OnCalendar with a fixed datetime. Persistent=true ensures the run happens even if missed.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "on_boot".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Uses systemd OnBootSec. Runs as a user service after the user's systemd instance starts.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "on_logon".to_string(),
-                available: false,
-                requires_admin: false,
-                constraint_notes: vec![
-                    "systemd user services start at user login automatically; use 'on_boot' with a short delay for equivalent behavior.".to_string(),
-                ],
-                backend_notes: vec![],
-            },
-            TriggerCapability {
-                trigger_type: "on_event".to_string(),
-                available: false,
-                requires_admin: false,
-                constraint_notes: vec![
-                    "Event-based triggers are not supported via systemd user timers.".to_string(),
-                ],
-                backend_notes: vec![],
-            },
-        ]
+        derive_trigger_capabilities(|kind| {
+            match kind {
+            SystemTriggerKind::Cron => (true, false, vec![], vec!["Uses systemd OnCalendar directive. Persistent=true ensures missed runs are caught up.".to_string()]),
+            SystemTriggerKind::Interval => (true, false, vec![], vec!["Uses systemd OnUnitActiveSec. First run triggered 60s after boot via OnBootSec.".to_string()]),
+            SystemTriggerKind::Once => (true, false, vec![], vec!["Uses systemd OnCalendar with a fixed datetime. Persistent=true ensures the run happens even if missed.".to_string()]),
+            SystemTriggerKind::OnBoot => (true, false, vec![], vec!["Uses systemd OnBootSec. Runs as a user service after the user's systemd instance starts.".to_string()]),
+            SystemTriggerKind::OnLogon => (false, false, vec!["systemd user services start at user login automatically; use 'on_boot' with a short delay for equivalent behavior.".to_string()], vec![]),
+            SystemTriggerKind::OnEvent => (false, false, vec!["Event-based triggers are not supported via systemd user timers.".to_string()], vec![]),
+        }
+        })
     }
 
     fn validate_trigger_translation(&self, trigger: &SystemTaskTrigger) -> TranslationValidation {

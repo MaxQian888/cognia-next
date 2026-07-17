@@ -14,9 +14,9 @@ use std::process::Command;
 use super::error::{Result, SchedulerError};
 use super::service::{generate_task_name, is_cognia_task, now_iso, SystemScheduler, TASK_PREFIX};
 use super::types::{
-    CreateSystemTaskInput, RunLevel, SchedulerCapabilities, SystemTask, SystemTaskAction,
-    SystemTaskStatus, SystemTaskTrigger, TaskMetadataState, TaskRunResult, TranslationValidation,
-    TriggerCapability,
+    derive_trigger_capabilities, CreateSystemTaskInput, RunLevel, SchedulerCapabilities,
+    SystemTask, SystemTaskAction, SystemTaskStatus, SystemTaskTrigger, SystemTriggerKind,
+    TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
 };
 
 /// Windows Task Scheduler implementation
@@ -1025,60 +1025,16 @@ impl SystemScheduler for WindowsScheduler {
     }
 
     fn get_trigger_capabilities(&self) -> Vec<TriggerCapability> {
-        vec![
-            TriggerCapability {
-                trigger_type: "cron".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Converted to schtasks schedule (MINUTE/HOURLY/DAILY/WEEKLY/MONTHLY). Complex cron patterns may not be fully expressible.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "interval".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Uses schtasks MINUTE schedule. Minimum granularity is 1 minute.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "once".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![],
-            },
-            TriggerCapability {
-                trigger_type: "on_boot".to_string(),
-                available: true,
-                requires_admin: true,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Uses schtasks ONSTART. Requires administrator privileges.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "on_logon".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Uses schtasks ONLOGON. Runs when the specified user logs in.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "on_event".to_string(),
-                available: false,
-                requires_admin: false,
-                constraint_notes: vec![
-                    "Requires XML-based task creation; not yet supported via schtasks CLI. Will be enabled when XML round-trip parsing is implemented.".to_string(),
-                ],
-                backend_notes: vec![],
-            },
-        ]
+        derive_trigger_capabilities(|kind| {
+            match kind {
+            SystemTriggerKind::Cron => (true, false, vec![], vec!["Converted to schtasks schedule (MINUTE/HOURLY/DAILY/WEEKLY/MONTHLY). Complex cron patterns may not be fully expressible.".to_string()]),
+            SystemTriggerKind::Interval => (true, false, vec![], vec!["Uses schtasks MINUTE schedule. Minimum granularity is 1 minute.".to_string()]),
+            SystemTriggerKind::Once => (true, false, vec![], vec![]),
+            SystemTriggerKind::OnBoot => (true, true, vec![], vec!["Uses schtasks ONSTART. Requires administrator privileges.".to_string()]),
+            SystemTriggerKind::OnLogon => (true, false, vec![], vec!["Uses schtasks ONLOGON. Runs when the specified user logs in.".to_string()]),
+            SystemTriggerKind::OnEvent => (false, false, vec!["Requires XML-based task creation; not yet supported via schtasks CLI. Will be enabled when XML round-trip parsing is implemented.".to_string()], vec![]),
+        }
+        })
     }
 
     fn validate_trigger_translation(&self, trigger: &SystemTaskTrigger) -> TranslationValidation {

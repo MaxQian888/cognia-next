@@ -829,7 +829,14 @@ impl SystemScheduler for NoopScheduler {
     }
 
     fn get_trigger_capabilities(&self) -> Vec<TriggerCapability> {
-        vec![]
+        derive_trigger_capabilities(|_kind| {
+            (
+                false,
+                false,
+                vec!["System scheduler not available on this platform".to_string()],
+                vec![],
+            )
+        })
     }
 
     fn validate_trigger_translation(&self, _trigger: &SystemTaskTrigger) -> TranslationValidation {

@@ -148,27 +148,6 @@ export interface PluginAnalyticsRow {
 }
 
 /**
- * One row per scheduled task contributed by a plugin. The scheduler executor
- * (`lib/scheduler/executors/plugin-executor.ts`) pulls these rows on tick.
- */
-export interface PluginScheduledJobRow {
-  id: string
-  pluginId: string
-  /** Cron expression or interval description. */
-  cron: string
-  /** Plugin-side handler name to invoke. */
-  handler: string
-  /** Free-form arguments passed to the handler. */
-  args?: Record<string, unknown>
-  /** "active" | "paused" | "error". */
-  status: string
-  lastRunAt?: number
-  nextRunAt?: number
-  createdAt: number
-  updatedAt: number
-}
-
-/**
  * Registry entry for a plugin's declared Dexie tables (schema v27). Written by
  * `applyPluginTables`; read on launch to restore the plugin table set.
  */

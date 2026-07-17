@@ -15,9 +15,9 @@ use std::process::Command;
 use super::error::{Result, SchedulerError};
 use super::service::{generate_task_name, is_cognia_task, now_iso, SystemScheduler, TASK_PREFIX};
 use super::types::{
-    CreateSystemTaskInput, RunLevel, SchedulerCapabilities, SystemTask, SystemTaskAction,
-    SystemTaskStatus, SystemTaskTrigger, TaskMetadataState, TaskRunResult, TranslationValidation,
-    TriggerCapability,
+    derive_trigger_capabilities, CreateSystemTaskInput, RunLevel, SchedulerCapabilities,
+    SystemTask, SystemTaskAction, SystemTaskStatus, SystemTaskTrigger, SystemTriggerKind,
+    TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
 };
 
 /// macOS launchd scheduler implementation
@@ -123,10 +123,14 @@ impl MacOSScheduler {
         // Add trigger configuration
         match &task.trigger {
             SystemTaskTrigger::Cron { expression, .. } => {
-                if let Some(calendar) = Self::cron_to_calendar_interval(expression) {
-                    plist.push_str("    <key>StartCalendarInterval</key>\n");
-                    plist.push_str(&calendar);
-                }
+                let calendar = Self::cron_to_calendar_interval(expression)?;
+                plist.push_str("    <key>CogniaCronExpression</key>\n");
+                plist.push_str(&format!(
+                    "    <string>{}</string>\n",
+                    Self::escape_xml(expression)
+                ));
+                plist.push_str("    <key>StartCalendarInterval</key>\n");
+                plist.push_str(&calendar);
             }
             SystemTaskTrigger::Interval { seconds } => {
                 plist.push_str(&format!(
@@ -290,69 +294,55 @@ impl MacOSScheduler {
     }
 
     /// Convert cron expression to launchd CalendarInterval
-    fn cron_to_calendar_interval(expression: &str) -> Option<String> {
+    fn cron_to_calendar_interval(expression: &str) -> Result<String> {
         let parts: Vec<&str> = expression.trim().split_whitespace().collect();
         if parts.len() != 5 {
-            return None;
+            return Err(SchedulerError::InvalidCron(format!(
+                "launchd requires exactly 5 fields, got {}",
+                parts.len()
+            )));
         }
 
-        let (minute, hour, day, _month, weekday) =
+        let (minute, hour, day, month, weekday) =
             (parts[0], parts[1], parts[2], parts[3], parts[4]);
 
         let mut dict = String::from("    <dict>\n");
-
-        // Minute
-        if minute != "*" {
-            if let Some(val) = Self::parse_cron_field(minute) {
+        for (key, field, min, max) in [
+            ("Minute", minute, 0, 59),
+            ("Hour", hour, 0, 23),
+            ("Day", day, 1, 31),
+            ("Month", month, 1, 12),
+            ("Weekday", weekday, 0, 7),
+        ] {
+            if let Some(value) = Self::parse_cron_field(field, key, min, max)? {
                 dict.push_str(&format!(
-                    "        <key>Minute</key>\n        <integer>{}</integer>\n",
-                    val
-                ));
-            }
-        }
-
-        // Hour
-        if hour != "*" {
-            if let Some(val) = Self::parse_cron_field(hour) {
-                dict.push_str(&format!(
-                    "        <key>Hour</key>\n        <integer>{}</integer>\n",
-                    val
-                ));
-            }
-        }
-
-        // Day of month
-        if day != "*" {
-            if let Some(val) = Self::parse_cron_field(day) {
-                dict.push_str(&format!(
-                    "        <key>Day</key>\n        <integer>{}</integer>\n",
-                    val
-                ));
-            }
-        }
-
-        // Weekday (0 = Sunday in launchd)
-        if weekday != "*" {
-            if let Some(val) = Self::parse_cron_field(weekday) {
-                dict.push_str(&format!(
-                    "        <key>Weekday</key>\n        <integer>{}</integer>\n",
-                    val
+                    "        <key>{key}</key>\n        <integer>{value}</integer>\n"
                 ));
             }
         }
 
         dict.push_str("    </dict>\n");
-        Some(dict)
+        Ok(dict)
     }
 
-    /// Parse a simple cron field value
-    fn parse_cron_field(field: &str) -> Option<u32> {
-        if field.starts_with("*/") {
-            // Interval - not directly supported, return None
-            None
-        } else {
-            field.parse().ok()
+    /// Parse a launchd-representable cron field without treating parse failure
+    /// as a wildcard. launchd's omitted keys mean wildcard, so accepting an
+    /// unsupported range/list/step here would silently increase frequency.
+    fn parse_cron_field(field: &str, name: &str, min: u32, max: u32) -> Result<Option<u32>> {
+        if field == "*" {
+            return Ok(None);
         }
+        let value = field.parse::<u32>().map_err(|_| {
+            SchedulerError::InvalidCron(format!(
+                "launchd cannot represent {name} field '{field}'; only '*' or one fixed value is supported"
+            ))
+        })?;
+        if !(min..=max).contains(&value) {
+            return Err(SchedulerError::InvalidCron(format!(
+                "{name} field '{field}' is outside {min}..={max}"
+            )));
+        }
+        Ok(Some(value))
     }
 
     fn decode_xml_entities(s: &str) -> String {
@@ -497,6 +487,15 @@ impl MacOSScheduler {
             return Some(SystemTaskTrigger::OnLogon { user: None });
         }
 
+        if let Some(expression) = Self::extract_key_block(content, "CogniaCronExpression", "string")
+        {
+            return Some(SystemTaskTrigger::Cron {
+                expression,
+                // launchd evaluates calendar intervals in the host's local timezone.
+                timezone: None,
+            });
+        }
+
         let calendar = Self::extract_key_block(content, "StartCalendarInterval", "dict")?;
         let minute = Self::extract_key_int(&calendar, "Minute");
         let hour = Self::extract_key_int(&calendar, "Hour");
@@ -512,7 +511,7 @@ impl MacOSScheduler {
         if let (Some(minute), Some(hour)) = (minute, hour) {
             return Some(SystemTaskTrigger::Cron {
                 expression: format!("{minute} {hour} * * *"),
-                timezone: Some("UTC".to_string()),
+                timezone: None,
             });
         }
 
@@ -781,62 +780,16 @@ impl SystemScheduler for MacOSScheduler {
     }
 
     fn get_trigger_capabilities(&self) -> Vec<TriggerCapability> {
-        vec![
-            TriggerCapability {
-                trigger_type: "cron".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Uses launchd StartCalendarInterval. Step expressions (*/N) are not supported; only fixed values.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "interval".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Uses launchd StartInterval (seconds). Minimum granularity is 1 second.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "once".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Implemented via StartCalendarInterval with fixed month/day/hour/minute.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "on_boot".to_string(),
-                available: false,
-                requires_admin: false,
-                constraint_notes: vec![
-                    "Boot-level triggers require system daemon scope (LaunchDaemons). Cognia operates as a user agent (LaunchAgents). Use 'on_logon' instead.".to_string(),
-                ],
-                backend_notes: vec![],
-            },
-            TriggerCapability {
-                trigger_type: "on_logon".to_string(),
-                available: true,
-                requires_admin: false,
-                constraint_notes: vec![],
-                backend_notes: vec![
-                    "Maps to RunAtLoad — runs when your user agent loads at login or agent restart.".to_string(),
-                ],
-            },
-            TriggerCapability {
-                trigger_type: "on_event".to_string(),
-                available: false,
-                requires_admin: false,
-                constraint_notes: vec![
-                    "Event-based triggers are not supported on macOS via launchd.".to_string(),
-                ],
-                backend_notes: vec![],
-            },
-        ]
+        derive_trigger_capabilities(|kind| {
+            match kind {
+            SystemTriggerKind::Cron => (true, false, vec![], vec!["Uses launchd StartCalendarInterval. Step, range, and list expressions are not supported; only wildcards and fixed values.".to_string()]),
+            SystemTriggerKind::Interval => (true, false, vec![], vec!["Uses launchd StartInterval (seconds). Minimum granularity is 1 second.".to_string()]),
+            SystemTriggerKind::Once => (true, false, vec![], vec!["Implemented via StartCalendarInterval with fixed month/day/hour/minute.".to_string()]),
+            SystemTriggerKind::OnBoot => (false, false, vec!["Boot-level triggers require system daemon scope (LaunchDaemons). Cognia operates as a user agent (LaunchAgents). Use 'on_logon' instead.".to_string()], vec![]),
+            SystemTriggerKind::OnLogon => (true, false, vec![], vec!["Maps to RunAtLoad — runs when your user agent loads at login or agent restart.".to_string()]),
+            SystemTriggerKind::OnEvent => (false, false, vec!["Event-based triggers are not supported on macOS via launchd.".to_string()], vec![]),
+        }
+        })
     }
 
     fn validate_trigger_translation(&self, trigger: &SystemTaskTrigger) -> TranslationValidation {
@@ -858,21 +811,22 @@ impl SystemScheduler for MacOSScheduler {
                 native_representation: None,
             },
             SystemTaskTrigger::Cron { expression, .. } => {
-                let parts: Vec<&str> = expression.split_whitespace().collect();
-                let mut warnings = vec![];
-                if parts.len() == 5 {
-                    for part in &parts {
-                        if part.starts_with("*/") {
-                            warnings.push("Step expressions (*/N) in cron are not directly supported by launchd StartCalendarInterval; only fixed values are used.".to_string());
-                            break;
-                        }
-                    }
-                }
-                TranslationValidation {
-                    valid: true,
-                    errors: vec![],
-                    warnings,
-                    native_representation: Some(format!("launchd: StartCalendarInterval from '{}'", expression)),
+                match Self::cron_to_calendar_interval(expression) {
+                    Ok(_) => TranslationValidation {
+                        valid: true,
+                        errors: vec![],
+                        warnings: vec![],
+                        native_representation: Some(format!(
+                            "launchd: StartCalendarInterval from '{}'",
+                            expression
+                        )),
+                    },
+                    Err(error) => TranslationValidation {
+                        valid: false,
+                        errors: vec![error.to_string()],
+                        warnings: vec![],
+                        native_representation: None,
+                    },
                 }
             }
             SystemTaskTrigger::Interval { seconds } => TranslationValidation {
@@ -915,6 +869,98 @@ use chrono::{Datelike, Timelike};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cron_task(expression: &str) -> SystemTask {
+        SystemTask {
+            id: "test-cron".to_string(),
+            name: "cron-task".to_string(),
+            description: None,
+            trigger: SystemTaskTrigger::Cron {
+                expression: expression.to_string(),
+                timezone: None,
+            },
+            action: SystemTaskAction::RunCommand {
+                command: "/bin/echo".to_string(),
+                args: vec![],
+                working_dir: None,
+                env: HashMap::new(),
+            },
+            run_level: RunLevel::User,
+            status: SystemTaskStatus::Enabled,
+            requires_admin: false,
+            tags: vec![],
+            created_at: None,
+            updated_at: None,
+            last_run_at: None,
+            next_run_at: None,
+            last_result: None,
+            metadata_state: TaskMetadataState::Full,
+        }
+    }
+
+    #[test]
+    fn cron_translation_keeps_every_fixed_field_including_month() {
+        let calendar = MacOSScheduler::cron_to_calendar_interval("0 9 1 1 3").unwrap();
+
+        assert!(calendar.contains("<key>Minute</key>\n        <integer>0</integer>"));
+        assert!(calendar.contains("<key>Hour</key>\n        <integer>9</integer>"));
+        assert!(calendar.contains("<key>Day</key>\n        <integer>1</integer>"));
+        assert!(calendar.contains("<key>Month</key>\n        <integer>1</integer>"));
+        assert!(calendar.contains("<key>Weekday</key>\n        <integer>3</integer>"));
+    }
+
+    #[test]
+    fn cron_translation_rejects_unrepresentable_or_wrong_arity_expressions() {
+        for expression in [
+            "*/15 * * * *",
+            "0 9 * * 1-5",
+            "0 9 * * 1,3,5",
+            "0 0 9 * * *",
+        ] {
+            let error = MacOSScheduler::cron_to_calendar_interval(expression)
+                .expect_err("expression must be rejected instead of losing fields");
+            assert!(matches!(error, SchedulerError::InvalidCron(_)));
+        }
+    }
+
+    #[test]
+    fn cron_generation_round_trips_the_original_expression() {
+        let plist = MacOSScheduler::generate_plist(&cron_task("0 9 1 1 *")).unwrap();
+        let trigger = MacOSScheduler::parse_trigger_from_plist(&plist).expect("trigger");
+
+        match trigger {
+            SystemTaskTrigger::Cron {
+                expression,
+                timezone,
+            } => {
+                assert_eq!(expression, "0 9 1 1 *");
+                assert_eq!(timezone, None);
+            }
+            other => panic!("expected cron trigger, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cron_validation_rejects_every_expression_the_translator_rejects() {
+        let scheduler = MacOSScheduler {
+            available: true,
+            agents_dir: PathBuf::from("/tmp"),
+        };
+
+        for expression in [
+            "*/15 * * * *",
+            "0 9 * * 1-5",
+            "0 9 * * 1,3,5",
+            "0 0 9 * * *",
+        ] {
+            let validation = scheduler.validate_trigger_translation(&SystemTaskTrigger::Cron {
+                expression: expression.to_string(),
+                timezone: None,
+            });
+            assert!(!validation.valid, "{expression} must not validate");
+            assert!(!validation.errors.is_empty(), "{expression} needs a reason");
+        }
+    }
 
     #[test]
     fn parses_plist_trigger_and_action() {

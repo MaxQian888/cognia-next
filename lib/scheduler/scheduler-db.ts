@@ -270,6 +270,22 @@ class SchedulerDatabase extends Dexie {
     return dbExecutions.map(safeDeserializeExecution).filter((e): e is TaskExecution => e !== null)
   }
 
+  /** Get recent executions whose persisted task type belongs to one source. */
+  async getRecentExecutionsMatching(
+    ownsTaskType: (taskType: string) => boolean,
+    limit: number = 50
+  ): Promise<TaskExecution[]> {
+    const dbExecutions = await this.executions
+      .orderBy("startedAt")
+      .reverse()
+      .filter((execution) => ownsTaskType(execution.taskType))
+      .limit(limit)
+      .toArray()
+    return dbExecutions
+      .map(safeDeserializeExecution)
+      .filter((execution): execution is TaskExecution => execution !== null)
+  }
+
   /**
    * Get execution by ID
    */

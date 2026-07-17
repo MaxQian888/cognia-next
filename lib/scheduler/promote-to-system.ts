@@ -30,13 +30,18 @@ export interface PromoteResult {
   input?: CreateSystemTaskInput
 }
 
+export type SystemSchedulerPlatform = "macos" | "windows" | "linux" | "unknown"
+
 /**
  * Attempt to promote an app-level task to a system-level task.
  *
  * @param task - The app-level ScheduledTask to promote
  * @returns PromoteResult indicating whether promotion is possible and the mapped input
  */
-export function promoteToSystemTask(task: ScheduledTask): PromoteResult {
+export function promoteToSystemTask(
+  task: ScheduledTask,
+  platform: SystemSchedulerPlatform = detectSystemSchedulerPlatform()
+): PromoteResult {
   // Check task type
   if (!PROMOTABLE_TYPES.has(task.type)) {
     return {
@@ -60,7 +65,7 @@ export function promoteToSystemTask(task: ScheduledTask): PromoteResult {
   // rather than letting the Rust backend fail with an opaque "exactly 5 fields"
   // message.
   if (task.trigger.type === "cron" && task.trigger.cronExpression) {
-    const guard = checkOsCronCompatibility(task.trigger.cronExpression)
+    const guard = checkOsCronCompatibility(task.trigger.cronExpression, platform)
     if (!guard.ok) {
       return { promotable: false, reason: guard.reason }
     }
@@ -102,7 +107,8 @@ export function promoteToSystemTask(task: ScheduledTask): PromoteResult {
  * only support classic 5-field cron. Returns a specific reason on rejection.
  */
 function checkOsCronCompatibility(
-  expression: string
+  expression: string,
+  platform: SystemSchedulerPlatform
 ): { ok: true } | { ok: false; reason: string } {
   const validation = validateCronExpression(expression)
   if (!validation.valid) {
@@ -133,7 +139,55 @@ function checkOsCronCompatibility(
         "Advanced cron modifiers (L for last-day, # for nth-weekday) are not supported by the OS scheduler. Use a plain 5-field expression.",
     }
   }
+  if (platform !== "macos") return { ok: true }
+
+  const fields = trimmed.split(/\s+/)
+  const stepped = fields.find((field) => field.includes("/"))
+  if (stepped) {
+    return {
+      ok: false,
+      reason:
+        'Step cron field "' +
+        stepped +
+        '" cannot be promoted because launchd requires a wildcard or one fixed value.',
+    }
+  }
+  const ranged = fields.find((field) => field.includes("-"))
+  if (ranged) {
+    return {
+      ok: false,
+      reason:
+        'Range cron field "' +
+        ranged +
+        '" cannot be promoted because launchd requires a wildcard or one fixed value.',
+    }
+  }
+  const listed = fields.find((field) => field.includes(","))
+  if (listed) {
+    return {
+      ok: false,
+      reason:
+        'List cron field "' +
+        listed +
+        '" cannot be promoted because launchd requires a wildcard or one fixed value.',
+    }
+  }
   return { ok: true }
+}
+
+function detectSystemSchedulerPlatform(): SystemSchedulerPlatform {
+  if (typeof navigator !== "undefined") {
+    const userAgent = navigator.userAgent.toLowerCase()
+    if (userAgent.includes("mac")) return "macos"
+    if (userAgent.includes("win")) return "windows"
+    if (userAgent.includes("linux")) return "linux"
+  }
+  if (typeof process !== "undefined") {
+    if (process.platform === "darwin") return "macos"
+    if (process.platform === "win32") return "windows"
+    if (process.platform === "linux") return "linux"
+  }
+  return "unknown"
 }
 
 function mapTrigger(task: ScheduledTask): SystemTaskTrigger | null {

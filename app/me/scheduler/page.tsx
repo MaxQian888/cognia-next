@@ -55,17 +55,12 @@ import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
 import { usePlatform } from "@/hooks/use-platform"
 import { cn } from "@/lib/utils"
-import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
+import {
+  SCHEDULED_ITEM_KINDS,
+  type ScheduledItemKind,
+  type UnifiedScheduledItem,
+} from "@/types/scheduler/unified"
 import type { CreateScheduledTaskInput } from "@/types/scheduler"
-
-const KIND_ORDER: ScheduledItemKind[] = [
-  "app",
-  "workflow",
-  "backup",
-  "plugin",
-  "system",
-  "connector",
-]
 
 export default function MobileSchedulerPage() {
   const t = useTranslations("scheduler")
@@ -149,7 +144,7 @@ export default function MobileSchedulerPage() {
 
   const grouped = useMemo(() => {
     const groups = new Map<ScheduledItemKind, UnifiedScheduledItem[]>()
-    for (const kind of KIND_ORDER) groups.set(kind, [])
+    for (const kind of SCHEDULED_ITEM_KINDS) groups.set(kind, [])
     for (const item of visibleItems) {
       const bucket = groups.get(item.kind)
       if (bucket) bucket.push(item)
