@@ -41,6 +41,7 @@
   "profile": "本地显示名称、头像与简介 — 同步到伴侣设备并包含在备份中。",
   "providers": "AI 提供商的 API 密钥、模型与连接设置。",
   "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",
+  "remoteHosts": "从这台桌面驱动一台远程 Cognia 主机——它的终端、文件与 git。",
   "sandbox": "操作系统 / 微虚拟机沙箱的健康状态与工具执行策略",
   "scheduledTasks": "配置定时调度、代理创建权限与资源上限",
   "search": "联网搜索 provider（Tavily、Brave、Bing、Google、Perplexity、Exa…）、默认参数、缓存、安全与来源验证。",

@@ -7,10 +7,12 @@ jest.mock("@/lib/tauri", () => ({
   isCapacitor: () => true,
 }))
 
+import { __resetRoutingForTests, setActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 import {
   RemoteTerminalSession,
   configureCompanionEndpointResolver,
   pickRemoteSpawn,
+  __resetEndpointResolverForTesting,
   __setWebSocketFactoryForTesting,
 } from "./transport-ws"
 
@@ -152,6 +154,24 @@ describe("RemoteTerminalSession.spawn", () => {
     await Promise.resolve()
     lastWs().fireClose(1006)
     await expect(spawnPromise).rejects.toThrow(/closed before ready/)
+  })
+
+  it("default resolver targets the active remote host (ADR-0082)", async () => {
+    // Restore the production default resolver, then activate a remote host.
+    __resetEndpointResolverForTesting()
+    setActiveRemoteEndpoint({ baseUrl: "https://box.example:27890", deviceJwt: "remote-jwt" })
+    try {
+      const spawnPromise = RemoteTerminalSession.spawn({ shell: "/bin/bash", rows: 24, cols: 80 })
+      await Promise.resolve()
+      const ws = lastWs()
+      expect(ws.url).toContain("wss://box.example:27890/ws/v1/terminal")
+      expect(ws.url).toContain("token=remote-jwt")
+      ws.fireMessage(JSON.stringify({ kind: "ready", sessionId: "r-1", shell: "/bin/bash" }))
+      const session = await spawnPromise
+      expect(session.id).toBe("r-1")
+    } finally {
+      __resetRoutingForTests()
+    }
   })
 })
 

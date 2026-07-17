@@ -46,6 +46,7 @@
 
 import { BaseTerminalSession } from "./base-session"
 import { isCapacitor } from "@/lib/tauri"
+import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 
 import type { IntegrationEvent, SessionInfo, SpawnRequest } from "./types"
 
@@ -71,17 +72,24 @@ export type CompanionEndpointResolver = () => Promise<CompanionEndpoint | null>
  * Tests inject their own resolver via
  * `configureCompanionEndpointResolver` to avoid the dynamic import.
  */
+/** Companion `baseUrl` is `https://…`; flip to `wss://…` for the WS upgrade. */
+function toWsBase(baseUrl: string): string {
+  return baseUrl.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://")
+}
+
 const defaultResolver: CompanionEndpointResolver = async () => {
+  // Desktop driving a remote Cognia host (ADR-0082): the active-host store
+  // installs the endpoint descriptor. Prefer it over the local companion cache
+  // so a remote terminal opens against the active host, not the paired server.
+  const remote = getActiveRemoteEndpoint()
+  if (remote) {
+    return { baseUrl: toWsBase(remote.baseUrl), token: remote.deviceJwt }
+  }
   if (!isCapacitor()) return null
   const { pickCompanionStorage } = await import("@/lib/tauri/companion-storage")
   const config = await pickCompanionStorage().load()
   if (!config) return null
-  return {
-    // Companion `baseUrl` is `https://…`; flip to `wss://…` for the
-    // WS upgrade. Plain `ws://` is preserved if used (mostly dev).
-    baseUrl: config.baseUrl.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://"),
-    token: config.deviceJwt,
-  }
+  return { baseUrl: toWsBase(config.baseUrl), token: config.deviceJwt }
 }
 
 let endpointResolver: CompanionEndpointResolver = defaultResolver

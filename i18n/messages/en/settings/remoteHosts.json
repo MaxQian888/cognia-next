@@ -1,0 +1,45 @@
+{
+  "title": "Remote hosts",
+  "description": "Drive a remote Cognia host — its terminal, files, and git — from this desktop. Files and git read with pairing; writes need the host to grant this device control.",
+  "tabs": {
+    "hosts": "Hosts",
+    "add": "Add host"
+  },
+  "list": {
+    "emptyTitle": "No remote hosts yet",
+    "emptyBody": "Pair a remote Cognia server to drive its terminal, files, and git from here. Add one on the Add host tab.",
+    "activeBadge": "Connected",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "rename": "Rename",
+    "renameLabel": "Host name",
+    "remove": "Remove",
+    "removeA11y": "Remove {label}",
+    "save": "Save",
+    "cancel": "Cancel",
+    "serverVersion": "cognia {version}",
+    "neverConnected": "Never connected",
+    "activeBanner": "Driving {label} — new terminals, file, and git operations target this host.",
+    "capabilityNote": "Reads (open files, git status, diff, log) work once paired. Writing files, commits, and pushes need the host to grant this device control in its allow-list."
+  },
+  "add": {
+    "baseUrlLabel": "Server URL",
+    "baseUrlPlaceholder": "https://your-host:27890",
+    "baseUrlHint": "The remote cognia-server address. Use its public URL (cloudflared or reverse proxy) to reach it across networks.",
+    "labelLabel": "Name (optional)",
+    "labelPlaceholder": "My dev box",
+    "payloadLabel": "Pair payload or JWT",
+    "payloadPlaceholder": "Paste the cgnp2 payload from `cognia-server pair`, or a raw pair JWT",
+    "payloadHint": "On the host run `cognia-server pair` and paste what it prints. A full payload fills in the URL for you.",
+    "connectAfter": "Connect after pairing",
+    "submit": "Pair host",
+    "submitting": "Pairing…",
+    "success": "Paired {label}.",
+    "errBaseUrl": "Enter a URL like https://your-host:27890.",
+    "errPayload": "That doesn't look like a pair payload or JWT.",
+    "errMissing": "Paste a pair payload or a pair JWT.",
+    "errNetwork": "Could not reach the host. Check the URL and that its companion server is running.",
+    "errHttp": "Pairing failed (HTTP {status}). Generate a fresh pair token on the host and try again.",
+    "errGeneric": "Pairing failed. Please try again."
+  }
+}

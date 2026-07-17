@@ -10,15 +10,26 @@ jest.mock("@/lib/tauri", () => ({
   isCapacitor: () => mockIsCapacitor,
 }))
 
+import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
 import {
   selectTerminalTransport,
   selectTerminalTransportChain,
   terminalAvailable,
 } from "./pick-transport"
 
+const activeRemoteFake: Transport = {
+  call: (async () => undefined) as Transport["call"],
+  subscribe: () => () => {},
+}
+
 beforeEach(() => {
   mockIsTauri = false
   mockIsCapacitor = false
+  __resetRoutingForTests()
+})
+afterEach(() => {
+  __resetRoutingForTests()
 })
 
 describe("selectTerminalTransport", () => {
@@ -72,5 +83,26 @@ describe("selectTerminalTransportChain", () => {
 
   it("returns an empty chain in plain browser", () => {
     expect(selectTerminalTransportChain()).toEqual([])
+  })
+})
+
+describe("remote host active (ADR-0082)", () => {
+  it("selectTerminalTransport returns ws on desktop when a remote host is active", () => {
+    mockIsTauri = true
+    setActiveRemoteTransport(activeRemoteFake)
+    expect(selectTerminalTransport()).toBe("ws")
+  })
+
+  it("chain is [ws] when a remote host is active", () => {
+    mockIsTauri = true
+    setActiveRemoteTransport(activeRemoteFake)
+    expect(selectTerminalTransportChain()).toEqual(["ws"])
+  })
+
+  it("reverts to tauri-channel once the remote host is cleared", () => {
+    mockIsTauri = true
+    setActiveRemoteTransport(activeRemoteFake)
+    setActiveRemoteTransport(null)
+    expect(selectTerminalTransport()).toBe("tauri-channel")
   })
 })

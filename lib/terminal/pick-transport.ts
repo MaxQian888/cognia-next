@@ -20,6 +20,7 @@
  */
 
 import { isCapacitor, isTauri } from "@/lib/tauri"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 
 export type TerminalTransportKind = "tauri-channel" | "ws" | "webrtc" | "unsupported"
 
@@ -28,6 +29,11 @@ export type TerminalTransportKind = "tauri-channel" | "ws" | "webrtc" | "unsuppo
  * with fallback logic (the dock's "+ New" button on desktop).
  */
 export function selectTerminalTransport(): TerminalTransportKind {
+  // Desktop driving a remote Cognia host (ADR-0082): the terminal targets the
+  // host's `/ws/v1/terminal` over the ws session instead of the local
+  // in-process PTY. Inert until a remote host is activated, so a plain desktop
+  // still gets `tauri-channel` (zero regression).
+  if (isRemoteHostActive()) return "ws"
   if (isTauri()) return "tauri-channel"
   if (isCapacitor()) return "ws"
   return "unsupported"
@@ -46,6 +52,7 @@ export function selectTerminalTransport(): TerminalTransportKind {
  *   - Web: returns `[]` — caller should surface "unsupported".
  */
 export function selectTerminalTransportChain(): TerminalTransportKind[] {
+  if (isRemoteHostActive()) return ["ws"]
   if (isTauri()) return ["tauri-channel"]
   if (isCapacitor()) return ["ws"]
   return []

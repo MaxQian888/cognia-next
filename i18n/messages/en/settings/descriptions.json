@@ -41,6 +41,7 @@
   "profile": "Your local display name, avatar and bio — synced to companion devices and included in backups.",
   "providers": "AI provider API keys, models, and connection settings.",
   "remoteControl": "Local HTTP listener for inbound triggers, plus webhook signing and custom headers for outbound calls.",
+  "remoteHosts": "Drive a remote Cognia host — its terminal, files, and git — from this desktop.",
   "sandbox": "OS / microVM sandbox health and tool execution policy",
   "scheduledTasks": "Configure cron-style automation, agent permissions, and resource limits",
   "search": "Web search providers (Tavily, Brave, Bing, Google, Perplexity, Exa…), defaults, cache, safety and source verification.",

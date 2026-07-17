@@ -191,6 +191,10 @@ const CompanionSection = dynamic(
   () => import("./companion/companion-section").then((m) => m.CompanionSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const RemoteHostsSection = dynamic(
+  () => import("./remote-hosts/remote-hosts-section").then((m) => m.RemoteHostsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const CcswitchSection = dynamic(
   () => import("./ccswitch/ccswitch-section").then((m) => m.CcswitchSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -540,6 +544,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <SecuritySection />
     case "companion":
       return <CompanionSection />
+    case "remote-hosts":
+      return <RemoteHostsSection />
     case "network":
       return <NetworkSection />
     case "logs":

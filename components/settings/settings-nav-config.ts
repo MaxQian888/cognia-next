@@ -15,6 +15,7 @@ import {
   MonitorIcon,
   InfoIcon,
   ServerCogIcon,
+  ServerIcon,
   GlobeIcon,
   Volume2Icon,
   ScrollTextIcon,
@@ -107,6 +108,7 @@ export type SettingsSectionId =
   | "gateway"
   | "external-bridge"
   | "companion"
+  | "remote-hosts"
   | "network"
   | "logs"
   | "diagnostics"
@@ -527,6 +529,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "companion",
     group: "system",
     icon: SmartphoneIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "remote-hosts",
+    labelKey: "remoteHosts",
+    descriptionKey: "remoteHosts",
+    group: "system",
+    icon: ServerIcon,
     desktopOnly: true,
   },
   {
@@ -1315,6 +1325,21 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "配对",
     "扫码",
     "移动端",
+  ],
+  "remote-hosts": [
+    "remote",
+    "remote host",
+    "remote development",
+    "remote dev",
+    "ssh",
+    "dev box",
+    "cognia-server",
+    "terminal",
+    "pair",
+    "远程",
+    "远程主机",
+    "远程开发",
+    "配对",
   ],
   network: [
     "network",

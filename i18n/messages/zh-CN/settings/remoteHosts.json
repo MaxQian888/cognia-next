@@ -1,0 +1,45 @@
+{
+  "title": "远程主机",
+  "description": "从这台桌面驱动一台远程 Cognia 主机——它的终端、文件与 git。配对后即可读取文件与 git;写入需要主机授权本设备控制。",
+  "tabs": {
+    "hosts": "主机",
+    "add": "添加主机"
+  },
+  "list": {
+    "emptyTitle": "还没有远程主机",
+    "emptyBody": "配对一台远程 Cognia 服务器,即可从这里驱动它的终端、文件与 git。在「添加主机」标签页添加一台。",
+    "activeBadge": "已连接",
+    "connect": "连接",
+    "disconnect": "断开",
+    "rename": "重命名",
+    "renameLabel": "主机名称",
+    "remove": "移除",
+    "removeA11y": "移除 {label}",
+    "save": "保存",
+    "cancel": "取消",
+    "serverVersion": "cognia {version}",
+    "neverConnected": "从未连接",
+    "activeBanner": "正在驱动 {label}——新的终端、文件与 git 操作都指向该主机。",
+    "capabilityNote": "读取(打开文件、git status、diff、log)在配对后即可用。写入文件、commit 与 push 需要主机在其 allow-list 中授权本设备控制。"
+  },
+  "add": {
+    "baseUrlLabel": "服务器 URL",
+    "baseUrlPlaceholder": "https://your-host:27890",
+    "baseUrlHint": "远程 cognia-server 地址。跨网络访问时请使用其公网 URL(cloudflared 或反向代理)。",
+    "labelLabel": "名称(可选)",
+    "labelPlaceholder": "我的 dev box",
+    "payloadLabel": "配对载荷或 JWT",
+    "payloadPlaceholder": "粘贴 `cognia-server pair` 打印的 cgnp2 载荷,或一段裸 pair JWT",
+    "payloadHint": "在主机上运行 `cognia-server pair` 并粘贴其打印内容。完整载荷会自动填好 URL。",
+    "connectAfter": "配对后立即连接",
+    "submit": "配对主机",
+    "submitting": "配对中…",
+    "success": "已配对 {label}。",
+    "errBaseUrl": "请输入形如 https://your-host:27890 的 URL。",
+    "errPayload": "这看起来不像配对载荷或 JWT。",
+    "errMissing": "请粘贴配对载荷或 pair JWT。",
+    "errNetwork": "无法到达主机。请检查 URL,以及其 companion 服务器是否在运行。",
+    "errHttp": "配对失败(HTTP {status})。请在主机上生成新的 pair token 后重试。",
+    "errGeneric": "配对失败,请重试。"
+  }
+}
