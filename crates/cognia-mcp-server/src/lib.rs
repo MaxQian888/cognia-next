@@ -68,6 +68,15 @@ pub struct McpServerState {
     pub(crate) inner: Mutex<McpServerInner>,
 }
 
+/// Liveness snapshot of the MCP server's Node sidecar, consumed by the
+/// unified managed-process registry (`src-tauri/src/process_registry`).
+#[derive(Debug, Clone)]
+pub struct McpManagedInfo {
+    pub port: u16,
+    pub pid: Option<u32>,
+    pub started_at: Option<String>,
+}
+
 pub(crate) struct McpServerInner {
     pub(crate) status: McpServerStatus,
     /// Running server handle + the sidecar process it talks to + the optional
@@ -102,6 +111,23 @@ impl McpServerState {
     #[allow(dead_code)] // used by tests and future UI status polling
     pub fn is_running(&self) -> bool {
         self.inner.lock().server.is_some()
+    }
+
+    /// Liveness snapshot for the unified managed-process registry
+    /// (`src-tauri/src/process_registry`). `None` when the server is stopped.
+    /// The MCP server is surfaced as a single managed process — its Node
+    /// sidecar — identified by the bound port; per-HTTP-session streaming
+    /// children are transient (idle-reaped) and intentionally not listed.
+    pub fn managed_snapshot(&self) -> Option<McpManagedInfo> {
+        let inner = self.inner.lock();
+        inner
+            .server
+            .as_ref()
+            .map(|(handle, sidecar, ..)| McpManagedInfo {
+                port: handle.bound_port,
+                pid: sidecar.pid(),
+                started_at: inner.status.started_at.clone(),
+            })
     }
 
     // ── Start ────────────────────────────────────────────────────────────
@@ -311,6 +337,12 @@ mod tests {
     }
 
     #[test]
+    fn managed_snapshot_is_none_when_stopped() {
+        let state = McpServerState::new();
+        assert!(state.managed_snapshot().is_none());
+    }
+
+    #[test]
     fn stop_when_not_running_returns_not_running() {
         let state = McpServerState::new();
         assert!(matches!(state.stop(), Err(McpServerError::NotRunning)));
@@ -407,9 +439,16 @@ mod tests {
         assert!(state.is_running());
         assert_eq!(state.status().port, Some(bound_port));
 
+        // The managed-process registry sees the running sidecar by bound port,
+        // and surfaces the Node child's OS pid.
+        let snap = state.managed_snapshot().expect("running server has a snapshot");
+        assert_eq!(snap.port, bound_port);
+        assert!(snap.pid.is_some(), "a running sidecar should report an OS pid");
+
         state.stop().expect("stop should succeed");
         assert!(!state.is_running());
         assert!(state.status().port.is_none());
+        assert!(state.managed_snapshot().is_none());
     }
 
     /// Second stop() after first must fail with NotRunning.

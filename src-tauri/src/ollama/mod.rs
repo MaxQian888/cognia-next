@@ -113,7 +113,9 @@ fn pull_client(url: &str) -> Result<reqwest::Client, String> {
         }
     }
 
-    builder.build().map_err(|e| format!("client build failed: {e}"))
+    builder
+        .build()
+        .map_err(|e| format!("client build failed: {e}"))
 }
 
 /// Pull `model_name`, emitting one `ollama-pull-progress` event per NDJSON line.
@@ -290,8 +292,8 @@ mod tests {
     fn an_in_band_error_fails_the_pull_and_carries_the_servers_message() {
         // HTTP 200 all the way; the failure exists only as a line in the body.
         // Reporting Ok here would call a failed pull a success.
-        let err = decide_pull_outcome("http://x", 3, Some("model not found".into()), false)
-            .unwrap_err();
+        let err =
+            decide_pull_outcome("http://x", 3, Some("model not found".into()), false).unwrap_err();
         assert!(err.contains("model not found"), "got: {err}");
     }
 

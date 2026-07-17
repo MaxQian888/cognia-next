@@ -89,6 +89,8 @@
 
     "telemetry",
 
+    "allow-all-app-commands",
+
     "upload:default",
     "upload:allow-upload",
     "upload:allow-download",

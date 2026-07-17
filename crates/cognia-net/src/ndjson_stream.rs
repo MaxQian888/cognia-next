@@ -155,7 +155,8 @@ mod tests {
         addr
     }
 
-    const OK_HEADERS: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n";
+    const OK_HEADERS: &str =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n";
 
     #[tokio::test]
     async fn delivers_each_line_as_it_arrives() {
@@ -254,8 +255,12 @@ mod tests {
     #[tokio::test]
     async fn refuses_a_single_line_that_blows_the_size_cap() {
         // 2 MiB of newline-free bytes — twice MAX_LINE_BYTES.
-        let flood: &'static str =
-            Box::leak(std::iter::repeat('x').take(2 * 1024 * 1024).collect::<String>().into_boxed_str());
+        let flood: &'static str = Box::leak(
+            std::iter::repeat('x')
+                .take(2 * 1024 * 1024)
+                .collect::<String>()
+                .into_boxed_str(),
+        );
         let addr = serve_once(OK_HEADERS, vec![flood]).await;
 
         let err = stream_ndjson_post(

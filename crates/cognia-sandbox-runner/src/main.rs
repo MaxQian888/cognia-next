@@ -28,6 +28,10 @@
 use std::collections::BTreeMap;
 
 #[derive(serde::Deserialize)]
+// Every field but `target_user` is consumed only by the Windows `mod win`
+// runner; the non-Windows stub ignores the payload, so the fields read as dead
+// there. They stay live on Windows, so scope the allow to non-Windows builds.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 struct RunnerInput {
     /// Retained for backward compatibility with the desktop backend's payload
     /// (the synthetic-user model); ignored by the restricted-token runner.
@@ -97,6 +101,11 @@ fn run(_input: RunnerInput) -> Result<RunnerOutput, String> {
 /// time out almost immediately. We saturate at `u32::MAX - 1` (≈49.7 days): a
 /// finite, very-long ceiling that is deliberately NOT the `INFINITE`
 /// (`u32::MAX`) sentinel, so a hung child can never wait forever.
+///
+/// Called by the Windows `mod win` runner and by the host-side unit tests
+/// below; on a non-Windows, non-test build neither caller exists, so allow the
+/// otherwise-dead symbol there rather than hard-gating it out of the tests.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn clamp_timeout_millis(timeout: std::time::Duration) -> u32 {
     const MAX_FINITE_MS: u128 = (u32::MAX - 1) as u128;
     timeout.as_millis().min(MAX_FINITE_MS) as u32

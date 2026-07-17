@@ -104,6 +104,13 @@ impl SidecarProcess {
         ))
     }
 
+    /// OS process ID of the live Node child, or `None` once it has been
+    /// reaped. Surfaced through the unified managed-process registry so the
+    /// performance panel can attribute + join the MCP sidecar by PID.
+    pub fn pid(&self) -> Option<u32> {
+        self._child.id()
+    }
+
     /// Construct from pre-built I/O handles and an already-spawned child.
     ///
     /// Used by integration tests to inject a mock echo process.

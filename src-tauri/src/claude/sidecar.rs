@@ -226,6 +226,16 @@ impl SidecarState {
         self.inner.lock().await.ready
     }
 
+    /// Liveness snapshot for the unified managed-process registry
+    /// (`crate::process_registry`). `Some((pid, ready))` while a child is
+    /// alive (`pid` is `None` only if the OS already reaped it), `None` when
+    /// no sidecar is running. Locks `inner` briefly and returns owned data —
+    /// never held across an `.await`.
+    pub async fn managed_snapshot(&self) -> Option<(Option<u32>, bool)> {
+        let guard = self.inner.lock().await;
+        guard.child.as_ref().map(|c| (c.id(), guard.ready))
+    }
+
     /// Record the send-time cwd for a session so the hook observer can resolve
     /// project/local-scope settings (trust-gated). Called from `claude_send`.
     pub async fn register_session_cwd(&self, session_id: &str, cwd: Option<String>) {
@@ -917,6 +927,12 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("not running"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn managed_snapshot_is_none_when_no_child() {
+        let s = SidecarState::new();
+        assert!(s.managed_snapshot().await.is_none());
     }
 
     fn decision(

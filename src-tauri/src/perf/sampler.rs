@@ -40,6 +40,10 @@ pub struct PerfSample {
     pub runtime: RuntimeSample,
     pub top_spans: Vec<SpanSnapshot>,
     pub system_memory: Option<SystemMemory>,
+    /// cognia-spawned child processes attributed to their owning subsystem
+    /// (external agents, chat sidecar, ACP + PTY terminals, MCP server).
+    /// Joined to `processes` by `pid` on the frontend for live CPU/memory.
+    pub managed: Vec<crate::process_registry::ManagedProcess>,
 }
 
 /// Shared, ref-counted sampler control surface. Held in `PerfState` and cloned
@@ -128,6 +132,9 @@ pub fn start(app: AppHandle, handle: Arc<SamplerHandle>, interval_ms: u64) {
             let runtime = rt_sampler.sample(&tokio::runtime::Handle::current().metrics());
             let top_spans = REGISTRY.snapshot();
             let system_memory = Some(proc_sampler.sample_system_memory());
+            // Attribute cognia-spawned processes to their owning subsystem.
+            // `collect` is non-blocking and holds no lock across this await.
+            let managed = crate::process_registry::collect(&app).await;
 
             let sample = PerfSample {
                 ts_ms: super::now_ms(),
@@ -136,6 +143,7 @@ pub fn start(app: AppHandle, handle: Arc<SamplerHandle>, interval_ms: u64) {
                 runtime,
                 top_spans,
                 system_memory,
+                managed,
             };
             handle.push(sample.clone());
             if let Err(err) = app.emit(SAMPLE_EVENT, &sample) {
@@ -172,6 +180,7 @@ mod tests {
             },
             top_spans: Vec::<SpanSnapshot>::new(),
             system_memory: None,
+            managed: Vec::new(),
         }
     }
 

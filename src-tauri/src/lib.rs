@@ -70,6 +70,10 @@ mod pet_window;
 // cli_bridge, generate_handler! + .manage()) resolves unchanged.
 pub use cognia_plugin_runtime as plugin_api;
 mod plugins;
+// Unified managed-process registry — aggregates cognia-spawned child processes
+// (external agents, chat sidecar, ACP + PTY terminals, MCP server) for the
+// performance panel's "Managed Processes" tab and the graceful teardown arm.
+mod process_registry;
 mod proxy_config;
 // ADR-0067 follow-up — extracted to `crates/cognia-remote-control`;
 // re-aliased so `crate::remote_control::…` (gateway, generate_handler!)
@@ -89,6 +93,11 @@ mod session_import;
 mod session_import_watch;
 mod settings;
 mod shell;
+// Route Ctrl+C / SIGTERM through the graceful `RunEvent` teardown instead of
+// letting the kernel hard-kill the process (which orphans children and leaves
+// the crash sentinel dirty). Desktop-only — mobile has no terminal signals.
+#[cfg(desktop)]
+mod shutdown;
 // ADR-0067 follow-up — extracted to `crates/cognia-skills` (zero coupling);
 // re-aliased so `crate::skills::…` (companion_api rpc + generate_handler!)
 // resolves unchanged.
@@ -469,6 +478,10 @@ pub fn run() {
             commands::greet,
             commands::menu_action_ids,
             commands::set_window_background_color,
+            // Unified managed-process registry (performance panel → Managed
+            // Processes tab): list + control cognia-spawned child processes.
+            process_registry::list_managed_processes,
+            process_registry::control_managed_process,
             account_auth::account_password_create_verifier,
             account_auth::account_password_verify,
             claude::commands::claude_send,
@@ -907,6 +920,7 @@ pub fn run() {
             gateway::commands::gateway_reset_key_quota,
             gateway::commands::gateway_push_snapshot,
             gateway::commands::gateway_decision_response,
+            gateway::commands::gateway_list_cooldowns,
             workflow::commands::workflow_register_trigger,
             workflow::commands::workflow_unregister_trigger,
             workflow::commands::workflow_persist_run_state,
@@ -1600,6 +1614,14 @@ pub fn run() {
                 });
             }
 
+            // Graceful shutdown on Ctrl+C / SIGTERM. Without this a terminal
+            // interrupt under `pnpm tauri dev` hard-kills the process before
+            // the `RunEvent::ExitRequested` teardown below runs, orphaning the
+            // crash-monitor child + sidecars and leaving the crash sentinel
+            // dirty (so the next launch falsely reports a crash). Desktop-only.
+            #[cfg(desktop)]
+            shutdown::install(app.handle().clone());
+
             log::info!(
                 "native setup() completed in {:?} (heavy subsystem opens are lazy/spawned)",
                 setup_start.elapsed()
@@ -1640,6 +1662,12 @@ pub fn run() {
                     let _ = agents.kill_all().await;
                     let _ = terminals.kill_all().await;
                 });
+                // Stop the remaining cognia-managed child processes that this
+                // arm did NOT already tear down — chat sidecar, integrated
+                // terminal PTYs, and the MCP server — so a graceful shutdown
+                // (incl. Ctrl+C / SIGTERM via `shutdown::install`) doesn't
+                // orphan them.
+                tauri::async_runtime::block_on(process_registry::teardown(app_handle));
                 // Graceful shutdown — clear the crash sentinel so the next
                 // launch doesn't mistake this clean exit for a crash.
                 crash::sentinel::mark_clean_exit();
@@ -1657,5 +1685,56 @@ mod command_registration_tests {
             source.contains(&command),
             "git_diff_stat must remain in tauri::generate_handler!"
         );
+    }
+
+    /// The app declares an ACL manifest (build.rs → AppManifest), which turns on
+    /// Tauri's ACL for EVERY app command reached from a webview. `build.rs`
+    /// regenerates `permissions/all-app-commands.toml` from the
+    /// `generate_handler!` list to grant them all; this test fails if the grant
+    /// ever drifts from the registered set, so a newly added command can never
+    /// silently regress into a runtime "not allowed. Command not found".
+    #[test]
+    fn every_registered_command_is_granted_by_the_app_acl() {
+        let source = include_str!("lib.rs");
+        let grant = include_str!("../permissions/all-app-commands.toml");
+
+        let marker = ["generate_handler!", "["].concat();
+        let start = source.find(&marker).expect("generate_handler! block present") + marker.len();
+        let end = source[start..]
+            .find(']')
+            .expect("generate_handler! block is terminated");
+        let block = &source[start..start + end];
+
+        let mut registered = 0usize;
+        let mut missing: Vec<&str> = Vec::new();
+        for raw_line in block.lines() {
+            let line = raw_line.split("//").next().unwrap_or("");
+            for token in line.split(',') {
+                let name = token.rsplit("::").next().unwrap_or("").trim();
+                let mut chars = name.chars();
+                let head_ok = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_');
+                let tail_ok = chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if head_ok && tail_ok {
+                    registered += 1;
+                    if !grant.contains(&format!("\"{name}\"")) {
+                        missing.push(name);
+                    }
+                }
+            }
+        }
+
+        assert!(
+            registered > 500,
+            "sanity: expected the full command list, only parsed {registered}"
+        );
+        assert!(
+            missing.is_empty(),
+            "permissions/all-app-commands.toml is missing {} grant(s); build.rs must \
+             regenerate it from generate_handler! (first missing: {:?})",
+            missing.len(),
+            &missing[..missing.len().min(10)]
+        );
+        assert!(grant.contains("\"account_password_verify\""));
+        assert!(grant.contains("\"account_password_create_verifier\""));
     }
 }

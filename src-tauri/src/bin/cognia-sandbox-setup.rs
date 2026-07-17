@@ -19,12 +19,22 @@
 // step (tracked in ADR-0028 Open follow-ups).
 
 use std::env;
+// These helpers are exercised only by the `#[cfg(target_os = "windows")]`
+// install/uninstall paths below; on other targets `main()` returns a
+// "Windows only" error before touching them, so gate the symbols to keep the
+// non-Windows binary free of dead code.
+#[cfg(target_os = "windows")]
 use std::path::PathBuf;
+#[cfg(target_os = "windows")]
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
 const OFFLINE_USER: &str = "CogniaSandboxOffline";
+#[cfg(target_os = "windows")]
 const ONLINE_USER: &str = "CogniaSandboxOnline";
+#[cfg(target_os = "windows")]
 const FIREWALL_OFFLINE_RULE: &str = "Cognia Sandbox Offline (block-all)";
+#[cfg(target_os = "windows")]
 const FIREWALL_ONLINE_RULE: &str = "Cognia Sandbox Online (HTTPS-only)";
 
 fn main() {
@@ -225,6 +235,7 @@ fn remove_firewall_rule(rule: &str) -> Result<(), SetupError> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
 fn marker_path() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("cognia").join("sandbox").join("setup.ok"))
 }

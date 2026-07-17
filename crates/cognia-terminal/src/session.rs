@@ -195,6 +195,10 @@ pub struct TerminalSessionInfo {
     pub extension_id: Option<String>,
     pub origin: SessionOrigin,
     pub shell: String,
+    /// OS process ID of the PTY child, captured at spawn. `None` for
+    /// test-built sessions with no real child. Consumed by the unified
+    /// managed-process registry so the performance panel can join CPU/memory.
+    pub pid: Option<u32>,
 }
 
 /// Wire envelope for the desktop Tauri Channel (1C). Pairs the replay seq
@@ -252,6 +256,10 @@ pub struct PtySession {
     /// child. See that function's docs for the full rationale.
     pub(super) write_tx: SyncSender<Vec<u8>>,
     pub(super) killer: StdMutex<Box<dyn ChildKiller + Send + Sync>>,
+    /// OS process ID captured from the PTY child at spawn. Immutable — the PTY
+    /// child keeps its PID for its whole life. `None` for store-only test
+    /// sessions built without a real child.
+    pub(super) pid: Option<u32>,
     pub(super) tempdir: Option<PathBuf>,
     /// Wave 2 — timestamped + monotonic-seq replay buffer. Every event
     /// the reader / waiter threads emit lands here before fan-out so
@@ -563,6 +571,9 @@ pub fn spawn_session_with_sink(
         .take_writer()
         .map_err(|e| format!("take_writer: {e}"))?;
     let killer = child.clone_killer();
+    // Capture the OS PID before the child is moved into the waiter thread, so
+    // the managed-process registry can attribute + join it in the perf panel.
+    let pid = child.process_id();
     let id = Uuid::new_v4().to_string();
     let replay = Arc::new(ReplayBuffer::new());
     let write_tx = spawn_writer_thread(&id, writer);
@@ -593,6 +604,7 @@ pub fn spawn_session_with_sink(
         master: StdMutex::new(pair.master),
         write_tx,
         killer: StdMutex::new(killer),
+        pid,
         tempdir: setup.tempdir,
         replay,
         channel_slot,
@@ -735,6 +747,7 @@ impl PtySession {
             extension_id: self.extension_id.clone(),
             origin: self.origin,
             shell: self.shell.clone(),
+            pid: self.pid,
         }
     }
 
@@ -1227,6 +1240,8 @@ mod tests {
         assert_eq!(info.extension_id.as_deref(), Some("ext-b"));
         assert_eq!(info.origin, SessionOrigin::Remote);
         assert_eq!(info.shell, shell);
+        // The OS pid is captured at spawn for the managed-process registry.
+        assert!(info.pid.is_some(), "a real PTY child should report an OS pid");
     }
 
     fn spawn_echo(payload: &str) -> Option<PtySession> {

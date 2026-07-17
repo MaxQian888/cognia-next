@@ -126,6 +126,7 @@ mod tests {
             // `cmd /C exit` and clone its killer; we don't need the child
             // alive for the store-only tests.
             killer: std::sync::Mutex::new(make_dummy_killer()),
+            pid: None,
             tempdir: None,
             replay: Arc::new(ReplayBuffer::new()),
             channel_slot: session::detached_desk_channel(),
