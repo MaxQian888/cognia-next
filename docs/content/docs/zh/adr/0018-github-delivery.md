@@ -40,7 +40,6 @@ webhook 接收器上加一个 `signatureMode: "github"`,让 `x-hub-signature-256
 plugins/github-delivery/
 ├── plugin.json            — 声明 4 张 Dexie 表 + 1 个连接器
 ├── src/index.ts           — 插件入口,注入 runtime + 适配器
-├── src/github-poll.ts     — ETag 轮询任务
 ├── src/connector/         — Inbox 桥(ghEventToInbound)
 ├── src/adapter/           — PlatformAdapter 实现 + conversationKey 编解码
 ├── src/approval/          — HITL 草稿桥(draft-bridge)
@@ -94,8 +93,8 @@ token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提�
 
 - **Webhook(默认)。** `trigger.github.webhook` 在 Rust axum 接收器上注册路径。校验逻辑读取
   `x-hub-signature-256`(签名模式 = `github`)。用户粘贴公开 URL;一键 cloudflared 在 M4 上线。
-- **轮询(后备)。** `github-poll` 调度任务每 5 分钟轮询一次 `/repos/{owner}/{repo}/events`,
-  带条件 GET(ETag)。结果与 `events` 表 diff,做去重。
+- **仅 Webhook（2026-07-16 更新）。** 未接入生产链路的轮询原型已删除；入站事件统一使用
+  Rust webhook receiver。
 
 两路最终都吐出同一个 `NormalizedGhEvent`,下游只面对一种形状。
 

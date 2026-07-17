@@ -81,8 +81,7 @@ RSA PRIVATE KEY-----` 和 `-----END` 行)。
 
 **排查清单.**
 
-1. **Settings → Scheduled tasks 里 `github-poll` 在跑吗?** 调度器列表里搜 `github-poll`,
-   状态应该是 `enabled` + 最近一次"上次跑"在 5 分钟以内。
+1. **仓库是否仍配置为已停用的 polling 模式？** 将 `triggerMode` 改为 `webhook`。
 2. **仓库在最近 90 天有过事件吗?** `/repos/{owner}/{repo}/events` 端点只回 90 天内的事件。
    长时间没活动的仓库会"看起来什么都没发生"。
 3. **`pollEtag` 一直是同一个值吗?** Dexie DevTools 看 `github-delivery:repos` 行,如果
@@ -94,10 +93,8 @@ RSA PRIVATE KEY-----` 和 `-----END` 行)。
 
 <Accordion title="同一个事件被 webhook 和 polling 都收到了,会重复触发吗?">
 
-**不会。** 两路最终都走 `plugins/github-delivery/src/github-poll.ts:pollRepo`(polling 路)
-或 Rust webhook 路,最终都到 `events` 表的 "upsert by deliveryId"。webhook 用
-`x-github-delivery` 头,polling 用 sha1(kind‖repoFullName‖primaryId) 合成 deliveryId,
-**只要事件本身是同一个 PR/Issue 的同一个 action,deliveryId 就一致**。
+轮询 transport 已停用。GitHub 事件只通过 Rust webhook 路径进入，并使用
+`x-github-delivery` header 作为稳定 delivery id。
 
 </Accordion>
 </Accordions>

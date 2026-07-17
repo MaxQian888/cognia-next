@@ -109,6 +109,5 @@ For workflow scenarios, treat 5K/h as ~80/min:
 | -------------------------------------------------------- | ------------------------------------------------------------------ |
 | `lib/github/octokit-factory.ts`                          | throttling / retry plugin configuration                            |
 | `lib/github/auth-app.ts`                                 | App token cache (auto-refreshes 5 min before expiry, saving a 401) |
-| `plugins/github-delivery/src/github-poll.ts`             | ETag conditional GET; 304 does not count as "real work"            |
 | `components/settings/github-delivery/tabs/usage-tab.tsx` | Usage Tab UI                                                       |
 | `components/settings/diagnostics/`                       | Real-time logs (displays throttle warnings)                        |

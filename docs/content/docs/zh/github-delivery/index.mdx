@@ -145,7 +145,6 @@ flowchart LR
 | `lib/github/cloudflared-tauri.ts`                          | 桌面端一键 webhook 暴露                        |
 | `plugins/github-delivery/plugin.json`                      | 插件清单 + 4 张 Dexie 表 + 1 个连接器          |
 | `plugins/github-delivery/src/index.ts`                     | 入口:wire runtime + 适配器                     |
-| `plugins/github-delivery/src/github-poll.ts`               | ETag 轮询调度任务                              |
 | `plugins/github-delivery/src/workflow/runtime.ts`          | `GithubRuntime` 单例(getRepo / getOctokit 等)  |
 | `plugins/github-delivery/src/workflow/shared.ts`           | `guardedExecutor` 工厂                         |
 | `plugins/github-delivery/src/workflow/nodes.ts`            | 13 个 `action.github.*` 执行器                 |

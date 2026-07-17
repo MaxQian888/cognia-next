@@ -90,8 +90,7 @@ connection validator also rejects dragging a webhook trigger onto the canvas
 
 **Troubleshooting Checklist.**
 
-1. **Is `github-poll` running in Settings → Scheduled tasks?** Search for `github-poll` in the scheduler list;
-   status should be `enabled` + last run within the past 5 minutes.
+1. **Is the repository still configured for the retired polling mode?** Change `triggerMode` to `webhook`.
 2. **Has the repository had events in the last 90 days?** The `/repos/{owner}/{repo}/events` endpoint only returns events from the past 90 days.
    Long-inactive repositories will "appear to have nothing happening."
 3. **Is `pollEtag` staying the same?** Check Dexie DevTools for the `github-delivery:repos` row;
@@ -103,10 +102,8 @@ connection validator also rejects dragging a webhook trigger onto the canvas
 
 <Accordion title="Same event received by both webhook and polling — will it trigger twice?">
 
-**No.** Both paths ultimately go through `plugins/github-delivery/src/github-poll.ts:pollRepo` (polling path)
-or the Rust webhook path, and both end at the `events` table via "upsert by deliveryId". Webhook uses
-the `x-github-delivery` header; polling synthesizes deliveryId from sha1(kind‖repoFullName‖primaryId).
-**As long as the event is the same PR/Issue with the same action, the deliveryId will be identical.**
+The polling transport has been retired. GitHub events enter through the Rust webhook path and use
+the `x-github-delivery` header as their stable delivery id.
 
 </Accordion>
 </Accordions>

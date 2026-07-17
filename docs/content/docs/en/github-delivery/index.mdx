@@ -149,7 +149,6 @@ accesses them directly by full name as `db.table("github-delivery:workOrders")`.
 | `lib/github/cloudflared-tauri.ts`                          | One-click webhook expose on desktop                         |
 | `plugins/github-delivery/plugin.json`                      | Plugin manifest + 4 Dexie tables + 1 connector              |
 | `plugins/github-delivery/src/index.ts`                     | Entry: wire runtime + adapters                              |
-| `plugins/github-delivery/src/github-poll.ts`               | ETag polling scheduler task                                 |
 | `plugins/github-delivery/src/workflow/runtime.ts`          | `GithubRuntime` singleton (getRepo / getOctokit etc.)       |
 | `plugins/github-delivery/src/workflow/shared.ts`           | `guardedExecutor` factory                                   |
 | `plugins/github-delivery/src/workflow/nodes.ts`            | 13 `action.github.*` executors                              |

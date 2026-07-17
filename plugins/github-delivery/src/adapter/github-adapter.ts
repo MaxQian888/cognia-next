@@ -9,7 +9,7 @@
  * quiet-hours / circuit-breaker / idempotency machinery for free.
  *
  * Inbound is intentionally NOT wired here — events arrive via webhook +
- * polling (the existing `runGithubPoll` + Rust webhook router), and the
+ * delivery (the Rust webhook router), and the
  * plugin entry hands them to `bus.dispatchInboundFull`. The adapter's
  * `start` is a no-op for the same reason.
  */

@@ -28,8 +28,6 @@ import {
   type WorkOrderStatus,
 } from "@/lib/github/types"
 import { requireGithubRuntime, setGithubRuntime, type GithubRuntime } from "./workflow/runtime"
-import { ghEventToInbound } from "./connector/inbox-bridge"
-import { runGithubPoll, type GhTable } from "./github-poll"
 import { setIssueLoopDriver } from "./workflow/issue-loop"
 import { SidecarIssueLoopDriver } from "./drivers/sidecar-driver"
 import { GithubAdapter } from "./adapter/github-adapter"
@@ -274,42 +272,5 @@ export function _peekState(): ActivationState | null {
 export function createGithubAdapterForBridge(ctx: PluginAdapterContext): GithubAdapter {
   return new GithubAdapter(`${ctx.pluginId}/${ctx.connectorDef.type}`, {
     getOctokit: (fullName) => requireGithubRuntime().getOctokit(fullName),
-  })
-}
-
-/**
- * One-shot polling pass over all registered repos. Exported so the
- * scheduler can invoke it on its own cadence, and tests can drive it
- * directly.
- *
- * For each new event the bridge produces an InboundEvent and (when a
- * ConnectorBus is available) dispatches it. The function never throws —
- * per-repo failures are captured by runGithubPoll and surfaced in the
- * returned result list.
- */
-export async function runPluginPoll(
-  ctx: PluginContext,
-  busInbound?: (event: import("@/types/connectors/event").NormalizedInboundEvent) => Promise<void>
-) {
-  if (!ctx.dexie) return []
-  const reposTable = ctx.dexie.table<GhRepoEntry, string>("repos") as unknown as GhTable<
-    GhRepoEntry,
-    string
-  >
-  const eventsTable = ctx.dexie.table<NormalizedGhEvent, string>("events") as unknown as GhTable<
-    NormalizedGhEvent,
-    string
-  >
-  return runGithubPoll({
-    reposTable,
-    eventsTable,
-    octokitFor: (repo) => buildOctokit(ctx, repo.fullName),
-    onEvent: busInbound
-      ? async (event) => {
-          const inbound = ghEventToInbound(event)
-          if (inbound) await busInbound(inbound)
-        }
-      : undefined,
-    logger: ctx.logger,
   })
 }

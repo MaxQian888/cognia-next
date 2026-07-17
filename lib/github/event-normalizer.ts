@@ -153,9 +153,8 @@ export interface PollingDiffEntry {
 
 /**
  * Deterministic 53-bit string hash (cyrb53). Pure JS — deliberately NOT
- * `node:crypto` — because the polling path runs in the WebView: the
- * github-delivery plugin drives `runGithubPoll` from the renderer through its
- * Dexie tables (`browser-builtin-registry` → `github-poll` → here). A static
+ * `node:crypto` so this legacy polling-payload normalizer remains safe to call
+ * from a WebView or during import of older event data. A static
  * `import { createHash } from "node:crypto"` pulled the module into the
  * static-export client bundle, where webpack resolves it to an empty stub and
  * `createHash` is `undefined` at runtime. 53 bits keeps dedup-key collisions

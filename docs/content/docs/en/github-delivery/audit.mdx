@@ -211,7 +211,6 @@ same time will not double-trigger workflows.
 | `plugins/github-delivery/src/index.ts`                        | `persistAudit` (capped delete), `upsertWorkOrder`          |
 | `plugins/github-delivery/src/workflow/shared.ts`              | All `guardedExecutor` call sites that invoke `recordAudit` |
 | `plugins/github-delivery/src/workflow/issue-loop.ts`          | `safeUpdateWorkOrder` state machine transitions            |
-| `plugins/github-delivery/src/github-poll.ts`                  | Shared `events` deduplication for webhook + polling        |
 | `plugins/github-delivery/src/connector/inbox-bridge.ts`       | `events` → Inbox messages (read-only)                      |
 | `components/settings/github-delivery/tabs/audit-tab.tsx`      | Audit Tab UI                                               |
 | `components/settings/github-delivery/tabs/audit-tab.test.tsx` | Audit Tab tests                                            |

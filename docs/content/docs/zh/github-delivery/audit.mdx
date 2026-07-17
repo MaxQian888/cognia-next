@@ -199,7 +199,6 @@ schema:
 | `plugins/github-delivery/src/index.ts`                        | `persistAudit`(capped delete)、`upsertWorkOrder`    |
 | `plugins/github-delivery/src/workflow/shared.ts`              | `guardedExecutor` 调 `recordAudit` 的全部时机       |
 | `plugins/github-delivery/src/workflow/issue-loop.ts`          | `safeUpdateWorkOrder` 状态机转换                    |
-| `plugins/github-delivery/src/github-poll.ts`                  | webhook + polling 共享的 `events` 去重              |
 | `plugins/github-delivery/src/connector/inbox-bridge.ts`       | `events` → Inbox 消息(只读)                         |
 | `components/settings/github-delivery/tabs/audit-tab.tsx`      | Audit Tab UI                                        |
 | `components/settings/github-delivery/tabs/audit-tab.test.tsx` | Audit Tab 测试                                      |

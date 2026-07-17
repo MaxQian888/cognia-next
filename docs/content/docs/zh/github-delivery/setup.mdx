@@ -189,11 +189,8 @@ Secret:任意强随机字符串(cognia 会请你输入并存入 OS keyring),Even
 
 无公网入口时,把 Repo 的 `triggerMode` 改成 `polling`:
 
-- `plugins/github-delivery/src/github-poll.ts:runGithubPoll` 每 5 分钟扫一次。
-- 用 ETag 条件 GET,所以无变化时只算 0 次 API 配额。
-- 通过 `/repos/{owner}/{repo}/events`(90 天窗口)取最近事件,经 `event-normalizer.ts:normalizePollingDiff`
-  规范化后去重写入 `events` 表。
-- 同样的事件 webhook 收过一次后,polling 不会重复触发(`deliveryId` 一致 → 写时被覆盖)。
+轮询后备路径已停用。无直接公网入口时，请使用内置 cloudflared tunnel 暴露 webhook URL。
+已有 `triggerMode: "polling"` 的仓库需要切换为 `"webhook"`。
 
 </Tab>
 </Tabs>
@@ -225,7 +222,7 @@ events 选 `pull_request.opened`,保存。
 | Webhook 进来但 audit 没有任何行                | 签名校验失败                               | 确认 `x-hub-signature-256` 在头里;Settings → Webhook secret 与 GitHub 端一致    |
 | `401 Bad credentials`                          | App private key 错误或 installation 未授权 | 检查 PEM 完整(包括 `-----BEGIN` / `-----END` 行);确认 installation 仍存在       |
 | `404 Not Found`(只读 endpoint)                 | App 安装时未勾选必要 repo permission       | 修改 GitHub App permissions,然后在仓库里 "Re-authorize" App                     |
-| Polling 看不到事件                             | `triggerMode` 不是 `polling`,或调度器没开  | 在 Repos Tab 切到 polling;在 Settings → Scheduled tasks 确认 `github-poll` 启用 |
+| 仓库收不到事件                                 | 仍使用旧的 `triggerMode: "polling"`       | 切换为 webhook 模式并检查公网 webhook URL                                  |
 | 节点抛 `No issue-loop AI driver`               | sidecar 未启动                             | 在 Settings → Providers 连接 Claude Code provider,然后重启插件                  |
 | `tauri.conf.json` shell scope 拒绝 cloudflared | 升级前的旧配置                             | 拉一下 main,确认 shell scope 含 `cloudflared` 的 allow 行                       |
 
@@ -240,6 +237,5 @@ events 选 `pull_request.opened`,保存。
 | `lib/github/octokit-factory.ts`                                | 按 mode 路由,挂 throttling / retry         |
 | `lib/github/cloudflared-tauri.ts`                              | cloudflared 一键暴露                       |
 | `src-tauri/src/workflow/triggers/webhook_router.rs`            | axum 接收器 + `SignatureMode::Github`      |
-| `plugins/github-delivery/src/github-poll.ts`                   | ETag 轮询任务                              |
 | `components/settings/github-delivery/tabs/repos-tab.tsx`       | Repo CRUD UI                               |
 | `components/settings/github-delivery/tabs/credentials-tab.tsx` | App / PAT 表单                             |

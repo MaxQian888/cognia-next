@@ -196,12 +196,9 @@ If using ngrok, Caddy, or nginx as a reverse proxy to your local machine:
 
 When there is no public ingress, change the repo's `triggerMode` to `polling`:
 
-- `plugins/github-delivery/src/github-poll.ts:runGithubPoll` scans every 5 minutes.
-- Uses conditional GET with ETag, so no API quota is consumed when there are no changes.
-- Fetches recent events via `/repos/{owner}/{repo}/events` (90-day window), normalizes them through
-  `event-normalizer.ts:normalizePollingDiff`, deduplicates, and writes them to the `events` table.
-- If the same event was already received via webhook, polling will not re-trigger it (`deliveryId` is identical →
-  overwritten on write).
+Polling fallback is not available. Configure a publicly reachable webhook URL, using the built-in
+cloudflared tunnel when direct ingress is unavailable. Existing repositories saved with
+`triggerMode: "polling"` must be switched to `"webhook"`.
 
 </Tab>
 </Tabs>
@@ -233,7 +230,7 @@ with the latest message being `<sender> opened PR #<n> in <repo>`.
 | Webhook arrives but audit has no rows             | Signature verification failed                                       | Confirm `x-hub-signature-256` is in the headers; verify Settings → Webhook secret matches the GitHub side    |
 | `401 Bad credentials`                             | Wrong App private key or unauthorized installation                  | Check the PEM is complete (including `-----BEGIN` / `-----END` lines); confirm the installation still exists |
 | `404 Not Found` (read-only endpoint)              | Necessary repo permissions were not checked during App installation | Modify GitHub App permissions, then "Re-authorize" the App in the repository                                 |
-| Polling shows no events                           | `triggerMode` is not `polling`, or the scheduler is off             | Switch to polling in the Repos Tab; in Settings → Scheduled tasks, confirm `github-poll` is enabled          |
+| Repository receives no events                    | Repository still has legacy `triggerMode: "polling"`                | Change the repository to webhook mode and verify the public webhook URL                                     |
 | Node throws `No issue-loop AI driver`             | Sidecar not started                                                 | Connect the Claude Code provider in Settings → Providers, then restart the plugin                            |
 | `tauri.conf.json` shell scope rejects cloudflared | Old config from before upgrade                                      | Pull main and confirm the shell scope contains an allow line for `cloudflared`                               |
 
@@ -248,6 +245,5 @@ with the latest message being `<sender> opened PR #<n> in <repo>`.
 | `lib/github/octokit-factory.ts`                                | Routes by mode, with throttling / retry plugins     |
 | `lib/github/cloudflared-tauri.ts`                              | One-click cloudflared expose                        |
 | `src-tauri/src/workflow/triggers/webhook_router.rs`            | axum receiver + `SignatureMode::Github`             |
-| `plugins/github-delivery/src/github-poll.ts`                   | ETag polling task                                   |
 | `components/settings/github-delivery/tabs/repos-tab.tsx`       | Repo CRUD UI                                        |
 | `components/settings/github-delivery/tabs/credentials-tab.tsx` | App / PAT form                                      |
