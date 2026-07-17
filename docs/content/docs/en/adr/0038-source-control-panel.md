@@ -1,14 +1,16 @@
 ---
 title: ADR 0038 — Source Control panel (VSCode-style Git)
-description: A full VSCode-built-in-Git equivalent panel — stage/unstage/discard at file and hunk level, commit (amend/signoff), branch ops, fetch/pull/push/sync, stash, merge-conflict resolution, and a Timeline — backed by a hybrid Rust subsystem (git2 reads + system-git for network/writes) and rendered with Monaco's DiffEditor.
+description: A full VSCode-built-in-Git equivalent panel — stage/unstage/discard at file and hunk level, commit (amend/signoff), branch ops, fetch/pull/push/sync, stash, merge-conflict resolution, blame, a commit-graph, and a Timeline — backed by a hybrid Rust subsystem (git2 reads + system-git for network/writes) and rendered with Monaco's DiffEditor.
 ---
 
 # ADR 0038 — Source Control panel (VSCode-style Git)
 
-> **Status**: Accepted. Implemented end-to-end: Rust `src-tauri/src/git/`
-> subsystem (35 `git_*` commands), the `lib/git/` seam + `stores/git/` store +
-> `hooks/git/` controllers, the `components/source-control/` UI, the
-> `/source-control` route, and a StatusBar branch/sync indicator.
+> **Status**: Accepted. Implemented end-to-end and since extracted to a
+> dedicated crate — `crates/cognia-git/` (ADR-0067 Phase 2, moved out of the
+> original `src-tauri/src/git/`): **62 `git_*` commands**, the `lib/git/` seam +
+> `stores/git/` store + `hooks/git/` controllers, the
+> `components/source-control/` UI, the `/source-control` route, and a StatusBar
+> branch/sync indicator.
 
 ## Context
 
@@ -19,8 +21,11 @@ UI**. The sidecar's VSCode `scm` shim is explicitly Tier-4 "NotSupported" with a
 note that a real Source Control UI is a "future separate plan". This ADR is that
 plan: a VSCode-built-in-Git equivalent bound to the active project's repository.
 
-Scope is the VSCode **built-in** Git feature set — no third-party Git Graph
-visualization or GitLens-style inline blame.
+Scope is the VSCode **built-in** Git feature set. Two capabilities originally
+scoped out as GitLens / Git-Graph territory — a commit-graph view
+(`commit-graph-view.tsx`, reached through the Timeline) and porcelain blame
+(`git_blame` → `blame-view.tsx`) — were subsequently added and are now part of
+the panel (see **Implemented since**).
 
 ## Decisions
 
@@ -30,14 +35,15 @@ visualization or GitLens-style inline blame.
 `vendored-libgit2` and **no `https`/`ssh` features** — so this libgit2 build has
 zero network transport compiled in. That hard-locks the split:
 
-- **Reads** (status, diff, log/history, branches, remotes, stash list, conflicts)
-  use `git2` directly — fast, structured, no subprocess. They run on
+- **Reads** (status, diff, log/history, branches, remotes, stash list, conflicts,
+  blame) use `git2` directly — fast, structured, no subprocess. They run on
   `spawn_blocking` because libgit2 is synchronous. The shared read core lives in
-  `git/read.rs` (the module `twin/code_repo.rs` should migrate onto in a
+  the crate's `read.rs` (the module `twin/code_repo.rs` should migrate onto in a
   follow-up).
 - **Mutations + network** (stage/unstage/discard, commit, branch
   switch/create/delete/rename, fetch/pull/push/sync, stash push/pop/apply/drop,
-  conflict resolution) shell out to the user's system `git` via `git/exec.rs`.
+  tag, reset, restore, sequencer/interactive-rebase, worktree, conflict
+  resolution) shell out to the user's system `git` via the crate's `exec.rs`.
   Shelling out is also what makes `pre-commit`/`commit-msg`/`pre-push` hooks,
   GPG/SSH signing, gitattributes filters, and the OS credential manager / SSH
   agent all behave exactly as in the user's terminal — which git2 would bypass.
@@ -56,54 +62,65 @@ repo. A new `/source-control` route lives in the GuildRail activity bar
 Reuses the offline Monaco setup (`lib/canvas/monaco-loader.ts`) and the
 ResizeObserver `layout()` fix from `components/canvas/canvas-panel.tsx`. Each
 diff hunk carries a **self-contained unified patch** (file header + one `@@`
-block) built in `git/diff.rs`; hunk-level stage/unstage/discard send that patch
-back to `git apply --cached`/`--reverse`. Conflict resolution renders a
+block) built in the crate's `diff.rs`; hunk-level stage/unstage/discard send that
+patch back to `git apply --cached`/`--reverse`. Conflict resolution renders a
 side-by-side Monaco diff of ours vs theirs with accept-ours/theirs/both.
 
 ### D4 — Single-owner fs watcher for live refresh
 
-A `notify` watcher (`git/watcher.rs`, the subsystem's only managed state) emits
-debounced `git://status-changed` events, ignoring everything under `.git/`
-except the refs/index/merge state and dropping gitignored working-tree churn via
-the `ignore` crate. To avoid an unmount race, the watcher has a **single owner**:
-the always-mounted StatusBar controller (`useGitBranchIndicator`). The panel
-never starts its own watcher — it refreshes on mount and after every mutation, so
-correctness never depends on the event firing.
+A `notify` watcher (the crate's `watcher.rs`, the subsystem's only managed
+state) emits debounced `git://status-changed` events, ignoring everything under
+`.git/` except the refs/index/merge state and dropping gitignored working-tree
+churn via the `ignore` crate. To avoid an unmount race, the watcher has a
+**single owner**: the always-mounted StatusBar controller
+(`useGitBranchIndicator`). The panel never starts its own watcher — it refreshes
+on mount and after every mutation, so correctness never depends on the event
+firing.
 
 ### D5 — Typed error model
 
-`git/error.rs` defines a `thiserror` enum serialized as `{ kind, detail }`
-(`NotARepo` / `DirtyWorkingTree` / `MergeConflict` / `AuthRequired` /
-`NetworkFailed` / `PatchFailed` / `LockHeld` / `GitNotInstalled` / …). The
-renderer switches on `err.kind` to drive distinct UI (conflict → resolver, auth
-→ credential CTA, not-a-repo → Open Folder) instead of locale-fragile substring
-matching. Every `detail` is passed through a URL-credential redactor before it
-leaves the backend.
+The crate's `error.rs` defines a `thiserror` enum serialized as
+`{ kind, detail }` (`NotARepo` / `DirtyWorkingTree` / `MergeConflict` /
+`AuthRequired` / `NetworkFailed` / `PatchFailed` / `LockHeld` /
+`GitNotInstalled` / …). The renderer switches on `err.kind` to drive distinct UI
+(conflict → resolver, auth → credential CTA, not-a-repo → Open Folder) instead of
+locale-fragile substring matching. Every `detail` is passed through a
+URL-credential redactor (`exec::redact`) before it leaves the backend.
 
 ## Lives in
 
 | Layer    | Paths                                                                 |
 | -------- | --------------------------------------------------------------------- |
-| Backend  | `src-tauri/src/git/` (`commands`, `read`, `exec`, `status`, `diff`, `stage`, `commit`, `branch`, `remote`, `stash`, `merge`, `history`, `watcher`, `error`, `types`) |
+| Backend  | `crates/cognia-git/src/` — `commands`, `read`, `exec`, `status`, `diff`, `diff_stat`, `stage`, `commit`, `branch`, `remote`, `stash`, `merge`, `history`, `blame`, `tag`, `reset`, `restore`, `sequencer`, `interactive_rebase`, `worktree`, `repo`, `watcher`, `error`, `types` (extracted from `src-tauri/src/git/` per ADR-0067 Phase 2) |
 | Seam     | `lib/git/` (`commands.ts`, `events.ts`, `types.ts`, `language-map.ts`, `load.ts`) |
 | State    | `stores/git/git-store.ts`, `hooks/git/{use-git-repo,use-git-actions,use-git-branch-indicator}.ts` |
-| UI       | `components/source-control/*`, `app/source-control/page.tsx`, GuildRail + StatusBar entries |
+| UI       | `components/source-control/*` (incl. `blame-view`, `commit-graph-view`, `timeline-view`), `app/source-control/page.tsx`, GuildRail + StatusBar entries |
 
 ## Verification
 
-- Rust: `cargo check` (+ `--tests`). Note `cargo test` cannot launch on the
-  Windows dev box (WebView2 entrypoint) — tests run in CI; system-git tests are
-  gated behind a `git --version` probe.
+- Rust: `cargo test -p cognia-git` (read the tee'd log — RTK masks cargo exit
+  codes). System-git tests are gated behind a `git --version` probe; the
+  cargo target lives at the repo root `target/`.
 - Frontend: `pnpm typecheck`, `pnpm build`, `pnpm test` (co-located, ≥90%),
   `pnpm lint:i18n` (the `sourceControl` namespace + `desktop.guildRail.sourceControl`).
 - Manual (`pnpm tauri dev`): open a dirty repo → stage a hunk → commit → switch
-  branch → fetch/pull/push/sync → stash → resolve a conflict → Timeline.
+  branch → fetch/pull/push/sync → stash → resolve a conflict → blame → Timeline.
+
+## Implemented since (originally scoped out)
+
+- **Commit-graph view** (`commit-graph-view.tsx`, via the Timeline) and
+  **porcelain blame** (`git_blame` → `blame-view.tsx`).
+- **`git init`** from the not-a-repo state (`git_init` in `repo.rs`) plus
+  `git_ignore_add` — the not-a-repo state is no longer explainer-only.
 
 ## Out of scope / follow-ups
 
-- Git Graph commit-graph visualization and GitLens-style inline blame.
-- `git init` from the not-a-repo state (currently explainer-only).
-- Multi-repo workspaces (one active repo per project).
+- Multi-repo workspaces (one active repo per project) and submodules.
 - Backing the sidecar VSCode `scm` shim with this UI.
-- Migrating `twin/code_repo.rs` onto `git/read.rs` and converging
-  `github/workspace.rs` onto `git/exec.rs`.
+- Migrating `twin/code_repo.rs` onto the crate's `read.rs` and converging
+  `github/workspace.rs` onto the crate's `exec.rs`.
+- Not yet implemented (candidate follow-ups): `git clone` into the panel,
+  in-panel `git config` writes (empty-ident recovery), a worktree-management
+  section (backend `git_worktree_*` exists but is only consumed by the
+  agent-team allocator / project editor), reflog/recovery view, GPG `-S`
+  commit signing (only signoff today), and line-level / sub-hunk staging.
