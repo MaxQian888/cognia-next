@@ -4,7 +4,7 @@
 
 use git2::Repository;
 
-use super::error::Result;
+use super::error::{GitError, Result};
 use super::exec;
 use super::read::{ahead_behind, open_repo};
 use super::types::{AheadBehind, GitRemote};
@@ -131,9 +131,35 @@ pub async fn push(
     exec::run(&cwd(repo_path), args).await
 }
 
+/// Whether the current branch has a configured upstream to sync against. An
+/// unborn HEAD (no commits yet) or a detached HEAD has none.
+fn has_upstream(repo_path: &str) -> Result<bool> {
+    let repo = open_repo(repo_path)?;
+    let name = match repo.head() {
+        Ok(head) => match head.shorthand() {
+            Some(n) => n.to_string(),
+            None => return Ok(false),
+        },
+        Err(_) => return Ok(false),
+    };
+    let has = match repo.find_branch(&name, git2::BranchType::Local) {
+        Ok(branch) => branch.upstream().is_ok(),
+        Err(_) => false,
+    };
+    Ok(has)
+}
+
 /// Pull then push, returning the post-sync divergence from upstream.
 /// `git pull` respects the user's `pull.rebase` config.
 pub async fn sync(repo_path: &str) -> Result<AheadBehind> {
+    // A branch with no upstream can't sync by tracking; guide the user to
+    // publish it first instead of failing with a generic "git command failed".
+    if !has_upstream(repo_path)? {
+        return Err(GitError::InvalidArgument(
+            "no upstream is set for the current branch; publish it first with push --set-upstream"
+                .into(),
+        ));
+    }
     let c = cwd(repo_path);
     exec::run(&c, ["pull"]).await?;
     exec::run(&c, ["push"]).await?;
@@ -217,6 +243,34 @@ mod tests {
         repo.remote("alpha", "https://example.com/o/r2.git")
             .unwrap();
         assert_eq!(resolve_default_remote(&repo).as_deref(), Some("alpha"));
+    }
+
+    #[tokio::test]
+    async fn sync_without_upstream_is_invalid_argument() {
+        if !git_on_path() {
+            return;
+        }
+        // A repo with a commit but no upstream: sync() must refuse with a typed
+        // InvalidArgument (guiding --set-upstream) before attempting a pull.
+        let tmp = TempDir::new().unwrap();
+        let repo = Repository::init(tmp.path()).unwrap();
+        {
+            let mut cfg = repo.config().unwrap();
+            cfg.set_str("user.name", "T").unwrap();
+            cfg.set_str("user.email", "t@e.com").unwrap();
+        }
+        fs::write(tmp.path().join("a.txt"), "hi\n").unwrap();
+        let sig = Signature::now("T", "t@e.com").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        let rp = tmp.path().to_string_lossy().into_owned();
+        let err = sync(&rp).await.unwrap_err();
+        assert!(matches!(err, GitError::InvalidArgument(_)));
     }
 
     fn git_on_path() -> bool {

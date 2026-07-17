@@ -86,7 +86,7 @@ pub fn classify_failure(stderr: &str) -> GitError {
     {
         return GitError::PatchFailed(detail);
     }
-    if s.contains("index.lock") || s.contains("unable to create") && s.contains(".lock") {
+    if s.contains("index.lock") || (s.contains("unable to create") && s.contains(".lock")) {
         return GitError::LockHeld(detail);
     }
     if s.contains("could not resolve host")
@@ -295,6 +295,16 @@ mod tests {
     fn classify_lock_held() {
         assert!(matches!(
             classify_failure("fatal: Unable to create '/r/.git/index.lock': File exists."),
+            GitError::LockHeld(_)
+        ));
+    }
+
+    #[test]
+    fn classify_lock_held_via_create_lock_without_index_lock() {
+        // Exercises the `unable to create` && `.lock` branch (no `index.lock`),
+        // which the parenthesization `a || (b && c)` keeps grouped correctly.
+        assert!(matches!(
+            classify_failure("fatal: Unable to create '/r/.git/shallow.lock': File exists."),
             GitError::LockHeld(_)
         ));
     }

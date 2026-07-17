@@ -37,8 +37,19 @@ pub async fn unstage(repo_path: &str, paths: &[String]) -> Result<()> {
         "--".to_string(),
     ];
     args.extend(paths.iter().cloned());
-    if exec::run(&cwd, args).await.is_ok() {
-        return Ok(());
+    let reset_err = match exec::run(&cwd, args).await {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    // `reset HEAD` failed. Only an unborn HEAD (no commit yet) justifies the
+    // index-drop fallback below; any other failure (lock held, bad path) must
+    // surface instead of being masked by the `rm`. `rev-parse --verify HEAD`
+    // succeeds iff HEAD resolves to a commit.
+    if exec::run(&cwd, ["rev-parse", "--verify", "--quiet", "HEAD"])
+        .await
+        .is_ok()
+    {
+        return Err(reset_err);
     }
     // Unborn HEAD: drop entries from the index instead.
     let mut rm = vec![
@@ -179,6 +190,27 @@ mod tests {
 
         unstage(&rp, &["a.txt".into()]).await.unwrap();
         assert!(!staged_names(tmp.path()).contains("a.txt"));
+    }
+
+    #[tokio::test]
+    async fn unstage_on_unborn_head_drops_from_index() {
+        if !git_on_path() {
+            return;
+        }
+        // Repo with no commit yet: HEAD is unborn, so `reset HEAD` can't run and
+        // unstage must fall back to dropping the index entry.
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path();
+        git(p, &["init", "-q", "-b", "main"]);
+        git(p, &["config", "user.email", "t@e.com"]);
+        git(p, &["config", "user.name", "T"]);
+        std::fs::write(p.join("a.txt"), "x\n").unwrap();
+        let rp = p.to_string_lossy().into_owned();
+
+        stage(&rp, &["a.txt".into()]).await.unwrap();
+        assert!(staged_names(p).contains("a.txt"));
+        unstage(&rp, &["a.txt".into()]).await.unwrap();
+        assert!(!staged_names(p).contains("a.txt"));
     }
 
     #[tokio::test]
