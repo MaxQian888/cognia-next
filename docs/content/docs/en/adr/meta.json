@@ -62,8 +62,12 @@
     "0072-browser-action-recording",
     "0073-chromium-cookie-import",
     "0074-otel-native-telemetry",
+    "0075-voice-tts-subsystem",
     "0076-local-provider-management-transport",
     "0077-tui-external-agent-hosting",
-    "0078-cli-app-bridge"
+    "0078-cli-app-bridge",
+    "0079-scheduler-extension-contract",
+    "0081-workflow-callable-unit-and-chained-triggers",
+    "0082-remote-development-remote-host"
   ]
 }
