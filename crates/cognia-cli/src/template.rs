@@ -20,10 +20,11 @@ pub enum TemplateKind {
 }
 
 impl TemplateKind {
-    /// Every template kind — the exhaustive list for tests and iteration.
-    /// Adding a kind here is a compile error if a `match` on `TemplateKind`
-    /// elsewhere isn't updated, so this stays honest.
-    pub const ALL: [TemplateKind; 5] = [
+    /// Every template kind — the exhaustive list for cross-template
+    /// invariants. Test-only today (only the `.gitignore` invariant iterates
+    /// it); un-gate when a production caller needs it.
+    #[cfg(test)]
+    const ALL: [TemplateKind; 5] = [
         Self::Wasm,
         Self::Ts,
         Self::Python,
