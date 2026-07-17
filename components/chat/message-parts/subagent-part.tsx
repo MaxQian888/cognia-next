@@ -300,11 +300,13 @@ export const SubagentPart = memo(function SubagentPart({
     </p>
   ) : null
 
-  // Simplified mode: one glanceable row, expandable to the full detail body.
+  // Simplified mode: one glanceable, borderless row (matches ToolCallRow's
+  // Codex-style recession), expandable to the full detail body nested under a
+  // left rule.
   if (mode === "simplified") {
     return (
       <div
-        className="not-prose my-1 rounded-md border bg-card"
+        className="not-prose my-0.5"
         data-testid={`subagent-part-${part.subagentId}`}
         data-status={status}
       >
@@ -315,16 +317,16 @@ export const SubagentPart = memo(function SubagentPart({
             aria-expanded={isOpen}
             aria-label={t("rowAria", { name: part.name, status: statusLabel })}
             data-testid={`subagent-toggle-${part.subagentId}`}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
           >
             <ChevronRightIcon
               className={cn(
-                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                "size-3.5 shrink-0 opacity-60 transition-transform",
                 isOpen && "rotate-90"
               )}
             />
-            <BotIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="shrink-0 font-medium">{part.name}</span>
+            <BotIcon className="size-3.5 shrink-0" />
+            <span className="shrink-0 font-medium text-foreground/80">{part.name}</span>
             {typeof depth === "number" ? (
               <Badge variant="secondary" className="text-[10px]" data-testid="subagent-depth-badge">
                 {t("depthBadge", { n: depth })}
@@ -387,7 +389,8 @@ export const SubagentPart = memo(function SubagentPart({
         </div>
         {rejectionBanner}
         <MotionCollapse open={isOpen}>
-          <div className="space-y-2 border-t px-3 py-2.5">
+          {/* ml aligns the left rule under the chevron (px-1.5 + half of size-3.5). */}
+          <div className="ml-[13px] mb-1 space-y-2 border-l pl-3 pt-1">
             <SubagentLogBody
               summary={part.summary}
               logs={logs}

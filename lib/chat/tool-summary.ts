@@ -176,6 +176,55 @@ export function tallyToolNames(parts: ToolPartLike[]): ToolTally[] {
   return order.map((key) => byKey.get(key)!)
 }
 
+/**
+ * Coarse action category for a tool, used by the simplified activity-group
+ * header's natural-language summary ("Edited files · Ran commands · Read
+ * files"). Folds the fine-grained icon buckets into verb-shaped groups.
+ */
+export type ToolActionCategory = "edit" | "run" | "read" | "search" | "web" | "other"
+
+const CATEGORY_BY_ICON: Record<ToolIconKey, ToolActionCategory> = {
+  read: "read",
+  write: "edit",
+  edit: "edit",
+  notebook: "edit",
+  search: "search",
+  glob: "read",
+  folder: "read",
+  terminal: "run",
+  web: "web",
+  task: "other",
+  generic: "other",
+}
+
+/** One action-category bucket for the simplified group's verb-phrase summary. */
+export interface ToolActionTally {
+  category: ToolActionCategory
+  count: number
+}
+
+/**
+ * Summarise a run of tool calls into ordered action categories — the input to
+ * the Codex-style verb phrase ("Edited files · Ran commands"). Buckets by the
+ * same icon mapping the rows use, preserving first-seen order. The component
+ * maps each `category` (+ count) to a pluralised i18n label.
+ */
+export function summarizeToolActivity(parts: ToolPartLike[]): ToolActionTally[] {
+  const order: ToolActionCategory[] = []
+  const byCategory = new Map<ToolActionCategory, ToolActionTally>()
+  for (const part of parts) {
+    const category = CATEGORY_BY_ICON[iconFor(normalizeToolName(part))]
+    const existing = byCategory.get(category)
+    if (existing) {
+      existing.count += 1
+    } else {
+      byCategory.set(category, { category, count: 1 })
+      order.push(category)
+    }
+  }
+  return order.map((category) => byCategory.get(category)!)
+}
+
 /** Aggregate status for a run of tool calls, used by the activity-group header. */
 export type AggregateStatus = "running" | "error" | "complete" | "pending"
 

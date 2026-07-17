@@ -878,6 +878,114 @@ describe("agent-flow grouping + mode", () => {
   })
 })
 
+// ── display-mode reactivity (standard ⇄ detailed) ─────────────────────────────
+//
+// standard and detailed differ ONLY in the `defaultOpen`/`forceOpen` handed to
+// each tool card's (and reasoning block's) uncontrolled Collapsible, which is
+// read once at mount. So flipping the header switch on an already-rendered
+// transcript changed the prop but never re-opened/re-collapsed a mounted card —
+// the "standard and detailed look identical" bug. The renderer folds the mode
+// into the KEY of just the mode-sensitive parts so a mode switch remounts them
+// and re-applies the per-mode default, while leaving prose untouched.
+describe("display-mode reactivity (standard ⇄ detailed)", () => {
+  afterEach(() => {
+    mockFlowMode = "standard"
+  })
+
+  function loneToolMsg(id: string): UIMessage {
+    return {
+      id,
+      role: "assistant",
+      parts: [{ type: "tool-SomeTool", state: "output-available", input: {} }],
+    } as unknown as UIMessage
+  }
+
+  // In production a mode switch re-renders MessageRenderer via the settings-store
+  // subscription inside `useAgentFlowMode`. That hook is mocked here (reads a
+  // module var), and MessageRenderer is `memo`'d on its props, so a bare
+  // `rerender` with identical props would bail out and never re-read the mode.
+  // Handing a fresh `onRegenerate` reference each render defeats the memo the
+  // same way a real store update would (it renders nothing without
+  // `isLastAssistant`), so the component re-runs and picks up `mockFlowMode`.
+  const forceRender = () => ({ onRegenerate: () => {} })
+
+  it("reuses the tool-card DOM node across a re-render at the same mode", () => {
+    mockFlowMode = "standard"
+    const msg = loneToolMsg("mode-stable")
+    const { rerender } = render(<MessageRenderer message={msg} {...forceRender()} />)
+    const first = document.querySelector("[data-test='tool']")
+    expect(first).toBeTruthy()
+    rerender(<MessageRenderer message={msg} {...forceRender()} />)
+    // Stable key at an unchanged mode → React keeps the same node (no
+    // gratuitous remount that would drop the user's manual card state).
+    expect(document.querySelector("[data-test='tool']")).toBe(first)
+  })
+
+  it("remounts the lone tool card when the mode switches standard → detailed", () => {
+    mockFlowMode = "standard"
+    const msg = loneToolMsg("mode-remount")
+    const { rerender } = render(<MessageRenderer message={msg} {...forceRender()} />)
+    const first = document.querySelector("[data-test='tool']")
+    expect(first).toBeTruthy()
+    mockFlowMode = "detailed"
+    rerender(<MessageRenderer message={msg} {...forceRender()} />)
+    const second = document.querySelector("[data-test='tool']")
+    expect(second).toBeTruthy()
+    // Mode folded into the key → the card remounts so its new per-mode
+    // `defaultOpen` takes effect (detailed expands what standard collapsed).
+    expect(second).not.toBe(first)
+  })
+
+  it("remounts the activity group when the mode switches standard → detailed", () => {
+    mockFlowMode = "standard"
+    const msg = {
+      id: "grp-remount",
+      role: "assistant",
+      parts: [
+        { type: "tool-A", state: "output-available", input: {} },
+        { type: "tool-B", state: "output-available", input: {} },
+      ],
+    } as unknown as UIMessage
+    const { rerender } = render(<MessageRenderer message={msg} {...forceRender()} />)
+    const first = document.querySelector("[data-test='activity-group']")
+    expect(first).toBeTruthy()
+    expect(first?.getAttribute("data-mode")).toBe("standard")
+    mockFlowMode = "detailed"
+    rerender(<MessageRenderer message={msg} {...forceRender()} />)
+    const second = document.querySelector("[data-test='activity-group']")
+    expect(second?.getAttribute("data-mode")).toBe("detailed")
+    expect(second).not.toBe(first)
+  })
+
+  it("remounts a reasoning block when the mode switches standard → detailed", () => {
+    mockFlowMode = "standard"
+    const msg = {
+      id: "reason-remount",
+      role: "assistant",
+      parts: [{ type: "reasoning", text: "thinking", state: "done" }],
+    } as unknown as UIMessage
+    const { rerender } = render(<MessageRenderer message={msg} {...forceRender()} />)
+    const first = document.querySelector("[data-test='reasoning']")
+    expect(first).toBeTruthy()
+    mockFlowMode = "detailed"
+    rerender(<MessageRenderer message={msg} {...forceRender()} />)
+    const second = document.querySelector("[data-test='reasoning']")
+    expect(second).not.toBe(first)
+  })
+
+  it("leaves prose untouched when the mode switches (mode-agnostic key)", () => {
+    mockFlowMode = "standard"
+    const msg = assistantMsg("prose-stable", "Hello there")
+    const { rerender } = render(<MessageRenderer message={msg} {...forceRender()} />)
+    const first = document.querySelector("[data-test='markdown']")
+    expect(first).toBeTruthy()
+    mockFlowMode = "detailed"
+    rerender(<MessageRenderer message={msg} {...forceRender()} />)
+    // Prose is not mode-sensitive, so a toggle must not remount it (no reflow).
+    expect(document.querySelector("[data-test='markdown']")).toBe(first)
+  })
+})
+
 // ── action bar suppression ────────────────────────────────────────────────────
 
 describe("action bar on tool-only turns", () => {

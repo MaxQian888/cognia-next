@@ -29,7 +29,12 @@ import type { ToolUIPart } from "ai"
 
 import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
 import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
-import { aggregateToolStatus, tallyToolNames, type AggregateStatus } from "@/lib/chat/tool-summary"
+import {
+  aggregateToolStatus,
+  summarizeToolActivity,
+  tallyToolNames,
+  type AggregateStatus,
+} from "@/lib/chat/tool-summary"
 import type { AgentFlowMode } from "@/types/appearance"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -65,8 +70,10 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
 
   const status = useMemo(() => aggregateToolStatus(entries.map((e) => e.part.state)), [entries])
   const glyph = AGG_GLYPH[status]
-  // Type-count preview ("read ×3 · grep ×1 · edit ×1") for the collapsed header.
+  // Type-count preview ("read ×3 · grep ×1 · edit ×1") for the collapsed header
+  // (standard/detailed). Simplified swaps in a Codex-style verb phrase instead.
   const tally = useMemo(() => tallyToolNames(entries.map((e) => e.part)), [entries])
+  const actions = useMemo(() => summarizeToolActivity(entries.map((e) => e.part)), [entries])
 
   const allRowsExpanded = expandedRows.size === entries.length && entries.length > 0
   const expandAllActive = mode === "simplified" ? allRowsExpanded : cardsOpen === true
@@ -118,14 +125,19 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
       </div>
     )
 
+  // Simplified mode reads as a recessive Codex-style stack: no card chrome, the
+  // header muted, and the collapsed rows nested under it. Standard/detailed keep
+  // the bordered card that wraps their full tool cards.
+  const simplified = mode === "simplified"
+
   return (
     <div
-      className="not-prose mb-4 w-full rounded-md border bg-card"
+      className={cn("not-prose w-full", simplified ? "mb-2" : "mb-4 rounded-md border bg-card")}
       data-testid="tool-activity-group"
       data-mode={mode}
       data-status={status}
     >
-      <div className="flex items-center gap-2 p-2.5">
+      <div className={cn("flex items-center gap-2", simplified ? "px-1.5 py-1" : "p-2.5")}>
         <button
           type="button"
           onClick={() => setGroupOpen((v) => !v)}
@@ -140,21 +152,39 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
             )}
           />
           <LayersIcon className="size-4 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 text-sm font-medium">
-            {t("group.summary", { count: entries.length })}
-          </span>
-          {/* Type-count preview — keeps the collapsed group glanceable. */}
-          <span
-            className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
-            data-testid="tool-activity-group-tally"
-          >
-            {tally.map((bucket, i) => (
-              <span key={bucket.name}>
-                {i > 0 ? <span aria-hidden> · </span> : null}
-                {t("group.tally", { name: bucket.name, count: bucket.count })}
+          {simplified ? (
+            // Codex-style natural-language verb phrase ("Edited files · Ran
+            // commands · Read files") — the compact summary of the whole run.
+            <span
+              className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground"
+              data-testid="tool-activity-group-actions"
+            >
+              {actions.map((bucket, i) => (
+                <span key={bucket.category}>
+                  {i > 0 ? <span aria-hidden> · </span> : null}
+                  {t(`action.${bucket.category}`, { count: bucket.count })}
+                </span>
+              ))}
+            </span>
+          ) : (
+            <>
+              <span className="shrink-0 text-sm font-medium">
+                {t("group.summary", { count: entries.length })}
               </span>
-            ))}
-          </span>
+              {/* Type-count preview — keeps the collapsed group glanceable. */}
+              <span
+                className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+                data-testid="tool-activity-group-tally"
+              >
+                {tally.map((bucket, i) => (
+                  <span key={bucket.name}>
+                    {i > 0 ? <span aria-hidden> · </span> : null}
+                    {t("group.tally", { name: bucket.name, count: bucket.count })}
+                  </span>
+                ))}
+              </span>
+            </>
+          )}
           <MotionStatusSwap swapKey={status} className="shrink-0">
             <glyph.Icon className={cn("size-4", glyph.className)} aria-hidden />
           </MotionStatusSwap>
@@ -174,7 +204,7 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
       </div>
 
       <MotionCollapse open={groupOpen}>
-        <div className="border-t p-2">{body}</div>
+        <div className={cn(simplified ? "pl-4 pt-0.5 pb-1" : "border-t p-2")}>{body}</div>
       </MotionCollapse>
     </div>
   )

@@ -1,5 +1,13 @@
 {
   "agentFlow": {
+    "action": {
+      "edit": "{count, plural, =1 {Edited a file} other {Edited files}}",
+      "other": "{count, plural, =1 {Used a tool} other {Used tools}}",
+      "read": "{count, plural, =1 {Read a file} other {Read files}}",
+      "run": "{count, plural, =1 {Ran a command} other {Ran commands}}",
+      "search": "{count, plural, =1 {Searched} other {Searched files}}",
+      "web": "{count, plural, =1 {Fetched the web} other {Fetched the web}}"
+    },
     "group": {
       "collapseAll": "Collapse all",
       "expandAll": "Expand all",

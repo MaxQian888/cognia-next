@@ -383,7 +383,13 @@ function MessageRendererInner({
                 }))
                 return (
                   <MotionReveal key={`${message.id}-group-${si}`} index={si}>
+                    {/* Key the group on the display mode: the tool cards it wraps
+                        own their open state in uncontrolled Collapsibles
+                        (`defaultOpen`, read once at mount), so a live
+                        standard⇄detailed switch only takes effect if the group
+                        remounts and re-applies the per-mode default. */}
                     <ToolActivityGroup
+                      key={agentFlowMode}
                       entries={entries}
                       mode={agentFlowMode}
                       renderCard={(part, key, opts) =>
@@ -404,9 +410,20 @@ function MessageRendererInner({
 
               const { part, index } = segment.entry
               const partKey = `${message.id}-${index}`
+              const partType = (part as { type?: string }).type
+              // Tool cards and reasoning read the display mode only through their
+              // Collapsible's uncontrolled `defaultOpen`, snapshotted at mount —
+              // a live standard⇄detailed switch changes the prop but never
+              // re-opens or re-collapses an already-mounted card. Fold the mode
+              // into just those parts' key so switching the display mode remounts
+              // them and re-applies the per-mode default. Prose keeps a
+              // mode-agnostic key (no reflow), and the outer MotionReveal key
+              // stays stable so the entrance animation isn't replayed on a toggle.
+              const modeSensitive = isToolPartType(partType) || partType === "reasoning"
+              const nodeKey = modeSensitive ? `${partKey}-${agentFlowMode}` : partKey
               const node = (
                 <MessagePart
-                  key={partKey}
+                  key={nodeKey}
                   part={part}
                   partKey={partKey}
                   isStreaming={isStreaming}
@@ -421,7 +438,6 @@ function MessageRendererInner({
               // Give tool cards/rows and dispatch banners a one-shot entrance;
               // leave text/markdown untouched to avoid wrapping prose in extra
               // block boxes.
-              const partType = (part as { type?: string }).type
               return isToolPartType(partType) || partType === "agent-team-dispatch" ? (
                 <MotionReveal key={partKey} index={si}>
                   {node}

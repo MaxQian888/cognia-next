@@ -2,6 +2,7 @@ import {
   aggregateToolStatus,
   clampTarget,
   normalizeToolName,
+  summarizeToolActivity,
   summarizeToolCall,
   tallyToolNames,
   type ToolPartLike,
@@ -153,5 +154,43 @@ describe("aggregateToolStatus", () => {
 
   it("reports complete when all calls resolved", () => {
     expect(aggregateToolStatus(["output-available", "output-available"])).toBe("complete")
+  })
+})
+
+describe("summarizeToolActivity", () => {
+  it("buckets tools into action categories, first-seen order, with counts", () => {
+    expect(
+      summarizeToolActivity([
+        tool("tool-Edit"),
+        tool("tool-Bash"),
+        tool("tool-Write"),
+        tool("tool-Read"),
+        tool("tool-Grep"),
+      ])
+    ).toEqual([
+      { category: "edit", count: 2 }, // Edit + Write
+      { category: "run", count: 1 }, // Bash
+      { category: "read", count: 1 }, // Read
+      { category: "search", count: 1 }, // Grep
+    ])
+  })
+
+  it("folds glob/ls into read and web tools into web", () => {
+    expect(
+      summarizeToolActivity([tool("tool-Glob"), tool("tool-ls"), tool("tool-WebFetch")])
+    ).toEqual([
+      { category: "read", count: 2 },
+      { category: "web", count: 1 },
+    ])
+  })
+
+  it("maps unknown tools to the other bucket", () => {
+    expect(summarizeToolActivity([tool("tool-mcp__x__frobnicate")])).toEqual([
+      { category: "other", count: 1 },
+    ])
+  })
+
+  it("returns an empty array for no parts", () => {
+    expect(summarizeToolActivity([])).toEqual([])
   })
 })

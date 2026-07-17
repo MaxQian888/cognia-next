@@ -72,6 +72,20 @@ describe("ToolActivityGroup", () => {
     expect(tally.textContent).toContain('"name":"Grep","count":1')
   })
 
+  it("renders a natural-language action summary in simplified mode (no count/tally)", () => {
+    const entries = [entry("tool-Edit"), entry("tool-Bash"), entry("tool-Read")]
+    const { getByTestId, queryByTestId } = render(
+      <ToolActivityGroup entries={entries} mode="simplified" renderCard={() => null} />
+    )
+    const actions = getByTestId("tool-activity-group-actions")
+    // Mocked t echoes `action.<category>:{params}` — assert each verb bucket.
+    expect(actions.textContent).toContain("action.edit")
+    expect(actions.textContent).toContain("action.run")
+    expect(actions.textContent).toContain("action.read")
+    // The count label + per-type tally are standard/detailed only.
+    expect(queryByTestId("tool-activity-group-tally")).toBeNull()
+  })
+
   it("marks running aggregate status", () => {
     const entries = [entry("tool-Read"), entry("tool-Grep", "input-available")]
     const { getByTestId } = render(

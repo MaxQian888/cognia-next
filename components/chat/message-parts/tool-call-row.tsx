@@ -119,8 +119,11 @@ export const ToolCallRow = memo(function ToolCallRow({
   }
 
   return (
+    // Borderless, recessive row (Codex-style): the tool activity fades into the
+    // background so the assistant's prose stands out. Expanding nests the full
+    // input/output under a left rule instead of boxing it in a card.
     <div
-      className="not-prose rounded-md border bg-card"
+      className="not-prose"
       data-testid={`tool-call-row-${summary.name}`}
       data-status={part.state}
     >
@@ -129,20 +132,15 @@ export const ToolCallRow = memo(function ToolCallRow({
         onClick={handleToggle}
         aria-expanded={open}
         aria-label={t("rowAria", { name: summary.name, status: statusLabel })}
-        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
       >
         <ChevronRightIcon
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90"
-          )}
+          className={cn("size-3.5 shrink-0 opacity-60 transition-transform", open && "rotate-90")}
         />
-        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="font-medium">{summary.name}</span>
+        <Icon className="size-3.5 shrink-0" />
+        <span className="font-medium text-foreground/80">{summary.name}</span>
         {summary.target ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-            {summary.target}
-          </span>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs">{summary.target}</span>
         ) : (
           <span className="flex-1" />
         )}
@@ -153,7 +151,8 @@ export const ToolCallRow = memo(function ToolCallRow({
         <span className="sr-only">{statusLabel}</span>
       </button>
       <MotionCollapse open={open}>
-        <div className="space-y-3 border-t px-3 py-2.5 text-popover-foreground">
+        {/* ml aligns the left rule under the chevron (px-1.5 + half of size-3.5). */}
+        <div className="ml-[13px] mb-1 space-y-3 border-l pl-3 pt-1 text-popover-foreground">
           <ToolBody part={part} />
         </div>
       </MotionCollapse>

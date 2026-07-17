@@ -173,6 +173,16 @@ describe("ChatHeader", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "false")
   })
 
+  it("mounts the agent-flow display quick toggle", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.getByTestId("agent-flow-display-toggle")).toBeInTheDocument()
+  })
+
   it("shows the No-API-key badge when neither api key nor subscription bearer exists", async () => {
     mockCredentialStatus.mockReturnValue({ keyOk: false, plan: null })
     const Wrapper = withAdapter(makeAdapter())

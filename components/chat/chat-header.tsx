@@ -18,6 +18,7 @@ import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
 import { PlanModeTasksSheet } from "@/components/agent/workspace/plan-mode-tasks-sheet"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { AgentFlowDisplayToggle } from "@/components/chat/agent-flow-display-toggle"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { SessionInsightsSheet } from "@/components/chat/session-insights/session-insights-sheet"
 import { useUIStore } from "@/stores/ui"
@@ -120,6 +121,11 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
       <PlanModeTasksSheet sessionId={session.id} />
 
       <PluginExtensionSlot point="chat.header" className="flex items-center gap-1 empty:hidden" />
+
+      {/* Quick simplified/standard/detailed switch — same global preference the
+          appearance settings card and session sheet drive. Desktop-only to keep
+          the mobile header slim; the sheet toggle remains the mobile entry. */}
+      <AgentFlowDisplayToggle className="hidden md:flex" />
 
       <Button
         variant="ghost"
