@@ -186,6 +186,7 @@
     "confirm": "Restore",
     "description": "Restore {path} from a chosen source.",
     "source": "Source (branch, tag, or commit)",
+    "sourcePlaceholder": "HEAD",
     "title": "Restore file"
   },
   "review": {
