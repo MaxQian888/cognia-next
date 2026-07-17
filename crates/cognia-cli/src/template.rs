@@ -320,7 +320,16 @@ pub fn next_steps(kind: TemplateKind, target_dir: &Path) -> Vec<String> {
 
 fn substitute_wasm_name(content: &str, target_name: &str) -> String {
     content
+        // The hyphenated package name must be replaced first: doing the
+        // underscored pass first could let a `target_name` containing `_`
+        // be re-substituted by the hyphenated pass.
         .replace("cognia-plugin-template", target_name)
+        // cargo-component normalizes `-` → `_` in the emitted artifact name,
+        // and `wasmMain` must name that artifact (e.g. `hello_wasm.wasm`),
+        // not the hyphenated package name — otherwise `plugin build` can't
+        // find the module by its declared name. wasm32-wasip2 applies the
+        // same normalization inside the component itself.
+        .replace("cognia_plugin_template", &target_name.replace('-', "_"))
         .replace("Cognia Plugin Template", &humanize(target_name))
 }
 
@@ -432,6 +441,25 @@ mod tests {
             .find(|f| f.rel_path == PathBuf::from("plugin.json"))
             .unwrap();
         assert!(pj.content.contains(r#""id": "my-plugin""#));
+    }
+
+    #[test]
+    fn wasm_main_matches_cargo_component_normalized_artifact_name() {
+        // cargo-component emits `<crate>.wasm` with `-` normalized to `_`,
+        // so `wasmMain` must be the underscored artifact name — not the
+        // hyphenated package name. Before the fix a scaffold named
+        // `hello-wasm` shipped `wasmMain: "cognia_plugin_template.wasm"`.
+        let files = files_for(TemplateKind::Wasm, "hello-wasm");
+        let pj = files
+            .iter()
+            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
+            .unwrap();
+        assert!(
+            pj.content.contains(r#""wasmMain": "hello_wasm.wasm""#),
+            "wasmMain should be the underscored artifact name, got:\n{}",
+            pj.content
+        );
+        assert!(pj.content.contains(r#""id": "hello-wasm""#));
     }
 
     #[test]
