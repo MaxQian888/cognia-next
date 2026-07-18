@@ -37,7 +37,9 @@ export async function discoverCodexAuth(): Promise<DiscoveredCodexAuth | null> {
 /**
  * Translate a `DiscoveredCodexAuth` into the shape we persist into our own
  * vault. This is the "Adopt" operation: copy fields verbatim, never mutate
- * codex-cli's source files.
+ * codex-cli's source files. `originalSource` keeps reused accounts linked to
+ * the CLI store so refresh re-discovers the current token pair instead of
+ * rotating a copied refresh token behind codex-cli's back.
  *
  * Returns `null` when the discovered payload has neither a ChatGPT bearer
  * nor an API key (in which case the renderer should treat it as "credential

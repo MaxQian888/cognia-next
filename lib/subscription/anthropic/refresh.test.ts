@@ -1,6 +1,12 @@
 import { refreshAndPersistAnthropicAccount } from "./refresh"
+import { discoverAnthropicAuth, discoveredToCredential } from "./discovery"
 
 import type { Account, AnthropicCredentialData, ProviderId } from "@/types/subscription"
+
+jest.mock("./discovery", () => ({
+  discoverAnthropicAuth: jest.fn(),
+  discoveredToCredential: jest.fn(),
+}))
 
 function anthropicAccount(over: Partial<AnthropicCredentialData> = {}): Account {
   return {
@@ -56,6 +62,75 @@ describe("refreshAndPersistAnthropicAccount", () => {
     expect(saved.credential).toMatchObject({ provider: "anthropic", accessToken: "new-access" })
     // Default reactivate:false → sidecar not restarted.
     expect(setActiveAccount).not.toHaveBeenCalled()
+  })
+
+  it("re-syncs a reused Claude CLI login without rotating its refresh token copy", async () => {
+    const linked = anthropicAccount({
+      originalSource: "keyring",
+    } as Partial<AnthropicCredentialData>)
+    const local = refreshedCredential({
+      accessToken: "cli-current-access",
+      refreshToken: "cli-current-refresh",
+      originalSource: "keyring",
+    } as Partial<AnthropicCredentialData>)
+    const refreshAccessToken = jest.fn(async () => refreshedCredential())
+    const saveAccount = jest.fn(async (_p: ProviderId, _a: Account) => {})
+    const discoverLocalCredential = jest.fn(async () => local)
+    const deps = {
+      getAccount: async () => linked,
+      saveAccount,
+      setActiveAccount: async () => {},
+      refreshAccessToken,
+      discoverLocalCredential,
+      now: () => 42,
+    }
+
+    const merged = await refreshAndPersistAnthropicAccount("acc-1", deps)
+
+    expect(merged?.accessToken).toBe("cli-current-access")
+    expect(discoverLocalCredential).toHaveBeenCalledTimes(1)
+    expect(refreshAccessToken).not.toHaveBeenCalled()
+    expect(saveAccount.mock.calls[0][1].credential).toMatchObject({
+      provider: "anthropic",
+      accessToken: "cli-current-access",
+      originalSource: "keyring",
+    })
+  })
+
+  it("uses the default CLI discovery adapter for a linked account", async () => {
+    const local = refreshedCredential({ originalSource: "keyring" })
+    jest
+      .mocked(discoverAnthropicAuth)
+      .mockResolvedValue({ source: "keyring", credential: {} } as never)
+    jest.mocked(discoveredToCredential).mockReturnValue(local)
+
+    const merged = await refreshAndPersistAnthropicAccount("acc-1", {
+      getAccount: async () => anthropicAccount({ originalSource: "keyring" }),
+      saveAccount: async () => {},
+      setActiveAccount: async () => {},
+      refreshAccessToken: async () => refreshedCredential(),
+    })
+
+    expect(merged).toMatchObject({ accessToken: "new-access", originalSource: "keyring" })
+    expect(discoverAnthropicAuth).toHaveBeenCalledTimes(1)
+    expect(discoveredToCredential).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps a file-linked account unchanged when the CLI login is unavailable", async () => {
+    const refreshAccessToken = jest.fn(async () => refreshedCredential())
+    const saveAccount = jest.fn(async () => {})
+    const deps = {
+      getAccount: async () =>
+        anthropicAccount({ originalSource: "file" } as Partial<AnthropicCredentialData>),
+      saveAccount,
+      setActiveAccount: async () => {},
+      refreshAccessToken,
+      discoverLocalCredential: async () => null,
+    }
+
+    await expect(refreshAndPersistAnthropicAccount("acc-1", deps)).resolves.toBeNull()
+    expect(refreshAccessToken).not.toHaveBeenCalled()
+    expect(saveAccount).not.toHaveBeenCalled()
   })
 
   it("re-activates the account only when reactivate is true", async () => {

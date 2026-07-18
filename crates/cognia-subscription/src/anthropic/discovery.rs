@@ -19,9 +19,9 @@
 //      username as the account (what `claude login` writes on macOS). The
 //      payload is the same JSON shape.
 //
-// We never write back to either surface. The renderer's `Adopt` action copies
-// the fields into our own v2 vault via `anthropic_oauth_save_pkce_result`;
-// refresh-token rotation then happens against our copy only.
+// We never write back to either surface. The renderer's `Adopt` action records
+// a linked snapshot in our v2 vault; refresh re-runs discovery so Claude Code
+// remains the owner of refresh-token rotation.
 
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
@@ -107,11 +107,49 @@ pub fn discover_anthropic_auth() -> Result<Option<DiscoveredAnthropicAuth>, Stri
     };
     let path_str = path.to_string_lossy().into_owned();
 
-    if let Some(from_file) = load_file(&path)? {
-        if let Some(found) = materialise(DiscoverySource::File, path_str.clone(), from_file) {
-            return Ok(Some(found));
+    // Claude Code uses the macOS Keychain as its authoritative store. A stale
+    // credentials file can remain after upgrades/manual restores; CCSwitch and
+    // Claude Code both read the Keychain first on macOS, so mirror that order.
+    #[cfg(target_os = "macos")]
+    let keyring_error = match load_keyring() {
+        Ok(Some(from_keyring)) => {
+            if let Some(found) =
+                materialise(DiscoverySource::Keyring, path_str.clone(), from_keyring)
+            {
+                return Ok(Some(found));
+            }
+            None
+        }
+        Ok(None) => None,
+        Err(error) => Some(error),
+    };
+
+    match load_file(&path) {
+        Ok(Some(from_file)) => {
+            if let Some(found) = materialise(DiscoverySource::File, path_str.clone(), from_file) {
+                return Ok(Some(found));
+            }
+        }
+        Ok(None) => {}
+        Err(file_error) => {
+            #[cfg(target_os = "macos")]
+            if let Some(keyring_error) = keyring_error {
+                return Err(format!(
+                    "{keyring_error}; credentials-file fallback also failed: {file_error}"
+                ));
+            }
+            return Err(file_error);
         }
     }
+
+    #[cfg(target_os = "macos")]
+    if let Some(error) = keyring_error {
+        return Err(error);
+    }
+
+    // Linux/Windows primarily use the credentials file, with the keyring kept
+    // as a supported fallback. Avoid reading the macOS Keychain twice.
+    #[cfg(not(target_os = "macos"))]
     if let Some(from_keyring) = load_keyring()? {
         if let Some(found) = materialise(DiscoverySource::Keyring, path_str, from_keyring) {
             return Ok(Some(found));
@@ -139,8 +177,11 @@ fn load_keyring() -> Result<Option<CredentialsDotJson>, String> {
     // touch the developer's / CI host's real keychain (which on a machine with
     // Claude Code installed holds a live credential).
     #[cfg(test)]
-    if let Some(blob) = test_support::keyring_override() {
-        return parse_keyring_blob(blob.as_deref());
+    if let Some(result) = test_support::keyring_override() {
+        return match result {
+            Ok(blob) => parse_keyring_blob(blob.as_deref()),
+            Err(error) => Err(error),
+        };
     }
 
     let account = os_username();
@@ -211,7 +252,7 @@ pub(crate) mod test_support {
     /// - `None`               → no override active; real keyring is consulted.
     /// - `Some(None)`         → override active, keyring reports *no entry*.
     /// - `Some(Some(blob))`   → override active, keyring returns `blob`.
-    static KEYRING_OVERRIDE: Mutex<Option<Option<String>>> = Mutex::new(None);
+    static KEYRING_OVERRIDE: Mutex<Option<Result<Option<String>, String>>> = Mutex::new(None);
 
     pub(crate) fn env_lock() -> MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -220,7 +261,7 @@ pub(crate) mod test_support {
             .unwrap_or_else(|e| e.into_inner())
     }
 
-    pub(crate) fn keyring_override() -> Option<Option<String>> {
+    pub(crate) fn keyring_override() -> Option<Result<Option<String>, String>> {
         KEYRING_OVERRIDE
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -242,7 +283,7 @@ pub(crate) mod test_support {
             let prev_config_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
             let tmp = tempfile::tempdir().unwrap();
             std::env::set_var("CLAUDE_CONFIG_DIR", tmp.path());
-            *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(None);
+            *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Ok(None));
             Self {
                 _guard: guard,
                 tmp,
@@ -256,7 +297,12 @@ pub(crate) mod test_support {
 
         pub(crate) fn set_keyring(&self, blob: &str) {
             *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) =
-                Some(Some(blob.to_string()));
+                Some(Ok(Some(blob.to_string())));
+        }
+
+        pub(crate) fn set_keyring_error(&self, error: &str) {
+            *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some(Err(error.to_string()));
         }
     }
 
@@ -337,6 +383,36 @@ mod tests {
         env.set_keyring(SAMPLE);
         let got = discover_anthropic_auth().unwrap().unwrap();
         assert_eq!(got.source, DiscoverySource::Keyring);
+        assert_eq!(got.access_token, "sk-ant-oat01-test");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_keyring_is_authoritative_over_a_stale_credentials_file() {
+        let env = TestEnv::new();
+        std::fs::write(
+            env.path().join(".credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"stale-file","refreshToken":"stale-rt"}}"#,
+        )
+        .unwrap();
+        env.set_keyring(SAMPLE);
+
+        let got = discover_anthropic_auth().unwrap().unwrap();
+
+        assert_eq!(got.source, DiscoverySource::Keyring);
+        assert_eq!(got.access_token, "sk-ant-oat01-test");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_falls_back_to_credentials_file_when_keyring_read_fails() {
+        let env = TestEnv::new();
+        std::fs::write(env.path().join(".credentials.json"), SAMPLE).unwrap();
+        env.set_keyring_error("keyring locked");
+
+        let got = discover_anthropic_auth().unwrap().unwrap();
+
+        assert_eq!(got.source, DiscoverySource::File);
         assert_eq!(got.access_token, "sk-ant-oat01-test");
     }
 

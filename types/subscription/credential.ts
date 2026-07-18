@@ -25,6 +25,9 @@ export const ALL_PROVIDER_IDS: readonly ProviderId[] = ["anthropic", "codex", "o
 /** Which Anthropic OAuth flow the credential came from. */
 export type AnthropicAuthMode = "subscription" | "console"
 
+/** External CLI store that remains authoritative for an adopted login. */
+export type LocalCliCredentialSource = "file" | "keyring"
+
 /**
  * Anthropic PKCE credential. Mirrors `subscription::vault::AnthropicCredentialData`
  * in Rust and the v1 `SubscriptionCredential` shape we migrated from.
@@ -39,6 +42,8 @@ export interface AnthropicCredentialData {
   email?: string
   /** "pro" | "max" | "team" | "console" | other. */
   plan?: string
+  /** Present when this account follows the local Claude Code login. */
+  originalSource?: LocalCliCredentialSource
   storedAtMs: number
 }
 
@@ -54,7 +59,7 @@ export type CodexAuthMode = "chatgpt" | "api_key"
  * Account tab so the user knows whether the bearer came from their existing
  * codex-cli install or from a fresh device-code login.
  */
-export type CodexCredentialSource = "file" | "keyring" | "oauth"
+export type CodexCredentialSource = LocalCliCredentialSource | "oauth"
 
 /** Codex device-code / api-key credential. */
 export interface CodexCredentialData {

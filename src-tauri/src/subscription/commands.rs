@@ -579,6 +579,7 @@ mod tests {
                 scope: None,
                 email: None,
                 plan: Some("pro".into()),
+                original_source: None,
                 stored_at_ms: 1_700_000_000_000,
             }),
             created_at_ms: 1_700_000_000_000,

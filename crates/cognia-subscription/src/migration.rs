@@ -385,6 +385,7 @@ mod tests {
             scope: Some("user:profile".into()),
             email: Some("legacy@example.com".into()),
             plan: Some("pro".into()),
+            original_source: None,
             stored_at_ms: 1_700_000_000_000,
         };
         let blob = serde_json::to_string(&cred).unwrap();

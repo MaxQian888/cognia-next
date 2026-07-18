@@ -26,3 +26,10 @@ Subscription: stop the Claude quota `429 Too Many Requests` storm, and make a re
   first use refreshes via the long-lived refresh_token), restoring the
   "a ChatGPT login always carries a real expiry" invariant the rest of the Codex
   subscription code already assumed.
+- **Keep reused CLI logins authoritative**: Claude/Codex refresh tokens may
+  rotate and are not safe to refresh from two independent copies. Accounts
+  adopted from a CLI file/keyring now re-read that local login instead of
+  exchanging Cognia's copied refresh token, so checking quota cannot log the
+  original CLI out. On macOS, Claude discovery also follows CCSwitch's
+  Keychain-first order so a stale `.credentials.json` cannot shadow the active
+  Claude Code login.

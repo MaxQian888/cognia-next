@@ -49,8 +49,9 @@ export async function discoverAnthropicAuth(): Promise<DiscoveredAnthropicAuth |
 /**
  * Translate a `DiscoveredAnthropicAuth` into the credential shape the vault
  * persists. This is the "Adopt" operation: copy fields verbatim, never mutate
- * Claude Code's source files. From adoption onward the token pair is ours —
- * refresh rotates our vault copy only.
+ * Claude Code's source files. `originalSource` keeps the account linked to the
+ * CLI store so later refreshes re-discover its current token pair instead of
+ * racing Claude Code by rotating a copied refresh token.
  *
  * Returns `null` when the discovered payload lacks either token — the vault's
  * `validate` requires both, so the renderer should treat that as "credential
@@ -72,6 +73,7 @@ export function discoveredToCredential(
     mode: "subscription",
     scope: discovered.scopes.length > 0 ? discovered.scopes.join(" ") : undefined,
     plan: discovered.subscriptionType,
+    originalSource: discovered.source,
     storedAtMs: nowMs,
   }
 }

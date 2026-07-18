@@ -107,6 +107,7 @@ describe("discoveredToCredential", () => {
       mode: "subscription",
       scope: "user:inference user:profile",
       plan: "max",
+      originalSource: "keyring",
       storedAtMs: 42,
     })
   })

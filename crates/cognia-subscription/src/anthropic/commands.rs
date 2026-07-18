@@ -17,7 +17,9 @@ use crate::vault::{self, Account, AnthropicCredentialData, ProviderCredential, P
 /// providers-tab one-click reuse card.
 #[tauri::command]
 pub async fn anthropic_oauth_discover() -> Result<Option<DiscoveredAnthropicAuth>, String> {
-    discovery::discover_anthropic_auth()
+    tauri::async_runtime::spawn_blocking(discovery::discover_anthropic_auth)
+        .await
+        .map_err(|error| format!("Claude credential discovery task failed: {error}"))?
 }
 
 /// Persist the result of a successful TS-side PKCE exchange.
@@ -94,6 +96,7 @@ mod tests {
             scope: Some("user:profile".into()),
             email: Some("user@example.com".into()),
             plan: Some("pro".into()),
+            original_source: None,
             stored_at_ms: 1_700_000_000_000,
         }
     }

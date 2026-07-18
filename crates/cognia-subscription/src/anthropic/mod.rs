@@ -39,6 +39,13 @@ impl SubscriptionProvider for AnthropicProvider {
                 c.mode
             ));
         }
+        if let Some(source) = c.original_source.as_deref() {
+            if source != "file" && source != "keyring" {
+                return Err(format!(
+                    "originalSource must be 'file' or 'keyring', got {source:?}"
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -126,6 +133,7 @@ mod tests {
             scope: Some("user:profile".into()),
             email: Some("user@example.com".into()),
             plan: Some("pro".into()),
+            original_source: None,
             stored_at_ms: 1_700_000_000_000,
         }
     }
@@ -173,6 +181,16 @@ mod tests {
         assert!(AnthropicProvider
             .validate(&ProviderCredential::Anthropic(c))
             .is_err());
+    }
+
+    #[test]
+    fn validate_rejects_unknown_original_source() {
+        let mut c = cred();
+        c.original_source = Some("copied".into());
+        let error = AnthropicProvider
+            .validate(&ProviderCredential::Anthropic(c))
+            .unwrap_err();
+        assert!(error.contains("originalSource"));
     }
 
     #[test]

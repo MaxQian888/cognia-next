@@ -48,6 +48,13 @@ pub struct AnthropicCredentialData {
     /// Plan label ("pro", "max", "team", "console").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
+    /// `"file"` or `"keyring"` when this account follows Claude Code's login.
+    #[serde(
+        rename = "originalSource",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub original_source: Option<String>,
     /// When this record was last written (ms epoch).
     #[serde(rename = "storedAtMs", default)]
     pub stored_at_ms: i64,
@@ -570,6 +577,7 @@ mod tests {
                 scope: Some("user:profile".into()),
                 email: Some("user@example.com".into()),
                 plan: Some("pro".into()),
+                original_source: Some("keyring".into()),
                 stored_at_ms: 1_700_000_000_000,
             }),
             created_at_ms: 1_700_000_000_000,
@@ -647,6 +655,7 @@ mod tests {
         // camelCase fields survive
         assert!(blob.contains("\"accessToken\""));
         assert!(blob.contains("\"refreshToken\""));
+        assert!(blob.contains("\"originalSource\":\"keyring\""));
         assert!(blob.contains("\"createdAtMs\""));
     }
 

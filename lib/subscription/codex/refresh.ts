@@ -31,6 +31,7 @@ import {
   toProviderCredential,
   tokenResponseToCredential,
 } from "./oauth"
+import { discoverCodexAuth, discoveredToCredential } from "./discovery"
 
 import type { Account, CodexCredentialData, ProviderId } from "@/types/subscription"
 
@@ -40,6 +41,8 @@ export interface RefreshCodexDeps {
   saveAccount: (provider: ProviderId, account: Account) => Promise<void>
   setActiveAccount: (provider: ProviderId, accountId: string | null) => Promise<void>
   now: () => number
+  /** Re-read the CLI-owned credential for accounts adopted via Reuse. */
+  discoverLocalCredential: () => Promise<CodexCredentialData | null>
   /**
    * When `true`, re-activate the account after persisting so the Rust-side
    * active-env snapshot is rebuilt with the new bearer. Defaults to `false` —
@@ -54,6 +57,10 @@ const DEFAULT_DEPS: RefreshCodexDeps = {
   saveAccount: defaultSaveAccount,
   setActiveAccount: defaultSetActiveAccount,
   now: () => Date.now(),
+  discoverLocalCredential: async () => {
+    const discovered = await discoverCodexAuth()
+    return discovered ? discoveredToCredential(discovered) : null
+  },
   reactivate: false,
 }
 
@@ -75,7 +82,15 @@ export async function refreshCodexAccountIfStale(
   accountId: string,
   deps: Partial<RefreshCodexDeps> = {}
 ): Promise<CodexCredentialData | null> {
-  const { refreshCodexToken, getAccount, saveAccount, setActiveAccount, now, reactivate } = {
+  const {
+    refreshCodexToken,
+    getAccount,
+    saveAccount,
+    setActiveAccount,
+    now,
+    discoverLocalCredential,
+    reactivate,
+  } = {
     ...DEFAULT_DEPS,
     ...deps,
   }
@@ -83,6 +98,21 @@ export async function refreshCodexAccountIfStale(
   const account = await getAccount("codex", accountId)
   if (!account || account.credential.provider !== "codex") return null
   const credential = account.credential
+
+  // A reused CLI login remains owned by codex-cli. Refresh tokens may rotate,
+  // so exchanging our copied token would invalidate the CLI's auth.json/keyring
+  // copy. Re-read the authoritative local login instead (CCSwitch's model).
+  if (credential.originalSource === "file" || credential.originalSource === "keyring") {
+    const synced = await discoverLocalCredential()
+    if (!synced) return null
+    await saveAccount("codex", {
+      ...account,
+      credential: toProviderCredential(synced),
+      lastUsedAtMs: now(),
+    })
+    if (reactivate) await setActiveAccount("codex", accountId)
+    return synced
+  }
 
   // `api_key` never expires and has no refresh token; `isCodexCredentialFresh`
   // already treats it (and an unknown expiry, expiresAtMs === 0) as fresh, but

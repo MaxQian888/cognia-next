@@ -21,6 +21,7 @@ import {
 } from "@/lib/subscription/core/transport"
 
 import { refreshAccessToken as defaultRefreshAccessToken } from "./oauth"
+import { discoverAnthropicAuth, discoveredToCredential } from "./discovery"
 
 import type { Account, AnthropicCredentialData, ProviderId } from "@/types/subscription"
 
@@ -30,6 +31,8 @@ export interface RefreshAnthropicDeps {
   saveAccount: (provider: ProviderId, account: Account) => Promise<void>
   setActiveAccount: (provider: ProviderId, accountId: string | null) => Promise<void>
   now: () => number
+  /** Re-read the CLI-owned credential for accounts adopted via Reuse. */
+  discoverLocalCredential: () => Promise<AnthropicCredentialData | null>
   /**
    * When `true`, re-activate the account after persisting so the in-process
    * OAuth bearer + sidecar pick up the new token (restarts the sidecar).
@@ -45,6 +48,10 @@ const DEFAULT_DEPS: RefreshAnthropicDeps = {
   saveAccount: defaultSaveAccount,
   setActiveAccount: defaultSetActiveAccount,
   now: () => Date.now(),
+  discoverLocalCredential: async () => {
+    const discovered = await discoverAnthropicAuth()
+    return discovered ? discoveredToCredential(discovered) : null
+  },
   reactivate: false,
 }
 
@@ -59,7 +66,15 @@ export async function refreshAndPersistAnthropicAccount(
   accountId: string,
   deps: Partial<RefreshAnthropicDeps> = {}
 ): Promise<AnthropicCredentialData | null> {
-  const { refreshAccessToken, getAccount, saveAccount, setActiveAccount, now, reactivate } = {
+  const {
+    refreshAccessToken,
+    getAccount,
+    saveAccount,
+    setActiveAccount,
+    now,
+    discoverLocalCredential,
+    reactivate,
+  } = {
     ...DEFAULT_DEPS,
     ...deps,
   }
@@ -68,10 +83,19 @@ export async function refreshAndPersistAnthropicAccount(
   if (!account || account.credential.provider !== "anthropic") return null
   const credential = account.credential
 
-  const updated = await refreshAccessToken({
-    refreshToken: credential.refreshToken,
-    mode: credential.mode,
-  })
+  // A reused Claude Code login remains owned by the CLI. Its refresh token can
+  // rotate, so exchanging Cognia's copied token would invalidate the keyring /
+  // credentials-file copy. CCSwitch avoids that race by reading the CLI store
+  // at query time; mirror that ownership rule here.
+  const followsLocalLogin =
+    credential.originalSource === "file" || credential.originalSource === "keyring"
+  const updated = followsLocalLogin
+    ? await discoverLocalCredential()
+    : await refreshAccessToken({
+        refreshToken: credential.refreshToken,
+        mode: credential.mode,
+      })
+  if (!updated) return null
   const merged: AnthropicCredentialData = {
     ...credential,
     ...updated,

@@ -1,6 +1,12 @@
 import { refreshCodexAccountIfStale } from "./refresh"
+import { discoverCodexAuth, discoveredToCredential } from "./discovery"
 
 import type { Account, CodexCredentialData } from "@/types/subscription"
+
+jest.mock("./discovery", () => ({
+  discoverCodexAuth: jest.fn(),
+  discoveredToCredential: jest.fn(),
+}))
 
 const NOW = 1_000_000
 
@@ -36,6 +42,7 @@ function deps(over: Record<string, unknown> = {}) {
       refresh_token: "refresh-2",
       expires_in: 3600,
     }),
+    discoverLocalCredential: jest.fn().mockResolvedValue(null),
     now: () => NOW,
     reactivate: false,
     ...over,
@@ -55,6 +62,82 @@ describe("refreshCodexAccountIfStale", () => {
     expect(fresh?.expiresAtMs).toBe(NOW + 3600 * 1000)
     const saved = d.saveAccount.mock.calls[0][1]
     expect(saved.credential).toMatchObject({ provider: "codex", accessToken: "fresh-bearer" })
+  })
+
+  it("re-syncs a reused CLI login without rotating the CLI refresh token copy", async () => {
+    const linked = credential({ originalSource: "file" })
+    const local = credential({
+      accessToken: "cli-current-bearer",
+      refreshToken: "cli-current-refresh",
+      expiresAtMs: NOW + 3_600_000,
+      originalSource: "file",
+    })
+    const d = deps({
+      getAccount: jest.fn().mockResolvedValue(account(linked)),
+      discoverLocalCredential: jest.fn().mockResolvedValue(local),
+    })
+
+    const fresh = await refreshCodexAccountIfStale("acc-1", d)
+
+    expect(fresh?.accessToken).toBe("cli-current-bearer")
+    expect(d.discoverLocalCredential).toHaveBeenCalledTimes(1)
+    expect(d.refreshCodexToken).not.toHaveBeenCalled()
+    expect(d.saveAccount.mock.calls[0][1].credential).toMatchObject({
+      provider: "codex",
+      accessToken: "cli-current-bearer",
+      originalSource: "file",
+    })
+  })
+
+  it("uses the default CLI discovery adapter for a linked account", async () => {
+    const linked = credential({ originalSource: "file" })
+    const local = credential({ accessToken: "discovered-bearer", originalSource: "file" })
+    jest.mocked(discoverCodexAuth).mockResolvedValue({ source: "file", credential: {} } as never)
+    jest.mocked(discoveredToCredential).mockReturnValue(local)
+    const { discoverLocalCredential: _discoverLocalCredential, ...d } = deps({
+      getAccount: jest.fn().mockResolvedValue(account(linked)),
+    })
+
+    const fresh = await refreshCodexAccountIfStale("acc-1", d)
+
+    expect(fresh).toBe(local)
+    expect(discoverCodexAuth).toHaveBeenCalledTimes(1)
+    expect(discoveredToCredential).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses the wall clock when no custom clock is supplied", async () => {
+    const { now: _now, ...d } = deps()
+
+    await refreshCodexAccountIfStale("acc-1", d)
+
+    expect(d.saveAccount.mock.calls[0][1].lastUsedAtMs).toBeGreaterThan(0)
+  })
+
+  it("re-activates a keyring-linked account after syncing the CLI login", async () => {
+    const linked = credential({ originalSource: "keyring" })
+    const d = deps({
+      getAccount: jest.fn().mockResolvedValue(account(linked)),
+      discoverLocalCredential: jest
+        .fn()
+        .mockResolvedValue(credential({ originalSource: "keyring" })),
+      reactivate: true,
+    })
+
+    await refreshCodexAccountIfStale("acc-1", d)
+
+    expect(d.refreshCodexToken).not.toHaveBeenCalled()
+    expect(d.setActiveAccount).toHaveBeenCalledWith("codex", "acc-1")
+  })
+
+  it("keeps a linked account unchanged when the CLI login is unavailable", async () => {
+    const d = deps({
+      getAccount: jest.fn().mockResolvedValue(account(credential({ originalSource: "file" }))),
+      discoverLocalCredential: jest.fn().mockResolvedValue(null),
+    })
+
+    await expect(refreshCodexAccountIfStale("acc-1", d)).resolves.toBeNull()
+    expect(d.refreshCodexToken).not.toHaveBeenCalled()
+    expect(d.saveAccount).not.toHaveBeenCalled()
   })
 
   it("does not flip the active pointer by default (chat must not restart the sidecar)", async () => {
