@@ -8,6 +8,7 @@ import {
 const manifest = {
   id: "review-plugin",
   name: "Review Plugin",
+  description: "Registers review panels in the Context Workbench.",
   version: "1.0.0",
   type: "frontend",
   permissions: ["extension:ui", "canvas:read"],

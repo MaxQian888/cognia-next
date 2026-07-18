@@ -1259,7 +1259,13 @@ export function validatePluginManifest(
         ) {
           push("error", "retention.invalid", `contextPanels "retention" is invalid`)
         }
-        const declaredPermissions = new Set(m.permissions ?? [])
+        const declaredPermissions = new Set(
+          Array.isArray(m.permissions)
+            ? m.permissions.filter(
+                (permission): permission is string => typeof permission === "string"
+              )
+            : []
+        )
         const requiredPermissions = [
           "extension:ui",
           ...(Array.isArray(resourceKinds)

@@ -41,6 +41,7 @@ import {
   createFullPluginContext,
   createWorkflowAPI,
   teardownPluginWorkflowRegistrations,
+  type FullPluginContext,
 } from "@/lib/plugin/core/context"
 import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
 import { createPluginA2UIBridge, type PluginA2UIBridge } from "@/lib/plugin/bridge/a2ui-bridge"
@@ -267,7 +268,7 @@ interface ParsedActivationSpec {
 
 interface PluginRuntimeRollbackSnapshot {
   status: Plugin["status"]
-  context?: PluginContext
+  context?: FullPluginContext
   hooks?: PluginHooks
   tools: PluginTool[]
   components: PluginA2UIComponent[]
@@ -528,7 +529,7 @@ export class PluginManager {
   private hooksManager: PluginLifecycleHooks
   private a2uiBridge: PluginA2UIBridge | null = null
   private themesBridge: PluginThemesBridge | null = null
-  private contexts: Map<string, PluginContext> = new Map()
+  private contexts: Map<string, FullPluginContext> = new Map()
   private registeredSlashCommandsByPlugin: Map<string, string[]> = new Map()
   private activationInFlight: Set<string> = new Set()
   /**

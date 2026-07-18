@@ -115,7 +115,7 @@ export async function registerContextPanelsForPlugin(
       recordPluginPointDiagnostic(manifest.id, {
         code: "plugin.silent-failure",
         severity: "error",
-        pointKind: "module-bridge",
+        pointKind: "runtime",
         pointId: `context-panel:${def.id}`,
         message: `Context panel "${def.id}" was not registered: ${message}`,
         hint: "Check the panel declaration, export, and resource permissions.",
