@@ -15,7 +15,9 @@ function info(id: string): SessionInfo {
   return { id, projectId: "p", extensionId: null, origin: "local", shell: "/bin/bash" }
 }
 
-function makeStore(): TerminalStoreLike {
+type TestStore = TerminalStoreLike & { restorePersistedLayout: jest.Mock }
+
+function makeStore(): TestStore {
   return {
     registerSession: jest.fn(),
     removeSession: jest.fn(),
@@ -26,6 +28,7 @@ function makeStore(): TerminalStoreLike {
     closePrompt: jest.fn(),
     pushCommand: jest.fn(),
     sessions: {},
+    restorePersistedLayout: jest.fn(),
   }
 }
 
@@ -52,6 +55,24 @@ describe("rehydrateTerminals", () => {
     expect(reattach).toHaveBeenCalledWith("b", 0)
     expect(registerLiveSession).toHaveBeenCalledTimes(2)
     expect(wireSessionToStore).toHaveBeenCalledTimes(2)
+    expect(store.restorePersistedLayout).toHaveBeenCalledTimes(1)
+  })
+
+  it("restores layout only after every surviving PTY row is registered", async () => {
+    const order: string[] = []
+    const store = makeStore()
+    ;(store.registerSession as jest.Mock).mockImplementation((session: SessionInfo) =>
+      order.push(`register:${session.id}`)
+    )
+    store.restorePersistedLayout.mockImplementation(() => order.push("restore-layout"))
+
+    await rehydrateTerminals({
+      store,
+      list: jest.fn(async () => [info("a"), info("b")]),
+      reattach: jest.fn(fakeReattach) as unknown as ReattachFn,
+    })
+
+    expect(order).toEqual(["register:a", "register:b", "restore-layout"])
   })
 
   it("registers the live session before the store row so the instance can attach", async () => {
@@ -81,13 +102,15 @@ describe("rehydrateTerminals", () => {
   })
 
   it("returns zero when listing throws (no sessions / not Tauri)", async () => {
+    const store = makeStore()
     const res = await rehydrateTerminals({
-      store: makeStore(),
+      store,
       list: jest.fn(async () => {
         throw new Error("invoke unavailable")
       }),
     })
     expect(res).toEqual({ restored: 0, failed: 0 })
+    expect(store.restorePersistedLayout).not.toHaveBeenCalled()
   })
 
   it("counts per-session failures without aborting the rest", async () => {
@@ -101,11 +124,14 @@ describe("rehydrateTerminals", () => {
 
     expect(res).toEqual({ restored: 1, failed: 1 })
     expect(registerLiveSession).toHaveBeenCalledTimes(1)
+    expect(store.restorePersistedLayout).toHaveBeenCalledTimes(1)
   })
 
-  it("does nothing when there are no alive sessions", async () => {
-    const res = await rehydrateTerminals({ store: makeStore(), list: jest.fn(async () => []) })
+  it("clears stale reload metadata when no PTY sessions survived", async () => {
+    const store = makeStore()
+    const res = await rehydrateTerminals({ store, list: jest.fn(async () => []) })
     expect(res).toEqual({ restored: 0, failed: 0 })
     expect(registerLiveSession).not.toHaveBeenCalled()
+    expect(store.restorePersistedLayout).toHaveBeenCalledTimes(1)
   })
 })

@@ -35,6 +35,7 @@ import {
   configureTerminalBridge,
   type TerminalOutputSink,
 } from "@/lib/plugin/vscode-shim/terminal-bridge"
+import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
 const noopSink: TerminalOutputSink = {
   appendLine() {
@@ -47,7 +48,12 @@ const noopSink: TerminalOutputSink = {
 
 export function TerminalBridgeInitializer() {
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri()) {
+      // Only desktop PTYs can survive a webview reload. Clear any snapshot
+      // inherited by web/Capacitor so it cannot mask later live store updates.
+      useTerminalStore.getState().restorePersistedLayout()
+      return
+    }
     configureTerminalBridge({
       spawn: createPtyShellSpawn(),
       outputSink: noopSink,

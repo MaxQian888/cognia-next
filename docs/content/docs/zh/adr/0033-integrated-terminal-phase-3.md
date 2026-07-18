@@ -35,7 +35,7 @@ Tauri Rust 进程（及每个活的 `PtySession`）在 webview 重载后存活�
 - `session.rs` 新增 `SeqEvent { seq, event }` 信封（桌面 Channel 现在携带 seq，渲染端因此知道续传点）与 `PtySession` 上的可换 `ChannelSlot { channel, last_seq }`。sink 通过当前安装的 Channel 发送；`last_seq` 对 replay-vs-live 去重，保证每个事件对某 channel 恰好送达一次；发送失败（重载后旧 channel 已死）不更新 `last_seq`，事件因此会被回放。
 - `terminal_reattach(id, on_event, resume_from)`（`commands.rs`，在 `lib.rs` 注册）安装新 Channel 并回放 `replay.since(resume_from)`。**锁序安全**：reader/waiter 线程对 replay 锁与 channel-slot 锁是*顺序*获取（push→释放→sink），从不嵌套，故 `reattach` 可在持 slot 锁时快照 `replay.since()` 而不死锁——使 swap 相对 sink 原子。
 - 渲染端（`lib/terminal/session.ts`）跟踪 `lastSeq` 并暴露 `TerminalSession.reattach(id, resumeFrom = 0)`。`resume_from = 0` 回放整个保留缓冲（≤512 KiB / 5 分钟），同时把最近 scrollback 还原进新 xterm。
-- `lib/terminal/rehydrate.ts` 在启动时运行（`terminal-bridge-initializer`，仅 Tauri）：`terminal_list_all` → 重建行 → `reattach` → `wireSessionToStore`。app 完全重启后不恢复（进程已没）。分屏*布局*刻意不跨重载持久化——原成员以独立 tab 回来；进程存活。
+- `lib/terminal/rehydrate.ts` 在启动时运行（`terminal-bridge-initializer`，仅 Tauri）：`terminal_list_all` → 重建行 → `reattach` → `wireSessionToStore` → 恢复经校验的 UI 布局。app 完全重启后不恢复（进程已没）。
 
 ### D4 — 路径/报错链接 → 只读 Monaco 查看器
 
@@ -48,6 +48,12 @@ agent 驱动的终端 tab 已带 `agentSpawner`（chat session id，由 `dock-to
 ### D6 — `wireSessionToStore` 抽取
 
 命令捕获 + 集成事件→store + 退出→store+审计 的接线原先内联在 `spawnFromDock`。Phase 3 抽到 `spawn-orchestrator.wireSessionToStore`，使重连的会话与新 spawn 的会话行为一致、无重复。
+
+### D7 — 可安全跨重载恢复的分屏布局
+
+终端持久化 shell 现在携带一份仅用于重载恢复的元数据快照：分屏成员及顺序、方向、聚焦 pane、各项目的 active tab，以及自定义标题。活的 `TerminalSessionRow` 仍只保存在内存中。持久化数据 hydration 后先放入独立的 `pendingReloadLayout`，避免逐个注册存活 PTY 时用不完整的中间状态覆盖完整快照。
+
+`terminal_list_all` 全部处理完后，`rehydrateTerminals` 以单次事务应用快照。store 只接受成功 reattach 的 session，拒绝跨项目 pane 与重复 group 成员，对过期 focus/active id 使用安全回退，随后清空 pending 快照。Rust 成功返回空 session 列表时，会清除 app 完全重启留下的过期元数据；列表调用失败时则保留，因为 IPC 故障可能是暂时的。Web 与 Capacitor 的 PTY 无法跨重载存活，因此在初始化时直接清除快照。pane 尺寸继续复用按 anchor id 键控的 `useResizableLayout` 持久化。
 
 ## 测试覆盖
 
@@ -69,5 +75,4 @@ agent 驱动的终端 tab 已带 `agentSpawner`（chat session id，由 `dock-to
 2. **移动端 OSC 633 下发** — ADR-0031 follow-up #2，仍延后。
 3. **服务端工作流执行 + consent 桥** — ADR-0031 follow-up #3。
 4. **dock 内 AI 命令辅助**（解释报错 / 建议修复）——已设计，未实现。
-5. **分屏布局跨重载持久化** — 进程存活；布局退化为多 tab。
-6. **消息级定位回对话** — 需要 chat 的 scroll-to-message 锚点。
+5. **消息级定位回对话** — 需要 chat 的 scroll-to-message 锚点。

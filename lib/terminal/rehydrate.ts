@@ -14,9 +14,10 @@
  * Sessions are NOT restored across a full app restart — the Rust process
  * and its PTYs are gone then, so `terminal_list_all` returns nothing.
  *
- * Split-pane layout is intentionally not persisted across reload (1C
- * scope): former split members come back as individual tabs. The
- * processes — the thing that matters — survive.
+ * Reload-safe UI metadata is restored only after every surviving PTY has
+ * registered. That ordering lets the store validate split groups, focus,
+ * active tabs, and custom titles against the authoritative Rust session list
+ * and discard stale metadata from a full app restart.
  */
 
 import { listAllTerminals, TerminalSession } from "./session"
@@ -29,9 +30,13 @@ export interface RehydrateResult {
   failed: number
 }
 
+type RehydrateStore = TerminalStoreLike & {
+  restorePersistedLayout?: () => void
+}
+
 export async function rehydrateTerminals(
   opts: {
-    store?: TerminalStoreLike
+    store?: RehydrateStore
     list?: typeof listAllTerminals
     reattach?: typeof TerminalSession.reattach
   } = {}
@@ -73,5 +78,9 @@ export async function rehydrateTerminals(
       failed++
     }
   }
+  // Apply the saved layout as one transaction after all rows exist. Calling
+  // this for an empty successful list clears stale ids from a full app restart;
+  // a failed list keeps the snapshot so a transient IPC failure cannot erase it.
+  store.restorePersistedLayout?.()
   return { restored, failed }
 }

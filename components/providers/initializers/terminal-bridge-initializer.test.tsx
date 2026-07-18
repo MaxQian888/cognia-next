@@ -20,6 +20,12 @@ jest.mock("@/lib/plugin/vscode-shim/terminal-bridge", () => ({
 // Cheap module to satisfy the warm-import — the real handler depends on
 // stores not stood up in this test.
 jest.mock("@/lib/terminal/dock-tool-handler", () => ({ runTerminalDockAction: jest.fn() }))
+const restorePersistedLayout = jest.fn()
+jest.mock("@/stores/terminal/terminal-store", () => ({
+  useTerminalStore: {
+    getState: () => ({ restorePersistedLayout }),
+  },
+}))
 
 import { isTauri } from "@/lib/tauri"
 import { createPtyShellSpawn } from "@/lib/plugin/vscode-shim/pty-bridge-adapter"
@@ -50,12 +56,14 @@ describe("TerminalBridgeInitializer", () => {
     unmount()
     expect(mockedConfigure).not.toHaveBeenCalled()
     expect(mockedCreate).not.toHaveBeenCalled()
+    expect(restorePersistedLayout).toHaveBeenCalledTimes(1)
   })
 
   it("wires configureTerminalBridge with the PTY spawn and a no-op sink in Tauri", () => {
     mockedIsTauri.mockReturnValue(true)
     render(<TerminalBridgeInitializer />)
     expect(mockedConfigure).toHaveBeenCalledTimes(1)
+    expect(restorePersistedLayout).not.toHaveBeenCalled()
     const arg = mockedConfigure.mock.calls[0][0]
     expect(arg.spawn).toBe("stub-spawn")
     // Sink should be a noop pair the test can call without throwing.
